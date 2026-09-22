@@ -177,12 +177,20 @@
   margin: 0.25rem 0 0 0;
 }
 
-.call-captions-box {
+/* Running call transcript — a chat thread of both sides, oldest first.
+   The card is a fixed-height dialog, so the thread scrolls inside itself
+   rather than growing the modal past the viewport. */
+.call-transcript {
   width: 100%;
-  min-height: 88px;
-  max-height: 140px;
+  min-height: 132px;
+  max-height: 36vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
   padding: 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
   border-radius: var(--radius-md, 0.75rem);
   background: var(--bg-muted, #f9fafb);
   border: 1px solid var(--border-subtle, #f3f4f6);
@@ -192,26 +200,125 @@
   text-align: left;
 }
 
-[data-theme='dark'] .call-captions-box {
+[data-theme='dark'] .call-transcript {
   background: #1f2937;
   border-color: #374151;
   color: #f3f4f6;
 }
 
-.call-caption-speaker {
-  font-weight: 600;
+.call-transcript-empty {
+  margin: auto 0;
+  color: var(--text-secondary, #6b7280);
+  font-style: italic;
+  text-align: center;
+}
+
+.call-transcript-hint {
+  margin: 0;
   font-size: 0.75rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.call-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1875rem;
+  max-width: 85%;
+}
+
+.call-turn--caller {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.call-turn--agent {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.call-turn-speaker {
+  font-weight: 600;
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  margin-bottom: 0.25rem;
   color: #2563eb;
 }
 
-.call-caption-speaker--caller {
+.call-turn-speaker--caller {
   color: #059669;
 }
 
-.call-caption-speaker--officer {
+.call-turn-speaker--officer {
   color: #7c3aed;
+}
+
+.call-turn-speaker--system {
+  color: var(--text-secondary, #6b7280);
+}
+
+.call-bubble {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.875rem;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-default, #e5e7eb);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.call-bubble--caller {
+  background: #059669;
+  border-color: #059669;
+  color: #ffffff;
+  border-bottom-right-radius: 0.25rem;
+}
+
+.call-bubble--assistant,
+.call-bubble--officer,
+.call-bubble--system {
+  border-bottom-left-radius: 0.25rem;
+}
+
+[data-theme='dark'] .call-bubble {
+  background: #111827;
+  border-color: #374151;
+}
+
+[data-theme='dark'] .call-bubble--caller {
+  background: #047857;
+  border-color: #047857;
+  color: #ffffff;
+}
+
+/* Interim hypothesis: still being revised by the recognizer, so it is shown
+   as provisional rather than as something the caller actually said. */
+.call-bubble--interim {
+  opacity: 0.75;
+  border-style: dashed;
+}
+
+.call-bubble-cursor {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.9em;
+  margin-left: 0.25rem;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  animation: callCaretBlink 1s steps(2, start) infinite;
+}
+
+@keyframes callCaretBlink {
+  to { visibility: hidden; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-transcript {
+    scroll-behavior: auto;
+  }
+
+  .call-bubble-cursor {
+    animation: none;
+  }
 }
 
 .call-actions {

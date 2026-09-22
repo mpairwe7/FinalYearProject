@@ -49,3 +49,27 @@ def get_max_spoken_sentences() -> int:
 
 def get_tts_voice() -> str:
     return os.getenv("RECEPTIONIST_TTS_VOICE", "en-KE-AsiliaNeural").strip() or "en-KE-AsiliaNeural"
+
+
+def live_partial_transcripts_enabled() -> bool:
+    """Whether the caller sees interim transcripts of their own speech.
+
+    On by default: without it the taxpayer's words only appear once the turn
+    closes. Set ``RECEPTIONIST_LIVE_PARTIALS=false`` to spend the GPU on turn
+    latency alone (a busy box, or a deployment whose ASR backend is a metered
+    cloud API rather than the resident local model).
+    """
+    return os.getenv("RECEPTIONIST_LIVE_PARTIALS", "true").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def get_partial_transcript_interval_s() -> float:
+    """Seconds between interim re-decodes of the utterance in progress."""
+    try:
+        return float(os.getenv("RECEPTIONIST_PARTIAL_INTERVAL_S", "0.8"))
+    except ValueError:
+        return 0.8

@@ -189,6 +189,14 @@ export const en = {
   'call.consentText': 'This call will be recorded and transcribed to assist URA officers and improve taxpayer support.',
   'call.consentAccept': 'Accept & Call',
   'call.consentDecline': 'Decline',
+  'call.you': 'You',
+  'call.officer': 'Officer',
+  'call.systemNote': 'System',
+  'call.transcriptLabel': 'Live call transcript',
+  'call.connecting': 'Connecting call…',
+  'call.listening': 'Listening… speak your tax question naturally.',
+  'call.listeningHint': 'Your words appear here as you speak.',
+  'call.mutedHint': 'Microphone muted — unmute to keep talking.',
 } as const;
 
 export type TranslationKey = keyof typeof en;

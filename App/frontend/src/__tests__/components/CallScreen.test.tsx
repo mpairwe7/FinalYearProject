@@ -127,6 +127,42 @@ describe('CallScreen component', () => {
     expect(screen.getByText('Live Audio Bridge Active')).toBeDefined();
   });
 
+  it('keeps the whole conversation on screen as a chat thread', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('ai');
+    useCallStore.getState().addCaption({ speaker: 'assistant', text: 'How can I help you?', final: true });
+    useCallStore.getState().addCaption({ speaker: 'caller', text: 'What is the VAT rate?', final: true });
+    useCallStore.getState().addCaption({ speaker: 'assistant', text: 'VAT is 18%.', final: true });
+
+    render(<CallScreen />);
+
+    // The earlier turns are still there, not replaced by the newest caption.
+    expect(screen.getByText('How can I help you?')).toBeDefined();
+    expect(screen.getByText('What is the VAT rate?')).toBeDefined();
+    expect(screen.getByText('VAT is 18%.')).toBeDefined();
+    expect(screen.getByRole('log')).toBeDefined();
+    expect(screen.getAllByText('You').length).toBe(1);
+  });
+
+  it('revises the caller interim caption in place, then keeps the final', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('ai');
+    useCallStore.getState().addCaption({ speaker: 'caller', text: 'what is the', final: false });
+    useCallStore.getState().addCaption({ speaker: 'caller', text: 'what is the VAT', final: false });
+
+    const { rerender } = render(<CallScreen />);
+
+    expect(useCallStore.getState().captions.length).toBe(1);
+    expect(screen.queryByText('what is the')).toBeNull();
+    expect(screen.getByText('what is the VAT')).toBeDefined();
+
+    useCallStore.getState().addCaption({ speaker: 'caller', text: 'What is the VAT rate?', final: true });
+    rerender(<CallScreen />);
+
+    expect(useCallStore.getState().captions.length).toBe(1);
+    expect(screen.getByText('What is the VAT rate?')).toBeDefined();
+  });
+
   it('shows ended screen with thank you note', () => {
     useCallStore.getState().openCall();
     useCallStore.getState().setStatus('ended');

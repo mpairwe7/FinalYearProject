@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { useTranslation } from '@/lib/i18n';
 import { useChatStore } from '@/store/useChatStore';
+import type { CaptionEntry } from '@/store/useCallStore';
 import { useCall } from '@/hooks/useCall';
 import {
   MicIcon,
@@ -29,6 +30,7 @@ export function CallScreen() {
     isMuted,
     officerName,
     ticketRef,
+    captions,
     currentCaption,
     error,
     closeCall,
@@ -38,13 +40,36 @@ export function CallScreen() {
     toggleMute,
   } = useCall();
 
-  const captionEndRef = useRef<HTMLDivElement | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  // Follow the conversation only while the caller is already at the bottom.
+  // Scrolling back to re-read an earlier answer should not be yanked away by
+  // the next caption — which, with live partials, now arrives twice a second.
+  const pinnedToBottom = useRef(true);
+
+  const handleTranscriptScroll = () => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
 
   useEffect(() => {
-    if (captionEndRef.current && typeof captionEndRef.current.scrollIntoView === 'function') {
-      captionEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    if (!pinnedToBottom.current) return;
+    const el = transcriptRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
     }
-  }, [currentCaption]);
+    if (transcriptEndRef.current && typeof transcriptEndRef.current.scrollIntoView === 'function') {
+      transcriptEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [captions]);
+
+  const speakerLabel = (speaker: CaptionEntry['speaker']): string => {
+    if (speaker === 'caller') return t('call.you');
+    if (speaker === 'officer') return officerName || t('call.officer');
+    if (speaker === 'system') return t('call.systemNote');
+    return t('call.assistantName');
+  };
 
   if (!isOpen) return null;
 
@@ -141,42 +166,56 @@ export function CallScreen() {
                 </p>
               </div>
 
-              {/* Live Captions with ARIA live region */}
+              {/* Running transcript of the call: both sides, oldest first, in
+                  an ARIA live region so a screen reader announces each new
+                  line as it lands. */}
               <div
-                className="call-captions-box"
+                className="call-transcript"
+                ref={transcriptRef}
+                onScroll={handleTranscriptScroll}
+                role="log"
+                aria-label={t('call.transcriptLabel')}
                 aria-live="polite"
                 aria-atomic="false"
               >
-                {currentCaption ? (
-                  <div>
-                    <div
-                      className={`call-caption-speaker ${
-                        currentCaption.speaker === 'caller'
-                          ? 'call-caption-speaker--caller'
-                          : currentCaption.speaker === 'officer'
-                          ? 'call-caption-speaker--officer'
-                          : ''
-                      }`}
-                    >
-                      {currentCaption.speaker === 'caller'
-                        ? 'You'
-                        : currentCaption.speaker === 'officer'
-                        ? officerName || 'Officer'
-                        : t('call.assistantName')}
-                    </div>
-                    <div>{currentCaption.text}</div>
-                  </div>
-                ) : (
-                  <div style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                {captions.length === 0 ? (
+                  <div className="call-transcript-empty">
                     {status === 'dialing'
-                      ? 'Connecting call…'
+                      ? t('call.connecting')
                       : status === 'ended'
                       ? t('call.thankYou')
-                      : 'Listening… speak your tax question naturally.'}
+                      : t('call.listening')}
                   </div>
+                ) : (
+                  captions.map((caption, index) => (
+                    <div
+                      key={`${caption.turn_id ?? 'x'}-${index}`}
+                      className={`call-turn call-turn--${
+                        caption.speaker === 'caller' ? 'caller' : 'agent'
+                      }`}
+                    >
+                      <span className={`call-turn-speaker call-turn-speaker--${caption.speaker}`}>
+                        {speakerLabel(caption.speaker)}
+                      </span>
+                      <div
+                        className={`call-bubble call-bubble--${caption.speaker}${
+                          caption.final === false ? ' call-bubble--interim' : ''
+                        }`}
+                      >
+                        {caption.text}
+                        {caption.final === false && <span className="call-bubble-cursor" />}
+                      </div>
+                    </div>
+                  ))
                 )}
-                <div ref={captionEndRef} />
+                <div ref={transcriptEndRef} />
               </div>
+
+              {status !== 'ended' && (
+                <p className="call-transcript-hint">
+                  {isMuted ? t('call.mutedHint') : t('call.listeningHint')}
+                </p>
+              )}
 
               {error && (
                 <div style={{ color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.25rem' }}>

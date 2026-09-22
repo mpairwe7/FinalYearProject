@@ -12,6 +12,7 @@ export type CallStatus =
 export interface CaptionEntry {
   speaker: 'caller' | 'assistant' | 'officer' | 'system';
   text: string;
+  /** `false` while the recognizer is still revising this utterance. */
   final?: boolean;
   turn_id?: number;
 }
@@ -68,10 +69,21 @@ export const useCallStore = create<CallStoreState>((set) => ({
   setOfficerName: (officerName) => set({ officerName }),
   setTicketRef: (ticketRef) => set({ ticketRef }),
   addCaption: (caption) =>
-    set((state) => ({
-      captions: [...state.captions, caption],
-      currentCaption: caption,
-    })),
+    set((state) => {
+      const captions = [...state.captions];
+      const last = captions[captions.length - 1];
+      // `final: false` is a hypothesis for the utterance still being spoken, so
+      // it overwrites the previous hypothesis for that speaker instead of
+      // stacking another bubble — and the final transcript then lands in the
+      // same place. Everything already final stays in the transcript for the
+      // rest of the call.
+      if (last && last.final === false && last.speaker === caption.speaker) {
+        captions[captions.length - 1] = caption;
+      } else {
+        captions.push(caption);
+      }
+      return { captions, currentCaption: caption };
+    }),
   setError: (error) => set({ error }),
   reset: () => set(initialState),
 }));

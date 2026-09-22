@@ -164,4 +164,12 @@ export const lg: Partial<Dictionary> = {
   'call.consentText': 'Essimu eno ejja kukwatibwa n’okuwandiikibwa okusobola okuyamba abakozi ba URA.',
   'call.consentAccept': 'Kkiriza & Kuba',
   'call.consentDecline': 'Gaana',
+  'call.you': 'Ggwe',
+  'call.officer': 'Omukozi',
+  'call.systemNote': 'Sisitemu',
+  'call.transcriptLabel': 'Ebiwandiikiddwa mu ssimu',
+  'call.connecting': 'Tukwataganya essimu…',
+  'call.listening': 'Tuwuliriza… buuza ekibuuzo kyo ku musolo.',
+  'call.listeningHint': 'Bye woyogera bijja kulabika wano nga okyayogera.',
+  'call.mutedHint': 'Eddoboozi lisiriziddwa — lizzeeyo osobole okweyongera okwogera.',
 };

@@ -17,6 +17,7 @@ try:
         OutputAudioRawFrame,
         InterruptionFrame,
         OutputTransportMessageFrame,
+        OutputTransportMessageUrgentFrame,
     )
 except ImportError:
     class Frame:  # type: ignore[no-redef]
@@ -44,6 +45,10 @@ except ImportError:
         def __init__(self, message: Any):
             self.message = message
 
+    class OutputTransportMessageUrgentFrame(Frame):  # type: ignore[no-redef]
+        def __init__(self, message: Any):
+            self.message = message
+
 
 class RequestOfficerFrame(Frame):
     """Custom frame fired when the caller clicks or requests 'talk to an officer'."""
@@ -66,7 +71,11 @@ class BrowserCallSerializer(FrameSerializer):
         if isinstance(frame, InterruptionFrame):
             return json.dumps({"type": "interrupt"})
 
-        if isinstance(frame, OutputTransportMessageFrame):
+        # The urgent variant is a SystemFrame the transport writes immediately
+        # instead of queueing behind pending bot audio — live captions use it so
+        # the caller's words are not held back by the reply they precede. It is
+        # a sibling class, not a subclass, so it needs naming here.
+        if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
             if isinstance(frame.message, (dict, list)):
                 return json.dumps(frame.message)
             return str(frame.message)

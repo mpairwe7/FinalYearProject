@@ -22,8 +22,10 @@ Taxpayer browser (CallScreen)                       Staff browser (/calls)
    Pipecat Pipeline (PipelineWorker):
      transport.input()  [FastAPIWebsocketTransport + BrowserCallSerializer]
      → CallerAudioTap        (bridged: forward caller PCM to officer leg)
+     → VADProcessor          (Silero; broadcasts VADUser{Started,Stopped}SpeakingFrame)
+     → LivePartialTranscriptTap (re-decodes the utterance-so-far every 0.8 s → `final:false` captions)
      → UraWhisperSTT         (SegmentedSTTService → SpeechModel.transcribe(with_words=True))
-     → TranscriptTap         (stash word probs in CallState, caption events)
+     → TranscriptTap         (stash word probs in CallState, `final:true` caption events)
      → user_aggregator       (LLMContextAggregatorPair; Silero VAD + Smart Turn v3; barge-in)
      → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer)
      → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k)
@@ -52,6 +54,8 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_FILLER_AFTER_MS` | `1000` | Latency threshold before playing *"Let me check that for you."* |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `4` | Spoken truncation limit before prompting *"Would you like more detail?"* |
 | `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | Verified East-African English edge-tts speaker |
+| `RECEPTIONIST_LIVE_PARTIALS` | `true` | Streams interim transcripts of the caller's own speech back to their screen |
+| `RECEPTIONIST_PARTIAL_INTERVAL_S` | `0.8` | Seconds between interim re-decodes of the utterance in progress |
 
 ---
 
@@ -106,7 +110,16 @@ ngrok http 8000
 2. Filler plays after 1 second if retrieval takes longer: *"Let me check that for you."*
 3. Assistant speaks the verified URA statutory guidance within ~3-4 seconds.
 4. Spoken text is trimmed to 4 sentences and acronyms are pronounced cleanly ("T-I-N", "U-R-A").
-5. Live captions update with `aria-live` screen-reader assistance.
+5. The call screen keeps a running chat transcript of both sides — nothing scrolls away,
+   and it auto-follows the newest line unless the caller has scrolled back to read.
+   The whole thread sits in an `aria-live` log region for screen-reader assistance.
+6. The caller's own words appear **while they are still speaking**: Whisper-SALT is a
+   segmented recognizer, so `LivePartialTranscriptTap` re-decodes the growing utterance
+   every `RECEPTIONIST_PARTIAL_INTERVAL_S` and sends each hypothesis as a `final:false`
+   caption (dashed bubble + caret). The turn's real transcript replaces it in place when
+   VAD closes the turn. Partial decodes cost 0.22 s (1 s of speech) to 0.63 s (4 s) on one
+   RTX A6000 with the model resident, and stop the moment the turn closes, so they never
+   contend with the answer behind them.
 
 ### Step 3: Clarification ("Did you mean...?")
 1. Caller indistinctly slurs a domain term: *"I want to know about group mid-port."*

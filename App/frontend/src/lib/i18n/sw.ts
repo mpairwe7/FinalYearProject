@@ -162,4 +162,12 @@ export const sw: Partial<Dictionary> = {
   'call.consentText': 'Simu hii itarekodiwa na kunakiliwa ili kuwasaidia maafisa wa URA na kuboresha huduma.',
   'call.consentAccept': 'Kubali na Upige',
   'call.consentDecline': 'Kataa',
+  'call.you': 'Wewe',
+  'call.officer': 'Afisa',
+  'call.systemNote': 'Mfumo',
+  'call.transcriptLabel': 'Nakala ya simu moja kwa moja',
+  'call.connecting': 'Inaunganisha simu…',
+  'call.listening': 'Tunasikiliza… uliza swali lako la kodi.',
+  'call.listeningHint': 'Maneno yako yanaonekana hapa unapoongea.',
+  'call.mutedHint': 'Maikrofoni imezimwa — iwashe ili uendelee kuongea.',
 };

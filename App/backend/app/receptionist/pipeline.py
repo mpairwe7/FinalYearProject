@@ -15,7 +15,7 @@ from .brain import UraReceptionistBrain
 from .config import get_max_call_s
 from .serializer import BrowserCallSerializer
 from .stt import UraWhisperSTT
-from .taps import CallerAudioTap, TranscriptTap
+from .taps import CallerAudioTap, LivePartialTranscriptTap, TranscriptTap
 from .tts import UraSpeechTTS
 
 logger = logging.getLogger(__name__)
@@ -95,6 +95,12 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
 
     caller_tap = CallerAudioTap(room=room)
     stt = UraWhisperSTT(speech_model=speech_model, user_id=room.state.user_id, language=room.state.locale)
+    # Sits after the VAD (it is driven by the speaking frames the VAD
+    # broadcasts) and before the STT, so the caller reads their sentence taking
+    # shape instead of waiting for the segmented recognizer to close the turn.
+    partial_tap = LivePartialTranscriptTap(
+        room=room, speech_model=speech_model, language=room.state.locale
+    )
     transcript_tap = TranscriptTap(room=room)
     brain = UraReceptionistBrain(room=room, chat_model=chat_model)
     tts = UraSpeechTTS(speech_model=speech_model, language=room.state.locale)
@@ -104,6 +110,7 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
         transport.input(),
         caller_tap,
         vad_processor,
+        partial_tap,
         stt,
         transcript_tap,
         context_aggregator.user(),
