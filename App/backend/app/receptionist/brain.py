@@ -100,7 +100,7 @@ class UraReceptionistBrain(LLMService):
         clarify_gate: ClarifyGate | None = None,
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
         self.chat_model = chat_model
         self.clarify_gate = clarify_gate or ClarifyGate(
@@ -136,6 +136,7 @@ class UraReceptionistBrain(LLMService):
     async def _handle_context_frame(
         self, frame: LLMContextFrame, direction: FrameDirection
     ) -> None:
+        logger.info("UraReceptionistBrain _handle_context_frame invoked with context: %r", getattr(frame, "context", None))
         # Extract user utterance from frame context
         user_text = ""
         context = getattr(frame, "context", None)

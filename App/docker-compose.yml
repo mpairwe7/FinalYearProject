@@ -102,6 +102,7 @@ services:
       - SPEECH_ENABLED=true
       - SPEECH_ASR_BACKEND=auto
       - SPEECH_TTS_BACKEND=auto
+      - SPEECH_WARMUP=true
       # --- Phase 28: Native voice-to-voice + Vision ---
       - FLAG_VOICE_STREAMING=true
       - FLAG_NATIVE_VOICE=true

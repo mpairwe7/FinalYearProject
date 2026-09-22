@@ -1228,8 +1228,14 @@ def detect_education_intent(
     if plan_rate_lookup(text):
         return None, "beginner", False
 
-    # Exclude operational queries about charging, filing, or clearance
-    if re.search(r"\b(charged\s+on|filing\s+process|clearance\s+requirements|how\s+to\s+apply)\b", text, re.IGNORECASE):
+    # Exclude operational and procedural queries (search, check, verify, steps, requirements to search/apply)
+    if re.search(
+        r"\b(charged\s+on|filing\s+process|clearance\s+requirements|how\s+to\s+apply|"
+        r"how\s+to\s+check|search\s+for|search\s+tin|verify\s+tin|check\s+tin|"
+        r"reprint|print\s+submitted|required\s+to\s+search|requirements?\s+to\s+search)\b",
+        text,
+        re.IGNORECASE,
+    ):
         return None, "beginner", False
 
     has_edu_ask = bool(_EDU_ASK_RE.search(text))

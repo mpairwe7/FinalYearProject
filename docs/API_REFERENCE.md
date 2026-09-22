@@ -1036,13 +1036,18 @@ CRUD endpoints for the escalation ticket queue. All admin endpoints require oper
 #### List Escalation Tickets
 
 ```http
-GET /v1/admin/tickets?status=open&limit=20&offset=0
+GET /v1/admin/tickets?status=open&priority=urgent&team=domestic_taxes&locale=lg&modality=voice&limit=20&offset=0
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | string | No | Filter by status (`open`, `in_progress`, `resolved`, `closed`) |
-| `limit` | integer | No | Page size (default 20) |
+| `status` | string | No | Filter by status (`open`, `assigned`, `resolved`, `wontfix`) |
+| `priority` | string | No | Filter by priority (`urgent`, `high`, `normal`, `low`) |
+| `team` | string | No | Filter by team (`domestic_taxes`, `customs`, `disputes`, `general`) |
+| `locale` | string | No | Filter by taxpayer language (`en`, `lg`, `sw`, etc.) |
+| `modality` | string | No | Filter by input modality (`text`, `voice`) |
+| `q` | string | No | Search query matching ID, reference, reason, query, translation, or notes |
+| `limit` | integer | No | Page size (1..500, default 50) |
 | `offset` | integer | No | Pagination offset (default 0) |
 
 **Response**
@@ -1483,8 +1488,8 @@ POST /v1/documents/analyze
 XLSX/XLSM, CSV, TXT, and images (PNG/JPEG/WebP/BMP/TIFF, OCR best-effort).
 Max 10 MB. Extracts text and tables, classifies the document against the
 URA taxonomy (receipt, tin_card, assessment, customs_declaration,
-filing_form, invoice, generic), and pulls TINs, UGX amounts, dates, and
-reference numbers.
+filing_form, invoice, statutory_act, portal_screenshot, generic), and pulls TINs, UGX amounts, dates, and
+reference numbers. For portal screenshots, returns interactive diagnostic troubleshooting steps, UI click hotspots, and portal links.
 
 **Response** `200`
 ```json
@@ -1498,6 +1503,7 @@ reference numbers.
   "tables": [],
   "text_preview": "…",
   "summary": "Payment receipt (92% classification confidence). …",
+  "screenshot_guidance": {},
   "warnings": [],
   "expires_in_seconds": 7200
 }

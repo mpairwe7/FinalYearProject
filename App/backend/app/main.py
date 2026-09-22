@@ -1240,7 +1240,8 @@ async def transcribe_audio(
         len(audio_bytes), content_type, sample_rate, language or "auto",
     )
 
-    result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    with_words = request.query_params.get("with_words", "").lower() in ("true", "1")
+    result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language, with_words=with_words)
     metrics.inc("speech_asr_total")
     if result.latency_s:
         metrics.observe("speech_asr_latency_s", result.latency_s)

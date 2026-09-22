@@ -769,6 +769,28 @@ class DocumentEndpointsTest(_RegistryIsolation):
         )
         self.assertEqual(r.status_code, 422)
 
+    def test_portal_screenshot_diagnosis_and_interactive_guidance(self):
+        sample_screenshot_text = (
+            "URA Web Portal - portal.ura.go.ug\n"
+            "Generate PRN - Domestic Taxes\n"
+            "Taxpayer TIN: 1001234567\n"
+            "Error: Mandatory field required - Payment Mode not selected\n"
+            "Please select commercial bank gateway before generating PRN.\n"
+        )
+        guidance = documents.diagnose_portal_screenshot(
+            text=sample_screenshot_text,
+            filename="ura_prn_error_screenshot.png",
+            fields={"tins": ["1001234567"], "prns": []},
+            meta={},
+            doc_type="portal_screenshot",
+        )
+        self.assertTrue(guidance.get("is_screenshot"))
+        self.assertIn("PRN", guidance.get("detected_portal", ""))
+        self.assertIn("https://portal.ura.go.ug", guidance.get("portal_url", ""))
+        self.assertTrue(len(guidance.get("steps", [])) >= 3)
+        self.assertTrue(any("Payment Mode" in s or "bank" in s.lower() for s in guidance.get("steps", [])))
+        self.assertTrue(len(guidance.get("hotspots", [])) > 0)
+
 
 if __name__ == "__main__":
     unittest.main()

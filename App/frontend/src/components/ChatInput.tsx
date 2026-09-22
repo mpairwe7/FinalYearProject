@@ -155,6 +155,34 @@ function ChatInputInner({
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const files = e.clipboardData.files;
+      const fileList: File[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type.startsWith('image/')) {
+          const name =
+            file.name && file.name !== 'image.png'
+              ? file.name
+              : `ura_portal_screenshot_${Date.now().toString().slice(-4)}.png`;
+          fileList.push(new File([file], name, { type: file.type }));
+        } else {
+          fileList.push(file);
+        }
+      }
+      if (fileList.length > 0 && typeof DataTransfer !== 'undefined') {
+        e.preventDefault();
+        const dt = new DataTransfer();
+        fileList.forEach((f) => dt.items.add(f));
+        onAttachFiles?.(dt.files);
+        if (!message.trim()) {
+          onMessageChange('Please inspect this URA portal screenshot and guide me on how to resolve the issue.');
+        }
+      }
+    }
+  };
+
   useLayoutEffect(() => {
     const input = inputRef.current;
     if (!input) return;
@@ -289,6 +317,7 @@ function ChatInputInner({
           spellCheck
           onChange={(e) => onMessageChange(e.target.value)}
           onFocus={onFocus}
+          onPaste={handlePaste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();

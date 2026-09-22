@@ -35,6 +35,7 @@ class DocumentType(str, Enum):
     FILING_FORM = "filing_form"
     INVOICE = "invoice"
     STATUTORY_ACT = "statutory_act"
+    PORTAL_SCREENSHOT = "portal_screenshot"
     GENERIC = "generic"
 
 
@@ -62,6 +63,22 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
             re.I,
         ),
         0.96,
+    ),
+    # URA Web Portals, Error Screens, and Portal Screenshots
+    (
+        DocumentType.PORTAL_SCREENSHOT,
+        re.compile(
+            r"portal\.ura\.go\.ug|e-?services?\.ura\.go\.ug|efris\.ura\.go\.ug|"
+            r"ura\s+web\s+portal|login\s+to\s+e-?services|e-?tax\s+portal|"
+            r"generate\s+prn|search\s+prn|prn\s+generation|"
+            r"error\s+(code\s*)?500|error\s+(code\s*)?404|session\s+expired|"
+            r"internal\s+server\s+error|failed\s+to\s+submit|mandatory\s+field|"
+            r"payment\s+registration\s+number\s*\(prn\)|bank\s+selection|"
+            r"efris\s+web|stock\s+reconciliation|taxpayer\s+dashboard|"
+            r"browser\s+not\s+supported|connection\s+timed\s+out|invalid\s+tin\s+format",
+            re.I,
+        ),
+        0.95,
     ),
     # EFRIS and electronic receipts are high-priority
     (

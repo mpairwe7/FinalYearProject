@@ -85,12 +85,20 @@ export function SupportCaseModal({
     }
   };
 
+  const [showEnOriginal, setShowEnOriginal] = useState(false);
+
   if (!isOpen || !ticketId) return null;
 
   const refCode = caseData?.reference || `TIC-${ticketId.slice(0, 8).toUpperCase()}`;
   const status = caseData?.status || "open";
   const hasOfficerReplied = Boolean(caseData?.officer_reply);
   const isResolved = status === "resolved";
+  const hasLocalizedReply = Boolean(
+    caseData?.officer_reply_localized && caseData.officer_reply_localized !== caseData.officer_reply,
+  );
+  const displayedReply = hasLocalizedReply && !showEnOriginal
+    ? caseData?.officer_reply_localized
+    : caseData?.officer_reply;
 
   // Compute active step index for visual stepper
   let stepIndex = 0;
@@ -213,7 +221,23 @@ export function SupportCaseModal({
                   ) : null}
                 </div>
               </div>
-              <div className="scm-officer-text">{caseData?.officer_reply}</div>
+              <div className="scm-officer-text">{displayedReply}</div>
+              {hasLocalizedReply ? (
+                <div className="scm-translation-toggle-bar">
+                  <span className="scm-translation-note">
+                    {showEnOriginal
+                      ? "Viewing original English response from officer"
+                      : `Translated to ${caseData?.locale ? caseData.locale.toUpperCase() : "your language"} for your convenience`}
+                  </span>
+                  <button
+                    type="button"
+                    className="scm-trans-btn"
+                    onClick={() => setShowEnOriginal(!showEnOriginal)}
+                  >
+                    {showEnOriginal ? "View translated response" : "View original in English"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="scm-waiting-card">

@@ -54,6 +54,45 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
     transport = FastAPIWebsocketTransport(websocket, transport_params)
 
     # 2. Pipeline processors
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
+    from pipecat.processors.audio.vad_processor import VADProcessor
+    from pipecat.processors.aggregators.llm_context import LLMContext
+    from pipecat.processors.aggregators.llm_response_universal import (
+        LLMContextAggregatorPair,
+        LLMUserAggregatorParams,
+    )
+    from pipecat.turns.user_turn_strategies import (
+        BaseUserTurnStopStrategy,
+        UserTurnStrategies,
+        VADUserTurnStartStrategy,
+    )
+    from pipecat.frames.frames import TranscriptionFrame
+
+    class STTTranscriptionStopStrategy(BaseUserTurnStopStrategy):
+        """Finalize the user turn as soon as STT produces a finalized transcription."""
+
+        async def process_frame(self, frame: Any) -> Any:
+            logger.info("STTTranscriptionStopStrategy.process_frame: frame=%r", frame)
+            if isinstance(frame, TranscriptionFrame) and getattr(frame, "finalized", False) and getattr(frame, "text", "").strip():
+                logger.info("STTTranscriptionStopStrategy: final transcript received %r -> triggering turn stop", frame.text)
+                await self.trigger_user_turn_stopped()
+            return None
+
+    vad_analyzer = SileroVADAnalyzer(params=VADParams(stop_secs=0.6, start_secs=0.2))
+    vad_processor = VADProcessor(vad_analyzer=vad_analyzer)
+    context = LLMContext()
+    context_aggregator = LLMContextAggregatorPair(
+        context,
+        user_params=LLMUserAggregatorParams(
+            user_turn_strategies=UserTurnStrategies(
+                start=[VADUserTurnStartStrategy()],
+                stop=[STTTranscriptionStopStrategy()],
+            ),
+            user_turn_stop_timeout=20.0,
+        ),
+    )
+
     caller_tap = CallerAudioTap(room=room)
     stt = UraWhisperSTT(speech_model=speech_model, user_id=room.state.user_id, language=room.state.locale)
     transcript_tap = TranscriptTap(room=room)
@@ -64,11 +103,14 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
     pipeline_elements = [
         transport.input(),
         caller_tap,
+        vad_processor,
         stt,
         transcript_tap,
+        context_aggregator.user(),
         brain,
         tts,
         transport.output(),
+        context_aggregator.assistant(),
     ]
 
     pipeline = Pipeline(pipeline_elements)

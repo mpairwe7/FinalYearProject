@@ -17,6 +17,28 @@ export interface DocumentTaxReconciliation {
   notes?: string[];
 }
 
+export interface ScreenshotHotspot {
+  id: string;
+  type: 'error' | 'action' | 'target';
+  label: string;
+  instruction: string;
+}
+
+export interface ScreenshotGuidance {
+  is_screenshot?: boolean;
+  detected_portal?: string;
+  portal_url?: string;
+  portal_category?: string;
+  detected_state?: string;
+  issues_detected?: string[];
+  steps?: string[];
+  hotspots?: ScreenshotHotspot[];
+  direct_action?: {
+    label: string;
+    url: string;
+  };
+}
+
 export interface DocumentAnalysisData {
   documentId: string;
   filename: string;
@@ -46,6 +68,7 @@ export interface DocumentAnalysisData {
   truncated?: boolean;
   summary?: string;
   taxReconciliation?: DocumentTaxReconciliation;
+  screenshot_guidance?: ScreenshotGuidance;
   warnings?: string[];
   expiresInSeconds?: number;
 }
@@ -78,6 +101,7 @@ const DOC_TYPE_LABELS_EN: Record<string, string> = {
   filing_form: 'Filing form',
   invoice: 'Invoice',
   statutory_act: 'Tax Law / Act',
+  portal_screenshot: 'URA Portal Screenshot',
   generic: 'Document',
 };
 
@@ -89,6 +113,7 @@ const DOC_TYPE_LABELS_LG: Record<string, string> = {
   filing_form: "Foomu y'omusolo",
   invoice: 'Invooyisi / EFRIS',
   statutory_act: "Etteeka ly'Omusolo",
+  portal_screenshot: "Ekifaananyi ky'omukutu gwa URA",
   generic: 'Ekiwandiiko',
 };
 
@@ -100,6 +125,7 @@ const DOC_TYPE_LABELS_SW: Record<string, string> = {
   filing_form: 'Fomu ya kodi',
   invoice: 'Invoisi / EFRIS',
   statutory_act: 'Sheria ya Kodi',
+  portal_screenshot: 'Picha ya Tovuti ya URA',
   generic: 'Nyaraka',
 };
 

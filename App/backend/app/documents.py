@@ -144,6 +144,7 @@ _DOC_TYPE_LABELS: dict[str, str] = {
     "filing_form": "Tax return / filing form",
     "invoice": "Invoice",
     "statutory_act": "Tax Law Compendium / Act",
+    "portal_screenshot": "URA Portal Screenshot",
     "generic": "General document",
 }
 
@@ -155,6 +156,7 @@ _DOC_TYPE_HINTS: dict[str, str] = {
     "filing_form": "You can ask the assistant to explain fields on this return or the filing deadlines.",
     "invoice": "You can ask the assistant about VAT treatment, EFRIS invoicing rules, or the amounts shown.",
     "statutory_act": "You can ask the assistant to summarize tax laws, find specific sections, or explain rates and legal compliance rules.",
+    "portal_screenshot": "You can ask the assistant to diagnose errors, identify click targets, or guide you through this URA portal screen.",
     "generic": "You can ask the assistant questions about the content extracted from this document.",
 }
 
@@ -286,6 +288,7 @@ class DocumentRecord:
     user_id: str = ""
     field_evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     tax_reconciliation: dict[str, Any] = field(default_factory=dict)
+    screenshot_guidance: dict[str, Any] = field(default_factory=dict)
 
     def _provenance_payload(self) -> dict[str, Any]:
         """Expose bounded evidence metadata without retaining source file bytes."""
@@ -320,6 +323,7 @@ class DocumentRecord:
             "truncated": self.truncated,
             "summary": self.summary,
             "tax_reconciliation": dict(self.tax_reconciliation),
+            "screenshot_guidance": dict(self.screenshot_guidance),
             "warnings": self.warnings,
             "expires_in_seconds": max(
                 0, int(self.created_at + DOCUMENT_TTL_SECONDS - time.time())
@@ -347,6 +351,7 @@ class DocumentRecord:
             "truncated": self.truncated,
             "summary": self.summary,
             "tax_reconciliation": dict(self.tax_reconciliation),
+            "screenshot_guidance": dict(self.screenshot_guidance),
             "warnings": self.warnings,
             "analyzed_at": self.created_at,
         }
@@ -360,6 +365,17 @@ class DocumentRecord:
         ]
         if self.summary:
             lines.append(f"Summary: {self.summary}")
+        if self.screenshot_guidance and self.screenshot_guidance.get("is_screenshot"):
+            sg = self.screenshot_guidance
+            lines.append(f"Portal: {sg.get('detected_portal', 'URA Web Portal')} ({sg.get('portal_url', '')})")
+            if sg.get("detected_state"):
+                lines.append(f"Screen State: {sg.get('detected_state')}")
+            if sg.get("issues_detected"):
+                lines.append(f"Detected Issues: {'; '.join(sg.get('issues_detected', []))}")
+            if sg.get("steps"):
+                lines.append("Interactive Resolution Steps:")
+                for step in sg.get("steps", []):
+                    lines.append(f"- {step}")
         field_bits = []
         for key, title in (
             ("tins", "TINs"),
@@ -1268,6 +1284,154 @@ def reconcile_tax_document(
     }
 
 
+def diagnose_portal_screenshot(
+    *,
+    text: str,
+    filename: str,
+    fields: dict[str, list[str]],
+    meta: dict[str, Any],
+    doc_type: str,
+) -> dict[str, Any]:
+    """Diagnose URA portal screenshots, detect error states, and generate interactive navigation steps."""
+    clean_fn = (filename or "").lower()
+    text_lower = (text or "").lower()
+    is_shot_named = any(k in clean_fn for k in ("screenshot", "screen", "portal", "error", "capture", "snip"))
+
+    is_portal = (
+        doc_type == "portal_screenshot"
+        or is_shot_named
+        or any(
+            term in text_lower
+            for term in (
+                "portal.ura.go.ug",
+                "e-services",
+                "eservices",
+                "efris",
+                "asycuda",
+                "ura web portal",
+                "e-tax",
+                "payment registration number",
+                "generate prn",
+                "search prn",
+                "login to e-services",
+                "internal server error",
+                "error 500",
+                "session expired",
+                "taxpayer dashboard",
+                "error code",
+                "customs entry",
+            )
+        )
+    )
+    if not is_portal:
+        return {}
+
+    # 1. Identify specific portal
+    if "efris" in text_lower or "efris" in clean_fn:
+        detected_portal = "URA EFRIS Invoicing & Fiscal Portal"
+        portal_url = "https://efris.ura.go.ug"
+        portal_category = "efris"
+    elif "asycuda" in text_lower or "customs" in text_lower or "bill of entry" in text_lower:
+        detected_portal = "URA Customs ASYCUDA World Portal"
+        portal_url = "https://customs.ura.go.ug"
+        portal_category = "customs"
+    elif "tin" in clean_fn or ("registration" in text_lower and "tin" in text_lower):
+        detected_portal = "URA e-Services Taxpayer Registration"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "tin"
+    elif "prn" in text_lower or "payment" in text_lower:
+        detected_portal = "URA e-Services PRN & Payments Portal"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "prn"
+    else:
+        detected_portal = "URA e-Services Web Portal"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "e_services"
+
+    # 2. Identify issues & error states
+    issues_detected: list[str] = []
+    steps: list[str] = []
+
+    if any(k in text_lower for k in ("error 500", "internal server error", "server error")):
+        detected_state = "Server Error (HTTP 500)"
+        issues_detected.append("The URA web service encountered an unexpected internal server fault.")
+        steps = [
+            "Step 1: Wait 60 seconds and refresh the page (Ctrl+F5) to clear expired session headers.",
+            "Step 2: Try accessing in a Private / Incognito browser window to bypass stale cookie state.",
+            "Step 3: If submitting a payment or return, ensure numeric fields do not contain commas or currency codes.",
+        ]
+    elif any(k in text_lower for k in ("session expired", "timed out", "timeout", "unauthorized")):
+        detected_state = "Session Timeout / Re-Authentication Required"
+        issues_detected.append("Your portal session timed out due to security inactivity.")
+        steps = [
+            "Step 1: Click 'Back to Login' on the URA e-Services homepage.",
+            "Step 2: Enter your 10-digit TIN and password. If prompted, verify the SMS OTP.",
+            "Step 3: Once authenticated, re-open the filing or PRN form directly.",
+        ]
+    elif "prn" in text_lower or "payment" in text_lower:
+        detected_state = "PRN Generation & Bank Selection"
+        if "bank" in text_lower or "mode" in text_lower:
+            issues_detected.append("Payment mode or commercial bank gateway requires explicit selection.")
+        steps = [
+            "Step 1: Verify the selected Tax Head (e.g., '0010 - Value Added Tax' or '0011 - Income Tax').",
+            "Step 2: In the 'Payment Mode' dropdown, select your bank (e.g. Stanbic, Absa, Centenary) or Mobile Money (MTN/Airtel).",
+            "Step 3: Click the green 'Generate PRN' button, note the 12-digit number, and settle payment.",
+        ]
+    elif "efris" in text_lower and any(k in text_lower for k in ("offline", "sync", "24")):
+        detected_state = "EFRIS Synchronization Window Exceeded"
+        issues_detected.append("Offline invoice synchronization has exceeded the mandatory 24-hour limit.")
+        steps = [
+            "Step 1: Verify active internet connectivity on your fiscal device or point-of-sale system.",
+            "Step 2: In the EFRIS client application, click 'System Management' > 'Offline Sync'.",
+            "Step 3: Transmit queued fiscal receipts to restore live URA receipting.",
+        ]
+    elif any(k in text_lower for k in ("mandatory", "required", "missing")):
+        detected_state = "Missing Mandatory Input Field"
+        issues_detected.append("One or more mandatory form fields marked with red asterisks (*) are empty.")
+        steps = [
+            "Step 1: Review the fields bordered in red on the portal screen.",
+            "Step 2: Fill in the missing required entries (e.g. Tax Period, Assessment Year, or Contact).",
+            "Step 3: Click 'Validate & Submit'.",
+        ]
+    else:
+        detected_state = f"{detected_portal} - Navigation Screen"
+        steps = [
+            "Step 1: Confirm your 10-digit TIN is correctly populated in the taxpayer banner.",
+            "Step 2: Choose the corresponding statutory flow under e-Services.",
+            "Step 3: Follow the guided prompts and save your submission reference code.",
+        ]
+
+    hotspots = [
+        {
+            "id": "spot-error",
+            "type": "error" if issues_detected else "target",
+            "label": "Notice / Target Area",
+            "instruction": issues_detected[0] if issues_detected else "Primary action target region on screen",
+        },
+        {
+            "id": "spot-action",
+            "type": "action",
+            "label": "Next Click Target",
+            "instruction": "Click the highlighted action button or input field to advance",
+        },
+    ]
+
+    return {
+        "is_screenshot": True,
+        "detected_portal": detected_portal,
+        "portal_url": portal_url,
+        "portal_category": portal_category,
+        "detected_state": detected_state,
+        "issues_detected": issues_detected,
+        "steps": steps,
+        "hotspots": hotspots,
+        "direct_action": {
+            "label": f"Open {detected_portal} ↗",
+            "url": portal_url,
+        },
+    }
+
+
 def analyze_document(
     data: bytes,
     filename: str,
@@ -1347,6 +1511,13 @@ def analyze_document(
         extraction.meta,
         text,
     )
+    screenshot_guidance = diagnose_portal_screenshot(
+        text=text,
+        filename=filename,
+        fields=fields,
+        meta=extraction.meta,
+        doc_type=classification.doc_type.value,
+    )
 
     record = DocumentRecord(
         doc_id=uuid.uuid4().hex,
@@ -1364,6 +1535,7 @@ def analyze_document(
         meta=extraction.meta,
         summary=summary,
         tax_reconciliation=tax_reconciliation,
+        screenshot_guidance=screenshot_guidance,
         warnings=extraction.warnings,
         created_at=time.time(),
         session_id=session_id or "",

@@ -314,6 +314,38 @@
   white-space: pre-wrap;
 }
 
+.scm-translation-toggle-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed rgba(6, 78, 59, 0.2);
+  font-size: 11px;
+}
+
+.scm-translation-note {
+  color: #047857;
+  font-style: italic;
+}
+
+.scm-trans-btn {
+  background: transparent;
+  border: 1px solid #059669;
+  color: #065f46;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.scm-trans-btn:hover {
+  background: #059669;
+  color: #ffffff;
+}
+
 /* Waiting Card */
 .scm-waiting-card {
   display: flex;

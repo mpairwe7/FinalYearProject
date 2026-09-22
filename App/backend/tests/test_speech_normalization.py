@@ -53,6 +53,46 @@ def test_tin_digit_expansion():
     assert "T I N 1 0 0 1 2 3 4 5 6 7" in res
 
 
+def test_standalone_tin_and_prn_and_nin():
+    raw = "You must obtain a valid TIN and PRN before paying, or show your NIN."
+    res = clean_text_for_speech(raw, locale="en")
+    assert "T-I-N" in res
+    assert "P-R-N" in res
+    assert "N-I-N" in res
+
+
+def test_prn_digit_expansion():
+    raw = "Your PRN is 224000123456."
+    res = clean_text_for_speech(raw, locale="en")
+    assert "P R N 2 2 4 0 0 0 1 2 3 4 5 6" in res
+
+
+def test_dts_and_additional_acronyms():
+    raw = "DTS stamps apply to excisable goods alongside CIT and LED."
+    res = clean_text_for_speech(raw, locale="en")
+    assert "Digital Tax Stamps" in res
+    assert "C-I-T" in res
+    assert "Local Excise Duty" in res
+
+
+def test_toll_free_number_cadence():
+    raw = "Call toll-free 0800 117 000 or 0800 217 000."
+    res = clean_text_for_speech(raw, locale="en")
+    assert "0 800, 117, 0 0 0" in res
+    assert "0 800, 217, 0 0 0" in res
+
+
+def test_step_pacing():
+    raw_en = "1. Visit the portal.\n2. Submit Form DT-1001."
+    res_en = clean_text_for_speech(raw_en, locale="en")
+    assert "Step 1: Visit the portal." in res_en
+    assert "Step 2: Submit Form D-T 1001." in res_en
+
+    raw_lg = "1. Genda ku mukutu.\n2. Sasula omusolo."
+    res_lg = clean_text_for_speech(raw_lg, locale="lg")
+    assert "Odaala 1: Genda ku mukutu." in res_lg
+
+
 def test_tax_acronym_expansion():
     raw = "Register on EFRIS with URA for PAYE and WHT compliance."
     res = clean_text_for_speech(raw, locale="en")

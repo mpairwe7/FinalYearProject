@@ -192,6 +192,58 @@ function ChatMessageInner({
                 <ReportDownloadButton attachment={a} />
               </div>
             ))}
+            {turn.attachments.map((a) =>
+              a.analysis?.screenshot_guidance?.is_screenshot ? (
+                <div className="portal-guidance-card" key={`guidance-${a.id}`} role="region" aria-label="URA Portal Guidance">
+                  <div className="portal-guidance-badge-row">
+                    <span className="portal-guidance-badge">
+                      🌐 {a.analysis.screenshot_guidance.detected_portal}
+                    </span>
+                    {a.analysis.screenshot_guidance.detected_state ? (
+                      <span className="portal-guidance-state">
+                        {a.analysis.screenshot_guidance.detected_state}
+                      </span>
+                    ) : null}
+                  </div>
+                  {a.analysis.screenshot_guidance.issues_detected && a.analysis.screenshot_guidance.issues_detected.length > 0 ? (
+                    <p className="portal-guidance-issue">
+                      ⚠️ <strong>Identified:</strong> {a.analysis.screenshot_guidance.issues_detected.join(' ')}
+                    </p>
+                  ) : null}
+                  {a.analysis.screenshot_guidance.steps && a.analysis.screenshot_guidance.steps.length > 0 ? (
+                    <div className="portal-guidance-steps-wrap">
+                      <span className="portal-guidance-steps-title">Recommended Resolution Steps:</span>
+                      <ol className="portal-guidance-steps-list">
+                        {a.analysis.screenshot_guidance.steps.map((step, idx) => (
+                          <li key={idx}>{step}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
+                  <div className="portal-guidance-actions">
+                    {a.analysis.screenshot_guidance.portal_url ? (
+                      <a
+                        href={a.analysis.screenshot_guidance.portal_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="portal-action-btn is-primary"
+                      >
+                        {a.analysis.screenshot_guidance.direct_action?.label || 'Open URA Portal ↗'}
+                      </a>
+                    ) : null}
+                    {onInspectAttachment ? (
+                      <button
+                        type="button"
+                        className="portal-action-btn is-ghost"
+                        onClick={() => onInspectAttachment(a)}
+                      >
+                        <EyeIcon /> Inspect Click Guidance
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null,
+            )}
           </div>
         )}
 

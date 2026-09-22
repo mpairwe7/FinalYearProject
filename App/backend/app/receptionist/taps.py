@@ -47,7 +47,7 @@ class CallerAudioTap(FrameProcessor):
     """Taps caller input PCM audio and forwards to the officer browser when bridged."""
 
     def __init__(self, room: Any, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+        super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
 
     async def process_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM) -> None:
@@ -62,11 +62,12 @@ class TranscriptTap(FrameProcessor):
     """Captures word confidences from TranscriptionFrame and emits live captions."""
 
     def __init__(self, room: Any, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+        super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
 
     async def process_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM) -> None:
         if isinstance(frame, TranscriptionFrame):
+            logger.info("TranscriptTap: received TranscriptionFrame: text=%r", frame.text)
             res = getattr(frame, "result", None)
             words = getattr(res, "words", None) if res else None
             self.room.state.turn_words = words or []

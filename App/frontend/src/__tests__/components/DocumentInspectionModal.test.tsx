@@ -134,4 +134,52 @@ describe('DocumentInspectionModal', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(handleClose).toHaveBeenCalled();
   });
+
+  it('renders interactive screenshot guidance and resolution steps', () => {
+    const screenshotDoc: DocumentAnalysisData = {
+      documentId: 'doc_shot_1',
+      filename: 'ura_portal_error.png',
+      kind: 'image',
+      sizeBytes: 85400,
+      docType: 'portal_screenshot',
+      confidence: 0.96,
+      screenshot_guidance: {
+        is_screenshot: true,
+        detected_portal: 'URA e-Services PRN & Payments Portal',
+        portal_url: 'https://portal.ura.go.ug',
+        detected_state: 'PRN Generation Failure',
+        issues_detected: ['Missing mandatory payment mode selection'],
+        steps: [
+          'Step 1: Select your bank from the Payment Mode dropdown.',
+          'Step 2: Click the green Generate PRN button.',
+        ],
+        hotspots: [
+          {
+            id: 'err-1',
+            type: 'error',
+            label: 'Missing Field',
+            instruction: 'Select payment mode',
+          },
+        ],
+      },
+    };
+
+    render(
+      <DocumentInspectionModal
+        isOpen={true}
+        onClose={vi.fn()}
+        document={{
+          id: 'doc_shot_1',
+          name: 'ura_portal_error.png',
+          analysis: screenshotDoc,
+        }}
+      />
+    );
+
+    expect(screen.getAllByText(/URA e-Services PRN & Payments Portal/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/PRN Generation Failure/i)).toBeDefined();
+    expect(screen.getByText(/Missing mandatory payment mode selection/i)).toBeDefined();
+    expect(screen.getByText(/Step 1: Select your bank from the Payment Mode dropdown./i)).toBeDefined();
+    expect(screen.getByText(/Open Official Portal ↗/i)).toBeDefined();
+  });
 });

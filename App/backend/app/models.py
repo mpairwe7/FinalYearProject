@@ -226,6 +226,7 @@ class EscalationRequest(BaseModel):
         pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
         description="Language to acknowledge in",
     )
+    modality: str = Field("text", description="Input modality: text or voice")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -253,7 +254,11 @@ class EscalationDetailResponse(BaseModel):
     assignee_display: str
     reason: str
     user_query: str
+    user_query_en: str = ""
+    locale: str = "en"
+    modality: str = "text"
     officer_reply: str
+    officer_reply_localized: str = ""
     reply_at: float
     reply_delivered: bool
     created_at: float
@@ -356,6 +361,7 @@ class TranslateResponse(BaseModel):
     latency_s: float
     backend: str
     error: str | None = None
+    figures_survived: bool = True
 
 
 class VoiceChatRequest(BaseModel):
@@ -557,7 +563,7 @@ class DocumentAnalysisResponse(BaseModel):
         "generic",
         description=(
             "receipt | tin_card | assessment | customs_declaration | "
-            "filing_form | invoice | generic"
+            "filing_form | invoice | portal_screenshot | generic"
         ),
     )
     confidence: float = Field(
@@ -578,6 +584,10 @@ class DocumentAnalysisResponse(BaseModel):
     tax_reconciliation: dict[str, Any] = Field(
         default_factory=dict,
         description="Automated financial reconciliation & rate compliance status",
+    )
+    screenshot_guidance: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Interactive screenshot navigation, error diagnostics, and resolution steps for URA sites",
     )
     warnings: list[str] = Field(default_factory=list)
     expires_in_seconds: int = Field(0, ge=0, description="TTL until the document is purged")

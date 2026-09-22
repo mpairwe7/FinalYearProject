@@ -32,6 +32,12 @@ except ImportError:
             self.num_channels = num_channels
 
 
+try:
+    from pipecat.services.settings import TTSSettings
+except ImportError:
+    TTSSettings = None
+
+
 class UraSpeechTTS(TTSService):
     """TTS service adapter that calls SpeechModel.synthesize in thread pool."""
 
@@ -42,9 +48,11 @@ class UraSpeechTTS(TTSService):
         language: str = "en",
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        v = voice or get_tts_voice()
+        settings = TTSSettings(language=language, voice=v) if TTSSettings else None
+        super().__init__(sample_rate=16000, settings=settings, **kwargs)
         self.speech_model = speech_model
-        self.voice = voice or get_tts_voice()
+        self.voice = v
         self.language = language
         self.last_first_chunk_ms: float = 0.0
 

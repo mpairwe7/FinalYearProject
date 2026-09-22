@@ -39,6 +39,12 @@ except ImportError:
             self.result = result
 
 
+try:
+    from pipecat.services.settings import STTSettings
+except ImportError:
+    STTSettings = None
+
+
 def _strip_wav_header(audio_bytes: bytes) -> bytes:
     """Strip WAV header if audio arrives containerized with RIFF header."""
     if audio_bytes.startswith(b"RIFF") and len(audio_bytes) > 44:
@@ -60,11 +66,28 @@ class UraWhisperSTT(SegmentedSTTService):
         language: str = "en",
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
+        settings = STTSettings(language=language) if STTSettings else None
+        super().__init__(
+            sample_rate=16000,
+            audio_passthrough=False,
+            ttfs_p99_latency=12.0,
+            settings=settings,
+            **kwargs,
+        )
         self.speech_model = speech_model
         self.user_id = user_id
         self.language = language
         self.last_stt_ms: float = 0.0
+
+    @property
+    def wants_wav_segments(self) -> bool:
+        """Local Whisper-SALT consumes raw 16-bit PCM directly."""
+        return False
+
+    async def start(self, frame: Any) -> None:
+        """Start STT service and broadcast STTMetadataFrame to arm turn stop timeouts."""
+        await super().start(frame)
+        await self.broadcast_service_metadata()
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
         """Transcribe segmented PCM audio with word-level confidence."""
@@ -72,6 +95,7 @@ class UraWhisperSTT(SegmentedSTTService):
         if not pcm or len(pcm) < 320:  # < 10ms of 16kHz audio
             return
 
+        logger.info("UraWhisperSTT.run_stt: transcribing %d bytes of PCM", len(pcm))
         t0 = time.perf_counter()
         try:
             res: TranscribeResult = await asyncio.to_thread(
@@ -86,6 +110,7 @@ class UraWhisperSTT(SegmentedSTTService):
             return
 
         self.last_stt_ms = round((time.perf_counter() - t0) * 1000, 1)
+        logger.info("UraWhisperSTT.run_stt completed in %.1f ms: text=%r", self.last_stt_ms, getattr(res, "text", ""))
 
         if res and res.text:
             frame = TranscriptionFrame(

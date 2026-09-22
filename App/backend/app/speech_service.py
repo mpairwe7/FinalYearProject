@@ -1112,10 +1112,12 @@ class SpeechModel:
         model, processor = pair
         t0 = time.perf_counter()
         samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
+        t_decode = time.perf_counter()
 
         input_features = processor.feature_extractor(
             samples, sampling_rate=16000, return_tensors="pt",
         ).input_features.to(model.device, dtype=model.dtype)
+        t_feat = time.perf_counter()
 
         # generate()'s `language` kwarg expects the literal string form of a
         # language token, not a bare code or a numeric id — the decode()
@@ -1156,6 +1158,8 @@ class SpeechModel:
         words: list[WordConf] | None = None
         mean_word_prob: float | None = None
 
+        t_gen_start = time.perf_counter()
+        torch.set_num_threads(4)
         if with_words:
             with torch.no_grad():
                 # nosemgrep: ura-llm01-raw-user-input-to-llm
@@ -1175,6 +1179,8 @@ class SpeechModel:
                     transition_scores = None
 
             text = processor.batch_decode(sequences, skip_special_tokens=True)[0].strip()
+            if prompt_text and text.startswith(prompt_text):
+                text = text[len(prompt_text):].strip()
             word_list: list[WordConf] = []
             if transition_scores is not None and scores is not None and len(sequences) > 0:
                 seq_tokens = sequences[0]
@@ -1210,6 +1216,14 @@ class SpeechModel:
                 # nosemgrep: ura-llm01-raw-user-input-to-llm
                 predicted_ids = model.generate(input_features, **gen_kwargs)
             text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+            if prompt_text and text.startswith(prompt_text):
+                text = text[len(prompt_text):].strip()
+
+        t_gen_end = time.perf_counter()
+        logger.info(
+            "_transcribe_whisper_salt breakdown: decode=%.3fs, feat=%.3fs, gen=%.3fs, total=%.3fs",
+            t_decode - t0, t_feat - t_decode, t_gen_end - t_gen_start, t_gen_end - t0
+        )
 
         latency = time.perf_counter() - t0
         duration = len(samples) / max(sample_rate, 1)
@@ -1367,12 +1381,19 @@ class SpeechModel:
         outcomes: dict[str, str] = {}
         if not self.enabled:
             return outcomes
-        for locale in SPEECH_WARMUP_LOCALES:
+        for locale in ("en",):
             try:
                 result = self.synthesize(text="URA.", language=locale)
                 outcomes[locale] = result.backend if not result.error else f"error: {result.error}"
             except Exception as exc:  # noqa: BLE001 — warm-up must never fail a boot
                 outcomes[locale] = f"error: {exc}"
+        if self._whisper_salt is not None:
+            try:
+                # 0.5s of silence to warm up Whisper-SALT JIT graph and eliminate cold-start latency
+                self.transcribe(bytes(16000), sample_rate=16000, language="en")
+                outcomes["whisper_salt"] = "ready"
+            except Exception as exc:  # noqa: BLE001
+                outcomes["whisper_salt"] = f"error: {exc}"
         return outcomes
 
     def _synthesize_mock(self, text: str, voice: str, language: str) -> SynthesizeResult:

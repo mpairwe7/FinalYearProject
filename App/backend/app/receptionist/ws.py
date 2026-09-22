@@ -86,7 +86,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     # 4. Connection caps
     client_host = websocket.client.host if websocket.client else "unknown"
     key = user_id or f"anon::{client_host}"
-    if not try_acquire("call", key, per_user_cap=1, global_cap=8):
+    if not try_acquire("call", key, per_user_cap=5, global_cap=16):
         await websocket.close(code=1013)
         return
 

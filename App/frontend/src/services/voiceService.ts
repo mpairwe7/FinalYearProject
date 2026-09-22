@@ -234,6 +234,9 @@ export class AudioRecorder {
     options?: { echoCancellation?: boolean; noiseSuppression?: boolean },
   ): Promise<() => void> {
     const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {});
+    }
 
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
