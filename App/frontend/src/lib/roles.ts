@@ -138,6 +138,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     roles: STAFF_ROLES,
   },
   {
+    href: "/calls",
+    label: "Phone calls",
+    navLabel: "Calls",
+    group: "work",
+    blurb: "Simulated AI phone receptionist: live calls, transfers, and audio takeover",
+    roles: ["ura_staff", "ura_admin", "ura_auditor"],
+  },
+  {
     href: "/admin/flags",
     label: "Flags",
     navLabel: "Flags",

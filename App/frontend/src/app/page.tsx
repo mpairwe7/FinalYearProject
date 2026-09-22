@@ -44,6 +44,8 @@ import ConversationSearch from '../components/ConversationSearch';
 import LoadingState from '../components/LoadingState';
 import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import ChatHeader from '../components/ChatHeader';
+import { CallScreen } from '../components/call/CallScreen';
+import { useCallStore } from '../store/useCallStore';
 import { DocumentInspectionModal } from '../components/DocumentInspectionModal';
 import { SupportCaseModal } from '../components/SupportCaseModal';
 import { useIdentity } from '../hooks/useIdentity';
@@ -178,6 +180,7 @@ export default function Page() {
   const addTurns = useChatStore((s) => s.addTurns);
   const updateLastTurn = useChatStore((s) => s.updateLastTurn);
   const reset = useChatStore((s) => s.reset);
+  const openCall = useCallStore((s) => s.openCall);
   // Session management
   const conversations = useChatStore((s) => s.conversations);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
@@ -1720,6 +1723,7 @@ export default function Page() {
         locale={locale}
         localeOptions={LOCALE_OPTIONS}
         onLocaleChange={setLocale}
+        onStartCall={openCall}
       />
 
       {activeTicketId && (
@@ -1918,6 +1922,8 @@ export default function Page() {
         ticketId={activeTicketId}
         conversationId={activeConversationId}
       />
+
+      <CallScreen />
 
       </div>{/* end .app-main-col */}
     </div>{/* end .app-shell.chatv2 */}

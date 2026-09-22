@@ -143,4 +143,23 @@ export const sw: Partial<Dictionary> = {
   'documents.entities': 'Sehemu za Kodi Zilizotolewa',
   'documents.tables': 'Jedwali na Laha kazi',
   'documents.suggested': 'Hatua Zinazopendekezwa',
+
+  // Call URA receptionist
+  'call.button': 'Piga Simu URA',
+  'call.dialing': 'Inapiga 0800 117 000…',
+  'call.assistantName': 'Msaidizi pepe wa URA',
+  'call.connected': 'Imeunganishwa',
+  'call.mute': 'Zima maikrofoni',
+  'call.unmute': 'Washa maikrofoni',
+  'call.talkOfficer': 'Ongea na afisa',
+  'call.hangup': 'Kata simu',
+  'call.transferring': 'Inakuunganisha na afisa wa URA…',
+  'call.officerJoined': 'Afisa {name} amejiunga',
+  'call.officerSpeaking': 'Afisa Anaongea',
+  'call.ended': 'Simu imekatika',
+  'call.thankYou': 'Asante kwa kupiga simu URA.',
+  'call.consentTitle': 'Idhini ya Kurekodi Simu',
+  'call.consentText': 'Simu hii itarekodiwa na kunakiliwa ili kuwasaidia maafisa wa URA na kuboresha huduma.',
+  'call.consentAccept': 'Kubali na Upige',
+  'call.consentDecline': 'Kataa',
 };

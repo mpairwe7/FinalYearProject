@@ -1,0 +1,209 @@
+/* Staff Calls page and detail view styling */
+
+.calls-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+}
+
+.st-case-container {
+  background: var(--bg-surface, #ffffff);
+  border-left: 1px solid var(--border-default, #e5e7eb);
+  height: 100%;
+}
+
+[data-theme='dark'] .st-case-container {
+  background: #111827;
+  border-color: #374151;
+}
+
+.st-case-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-default, #e5e7eb);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+[data-theme='dark'] .st-case-header {
+  border-color: #374151;
+}
+
+/* Bubbles in Call Transcript */
+.st-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 80%;
+  gap: 0.25rem;
+}
+
+.st-bubble-wrap--caller {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.st-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.st-bubble-author {
+  font-weight: 600;
+  color: var(--text-secondary, #6b7280);
+}
+
+.st-bubble-meta {
+  color: #059669;
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.st-bubble {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-lg, 0.75rem);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.st-bubble--assistant {
+  background: #eff6ff;
+  color: #1e3a8a;
+  border: 1px solid #bfdbfe;
+  border-bottom-left-radius: 2px;
+}
+
+[data-theme='dark'] .st-bubble--assistant {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #334155;
+}
+
+.st-bubble--caller {
+  background: #f0fdf4;
+  color: #064e3b;
+  border: 1px solid #bbf7d0;
+  border-bottom-right-radius: 2px;
+}
+
+[data-theme='dark'] .st-bubble--caller {
+  background: #064e3b;
+  color: #d1fae5;
+  border-color: #047857;
+}
+
+.st-bubble--officer {
+  background: #faf5ff;
+  color: #581c87;
+  border: 1px solid #e9d5ff;
+  border-bottom-left-radius: 2px;
+}
+
+[data-theme='dark'] .st-bubble--officer {
+  background: #3b0764;
+  color: #f3e8ff;
+  border-color: #6b21a8;
+}
+
+.st-bubble--interim {
+  background: #f3f4f6;
+  color: #6b7280;
+  font-style: italic;
+  border: 1px dashed #d1d5db;
+}
+
+/* Low-confidence words mark */
+.st-mark-low-conf {
+  background-color: #fef08a;
+  color: #854d0e;
+  border-bottom: 2px dotted #ca8a04;
+  padding: 0 2px;
+  border-radius: 2px;
+  cursor: help;
+  text-decoration: none;
+}
+
+[data-theme='dark'] .st-mark-low-conf {
+  background-color: #713f12;
+  color: #fef08a;
+  border-bottom-color: #eab308;
+}
+
+/* Clarification Chip */
+.st-chip--clarify {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
+[data-theme='dark'] .st-chip--clarify {
+  background: #78350f;
+  color: #fde68a;
+  border-color: #b45309;
+}
+
+.st-jump-bottom-btn {
+  position: absolute;
+  bottom: 1rem;
+  right: 1.5rem;
+  background: var(--bg-surface, #ffffff);
+  border: 1px solid var(--border-default, #e5e7eb);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 9999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #2563eb;
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* Metrics Tiles */
+.st-metric-tile {
+  background: var(--bg-muted, #f9fafb);
+  border: 1px solid var(--border-subtle, #f3f4f6);
+  padding: 0.625rem;
+  border-radius: 6px;
+  text-align: center;
+}
+
+[data-theme='dark'] .st-metric-tile {
+  background: #1f2937;
+  border-color: #374151;
+}
+
+.st-metric-label {
+  font-size: 0.6875rem;
+  color: var(--text-secondary, #6b7280);
+  text-transform: uppercase;
+  margin-bottom: 0.25rem;
+}
+
+.st-metric-value {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary, #111827);
+}
+
+[data-theme='dark'] .st-metric-value {
+  color: #f9fafb;
+}
+
+.st-pill--pulse {
+  animation: stPillPulse 1.6s infinite;
+}
+
+@keyframes stPillPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.85; }
+}

@@ -619,6 +619,26 @@ async def lifespan(app: FastAPI):
     else:
         app.state.offline_rag = None
 
+    # Simulated voice receptionist (Pipecat demo)
+    if _flags.is_enabled("voice_receptionist"):
+        try:
+            from . import receptionist
+            if not receptionist.is_available():
+                raise RuntimeError("FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed")
+            from .receptionist.store import init_receptionist_schema
+            init_receptionist_schema()
+            workers_count = int(os.getenv("WORKERS", "1"))
+            if workers_count > 1:
+                logger.warning(
+                    "FLAG_VOICE_RECEPTIONIST is enabled with WORKERS=%d. "
+                    "Voice receptionist call registry and bridges live in-process — "
+                    "single worker (WORKERS=1) is recommended for demo stability.",
+                    workers_count,
+                )
+        except Exception:
+            logger.exception("Voice receptionist initialization failed")
+            raise
+
     # Startup alone is insufficient: an otherwise idle pod would retain
     # expired documents and in-memory data indefinitely. The job itself is
     # idempotent, including when several replicas run it at once.
@@ -1293,6 +1313,13 @@ async def translate_text(
         metrics.observe("speech_mt_latency_s", result.latency_s)
     if result.error:
         metrics.inc("speech_mt_errors_total")
+    figures_ok = True
+    if body.text and result.text and not result.error:
+        try:
+            from . import mt
+            figures_ok = mt.figures_survived(body.text, result.text, locale=body.target_lang)
+        except Exception:
+            figures_ok = True
     return TranslateResponse(
         text=result.text,
         source_lang=result.source_lang,
@@ -1300,6 +1327,7 @@ async def translate_text(
         latency_s=result.latency_s,
         backend=result.backend,
         error=result.error,
+        figures_survived=figures_ok,
     )
 
 
@@ -1920,6 +1948,33 @@ async def chat_stream_ws_v2(websocket: WebSocket) -> None:
     await chat_stream_ws(websocket, app)
 
 
+@app.websocket("/v1/calls/stream")
+async def call_stream_ws(websocket: WebSocket) -> None:
+    """Taxpayer phone call simulation WebSocket.
+
+    Gated by ``voice_receptionist`` feature flag.
+    """
+    from .receptionist.ws import call_stream_endpoint
+
+    await call_stream_endpoint(websocket)
+
+
+@app.websocket("/v1/admin/calls/stream")
+async def admin_call_stream_ws(websocket: WebSocket, call_id: str | None = None) -> None:
+    """Live staff call events (lobby or per-call live transcript)."""
+    from .receptionist.ws import staff_calls_stream_endpoint
+
+    await staff_calls_stream_endpoint(websocket, call_id=call_id)
+
+
+@app.websocket("/v1/admin/calls/{call_id}/audio")
+async def admin_call_audio_ws(websocket: WebSocket, call_id: str) -> None:
+    """Officer live audio bridge for call takeover."""
+    from .receptionist.ws import officer_audio_endpoint
+
+    await officer_audio_endpoint(websocket, call_id=call_id)
+
+
 # ---------------------------------------------------------------------------
 # Classification endpoints
 # ---------------------------------------------------------------------------
@@ -2234,6 +2289,7 @@ def request_human_officer(
         # first replies.
         "requested_by": "taxpayer",
     }
+    modality = getattr(body, "modality", "text") or "text"
     ticket_id = model._maybe_create_ticket(
         reason=reason,
         user_query=reason,
@@ -2243,6 +2299,8 @@ def request_human_officer(
         priority="normal",
         handoff=handoff,
         user_id=ctx.user_id or "",
+        locale=locale,
+        modality=modality,
     )
     if not ticket_id:
         # _maybe_create_ticket logs the failure as ESCALATION LOST. The
@@ -2327,6 +2385,18 @@ def get_escalation_status(
     if officer_reply and status != "resolved":
         status_label = "Officer Response Ready"
 
+    locale = str(ticket.get("locale") or "en")
+    modality = str(ticket.get("modality") or "text")
+    user_query_en = str(ticket.get("user_query_en") or "")
+    officer_reply_localized = str(ticket.get("officer_reply_localized") or "")
+
+    if officer_reply and not officer_reply_localized and locale not in ("", "en"):
+        try:
+            from .service import localize_reply
+            officer_reply_localized = localize_reply(officer_reply, locale)
+        except Exception:
+            officer_reply_localized = officer_reply
+
     return EscalationDetailResponse(
         ok=True,
         ticket_id=tid,
@@ -2340,7 +2410,11 @@ def get_escalation_status(
         assignee_display=f"Officer {assignee.split('@')[0].capitalize()}" if assignee else "URA Support Officer",
         reason=str(ticket.get("reason") or "Assistance required"),
         user_query=str(ticket.get("user_query") or ""),
+        user_query_en=user_query_en,
+        locale=locale,
+        modality=modality,
         officer_reply=officer_reply,
+        officer_reply_localized=officer_reply_localized,
         reply_at=reply_at,
         reply_delivered=bool(reply_delivered_at > 0),
         created_at=created_at,
@@ -2555,6 +2629,8 @@ def list_tickets_endpoint(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    locale: str | None = None,
+    modality: str | None = None,
     q: str | None = None,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
@@ -2579,13 +2655,15 @@ def list_tickets_endpoint(
         raise HTTPException(status_code=400, detail="invalid priority")
 
     rows = db.list_tickets(
-        status=status, limit=limit, offset=offset, priority=priority, team=team, q=q
+        status=status, limit=limit, offset=offset, priority=priority, team=team, locale=locale, modality=modality, q=q
     )
     return {
         "count": len(rows),
         "status_filter": status or "all",
         "priority_filter": priority or "all",
         "team_filter": team or "all",
+        "locale_filter": locale or "all",
+        "modality_filter": modality or "all",
         "teams": known_teams(),
         "limit": limit,
         "offset": offset,
@@ -2807,6 +2885,8 @@ async def update_ticket_endpoint(
     staff_note: str | None = None,
     priority: str | None = None,
     officer_reply: str | None = None,
+    officer_reply_localized: str | None = None,
+    locale: str | None = None,
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Update a ticket's status/assignee/note/priority/reply.
@@ -2830,8 +2910,23 @@ async def update_ticket_endpoint(
                     priority = body["priority"]
                 if "officer_reply" in body:
                     officer_reply = body["officer_reply"]
+                if "officer_reply_localized" in body:
+                    officer_reply_localized = body["officer_reply_localized"]
+                if "locale" in body:
+                    locale = body["locale"]
         except Exception:
             pass
+
+    if officer_reply and not officer_reply_localized:
+        ticket = db.get_ticket(ticket_id)
+        if ticket:
+            t_loc = (locale or ticket.get("locale") or "en").lower().strip()
+            if t_loc not in ("", "en"):
+                try:
+                    from .service import localize_reply
+                    officer_reply_localized = localize_reply(officer_reply, t_loc)
+                except Exception:
+                    logger.debug("auto-localizing officer reply failed", exc_info=True)
 
     ok = db.update_ticket(
         ticket_id,
@@ -2840,6 +2935,8 @@ async def update_ticket_endpoint(
         staff_note=staff_note,
         priority=priority,
         officer_reply=officer_reply,
+        officer_reply_localized=officer_reply_localized,
+        locale=locale,
     )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
@@ -2869,6 +2966,85 @@ def voice_audit_endpoint(
     )
     stats = voice_audit_stats(days=days)
     return {"entries": entries, "stats": stats}
+
+
+# ---------------------------------------------------------------------------
+# Phone Receptionist Admin Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/admin/calls", tags=["admin"])
+def list_calls_endpoint(
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """List phone calls filtered by status (live, ended, all)."""
+    from .receptionist.store import list_calls
+    calls = list_calls(status=status, limit=limit, offset=offset)
+    return {
+        "calls": calls,
+        "count": len(calls),
+        "status_filter": status or "all",
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/v1/admin/calls/metrics", tags=["admin"])
+def get_call_metrics_endpoint(
+    days: int = 7,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Retrieve aggregate phone receptionist performance metrics."""
+    from .receptionist.metrics import get_aggregate_metrics
+    return get_aggregate_metrics(days=days)
+
+
+@app.get("/v1/admin/calls/{call_id}", tags=["admin"])
+def get_call_detail_endpoint(
+    call_id: str,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Retrieve full call detail including turns, summary, metrics, and ticket."""
+    import re
+    from .receptionist.store import get_call_with_turns
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
+        raise HTTPException(status_code=400, detail="Invalid call_id format")
+
+    detail = get_call_with_turns(call_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return detail
+
+
+@app.post("/v1/admin/calls/{call_id}/review", tags=["admin"])
+def review_call_endpoint(
+    call_id: str,
+    body: dict = Body(...),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Submit an officer rating (1-5) and note for a call."""
+    import re
+    from .receptionist.store import get_call, save_call_review
+    if ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="Only staff and admins can submit reviews")
+
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
+        raise HTTPException(status_code=400, detail="Invalid call_id format")
+
+    call = get_call(call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    try:
+        rating = int(body.get("rating", 5))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid rating")
+    note = str(body.get("note", ""))
+    ok = save_call_review(call_id, rating=rating, note=note)
+    return {"ok": ok, "call_id": call_id, "rating": rating}
 
 
 @app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)

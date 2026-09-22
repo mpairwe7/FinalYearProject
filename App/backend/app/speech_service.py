@@ -39,6 +39,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import logging
+import math
 import os
 import sys
 import threading
@@ -268,6 +269,7 @@ EN_EDGE_VOICE_CHOICES: tuple[str, ...] = (
     "en-US-AriaNeural",
     "en-US-GuyNeural",
     "en-GB-SoniaNeural",
+    "en-KE-AsiliaNeural",
 )
 
 
@@ -438,6 +440,28 @@ class LocalVoiceUnavailable(RuntimeError):
 
 
 @dataclass
+class WordConf:
+    word: str
+    prob: float
+    start: float | None = None
+    end: float | None = None
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"word": self.word, "prob": round(float(self.prob), 3)}
+        if self.start is not None:
+            d["start"] = self.start
+        if self.end is not None:
+            d["end"] = self.end
+        return d
+
+
+@dataclass
 class TranscribeResult:
     text: str
     language: str | None = None
@@ -446,6 +470,8 @@ class TranscribeResult:
     rtf: float | None = None
     backend: str = "unknown"
     error: str | None = None
+    words: list[WordConf] | None = None
+    mean_word_prob: float | None = None
 
 
 @dataclass
@@ -700,7 +726,11 @@ class SpeechModel:
         return self.enabled and self._initialised
 
     def transcribe(
-        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+        self,
+        audio_bytes: bytes,
+        sample_rate: int = 16000,
+        language: str | None = None,
+        with_words: bool = False,
     ) -> TranscribeResult:
         """Transcribe raw PCM bytes, filling in any timing the backend omitted.
 
@@ -713,7 +743,7 @@ class SpeechModel:
         `return` in the chain where the next branch added would miss it.
         """
         t_start = time.perf_counter()
-        result = self._transcribe_chain(audio_bytes, sample_rate, language)
+        result = self._transcribe_chain(audio_bytes, sample_rate, language, with_words=with_words)
         if result.duration_s is None:
             result.duration_s = _input_duration_s(audio_bytes, sample_rate)
         if result.latency_s is None:
@@ -723,7 +753,11 @@ class SpeechModel:
         return result
 
     def _transcribe_chain(
-        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+        self,
+        audio_bytes: bytes,
+        sample_rate: int = 16000,
+        language: str | None = None,
+        with_words: bool = False,
     ) -> TranscribeResult:
         """The backend fallback chain itself.
 
@@ -753,7 +787,9 @@ class SpeechModel:
         # ⓪ Whisper-SALT (one fine-tune, every locale — tried first when loaded)
         if self._whisper_salt is not None:
             try:
-                result = self._transcribe_whisper_salt(audio_bytes, sample_rate, language)
+                result = self._transcribe_whisper_salt(
+                    audio_bytes, sample_rate, language, with_words=with_words
+                )
                 if result and result.text:
                     return result
                 if result:
@@ -1050,7 +1086,11 @@ class SpeechModel:
         )
 
     def _transcribe_whisper_salt(
-        self, audio_bytes: bytes, sample_rate: int, language: str | None
+        self,
+        audio_bytes: bytes,
+        sample_rate: int,
+        language: str | None,
+        with_words: bool = False,
     ) -> TranscribeResult | None:
         """Offline STT via Sunbird/asr-whisper-large-v3-salt — one model, every locale.
 
@@ -1104,9 +1144,7 @@ class SpeechModel:
             except Exception:
                 prompt_ids = None
 
-        gen_kwargs: dict[str, Any] = {"max_new_tokens": 225}
-        if forced_language is not None:
-            gen_kwargs["language"] = forced_language
+        gen_kwargs: dict[str, Any] = {"max_new_tokens": 225, "language": forced_language}
         if prompt_ids is not None:
             gen_kwargs["prompt_ids"] = prompt_ids
 
@@ -1114,10 +1152,63 @@ class SpeechModel:
         # Whisper ASR fed a mel spectrogram (input_features), not user text —
         # there is no prompt for LLM01 to inject into. The transcript IS
         # guarded downstream, at service.generate()'s InputGuard.check(message).
-        with torch.no_grad():
-            # nosemgrep: ura-llm01-raw-user-input-to-llm
-            predicted_ids = model.generate(input_features, **gen_kwargs)
-        text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+        words: list[WordConf] | None = None
+        mean_word_prob: float | None = None
+
+        if with_words:
+            with torch.no_grad():
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
+                out = model.generate(
+                    input_features,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                    **gen_kwargs,
+                )
+                sequences = getattr(out, "sequences", out)
+                scores = getattr(out, "scores", None)
+                if scores is not None and hasattr(model, "compute_transition_scores"):
+                    transition_scores = model.compute_transition_scores(
+                        sequences, scores, normalize_logits=True
+                    )
+                else:
+                    transition_scores = None
+
+            text = processor.batch_decode(sequences, skip_special_tokens=True)[0].strip()
+            word_list: list[WordConf] = []
+            if transition_scores is not None and scores is not None and len(sequences) > 0:
+                seq_tokens = sequences[0]
+                gen_tokens = seq_tokens[-len(scores):].tolist()
+                log_probs = transition_scores[0].tolist()
+                special_ids = set(processor.tokenizer.all_special_ids) if hasattr(processor.tokenizer, "all_special_ids") else set()
+                cur_tokens: list[int] = []
+                cur_probs: list[float] = []
+                for tid, lp in zip(gen_tokens, log_probs):
+                    if tid in special_ids:
+                        continue
+                    piece = processor.tokenizer.decode([tid])
+                    if not piece or piece.startswith("<|"):
+                        continue
+                    prob = max(0.0, min(1.0, math.exp(float(lp))))
+                    if (piece.startswith(" ") or (not word_list and not cur_tokens)) and cur_tokens:
+                        w = processor.tokenizer.decode(cur_tokens).strip()
+                        if w:
+                            word_list.append(WordConf(word=w, prob=round(min(cur_probs), 3)))
+                        cur_tokens = [tid]
+                        cur_probs = [prob]
+                    else:
+                        cur_tokens.append(tid)
+                        cur_probs.append(prob)
+                if cur_tokens:
+                    w = processor.tokenizer.decode(cur_tokens).strip()
+                    if w:
+                        word_list.append(WordConf(word=w, prob=round(min(cur_probs), 3)))
+            words = word_list if word_list else None
+            mean_word_prob = round(sum(w.prob for w in words) / len(words), 3) if words else None
+        else:
+            with torch.no_grad():
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
+                predicted_ids = model.generate(input_features, **gen_kwargs)
+            text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
 
         latency = time.perf_counter() - t0
         duration = len(samples) / max(sample_rate, 1)
@@ -1131,6 +1222,8 @@ class SpeechModel:
             latency_s=round(latency, 3),
             rtf=round(latency / max(duration, 0.01), 2),
             backend="whisper_salt",
+            words=words,
+            mean_word_prob=mean_word_prob,
         )
 
     def _transcribe_faster_whisper(
@@ -1619,6 +1712,10 @@ class SpeechModel:
 
         voice_id = resolve_edge_voice(language, voice)
         t0 = time.perf_counter()
+        # Natural conversational pacing (8-10% slower) provides clear articulation
+        # for tax statutory figures, acronyms, and multi-syllabic vernacular phrasing.
+        default_rate = "-10%" if language == "lg" else "-8%"
+        tts_rate = os.getenv("SPEECH_TTS_RATE", default_rate)
 
         def _generate_sync() -> bytes:
             """Run the async generator in an isolated event loop on this thread."""
@@ -1627,7 +1724,7 @@ class SpeechModel:
             loop = asyncio.new_event_loop()
             try:
                 async def _stream() -> bytes:
-                    communicate = edge_tts.Communicate(text[:3000], voice_id)
+                    communicate = edge_tts.Communicate(text[:3000], voice_id, rate=tts_rate)
                     buf = io.BytesIO()
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":

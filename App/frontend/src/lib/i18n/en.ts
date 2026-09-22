@@ -170,6 +170,25 @@ export const en = {
   'documents.entities': 'Extracted Tax Fields',
   'documents.tables': 'Tables & Worksheets',
   'documents.suggested': 'Suggested Actions',
+
+  // Call URA receptionist -------------------------------------------------
+  'call.button': 'Call URA',
+  'call.dialing': 'Calling 0800 117 000…',
+  'call.assistantName': 'URA Virtual Assistant',
+  'call.connected': 'Connected',
+  'call.mute': 'Mute',
+  'call.unmute': 'Unmute',
+  'call.talkOfficer': 'Talk to an officer',
+  'call.hangup': 'End call',
+  'call.transferring': 'Connecting you to an officer…',
+  'call.officerJoined': 'Officer {name} joined',
+  'call.officerSpeaking': 'Officer Speaking',
+  'call.ended': 'Call ended',
+  'call.thankYou': 'Thank you for calling URA.',
+  'call.consentTitle': 'Call Recording & Transcription Consent',
+  'call.consentText': 'This call will be recorded and transcribed to assist URA officers and improve taxpayer support.',
+  'call.consentAccept': 'Accept & Call',
+  'call.consentDecline': 'Decline',
 } as const;
 
 export type TranslationKey = keyof typeof en;

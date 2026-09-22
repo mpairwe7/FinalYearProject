@@ -287,7 +287,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (49 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (50 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -511,9 +511,10 @@ All major subsystems are behind feature flags for progressive rollout:
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
 | `langgraph` | off | Route agentic requests through the graph orchestrator |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
+| `voice_receptionist` | off | Simulated phone receptionist: Pipecat call socket, staff Calls page, audio bridge |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**49** in total, including the per-phase switches for voice, offline and
+**50** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

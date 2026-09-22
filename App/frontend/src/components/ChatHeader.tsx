@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import LanguageMenu, { LanguageOption } from './LanguageMenu';
 import ConversationMenu from './ConversationMenu';
+import { useTranslation } from '../lib/i18n';
 import { useTheme } from '../hooks/useTheme';
 import {
   AutoThemeIcon,
@@ -11,6 +12,7 @@ import {
   KebabIcon,
   MoonIcon,
   PanelLeftIcon,
+  PhoneIcon,
   SettingsIcon,
   SunIcon,
   TrashIcon,
@@ -63,6 +65,7 @@ interface ChatHeaderProps {
   /** Commits a new title. The inline editor is owned here, beside the title. */
   onRenameConversation?: (title: string) => void;
   onDeleteConversation?: () => void;
+  onStartCall?: () => void;
 }
 
 export default function ChatHeader({
@@ -79,11 +82,13 @@ export default function ChatHeader({
   localeOptions,
   onLocaleChange,
   conversationTitle,
-  conversationPinned = false,
+  conversationPinned,
   onPinConversation,
   onRenameConversation,
   onDeleteConversation,
+  onStartCall,
 }: ChatHeaderProps) {
+  const t = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
@@ -248,6 +253,18 @@ export default function ChatHeader({
       )}
 
       <div className="hdrv2-spacer" />
+
+      {onStartCall && (
+        <button
+          type="button"
+          className="top-bar-icon-btn"
+          aria-label={t('call.button')}
+          title={t('call.button')}
+          onClick={onStartCall}
+        >
+          <PhoneIcon size={18} />
+        </button>
+      )}
 
       {/* Language sits beside the 3-dot rather than inside it: it is the one
           setting people change often enough to want the current value visible

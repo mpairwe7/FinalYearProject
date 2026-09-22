@@ -131,6 +131,72 @@ class VoiceStreamEvent:
 
 
 # ---------------------------------------------------------------------------
+# EnergyVAD
+# ---------------------------------------------------------------------------
+
+
+class EnergyVAD:
+    """Energy-based Voice Activity Detection with hysteresis."""
+
+    def __init__(
+        self,
+        energy_threshold: float = _VAD_ENERGY_THRESHOLD,
+        silence_duration_ms: int = _VAD_SILENCE_MS,
+        max_utterance_s: float = _VAD_MAX_UTTERANCE_S,
+        sample_rate: int = 16_000,
+    ) -> None:
+        self.energy_threshold = energy_threshold
+        self.silence_duration_ms = silence_duration_ms
+        self.max_utterance_s = max_utterance_s
+        self.sample_rate = sample_rate
+
+        self.is_speaking = False
+        self.silence_samples = 0
+        self.utterance_start: float | None = None
+        self.audio_buffer = bytearray()
+
+    def reset(self) -> None:
+        self.is_speaking = False
+        self.silence_samples = 0
+        self.utterance_start = None
+        self.audio_buffer.clear()
+
+    def detect(self, pcm_chunk: bytes) -> tuple[bool, bool]:
+        """Detect speech and utterance completion on a PCM16 LE chunk.
+
+        Returns (is_speech, utterance_complete).
+        """
+        n_samples = len(pcm_chunk) // 2
+        if n_samples == 0:
+            return False, False
+
+        samples = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+        rms = float(np.sqrt(np.mean(samples ** 2)))
+        is_speech = rms > self.energy_threshold
+
+        if is_speech:
+            if not self.is_speaking:
+                self.is_speaking = True
+                self.utterance_start = time.perf_counter()
+            self.silence_samples = 0
+            self.audio_buffer.extend(pcm_chunk)
+        else:
+            if self.is_speaking:
+                self.silence_samples += n_samples
+                self.audio_buffer.extend(pcm_chunk)
+                silence_ms = (self.silence_samples / self.sample_rate) * 1000
+                if silence_ms >= self.silence_duration_ms:
+                    return False, True
+
+        if self.utterance_start is not None:
+            elapsed = time.perf_counter() - self.utterance_start
+            if elapsed >= self.max_utterance_s:
+                return is_speech, True
+
+        return is_speech, False
+
+
+# ---------------------------------------------------------------------------
 # VoiceSession
 # ---------------------------------------------------------------------------
 
@@ -170,10 +236,12 @@ class VoiceSession:
         self.tenant_id = tenant_id or "default"
 
         # VAD state
-        self._audio_buffer = bytearray()
-        self._is_speaking = False
-        self._silence_samples = 0
-        self._utterance_start: float | None = None
+        self._vad = EnergyVAD(
+            energy_threshold=self.vad.energy_threshold,
+            silence_duration_ms=self.vad.silence_duration_ms,
+            max_utterance_s=self.vad.max_utterance_s,
+            sample_rate=self.vad.sample_rate,
+        )
 
         # Barge-in
         self._cancelled = asyncio.Event()
@@ -511,8 +579,40 @@ class VoiceSession:
         )
 
     # ------------------------------------------------------------------
-    # VAD
+    # VAD & Backward Compatibility Properties
     # ------------------------------------------------------------------
+
+    @property
+    def _audio_buffer(self) -> bytearray:
+        return self._vad.audio_buffer
+
+    @_audio_buffer.setter
+    def _audio_buffer(self, val: bytearray) -> None:
+        self._vad.audio_buffer = val
+
+    @property
+    def _is_speaking(self) -> bool:
+        return self._vad.is_speaking
+
+    @_is_speaking.setter
+    def _is_speaking(self, val: bool) -> None:
+        self._vad.is_speaking = val
+
+    @property
+    def _silence_samples(self) -> int:
+        return self._vad.silence_samples
+
+    @_silence_samples.setter
+    def _silence_samples(self, val: int) -> None:
+        self._vad.silence_samples = val
+
+    @property
+    def _utterance_start(self) -> float | None:
+        return self._vad.utterance_start
+
+    @_utterance_start.setter
+    def _utterance_start(self, val: float | None) -> None:
+        self._vad.utterance_start = val
 
     def _vad_detect(self, pcm_chunk: bytes) -> tuple[bool, bool]:
         """Energy-based Voice Activity Detection with hysteresis.
@@ -524,41 +624,7 @@ class VoiceSession:
             (is_speech, utterance_complete) — True/True means the user
             finished speaking and the accumulated buffer is ready for ASR.
         """
-        # Convert PCM16 LE to float32
-        n_samples = len(pcm_chunk) // 2
-        if n_samples == 0:
-            return False, False
-
-        samples = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32) / 32768.0
-
-        # RMS energy
-        rms = float(np.sqrt(np.mean(samples ** 2)))
-        is_speech = rms > self.vad.energy_threshold
-
-        if is_speech:
-            if not self._is_speaking:
-                self._is_speaking = True
-                self._utterance_start = time.perf_counter()
-            self._silence_samples = 0
-            self._audio_buffer.extend(pcm_chunk)
-        else:
-            if self._is_speaking:
-                self._silence_samples += n_samples
-                # Still accumulate audio during silence hysteresis
-                self._audio_buffer.extend(pcm_chunk)
-
-                silence_ms = (self._silence_samples / self.vad.sample_rate) * 1000
-                if silence_ms >= self.vad.silence_duration_ms:
-                    # Utterance complete
-                    return False, True
-
-        # Check max utterance duration
-        if self._utterance_start is not None:
-            elapsed = time.perf_counter() - self._utterance_start
-            if elapsed >= self.vad.max_utterance_s:
-                return is_speech, True
-
-        return is_speech, False
+        return self._vad.detect(pcm_chunk)
 
 
 # ---------------------------------------------------------------------------

@@ -163,10 +163,18 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/offline/status"),
     ("POST", "/v1/offline/sync"),
     ("GET", "/v1/offline/bundle"),
+    # --- Receptionist (simulated phone calls) ---
+    ("GET", "/v1/admin/calls"),
+    ("GET", "/v1/admin/calls/metrics"),
+    ("GET", "/v1/admin/calls/{call_id}"),
+    ("POST", "/v1/admin/calls/{call_id}/review"),
     # --- WebSocket ---
     ("WS", "/v1/voice/chat/stream"),
     ("WS", "/v2/chat/stream"),
     ("WS", "/v2/voice/chat/stream"),
+    ("WS", "/v1/calls/stream"),
+    ("WS", "/v1/admin/calls/stream"),
+    ("WS", "/v1/admin/calls/{call_id}/audio"),
 }
 
 # Where each endpoint is exercised end-to-end over HTTP/WS. Keys MUST equal
@@ -243,9 +251,16 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/offline/status"): "this:test_offline_status_flag_on",
     ("POST", "/v1/offline/sync"): "test_api_endpoints.OfflineModelEndpoints",
     ("GET", "/v1/offline/bundle"): "test_api_endpoints.OfflineModelEndpoints",
+    ("GET", "/v1/admin/calls"): "App.backend.tests.test_receptionist_ws",
+    ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
+    ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
+    ("POST", "/v1/admin/calls/{call_id}/review"): "App.backend.tests.test_receptionist_ws",
     ("WS", "/v1/voice/chat/stream"): "test_voice_ws_hardening",
     ("WS", "/v2/chat/stream"): "test_chat_ws_lifecycle",
     ("WS", "/v2/voice/chat/stream"): "test_native_voice",
+    ("WS", "/v1/calls/stream"): "App.backend.tests.test_receptionist_ws",
+    ("WS", "/v1/admin/calls/stream"): "App.backend.tests.test_receptionist_ws",
+    ("WS", "/v1/admin/calls/{call_id}/audio"): "App.backend.tests.test_receptionist_ws",
 }
 
 
@@ -374,11 +389,11 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (70 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (74 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 70, f"expected 70 HTTP endpoints, found {len(http)}"
-    assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
+    assert len(http) == 74, f"expected 74 HTTP endpoints, found {len(http)}"
+    assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
 # ---------------------------------------------------------------------------

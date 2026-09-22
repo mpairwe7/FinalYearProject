@@ -98,6 +98,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
 
+# Voice receptionist (Pipecat + jellyfish phonetic keys) for the GPU image
+COPY App/backend/requirements-receptionist.txt ./requirements-receptionist.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements-receptionist.txt
+
 # Spark-TTS-SALT's remaining dependencies. Deliberately NOT `pip install -r
 # spark-tts/requirements.txt` — that file pins numpy==2.2.3, torch==2.5.1,
 # torchaudio==2.5.1, transformers==4.46.2 against an older PyTorch generation

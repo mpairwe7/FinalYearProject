@@ -49,6 +49,7 @@ import {
   InboxIcon,
   ListIcon,
   PanelLeftIcon,
+  PhoneIcon,
   SendIcon,
   SlidersIcon,
 } from "./ops/icons";
@@ -104,6 +105,7 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
   "/admin": GaugeIcon,
   "/agent": InboxIcon,
   "/admin/tickets": ListIcon,
+  "/calls": PhoneIcon,
   "/admin/flags": FlagIcon,
   "/admin/overrides": SlidersIcon,
   "/admin/outbox": SendIcon,

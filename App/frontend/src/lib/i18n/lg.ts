@@ -145,4 +145,23 @@ export const lg: Partial<Dictionary> = {
   'documents.entities': "Ebibuuzo n'Ensimbi Ezuliddwa",
   'documents.tables': "Emmeeza n'Ebikolwa",
   'documents.suggested': "Ebirowoozo eby'Okukola",
+
+  // Call URA receptionist
+  'call.button': 'Kuba Essimu ku URA',
+  'call.dialing': 'Kukuba 0800 117 000…',
+  'call.assistantName': 'Omuyambi ow’ekikugu owa URA',
+  'call.connected': 'Kukwataganye',
+  'call.mute': 'Sirisa eddoboozi',
+  'call.unmute': 'Zaayo eddoboozi',
+  'call.talkOfficer': 'Yogera n’omukozi wa URA',
+  'call.hangup': 'Mala essimu',
+  'call.transferring': 'Kukukwataganya n’omukozi wa URA…',
+  'call.officerJoined': 'Omukozi {name} ayingidde',
+  'call.officerSpeaking': 'Omukozi ayogera',
+  'call.ended': 'Essimu ewedde',
+  'call.thankYou': 'Weebale kukuba ku URA.',
+  'call.consentTitle': 'Olukusa lw’okukwata eddoboozi',
+  'call.consentText': 'Essimu eno ejja kukwatibwa n’okuwandiikibwa okusobola okuyamba abakozi ba URA.',
+  'call.consentAccept': 'Kkiriza & Kuba',
+  'call.consentDecline': 'Gaana',
 };

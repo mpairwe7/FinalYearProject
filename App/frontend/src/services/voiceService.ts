@@ -231,6 +231,7 @@ export class AudioRecorder {
    */
   async startStreaming(
     onChunk: (pcm16: ArrayBuffer) => void,
+    options?: { echoCancellation?: boolean; noiseSuppression?: boolean },
   ): Promise<() => void> {
     const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
 
@@ -238,14 +239,13 @@ export class AudioRecorder {
       audio: {
         sampleRate: { ideal: TARGET_SAMPLE_RATE },
         channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
+        echoCancellation: options?.echoCancellation ?? true,
+        noiseSuppression: options?.noiseSuppression ?? true,
       },
     });
 
-    const source = ctx.createMediaStreamSource(this.stream);
-
     try {
+      const source = ctx.createMediaStreamSource(this.stream);
       // Prefer AudioWorklet (modern browsers)
       await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
       const workletNode = new AudioWorkletNode(ctx, 'pcm16-processor');
@@ -268,6 +268,7 @@ export class AudioRecorder {
       };
     } catch {
       // Fallback: ScriptProcessorNode (deprecated but widely supported)
+      const source = ctx.createMediaStreamSource(this.stream);
       const bufSize = 4096;
       const processor = ctx.createScriptProcessor(bufSize, 1, 1);
       processor.onaudioprocess = (e: AudioProcessingEvent) => {

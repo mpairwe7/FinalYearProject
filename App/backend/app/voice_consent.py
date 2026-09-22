@@ -53,6 +53,11 @@ VOICE_EVENT_TYPES = frozenset({
     "session_start",
     "session_end",
     "barge_in",
+    "call_started",
+    "call_transferred",
+    "officer_joined",
+    "call_ended",
+    "staff_viewed_call",
 })
 
 

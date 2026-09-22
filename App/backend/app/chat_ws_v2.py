@@ -166,7 +166,7 @@ def _resolve_ws_principal(
     if auth_header.lower().startswith("bearer "):
         token = auth_header.split(" ", 1)[1].strip()
     if not token:
-        token = websocket.query_params.get("access_token", "")
+        token = websocket.query_params.get("access_token", "") or websocket.query_params.get("token", "")
     if not token:
         if required:
             raise JWTAuthError("authentication required")

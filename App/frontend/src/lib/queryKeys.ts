@@ -43,4 +43,10 @@ export const queryKeys = {
     health: () => ['speech', 'health'] as const,
     voices: () => ['speech', 'voices'] as const,
   },
+  calls: {
+    all: () => ['calls'] as const,
+    list: (status?: string) => ['calls', 'list', status] as const,
+    detail: (id: string) => ['calls', 'detail', id] as const,
+    metrics: (days?: number) => ['calls', 'metrics', days] as const,
+  },
 } as const;

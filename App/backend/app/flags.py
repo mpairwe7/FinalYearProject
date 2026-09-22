@@ -392,6 +392,11 @@ _REGISTRY: dict[str, Flag] = {
             "(filing submission, OCR batches, graph extraction) with durable "
             "state and task.progress events over the WebSocket transport.",
         ),
+        Flag(
+            "voice_receptionist",
+            False,
+            "Simulated phone receptionist: Pipecat call socket, staff Calls page, audio bridge",
+        ),
     ]
 }
 

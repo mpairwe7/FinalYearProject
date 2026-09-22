@@ -156,6 +156,10 @@ def init_db() -> None:
         resolved_at         DOUBLE PRECISION DEFAULT 0,
         assignee            TEXT DEFAULT '',
         staff_note          TEXT DEFAULT '',
+        locale              TEXT DEFAULT 'en',
+        modality            TEXT DEFAULT 'text',
+        user_query_en       TEXT DEFAULT '',
+        officer_reply_localized TEXT DEFAULT '',
         created_at          DOUBLE PRECISION NOT NULL,
         updated_at          DOUBLE PRECISION NOT NULL
     );
@@ -308,6 +312,10 @@ def init_db() -> None:
                 ("first_response_at", "DOUBLE PRECISION DEFAULT 0"),
                 ("resolved_at", "DOUBLE PRECISION DEFAULT 0"),
                 ("team", "TEXT DEFAULT ''"),
+                ("locale", "TEXT DEFAULT 'en'"),
+                ("modality", "TEXT DEFAULT 'text'"),
+                ("user_query_en", "TEXT DEFAULT ''"),
+                ("officer_reply_localized", "TEXT DEFAULT ''"),
             ):
                 cur.execute(f"ALTER TABLE tickets ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
             cur.execute(
@@ -362,10 +370,26 @@ def cleanup_expired_data() -> dict[str, int]:
                     (ticket_cutoff,),
                 )
                 deleted["tickets"] = cur.rowcount
+
+                # Voice receptionist tables retention
+                cur.execute(
+                    "DELETE FROM voice_call_turns WHERE created_at < %s",
+                    (now - (_CONVERSATION_TTL_DAYS * 86400),),
+                )
+                deleted["voice_call_turns"] = cur.rowcount
+
+                conv_cutoff = now - (_CONVERSATION_TTL_DAYS * 86400)
+                cur.execute(
+                    """DELETE FROM voice_calls
+                       WHERE ((ticket_id IS NULL OR ticket_id = '') AND started_at < %s)
+                          OR (ticket_id IS NOT NULL AND ticket_id != '' AND started_at < %s)""",
+                    (conv_cutoff, ticket_cutoff),
+                )
+                deleted["voice_calls"] = cur.rowcount
             conn.commit()
         except Exception:
             conn.rollback()
-            logger.exception("TTL cleanup failed for tickets")
+            logger.exception("TTL cleanup failed for tickets and voice calls")
             deleted["tickets"] = 0
     return deleted
 
@@ -878,7 +902,8 @@ _TICKET_COLUMNS = (
     "id, conversation_id, session_id, status, priority, reason, "
     "user_query, bot_reply, handoff_json, response_judge_json, "
     "assignee, staff_note, created_at, updated_at, user_id, team, "
-    "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at"
+    "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at, "
+    "locale, modality, user_query_en, officer_reply_localized"
 )
 #: Detail view — the transcript is the point of the ticket.
 _TICKET_COLUMNS_FULL = _TICKET_COLUMNS + ", transcript_json"
@@ -889,7 +914,7 @@ def _row_to_ticket(row: tuple[Any, ...], columns: str = _TICKET_COLUMNS) -> dict
     ticket = dict(zip(columns.replace(" ", "").split(","), row, strict=True))
     from .database import _redact_ticket_value
 
-    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply"):
+    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply", "user_query_en", "officer_reply_localized"):
         if field in ticket:
             ticket[field] = _redact_ticket_value(ticket[field])
     ticket["handoff"] = _redact_ticket_value(_loads(ticket.pop("handoff_json", "{}"), {}))
@@ -921,6 +946,10 @@ def create_ticket(
     transcript: list[dict[str, Any]] | None = None,
     user_id: str = "",
     team: str = "",
+    locale: str = "en",
+    modality: str = "text",
+    user_query_en: str = "",
+    officer_reply_localized: str = "",
 ) -> dict[str, Any]:
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r -> 'normal'", priority)
@@ -929,6 +958,8 @@ def create_ticket(
 
     reason = _redact_ticket_value(reason)
     user_query = _redact_ticket_value(user_query)
+    user_query_en = _redact_ticket_value(user_query_en)
+    officer_reply_localized = _redact_ticket_value(officer_reply_localized)
     bot_reply = _redact_ticket_value(bot_reply)
     handoff = _redact_ticket_value(handoff or {})
     response_judge = _redact_ticket_value(response_judge or {})
@@ -945,8 +976,9 @@ def create_ticket(
                                         reason, user_query, bot_reply,
                                         handoff_json, response_judge_json, transcript_json,
                                         user_id, team, assignee, staff_note,
+                                        locale, modality, user_query_en, officer_reply_localized,
                                         created_at, updated_at)
-                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s)""",
+                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s,%s,%s,%s,%s)""",
                 (
                     ticket_id,
                     conversation_id,
@@ -960,6 +992,10 @@ def create_ticket(
                     json.dumps(transcript),
                     user_id,
                     team,
+                    locale or "en",
+                    modality or "text",
+                    user_query_en or "",
+                    officer_reply_localized or "",
                     now,
                     now,
                 ),
@@ -975,6 +1011,10 @@ def create_ticket(
         "response_judge": response_judge,
         "transcript": transcript,
         "team": team,
+        "locale": locale or "en",
+        "modality": modality or "text",
+        "user_query_en": user_query_en or "",
+        "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
     }
 
@@ -985,6 +1025,8 @@ def list_tickets(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    locale: str | None = None,
+    modality: str | None = None,
     q: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
@@ -1003,6 +1045,12 @@ def list_tickets(
     if team:
         sql += " AND team = %s" if (status or params) else " WHERE team = %s"
         params.append(team)
+    if locale:
+        sql += " AND locale = %s" if (status or params) else " WHERE locale = %s"
+        params.append(locale)
+    if modality:
+        sql += " AND modality = %s" if (status or params) else " WHERE modality = %s"
+        params.append(modality)
     if q and q.strip():
         term = q.strip().lstrip("#")
         if term.upper().startswith("TIC-"):
@@ -1015,7 +1063,7 @@ def list_tickets(
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
         "   WHEN 'normal' THEN 2 ELSE 3 END,"
-        " created_at DESC LIMIT %s OFFSET %s"
+        " created_at ASC LIMIT %s OFFSET %s"
     )
     params.extend([limit, offset])
     with pool.connection() as conn, conn.cursor() as cur:
@@ -1083,6 +1131,8 @@ def update_ticket(
     staff_note: str | None = None,
     priority: str | None = None,
     officer_reply: str | None = None,
+    officer_reply_localized: str | None = None,
+    locale: str | None = None,
 ) -> bool:
     pool = _get_pool()
     if pool is None:
@@ -1109,6 +1159,14 @@ def update_ticket(
         params.append(_redact_ticket_value(officer_reply)[:4000])
         sets.append("reply_at = %s")
         params.append(now)
+    if officer_reply_localized is not None:
+        from .database import _redact_ticket_value
+
+        sets.append("officer_reply_localized = %s")
+        params.append(_redact_ticket_value(officer_reply_localized)[:4000])
+    if locale is not None:
+        sets.append("locale = %s")
+        params.append(locale[:16])
     if status is not None:
         sets.append("status = %s")
         params.append(status)
@@ -1216,7 +1274,7 @@ def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """SELECT id, officer_reply, reply_at, assignee, status FROM tickets
+            """SELECT id, officer_reply, officer_reply_localized, locale, reply_at, assignee, status FROM tickets
                WHERE conversation_id = %s AND officer_reply != ''
                  AND reply_delivered_at = 0
                ORDER BY reply_at ASC LIMIT 1""",
@@ -1226,7 +1284,7 @@ def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
     if not row:
         return None
     return dict(
-        zip(("id", "officer_reply", "reply_at", "assignee", "status"), row, strict=True)
+        zip(("id", "officer_reply", "officer_reply_localized", "locale", "reply_at", "assignee", "status"), row, strict=True)
     )
 
 

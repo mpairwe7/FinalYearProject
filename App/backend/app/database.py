@@ -423,6 +423,10 @@ def init_db() -> None:
             resolved_at        REAL DEFAULT 0,
             assignee       TEXT DEFAULT '',
             staff_note     TEXT DEFAULT '',
+            locale         TEXT DEFAULT 'en',
+            modality       TEXT DEFAULT 'text',
+            user_query_en  TEXT DEFAULT '',
+            officer_reply_localized TEXT DEFAULT '',
             created_at     REAL NOT NULL,
             updated_at     REAL NOT NULL
         );
@@ -618,6 +622,10 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "first_response_at", "REAL DEFAULT 0")
     _ensure_column(conn, "tickets", "resolved_at", "REAL DEFAULT 0")
     _ensure_column(conn, "tickets", "team", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "locale", "TEXT DEFAULT 'en'")
+    _ensure_column(conn, "tickets", "modality", "TEXT DEFAULT 'text'")
+    _ensure_column(conn, "tickets", "user_query_en", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "officer_reply_localized", "TEXT DEFAULT ''")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
@@ -701,6 +709,27 @@ def cleanup_expired_data() -> dict[str, int]:
             logger.exception("TTL cleanup failed for %s", table)
             conn.rollback()
             deleted[table] = 0
+
+    # Voice receptionist tables retention
+    try:
+        cur = conn.execute(
+            "DELETE FROM voice_call_turns WHERE created_at < ?",
+            (now - (_CONVERSATION_TTL_DAYS * 86400),),
+        )
+        deleted["voice_call_turns"] = cur.rowcount
+
+        conv_cutoff = now - (_CONVERSATION_TTL_DAYS * 86400)
+        ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
+        cur = conn.execute(
+            """DELETE FROM voice_calls
+               WHERE ((ticket_id IS NULL OR ticket_id = '') AND started_at < ?)
+                  OR (ticket_id IS NOT NULL AND ticket_id != '' AND started_at < ?)""",
+            (conv_cutoff, ticket_cutoff),
+        )
+        deleted["voice_calls"] = cur.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
     return deleted
 
@@ -1375,7 +1404,7 @@ def _redact_ticket_value(value: Any) -> Any:
 
 def _hydrate_ticket(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     ticket = dict(row)
-    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply"):
+    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply", "user_query_en", "officer_reply_localized"):
         if field in ticket:
             ticket[field] = _redact_ticket_value(ticket[field])
     ticket["handoff"] = _redact_ticket_value(_json_loads(ticket.pop("handoff_json", "{}"), {}))
@@ -1398,6 +1427,10 @@ def create_ticket(
     transcript: list[dict[str, Any]] | None = None,
     user_id: str = "",
     team: str = "",
+    locale: str = "en",
+    modality: str = "text",
+    user_query_en: str = "",
+    officer_reply_localized: str = "",
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -1411,6 +1444,8 @@ def create_ticket(
         priority = "normal"
     reason = _redact_ticket_value(reason)
     user_query = _redact_ticket_value(user_query)
+    user_query_en = _redact_ticket_value(user_query_en)
+    officer_reply_localized = _redact_ticket_value(officer_reply_localized)
     bot_reply = _redact_ticket_value(bot_reply)
     handoff = _redact_ticket_value(handoff or {})
     response_judge = _redact_ticket_value(response_judge or {})
@@ -1424,8 +1459,9 @@ def create_ticket(
                                     reason, user_query, bot_reply,
                                     handoff_json, response_judge_json, transcript_json,
                                     user_id, team, assignee, staff_note,
+                                    locale, modality, user_query_en, officer_reply_localized,
                                     created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -1439,6 +1475,10 @@ def create_ticket(
                 _json_dumps(transcript, "[]"),
                 user_id,
                 team,
+                locale or "en",
+                modality or "text",
+                user_query_en or "",
+                officer_reply_localized or "",
                 now,
                 now,
             ),
@@ -1458,6 +1498,10 @@ def create_ticket(
         "response_judge": response_judge,
         "transcript": transcript,
         "team": team,
+        "locale": locale or "en",
+        "modality": modality or "text",
+        "user_query_en": user_query_en or "",
+        "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
     }
 
@@ -1468,6 +1512,8 @@ def list_tickets(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    locale: str | None = None,
+    modality: str | None = None,
     q: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
@@ -1490,7 +1536,8 @@ def list_tickets(
         "       user_query, bot_reply, handoff_json, response_judge_json, "
         "       assignee, staff_note, created_at, updated_at, user_id, team, "
         "       officer_reply, reply_at, reply_delivered_at, "
-        "       first_response_at, resolved_at "
+        "       first_response_at, resolved_at, "
+        "       locale, modality, user_query_en, officer_reply_localized "
         "FROM tickets"
     )
     params: list[Any] = []
@@ -1503,6 +1550,12 @@ def list_tickets(
     if team:
         sql += " AND team = ?" if (status or params) else " WHERE team = ?"
         params.append(team)
+    if locale:
+        sql += " AND locale = ?" if (status or params) else " WHERE locale = ?"
+        params.append(locale)
+    if modality:
+        sql += " AND modality = ?" if (status or params) else " WHERE modality = ?"
+        params.append(modality)
     if q and q.strip():
         term = q.strip().lstrip("#")
         if term.upper().startswith("TIC-"):
@@ -1515,7 +1568,7 @@ def list_tickets(
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
         "   WHEN 'normal' THEN 2 ELSE 3 END,"
-        " created_at DESC LIMIT ? OFFSET ?"
+        " created_at ASC LIMIT ? OFFSET ?"
     )
     params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()
@@ -1559,7 +1612,7 @@ def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
         return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT id, officer_reply, reply_at, assignee, status FROM tickets
+        """SELECT id, officer_reply, officer_reply_localized, locale, reply_at, assignee, status FROM tickets
            WHERE conversation_id = ?
              AND officer_reply != ''
              AND reply_delivered_at = 0
@@ -2241,6 +2294,8 @@ def update_ticket(
     staff_note: str | None = None,
     priority: str | None = None,
     officer_reply: str | None = None,
+    officer_reply_localized: str | None = None,
+    locale: str | None = None,
 ) -> bool:
     """Update mutable ticket fields.  Returns True if a row was touched.
 
@@ -2277,6 +2332,12 @@ def update_ticket(
         params.append(_redact_ticket_value(officer_reply)[:4000])
         sets.append("reply_at = ?")
         params.append(now)
+    if officer_reply_localized is not None:
+        sets.append("officer_reply_localized = ?")
+        params.append(_redact_ticket_value(officer_reply_localized)[:4000])
+    if locale is not None:
+        sets.append("locale = ?")
+        params.append(locale[:16])
     if status is not None:
         if status not in ("open", "assigned", "resolved", "wontfix"):
             return False

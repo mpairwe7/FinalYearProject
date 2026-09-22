@@ -37,6 +37,11 @@ services:
       # is not a safe default for this one.
       - LLM_ENABLED=true
       - SPEECH_ENABLED=true
+      - WORKERS=1
+      - FLAG_VOICE_RECEPTIONIST=true
+      - FLAG_VOICE_CONSENT=true
+      - FLAG_TICKET_QUEUE=true
+      - FLAG_HANDOFF_SUMMARIES=true
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.
