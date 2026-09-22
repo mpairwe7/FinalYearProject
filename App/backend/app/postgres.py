@@ -1713,6 +1713,8 @@ def upsert_user(
     if pool is None:
         raise RuntimeError("postgres unavailable")
     now = time.time()
+    valid_roles = {"public", "verified_taxpayer", "ura_staff", "ura_admin", "ura_auditor"}
+    clean_role = role if role in valid_roles else "public"
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -1723,7 +1725,7 @@ def upsert_user(
             existing = _as_dict(_USER_COLUMNS, cur.fetchone())
             if existing is not None:
                 merged_email = email or existing["email"]
-                merged_role = role or existing["role"]
+                merged_role = clean_role or existing["role"]
                 cur.execute(
                     "UPDATE users SET last_seen_at = %s, email = %s, role = %s WHERE id = %s",
                     (now, merged_email, merged_role, existing["id"]),
@@ -1734,7 +1736,7 @@ def upsert_user(
             user_id = str(uuid.uuid4())
             cur.execute(
                 f"INSERT INTO users ({_USER_COLUMNS}) VALUES (%s,%s,%s,%s,%s,%s,%s)",  # nosec B608 # noqa: S608
-                (user_id, tenant_id, external_id, email, role, now, now),
+                (user_id, tenant_id, external_id, email, clean_role, now, now),
             )
         conn.commit()
     return {
@@ -1742,7 +1744,7 @@ def upsert_user(
         "tenant_id": tenant_id,
         "external_id": external_id,
         "email": email,
-        "role": role,
+        "role": clean_role,
         "created_at": now,
         "last_seen_at": now,
     }

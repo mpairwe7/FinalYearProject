@@ -105,9 +105,41 @@ export default function OidcCallbackPage() {
 
       // Confirm the backend accepts it, and find out which role we hold, before
       // sending anyone to a dashboard that would refuse them.
-      const me = await fetch("/api/v1/me", {
-        headers: { Authorization: `Bearer ${body.access_token}` },
-      }).then((r) => r.json());
+      let meRes: Response;
+      try {
+        meRes = await fetch("/api/v1/me", {
+          headers: { Authorization: `Bearer ${body.access_token}` },
+        });
+      } catch (err) {
+        setPhase("error");
+        setDetail(`Could not reach the backend service (/api/v1/me): ${(err as Error).message}`);
+        return;
+      }
+
+      if (!meRes.ok) {
+        let errDetail = `HTTP ${meRes.status}`;
+        try {
+          const errBody = await meRes.json();
+          errDetail = errBody.detail || errBody.message || errDetail;
+        } catch {
+          const text = await meRes.text().catch(() => "");
+          if (text) {
+            errDetail = `${errDetail}: ${text.slice(0, 100)}`;
+          }
+        }
+        setPhase("error");
+        setDetail(`Backend session verification failed (${errDetail}). Please verify backend connectivity.`);
+        return;
+      }
+
+      let me: { authenticated?: boolean; role?: string; email?: string; external_id?: string } | null = null;
+      try {
+        me = await meRes.json();
+      } catch {
+        setPhase("error");
+        setDetail("Backend returned an invalid JSON response during session verification.");
+        return;
+      }
 
       if (!me?.authenticated) {
         setPhase("error");

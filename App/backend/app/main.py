@@ -3134,19 +3134,33 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
     from .tools.ura_account import account_api_status
 
     # Refresh last_seen + upsert on every whoami call
-    row = db.upsert_user(
-        external_id=ctx.user.user_id,
-        tenant_id=ctx.tenant_id,
-        email=ctx.user.email,
-        role=ctx.role,
-    )
+    try:
+        row = db.upsert_user(
+            external_id=ctx.user.user_id,
+            tenant_id=ctx.tenant_id,
+            email=ctx.user.email,
+            role=ctx.role,
+        )
+        user_id = row.get("id") or ctx.user.user_id
+        external_id = row.get("external_id") or ctx.user.user_id
+        tenant_id = row.get("tenant_id") or ctx.tenant_id
+        email = row.get("email") or ctx.user.email
+        role = row.get("role") or ctx.role
+    except Exception:
+        logger.exception("Failed to upsert user in database during /v1/me whoami")
+        user_id = ctx.user.user_id
+        external_id = ctx.user.user_id
+        tenant_id = ctx.tenant_id
+        email = ctx.user.email
+        role = ctx.role
+
     return {
         "authenticated": True,
-        "user_id": row["id"],
-        "external_id": row["external_id"],
-        "tenant_id": row["tenant_id"],
-        "email": row["email"],
-        "role": row["role"],
+        "user_id": user_id,
+        "external_id": external_id,
+        "tenant_id": tenant_id,
+        "email": email,
+        "role": role,
         "granted_purposes": ctx.user.granted_purposes,
         "account_api": account_api_status(),
     }
