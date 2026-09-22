@@ -1,8 +1,16 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import type { TicketQueueItem } from "../../services/analyticsApi";
-import { isRecentTicket, ticketRef, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
+import {
+  isRecentTicket,
+  ticketLocaleFlag,
+  ticketLocaleLabel,
+  ticketRef,
+  topicLabel,
+  waitingFor,
+  waitTone,
+} from "../../lib/ticketUi";
 import "./staffTickets.css";
 
 /**
@@ -17,10 +25,15 @@ export function QueueRow({
   selected: boolean;
   onSelect: (id: string) => void;
 }) {
+  const [showOriginal, setShowOriginal] = useState(false);
   const tone = waitTone(ticket.created_at, ticket.first_response_at, ticket.reply_at);
   const waitClass = tone === "ok" ? "" : ` is-${tone}`;
   const ref = ticketRef(ticket.id);
   const isRecent = isRecentTicket(ticket.created_at);
+  const isVernacular = Boolean(
+    ticket.locale && ticket.locale !== "en" && ticket.user_query_en && ticket.user_query_en !== ticket.user_query,
+  );
+  const isVoice = ticket.modality === "voice";
 
   return (
     <div
@@ -55,8 +68,48 @@ export function QueueRow({
       </div>
 
       <div className="st-row-body">
-        <span className="st-row-topic">{ticket.reason || topicLabel(ticket)}</span>
-        <span className="st-row-query">{ticket.user_query}</span>
+        <div className="st-row-topic-line">
+          <span className="st-row-topic">{ticket.reason || topicLabel(ticket)}</span>
+          {ticket.locale && ticket.locale !== "en" ? (
+            <span
+              className="st-row-lang-pill"
+              title={`Taxpayer language: ${ticketLocaleLabel(ticket.locale)} (transcribed/translated to English)`}
+            >
+              {ticketLocaleFlag(ticket.locale)} {ticketLocaleLabel(ticket.locale)} → EN
+            </span>
+          ) : null}
+          {isVoice ? (
+            <span className="st-row-voice-pill" title="Transcribed from taxpayer voice note">
+              🎙️ Voice
+            </span>
+          ) : null}
+        </div>
+
+        <div className="st-row-query-row">
+          <span className="st-row-query">
+            {isVernacular && !showOriginal ? (
+              <>
+                <span className="st-query-trans-tag">[EN]</span> {ticket.user_query_en}
+              </>
+            ) : (
+              ticket.user_query
+            )}
+          </span>
+          {isVernacular ? (
+            <button
+              type="button"
+              className="st-row-trans-toggle"
+              title={showOriginal ? "Switch to English translation" : "View original vernacular query"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowOriginal((v) => !v);
+              }}
+            >
+              {showOriginal ? "🇬🇧 EN" : `${ticketLocaleFlag(ticket.locale)} Orig`}
+            </button>
+          ) : null}
+        </div>
+
         <div className="st-row-meta">
           {ticket.team ? <span className="st-row-team">🏢 {ticket.team.replace(/_/g, " ")}</span> : null}
           {ticket.assignee ? (

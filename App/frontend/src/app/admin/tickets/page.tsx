@@ -62,9 +62,11 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
   const update = useUpdateTicket();
 
   const tickets = useMemo(() => {
-    const rows = sortQueue(queue?.tickets ?? []);
+    let rows = sortQueue(queue?.tickets ?? []);
+    if (view.locale) rows = rows.filter((ticket) => (ticket.locale || "en").toLowerCase() === view.locale.toLowerCase());
+    if (view.modality) rows = rows.filter((ticket) => (ticket.modality || "text").toLowerCase() === view.modality.toLowerCase());
     return rows.filter((ticket) => ticketMatchesQuery(ticket, view.q));
-  }, [queue, view.q]);
+  }, [queue, view.q, view.locale, view.modality]);
 
   const teams = queue?.teams ?? [];
   const selected = view.ticket || null;
@@ -94,7 +96,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
     searchSelector: "[data-ticket-search]",
   });
 
-  const narrowed = Boolean(view.priority || view.team || view.q);
+  const narrowed = Boolean(view.priority || view.team || view.locale || view.modality || view.q);
 
   return (
     <OpsPage
@@ -227,6 +229,48 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
             </>
           ) : null}
 
+          <span className="ops-toolbar-sep" aria-hidden="true" />
+          <span
+            className="tickets-filter-group"
+            role="group"
+            aria-label="Language"
+          >
+            <span className="tickets-filter-label">Language</span>
+            <button
+              type="button"
+              className={`ops-filter${view.locale === "" ? " is-active" : ""}`}
+              aria-pressed={view.locale === ""}
+              aria-label="All languages"
+              onClick={() => setView({ locale: "" })}
+            >
+              all
+            </button>
+            <button
+              type="button"
+              className={`ops-filter${view.locale === "en" ? " is-active" : ""}`}
+              aria-pressed={view.locale === "en"}
+              onClick={() => setView({ locale: "en" })}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              className={`ops-filter${view.locale === "lg" ? " is-active" : ""}`}
+              aria-pressed={view.locale === "lg"}
+              onClick={() => setView({ locale: "lg" })}
+            >
+              🇺🇬 Luganda
+            </button>
+            <button
+              type="button"
+              className={`ops-filter${view.locale === "sw" ? " is-active" : ""}`}
+              aria-pressed={view.locale === "sw"}
+              onClick={() => setView({ locale: "sw" })}
+            >
+              🇰🇪 Swahili
+            </button>
+          </span>
+
           <span className="ops-toolbar-end tickets-toolbar-search">
             <input
               type="search"
@@ -268,7 +312,7 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
           <button
             type="button"
             className="ops-btn is-ghost is-sm"
-            onClick={() => setView({ priority: "", team: "", q: "" })}
+            onClick={() => setView({ priority: "", team: "", locale: "", modality: "", q: "" })}
           >
             Clear filters
           </button>

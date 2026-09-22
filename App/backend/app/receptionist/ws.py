@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any
@@ -12,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from .. import database as db
 from ..auth import AuthContext, require_role
 from ..chat_ws_v2 import _resolve_ws_principal
 
@@ -301,7 +303,8 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
     officer_name = f"Officer {officer_handle}"
     speech_model = None
     try:
-        speech_model = get_speech_model(None)  # type: ignore[arg-type]
+        from ..main import app
+        speech_model = getattr(getattr(app, "state", None), "speech", None)
     except Exception:
         pass
 

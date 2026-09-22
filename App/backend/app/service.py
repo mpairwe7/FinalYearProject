@@ -87,6 +87,7 @@ from .calculator_router import (
     extract_amounts,
     format_calc_reply,
     format_rate_reply,
+    has_money_amount,
     parse_ugx_amount,
     plan_calculation,
     rate_lookup_calendar_years,
@@ -4767,7 +4768,11 @@ class ChatModel:
             if candidates:
                 return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 
-        if not _TIN_REGISTRATION_QUERY_RE.search(query):
+        is_tin_query = bool(
+            _TIN_REGISTRATION_QUERY_RE.search(query)
+            or re.search(r"\b(?:search|verify|find|lookup|print|reprint|submitted|group|track|authenticate)\b.*\b(?:tin|certificate|document|application)\b|\b(?:tin|certificate|document|application)\b.*\b(?:search|verify|find|lookup|print|reprint|submitted|group|track|authenticate)\b", query, re.I)
+        )
+        if not is_tin_query:
             if not _RETURN_FILING_QUERY_RE.search(query):
                 if not re.search(r"\b(presumptive|small\s+business)\b", query, re.IGNORECASE):
                     return []
@@ -4815,11 +4820,12 @@ class ChatModel:
             return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
 
         candidates: list[dict[str, str]] = []
+        query_words = [w for w in re.findall(r"\w+", query.lower()) if len(w) > 3]
         for tag in ("instant_tin_application", "processes_systems", "taxpayer_starter_pack"):
             for entry in self._faq_index.get(tag, []):
                 text = f"{entry['question']} {entry['answer']}".lower()
-                if "tin" in text and any(
-                    term in text for term in ("register", "registration", "apply", "get a tin")
+                if ("tin" in text or "certificate" in text or "document" in text or "application" in text) and any(
+                    term in text for term in ("register", "registration", "apply", "get a tin", "search", "verify", "print", "submitted", "non-resident", "group", "track", "status", "authenticate", "genuine")
                 ):
                     enriched = dict(entry)
                     enriched["tag"] = tag
@@ -4829,12 +4835,13 @@ class ChatModel:
         if not candidates:
             return []
 
-        def score(entry: dict[str, str]) -> tuple[int, int]:
+        def score(entry: dict[str, str]) -> tuple[int, int, int]:
             question = entry["question"].lower()
             text = f"{entry['question']} {entry['answer']}".lower()
-            exact = int("how do i apply for an instant tin" in question)
-            procedure = int("go to ura.go.ug" in text and "get a tin" in text)
-            return (exact + procedure, len(text))
+            exact = int("how do i apply for an instant tin" in question and "instant tin" in query.lower())
+            q_match = sum(3 for w in query_words if w in question)
+            procedure = int("go to ura.go.ug" in text and ("get a tin" in text or "e-services" in text or "track" in text or "search" in text or "document" in text))
+            return (exact, q_match, procedure)
 
         candidates.sort(key=score, reverse=True)
         return _mark_faq_priority(_faq_hits_to_retrieval_hits(candidates[:top_k]))
@@ -4856,7 +4863,7 @@ class ChatModel:
         stays clean, stepwise Markdown. ``citations`` is kept on the signature for callers.
         """
         if _TIN_REGISTRATION_QUERY_RE.search(query):
-            if re.search(r"^\s*who\b|\bwho\s+(?:must|should|needs?|is\s+required)\b|\b(?:how\s+long|duration|time\s+taken|minutes|how\s+many\s+days|ebbanga)\b", query, re.I):
+            if re.search(r"^\s*who\b|\bwho\s+(?:must|should|needs?|is\s+required)\b|\b(?:how\s+long|duration|time\s+taken|minutes|how\s+many\s+days|ebbanga)\b|\b(?:non[-\s]?citizens?|foreigners?|minors?|refugees?|diplomats?|search|verify|find|print|reprint|group|track|authenticate|genuine)\b", query, re.I):
                 return "", False
             # Organisation asks are answered from the curated non-individual
             # template regardless of hits (the instant-TIN FAQ hits are
@@ -4910,6 +4917,9 @@ class ChatModel:
                 return reply, True
 
         if _RETURN_FILING_QUERY_RE.search(query):
+            # Do not hijack specific sub-queries (downloading templates/forms, manual forms, digital service tax, authenticating acknowledgements)
+            if re.search(r"\b(download|manual|template|it-dst|dst|digital\s+service|authenticate|verify|check)\b", query, re.I):
+                return "", False
             file_hit = next(
                 (
                     h
@@ -5142,7 +5152,8 @@ class ChatModel:
             return []
 
     @staticmethod
-    def _deliver_officer_reply(conversation_id: str) -> str:
+    @staticmethod
+    def _deliver_officer_reply(conversation_id: str, locale: str = "en") -> str:
         """Return an undelivered officer reply for this conversation.
 
         Closes the loop escalation left open: the taxpayer was told a
@@ -5165,12 +5176,48 @@ class ChatModel:
             return ""
 
         officer = str(pending.get("assignee") or "").strip()
-        lead = (
-            f"A URA officer ({officer}) has replied to your case:"
-            if officer
-            else "A URA officer has replied to your case:"
-        )
-        text = f"{lead}\n\n{pending['officer_reply']}"
+        ticket_locale = str(pending.get("locale") or locale or "en").lower().strip()
+        if ticket_locale.startswith("lg"):
+            target_locale = "lg"
+        elif ticket_locale.startswith("sw"):
+            target_locale = "sw"
+        elif ticket_locale in ("en", "lg", "sw", "nyn", "ach"):
+            target_locale = ticket_locale
+        else:
+            target_locale = "en"
+
+        raw_officer_reply = str(pending.get("officer_reply") or "").strip()
+        localized_reply = str(pending.get("officer_reply_localized") or "").strip()
+
+        if not localized_reply and target_locale != "en":
+            try:
+                localized_reply = localize_reply(raw_officer_reply, target_locale)
+            except Exception:
+                logger.exception("failed to localize pending officer reply on delivery")
+                localized_reply = raw_officer_reply
+
+        chosen_reply = localized_reply if (localized_reply and target_locale != "en") else raw_officer_reply
+
+        if target_locale == "lg":
+            lead = (
+                f"Omukungu wa URA ({officer}) ayanukudde ensonga yo:"
+                if officer
+                else "Omukungu wa URA ayanukudde ensonga yo:"
+            )
+        elif target_locale == "sw":
+            lead = (
+                f"Afisa wa URA ({officer}) amejibu kesi yako:"
+                if officer
+                else "Afisa wa URA amejibu kesi yako:"
+            )
+        else:
+            lead = (
+                f"A URA officer ({officer}) has replied to your case:"
+                if officer
+                else "A URA officer has replied to your case:"
+            )
+
+        text = f"{lead}\n\n{chosen_reply}"
         try:
             db.mark_reply_delivered(str(pending.get("id", "")))
         except Exception:
@@ -5189,6 +5236,8 @@ class ChatModel:
         handoff: dict[str, Any] | None = None,
         response_judge: dict[str, Any] | None = None,
         user_id: str = "",
+        locale: str | None = None,
+        modality: str = "text",
     ) -> str:
         """Persist a structured escalation ticket when the queue is enabled."""
         if not flags.is_enabled("ticket_queue"):
@@ -5197,6 +5246,30 @@ class ChatModel:
             final_decision = str((response_judge or {}).get("final_decision", "")).lower()
             if final_decision != "escalate":
                 return ""
+
+        # Determine taxpayer locale (either passed in, from handoff, or detected)
+        eff_locale = (locale or (handoff or {}).get("locale") or "").lower().strip()
+        if not eff_locale:
+            try:
+                from .query import detect_language
+                eff_locale = detect_language(user_query) or "en"
+            except Exception:
+                eff_locale = "en"
+        if eff_locale.startswith("lg"):
+            eff_locale = "lg"
+        elif eff_locale.startswith("sw"):
+            eff_locale = "sw"
+        elif eff_locale not in ("en", "lg", "sw", "nyn", "ach"):
+            eff_locale = "en"
+
+        # If vernacular, translate user_query into English for staff agents
+        user_query_en = ""
+        if eff_locale != "en" and user_query:
+            try:
+                from .query import translate_query_for_retrieval
+                user_query_en = translate_query_for_retrieval(user_query, eff_locale) or ""
+            except Exception:
+                logger.debug("vernacular query translation failed", exc_info=True)
 
         # The turn being escalated is not in `conversations` yet — it is
         # logged by the caller after generate() returns — so append it to
@@ -5212,6 +5285,19 @@ class ChatModel:
                 "topic_tag": "escalated",
             }
         )
+
+        # For transcript turns, attach user_message_en so staff can read vernacular turns in English
+        if eff_locale != "en":
+            try:
+                from .query import translate_query_for_retrieval
+                for turn in transcript:
+                    um = str(turn.get("user_message") or "").strip()
+                    if um and not turn.get("user_message_en"):
+                        tr = translate_query_for_retrieval(um, eff_locale)
+                        if tr and tr.strip() and tr.strip().lower() != um.lower():
+                            turn["user_message_en"] = tr.strip()
+            except Exception:
+                logger.debug("transcript turn translation failed", exc_info=True)
 
         # One conversation, one officer.  Without this a taxpayer who
         # asks for a human three times opens three tickets, and three
@@ -5245,6 +5331,9 @@ class ChatModel:
                 # classified, so an officer sees their own queue rather
                 # than triaging a mixed one by reading every row.
                 team=team_for_topic(str((handoff or {}).get("topic", ""))),
+                locale=eff_locale,
+                modality=modality,
+                user_query_en=user_query_en,
             )
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:
@@ -6796,7 +6885,7 @@ class ChatModel:
             # 1a1. A human answered. Deliver it before anything else —
             #      the taxpayer was told someone would follow up, and the
             #      officer's answer outranks anything the bot would say.
-            officer_note = self._deliver_officer_reply(thread_id)
+            officer_note = self._deliver_officer_reply(thread_id, locale=locale)
             if officer_note:
                 delivered = {
                     "reply": officer_note,

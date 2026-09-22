@@ -1,8 +1,17 @@
 "use client";
 
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import type { TicketDetail, TicketPatch } from "../../services/analyticsApi";
-import { officerHandle, STATUS_LABEL, ticketRef, topicLabel, waitingFor, waitTone } from "../../lib/ticketUi";
+import {
+  officerHandle,
+  STATUS_LABEL,
+  ticketLocaleFlag,
+  ticketLocaleLabel,
+  ticketRef,
+  topicLabel,
+  waitingFor,
+  waitTone,
+} from "../../lib/ticketUi";
 import { analyticsApi } from "../../services/analyticsApi";
 import { Skeleton } from "../ops/States";
 import type { StaffIdentity } from "../StaffGuard";
@@ -67,6 +76,15 @@ export function TicketCase({
   onPatch: (patch: TicketPatch) => void;
   onBack?: () => void;
 }) {
+  const [transMode, setTransMode] = useState<"both" | "en" | "orig">("both");
+  const handoff = ticket?.handoff ?? {};
+  const transcript = ticket?.transcript ?? [];
+  const warm = handoff.transfer_style === "warm";
+  const canAct = who?.role !== "ura_auditor";
+  const tone = ticket ? waitTone(ticket.created_at, ticket.first_response_at, ticket.reply_at) : "ok";
+  const handle = officerHandle(who);
+  const isVernacular = Boolean(ticket?.locale && ticket.locale !== "en");
+
   if (loading) {
     return (
       <div className="st-case-loading" aria-busy="true">
@@ -79,13 +97,6 @@ export function TicketCase({
     );
   }
   if (error || !ticket) return <p className="st-empty">Could not load this ticket.</p>;
-
-  const handoff = ticket.handoff ?? {};
-  const transcript = ticket.transcript ?? [];
-  const warm = handoff.transfer_style === "warm";
-  const canAct = who?.role !== "ura_auditor";
-  const tone = waitTone(ticket.created_at, ticket.first_response_at, ticket.reply_at);
-  const handle = officerHandle(who);
 
   return (
     <article className="st-case">
@@ -143,6 +154,16 @@ export function TicketCase({
           <p className="st-case-pills">
             <span className={`st-pri st-pri-${ticket.priority}`}>{ticket.priority}</span>
             <span className="st-pill">{STATUS_LABEL[ticket.status] || ticket.status}</span>
+            {ticket.locale && ticket.locale !== "en" ? (
+              <span className="st-pill st-pill-lang" title={`Taxpayer language is ${ticketLocaleLabel(ticket.locale)}`}>
+                {ticketLocaleFlag(ticket.locale)} {ticketLocaleLabel(ticket.locale)}
+              </span>
+            ) : null}
+            {ticket.modality === "voice" ? (
+              <span className="st-pill st-pill-voice" title="Transcribed from taxpayer voice note">
+                🎙️ Voice Note
+              </span>
+            ) : null}
             {handoff.sentiment && handoff.sentiment !== "neutral" ? (
               <span className="st-pill st-pill-sentiment">{handoff.sentiment}</span>
             ) : null}
@@ -158,6 +179,16 @@ export function TicketCase({
           waiting {waitingFor(ticket.created_at)}
         </span>
       </header>
+
+      {ticket.user_query_en && ticket.user_query_en !== ticket.user_query ? (
+        <section className="st-query-translation-banner" aria-label="Query Translation">
+          <span className="st-brief-label">🇬🇧 English Translation of Citizen Query</span>
+          <p className="st-query-translation-text">{ticket.user_query_en}</p>
+          <span className="st-query-translation-orig">
+            Original ({ticketLocaleLabel(ticket.locale)}): “{ticket.user_query}”
+          </span>
+        </section>
+      ) : null}
 
       {handoff.summary || handoff.opening_guidance || handoff.required_details?.length ? (
         <section className="st-brief">
@@ -182,33 +213,78 @@ export function TicketCase({
       ) : null}
 
       <section aria-label="Conversation as it stood at escalation">
-        <span className="st-brief-label">
-          Conversation
-          <span>
-            {" "}
-            · {transcript.length} turn{transcript.length === 1 ? "" : "s"}, as it stood when the
-            ticket was raised
+        <div className="st-conversation-head">
+          <span className="st-brief-label">
+            Conversation
+            <span>
+              {" "}
+              · {transcript.length} turn{transcript.length === 1 ? "" : "s"}, as it stood when the
+              ticket was raised
+            </span>
           </span>
-        </span>
+          {isVernacular ? (
+            <div className="st-trans-mode-switch" role="group" aria-label="Transcript language mode">
+              <button
+                type="button"
+                className={`st-trans-btn${transMode === "both" ? " is-active" : ""}`}
+                onClick={() => setTransMode("both")}
+              >
+                Dual View
+              </button>
+              <button
+                type="button"
+                className={`st-trans-btn${transMode === "en" ? " is-active" : ""}`}
+                onClick={() => setTransMode("en")}
+              >
+                English Only
+              </button>
+              <button
+                type="button"
+                className={`st-trans-btn${transMode === "orig" ? " is-active" : ""}`}
+                onClick={() => setTransMode("orig")}
+              >
+                Original ({ticket.locale?.toUpperCase()})
+              </button>
+            </div>
+          ) : null}
+        </div>
         {transcript.length === 0 ? (
           <p className="st-empty">No transcript was captured for this ticket.</p>
         ) : (
           <ol className="st-transcript">
-            {transcript.map((turn, index) => (
-              <li className="st-turn" key={`${turn.created_at}-${index}`}>
-                <p>
-                  <span className="st-turn-who">Taxpayer</span>
-                  {turn.user_message}
-                </p>
-                <p className="st-turn-bot">
-                  <span className="st-turn-who">Assistant</span>
-                  {turn.bot_reply}
-                </p>
-                {turn.created_at ? (
-                  <span className="st-turn-meta">{turnTime(turn.created_at)}</span>
-                ) : null}
-              </li>
-            ))}
+            {transcript.map((turn, index) => {
+              const hasEn = Boolean(turn.user_message_en && turn.user_message_en !== turn.user_message);
+              return (
+                <li className="st-turn" key={`${turn.created_at}-${index}`}>
+                  {hasEn && transMode === "both" ? (
+                    <div className="st-turn-bilingual-block">
+                      <p className="st-turn-orig">
+                        <span className="st-turn-who">Taxpayer ({ticketLocaleLabel(ticket.locale)})</span>
+                        {turn.user_message}
+                      </p>
+                      <p className="st-turn-trans">
+                        <span className="st-turn-who">🌐 English Translation</span>
+                        {turn.user_message_en}
+                      </p>
+                    </div>
+                  ) : (
+                    <p>
+                      <span className="st-turn-who">
+                        Taxpayer {hasEn && transMode === "en" ? "[EN]" : ""}
+                      </span>
+                      {hasEn && transMode === "en" ? turn.user_message_en : turn.user_message}
+                    </p>
+                  )}
+                  <p className="st-turn-bot">
+                    <span className="st-turn-who">Assistant</span>
+                    {turn.bot_reply}
+                  </p>
+                  {turn.created_at ? (
+                    <span className="st-turn-meta">{turnTime(turn.created_at)}</span>
+                  ) : null}
+                </li>
+              );
+            })}
           </ol>
         )}
       </section>

@@ -47,6 +47,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 # Ensure the project root is on sys.path so `ml.scripts.*` imports resolve.
 from ._root import PROJECT_ROOT as _PROJECT_ROOT_P

@@ -78,6 +78,9 @@ export interface TicketQueueItem {
   priority: string;
   reason: string;
   user_query: string;
+  user_query_en?: string;
+  locale?: string;
+  modality?: "text" | "voice";
   bot_reply: string;
   created_at: number;
   updated_at: number;
@@ -87,6 +90,7 @@ export interface TicketQueueItem {
   first_response_at?: number;
   reply_at?: number;
   officer_reply?: string;
+  officer_reply_localized?: string;
   viewers?: string[];
   handoff?: {
     summary?: string;
@@ -116,6 +120,7 @@ export interface TicketQueueItem {
 /** One turn of the conversation captured when the ticket was raised. */
 export interface TicketTranscriptTurn {
   user_message: string;
+  user_message_en?: string;
   bot_reply: string;
   created_at: number;
   sources?: string[];
@@ -134,6 +139,7 @@ export interface TicketDetail extends TicketQueueItem {
   transcript?: TicketTranscriptTurn[];
   /** Shown to the taxpayer on their next turn. Distinct from staff_note. */
   officer_reply?: string;
+  officer_reply_localized?: string;
   /** Internal. Never reaches the taxpayer. */
   staff_note?: string;
   assignee?: string;
@@ -156,13 +162,18 @@ export interface EscalationCaseDetail {
   assignee_display: string;
   reason: string;
   user_query: string;
+  user_query_en?: string;
+  locale?: string;
+  modality?: string;
   officer_reply: string;
+  officer_reply_localized?: string;
   reply_at: number;
   reply_delivered: boolean;
   created_at: number;
   resolved_at: number;
   transcript: Array<{
     user_message?: string;
+    user_message_en?: string;
     bot_reply?: string;
     created_at?: number;
     sender?: string;
@@ -194,6 +205,8 @@ export interface TicketPatch {
   staff_note?: string;
   priority?: string;
   officer_reply?: string;
+  officer_reply_localized?: string;
+  locale?: string;
 }
 
 export interface TicketQueueResponse {
@@ -264,7 +277,7 @@ export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
-  tickets: (status = "open", limit = 8, priority = "", team = "", q?: string) =>
+  tickets: (status = "open", limit = 8, priority = "", team = "", q?: string, locale?: string, modality?: string) =>
     fetchJson<TicketQueueResponse>(
       // "any" is a UI token; the API takes an absent status to mean all
       // statuses and 400s on anything outside the four real ones.
@@ -272,8 +285,24 @@ export const analyticsApi = {
         `&limit=${limit}&offset=0` +
         (priority ? `&priority=${encodeURIComponent(priority)}` : "") +
         (team ? `&team=${encodeURIComponent(team)}` : "") +
+        (locale ? `&locale=${encodeURIComponent(locale)}` : "") +
+        (modality ? `&modality=${encodeURIComponent(modality)}` : "") +
         (q ? `&q=${encodeURIComponent(q)}` : ""),
     ),
+  translate: (text: string, sourceLang = "en", targetLang = "lg") =>
+    fetchJson<{
+      text: string;
+      source_lang: string;
+      target_lang: string;
+      latency_s: number;
+      backend: string;
+      error?: string | null;
+      figures_survived?: boolean;
+    }>("/v1/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, source_lang: sourceLang, target_lang: targetLang }),
+    }),
   publicTicketStatus: (ticketId: string) =>
     fetchJson<EscalationCaseDetail>(`/v1/escalate/${encodeURIComponent(ticketId)}`),
   replyToPublicTicket: (ticketId: string, message: string, locale = "en") =>
@@ -319,14 +348,14 @@ export const analyticsApi = {
       "/v1/admin/outbox",
     ),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
-    // The backend takes these as query parameters, not a JSON body.
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(patch)) {
-      if (value !== undefined && value !== "") params.set(key, String(value));
-    }
     const res = await fetch(
-      `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}?${params.toString()}`,
-      { method: "PATCH", headers: authHeaders(), signal: AbortSignal.timeout(15000) },
+      `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(patch),
+        signal: AbortSignal.timeout(15000),
+      },
     );
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return res.json();

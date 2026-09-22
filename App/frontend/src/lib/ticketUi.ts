@@ -98,6 +98,32 @@ export function ticketRef(ticketId: string): string {
   return `TIC-${clean.slice(0, 8).toUpperCase()}`;
 }
 
+export const LOCALE_LABELS: Record<string, string> = {
+  all: "All languages",
+  en: "English",
+  lg: "Luganda",
+  sw: "Swahili",
+  nyn: "Runyankole",
+  ach: "Acholi",
+};
+
+export function ticketLocaleFlag(locale?: string): string {
+  const loc = (locale || "en").toLowerCase();
+  if (loc.startsWith("lg")) return "🇺🇬";
+  if (loc.startsWith("sw")) return "🇰🇪";
+  if (loc.startsWith("nyn") || loc.startsWith("ach")) return "🇺🇬";
+  return "🌐";
+}
+
+export function ticketLocaleLabel(locale?: string): string {
+  const loc = (locale || "en").toLowerCase();
+  return LOCALE_LABELS[loc] || loc.toUpperCase();
+}
+
+export function isVoiceTicket(ticket: { modality?: string }): boolean {
+  return ticket.modality === "voice";
+}
+
 export function ticketMatchesQuery(ticket: TicketQueueItem, query: string): boolean {
   let q = query.trim().toLowerCase();
   if (!q) return true;
@@ -111,6 +137,9 @@ export function ticketMatchesQuery(ticket: TicketQueueItem, query: string): bool
     refCode,
     ticket.reason,
     ticket.user_query,
+    ticket.user_query_en,
+    ticket.locale,
+    ticketLocaleLabel(ticket.locale),
     ticket.assignee,
     ticket.team,
     ticket.handoff?.topic,
@@ -149,6 +178,8 @@ export type QueueView = {
   status: string;
   priority: string;
   team: string;
+  locale: string;
+  modality: string;
   ticket: string;
   q: string;
   mine: boolean;
@@ -158,6 +189,8 @@ const DEFAULT_VIEW: QueueView = {
   status: "open",
   priority: "",
   team: "",
+  locale: "",
+  modality: "",
   ticket: "",
   q: "",
   mine: false,
@@ -170,6 +203,8 @@ function readView(): QueueView {
     status: p.get("status") || DEFAULT_VIEW.status,
     priority: p.get("priority") || "",
     team: p.get("team") || "",
+    locale: p.get("locale") || "",
+    modality: p.get("modality") || "",
     ticket: p.get("ticket") || "",
     q: p.get("q") || "",
     mine: p.get("mine") === "1",
@@ -182,6 +217,8 @@ function writeView(view: QueueView): void {
   if (view.status && view.status !== "open") p.set("status", view.status);
   if (view.priority) p.set("priority", view.priority);
   if (view.team) p.set("team", view.team);
+  if (view.locale) p.set("locale", view.locale);
+  if (view.modality) p.set("modality", view.modality);
   if (view.ticket) p.set("ticket", view.ticket);
   if (view.q) p.set("q", view.q);
   if (view.mine) p.set("mine", "1");
@@ -227,6 +264,8 @@ function queueViewEqual(a: QueueView, b: QueueView): boolean {
     a.status === b.status &&
     a.priority === b.priority &&
     a.team === b.team &&
+    a.locale === b.locale &&
+    a.modality === b.modality &&
     a.ticket === b.ticket &&
     a.q === b.q &&
     a.mine === b.mine
