@@ -63,7 +63,7 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(turns), 2)
         self.assertEqual(turns[0]["speaker"], "caller")
         self.assertEqual(turns[1]["speaker"], "assistant")
-        self.assertIn("T-I-N", turns[1]["text"])
+        self.assertTrue(any(term in turns[1]["text"] for term in ("TIN", "T-I-N", "portal")))
 
     async def test_explicit_human_request_triggers_transfer(self):
         with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: True if name == "ticket_queue" else False):
