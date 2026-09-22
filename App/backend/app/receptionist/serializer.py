@@ -58,7 +58,7 @@ class BrowserCallSerializer(FrameSerializer):
     def __init__(self, room: Any = None) -> None:
         self.room = room
 
-    def serialize(self, frame: Frame) -> bytes | str | None:
+    async def serialize(self, frame: Frame) -> bytes | str | None:
         """Convert a Pipecat frame into a WebSocket message."""
         if isinstance(frame, OutputAudioRawFrame):
             return frame.audio
@@ -73,7 +73,7 @@ class BrowserCallSerializer(FrameSerializer):
 
         return None
 
-    def deserialize(self, data: bytes | str) -> Frame | None:
+    async def deserialize(self, data: bytes | str) -> Frame | None:
         """Convert a WebSocket message into a Pipecat frame."""
         if isinstance(data, bytes):
             return InputAudioRawFrame(audio=data, sample_rate=16000, num_channels=1)

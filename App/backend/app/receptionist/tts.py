@@ -48,7 +48,7 @@ class UraSpeechTTS(TTSService):
         self.language = language
         self.last_first_chunk_ms: float = 0.0
 
-    async def run_tts(self, text: str) -> AsyncGenerator[Frame, None]:
+    async def run_tts(self, text: str, context_id: str = "", *args: Any, **kwargs: Any) -> AsyncGenerator[Frame, None]:
         """Synthesize text and stream chunked PCM16 LE frames."""
         clean_text = text.strip()
         if not clean_text:

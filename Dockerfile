@@ -36,6 +36,11 @@ COPY App/backend/requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
 
+# Voice receptionist (Pipecat + jellyfish phonetic keys)
+COPY App/backend/requirements-receptionist.txt ./requirements-receptionist.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements-receptionist.txt
+
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
 # -----------------------------------------------------------------------------

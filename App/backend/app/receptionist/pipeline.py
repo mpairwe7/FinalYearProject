@@ -27,7 +27,7 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
         from pipecat.pipeline.pipeline import Pipeline
         from pipecat.pipeline.runner import PipelineRunner
         from pipecat.pipeline.task import PipelineParams, PipelineTask
-        from pipecat.transports.network.fastapi_websocket import (
+        from pipecat.transports.websocket.fastapi import (
             FastAPIWebsocketParams,
             FastAPIWebsocketTransport,
         )
@@ -37,8 +37,8 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
     speech_model = _get_speech_model()
     chat_model = None
     try:
-        from ..service import get_chat_model
-        chat_model = get_chat_model()
+        from ..main import app
+        chat_model = getattr(getattr(app, "state", None), "model", None)
     except Exception:
         logger.debug("ChatModel singleton lookup failed; using mock/fallback")
 

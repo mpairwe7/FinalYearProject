@@ -12,13 +12,14 @@ try:
 except ImportError:
     jellyfish = None  # type: ignore[assignment]
 
+from .._root import PROJECT_ROOT
 from ..query import _ABBREVIATIONS, _TAX_DOMAIN_VOCAB, _damerau_levenshtein
 
 logger = logging.getLogger(__name__)
 
 # Fallback path for multi-word lexicon definitions
-_LEXICON_PATH = Path(__file__).resolve().parents[4] / "data" / "receptionist" / "lexicon_en.txt"
-_ALT_LEXICON_PATH = Path(__file__).resolve().parents[4] / "Data" / "receptionist" / "lexicon_en.txt"
+_LEXICON_PATH = PROJECT_ROOT / "Data" / "receptionist" / "lexicon_en.txt"
+_ALT_LEXICON_PATH = PROJECT_ROOT / "data" / "receptionist" / "lexicon_en.txt"
 
 
 class ReceptionistLexicon:

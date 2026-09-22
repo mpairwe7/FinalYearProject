@@ -55,14 +55,22 @@ class ReviewCallRequest(BaseModel):
 
 async def call_stream_endpoint(websocket: WebSocket) -> None:
     """Taxpayer phone call simulation WebSocket (/v1/calls/stream)."""
+    logger.info(
+        "call_stream_endpoint: flag=%s, origin=%r, headers=%r",
+        flags.is_enabled("voice_receptionist"),
+        websocket.headers.get("origin"),
+        dict(websocket.headers),
+    )
     # 1. Flag check
     if not flags.is_enabled("voice_receptionist"):
+        logger.warning("call_stream_endpoint: rejected due to flag voice_receptionist being off")
         await websocket.close(code=1001)
         return
 
     # 2. Origin check
     origin = websocket.headers.get("origin")
     if not is_ws_origin_allowed(origin):
+        logger.warning("call_stream_endpoint: rejected due to origin not allowed: %r", origin)
         await websocket.close(code=4403)
         return
 
@@ -70,7 +78,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     auth_req = flags.is_enabled("auth_required")
     try:
         user_id, tenant_id, role, _ = _resolve_ws_principal(websocket, required=auth_req)
-    except Exception:
+    except Exception as exc:
+        logger.warning("call_stream_endpoint: rejected due to auth failed: %s", exc)
         await websocket.close(code=4401 if auth_req else 4403)
         return
 
@@ -137,7 +146,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             started_at=room.state.started_at,
         )
 
-        log_voice_event("call_started", session_id=call_id, user_id=user_id, tenant_id=tenant_id)
+        log_voice_event(user_id=user_id or "", session_id=call_id, event_type="call_started", tenant_id=tenant_id or "default")
         hub.publish_lobby(
             "call.started",
             {
@@ -165,14 +174,10 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             runner = PipelineRunner()
             await brain.say_greeting()
             await runner.run(task)
-        except (ImportError, RuntimeError):
-            # Fallback loop for environments without Pipecat runtime
-            from ..service import get_chat_model
-            chat_model = None
-            try:
-                chat_model = get_chat_model()
-            except Exception:
-                pass
+        except (ImportError, RuntimeError) as pipeline_err:
+            logger.warning("Pipeline fallback active: %s", pipeline_err)
+            from ..main import app
+            chat_model = getattr(getattr(app, "state", None), "model", None)
             brain = UraReceptionistBrain(room=room, chat_model=chat_model)
             await brain.say_greeting()
 
@@ -198,7 +203,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             await room.end("caller_hangup")
             record_call_end_metrics(call_id, room.state)
             asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
-            log_voice_event("call_ended", session_id=call_id, user_id=user_id, tenant_id=tenant_id)
+            log_voice_event(user_id=user_id or "", session_id=call_id, event_type="call_ended", tenant_id=tenant_id or "default")
             hub.publish_lobby(
                 "call.ended",
                 {
@@ -237,7 +242,7 @@ async def staff_calls_stream_endpoint(
     queue: asyncio.Queue[dict[str, Any]]
     if call_id:
         # Per-call Live mode
-        log_voice_event("staff_viewed_call", session_id=call_id, user_id=user_id, tenant_id=tenant_id)
+        log_voice_event(user_id=user_id or "", session_id=call_id, event_type="staff_viewed_call", tenant_id=tenant_id or "default")
         snapshot = get_call_with_turns(call_id) or {}
         await websocket.send_text(
             json.dumps({
@@ -342,7 +347,7 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
 
     hub.publish_lobby("call.bridged", {"call_id": call_id, "status": "bridged", "officer_name": officer_name})
     hub.publish_call(call_id, "status", status_event)
-    log_voice_event("officer_joined", session_id=call_id, user_id=user_id, tenant_id=tenant_id)
+    log_voice_event(user_id=user_id or "", session_id=call_id, event_type="officer_joined", tenant_id=tenant_id or "default")
 
     officer_leg.start()
 

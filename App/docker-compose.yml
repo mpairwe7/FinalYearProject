@@ -107,6 +107,8 @@ services:
       - FLAG_NATIVE_VOICE=true
       - FLAG_STREAMING_TTS_V2=true
       - FLAG_VOICE_VISION_V2=true
+      - FLAG_VOICE_RECEPTIONIST=true
+      - WORKERS=1
       - FLAG_SPECULATIVE_PREFETCH=true
     env_file:
       - ../.env
