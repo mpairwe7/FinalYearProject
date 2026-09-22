@@ -110,21 +110,22 @@ export function useCall() {
               break;
             }
             case 'caption': {
+              const spk = typeof msg.speaker === 'string' ? msg.speaker : 'assistant';
               store.addCaption({
-                speaker: msg.speaker || 'assistant',
-                text: msg.text || '',
-                final: msg.final ?? true,
-                turn_id: msg.turn_id,
+                speaker: spk as 'caller' | 'assistant' | 'officer' | 'system',
+                text: String(msg.text || ''),
+                final: Boolean(msg.final ?? true),
+                turn_id: typeof msg.turn_id === 'number' ? msg.turn_id : undefined,
               });
               break;
             }
             case 'status': {
               if (msg.status === 'transferring') {
                 store.setStatus('transferring');
-                if (msg.ticket_ref) store.setTicketRef(msg.ticket_ref);
+                if (msg.ticket_ref) store.setTicketRef(String(msg.ticket_ref));
               } else if (msg.status === 'bridged') {
                 store.setStatus('officer');
-                if (msg.officer_name) store.setOfficerName(msg.officer_name);
+                if (msg.officer_name) store.setOfficerName(String(msg.officer_name));
                 // Play join chime
                 if (audioCtxRef.current) {
                   playJoinChime(audioCtxRef.current);
@@ -141,7 +142,7 @@ export function useCall() {
               break;
             }
             case 'error': {
-              store.setError(msg.detail || 'Call error occurred');
+              store.setError(String(msg.detail || 'Call error occurred'));
               break;
             }
           }

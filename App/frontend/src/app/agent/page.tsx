@@ -47,7 +47,7 @@ const TAB_LABEL: Record<QueueTab, string> = {
   resolved: "Resolved",
 };
 
-function AgentQueue({ who }: { who: StaffIdentity }) {
+export function AgentQueue({ who }: { who: StaffIdentity }) {
   const handle = officerHandle(who);
   const [view, setView] = useQueueView();
   const status = view.mine ? "assigned" : view.status === "resolved" ? "resolved" : "open";
@@ -56,10 +56,12 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
   const update = useUpdateTicket();
 
   const tickets = useMemo(() => {
-    const rows = sortQueue(queue?.tickets ?? []);
-    if (view.mine) return rows.filter((ticket) => isMine(ticket, handle));
+    let rows = sortQueue(queue?.tickets ?? []);
+    if (view.mine) rows = rows.filter((ticket) => isMine(ticket, handle));
+    if (view.locale) rows = rows.filter((ticket) => (ticket.locale || "en").toLowerCase() === view.locale.toLowerCase());
+    if (view.modality) rows = rows.filter((ticket) => (ticket.modality || "text").toLowerCase() === view.modality.toLowerCase());
     return rows;
-  }, [queue, view.mine, handle]);
+  }, [queue, view.mine, view.locale, view.modality, handle]);
 
   // The case the officer explicitly opened, or arrived on via ?ticket=.
   // Below 960px the queue and the case are alternating views, so this — and
@@ -180,6 +182,37 @@ function AgentQueue({ who }: { who: StaffIdentity }) {
               ) : null}
             </button>
           ))}
+        </div>
+
+        <div className="st-lang-filter-group" role="group" aria-label="Filter by language">
+          <button
+            type="button"
+            className={`st-trans-btn${!view.locale ? " is-active" : ""}`}
+            onClick={() => setView({ locale: "" })}
+          >
+            All
+          </button>
+          <button
+            type="button"
+            className={`st-trans-btn${view.locale === "en" ? " is-active" : ""}`}
+            onClick={() => setView({ locale: "en" })}
+          >
+            🇬🇧 EN
+          </button>
+          <button
+            type="button"
+            className={`st-trans-btn${view.locale === "lg" ? " is-active" : ""}`}
+            onClick={() => setView({ locale: "lg" })}
+          >
+            🇺🇬 Luganda
+          </button>
+          <button
+            type="button"
+            className={`st-trans-btn${view.locale === "sw" ? " is-active" : ""}`}
+            onClick={() => setView({ locale: "sw" })}
+          >
+            🇰🇪 Swahili
+          </button>
         </div>
 
         {/* The shortcuts were always here; nothing on this page said so. */}

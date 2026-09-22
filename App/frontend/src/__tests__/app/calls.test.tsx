@@ -78,7 +78,7 @@ function renderPage(role = 'ura_staff') {
   });
   return render(
     <QueryClientProvider client={client}>
-      <StaffCalls who={{ email: 'officer@ura.go.ug', role, name: 'Officer Sarah' }} />
+      <StaffCalls who={{ authenticated: true, email: 'officer@ura.go.ug', role }} />
     </QueryClientProvider>,
   );
 }

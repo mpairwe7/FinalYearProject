@@ -233,7 +233,7 @@ export default function ChatHeader({
 
       {showTitle && !renaming && (
         <ConversationMenu
-          pinned={conversationPinned}
+          pinned={Boolean(conversationPinned)}
           onPin={() => onPinConversation?.()}
           onRename={() => {
             setDraft(conversationTitle ?? '');

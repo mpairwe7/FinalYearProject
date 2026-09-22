@@ -49,7 +49,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
   return (
     <OpsPage
       title="Phone Calls"
-      subtitle="Simulated AI receptionist live calls, escalations, and performance"
+      description="Simulated AI receptionist live calls, escalations, and performance"
     >
       {/* Incoming Transfer Banner */}
       {liveBanner && (
@@ -174,26 +174,26 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
                 <div className="st-case-card">
                   <div className="st-metric-label">Total Calls (7d)</div>
                   <div className="st-metric-value">{metricsData.total_calls}</div>
-                  <ChartNote note="All simulated calls logged across the 7-day period" />
+                  <ChartNote>All simulated calls logged across the 7-day period</ChartNote>
                 </div>
                 <div className="st-case-card">
                   <div className="st-metric-label">Average Call Duration</div>
                   <div className="st-metric-value">{metricsData.avg_duration_s}s</div>
-                  <ChartNote note="Mean total connected seconds from call start to hangup" />
+                  <ChartNote>Mean total connected seconds from call start to hangup</ChartNote>
                 </div>
                 <div className="st-case-card">
                   <div className="st-metric-label">Mean Word Confidence</div>
                   <div className="st-metric-value">
                     {Math.round((metricsData.mean_word_prob || 0) * 100)}%
                   </div>
-                  <ChartNote note="Average per-word Whisper-SALT ASR acoustic confidence" />
+                  <ChartNote>Average per-word Whisper-SALT ASR acoustic confidence</ChartNote>
                 </div>
                 <div className="st-case-card">
                   <div className="st-metric-label">Officer Rating</div>
                   <div className="st-metric-value">
                     {metricsData.avg_officer_rating ? `${metricsData.avg_officer_rating} / 5` : '—'}
                   </div>
-                  <ChartNote note="Average human review score submitted by staff officers" />
+                  <ChartNote>Average human review score submitted by staff officers</ChartNote>
                 </div>
               </div>
             </>
@@ -207,7 +207,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
           {/* Left: Queue List */}
           <div className="ag-list-col" style={{ width: '320px', overflowY: 'auto', borderRight: '1px solid var(--border-default, #e5e7eb)' }}>
             {(activeTab === 'live' ? loadingLive : loadingHistory) ? (
-              <SkeletonRows count={4} />
+              <SkeletonRows rows={4} />
             ) : (activeTab === 'live' ? liveError : historyError) ? (
               <ErrorState title="Failed to load calls" body="Unable to reach the call registry." />
             ) : activeCallList.length === 0 ? (
@@ -245,7 +245,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
 
 export default function Page() {
   return (
-    <StaffGuard requiredRoles={['ura_staff', 'ura_admin', 'ura_auditor']}>
+    <StaffGuard current="/calls" requireRoles={['ura_staff', 'ura_admin', 'ura_auditor']}>
       {(who) => <StaffCalls who={who} />}
     </StaffGuard>
   );
