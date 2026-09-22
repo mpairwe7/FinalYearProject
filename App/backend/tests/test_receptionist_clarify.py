@@ -5,6 +5,10 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+import pytest
+
+pytest.importorskip("jellyfish")
+
 from app.receptionist.clarify import (
     ClarifyGate,
     ClarifyState,

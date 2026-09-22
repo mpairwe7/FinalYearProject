@@ -7,7 +7,10 @@ import re
 from pathlib import Path
 from typing import Final
 
-import jellyfish
+try:
+    import jellyfish
+except ImportError:
+    jellyfish = None  # type: ignore[assignment]
 
 from ..query import _ABBREVIATIONS, _TAX_DOMAIN_VOCAB, _damerau_levenshtein
 
@@ -91,11 +94,12 @@ class ReceptionistLexicon:
                     logger.debug("Failed reading lexicon file at %s", path, exc_info=True)
 
         # Build Metaphone table for single terms
-        for term in self.single_terms:
-            try:
-                self.term_metaphones[term] = jellyfish.metaphone(term)
-            except Exception:
-                pass
+        if jellyfish is not None:
+            for term in self.single_terms:
+                try:
+                    self.term_metaphones[term] = jellyfish.metaphone(term)
+                except Exception:
+                    pass
 
     def candidates(self, word: str, context: str | None = None) -> list[tuple[str, float]]:
         """Find candidate term corrections for a poorly recognized word.
@@ -110,11 +114,12 @@ class ReceptionistLexicon:
         w_no_dash = w.replace("-", "")
         w_meta = ""
         w_nodash_meta = ""
-        try:
-            w_meta = jellyfish.metaphone(w)
-            w_nodash_meta = jellyfish.metaphone(w_no_dash)
-        except Exception:
-            pass
+        if jellyfish is not None:
+            try:
+                w_meta = jellyfish.metaphone(w)
+                w_nodash_meta = jellyfish.metaphone(w_no_dash)
+            except Exception:
+                pass
 
         ctx_words: list[str] = []
         if context:
