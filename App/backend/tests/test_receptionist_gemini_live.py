@@ -98,8 +98,10 @@ class TestReceptionistGeminiLive(unittest.IsolatedAsyncioTestCase):
             "pipecat.transports.websocket.fastapi": mock_pipecat.transports.websocket.fastapi,
         }
 
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-test-mock"}), \  # pragma: allowlist secret
-             patch.dict(sys.modules, mock_modules):
+        with (
+            patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-test-mock"}),  # pragma: allowlist secret
+            patch.dict(sys.modules, mock_modules),
+        ):
             from app.receptionist.gemini_live import build_gemini_live_pipeline
             task, transport, brain = build_gemini_live_pipeline(
                 self.room, MagicMock(), chat_model=chat_model
