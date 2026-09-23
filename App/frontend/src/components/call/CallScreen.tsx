@@ -32,6 +32,8 @@ export function CallScreen() {
     ticketRef,
     captions,
     currentCaption,
+    isUserSpeaking,
+    activeAiText,
     error,
     closeCall,
     startCall,
@@ -137,17 +139,21 @@ export function CallScreen() {
 
             {/* Call Body */}
             <div className="call-body">
-              <div className="call-avatar-wrap">
+              {/* Gemini Live Fluid Visualizer Orb */}
+              <div className="gemini-live-orb-wrap">
                 <div
-                  className={`call-avatar ${
-                    currentCaption?.speaker === 'assistant' || currentCaption?.speaker === 'officer'
-                      ? 'call-avatar--speaking'
+                  className={`gemini-live-orb ${
+                    (currentCaption?.speaker === 'assistant' || currentCaption?.speaker === 'officer') && activeAiText
+                      ? 'gemini-live-orb--speaking'
+                      : isUserSpeaking
+                      ? 'gemini-live-orb--listening'
                       : ''
                   }`}
                 >
-                  {status === 'officer' ? <UserIcon /> : <PhoneIcon size={28} />}
+                  {status === 'officer' ? <UserIcon /> : <PhoneIcon size={32} />}
                 </div>
-                <div className="call-avatar-ring" />
+                <div className="gemini-live-ring" />
+                <div className="gemini-live-ring gemini-live-ring--outer" />
               </div>
 
               <div>
@@ -158,7 +164,7 @@ export function CallScreen() {
                 </h2>
                 <p className="call-persona-subtitle">
                   {status === 'dialing' && '0800 117 000 (Toll-free)'}
-                  {status === 'ai' && 'AI Phone Receptionist'}
+                  {status === 'ai' && 'AI Phone Receptionist • Gemini Live'}
                   {status === 'transferring' &&
                     (ticketRef ? `Ticket: ${ticketRef}` : 'Holding for available officer…')}
                   {status === 'officer' && 'Live Audio Bridge Active'}
@@ -166,9 +172,32 @@ export function CallScreen() {
                 </p>
               </div>
 
-              {/* Running transcript of the call: both sides, oldest first, in
-                  an ARIA live region so a screen reader announces each new
-                  line as it lands. */}
+              {/* Gemini Live Active Spoken Text Area (Current Turn Only) */}
+              <div className="gemini-live-display">
+                {isUserSpeaking ? (
+                  <div className="gemini-live-listening-state">
+                    <div className="gemini-wave-bars">
+                      <span className="gemini-wave-bar" />
+                      <span className="gemini-wave-bar" />
+                      <span className="gemini-wave-bar" />
+                      <span className="gemini-wave-bar" />
+                    </div>
+                    <span>{t('call.listening')}...</span>
+                  </div>
+                ) : activeAiText ? (
+                  <div className="gemini-live-text">{activeAiText}</div>
+                ) : (
+                  <div className="call-transcript-empty">
+                    {status === 'dialing'
+                      ? t('call.connecting')
+                      : status === 'ended'
+                      ? t('call.thankYou')
+                      : t('call.listening')}
+                  </div>
+                )}
+              </div>
+
+              {/* Running transcript of previous turns */}
               <div
                 className="call-transcript"
                 ref={transcriptRef}
@@ -178,36 +207,26 @@ export function CallScreen() {
                 aria-live="polite"
                 aria-atomic="false"
               >
-                {captions.length === 0 ? (
-                  <div className="call-transcript-empty">
-                    {status === 'dialing'
-                      ? t('call.connecting')
-                      : status === 'ended'
-                      ? t('call.thankYou')
-                      : t('call.listening')}
-                  </div>
-                ) : (
-                  captions.map((caption, index) => (
+                {captions.slice(0, activeAiText && captions.length > 0 ? -1 : undefined).map((caption, index) => (
+                  <div
+                    key={`${caption.turn_id ?? 'x'}-${index}`}
+                    className={`call-turn call-turn--${
+                      caption.speaker === 'caller' ? 'caller' : 'agent'
+                    }`}
+                  >
+                    <span className={`call-turn-speaker call-turn-speaker--${caption.speaker}`}>
+                      {speakerLabel(caption.speaker)}
+                    </span>
                     <div
-                      key={`${caption.turn_id ?? 'x'}-${index}`}
-                      className={`call-turn call-turn--${
-                        caption.speaker === 'caller' ? 'caller' : 'agent'
+                      className={`call-bubble call-bubble--${caption.speaker}${
+                        caption.final === false ? ' call-bubble--interim' : ''
                       }`}
                     >
-                      <span className={`call-turn-speaker call-turn-speaker--${caption.speaker}`}>
-                        {speakerLabel(caption.speaker)}
-                      </span>
-                      <div
-                        className={`call-bubble call-bubble--${caption.speaker}${
-                          caption.final === false ? ' call-bubble--interim' : ''
-                        }`}
-                      >
-                        {caption.text}
-                        {caption.final === false && <span className="call-bubble-cursor" />}
-                      </div>
+                      {caption.text}
+                      {caption.final === false && <span className="call-bubble-cursor" />}
                     </div>
-                  ))
-                )}
+                  </div>
+                ))}
                 <div ref={transcriptEndRef} />
               </div>
 

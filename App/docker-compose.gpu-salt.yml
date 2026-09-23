@@ -38,6 +38,7 @@ services:
       - LLM_ENABLED=true
       - SPEECH_ENABLED=true
       - WORKERS=1
+      - RECEPTIONIST_ENGINE=${RECEPTIONIST_ENGINE:-gemini_live}
       - FLAG_VOICE_RECEPTIONIST=true
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true
@@ -134,7 +135,7 @@ services:
 
   vllm:
     environment:
-      - NVIDIA_VISIBLE_DEVICES=${GPU_ID:-2}
+      - NVIDIA_VISIBLE_DEVICES=${VLLM_GPU_ID:-${GPU_ID:-2}}
     deploy:
       resources:
         reservations:
@@ -142,5 +143,5 @@ services:
           # otherwise Compose appends it and vLLM can reserve two cards.
           devices: !override
             - driver: nvidia
-              device_ids: ["${GPU_ID:-2}"]
+              device_ids: ["${VLLM_GPU_ID:-${GPU_ID:-2}}"]
               capabilities: [gpu]

@@ -26,6 +26,8 @@ interface CallStoreState {
   ticketRef: string | null;
   captions: CaptionEntry[];
   currentCaption: CaptionEntry | null;
+  isUserSpeaking: boolean;
+  activeAiText: string;
   error: string | null;
 
   openCall: () => void;
@@ -35,6 +37,8 @@ interface CallStoreState {
   setMuted: (isMuted: boolean | ((prev: boolean) => boolean)) => void;
   setOfficerName: (name: string | null) => void;
   setTicketRef: (ref: string | null) => void;
+  setUserSpeaking: (speaking: boolean) => void;
+  setActiveAiText: (text: string) => void;
   addCaption: (caption: CaptionEntry) => void;
   setError: (error: string | null) => void;
   reset: () => void;
@@ -49,13 +53,25 @@ const initialState = {
   ticketRef: null,
   captions: [],
   currentCaption: null,
+  isUserSpeaking: false,
+  activeAiText: '',
   error: null,
 };
 
 export const useCallStore = create<CallStoreState>((set) => ({
   ...initialState,
 
-  openCall: () => set({ isOpen: true, status: 'consent', error: null, duration: 0, captions: [], currentCaption: null }),
+  openCall: () =>
+    set({
+      isOpen: true,
+      status: 'consent',
+      error: null,
+      duration: 0,
+      captions: [],
+      currentCaption: null,
+      isUserSpeaking: false,
+      activeAiText: '',
+    }),
   closeCall: () => set({ isOpen: false, status: 'idle' }),
   setStatus: (status) => set({ status }),
   setDuration: (duration) =>
@@ -68,6 +84,12 @@ export const useCallStore = create<CallStoreState>((set) => ({
     })),
   setOfficerName: (officerName) => set({ officerName }),
   setTicketRef: (ticketRef) => set({ ticketRef }),
+  setUserSpeaking: (isUserSpeaking) =>
+    set((state) => ({
+      isUserSpeaking,
+      activeAiText: isUserSpeaking ? '' : state.activeAiText,
+    })),
+  setActiveAiText: (activeAiText) => set({ activeAiText }),
   addCaption: (caption) =>
     set((state) => {
       const captions = [...state.captions];
@@ -82,7 +104,13 @@ export const useCallStore = create<CallStoreState>((set) => ({
       } else {
         captions.push(caption);
       }
-      return { captions, currentCaption: caption };
+      const isAssistant = caption.speaker === 'assistant' || caption.speaker === 'officer';
+      return {
+        captions,
+        currentCaption: caption,
+        activeAiText: isAssistant ? caption.text : state.activeAiText,
+        isUserSpeaking: caption.speaker === 'caller',
+      };
     }),
   setError: (error) => set({ error }),
   reset: () => set(initialState),

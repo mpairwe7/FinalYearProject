@@ -41,7 +41,10 @@ except ImportError:
         pass
 
     class InputAudioRawFrame(Frame):  # type: ignore[no-redef]
-        pass
+        def __init__(self, audio: bytes = b"", sample_rate: int = 16000, num_channels: int = 1, *args: Any, **kwargs: Any):
+            self.audio = audio
+            self.sample_rate = sample_rate
+            self.num_channels = num_channels
 
     class OutputTransportMessageFrame(Frame):  # type: ignore[no-redef]
         def __init__(self, message: Any):
@@ -52,7 +55,10 @@ except ImportError:
             self.message = message
 
     class TranscriptionFrame(Frame):  # type: ignore[no-redef]
-        pass
+        def __init__(self, text: str = "", user_id: str = "", timestamp: str = "", *args: Any, **kwargs: Any):
+            self.text = text
+            self.user_id = user_id
+            self.timestamp = timestamp
 
     class UserStartedSpeakingFrame(Frame):  # type: ignore[no-redef]
         pass

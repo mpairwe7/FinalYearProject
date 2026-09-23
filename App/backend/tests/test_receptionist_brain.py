@@ -99,3 +99,39 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         await self.brain.process_frame(InterruptionFrame())
         self.assertGreater(self.room.state.generation_id, start_gen_id)
         self.assertEqual(self.room.state.barge_in_count, 1)
+
+    async def test_filler_pool_non_repeating_and_config(self):
+        from app.receptionist.brain import FILLER_POOL
+        from app.receptionist.config import get_filler_after_ms, get_max_spoken_sentences
+
+        self.assertEqual(get_filler_after_ms(), 450)
+        self.assertEqual(get_max_spoken_sentences(), 3)
+        self.assertGreaterEqual(len(FILLER_POOL), 6)
+
+        # Test no consecutive repeats over multiple picks
+        last = None
+        for _ in range(30):
+            current = self.brain._pick_filler()
+            self.assertIn(current, FILLER_POOL)
+            self.assertNotEqual(current, last)
+            last = current
+
+    async def test_tts_voice_keyword_arguments(self):
+        from app.receptionist.tts import UraSpeechTTS
+
+        speech_mock = MagicMock()
+        speech_mock.synthesize.return_value = MagicMock(audio=b"\x00" * 640)
+        speech_mock._decode_audio_bytes.return_value = [0.0] * 320
+
+        tts = UraSpeechTTS(
+            speech_model=speech_mock,
+            voice="en-KE-AsiliaNeural",
+            language="en",
+        )
+        frames = [f async for f in tts.run_tts("Hello")]
+        self.assertGreater(len(frames), 0)
+        speech_mock.synthesize.assert_called_once_with(
+            "Hello",
+            voice="en-KE-AsiliaNeural",
+            language="en",
+        )

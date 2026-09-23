@@ -56,3 +56,8 @@ class TestReceptionistSerializer(unittest.IsolatedAsyncioTestCase):
         raw = json.dumps({"type": "ping"})
         frame = await self.serializer.deserialize(raw)
         self.assertIsNone(frame)
+
+    async def test_deserialize_interrupt(self):
+        raw = json.dumps({"type": "interrupt"})
+        frame = await self.serializer.deserialize(raw)
+        self.assertIsInstance(frame, InterruptionFrame)

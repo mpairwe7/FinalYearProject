@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 from typing import Any
@@ -81,7 +82,17 @@ GREETING_TEXT = (
     "Hello, you've reached URA. I'm the virtual assistant; this call is "
     "transcribed so an officer can help if needed. How can I help you?"
 )
-FILLER_TEXT = "Let me check that for you."
+FILLER_POOL: tuple[str, ...] = (
+    "mm, one sec",
+    "okay, so",
+    "let me see",
+    "right, checking now",
+    "one moment",
+    "let me check that",
+    "just a second",
+    "Let me check that for you.",
+)
+FILLER_TEXT = FILLER_POOL[-1]
 
 
 def _split_into_sentences(text: str) -> list[str]:
@@ -107,6 +118,14 @@ class UraReceptionistBrain(LLMService):
             threshold=get_clarify_threshold(),
             max_attempts=get_max_clarify_attempts(),
         )
+        self._last_filler: str | None = None
+
+    def _pick_filler(self) -> str:
+        """Select a filler from FILLER_POOL avoiding consecutive repetition."""
+        choices = [f for f in FILLER_POOL if f != self._last_filler]
+        chosen = random.choice(choices) if choices else FILLER_POOL[0]
+        self._last_filler = chosen
+        return chosen
 
     async def say_greeting(self) -> None:
         """Push initial greeting to caller and publish turn."""
@@ -279,7 +298,8 @@ class UraReceptionistBrain(LLMService):
         if not done:
             # Answer is taking more than threshold; play filler if not barged in
             if curr_gen_id == self.room.state.generation_id and self.room.state.mode == "ai":
-                await self._say_and_record(FILLER_TEXT, kind="filler", skip_log=True)
+                filler = self._pick_filler()
+                await self._say_and_record(filler, kind="filler", skip_log=True)
 
         # Wait up to 25s for completion
         try:

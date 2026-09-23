@@ -67,8 +67,8 @@ class UraSpeechTTS(TTSService):
             res = await asyncio.to_thread(
                 self.speech_model.synthesize,
                 clean_text,
-                self.language,
-                self.voice,
+                voice=self.voice,
+                language=self.language,
             )
         except Exception:
             logger.exception("UraSpeechTTS synthesis failed for text: %s", clean_text[:60])

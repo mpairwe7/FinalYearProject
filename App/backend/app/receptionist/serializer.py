@@ -94,6 +94,9 @@ class BrowserCallSerializer(FrameSerializer):
                 return None
 
             msg_type = msg.get("type")
+            if msg_type == "interrupt":
+                return InterruptionFrame()
+
             if msg_type == "request_officer":
                 return RequestOfficerFrame(reason=msg.get("reason", "caller_requested"))
 

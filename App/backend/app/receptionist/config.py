@@ -35,16 +35,16 @@ def get_max_call_s() -> float:
 
 def get_filler_after_ms() -> int:
     try:
-        return int(os.getenv("RECEPTIONIST_FILLER_AFTER_MS", "1000"))
+        return int(os.getenv("RECEPTIONIST_FILLER_AFTER_MS", "450"))
     except ValueError:
-        return 1000
+        return 450
 
 
 def get_max_spoken_sentences() -> int:
     try:
-        return int(os.getenv("RECEPTIONIST_MAX_SPOKEN_SENTENCES", "4"))
+        return int(os.getenv("RECEPTIONIST_MAX_SPOKEN_SENTENCES", "3"))
     except ValueError:
-        return 4
+        return 3
 
 
 def get_tts_voice() -> str:
@@ -73,3 +73,21 @@ def get_partial_transcript_interval_s() -> float:
         return float(os.getenv("RECEPTIONIST_PARTIAL_INTERVAL_S", "0.8"))
     except ValueError:
         return 0.8
+
+
+def get_receptionist_engine() -> str:
+    """The receptionist conversational engine: 'cascaded' (default) or 'gemini_live'."""
+    return os.getenv("RECEPTIONIST_ENGINE", "cascaded").strip().lower()
+
+
+def get_gemini_live_model() -> str:
+    """The Gemini Live model ID for real-time bidirectional speech."""
+    return (
+        os.getenv("GEMINI_LIVE_MODEL", "models/gemini-2.5-flash-native-audio-latest").strip()
+        or "models/gemini-2.5-flash-native-audio-latest"
+    )
+
+
+def get_gemini_live_voice() -> str:
+    """Gemini Live voice identifier (Aoede, Charon, Fenrir, Kore, Puck)."""
+    return os.getenv("GEMINI_LIVE_VOICE", "Aoede").strip() or "Aoede"

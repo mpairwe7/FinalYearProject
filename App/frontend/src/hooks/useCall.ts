@@ -107,6 +107,11 @@ export function useCall() {
             }
             case 'interrupt': {
               player.flush();
+              store.setUserSpeaking(true);
+              break;
+            }
+            case 'user_speaking': {
+              store.setUserSpeaking(Boolean(msg.speaking));
               break;
             }
             case 'caption': {
@@ -166,14 +171,35 @@ export function useCall() {
       // Start microphone streaming
       try {
         const recorder = new AudioRecorder();
+        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
         const cleanup = await recorder.startStreaming(
           (pcmChunk) => {
             if (!isMutedRef.current && socketRef.current) {
               socketRef.current.sendAudio(pcmChunk);
+              // Client-side voice energy check to immediately trigger Gemini Live listening state
+              if (pcmChunk.byteLength >= 2) {
+                const int16 = new Int16Array(pcmChunk);
+                let sum = 0;
+                for (let i = 0; i < int16.length; i += 2) {
+                  sum += int16[i] * int16[i];
+                }
+                const rms = Math.sqrt(sum / (int16.length / 2));
+                if (rms > 1200) {
+                  store.setUserSpeaking(true);
+                  if (silenceTimer) clearTimeout(silenceTimer);
+                  silenceTimer = setTimeout(() => {
+                    store.setUserSpeaking(false);
+                  }, 1400);
+                }
+              }
             }
           },
           { echoCancellation: true, noiseSuppression: true },
         );
+        micCleanupRef.current = () => {
+          if (silenceTimer) clearTimeout(silenceTimer);
+          cleanup();
+        };
         micCleanupRef.current = cleanup;
       } catch (err: unknown) {
         store.setError((err as Error)?.message || 'Microphone access denied');
@@ -201,6 +227,8 @@ export function useCall() {
     ticketRef: store.ticketRef,
     captions: store.captions,
     currentCaption: store.currentCaption,
+    isUserSpeaking: store.isUserSpeaking,
+    activeAiText: store.activeAiText,
     error: store.error,
     openCall: store.openCall,
     closeCall: store.closeCall,
