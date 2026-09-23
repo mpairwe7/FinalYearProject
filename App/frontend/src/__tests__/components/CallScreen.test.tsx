@@ -54,13 +54,20 @@ describe('CallScreen component', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('renders consent dialog when opened', () => {
+  it('renders the pre-call card when opened', () => {
     useCallStore.getState().openCall();
     render(<CallScreen />);
 
     expect(screen.getByRole('dialog')).toBeDefined();
-    expect(screen.getByText('Call Recording & Transcription Consent')).toBeDefined();
-    expect(screen.getByText('Accept & Call')).toBeDefined();
+    expect(screen.getByText('0800 117 000 · Toll-free')).toBeDefined();
+    expect(
+      screen.getByText('Calls are transcribed so an officer can pick up with full context.'),
+    ).toBeDefined();
+    // Decline sits on the left of Call URA, so the safe choice is the one the
+    // thumb reaches first rather than the one it lands on by accident.
+    const actions = screen.getByText('Decline').parentElement;
+    const labels = Array.from(actions?.children ?? []).map((el) => el.textContent);
+    expect(labels).toEqual(['Decline', 'Call URA']);
   });
 
   it('allows declining consent to close call', () => {
@@ -83,11 +90,13 @@ describe('CallScreen component', () => {
 
     render(<CallScreen />);
 
-    expect(screen.getAllByText('URA Virtual Assistant').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Connected')).toBeDefined();
     expect(screen.getByText('How can I assist you with your taxes today?')).toBeDefined();
     expect(screen.getByLabelText('Mute')).toBeDefined();
     expect(screen.getByLabelText('Talk to an officer')).toBeDefined();
     expect(screen.getByLabelText('End call')).toBeDefined();
+    // The persona block is gone: the conversation is the screen now.
+    expect(screen.queryByText('URA Virtual Assistant')).toBeNull();
   });
 
   it('toggles mute button state', () => {
@@ -112,7 +121,7 @@ describe('CallScreen component', () => {
 
     render(<CallScreen />);
 
-    expect(screen.getByText('Connecting you to an officer…')).toBeDefined();
+    expect(screen.getAllByText('Connecting you to an officer…').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Ticket: TICK-1234')).toBeDefined();
   });
 
@@ -124,7 +133,7 @@ describe('CallScreen component', () => {
     render(<CallScreen />);
 
     expect(screen.getByText('Officer Sarah')).toBeDefined();
-    expect(screen.getByText('Live Audio Bridge Active')).toBeDefined();
+    expect(screen.getByText('Live audio bridge active')).toBeDefined();
   });
 
   it('keeps the whole conversation on screen as a chat thread', () => {
@@ -141,7 +150,11 @@ describe('CallScreen component', () => {
     expect(screen.getByText('What is the VAT rate?')).toBeDefined();
     expect(screen.getByText('VAT is 18%.')).toBeDefined();
     expect(screen.getByRole('log')).toBeDefined();
-    expect(screen.getAllByText('You').length).toBe(1);
+    // The caller's own words read as chat bubbles; the assistant's are plain
+    // transcript text, so only the caller turn carries the bubble class.
+    const callerTurn = screen.getByText('What is the VAT rate?');
+    expect(callerTurn.className).toContain('call-bubble');
+    expect(screen.getByText('VAT is 18%.').className).toContain('call-say');
   });
 
   it('revises the caller interim caption in place, then keeps the final', () => {
@@ -161,6 +174,27 @@ describe('CallScreen component', () => {
 
     expect(useCallStore.getState().captions.length).toBe(1);
     expect(screen.getByText('What is the VAT rate?')).toBeDefined();
+  });
+
+  it('offers a jump-to-latest control once the caller scrolls back', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('ai');
+    useCallStore.getState().addCaption({ speaker: 'assistant', text: 'VAT is 18%.', final: true });
+
+    render(<CallScreen />);
+
+    const thread = screen.getByRole('log');
+    // jsdom reports every box as zero-sized, so the scroll geometry the pin
+    // logic reads has to be supplied by hand.
+    Object.defineProperty(thread, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(thread, 'clientHeight', { value: 300, configurable: true });
+    thread.scrollTop = 120;
+    fireEvent.scroll(thread);
+
+    const jump = screen.getByText('Jump to latest');
+    fireEvent.click(jump);
+
+    expect(screen.queryByText('Jump to latest')).toBeNull();
   });
 
   it('shows ended screen with thank you note', () => {

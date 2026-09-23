@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from '@/lib/i18n';
 import { useChatStore } from '@/store/useChatStore';
 import type { CaptionEntry } from '@/store/useCallStore';
 import { useCall } from '@/hooks/useCall';
+import { CallOrb } from '@/components/call/CallOrb';
 import {
+  ChevronDownIcon,
   MicIcon,
   MicOffIcon,
   PhoneIcon,
@@ -20,6 +22,9 @@ function formatDuration(sec: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+/** Distance from the bottom, in px, still treated as "following the call". */
+const PIN_THRESHOLD = 48;
+
 export function CallScreen() {
   const t = useTranslation();
   const locale = useChatStore((s) => s.locale);
@@ -31,9 +36,6 @@ export function CallScreen() {
     officerName,
     ticketRef,
     captions,
-    currentCaption,
-    isUserSpeaking,
-    activeAiText,
     error,
     closeCall,
     startCall,
@@ -42,29 +44,42 @@ export function CallScreen() {
     toggleMute,
   } = useCall();
 
-  const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
   // Follow the conversation only while the caller is already at the bottom.
   // Scrolling back to re-read an earlier answer should not be yanked away by
   // the next caption — which, with live partials, now arrives twice a second.
   const pinnedToBottom = useRef(true);
+  const [showJump, setShowJump] = useState(false);
 
-  const handleTranscriptScroll = () => {
-    const el = transcriptRef.current;
+  const handleThreadScroll = useCallback(() => {
+    const el = threadRef.current;
     if (!el) return;
-    pinnedToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-  };
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < PIN_THRESHOLD;
+    pinnedToBottom.current = atBottom;
+    setShowJump(!atBottom);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    const el = threadRef.current;
+    pinnedToBottom.current = true;
+    setShowJump(false);
+    if (el) el.scrollTop = el.scrollHeight;
+    if (threadEndRef.current?.scrollIntoView) {
+      threadEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, []);
 
   useEffect(() => {
     if (!pinnedToBottom.current) return;
-    const el = transcriptRef.current;
+    const el = threadRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
     }
-    if (transcriptEndRef.current && typeof transcriptEndRef.current.scrollIntoView === 'function') {
-      transcriptEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    if (threadEndRef.current?.scrollIntoView) {
+      threadEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
-  }, [captions]);
+  }, [captions, status]);
 
   const speakerLabel = (speaker: CaptionEntry['speaker']): string => {
     if (speaker === 'caller') return t('call.you');
@@ -75,6 +90,38 @@ export function CallScreen() {
 
   if (!isOpen) return null;
 
+  const live = status === 'ai' || status === 'transferring' || status === 'officer';
+
+  /* ---------------------------------------------------------------- pre-call */
+  if (status === 'consent') {
+    return (
+      <div className="call-backdrop" role="dialog" aria-modal="true" aria-label={t('call.preTitle')}>
+        <div className="call-card call-card--pre">
+          <div className="call-pre-avatar">
+            <PhoneIcon size={22} />
+          </div>
+          <h3 className="call-pre-title">{t('call.preTitle')}</h3>
+          <p className="call-pre-subtitle">{t('call.preSubtitle')}</p>
+          <p className="call-pre-consent">{t('call.preConsent')}</p>
+          <div className="call-pre-actions">
+            <button type="button" className="call-btn call-btn--ghost" onClick={closeCall}>
+              {t('call.consentDecline')}
+            </button>
+            <button
+              type="button"
+              className="call-btn call-btn--primary"
+              onClick={() => startCall(locale)}
+            >
+              <PhoneIcon size={16} />
+              {t('call.button')}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /* ------------------------------------------------------------- active call */
   return (
     <div
       className="call-backdrop"
@@ -82,224 +129,154 @@ export function CallScreen() {
       aria-modal="true"
       aria-label={t('call.assistantName')}
     >
-      <div className="call-card">
-        {status === 'consent' ? (
-          <div className="call-consent-box">
-            <div className="call-avatar-wrap" style={{ margin: '0 auto' }}>
-              <div className="call-avatar">
-                <PhoneIcon size={32} />
-              </div>
-            </div>
-            <h3 className="call-consent-title">{t('call.consentTitle')}</h3>
-            <p className="call-consent-text">{t('call.consentText')}</p>
-            <div className="call-consent-buttons">
-              <button
-                type="button"
-                className="call-btn-decline"
-                onClick={closeCall}
-              >
-                {t('call.consentDecline')}
-              </button>
-              <button
-                type="button"
-                className="call-btn-accept"
-                onClick={() => startCall(locale)}
-              >
-                <PhoneIcon size={16} />
-                {t('call.consentAccept')}
-              </button>
-            </div>
+      <div className="call-card call-card--live">
+        <header className="call-header">
+          <div
+            className={`call-status-pill ${
+              status === 'ai' || status === 'officer'
+                ? 'call-status-pill--active'
+                : status === 'transferring'
+                ? 'call-status-pill--transferring'
+                : ''
+            }`}
+          >
+            <span className="call-status-dot" />
+            <span>
+              {status === 'dialing' && t('call.dialing')}
+              {status === 'ai' && t('call.connected')}
+              {status === 'transferring' && t('call.transferring')}
+              {status === 'officer' &&
+                (officerName ? `Officer ${officerName}` : t('call.officerSpeaking'))}
+              {status === 'ended' && t('call.ended')}
+            </span>
           </div>
-        ) : (
-          <>
-            {/* Header with status pill and timer */}
-            <div className="call-header">
-              <div
-                className={`call-status-pill ${
-                  status === 'ai' || status === 'officer'
-                    ? 'call-status-pill--active'
-                    : status === 'transferring'
-                    ? 'call-status-pill--transferring'
-                    : ''
-                }`}
-              >
-                <span className="call-status-dot" />
-                <span>
-                  {status === 'dialing' && t('call.dialing')}
-                  {status === 'ai' && t('call.connected')}
-                  {status === 'transferring' && t('call.transferring')}
-                  {status === 'officer' && (officerName ? `Officer ${officerName}` : t('call.officerSpeaking'))}
-                  {status === 'ended' && t('call.ended')}
-                </span>
-              </div>
-              {(status === 'ai' || status === 'transferring' || status === 'officer') && (
-                <span className="call-timer">{formatDuration(duration)}</span>
-              )}
-            </div>
+          <div className="call-header-meta">
+            {status === 'transferring' && ticketRef && (
+              <span className="call-ticket-chip">{`Ticket: ${ticketRef}`}</span>
+            )}
+            {live && <span className="call-timer">{formatDuration(duration)}</span>}
+          </div>
+        </header>
 
-            {/* Call Body */}
-            <div className="call-body">
-              {/* Gemini Live Fluid Visualizer Orb */}
-              <div className="gemini-live-orb-wrap">
-                <div
-                  className={`gemini-live-orb ${
-                    (currentCaption?.speaker === 'assistant' || currentCaption?.speaker === 'officer') && activeAiText
-                      ? 'gemini-live-orb--speaking'
-                      : isUserSpeaking
-                      ? 'gemini-live-orb--listening'
-                      : ''
-                  }`}
-                >
-                  {status === 'officer' ? <UserIcon /> : <PhoneIcon size={32} />}
-                </div>
-                <div className="gemini-live-ring" />
-                <div className="gemini-live-ring gemini-live-ring--outer" />
-              </div>
+        <div className="call-thread-wrap">
+          <div
+            className="call-thread"
+            ref={threadRef}
+            onScroll={handleThreadScroll}
+            role="log"
+            aria-label={t('call.transcriptLabel')}
+            aria-live="polite"
+            aria-atomic="false"
+          >
+            {captions.length === 0 && (
+              <p className="call-thread-empty">
+                {status === 'dialing' ? t('call.connecting') : t('call.listening')}
+              </p>
+            )}
 
-              <div>
-                <h2 className="call-persona-title">
-                  {status === 'officer'
-                    ? officerName || 'URA Support Officer'
-                    : t('call.assistantName')}
-                </h2>
-                <p className="call-persona-subtitle">
-                  {status === 'dialing' && '0800 117 000 (Toll-free)'}
-                  {status === 'ai' && 'AI Phone Receptionist • Gemini Live'}
-                  {status === 'transferring' &&
-                    (ticketRef ? `Ticket: ${ticketRef}` : 'Holding for available officer…')}
-                  {status === 'officer' && 'Live Audio Bridge Active'}
-                  {status === 'ended' && t('call.thankYou')}
-                </p>
-              </div>
+            {captions.map((caption, index) => {
+              const key = `${caption.turn_id ?? 'x'}-${index}`;
+              const interim = caption.final === false;
 
-              {/* Gemini Live Active Spoken Text Area (Current Turn Only) */}
-              <div className="gemini-live-display">
-                {isUserSpeaking ? (
-                  <div className="gemini-live-listening-state">
-                    <div className="gemini-wave-bars">
-                      <span className="gemini-wave-bar" />
-                      <span className="gemini-wave-bar" />
-                      <span className="gemini-wave-bar" />
-                      <span className="gemini-wave-bar" />
-                    </div>
-                    <span>{t('call.listening')}...</span>
-                  </div>
-                ) : activeAiText ? (
-                  <div className="gemini-live-text">{activeAiText}</div>
-                ) : (
-                  <div className="call-transcript-empty">
-                    {status === 'dialing'
-                      ? t('call.connecting')
-                      : status === 'ended'
-                      ? t('call.thankYou')
-                      : t('call.listening')}
-                  </div>
-                )}
-              </div>
-
-              {/* Running transcript of previous turns */}
-              <div
-                className="call-transcript"
-                ref={transcriptRef}
-                onScroll={handleTranscriptScroll}
-                role="log"
-                aria-label={t('call.transcriptLabel')}
-                aria-live="polite"
-                aria-atomic="false"
-              >
-                {captions.slice(0, activeAiText && captions.length > 0 ? -1 : undefined).map((caption, index) => (
-                  <div
-                    key={`${caption.turn_id ?? 'x'}-${index}`}
-                    className={`call-turn call-turn--${
-                      caption.speaker === 'caller' ? 'caller' : 'agent'
-                    }`}
-                  >
-                    <span className={`call-turn-speaker call-turn-speaker--${caption.speaker}`}>
-                      {speakerLabel(caption.speaker)}
-                    </span>
-                    <div
-                      className={`call-bubble call-bubble--${caption.speaker}${
-                        caption.final === false ? ' call-bubble--interim' : ''
-                      }`}
-                    >
+              if (caption.speaker === 'caller') {
+                return (
+                  <div key={key} className="call-turn call-turn--caller">
+                    <div className={`call-bubble${interim ? ' call-bubble--interim' : ''}`}>
                       {caption.text}
-                      {caption.final === false && <span className="call-bubble-cursor" />}
+                      {interim && <span className="call-bubble-cursor" />}
                     </div>
                   </div>
-                ))}
-                <div ref={transcriptEndRef} />
+                );
+              }
+
+              if (caption.speaker === 'system') {
+                return (
+                  <p key={key} className="call-system-note">
+                    {caption.text}
+                  </p>
+                );
+              }
+
+              return (
+                <div key={key} className="call-turn call-turn--agent">
+                  {caption.speaker === 'officer' && (
+                    <span className="call-speaker-chip">{speakerLabel(caption.speaker)}</span>
+                  )}
+                  <div className={`call-say${interim ? ' call-say--interim' : ''}`}>
+                    {caption.text}
+                  </div>
+                </div>
+              );
+            })}
+
+            {status === 'transferring' && (
+              <p className="call-system-note">{t('call.transferring')}</p>
+            )}
+            {status === 'officer' && <p className="call-system-note">{t('call.bridgeActive')}</p>}
+            {status === 'ended' && <p className="call-system-note">{t('call.thankYou')}</p>}
+
+            <div ref={threadEndRef} />
+          </div>
+
+          {showJump && (
+            <button type="button" className="call-jump" onClick={jumpToLatest}>
+              <ChevronDownIcon />
+              {t('call.jumpToLatest')}
+            </button>
+          )}
+        </div>
+
+        {error && <p className="call-error">{error}</p>}
+
+        <footer className="call-dock">
+          {status !== 'ended' ? (
+            <>
+              <div className="call-dock-side">
+                <button
+                  type="button"
+                  className={`call-ctl${isMuted ? ' call-ctl--muted' : ''}`}
+                  onClick={toggleMute}
+                  aria-label={isMuted ? t('call.unmute') : t('call.mute')}
+                  title={isMuted ? t('call.unmute') : t('call.mute')}
+                >
+                  {isMuted ? <MicOffIcon size={20} /> : <MicIcon />}
+                </button>
               </div>
 
-              {status !== 'ended' && (
-                <p className="call-transcript-hint">
-                  {isMuted ? t('call.mutedHint') : t('call.listeningHint')}
-                </p>
-              )}
+              <CallOrb active={live} />
 
-              {error && (
-                <div style={{ color: '#dc2626', fontSize: '0.8125rem', marginTop: '0.25rem' }}>
-                  {error}
-                </div>
-              )}
-
-              {/* Actions bar */}
-              <div className="call-actions">
-                {status !== 'ended' ? (
-                  <>
-                    {/* Mute Button */}
-                    <button
-                      type="button"
-                      className={`call-action-btn ${isMuted ? 'call-action-btn--muted' : ''}`}
-                      onClick={toggleMute}
-                      aria-label={isMuted ? t('call.unmute') : t('call.mute')}
-                    >
-                      <div className="call-action-btn-circle">
-                        {isMuted ? <MicOffIcon size={20} /> : <MicIcon />}
-                      </div>
-                      <span>{isMuted ? t('call.unmute') : t('call.mute')}</span>
-                    </button>
-
-                    {/* Talk to an Officer Button */}
-                    {status === 'ai' && (
-                      <button
-                        type="button"
-                        className="call-action-btn"
-                        onClick={requestOfficer}
-                        aria-label={t('call.talkOfficer')}
-                      >
-                        <div className="call-action-btn-circle">
-                          <UserIcon />
-                        </div>
-                        <span>{t('call.talkOfficer')}</span>
-                      </button>
-                    )}
-
-                    {/* Hang Up Button */}
-                    <button
-                      type="button"
-                      className="call-action-btn call-action-btn--hangup"
-                      onClick={hangup}
-                      aria-label={t('call.hangup')}
-                    >
-                      <div className="call-action-btn-circle">
-                        <PhoneOffIcon size={20} />
-                      </div>
-                      <span>{t('call.hangup')}</span>
-                    </button>
-                  </>
-                ) : (
+              <div className="call-dock-side call-dock-side--end">
+                {status === 'ai' && (
                   <button
                     type="button"
-                    className="call-btn-accept"
-                    onClick={closeCall}
-                    style={{ width: '100%' }}
+                    className="call-ctl"
+                    onClick={requestOfficer}
+                    aria-label={t('call.talkOfficer')}
+                    title={t('call.talkOfficer')}
                   >
-                    {t('common.close')}
+                    <UserIcon />
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="call-ctl call-ctl--hangup"
+                  onClick={hangup}
+                  aria-label={t('call.hangup')}
+                  title={t('call.hangup')}
+                >
+                  <PhoneOffIcon size={20} />
+                </button>
               </div>
-            </div>
-          </>
+            </>
+          ) : (
+            <button type="button" className="call-btn call-btn--primary call-btn--block" onClick={closeCall}>
+              {t('common.close')}
+            </button>
+          )}
+        </footer>
+
+        {status !== 'ended' && (
+          <p className="call-hint">{isMuted ? t('call.mutedHint') : t('call.listeningHint')}</p>
         )}
       </div>
     </div>

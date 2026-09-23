@@ -1,17 +1,34 @@
-/* Call URA overlay and active call interface */
+/* =============================================================================
+ * Call URA — pre-call card and the live call sheet.
+ *
+ * The sheet follows the chat's own theme rather than inventing a palette: it
+ * mounts inside `.app-shell.chatv2`, so every token below resolves to the
+ * chatv2 values (white / #212121 canvas, URA navy accent) and re-themes with
+ * the rest of the app. Fallbacks keep it legible if it is ever mounted
+ * outside that scope.
+ *
+ * Layout: a centred sheet, not a full-screen takeover — the caller can still
+ * see the chat they came from behind the backdrop. Inside, three rows:
+ * header / scrolling thread / dock. The dock is where the orb lives, with the
+ * call controls either side of it.
+ * ========================================================================== */
 
 .call-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(15, 18, 24, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
   padding: 1rem;
-  animation: callFadeIn 0.25s ease-out;
+  animation: callFadeIn 0.2s ease-out;
+}
+
+:root[data-theme='dark'] .call-backdrop {
+  background: rgba(0, 0, 0, 0.66);
 }
 
 @keyframes callFadeIn {
@@ -21,33 +38,140 @@
 
 .call-card {
   width: 100%;
-  max-width: 440px;
-  background: var(--bg-surface, #ffffff);
-  border: 1px solid var(--border-default, #e5e7eb);
-  border-radius: var(--radius-xl, 1.25rem);
-  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.35);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  background: var(--bg-0, #ffffff);
+  border: 1px solid var(--border-0, #e6e6e6);
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, 0.14));
+  color: var(--text-0, #0d0d0d);
   position: relative;
+  overflow: hidden;
 }
 
-[data-theme='dark'] .call-card {
-  background: #111827;
-  border-color: #374151;
-  box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.7);
+/* ------------------------------------------------------------------ pre-call */
+
+.call-card--pre {
+  max-width: 380px;
+  padding: 1.75rem 1.5rem 1.375rem;
+  text-align: center;
+}
+
+.call-pre-avatar {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 0.875rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Flat URA navy: the old gradient-plus-glow avatar was the single most
+     "generated" thing on the screen. The glyph takes the accent's own
+     contrast colour, because chatv2 inverts the accent in dark mode (a light
+     pill with a dark glyph) — a hardcoded white icon disappears there. */
+  background: var(--cv2-accent, #003087);
+  color: var(--cv2-accent-contrast, #ffffff);
+}
+
+.call-pre-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.call-pre-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-2, #6e6e6e);
+  font-variant-numeric: tabular-nums;
+}
+
+.call-pre-consent {
+  margin: 0.875rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-2, #6e6e6e);
+}
+
+.call-pre-actions {
+  display: flex;
+  gap: 0.625rem;
+  margin-top: 1.25rem;
+}
+
+/* --------------------------------------------------------------- shared btns */
+
+.call-btn {
+  flex: 1;
+  min-height: 42px;
+  padding: 0 1rem;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.call-btn--ghost {
+  background: transparent;
+  color: var(--text-1, #3f3f3f);
+  border: 1px solid var(--border-1, #d2d2d2);
+}
+
+.call-btn--ghost:hover {
+  background: var(--surface-1, #f7f7f7);
+}
+
+.call-btn--primary {
+  background: var(--cv2-accent, #003087);
+  color: var(--cv2-accent-contrast, #ffffff);
+  border: 1px solid transparent;
+}
+
+.call-btn--primary:hover {
+  background: var(--cv2-accent-hover, #06246b);
+}
+
+.call-btn--block {
+  width: 100%;
+  flex: none;
+}
+
+.call-btn:focus-visible,
+.call-ctl:focus-visible,
+.call-jump:focus-visible {
+  outline: 2px solid var(--cv2-focus, #0b57d0);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------- live sheet */
+
+.call-card--live {
+  max-width: 560px;
+  height: min(78vh, 720px);
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  padding: 0;
 }
 
 .call-header {
-  padding: 1rem 1.25rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid var(--border-subtle, #f3f4f6);
+  gap: 0.75rem;
+  padding: 0.875rem 1.125rem;
+  border-bottom: 1px solid var(--border-0, #e6e6e6);
 }
 
-[data-theme='dark'] .call-header {
-  border-color: #1f2937;
+.call-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .call-status-pill {
@@ -58,247 +182,153 @@
   font-weight: 600;
   padding: 0.25rem 0.75rem;
   border-radius: 9999px;
-  background: #f3f4f6;
-  color: #374151;
-}
-
-[data-theme='dark'] .call-status-pill {
-  background: #1f2937;
-  color: #e5e7eb;
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-1, #3f3f3f);
 }
 
 .call-status-pill--active {
-  background: #ecfdf5;
-  color: #065f46;
-}
-
-[data-theme='dark'] .call-status-pill--active {
-  background: #064e3b;
-  color: #a7f3d0;
+  background: var(--cv2-success-soft, #dcfae6);
+  color: var(--success, #067647);
 }
 
 .call-status-pill--transferring {
-  background: #fffbeb;
-  color: #92400e;
-  animation: callPulse 1.8s infinite;
-}
-
-[data-theme='dark'] .call-status-pill--transferring {
-  background: #78350f;
-  color: #fde68a;
+  background: var(--cv2-warning-soft, #fef0c7);
+  color: var(--warning, #b54708);
 }
 
 .call-status-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: currentColor;
 }
 
 .call-status-pill--active .call-status-dot {
-  animation: callDotPulse 1.5s infinite;
+  animation: callDotPulse 1.6s infinite;
 }
 
 @keyframes callDotPulse {
   0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.3); }
+  50% { opacity: 0.45; transform: scale(1.3); }
+}
+
+.call-ticket-chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 8px;
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-2, #6e6e6e);
+  border: 1px solid var(--border-0, #e6e6e6);
 }
 
 .call-timer {
-  font-family: var(--font-mono, monospace);
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-secondary, #6b7280);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2, #6e6e6e);
+  font-variant-numeric: tabular-nums;
 }
 
-.call-body {
-  padding: 2rem 1.5rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 1.25rem;
-}
+/* ------------------------------------------------------------------- thread */
 
-.call-avatar-wrap {
+.call-thread-wrap {
   position: relative;
-  width: 84px;
-  height: 84px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 0;
 }
 
-.call-avatar {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: var(--accent-gradient, linear-gradient(135deg, #1d4ed8, #2563eb));
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
-  box-shadow: 0 4px 14px rgba(29, 78, 216, 0.35);
-}
-
-.call-avatar-ring {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid #3b82f6;
-  opacity: 0;
-  z-index: 1;
-}
-
-.call-avatar--speaking .call-avatar-ring {
-  animation: callRipple 2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
-}
-
-@keyframes callRipple {
-  0% { transform: scale(0.85); opacity: 0.8; }
-  100% { transform: scale(1.35); opacity: 0; }
-}
-
-.call-persona-title {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  margin: 0;
-}
-
-[data-theme='dark'] .call-persona-title {
-  color: #f9fafb;
-}
-
-.call-persona-subtitle {
-  font-size: 0.875rem;
-  color: var(--text-secondary, #6b7280);
-  margin: 0.25rem 0 0 0;
-}
-
-/* Running call transcript — a chat thread of both sides, oldest first.
-   The card is a fixed-height dialog, so the thread scrolls inside itself
-   rather than growing the modal past the viewport. */
-.call-transcript {
-  width: 100%;
-  min-height: 132px;
-  max-height: 36vh;
+.call-thread {
+  height: 100%;
   overflow-y: auto;
   overscroll-behavior: contain;
   scroll-behavior: smooth;
-  padding: 0.875rem;
+  padding: 1.25rem 1.25rem 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.625rem;
-  border-radius: var(--radius-md, 0.75rem);
-  background: var(--bg-muted, #f9fafb);
-  border: 1px solid var(--border-subtle, #f3f4f6);
-  font-size: 0.875rem;
-  line-height: 1.45;
-  color: var(--text-primary, #1f2937);
-  text-align: left;
+  gap: 1.125rem;
+  /* Text dissolves under the header instead of colliding with its border. */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
 }
 
-[data-theme='dark'] .call-transcript {
-  background: #1f2937;
-  border-color: #374151;
-  color: #f3f4f6;
-}
-
-.call-transcript-empty {
+.call-thread-empty {
   margin: auto 0;
-  color: var(--text-secondary, #6b7280);
-  font-style: italic;
   text-align: center;
-}
-
-.call-transcript-hint {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--text-secondary, #6b7280);
+  color: var(--text-2, #6e6e6e);
+  font-size: 0.875rem;
 }
 
 .call-turn {
   display: flex;
   flex-direction: column;
-  gap: 0.1875rem;
-  max-width: 85%;
+  gap: 0.25rem;
+  max-width: 100%;
 }
 
 .call-turn--caller {
   align-self: flex-end;
   align-items: flex-end;
+  max-width: 82%;
 }
 
 .call-turn--agent {
-  align-self: flex-start;
+  align-self: stretch;
   align-items: flex-start;
 }
 
-.call-turn-speaker {
-  font-weight: 600;
-  font-size: 0.6875rem;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: #2563eb;
-}
-
-.call-turn-speaker--caller {
-  color: #059669;
-}
-
-.call-turn-speaker--officer {
-  color: #7c3aed;
-}
-
-.call-turn-speaker--system {
-  color: var(--text-secondary, #6b7280);
-}
-
-.call-bubble {
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.875rem;
-  background: var(--bg-surface, #ffffff);
-  border: 1px solid var(--border-default, #e5e7eb);
+/* What the assistant (or the officer) says: plain text, no bubble — the
+   caller is listening to it, so on screen it should read like a transcript,
+   not like a chat message competing for attention. */
+.call-say {
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--text-0, #0d0d0d);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  animation: callTextIn 0.18s ease-out;
 }
 
-.call-bubble--caller {
-  background: #059669;
-  border-color: #059669;
-  color: #ffffff;
-  border-bottom-right-radius: 0.25rem;
+.call-say--interim {
+  color: var(--text-2, #6e6e6e);
 }
 
-.call-bubble--assistant,
-.call-bubble--officer,
-.call-bubble--system {
-  border-bottom-left-radius: 0.25rem;
+@keyframes callTextIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-[data-theme='dark'] .call-bubble {
-  background: #111827;
-  border-color: #374151;
+.call-speaker-chip {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2, #6e6e6e);
 }
 
-[data-theme='dark'] .call-bubble--caller {
-  background: #047857;
-  border-color: #047857;
-  color: #ffffff;
+/* The caller's own words, in the same bubble the chat uses for their typed
+   messages — scrolling up should feel like the same conversation. */
+.call-bubble {
+  padding: 0.5rem 0.875rem;
+  border-radius: 16px;
+  border-bottom-right-radius: 6px;
+  background: var(--cv2-user-bubble, #eef3fc);
+  border: 1px solid var(--cv2-user-bubble-border, #d9e4f5);
+  color: var(--text-0, #0d0d0d);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Interim hypothesis: still being revised by the recognizer, so it is shown
    as provisional rather than as something the caller actually said. */
 .call-bubble--interim {
-  opacity: 0.75;
+  opacity: 0.7;
   border-style: dashed;
 }
 
 .call-bubble-cursor {
   display: inline-block;
-  width: 0.5rem;
+  width: 0.45rem;
   height: 0.9em;
   margin-left: 0.25rem;
   vertical-align: text-bottom;
@@ -311,293 +341,243 @@
   to { visibility: hidden; }
 }
 
+.call-system-note {
+  align-self: center;
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-2, #6e6e6e);
+  text-align: center;
+}
+
+.call-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text-1, #3f3f3f);
+  background: var(--bg-0, #ffffff);
+  border: 1px solid var(--border-1, #d2d2d2);
+  box-shadow: var(--shadow-md, 0 4px 14px rgba(0, 0, 0, 0.08));
+  animation: callTextIn 0.15s ease-out;
+}
+
+.call-jump:hover {
+  background: var(--surface-1, #f7f7f7);
+}
+
+.call-error {
+  margin: 0 1.25rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  color: var(--danger, #b42318);
+  background: var(--cv2-danger-soft, #fee4e2);
+}
+
+/* --------------------------------------------------------------------- dock */
+
+.call-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.875rem 1.25rem 0.5rem;
+  border-top: 1px solid var(--border-0, #e6e6e6);
+}
+
+.call-dock-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex: 1;
+}
+
+.call-dock-side--end {
+  justify-content: flex-end;
+}
+
+.call-ctl {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-1, #3f3f3f);
+  background: var(--surface-1, #f7f7f7);
+  border: 1px solid var(--border-0, #e6e6e6);
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.call-ctl:hover {
+  background: var(--surface-2, #f0f0f0);
+  transform: translateY(-1px);
+}
+
+.call-ctl--muted {
+  background: var(--cv2-warning-soft, #fef0c7);
+  border-color: transparent;
+  color: var(--warning, #b54708);
+}
+
+/* Hang-up keeps one fixed red in both themes. `--danger` lightens in dark for
+   text legibility, which would leave a white glyph on a pale red button. */
+.call-ctl--hangup {
+  background: #d92d20;
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.call-ctl--hangup:hover {
+  background: #b42318;
+}
+
+.call-hint {
+  margin: 0;
+  padding: 0 1.25rem 0.875rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-3, #6e6e6e);
+}
+
+/* ---------------------------------------------------------------------- orb */
+
+.call-orb-wrap {
+  width: 96px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.call-orb {
+  --orb-level: 0;
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Scale is driven straight from the audio level written by CallOrb, so the
+     orb tracks the voice rather than running a fixed animation loop. */
+  transform: scale(calc(1 + var(--orb-level) * 0.18));
+  transition: transform 0.06s linear;
+}
+
+.call-orb-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  /* URA navy with a gold sheen, rather than the generic blue/purple orb. */
+  background:
+    radial-gradient(circle at 32% 28%, rgba(249, 199, 79, 0.55), transparent 42%),
+    radial-gradient(circle at 60% 65%, #0b57d0, #003087 72%);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.18);
+}
+
+.call-orb-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(11, 87, 208, 0.42), transparent 68%);
+  opacity: calc(0.15 + var(--orb-level) * 0.85);
+  transition: opacity 0.08s linear;
+  pointer-events: none;
+}
+
+/* Light theme washes out a wide bloom, so the glow tightens and the orb gets
+   a defining edge instead. */
+.call-orb::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 48, 135, 0.18);
+}
+
+:root[data-theme='dark'] .call-orb::after {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-theme='dark'] .call-orb-halo {
+  inset: -20px;
+}
+
+.call-orb[data-mode='listening'] .call-orb-core {
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), transparent 42%),
+    radial-gradient(circle at 60% 65%, #12b886, #00756b 72%);
+}
+
+.call-orb[data-mode='listening'] .call-orb-halo {
+  background: radial-gradient(circle, rgba(0, 117, 107, 0.42), transparent 68%);
+}
+
+.call-orb[data-mode='idle'] {
+  animation: callOrbBreathe 4s ease-in-out infinite;
+}
+
+@keyframes callOrbBreathe {
+  0%, 100% { transform: scale(0.97); }
+  50% { transform: scale(1.02); }
+}
+
+/* ------------------------------------------------------------------ responsive */
+
+@media (max-width: 560px) {
+  .call-backdrop {
+    padding: 0.5rem;
+  }
+
+  .call-card--live {
+    height: min(88vh, 720px);
+  }
+
+  .call-thread {
+    padding: 1rem 0.875rem 1.25rem;
+    gap: 1rem;
+  }
+
+  .call-say {
+    font-size: 1rem;
+  }
+
+  .call-dock {
+    padding: 0.75rem 0.875rem 0.5rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .call-transcript {
+  .call-backdrop,
+  .call-say,
+  .call-jump {
+    animation: none;
+  }
+
+  .call-thread {
     scroll-behavior: auto;
   }
 
-  .call-bubble-cursor {
+  .call-bubble-cursor,
+  .call-orb[data-mode='idle'],
+  .call-status-pill--active .call-status-dot {
     animation: none;
   }
+
+  .call-orb {
+    transform: none;
+    transition: none;
+  }
 }
-
-.call-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  width: 100%;
-  padding-top: 0.5rem;
-}
-
-.call-action-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.375rem;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--text-secondary, #4b5563);
-  transition: transform 0.15s ease, color 0.15s ease;
-}
-
-.call-action-btn:hover {
-  transform: translateY(-2px);
-  color: var(--text-primary, #111827);
-}
-
-.call-action-btn-circle {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-muted, #e5e7eb);
-  color: inherit;
-  transition: all 0.2s ease;
-}
-
-.call-action-btn--muted .call-action-btn-circle {
-  background: #fee2e2;
-  color: #dc2626;
-}
-
-.call-action-btn--hangup .call-action-btn-circle {
-  background: #dc2626;
-  color: #ffffff;
-}
-
-.call-action-btn--hangup:hover .call-action-btn-circle {
-  background: #b91c1c;
-}
-
-/* Consent Box */
-.call-consent-box {
-  padding: 1.75rem;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.call-consent-title {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: var(--text-primary, #111827);
-  margin: 0;
-}
-
-.call-consent-text {
-  font-size: 0.875rem;
-  color: var(--text-secondary, #4b5563);
-  line-height: 1.5;
-  margin: 0;
-}
-
-.call-consent-buttons {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
-
-.call-btn-accept {
-  flex: 1;
-  padding: 0.625rem 1rem;
-  border-radius: var(--radius-md, 0.5rem);
-  background: #2563eb;
-  color: #ffffff;
-  font-weight: 600;
-  font-size: 0.875rem;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-}
-
-.call-btn-accept:hover {
-  background: #1d4ed8;
-}
-
-.call-btn-decline {
-  flex: 1;
-  padding: 0.625rem 1rem;
-  border-radius: var(--radius-md, 0.5rem);
-  background: #f3f4f6;
-  color: #374151;
-  font-weight: 600;
-  font-size: 0.875rem;
-  border: 1px solid #e5e7eb;
-  cursor: pointer;
-}
-
-[data-theme='dark'] .call-btn-decline {
-  background: #1f2937;
-  color: #d1d5db;
-  border-color: #374151;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Gemini Live UI: Fluid Orb Visualizer & Active Spoken Card                  */
-/* -------------------------------------------------------------------------- */
-
-.gemini-live-orb-wrap {
-  position: relative;
-  width: 120px;
-  height: 120px;
-  margin: 0.5rem auto 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.gemini-live-orb {
-  width: 80px;
-  height: 80px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, #38bdf8, #2563eb 55%, #7c3aed 100%);
-  box-shadow: 0 0 30px rgba(56, 189, 248, 0.45), 0 0 60px rgba(124, 58, 237, 0.25);
-  position: relative;
-  z-index: 2;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-}
-
-.gemini-live-orb--speaking {
-  animation: geminiOrbSpeak 1.4s ease-in-out infinite alternate;
-  box-shadow: 0 0 45px rgba(56, 189, 248, 0.75), 0 0 90px rgba(124, 58, 237, 0.5);
-}
-
-.gemini-live-orb--listening {
-  background: radial-gradient(circle at 35% 35%, #34d399, #059669 60%, #047857 100%);
-  box-shadow: 0 0 35px rgba(52, 211, 153, 0.6), 0 0 65px rgba(5, 150, 105, 0.35);
-  animation: geminiOrbListen 1.2s ease-in-out infinite alternate;
-}
-
-.gemini-live-ring {
-  position: absolute;
-  inset: -10px;
-  border-radius: 50%;
-  border: 2px solid rgba(56, 189, 248, 0.45);
-  opacity: 0;
-  z-index: 1;
-}
-
-.gemini-live-orb--speaking .gemini-live-ring {
-  animation: geminiRingPulse 1.8s cubic-bezier(0, 0.2, 0.8, 1) infinite;
-}
-
-.gemini-live-ring--outer {
-  inset: -22px;
-  border-color: rgba(124, 58, 237, 0.35);
-  animation-delay: 0.4s;
-}
-
-@keyframes geminiOrbSpeak {
-  0% { transform: scale(0.96); filter: brightness(1); }
-  100% { transform: scale(1.08); filter: brightness(1.25); }
-}
-
-@keyframes geminiOrbListen {
-  0% { transform: scale(0.98); }
-  100% { transform: scale(1.05); }
-}
-
-@keyframes geminiRingPulse {
-  0% { transform: scale(0.85); opacity: 0.9; }
-  100% { transform: scale(1.45); opacity: 0; }
-}
-
-.gemini-live-display {
-  width: 100%;
-  min-height: 90px;
-  max-height: 160px;
-  padding: 1rem 1.25rem;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  border-radius: var(--radius-lg, 1rem);
-  background: rgba(243, 244, 246, 0.85);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  overflow-y: auto;
-  transition: all 0.2s ease;
-}
-
-[data-theme='dark'] .gemini-live-display {
-  background: rgba(31, 41, 55, 0.75);
-  border-color: #374151;
-}
-
-.gemini-live-text {
-  font-size: 1.0625rem;
-  font-weight: 500;
-  line-height: 1.55;
-  color: var(--text-primary, #111827);
-  animation: textFadeIn 0.2s ease-out;
-}
-
-[data-theme='dark'] .gemini-live-text {
-  color: #f9fafb;
-}
-
-.gemini-live-listening-state {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  color: #059669;
-  font-size: 0.9375rem;
-  font-weight: 600;
-}
-
-[data-theme='dark'] .gemini-live-listening-state {
-  color: #34d399;
-}
-
-.gemini-wave-bars {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  height: 18px;
-}
-
-.gemini-wave-bar {
-  width: 3px;
-  height: 100%;
-  background: currentColor;
-  border-radius: 9999px;
-  animation: waveBar 0.9s ease-in-out infinite alternate;
-}
-
-.gemini-wave-bar:nth-child(2) { animation-delay: 0.15s; height: 65%; }
-.gemini-wave-bar:nth-child(3) { animation-delay: 0.3s; height: 85%; }
-.gemini-wave-bar:nth-child(4) { animation-delay: 0.45s; height: 50%; }
-
-@keyframes waveBar {
-  0% { transform: scaleY(0.3); }
-  100% { transform: scaleY(1); }
-}
-
-@keyframes textFadeIn {
-  from { opacity: 0; transform: translateY(3px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Compact transcript drawer beneath the Gemini Live display */
-.call-transcript {
-  max-height: 18vh;
-  margin-top: 0.25rem;
-  font-size: 0.8125rem;
-  opacity: 0.85;
-}
-

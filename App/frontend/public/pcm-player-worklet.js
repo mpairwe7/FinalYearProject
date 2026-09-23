@@ -13,6 +13,13 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
     this.bufferedSamples = 0;
     this.isPlaying = false;
     this.minBufferSamples = 16000 * 0.06; // 60ms initial jitter buffer
+    // Level reporting for the call orb. Measured here rather than where chunks
+    // are enqueued, because the jitter buffer means audio is handed over well
+    // before it is heard — an orb driven by enqueue time pulses ahead of the
+    // voice. Posting every 8 render quanta is ~30Hz at 16kHz, enough for a
+    // smooth pulse and cheap enough for the audio thread.
+    this.quantaSinceLevel = 0;
+    this.levelPeak = 0;
 
     this.port.onmessage = (event) => {
       const data = event.data;
@@ -23,6 +30,11 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
         this.writeIndex = 0;
         this.bufferedSamples = 0;
         this.isPlaying = false;
+        // A barge-in cuts the sentence off mid-word; say so, or the orb keeps
+        // glowing at whatever level the discarded audio last reached.
+        this.levelPeak = 0;
+        this.quantaSinceLevel = 0;
+        this.port.postMessage({ type: 'level', level: 0 });
         return;
       }
 
@@ -58,6 +70,7 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
 
     if (!this.isPlaying || this.bufferedSamples === 0) {
       channel.fill(0);
+      this._reportLevel(channel, framesNeeded);
       return true;
     }
 
@@ -73,6 +86,7 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
       this.bufferedSamples = 0;
       this.isPlaying = false;
       this.port.postMessage({ type: 'underrun' });
+      this._reportLevel(channel, framesNeeded);
       return true;
     }
 
@@ -81,8 +95,31 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
       this.readIndex = (this.readIndex + 1) % this.buffer.length;
     }
     this.bufferedSamples -= framesNeeded;
+    this._reportLevel(channel, framesNeeded);
 
     return true;
+  }
+
+  /**
+   * Post the loudest sample of the last ~8 quanta to the main thread.
+   *
+   * Peak rather than RMS: speech is mostly quiet between syllables, and an
+   * averaged level makes the orb look sluggish against a voice that is plainly
+   * audible. The peak is reset after each post so the next window measures
+   * itself rather than decaying from an earlier shout.
+   */
+  _reportLevel(channel, framesNeeded) {
+    for (let i = 0; i < framesNeeded; i++) {
+      const magnitude = channel[i] < 0 ? -channel[i] : channel[i];
+      if (magnitude > this.levelPeak) this.levelPeak = magnitude;
+    }
+
+    this.quantaSinceLevel += 1;
+    if (this.quantaSinceLevel < 8) return;
+
+    this.port.postMessage({ type: 'level', level: this.levelPeak });
+    this.quantaSinceLevel = 0;
+    this.levelPeak = 0;
   }
 }
 

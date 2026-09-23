@@ -4,6 +4,7 @@ import { CallSocket } from '@/services/callSocket';
 import { PCMPlayer } from '@/services/pcmPlayer';
 import { AudioRecorder } from '@/services/voiceService';
 import { playDialTone, playJoinChime } from '@/services/callTones';
+import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audioLevelBus';
 
 export function useCall() {
   const store = useCallStore();
@@ -21,6 +22,7 @@ export function useCall() {
   }, [store.isMuted]);
 
   const cleanupAudio = useCallback(() => {
+    resetAudioLevels();
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -79,6 +81,7 @@ export function useCall() {
       // Create PCM16 player
       const player = new PCMPlayer(16000);
       playerRef.current = player;
+      player.onLevel((level) => setOutputLevel(level));
       player.init().catch(() => {});
 
       // Create WebSocket
@@ -184,6 +187,10 @@ export function useCall() {
                   sum += int16[i] * int16[i];
                 }
                 const rms = Math.sqrt(sum / (int16.length / 2));
+                // The same reading drives the orb. 6000 of 32767 is roughly
+                // conversational speech at a laptop mic, so normal talking
+                // fills the orb without a shout pinning it at 1.
+                setInputLevel(rms / 6000);
                 if (rms > 1200) {
                   store.setUserSpeaking(true);
                   if (silenceTimer) clearTimeout(silenceTimer);
@@ -192,15 +199,19 @@ export function useCall() {
                   }, 1400);
                 }
               }
+            } else if (isMutedRef.current) {
+              setInputLevel(0);
             }
           },
           { echoCancellation: true, noiseSuppression: true },
         );
+        // Both the recorder teardown AND the pending silence timer, or a call
+        // that ends mid-utterance leaves a timer to fire `setUserSpeaking`
+        // against a store the next call has already reset.
         micCleanupRef.current = () => {
           if (silenceTimer) clearTimeout(silenceTimer);
           cleanup();
         };
-        micCleanupRef.current = cleanup;
       } catch (err: unknown) {
         store.setError((err as Error)?.message || 'Microphone access denied');
         hangup();
