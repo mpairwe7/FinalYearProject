@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from .. import database as db
@@ -123,6 +125,40 @@ def init_receptionist_schema() -> None:
         logger.exception("Failed to initialize voice receptionist schema")
 
 
+# Who wants to hear about a call's new turns (the officer brief's scheduler).
+# Turns are written from several places — the brain, the Gemini transcript
+# taps, the router, the officer leg — and all of them come through
+# create_turn, so observing it here needs no change at any call site.
+TurnObserver = Callable[[dict[str, Any]], None]
+_turn_observers: dict[str, list[TurnObserver]] = {}
+_observers_lock = threading.Lock()
+
+
+def register_turn_observer(call_id: str, observer: TurnObserver) -> None:
+    with _observers_lock:
+        _turn_observers.setdefault(call_id, []).append(observer)
+
+
+def unregister_turn_observer(call_id: str, observer: TurnObserver) -> None:
+    with _observers_lock:
+        # ==, not "is": each ``scheduler.observe`` access is a new bound method.
+        remaining = [o for o in _turn_observers.get(call_id, []) if o != observer]
+        if remaining:
+            _turn_observers[call_id] = remaining
+        else:
+            _turn_observers.pop(call_id, None)
+
+
+def _notify_turn_observers(turn: dict[str, Any]) -> None:
+    with _observers_lock:
+        observers = list(_turn_observers.get(turn["call_id"], []))
+    for observer in observers:
+        try:
+            observer(turn)
+        except Exception:
+            logger.debug("Turn observer failed for %s", turn["call_id"], exc_info=True)
+
+
 def create_call(
     call_id: str,
     conversation_id: str = "",
@@ -164,7 +200,45 @@ def get_call(call_id: str) -> dict[str, Any] | None:
             row["metrics"] = json.loads(row["metrics_json"])
         except Exception:
             row["metrics"] = None
+    if row.get("brief_json"):
+        try:
+            row["brief"] = json.loads(row["brief_json"])
+        except Exception:
+            row["brief"] = None
     return row
+
+
+def claim_call(call_id: str, officer_id: str, now: float, expired_before: float) -> bool:
+    """Give a waiting call to *officer_id*, atomically: first claim wins.
+
+    One conditional UPDATE, so two officers pressing "Take call" at once —
+    on this replica or through the database — cannot both succeed. A claim
+    older than *expired_before* (audio never connected) no longer counts, and
+    a call already with an officer cannot be claimed at all.
+    """
+    affected = db.execute(
+        """
+        UPDATE voice_calls SET claimed_by = ?, claimed_at = ?
+        WHERE call_id = ? AND status IN ('ai', 'transferring')
+          AND (claimed_by = '' OR claimed_by IS NULL OR claimed_by = ? OR claimed_at < ?)
+        """,
+        (officer_id, now, call_id, officer_id, expired_before),
+    )
+    return affected > 0
+
+
+def release_claim(call_id: str, officer_id: str | None = None) -> bool:
+    """Drop the claim on *call_id* — only *officer_id*'s, when given."""
+    if officer_id is None:
+        affected = db.execute(
+            "UPDATE voice_calls SET claimed_by = '', claimed_at = NULL WHERE call_id = ?", (call_id,)
+        )
+    else:
+        affected = db.execute(
+            "UPDATE voice_calls SET claimed_by = '', claimed_at = NULL WHERE call_id = ? AND claimed_by = ?",
+            (call_id, officer_id),
+        )
+    return affected > 0
 
 
 def update_call(call_id: str, **kwargs: Any) -> bool:
@@ -269,7 +343,7 @@ def create_turn(
             latency_str, t_now,
         ),
     )
-    return {
+    turn = {
         "id": turn_id,
         "call_id": call_id,
         "seq": seq,
@@ -282,6 +356,8 @@ def create_turn(
         "latencies": latencies or {},
         "created_at": t_now,
     }
+    _notify_turn_observers(turn)
+    return turn
 
 
 def list_turns(call_id: str) -> list[dict[str, Any]]:

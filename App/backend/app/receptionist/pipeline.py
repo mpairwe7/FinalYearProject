@@ -139,12 +139,15 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
                 exc,
             )
 
+    from .hold_gate import OfficerOutputGate
+
     transport = build_transport(room, websocket)
     processors, assistant_aggregator, brain = build_cascaded_branch(room, speech_model, chat_model)
     pipeline = Pipeline([
         transport.input(),
         CallerAudioTap(room=room),
         *processors,
+        OfficerOutputGate(room),
         transport.output(),
         assistant_aggregator,
     ])

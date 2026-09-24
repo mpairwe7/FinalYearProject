@@ -90,9 +90,13 @@ class CallerAudioTap(FrameProcessor):
         self.room = room
 
     async def process_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM) -> None:
-        if isinstance(frame, InputAudioRawFrame):
-            if self.room.state.mode == "bridged" and self.room.officer is not None:
+        if isinstance(frame, InputAudioRawFrame) and self.room.state.mode == "bridged":
+            # The caller is talking to the officer now: their audio goes to the
+            # officer only. Passed on, it reached Gemini, which answered the
+            # caller over the officer.
+            if self.room.officer is not None:
                 self.room.officer.send_caller_audio(frame.audio)
+            return
 
         await self.push_frame(frame, direction)
 

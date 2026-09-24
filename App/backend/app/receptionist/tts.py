@@ -39,6 +39,39 @@ except ImportError:
     TTSSettings = None
 
 
+def decode_to_pcm16(speech_model: Any, audio: bytes) -> bytes:
+    """Synthesised audio (any container) as 16 kHz mono PCM16 — what the caller's player takes."""
+    samples = speech_model._decode_audio_bytes(audio, target_sr=16000)
+    if len(samples) == 0:
+        return b""
+    return (np.asarray(samples) * 32767).clip(-32768, 32767).astype(np.int16).tobytes()
+
+
+def synthesize_pcm16(speech_model: Any, text: str, language: str, voice: str | None = None) -> bytes:
+    """A line spoken outside the pipeline (an officer joining or closing the call). Blocking.
+
+    Empty when synthesis fails, or when the only voice for Luganda is the
+    English stand-in and that is not allowed — the caption still goes out.
+    """
+    if speech_model is None or not text:
+        return b""
+    try:
+        res = speech_model.synthesize(text, voice=voice or get_tts_voice(), language=language)
+    except Exception:
+        logger.exception("Synthesis failed for a line outside the pipeline")
+        return b""
+    if not res or not res.audio:
+        return b""
+    backend = str(getattr(res, "backend", "") or "")
+    if language == "lg" and backend.startswith("edge") and not allow_edge_standin_lg():
+        return b""
+    try:
+        return decode_to_pcm16(speech_model, res.audio)
+    except Exception:
+        logger.exception("Failed decoding a line outside the pipeline to PCM16")
+        return b""
+
+
 class UraSpeechTTS(TTSService):
     """TTS service adapter that calls SpeechModel.synthesize in thread pool.
 
@@ -118,13 +151,11 @@ class UraSpeechTTS(TTSService):
             logger.warning("Dropping English stand-in voice for a Luganda line (%s)", backend)
             return
 
-        # Decode audio bytes into float32 samples at 16000Hz
+        # Decode audio bytes into PCM16 at 16000Hz
         try:
-            samples = self.speech_model._decode_audio_bytes(res.audio, target_sr=16000)
-            if len(samples) == 0:
+            pcm_bytes = decode_to_pcm16(self.speech_model, res.audio)
+            if not pcm_bytes:
                 return
-            pcm_i16 = (np.asarray(samples) * 32767).clip(-32768, 32767).astype(np.int16)
-            pcm_bytes = pcm_i16.tobytes()
         except Exception:
             logger.exception("Failed decoding synthesized audio to PCM16")
             return

@@ -50,6 +50,12 @@ class CallState:
     latencies: list[dict[str, float]] = field(default_factory=list)
     officer_name: str | None = None
     officer_id: str | None = None
+    # Call Desk: the officer holding the call (claimed, not yet connected or
+    # connected), and when their audio joined.
+    claimed_by: str = ""
+    claimed_name: str = ""  # "Officer Nakato" — from the claimant's token, not their id
+    claimed_at: float | None = None
+    bridged_at: float | None = None
     transfer_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
     # the language the call is in *now*; these record how it got there.
@@ -80,6 +86,10 @@ class CallRoom:
         self.officer: Any | None = None
         self.worker: Any | None = None
         self.lock = asyncio.Lock()
+        # Every officer action on this call (claim, release, join, end) runs
+        # under this lock; the claim itself is also atomic in the database.
+        self.desk_lock = asyncio.Lock()
+        self.claim_timer: asyncio.Task[None] | None = None
         self.end_event = asyncio.Event()
 
     async def end(self, reason: str = "normal") -> None:

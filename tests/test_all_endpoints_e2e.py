@@ -168,6 +168,10 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/calls/metrics"),
     ("GET", "/v1/admin/calls/{call_id}"),
     ("POST", "/v1/admin/calls/{call_id}/review"),
+    ("GET", "/v1/admin/calls/{call_id}/brief"),
+    ("POST", "/v1/admin/calls/{call_id}/claim"),
+    ("POST", "/v1/admin/calls/{call_id}/release"),
+    ("POST", "/v1/admin/calls/{call_id}/end"),
     # --- WebSocket ---
     ("WS", "/v1/voice/chat/stream"),
     ("WS", "/v2/chat/stream"),
@@ -255,6 +259,10 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
     ("POST", "/v1/admin/calls/{call_id}/review"): "App.backend.tests.test_receptionist_ws",
+    ("GET", "/v1/admin/calls/{call_id}/brief"): "App.backend.tests.test_receptionist_brief",
+    ("POST", "/v1/admin/calls/{call_id}/claim"): "App.backend.tests.test_receptionist_claims",
+    ("POST", "/v1/admin/calls/{call_id}/release"): "App.backend.tests.test_receptionist_claims",
+    ("POST", "/v1/admin/calls/{call_id}/end"): "App.backend.tests.test_receptionist_claims",
     ("WS", "/v1/voice/chat/stream"): "test_voice_ws_hardening",
     ("WS", "/v2/chat/stream"): "test_chat_ws_lifecycle",
     ("WS", "/v2/voice/chat/stream"): "test_native_voice",
@@ -389,10 +397,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (74 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (78 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 74, f"expected 74 HTTP endpoints, found {len(http)}"
+    assert len(http) == 78, f"expected 78 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

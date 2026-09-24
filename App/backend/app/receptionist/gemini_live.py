@@ -742,6 +742,8 @@ def build_gemini_live_pipeline(
     )
     transport = FastAPIWebsocketTransport(websocket, transport_params)
 
+    from .hold_gate import OfficerOutputGate
+
     caller_tap = CallerAudioTap(room=room)
     transcript_tap = GeminiLiveTranscriptTap(room=room)
 
@@ -753,6 +755,7 @@ def build_gemini_live_pipeline(
         OfficerRequestBridge(),
         gemini_live_service,
         transcript_tap,
+        OfficerOutputGate(room),
         transport.output(),
         context_aggregator.assistant(),
     ]

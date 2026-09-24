@@ -52,6 +52,19 @@ except ImportError:  # pragma: no cover — the gate only exists inside a Pipeca
     FrameProcessor = object  # type: ignore[assignment,misc]
 
 
+def is_reply_frame(frame: Frame) -> bool:
+    """The assistant's reply itself: its audio, its text, its start/end markers, its captions.
+
+    Nothing else counts. In particular the transcript tap's "user is speaking"
+    notice, which Gemini triggers the moment it hears the caller, used to
+    start the hold gate's clock with no reply in sight.
+    """
+    if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
+        message = frame.message if isinstance(frame.message, dict) else {}
+        return message.get("type") == "caption"
+    return isinstance(frame, _REPLY_FRAMES)
+
+
 class OutputHoldGate(FrameProcessor):  # type: ignore[misc,valid-type]
     """Buffers downstream frames while held. See the module docstring."""
 
@@ -125,7 +138,7 @@ class OutputHoldGate(FrameProcessor):  # type: ignore[misc,valid-type]
             self._buffer = []
             self._cancel_timer()
             self._first_held_at = None
-        elif (self._holding or self._flushing) and direction == FrameDirection.DOWNSTREAM and self._holdable(frame):
+        elif (self._holding or self._flushing) and direction == FrameDirection.DOWNSTREAM and is_reply_frame(frame):
             if self._holding and not self._buffer:
                 self._first_held_at = time.monotonic()
                 if not self._pinned:
@@ -134,19 +147,6 @@ class OutputHoldGate(FrameProcessor):  # type: ignore[misc,valid-type]
             return
 
         await self.push_frame(frame, direction)
-
-    @staticmethod
-    def _holdable(frame: Frame) -> bool:
-        """The reply itself: its audio, its text, its start/end markers, its captions.
-
-        Nothing else waits. In particular the transcript tap's "user is
-        speaking" notice, which Gemini triggers the moment it hears the caller,
-        used to start the hold's clock with no reply in sight.
-        """
-        if isinstance(frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)):
-            message = frame.message if isinstance(frame.message, dict) else {}
-            return message.get("type") == "caption"
-        return isinstance(frame, _REPLY_FRAMES)
 
     async def _release_after_timeout(self) -> None:
         try:
@@ -229,3 +229,28 @@ class InterruptedReplyMute(FrameProcessor):  # type: ignore[misc,valid-type]
                 self._muted_since = None
                 return True  # the end of the reply that was cut off
         return self._muted_since is not None and isinstance(frame, _REPLY_FRAMES)
+
+
+class OfficerOutputGate(FrameProcessor):  # type: ignore[misc,valid-type]
+    """Keeps the AI silent while an officer has the call.
+
+    Sits just before the transport's output in every pipeline. Once an officer
+    is bridged the caller talks to them — their audio and captions go straight
+    to the caller's socket, not through here — and anything the AI still says
+    (a reply it was halfway through when the officer joined) is dropped.
+    Everything that is not a reply passes: lifecycle, interruptions, status.
+    """
+
+    def __init__(self, room: Any, **kwargs: Any) -> None:
+        super().__init__(enable_direct_mode=True, **kwargs)
+        self.room = room
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if (
+            direction == FrameDirection.DOWNSTREAM
+            and self.room.state.mode == "bridged"
+            and is_reply_frame(frame)
+        ):
+            return
+        await self.push_frame(frame, direction)

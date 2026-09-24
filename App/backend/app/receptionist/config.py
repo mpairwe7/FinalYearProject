@@ -234,6 +234,21 @@ def get_turn_timeout_s() -> float:
     return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
 
 
+def get_brief_every_turns() -> int:
+    """Caller turns between rolling rebuilds of the officer's brief."""
+    return max(1, _env_int("RECEPTIONIST_BRIEF_EVERY_TURNS", 3))
+
+
+def get_brief_model() -> str:
+    """Gemini model that writes the officer's brief for English and Swahili calls."""
+    return os.getenv("RECEPTIONIST_BRIEF_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
+
+
+def get_claim_timeout_s() -> float:
+    """How long an officer's claim holds a call before their audio connects."""
+    return max(1.0, _env_float("RECEPTIONIST_CLAIM_TIMEOUT_S", 20.0))
+
+
 def local_barge_in_enabled() -> bool:
     """Whether the call's own VAD stops Gemini when the caller talks over it.
 

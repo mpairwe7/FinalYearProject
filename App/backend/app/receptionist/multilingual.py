@@ -148,7 +148,7 @@ def build_multilingual_pipeline(
         OfficerRequestBridge,
         build_gemini_live_service,
     )
-    from .hold_gate import InterruptedReplyMute, OutputHoldGate
+    from .hold_gate import InterruptedReplyMute, OfficerOutputGate, OutputHoldGate
     from .pipeline import build_cascaded_branch, build_transport
     from .sentinel import LanguageSentinel
 
@@ -230,6 +230,7 @@ def build_multilingual_pipeline(
         sentinel,
         ParallelPipeline(*branches),
         outlet,
+        OfficerOutputGate(room),
         transport.output(),
     ])
     task = PipelineTask(

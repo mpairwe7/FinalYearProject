@@ -3065,6 +3065,123 @@ def review_call_endpoint(
     return {"ok": ok, "call_id": call_id, "rating": rating}
 
 
+# -- Officer Call Desk (docs/plans/officer-call-desk-plan.md §6.2–6.3) -------
+# Per-call routes, staff-only and audited; the lobby channel never carries
+# what these return.
+
+_CALL_ID_RE = r"^[a-zA-Z0-9_-]{1,64}$"
+
+
+def _desk_call_id(call_id: str) -> str:
+    import re
+    if not re.match(_CALL_ID_RE, call_id):
+        raise HTTPException(status_code=400, detail="Invalid call_id format")
+    return call_id
+
+
+def _desk_writer(ctx: AuthContext) -> None:
+    """Auditors see every call but take, hold and end none."""
+    if ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="Read-only role")
+
+
+def _desk_officer_name(ctx: AuthContext) -> str:
+    """The claimant as a caller will hear them: name, username or email — never a bare ``sub``."""
+    from .receptionist.desk import officer_display_name
+    claims = ctx.claims or {}
+    handle = (
+        str(claims.get("given_name") or "").strip()
+        or str(claims.get("preferred_username") or "").strip()
+        or (ctx.user.email if ctx.user else "")
+        or ctx.user_id
+    )
+    return officer_display_name(handle)
+
+
+def _desk_error(exc: Any) -> Response:
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=exc.status, content={"detail": exc.detail, **exc.extra})
+
+
+@app.get("/v1/admin/calls/{call_id}/brief", tags=["admin"])
+async def get_call_brief_endpoint(
+    call_id: str,
+    refresh: bool = False,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """The officer's brief for a call; 202 while the first one is being written."""
+    from fastapi.responses import JSONResponse
+
+    from .receptionist import brief as call_brief
+    from .receptionist.store import get_call
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    call = get_call(call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_brief",
+                    tenant_id=ctx.tenant_id or "default")
+    if refresh:
+        brief = await asyncio.to_thread(call_brief.build_brief, call_id, force=True)
+        if brief:
+            call_brief.publish_brief(call_id, brief)
+            return brief
+    elif call.get("brief"):
+        return call["brief"]
+    call_brief.build_now(call_id)
+    return JSONResponse(status_code=202, content={"status": "building"})
+
+
+@app.post("/v1/admin/calls/{call_id}/claim", tags=["admin"])
+async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
+    """Take a waiting call (or one the AI is handling): first officer wins, the rest get 409."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    try:
+        result = await desk.claim(call_id, ctx.user_id, chat_model=getattr(app.state, "model", None),
+                                  officer_name=_desk_officer_name(ctx))
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_claimed",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/release", tags=["admin"])
+async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
+    """Give a claimed call back to the waiting queue before joining it."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    try:
+        result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_released",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/end", tags=["admin"])
+async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
+    """The officer ends the call: the caller hears a closing line and is hung up."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    try:
+        result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None),
+                                is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_ended_call",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
 @app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)
 def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevTokenRequest)) -> DevTokenResponse:
     """Mint a development/prototype token for staff or taxpayer access.

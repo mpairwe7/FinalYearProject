@@ -22,6 +22,7 @@ import logging
 import time
 from typing import Any
 
+from . import brief as call_brief
 from .hub import hub
 from .store import update_call
 
@@ -120,6 +121,9 @@ def open_transfer(
     )
     status_event = {"type": "status", "status": "transferring", "ticket_ref": tid}
     hub.publish_call(room.call_id, "status", status_event)
+    # The officer who takes it reads the brief first; it is usually fresh
+    # already (rolling), and this brings it up to the transfer itself.
+    call_brief.build_now(room.call_id)
     return tid, status_event
 
 

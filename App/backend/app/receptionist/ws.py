@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
-from .. import database as db
 from ..auth import AuthContext, require_role
 from ..chat_ws_v2 import _resolve_ws_principal
 
@@ -21,6 +20,8 @@ require_admin_access = require_role("ura_staff", "ura_admin", "ura_auditor")
 from ..flags import flags
 from ..voice_consent import log_voice_event, require_voice_consent
 from ..ws_concurrency import is_ws_origin_allowed, release, try_acquire
+from . import brief as call_brief
+from . import desk
 from .brain import UraReceptionistBrain
 from ..query import SUPPORTED_LOCALES
 from .config import get_default_language, get_languages, get_max_call_s
@@ -35,7 +36,6 @@ from .store import (
     get_call_with_turns,
     list_calls,
     save_call_review,
-    update_call,
 )
 from .summary import generate_call_summary
 
@@ -157,6 +157,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         )
 
         log_voice_event(user_id=user_id or "", session_id=call_id, event_type="call_started", tenant_id=tenant_id or "default")
+        call_brief.start(call_id)
         hub.publish_lobby(
             "call.started",
             {
@@ -230,6 +231,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         logger.exception("Error in call stream: %s", call_id)
     finally:
         if room:
+            call_brief.stop(call_id)
             await room.end("caller_hangup")
             record_call_end_metrics(call_id, room.state)
             asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
@@ -256,6 +258,11 @@ async def staff_calls_stream_endpoint(
     call_id: str | None = Query(None),
 ) -> None:
     """Staff WebSocket (/v1/admin/calls/stream): lobby or per-call live mode."""
+    # No phone calls on this deployment: 1001 tells the console to hide its
+    # call layer for the session instead of retrying.
+    if not flags.is_enabled("voice_receptionist"):
+        await websocket.close(code=1001)
+        return
     try:
         user_id, tenant_id, role, _ = _resolve_ws_principal(websocket, required=True)
     except Exception:
@@ -328,14 +335,19 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         await websocket.close(code=4404 if not room else 4400)
         return
 
-    if room.officer is not None:
+    # Only the officer who claimed the call (POST …/claim) may join it; that
+    # is what keeps it to one officer when two press "Take call" together.
+    if room.officer is not None or room.state.claimed_by != user_id:
+        # Accept first: a close before the handshake is an HTTP 403, which a
+        # browser reports as 1006 — the officer would see "could not connect"
+        # instead of "another officer has this call".
+        await websocket.accept()
         await websocket.close(code=4409)
         return
 
     await websocket.accept()
 
-    officer_handle = user_id.split("@")[0].capitalize()
-    officer_name = f"Officer {officer_handle}"
+    officer_name = room.state.claimed_name or desk.officer_display_name(user_id)
     speech_model = None
     try:
         from ..main import app
@@ -351,32 +363,8 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         speech_model=speech_model,
     )
 
-    room.officer = officer_leg
-    room.state.mode = "bridged"
-    room.state.officer_id = user_id
-    room.state.officer_name = officer_name
-
-    update_call(call_id, status="bridged", officer_id=user_id)
-    if room.state.ticket_id:
-        try:
-            db.update_ticket(room.state.ticket_id, status="assigned", assignee=user_id)
-        except Exception:
-            pass
-
-    # Send caller bridged status (plays join chime)
-    status_event = {
-        "type": "status",
-        "status": "bridged",
-        "officer_name": officer_name,
-    }
-    if room.caller_ws:
-        try:
-            await room.caller_ws.send_text(json.dumps(status_event))
-        except Exception:
-            pass
-
-    hub.publish_lobby("call.bridged", {"call_id": call_id, "status": "bridged", "officer_name": officer_name})
-    hub.publish_call(call_id, "status", status_event)
+    # The AI goes quiet, the caller hears who joined, then the bridge opens.
+    await desk.bridge(room, officer_leg, user_id, speech_model)
     log_voice_event(user_id=user_id or "", session_id=call_id, event_type="officer_joined", tenant_id=tenant_id or "default")
 
     officer_leg.start()
@@ -396,7 +384,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         await officer_leg.close()
         room.officer = None
         if room.state.mode == "bridged":
-            await room.end("officer_hangup")
+            # The officer's connection went without an End: the caller must not
+            # be left on a silent line. (A grace period to rejoin: Phase 2.)
+            await desk.hang_up_caller(room, "officer_hangup")
 
 
 # ---------------------------------------------------------------------------
