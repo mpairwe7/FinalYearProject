@@ -261,3 +261,377 @@
   0%, 100% { transform: scale(1); opacity: 1; }
   50% { transform: scale(1.05); opacity: 0.85; }
 }
+
+/* ══ Call Desk (docs/plans/officer-call-desk-plan.md §3.2–3.3, §9) ═══════════
+   Queue, workspace and brief. Ops tokens only; colour carries state. */
+
+.calls-hints kbd {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-2xs);
+}
+
+.calls-row-ticket {
+  color: var(--ops-info-ink);
+  font-weight: var(--ops-weight-medium);
+}
+
+/* Performance tab — the layout the page used to set inline. */
+.calls-perf {
+  display: grid;
+  gap: var(--ops-space-5);
+}
+
+.calls-perf-gauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--ops-space-4);
+}
+
+.calls-perf-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--ops-space-4);
+}
+
+.calls-history-list {
+  max-height: calc(100dvh - var(--ops-nav-h) - 140px);
+  overflow-y: auto;
+}
+
+/* ── Queue ───────────────────────────────────────────────────────────── */
+
+.cq {
+  display: grid;
+  gap: var(--ops-space-4);
+  max-height: calc(100dvh - var(--ops-nav-h) - 140px);
+  overflow-y: auto;
+}
+
+.cq-heading {
+  margin: 0 0 var(--ops-space-1);
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  text-transform: uppercase;
+  letter-spacing: var(--ops-tracking-meta, 0.04em);
+}
+
+.cq-count {
+  font-family: var(--ops-font-mono);
+  opacity: 0.7;
+}
+
+.cq-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--ops-space-1);
+}
+
+.cq-item {
+  width: 100%;
+  display: grid;
+  gap: 0.2rem;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--ops-row, transparent);
+  border: 1px solid transparent;
+  border-radius: var(--ops-radius-sm);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  cursor: pointer;
+}
+
+.cq-item:hover {
+  background: var(--ops-row-hover, var(--ops-hairline));
+}
+
+.cq-item.is-selected {
+  background: var(--ops-row-active, var(--ops-hairline));
+  border-color: var(--ops-line);
+}
+
+.cq-item:focus-visible {
+  outline: 2px solid var(--ops-focus);
+  outline-offset: 1px;
+}
+
+.cq-item-head,
+.cq-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+}
+
+.cq-time,
+.cq-id {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.cq-topic {
+  font-weight: var(--ops-weight-semi);
+}
+
+.cq-chip {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-2xs);
+  text-transform: uppercase;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid transparent;
+}
+
+.cq-chip--bad {
+  color: var(--ops-bad-ink);
+  background: var(--ops-bad-fill);
+  border-color: var(--ops-bad-line);
+}
+.cq-chip--good {
+  color: var(--ops-good-ink);
+  background: var(--ops-good-fill);
+  border-color: var(--ops-good-line);
+}
+.cq-chip--warn {
+  color: var(--ops-warn-ink);
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+}
+.cq-chip--info {
+  color: var(--ops-info-ink);
+  background: var(--ops-info-fill);
+  border-color: var(--ops-info-line);
+}
+
+/* A waiting caller's dot pulses — the dot, never the row. */
+.cq-item--waiting .cq-chip--bad::before {
+  content: '';
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.3rem;
+  border-radius: 50%;
+  background: var(--ops-bad);
+  animation: cq-pulse 2s ease-in-out infinite;
+}
+
+@keyframes cq-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ── Workspace ───────────────────────────────────────────────────────── */
+
+.cw {
+  display: grid;
+  gap: var(--ops-space-4);
+  align-content: start;
+}
+
+.cw-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--ops-space-3);
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.cw-head-main,
+.cw-head-meta,
+.cw-levels,
+.cw-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+}
+
+.cw-title {
+  font-size: var(--ops-text-lg);
+  font-weight: var(--ops-weight-semi);
+}
+
+.cw--waiting .cw-title {
+  color: var(--ops-bad-ink);
+}
+
+.cw--mine .cw-title {
+  color: var(--ops-good-ink);
+}
+
+.cw-clock {
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.cw-levels {
+  font-size: var(--ops-text-xs);
+}
+
+.cw-ticket {
+  color: var(--ops-info-ink);
+  font-weight: var(--ops-weight-medium);
+}
+
+.cw-error {
+  color: var(--ops-bad-ink);
+  font-size: var(--ops-text-sm);
+}
+
+.cw-transcript {
+  display: flex;
+  flex-direction: column;
+  min-height: 16rem;
+  max-height: 55vh;
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-md);
+}
+
+.cw-controls {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+  padding: var(--ops-space-3) 0 0;
+  background: var(--ops-panel);
+  border-top: 1px solid var(--ops-hairline);
+}
+
+.cw-controls-spacer {
+  flex: 1;
+}
+
+.cw-ended {
+  display: grid;
+  gap: var(--ops-space-3);
+}
+
+/* ── Brief ───────────────────────────────────────────────────────────── */
+
+.cb-card {
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  background: var(--ops-panel);
+}
+
+.cb-card--pending {
+  font-size: var(--ops-text-sm);
+}
+
+.cb-card--compact {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+}
+
+.cb-rows {
+  margin: 0;
+  display: grid;
+  gap: var(--ops-space-2);
+}
+
+.cb-row {
+  display: grid;
+  grid-template-columns: 9.5rem 1fr;
+  gap: var(--ops-space-3);
+  align-items: baseline;
+}
+
+.cb-label {
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  text-transform: uppercase;
+  letter-spacing: var(--ops-tracking-meta, 0.04em);
+}
+
+.cb-value {
+  margin: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.cb-card--compact .cb-value {
+  display: block;
+  flex: 1;
+}
+
+.cb-opener {
+  font-style: italic;
+}
+
+.cb-evidence {
+  display: inline-flex;
+  gap: 0.2rem;
+}
+
+.cb-ev {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-2xs);
+  color: var(--ops-info-ink);
+  background: var(--ops-info-fill);
+  border: 1px solid var(--ops-info-line);
+  border-radius: var(--ops-radius-pill);
+  padding: 0 0.35rem;
+  cursor: pointer;
+}
+
+.cb-ev:focus-visible {
+  outline: 2px solid var(--ops-focus);
+}
+
+.cb-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+  margin-top: var(--ops-space-3);
+  padding-top: var(--ops-space-2);
+  border-top: 1px solid var(--ops-hairline);
+  font-size: var(--ops-text-xs);
+}
+
+.cb-foot-actions {
+  display: inline-flex;
+  gap: var(--ops-space-1);
+}
+
+/* ── Transcript additions ────────────────────────────────────────────── */
+
+.st-bubble-time {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-2xs);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+/* The brief's evidence link points here. */
+.st-bubble-wrap.is-flash .st-bubble {
+  background: var(--ops-info-fill);
+  outline: 2px solid var(--ops-info-line);
+  transition: background 1.2s ease-out;
+}
+
+@media (max-width: 1100px) {
+  .cb-row {
+    grid-template-columns: 1fr;
+    gap: 0.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cq-item--waiting .cq-chip--bad::before {
+    animation: none;
+  }
+  .st-bubble-wrap.is-flash .st-bubble {
+    transition: none;
+  }
+}

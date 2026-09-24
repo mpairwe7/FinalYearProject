@@ -79,7 +79,7 @@ export function CallRow({ call, isSelected, onSelect }: CallRowProps) {
       <div className="ag-row-meta">
         <span>ID: {call.call_id.slice(0, 10)}</span>
         {call.ticket_id && (
-          <span style={{ color: '#2563eb', fontWeight: 500 }}>Ticket #{call.ticket_id.slice(0, 8)}</span>
+          <span className="calls-row-ticket">Ticket #{call.ticket_id.slice(0, 8)}</span>
         )}
       </div>
     </div>

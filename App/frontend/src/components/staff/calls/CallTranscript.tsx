@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { CallTurn } from '@/services/callsApi';
+import { formatClock } from '@/hooks/useNow';
 
 interface CallTranscriptProps {
   turns: CallTurn[];
   interimCaption?: { speaker: string; text: string } | null;
+  /** Call start, for "0:42" stamps on each turn. */
+  startedAt?: number;
+  /** A turn to highlight briefly — the brief's evidence link just pointed at it. */
+  flashSeq?: number | null;
 }
 
 function renderTextWithConfidenceMarks(text: string, lowConfWords?: Array<{ word: string; prob: number }>) {
@@ -40,7 +45,7 @@ function renderTextWithConfidenceMarks(text: string, lowConfWords?: Array<{ word
   });
 }
 
-export function CallTranscript({ turns, interimCaption }: CallTranscriptProps) {
+export function CallTranscript({ turns, interimCaption, startedAt, flashSeq = null }: CallTranscriptProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
@@ -81,7 +86,7 @@ export function CallTranscript({ turns, interimCaption }: CallTranscriptProps) {
           if (turn.kind === 'language') {
             // A language lock or switch: a marker between turns, not a bubble.
             return (
-              <div key={turn.id || turn.seq} className="st-language-note" role="note">
+              <div key={turn.id || turn.seq} id={`turn-${turn.seq}`} className="st-language-note" role="note">
                 {turn.text}
               </div>
             );
@@ -102,12 +107,18 @@ export function CallTranscript({ turns, interimCaption }: CallTranscriptProps) {
           return (
             <div
               key={turn.id || turn.seq}
-              className={`st-bubble-wrap ${isCaller ? 'st-bubble-wrap--caller' : ''}`}
+              id={`turn-${turn.seq}`}
+              className={`st-bubble-wrap ${isCaller ? 'st-bubble-wrap--caller' : ''}${
+                flashSeq === turn.seq ? ' is-flash' : ''
+              }`}
             >
               <div className="st-bubble-header">
                 <span className="st-bubble-author">
                   {isCaller ? 'Caller' : isOfficer ? 'Officer' : isAssistant ? 'AI Assistant' : 'System'}
                 </span>
+                {startedAt !== undefined && (
+                  <span className="st-bubble-time">{formatClock(turn.created_at - startedAt)}</span>
+                )}
                 {isClarify && <span className="st-chip st-chip--clarify">Clarification</span>}
                 {turn.mean_word_prob !== null && isCaller && (
                   <span className="st-bubble-meta">

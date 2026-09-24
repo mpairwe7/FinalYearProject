@@ -74,10 +74,55 @@ export interface CallRecord {
   brief_json?: string | null;
   brief_updated_at?: number | null;
   risk_json?: string | null;
+  /** The officer's brief, when one has been written (per-call routes only). */
+  brief?: CallBrief | null;
   summary?: CallSummary;
   metrics?: Record<string, unknown>;
   turns?: CallTurn[];
   ticket?: Record<string, unknown>;
+}
+
+/** One claim in an officer's brief, with the transcript turns it rests on. */
+export interface BriefClaim {
+  text: string;
+  turn_seqs: number[];
+}
+
+/** The officer's brief (docs/plans/officer-call-desk-plan.md §6.2). Always English. */
+export interface CallBrief {
+  why_officer: BriefClaim | null;
+  caller_goal: BriefClaim;
+  ai_already_said: BriefClaim[];
+  still_open: BriefClaim[];
+  details_given: Array<{ label: string; value: string; turn_seqs: number[] }>;
+  sentiment: 'calm' | 'confused' | 'frustrated' | 'distressed';
+  topic: string;
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  suggested_opener: string;
+  language: string;
+  turns_covered: number;
+  generated_at: number;
+  model: string;
+  fallback: boolean;
+}
+
+export interface ClaimResult {
+  claimed: boolean;
+  call_id: string;
+  officer_name: string;
+  claim_expires_at: number;
+}
+
+/** Someone else already has the call. */
+export class ClaimConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly claimedBy: string,
+    public readonly officerName: string,
+  ) {
+    super(message);
+    this.name = 'ClaimConflictError';
+  }
 }
 
 export interface CallAggregates {
@@ -114,6 +159,27 @@ async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
+/** A Call Desk action: a 409 comes back as the typed conflict, not a bare error. */
+async function deskAction<T>(callId: string, action: string): Promise<T> {
+  const res = await fetch(`${BASE}/v1/admin/calls/${encodeURIComponent(callId)}/${action}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(15000),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (res.status === 409) {
+    throw new ClaimConflictError(
+      String(body.detail || 'Another officer has this call'),
+      String(body.claimed_by || ''),
+      String(body.officer_name || ''),
+    );
+  }
+  if (!res.ok) {
+    throw new Error(String(body.detail || `${res.status} ${res.statusText}`));
+  }
+  return body as T;
+}
+
 export const callsApi = {
   listCalls: (status = 'all', limit = 50, offset = 0) =>
     fetchJson<{ calls: CallRecord[]; count: number }>(
@@ -135,4 +201,19 @@ export const callsApi = {
         body: JSON.stringify({ rating, note }),
       },
     ),
+
+  /** The brief, or `null` while the first one is being written (202). */
+  getBrief: async (callId: string, refresh = false): Promise<CallBrief | null> => {
+    const res = await fetch(
+      `${BASE}/v1/admin/calls/${encodeURIComponent(callId)}/brief${refresh ? '?refresh=1' : ''}`,
+      { headers: authHeaders(), signal: AbortSignal.timeout(20000) },
+    );
+    if (res.status === 202) return null;
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+  },
+
+  claimCall: (callId: string) => deskAction<ClaimResult>(callId, 'claim'),
+  releaseCall: (callId: string) => deskAction<{ released: boolean }>(callId, 'release'),
+  endCall: (callId: string) => deskAction<{ ended: boolean }>(callId, 'end'),
 };

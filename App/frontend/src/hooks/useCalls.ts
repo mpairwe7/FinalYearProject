@@ -2,18 +2,16 @@
  * TanStack Query hooks and WebSocket streaming for staff Calls page.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/queryKeys';
 import {
   callsApi,
+  CallBrief,
   CallRecord,
   CallTurn,
 } from '@/services/callsApi';
-import { callTopicLabel } from '@/lib/callTopic';
 import { appendAuthToken } from '@/lib/authSession';
-import { AudioRecorder } from '@/services/voiceService';
-import { PCMPlayer } from '@/services/pcmPlayer';
 
 // ---------------------------------------------------------------------------
 // 1. REST Query Hooks
@@ -56,86 +54,18 @@ export function useReviewCall() {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Staff Lobby Stream (Live Events)
+// 2. Per-Call Live Stream (transcript, status, brief)
 // ---------------------------------------------------------------------------
-
-export function useCallsLobby() {
-  const queryClient = useQueryClient();
-  const [liveBanner, setLiveBanner] = useState<{
-    callId: string;
-    topic: string;
-    reason: string;
-    ticketId?: string;
-    language?: string;
-    priority?: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const url = appendAuthToken(`${protocol}//${host}/api/v1/admin/calls/stream`);
-
-    let ws: WebSocket | null = null;
-
-    try {
-      ws = new WebSocket(url);
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (
-            payload.type === 'call.started' ||
-            payload.type === 'call.ended' ||
-            payload.type === 'call.bridged' ||
-            payload.type === 'call.language'
-          ) {
-            queryClient.invalidateQueries({ queryKey: queryKeys.calls.all() });
-          }
-          if (payload.type === 'call.transfer_requested') {
-            queryClient.invalidateQueries({ queryKey: queryKeys.calls.all() });
-            setLiveBanner({
-              callId: payload.data?.call_id,
-              topic: callTopicLabel(payload.data?.topic) || 'General tax support',
-              reason: payload.data?.reason || 'Transfer requested',
-              ticketId: payload.data?.ticket_ref || undefined,
-              language: typeof payload.data?.language === 'string' ? payload.data.language : undefined,
-              priority: typeof payload.data?.priority === 'string' ? payload.data.priority : undefined,
-            });
-          }
-          if (payload.type === 'call.transfer_timed_out') {
-            // Nobody answered: the call is back with the AI and owed a callback.
-            queryClient.invalidateQueries({ queryKey: queryKeys.calls.all() });
-            setLiveBanner((b) => (b && b.callId === payload.data?.call_id ? null : b));
-          }
-        } catch {}
-      };
-
-      ws.onerror = () => {
-        // Fallback polling already covered by refetchInterval on useCalls
-      };
-    } catch {}
-
-    return () => {
-      if (ws) {
-        try {
-          ws.close();
-        } catch {}
-      }
-    };
-  }, [queryClient]);
-
-  return { liveBanner, clearBanner: () => setLiveBanner(null) };
-}
-
-// ---------------------------------------------------------------------------
-// 3. Per-Call Live Stream (Transcript & State Deltas)
-// ---------------------------------------------------------------------------
+//
+// The lobby (every live call's metadata) and the officer's own audio live
+// outside React now — services/callLobbySocket.ts and
+// services/officerCallSession.ts — so they survive page navigation.
 
 export function useCallLive(callId?: string | null) {
   const [call, setCall] = useState<CallRecord | null>(null);
   const [turns, setTurns] = useState<CallTurn[]>([]);
   const [interimCaption, setInterimCaption] = useState<{ speaker: string; text: string } | null>(null);
+  const [brief, setBrief] = useState<CallBrief | null>(null);
 
   useEffect(() => {
     if (!callId || typeof window === 'undefined') {
@@ -156,6 +86,9 @@ export function useCallLive(callId?: string | null) {
           if (msg.type === 'snapshot') {
             setCall(msg.call || null);
             setTurns(msg.turns || []);
+            setBrief(msg.call?.brief || null);
+          } else if (msg.type === 'brief') {
+            setBrief(msg.data || null);
           } else if (msg.type === 'turn') {
             setTurns((prev) => [...prev, msg.data]);
             setInterimCaption(null);
@@ -174,6 +107,7 @@ export function useCallLive(callId?: string | null) {
       setCall(null);
       setTurns([]);
       setInterimCaption(null);
+      setBrief(null);
       if (ws) {
         try {
           ws.close();
@@ -186,117 +120,35 @@ export function useCallLive(callId?: string | null) {
     call: callId ? call : null,
     turns: callId ? turns : [],
     interimCaption: callId ? interimCaption : null,
+    brief: callId ? brief : null,
   };
 }
 
 // ---------------------------------------------------------------------------
-// 4. Officer Audio Bridge Hook
+// 3. The officer's brief
 // ---------------------------------------------------------------------------
 
-export function useOfficerAudio(callId?: string | null) {
-  const [isBridged, setIsBridged] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const wsRef = useRef<WebSocket | null>(null);
-  const playerRef = useRef<PCMPlayer | null>(null);
-  const micCleanupRef = useRef<(() => void) | null>(null);
-  const isMutedRef = useRef(isMuted);
-
-  useEffect(() => {
-    isMutedRef.current = isMuted;
-  }, [isMuted]);
-
-  const leaveAudio = () => {
-    if (micCleanupRef.current) {
-      micCleanupRef.current();
-      micCleanupRef.current = null;
-    }
-    if (playerRef.current) {
-      playerRef.current.close();
-      playerRef.current = null;
-    }
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch {}
-      wsRef.current = null;
-    }
-    setIsBridged(false);
-  };
-
-  const takeCall = async () => {
-    if (!callId || typeof window === 'undefined') return;
-
-    leaveAudio();
-    setError(null);
-
-    const player = new PCMPlayer(16000);
-    playerRef.current = player;
-    await player.init().catch(() => {});
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const url = appendAuthToken(`${protocol}//${host}/api/v1/admin/calls/${encodeURIComponent(callId)}/audio`);
-
-    try {
-      const ws = new WebSocket(url);
-      ws.binaryType = 'arraybuffer';
-      wsRef.current = ws;
-
-      ws.onopen = async () => {
-        setIsBridged(true);
-        // Start officer mic capture
-        try {
-          const recorder = new AudioRecorder();
-          const cleanup = await recorder.startStreaming(
-            (pcmChunk) => {
-              if (!isMutedRef.current && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(pcmChunk);
-              }
-            },
-            { echoCancellation: true, noiseSuppression: true },
-          );
-          micCleanupRef.current = cleanup;
-        } catch (_err: unknown) {
-          setError('Microphone access denied for officer');
-          leaveAudio();
-        }
-      };
-
-      ws.onmessage = (event) => {
-        if (event.data instanceof ArrayBuffer) {
-          // Caller audio chunk received -> play to officer headset
-          player.push(event.data);
-        }
-      };
-
-      ws.onerror = () => {
-        setError('Audio bridge connection failed');
-        leaveAudio();
-      };
-
-      ws.onclose = () => {
-        leaveAudio();
-      };
-    } catch (err: unknown) {
-      setError((err as Error)?.message || 'Failed opening audio bridge');
-      leaveAudio();
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      leaveAudio();
-    };
-  }, []);
-
-  return {
-    isBridged,
-    isMuted,
-    error,
-    takeCall,
-    leaveAudio,
-    toggleMute: () => setIsMuted((v) => !v),
-  };
+/**
+ * A call's brief: fetched once (the rolling one is usually there already),
+ * then kept current by the per-call socket's `brief` events (`live`).
+ * `refresh()` asks the server to rebuild it now.
+ */
+export function useCallBrief(callId: string | null, live: CallBrief | null) {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: callId ? queryKeys.calls.brief(callId) : ['calls', 'brief', 'none'],
+    queryFn: () => (callId ? callsApi.getBrief(callId) : Promise.resolve(null)),
+    enabled: Boolean(callId),
+    // 202 "building": look again shortly; the live event usually wins the race.
+    refetchInterval: (q) => (q.state.data === null ? 3000 : false),
+  });
+  const refresh = useMutation({
+    mutationFn: () => (callId ? callsApi.getBrief(callId, true) : Promise.resolve(null)),
+    onSuccess: (brief) => {
+      if (callId && brief) queryClient.setQueryData(queryKeys.calls.brief(callId), brief);
+    },
+  });
+  const fetched = query.data ?? null;
+  const brief = !live ? fetched : !fetched || live.generated_at >= fetched.generated_at ? live : fetched;
+  return { brief, loading: query.isLoading, refresh: () => refresh.mutate(), refreshing: refresh.isPending };
 }

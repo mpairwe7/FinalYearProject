@@ -1,0 +1,393 @@
+/* The console's call layer — call bar, transfer alerts, active-call dock,
+   device check (docs/plans/officer-call-desk-plan.md §3.1, §9). Ops tokens
+   only: flat panels, hairlines, colour for state. Both themes via tokens. */
+
+.cc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── Call bar ─────────────────────────────────────────────────────────── */
+
+.cc-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-4);
+  flex-wrap: wrap;
+  padding: var(--ops-space-2) var(--ops-gutter);
+  border-bottom: 1px solid var(--ops-hairline);
+  background: var(--ops-panel);
+  font-size: var(--ops-text-sm);
+}
+
+.cc-bar-group {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+}
+
+.cc-bar-group--end {
+  margin-left: auto;
+}
+
+.cc-availability {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+.cc-availability select {
+  font: inherit;
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-sm);
+  padding: 0.15rem 0.35rem;
+}
+
+.cc-count {
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
+  background: none;
+  border: 0;
+  color: inherit;
+  padding: 0;
+}
+
+.cc-count--waiting {
+  color: var(--ops-bad-ink);
+  background: var(--ops-bad-fill);
+  border: 1px solid var(--ops-bad-line);
+  border-radius: var(--ops-radius-pill);
+  padding: 0.1rem 0.6rem;
+  cursor: pointer;
+}
+
+.cc-state--on-call {
+  color: var(--ops-good-ink);
+  background: var(--ops-good-fill);
+  border: 1px solid var(--ops-good-line);
+  border-radius: var(--ops-radius-pill);
+  padding: 0.1rem 0.6rem;
+}
+
+.cc-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--ops-neutral, var(--ops-line));
+}
+
+.cc-dot--available,
+.cc-dot--bridged {
+  background: var(--ops-good);
+}
+.cc-dot--busy,
+.cc-dot--connecting,
+.cc-dot--ending {
+  background: var(--ops-warn);
+}
+.cc-dot--away {
+  background: var(--ops-line);
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+
+.cc-btn {
+  font: inherit;
+  font-size: var(--ops-text-sm);
+  color: inherit;
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-sm);
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+}
+
+.cc-btn:focus-visible {
+  outline: 2px solid var(--ops-focus);
+  outline-offset: 2px;
+}
+
+.cc-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.cc-btn--primary {
+  color: var(--ops-good-ink);
+  background: var(--ops-good-fill);
+  border-color: var(--ops-good-line);
+  font-weight: var(--ops-weight-semi);
+}
+
+.cc-btn--danger {
+  color: var(--ops-bad-ink);
+  background: var(--ops-bad-fill);
+  border-color: var(--ops-bad-line);
+}
+
+.cc-btn--quiet {
+  background: transparent;
+  border-color: transparent;
+}
+
+.cc-btn.is-attention {
+  color: var(--ops-warn-ink);
+}
+
+.cc-btn kbd,
+.cc-dock kbd {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-2xs);
+  opacity: 0.7;
+  margin-left: 0.25rem;
+}
+
+/* ── Transfer alerts ─────────────────────────────────────────────────── */
+
+.cc-alerts {
+  position: fixed;
+  right: var(--ops-space-4);
+  bottom: calc(var(--ops-space-4) + 3.5rem);
+  z-index: 60;
+  display: grid;
+  gap: var(--ops-space-2);
+  width: min(24rem, calc(100vw - 2rem));
+}
+
+.cc-alert {
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-bad-line);
+  border-left: 3px solid var(--ops-bad);
+  border-radius: var(--ops-radius-md);
+  box-shadow: var(--ops-elev-2, var(--ops-elev-1));
+  padding: var(--ops-space-3);
+  display: grid;
+  gap: var(--ops-space-1);
+  animation: cc-slide-in 180ms ease-out;
+}
+
+.cc-alert--taken {
+  border-color: var(--ops-line);
+  border-left-color: var(--ops-line);
+  color: var(--text-3, inherit);
+}
+
+.cc-alert-head {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+.cc-alert-title {
+  font-weight: var(--ops-weight-semi);
+  color: var(--ops-bad-ink);
+}
+
+.cc-alert-topic {
+  font-size: var(--ops-text-md);
+  font-weight: var(--ops-weight-semi);
+}
+
+.cc-alert-meta,
+.cc-alert-error {
+  font-size: var(--ops-text-xs);
+}
+
+.cc-alert-error {
+  color: var(--ops-bad-ink);
+}
+
+.cc-alert-actions {
+  display: flex;
+  gap: var(--ops-space-2);
+  margin-top: var(--ops-space-1);
+}
+
+@keyframes cc-slide-in {
+  from {
+    transform: translateY(0.5rem);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+/* ── Wait ring ───────────────────────────────────────────────────────── */
+
+.cc-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ops-warn-ink);
+}
+
+.cc-wait.is-urgent {
+  color: var(--ops-bad-ink);
+}
+
+.cc-wait-track {
+  fill: none;
+  stroke: var(--ops-hairline);
+  stroke-width: 3;
+}
+
+.cc-wait-fill {
+  fill: none;
+  stroke: var(--ops-warn);
+  stroke-width: 3;
+  transition: stroke-dashoffset 1s linear;
+}
+
+.cc-wait.is-urgent .cc-wait-fill {
+  stroke: var(--ops-bad);
+}
+
+/* ── Level meter ─────────────────────────────────────────────────────── */
+
+.cc-level {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 0.9rem;
+}
+
+.cc-level-bar {
+  width: 3px;
+  background: var(--ops-hairline);
+  border-radius: 1px;
+}
+.cc-level-bar[data-bar='1'] { height: 20%; }
+.cc-level-bar[data-bar='2'] { height: 40%; }
+.cc-level-bar[data-bar='3'] { height: 60%; }
+.cc-level-bar[data-bar='4'] { height: 80%; }
+.cc-level-bar[data-bar='5'] { height: 100%; }
+
+.cc-level[data-level='1'] .cc-level-bar:nth-child(-n + 1),
+.cc-level[data-level='2'] .cc-level-bar:nth-child(-n + 2),
+.cc-level[data-level='3'] .cc-level-bar:nth-child(-n + 3),
+.cc-level[data-level='4'] .cc-level-bar:nth-child(-n + 4),
+.cc-level[data-level='5'] .cc-level-bar {
+  background: var(--ops-good);
+}
+
+/* ── Active-call dock ────────────────────────────────────────────────── */
+
+.cc-dock {
+  position: fixed;
+  left: 50%;
+  bottom: var(--ops-space-4);
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+  flex-wrap: wrap;
+  max-width: calc(100vw - 2rem);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-good-line);
+  border-radius: var(--ops-radius-pill);
+  box-shadow: var(--ops-elev-2, var(--ops-elev-1));
+  padding: var(--ops-space-2) var(--ops-space-4);
+  font-size: var(--ops-text-sm);
+}
+
+.cc-dock--notice {
+  border-color: var(--ops-line);
+}
+
+.cc-dock-label {
+  font-family: var(--ops-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.cc-dock-actions,
+.cc-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+/* ── Device check ────────────────────────────────────────────────────── */
+
+.cc-dialog-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--ops-ink, #000) 30%, transparent);
+}
+
+.cc-dialog {
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  padding: var(--ops-space-5);
+  width: min(26rem, calc(100vw - 2rem));
+  display: grid;
+  gap: var(--ops-space-3);
+}
+
+.cc-dialog:focus-visible {
+  outline: 2px solid var(--ops-focus);
+}
+
+.cc-dialog-title {
+  margin: 0;
+  font-size: var(--ops-text-lg);
+}
+
+.cc-dialog-row {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-3);
+  flex-wrap: wrap;
+}
+
+.cc-dialog-note {
+  font-size: var(--ops-text-xs);
+}
+
+.cc-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.cc-meter {
+  --cc-meter: 0;
+  position: relative;
+  display: inline-block;
+  width: 7rem;
+  height: 0.4rem;
+  overflow: hidden;
+  border-radius: var(--ops-radius-pill);
+  background: var(--ops-hairline);
+}
+
+.cc-meter::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--cc-meter) * 100%);
+  background: var(--ops-good);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cc-alert {
+    animation: none;
+  }
+  .cc-wait-fill {
+    transition: none;
+  }
+}

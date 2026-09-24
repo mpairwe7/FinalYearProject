@@ -272,7 +272,8 @@ function queueViewEqual(a: QueueView, b: QueueView): boolean {
   );
 }
 
-function isTypingTarget(target: EventTarget | null): boolean {
+/** Keys pressed in a field belong to the field, not to a shortcut. */
+export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;

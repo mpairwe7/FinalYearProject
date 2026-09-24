@@ -70,3 +70,28 @@ export function playJoinChime(ctx: AudioContext): void {
   osc.start(now);
   osc.stop(now + 0.55);
 }
+
+/**
+ * A caller is waiting for an officer: two short, bright notes, once. Quiet
+ * enough to sit under a conversation, distinct from the join chime.
+ */
+export function playAlertChime(ctx: AudioContext): void {
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  const now = ctx.currentTime;
+  [880, 1174.66].forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const start = now + i * 0.18;
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(0.09, start + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.3);
+    osc.start(start);
+    osc.stop(start + 0.32);
+  });
+}

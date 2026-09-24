@@ -56,6 +56,7 @@ import {
 import SettingsDialog, { type SettingsTab } from "./settings/SettingsDialog";
 import { useSidebarMode } from "../hooks/useSidebarMode";
 import { TicketLiveBanner } from "./staff/TicketLiveBanner";
+import { StaffCallLayer } from "./staff/calls/console/StaffCallLayer";
 import "./staffGuard.css";
 
 export interface StaffIdentity {
@@ -410,6 +411,9 @@ export default function StaffGuard({
       {/* The rail is fixed, so everything else lives in a column that is
           offset by the rail's current width. */}
       <div className="staff-shell-content">
+        {/* Phone calls on every staff page: the call bar, transfer alerts and
+            the officer's own call, which outlives navigation (Call Desk §8.2). */}
+        <StaffCallLayer role={state.who.role} />
         <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
         {children(state.who)}
       </div>

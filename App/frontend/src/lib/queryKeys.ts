@@ -47,6 +47,7 @@ export const queryKeys = {
     all: () => ['calls'] as const,
     list: (status?: string) => ['calls', 'list', status] as const,
     detail: (id: string) => ['calls', 'detail', id] as const,
+    brief: (id: string) => ['calls', 'brief', id] as const,
     metrics: (days?: number) => ['calls', 'metrics', days] as const,
   },
 } as const;
