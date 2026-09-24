@@ -73,7 +73,7 @@ SPEECH_MT_BACKEND = os.getenv("SPEECH_MT_BACKEND", "prompted")
 SPEECH_DEADLINE_S = float(os.getenv("SPEECH_DEADLINE_S", "60"))
 # LRU cache for repeated short phrases (greetings, empathy openers, workflow
 # prompts). 0 disables. Keyed by (text, voice, language).
-TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "64"))
+TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "256"))
 
 # Synthesize one throwaway phrase per configured locale at startup, in the
 # background, so the first taxpayer to press Listen does not pay for a cold
@@ -497,9 +497,73 @@ class TranslateResult:
     error: str | None = None
 
 
+@dataclass
+class LanguageIdResult:
+    """Spoken-language identification over a closed candidate set.
+
+    ``probs`` is renormalised over the candidates only, so it answers "which
+    of the languages this call can be in" — not "which of Whisper's 99". An
+    ``error`` means no vote: ``probs`` is empty and ``top`` is ``""``.
+    """
+
+    probs: dict[str, float]
+    top: str
+    latency_ms: float
+    speech_s: float
+    backend: str = "salt_token"
+    error: str | None = None
+
+    @property
+    def confidence(self) -> float:
+        return self.probs.get(self.top, 0.0)
+
+
+# Below this much audio the language-token distribution is close to the
+# prior — there is not enough speech in the mel window to vote on.
+LID_MIN_AUDIO_S = float(os.getenv("SPEECH_LID_MIN_AUDIO_S", "0.3"))
+# Language id is one encoder pass; anything near this deadline means the
+# shared speech executor is saturated, and a late vote is worse than none.
+SPEECH_LID_DEADLINE_S = float(os.getenv("SPEECH_LID_DEADLINE_S", "2.0"))
+
+
 # ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
+
+
+def pcm16_to_wav(pcm: bytes, sample_rate: int = 16000) -> bytes:
+    """Mono 16-bit little-endian PCM wrapped in a WAV header.
+
+    Hand this, not bare PCM, to :meth:`SpeechModel.transcribe`.
+    ``_decode_audio_bytes`` sniffs formats from the first bytes, and raw PCM
+    that happens to start ``FF Ex`` — a quiet sample of -1 is ``FF FF`` —
+    passes for an MPEG frame sync: libsndfile then "decodes" it as MP3
+    garbage. Measured on the language-id set, 7% of real clips start that
+    way. A RIFF header is unambiguous and costs 44 bytes.
+    """
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes(pcm[: len(pcm) - (len(pcm) % 2)])
+    return buf.getvalue()
+
+
+def _tts_cache_key(text: str, voice: str, language: str) -> tuple[str, str, str]:
+    """Phrase-cache key for already-normalized *text*.
+
+    usedforsecurity=False is not a suppression: this digest keys an
+    in-process cache, so it needs to be fast and stable, not
+    collision-resistant against an adversary. Saying so lets the hash
+    keep working where a FIPS-restricted build would otherwise refuse
+    SHA-1 outright, and tells Bandit (B324) the truth rather than
+    hiding the finding behind a nosec.
+    """
+    return (hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest(), voice, language)
 
 
 class SpeechModel:
@@ -522,6 +586,12 @@ class SpeechModel:
         self._breakers = {
             "asr": CircuitBreaker(
                 name="speech.asr",
+                failure_threshold=3,
+                reset_timeout=15.0,
+                max_timeout=120.0,
+            ),
+            "lid": CircuitBreaker(
+                name="speech.lid",
                 failure_threshold=3,
                 reset_timeout=15.0,
                 max_timeout=120.0,
@@ -1086,6 +1156,100 @@ class SpeechModel:
             backend="whisper_peft",
         )
 
+    def identify_language(
+        self,
+        audio_bytes: bytes,
+        sample_rate: int = 16000,
+        candidates: tuple[str, ...] = ("en", "sw", "lg"),
+    ) -> LanguageIdResult:
+        """Which of *candidates* is being spoken, from Whisper-SALT's language token.
+
+        *audio_bytes* is raw 16-bit little-endian PCM at *sample_rate*, or a WAV.
+
+        One encoder pass and ONE decoder step from ``<|startoftranscript|>``:
+        the logits at that position are Whisper's language-token prediction,
+        read here only at the :data:`SALT_LANGUAGE_TOKEN_IDS` ids of the
+        candidates and softmaxed over those alone. No text is decoded, so the
+        cost is the encoder (~30-60 ms on an A6000) — a fraction of a
+        transcription, which is why the receptionist can afford it on every
+        utterance. ``lg`` is id 50355, the repurposed ``<|ba|>`` slot; see the
+        comment on that table for why that id and not a "correct-looking" one.
+
+        No domain prompt, unlike :meth:`_transcribe_whisper_salt`: its prompt
+        text is itself language-specific and would vote for the language it
+        was written in.
+
+        Never raises. A missing model, too little audio or an open breaker
+        comes back as a result with ``error`` set and no vote.
+        """
+        t0 = time.perf_counter()
+        if self._whisper_salt is None:
+            return LanguageIdResult({}, "", 0.0, 0.0, error="whisper_salt_unavailable")
+        token_ids = {c: SALT_LANGUAGE_TOKEN_IDS[c] for c in candidates if c in SALT_LANGUAGE_TOKEN_IDS}
+        if len(token_ids) < 2:
+            return LanguageIdResult({}, "", 0.0, 0.0, error="need_two_mapped_candidates")
+        if not self._breakers["lid"].allow_request():
+            return LanguageIdResult({}, "", 0.0, 0.0, error="breaker_open")
+
+        future = self._executor.submit(self._identify_language_salt, audio_bytes, sample_rate, token_ids)
+        try:
+            probs, speech_s = future.result(timeout=SPEECH_LID_DEADLINE_S)
+        except (concurrent.futures.TimeoutError, Exception) as exc:
+            self._breakers["lid"].record_failure()
+            logger.debug("Whisper-SALT language id failed: %s", exc)
+            return LanguageIdResult(
+                {}, "", round((time.perf_counter() - t0) * 1000, 1), 0.0, error=f"lid_failed: {type(exc).__name__}",
+            )
+        self._breakers["lid"].record_success()
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        if not probs:
+            return LanguageIdResult({}, "", latency_ms, speech_s, error="too_short")
+        top = max(probs, key=probs.__getitem__)
+        return LanguageIdResult(probs, top, latency_ms, speech_s)
+
+    def _identify_language_salt(
+        self,
+        audio_bytes: bytes,
+        sample_rate: int,
+        token_ids: dict[str, int],
+    ) -> tuple[dict[str, float], float]:
+        """Worker for :meth:`identify_language`: ``({lang: prob}, speech_s)``."""
+        import torch
+
+        import numpy as np
+
+        model, processor = self._whisper_salt
+        if audio_bytes[:4] == b"RIFF":
+            samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
+        else:
+            # Raw PCM16 — what a call streams. Decoded explicitly rather than
+            # through _decode_audio_bytes, whose raw-PCM branch guesses float32
+            # when every reinterpreted value happens to be small, and so reads
+            # a quiet, all-positive stretch of PCM16 as half as many samples.
+            usable = len(audio_bytes) - (len(audio_bytes) % 2)
+            samples = np.frombuffer(audio_bytes[:usable], dtype="<i2").astype(np.float32) / 32768.0
+            if sample_rate != 16000:
+                samples = self._resample(samples, sample_rate, 16000)
+        speech_s = round(len(samples) / 16000, 3)
+        if speech_s < LID_MIN_AUDIO_S:
+            return {}, speech_s
+
+        input_features = processor.feature_extractor(
+            samples, sampling_rate=16000, return_tensors="pt",
+        ).input_features.to(model.device, dtype=model.dtype)
+        sot_id = processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
+        decoder_input_ids = torch.tensor([[sot_id]], device=model.device)
+        with torch.no_grad():
+            encoder_outputs = model.model.encoder(input_features)
+            logits = model(
+                encoder_outputs=encoder_outputs,
+                decoder_input_ids=decoder_input_ids,
+            ).logits
+        langs = list(token_ids)
+        picked = logits[0, -1, [token_ids[lang] for lang in langs]].float()
+        probs = torch.softmax(picked, dim=-1).tolist()
+        return {lang: round(float(p), 4) for lang, p in zip(langs, probs)}, speech_s
+
     def _transcribe_whisper_salt(
         self,
         audio_bytes: bytes,
@@ -1337,34 +1501,74 @@ class SpeechModel:
         voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
 
         # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
-        #    workflow questions) skip the whole backend chain.
-        #
-        #    usedforsecurity=False is not a suppression: this digest keys an
-        #    in-process cache, so it needs to be fast and stable, not
-        #    collision-resistant against an adversary. Saying so lets the hash
-        #    keep working where a FIPS-restricted build would otherwise refuse
-        #    SHA-1 outright, and tells Bandit (B324) the truth rather than
-        #    hiding the finding behind a nosec.
-        cache_key = (
-            hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest(),
-            voice,
-            language,
-        )
-        if TTS_CACHE_SIZE > 0:
-            with self._tts_cache_lock:
-                cached = self._tts_cache.get(cache_key)
-                if cached is not None:
-                    self._tts_cache.move_to_end(cache_key)
-                    return replace(cached, latency_s=0.0, backend=f"{cached.backend}+cache")
+        #    workflow questions, the receptionist's pre-warmed lines) skip the
+        #    whole backend chain.
+        cache_key = _tts_cache_key(text, voice, language)
+        cached = self._tts_cache_lookup(cache_key)
+        if cached is not None:
+            return cached
 
         result = self._synthesize_uncached(text, voice, language)
-        if TTS_CACHE_SIZE > 0 and result.audio and not result.error:
-            with self._tts_cache_lock:
-                self._tts_cache[cache_key] = result
-                self._tts_cache.move_to_end(cache_key)
-                while len(self._tts_cache) > TTS_CACHE_SIZE:
-                    self._tts_cache.popitem(last=False)
+        self._tts_cache_store(cache_key, result)
         return result
+
+    # The phrase cache is keyed on the *normalized* text, so a caller that
+    # streams audio itself (the receptionist's Orpheus path) reads and fills
+    # the same entries synthesize() does, through these two.
+
+    def tts_cache_get(self, text: str, voice: str | None, language: str) -> SynthesizeResult | None:
+        """A cached synthesis of *text*, or ``None``. Never synthesizes."""
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, locale=language)
+        voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
+        return self._tts_cache_lookup(_tts_cache_key(text, voice, language))
+
+    def tts_cache_put(self, text: str, voice: str | None, language: str, result: SynthesizeResult) -> None:
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, locale=language)
+        voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
+        self._tts_cache_store(_tts_cache_key(text, voice, language), result)
+
+    def _tts_cache_lookup(self, key: tuple[str, str, str]) -> SynthesizeResult | None:
+        if TTS_CACHE_SIZE <= 0:
+            return None
+        with self._tts_cache_lock:
+            cached = self._tts_cache.get(key)
+            if cached is None:
+                return None
+            self._tts_cache.move_to_end(key)
+        return replace(cached, latency_s=0.0, backend=f"{cached.backend}+cache")
+
+    def _tts_cache_store(self, key: tuple[str, str, str], result: SynthesizeResult) -> None:
+        if TTS_CACHE_SIZE <= 0 or not result.audio or result.error:
+            return
+        with self._tts_cache_lock:
+            self._tts_cache[key] = result
+            self._tts_cache.move_to_end(key)
+            while len(self._tts_cache) > TTS_CACHE_SIZE:
+                self._tts_cache.popitem(last=False)
+
+    def prewarm_phrases(
+        self, language: str, phrases: list[str], voice: str | None = None
+    ) -> dict[str, int]:
+        """Synthesize fixed lines into the phrase cache before anyone waits on them.
+
+        For the receptionist's own lines (fillers, clarify prompts, the
+        transfer notice) in voices too slow to render live. Sequential, like
+        :meth:`warmup`, and never raises. Returns ``{"cached": n, "failed": m}``.
+        """
+        outcome = {"cached": 0, "failed": 0}
+        if not self.enabled:
+            return outcome
+        for text in phrases:
+            try:
+                result = self.synthesize(text, voice=voice, language=language)
+                outcome["cached" if result.audio and not result.error else "failed"] += 1
+            except Exception:  # noqa: BLE001 — pre-warming must never fail a boot
+                outcome["failed"] += 1
+        return outcome
 
     def warmup(self) -> dict[str, str]:
         """Run one short synthesis per warm-up locale. Never raises.
@@ -1441,7 +1645,7 @@ class SpeechModel:
         language: str,
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
-        from . import spark_tts_salt
+        from . import orpheus_tts, spark_tts_salt
 
         # An explicitly requested test double, before any real backend.
         #
@@ -1458,6 +1662,30 @@ class SpeechModel:
         # setting silently produce "All TTS backends failed".
         if SPEECH_TTS_BACKEND == "mock":
             return self._synthesize_mock(text, voice, language)
+
+        # ⓪.5 Orpheus-3B, for the languages it is configured to voice (opt-in
+        #     by ORPHEUS_TTS_URL; Luganda by default). First, ahead of even a
+        #     local Piper voice: it is the only native voice here fast enough
+        #     for a live call (~350 ms to first audio vs ~4 s for Spark-TTS-SALT),
+        #     and whatever the receptionist pre-warms through this method must
+        #     be the same voice its live answers stream in. Unavailable or
+        #     failing, it falls through to the chain below unchanged.
+        if orpheus_tts.speaker_for(language):
+            t_orpheus = time.perf_counter()
+            try:
+                pcm = orpheus_tts.synthesize(text, language)
+                n = len(pcm) // 2
+                return SynthesizeResult(
+                    audio=orpheus_tts.pcm16_to_wav(pcm),
+                    sample_rate=orpheus_tts.SAMPLE_RATE,
+                    num_samples=n,
+                    duration_s=round(n / orpheus_tts.SAMPLE_RATE, 3),
+                    latency_s=round(time.perf_counter() - t_orpheus, 3),
+                    backend="orpheus_salt",
+                    voice=orpheus_tts.speaker_for(language) or "",
+                )
+            except orpheus_tts.OrpheusUnavailable as exc:
+                logger.info("Orpheus TTS unavailable for %s (%s); trying the next voice", language, exc)
 
         # Local Piper and edge-tts both default to an English voice for any
         # language they have no model for, and then *succeed* — so left in
