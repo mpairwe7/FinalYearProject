@@ -68,7 +68,15 @@ class Scenario:
     override: str | None = None
     expect_status: str | None = None
     expect_status_on: str | None = None  # the utterance that must trigger it
+    # Talk over the assistant: this turn starts ``barge_after_s`` into the
+    # greeting (0) or into the answer to the turn before it, and must stop it.
+    barge_turn: int | None = None
+    barge_after_s: float = 2.0
     note: str = ""
+
+
+#: A barge-in passes when the assistant's audio stops within this long.
+BARGE_STOP_BUDGET_MS = 2000
 
 
 SCENARIOS = [
@@ -90,7 +98,33 @@ SCENARIOS = [
     Scenario("8_transfer_from_luganda", ["lg_vat", "lg_person"], ["lg"], expect_status="transferring",
              expect_status_on="lg_person",
              note="Officer request in Luganda transfers; staff see a Luganda caller."),
+    Scenario("9_barge_in_greeting", ["en_vat"], ["en"], barge_turn=0,
+             note="Talking over Gemini's greeting stops it, and the question is answered."),
+    Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1,
+             note="Talking over a Luganda answer stops it (cascaded engine, Orpheus voice)."),
 ]
+
+
+def barge_metrics(listener: "Listener", started: float) -> dict[str, Any]:
+    """How the assistant reacted to a caller who started talking at *started*.
+
+    Audio arrives paced in real time while the assistant talks, so the first
+    gap of 0.4 s after *started* is where it stopped.
+    """
+    talking = any(started - 0.3 <= t < started for t in listener.audio_times)
+    stop = started
+    for t in sorted(t for t in listener.audio_times if t >= started):
+        if t - stop > 0.4:
+            break
+        stop = t
+    interrupt = next((t for t, m in listener.messages if t >= started and m.get("type") == "interrupt"), None)
+    stop_ms = round((stop - started) * 1000)
+    return {
+        "talking_at_barge": talking,
+        "bot_stop_ms": stop_ms,
+        "interrupt_ms": round((interrupt - started) * 1000) if interrupt else None,
+        "stopped": talking and stop_ms <= BARGE_STOP_BUDGET_MS,
+    }
 
 
 def render(render_url: str) -> None:
@@ -117,9 +151,13 @@ def render(render_url: str) -> None:
         print(f"rendered {key} ({len(pcm16) / 16000:.1f}s)")
 
 
-def pcm_of(key: str) -> bytes:
+def pcm_of(key: str, gain_db: float = 0.0) -> bytes:
     with wave.open(str(AUDIO_DIR / f"{key}.wav"), "rb") as w:
-        return w.readframes(w.getnframes())
+        pcm = w.readframes(w.getnframes())
+    if not gain_db:
+        return pcm
+    scaled = np.frombuffer(pcm, dtype="<i2").astype(np.float32) * (10 ** (gain_db / 20))
+    return np.clip(scaled, -32768, 32767).astype("<i2").tobytes()
 
 
 @dataclass
@@ -191,7 +229,7 @@ async def keep_silence(ws: Any, stop: asyncio.Event) -> None:
         await asyncio.sleep(0.02)
 
 
-async def run_scenario(url: str, sc: Scenario, reply_wait_s: float) -> dict[str, Any]:
+async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_db: float = 0.0) -> dict[str, Any]:
     import websockets
 
     listener = Listener()
@@ -202,10 +240,13 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float) -> dict[str,
         reader = asyncio.create_task(pump(ws, listener))
         stop = asyncio.Event()
         filler = asyncio.create_task(keep_silence(ws, stop))
-        # Let the greeting play out.
+        # Let the greeting play out — or talk over it.
         opened = time.monotonic()
         if await first_audio_after(listener, opened, 20.0):
-            await wait_quiet(listener, opened, quiet_s=2.0, timeout_s=30)
+            if sc.barge_turn == 0:
+                await asyncio.sleep(sc.barge_after_s)
+            else:
+                await wait_quiet(listener, opened, quiet_s=2.0, timeout_s=30)
         ready = next((m for _, m in listener.messages if m.get("type") == "call_ready"), {})
         result["call_id"] = ready.get("call_id")
         result["language_detection"] = ready.get("language_detection")
@@ -215,11 +256,12 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float) -> dict[str,
             if await first_audio_after(listener, sent, 15.0):
                 await wait_quiet(listener, sent, quiet_s=2.5, timeout_s=20)
 
-        for key in sc.turns:
+        for index, key in enumerate(sc.turns):
             stop.set()
             await filler
             mark = len(listener.messages)
-            ended = await speak(ws, pcm_of(key))
+            started = time.monotonic()
+            ended = await speak(ws, pcm_of(key, barge_gain_db if sc.barge_turn == index else 0.0))
             stop = asyncio.Event()
             filler = asyncio.create_task(keep_silence(ws, stop))
             first_audio = await first_audio_after(listener, ended, reply_wait_s)
@@ -234,7 +276,10 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float) -> dict[str,
                     ):
                         break
                     await asyncio.sleep(0.1)
-                await wait_quiet(listener, ended, quiet_s=3.0, timeout_s=reply_wait_s)
+                if sc.barge_turn == index + 1:
+                    await asyncio.sleep(sc.barge_after_s)  # the next turn talks over this answer
+                else:
+                    await wait_quiet(listener, ended, quiet_s=3.0, timeout_s=reply_wait_s)
             new = [m for _, m in listener.messages[mark:]]
             timed = [(t, m) for t, m in listener.messages[mark:]]
             said = [(t, m["text"]) for t, m in timed if m.get("type") == "caption"
@@ -253,6 +298,7 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float) -> dict[str,
                 "caller": [m["text"] for m in new if m.get("type") == "caption"
                            and m.get("speaker") == "caller" and m.get("final")],
                 "status": [m.get("status") for m in new if m.get("type") == "status"],
+                **({"barge": barge_metrics(listener, started)} if sc.barge_turn == index else {}),
             })
         stop.set()
         await filler
@@ -272,8 +318,11 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float) -> dict[str,
         status_ok = bool(on) and sc.expect_status in on[0]["status"] and not any(
             sc.expect_status in t["status"] for t in before
         )
+    barge_ok = all(t["barge"]["stopped"] for t in result["turns"] if "barge" in t)
     result["language_sequence"] = seen
-    result["passed"] = bool(result["language_detection"]) and seen == sc.expect_languages and status_ok
+    result["passed"] = (
+        bool(result["language_detection"]) and seen == sc.expect_languages and status_ok and barge_ok
+    )
     return result
 
 
@@ -284,7 +333,7 @@ async def main_async(args: argparse.Namespace) -> None:
     for sc in chosen:
         print(f"== {sc.name}", flush=True)
         try:
-            res = await run_scenario(args.ws, sc, args.reply_wait)
+            res = await run_scenario(args.ws, sc, args.reply_wait, args.barge_gain_db)
         except Exception as exc:  # a crashed scenario is a result, not an abort
             res = {"name": sc.name, "passed": False, "error": f"{type(exc).__name__}: {exc}"}
         results.append(res)
@@ -293,6 +342,8 @@ async def main_async(args: argparse.Namespace) -> None:
             print(f"   {turn['utterance']}: audio {turn['first_audio_ms']} ms, filler {turn['filler_caption_ms']} ms,"
                   f" answer {turn['answer_caption_ms']} ms  langs={[e['language'] for e in turn['languages']]}"
                   f"  status={turn['status']}  reply={[a[:90] for a in turn['assistant'][-1:]]}", flush=True)
+            if "barge" in turn:
+                print(f"      barge-in: {turn['barge']}", flush=True)
     lat = [t["first_audio_ms"] for r in results for t in r.get("turns", []) if t.get("first_audio_ms") is not None]
     report = {
         "date": dt.date.today().isoformat(),
@@ -315,6 +366,9 @@ def main() -> None:
     ap.add_argument("--reply-wait", type=float, default=30.0)
     ap.add_argument("--repeat", type=int, default=1, help="run each chosen scenario this many times")
     ap.add_argument("--label", default="", help="appended to the report name, e.g. _flag_off")
+    ap.add_argument("--barge-gain-db", type=float, default=0.0,
+                    help="level of the barge-in turn, e.g. -15: a browser's echo canceller "
+                         "turns the caller down while the assistant is talking")
     args = ap.parse_args()
     if args.render_url:
         render(args.render_url)

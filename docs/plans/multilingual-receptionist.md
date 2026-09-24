@@ -226,8 +226,8 @@ fix below came from a scenario that failed:
 
 **Result (2026-09-24, local stack: api + Sunflower on one A6000, Orpheus FP8 on
 another; Gemini Live over the internet): 8/8 scenarios pass, on two consecutive
-full runs of the final code**
-(`evals/reports/call_replay_2026-09-24.json`). Milliseconds from the end of the
+full runs of the code first shipped** (the table is that run; the report file now
+holds the later ten-scenario run below). Milliseconds from the end of the
 caller's turn; "answer" is when the reply's *final* caption arrives, i.e. after the
 whole reply has been synthesised, so it overstates when the caller starts hearing it.
 
@@ -253,6 +253,60 @@ synthetic clip's transcript — "Vati" may be clarified ("did you say VAT?") or
 answered; `lg_tin` is heard as "ttiimu", which the knowledge base escalates (and the
 answer cache replays) — which is retrieval behaviour, not language logic; scenario 8
 opens on `lg_vat` for that reason.
+
+### First live test (2026-09-24, a real Luganda caller over the ngrok tunnel)
+
+Two complaints: Gemini answered Luganda with "I can only assist in English and
+Swahili", and talking over the assistant did not stop it. The api log of the calls
+showed why.
+
+- **A weak English vote locked the call in English.** The first content question
+  ("Rwandakuyango na sema ya baama.", 2.4 s — Luganda the language token could not
+  place) voted English at P 0.63 and locked English: the lock needed no confidence
+  at all for the opening language. It now needs `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE`
+  (0.70) whichever language it is.
+- **Luganda never won twice in a row.** On this caller's phone audio the language
+  token gave clear Luganda only P(lg) 0.52–0.78, with every second or third Luganda
+  utterance voted *English* (0.71–0.92). "Two in a row ≥ 0.70" never formed, and each
+  English vote wiped the run. A locked call now moves when 2 of its last 3 content
+  votes are for the new language at ≥ 0.50 — replayed on this caller's votes it moves
+  on the third Luganda utterance; English speech never had Luganda as its top vote in
+  the eval (0/368), so English callers keep their protection.
+- **Gemini is now a second listener.** It hears the same audio and knows Luganda; it
+  was the one saying so ("English and Swahili only"). It now calls
+  `hand_over_to_luganda` instead, and the router moves the call (after the caller's
+  turn) and re-asks the turn in Luganda (`LanguagePolicy.report`). Isolated — the
+  sentinel unable to decide (`RECEPTIONIST_LID_MIN_SPEECH_S=99`) — 4/4 Luganda calls
+  moved on Gemini's report alone, 6.8–9.9 s to the first Luganda audio: a backstop
+  behind the sentinel, not a replacement. The caller's spoken "Can we go to Luganda"
+  (transcribed "Ingolian") is the kind of request only Gemini can still catch.
+- **Barge-in: Gemini's VAD was set to hear speech onsets poorly.** The caller talked
+  over two answers for 2–3 s; the sentinel's VAD heard every word, Gemini played on —
+  its start-of-speech sensitivity was `LOW`. It is now `HIGH` (Gemini Live's default,
+  `GEMINI_LIVE_START_SENSITIVITY`), and the call's own VAD backs it: after
+  `RECEPTIONIST_BARGE_IN_MIN_S` (0.4 s) of the caller talking over Gemini, the router
+  interrupts playback, and `InterruptedReplyMute` drops the rest of the reply Gemini
+  is still streaming until its end marker (Gemini's own interrupt ends the mute).
+- **Over the greeting itself, the caller's speech never reached the server.** In both
+  calls the first speech the sentinel heard began within ~0.3 s of the greeting
+  ending — the browser's echo canceller keeps the microphone down while the
+  speaker plays. Nothing server-side can hear that; headphones do, and the runbook
+  says so. The greeting's wording is §1's requirement, so it is unchanged, though at
+  ~12 s it is the longest stretch a caller must talk over.
+
+Measured with the replay harness's new barge-in scenarios (the caller starts 2 s into
+the greeting or into an answer; `bot_stop_ms` = caller onset → assistant silent), and
+with the barge-in turn attenuated as a double-talking echo canceller would:
+
+| Setting | Level | Gemini greeting (n) | Luganda answer (n) |
+|---|---|---|---|
+| Before (`LOW`, no local barge-in) | 0 dB | 907 ms (1) | 1766 ms (1) |
+| Before | −12 dB | 781 ms; **missed — 4158 ms** (2) | — |
+| After (`HIGH` + local barge-in) | 0 dB | 750 ms (1) | 1707 ms (1) |
+| After | −12 / −20 dB | 687–1110 ms, 4/4 | 1697–1760 ms, 4/4 |
+| Gemini forced `LOW`, local barge-in only | −12 dB | 835–1152 ms, 3/3 | — |
+
+All ten scenarios pass on the fixed build (`call_replay_2026-09-24.json`).
 
 ### Bugs found on the way (pre-existing, fixed)
 

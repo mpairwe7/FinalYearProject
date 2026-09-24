@@ -67,6 +67,12 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_ENGINE` | `cascaded` | Conversational engine: `cascaded` (Silero+Whisper+RAG+EdgeTTS) or `gemini_live` |
 | `GEMINI_LIVE_MODEL` | `models/gemini-2.5-flash-native-audio-latest` | Multimodal speech-to-speech model used when `RECEPTIONIST_ENGINE=gemini_live` |
 | `GEMINI_LIVE_VOICE` | `Aoede` | Gemini voice ID (`Aoede`, `Charon`, `Fenrir`, `Kore`, `Puck`) |
+| `GEMINI_LIVE_START_SENSITIVITY` | `high` | How readily Gemini's VAD hears the caller start talking — what lets a caller talk over it. `low` missed callers talking over the greeting |
+| `GEMINI_LIVE_END_SENSITIVITY` | `high` | How readily Gemini decides the caller has finished |
+| `GEMINI_LIVE_SILENCE_MS` | `300` | Silence that ends the caller's turn for Gemini |
+| `GEMINI_LIVE_PREFIX_PADDING_MS` | `100` | Speech Gemini needs before committing to a start of speech |
+| `RECEPTIONIST_LOCAL_BARGE_IN` | `true` | The call's own VAD also stops Gemini when the caller talks over it (turn off on a device whose speaker leaks into the mic) |
+| `RECEPTIONIST_BARGE_IN_MIN_S` | `0.4` | Speech past the VAD onset (itself 0.2 s) that counts as talking over the assistant |
 | `RECEPTIONIST_LIVE_PARTIALS` | `true` | Streams interim transcripts of the caller's own speech back to their screen |
 | `RECEPTIONIST_PARTIAL_INTERVAL_S` | `0.8` | Seconds between interim re-decodes of the utterance in progress |
 | `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes |
@@ -205,12 +211,22 @@ not trust the selection: it opens in English and follows what the caller *says*.
   decoded as text, for explicit requests and code-switching.
 - Utterances under `RECEPTIONIST_LID_MIN_SPEECH_S` (1.5 s) never decide ("Hello",
   "Gyebale ko", "yes").
-- The first content utterance locks the call. Moving off English there needs a vote
-  of at least `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` (0.70); a weaker one leaves the
-  call open and the next utterance decides.
-- Locked calls switch on one vote ≥ `RECEPTIONIST_LID_SWITCH_CONFIDENCE` (0.90), two
-  in a row ≥ 0.70, or one ≥ 0.70 whose text has at least three words of the new
-  language and none of the current one.
+- The first content utterance with a vote of at least
+  `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` (0.70) locks the call — in whichever
+  language, English included; a weaker vote leaves the call open and the next
+  utterance decides.
+- Locked calls switch on one vote ≥ `RECEPTIONIST_LID_SWITCH_CONFIDENCE` (0.90); on one
+  ≥ 0.70 whose text has at least three words of the new language and none of the
+  current one; or when `RECEPTIONIST_LID_HYSTERESIS_TURNS` (2) of the last
+  `RECEPTIONIST_LID_HYSTERESIS_WINDOW` (3) content votes are for the new language at
+  ≥ `RECEPTIONIST_LID_SUPPORT_CONFIDENCE` (0.50) — not "in a row": on a real caller's
+  phone audio every third Luganda utterance came back English, and a strict run
+  never formed.
+- **Gemini is a second listener.** It hears the same audio and knows Luganda when it
+  hears it — including Luganda the language token called English. Instead of
+  telling the caller it only speaks English and Swahili, it calls
+  `hand_over_to_luganda`, and the router moves the call (after the caller's turn
+  ends) and re-asks what they said in Luganda. An on-screen choice still wins.
 - Code-switched Luganda ("Nsaba okumanya ku TIN yange") counts as Luganda when the
   text has two Luganda words (more than Swahili ones) and the acoustics lean Bantu —
   P(lg) ≥ 0.35, or P(lg)+P(sw) ≥ 0.5 (SALT often hears mixed Luganda as Swahili), or
@@ -277,5 +293,7 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | Luganda answers in an English accent, or silent | `ORPHEUS_TTS_URL` unset or sidecar down (`Orpheus TTS unreachable` in api logs); `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG=false` drops the English stand-in on purpose |
 | English caller moved to Luganda | api log `Language vote lg p=…` lines; raise `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` or `RECEPTIONIST_LID_MIN_SPEECH_S` |
 | First English answer feels late | `language.held_ms_p95` in the call metrics; lower `RECEPTIONIST_LID_HOLD_TIMEOUT_MS` |
-| Call never leaves English | `SpeechModel.identify_language` returning `whisper_salt_unavailable` — Whisper-SALT not loaded |
+| Call never leaves English | `SpeechModel.identify_language` returning `whisper_salt_unavailable` — Whisper-SALT not loaded; `gemini_live heard lg` lines show whether Gemini reported Luganda |
+| Caller cannot talk over the assistant | api log `Gemini VAD: interrupted signal received` (Gemini stopped itself) or `Caller talking over Gemini` (the call's own VAD did); neither — the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
+| Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or `GEMINI_LIVE_START_SENSITIVITY=low` |
 
