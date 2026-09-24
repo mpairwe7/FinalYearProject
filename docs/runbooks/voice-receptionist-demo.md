@@ -60,6 +60,9 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
+| `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
+| `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Gemini model that writes the brief for English/Swahili calls; Luganda calls use Sunflower |
+| `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes) |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* |
@@ -171,15 +174,30 @@ ngrok http 8000
    `call.transfer_timed_out`) — a **Callback** chip on its row. Replay check:
    `scripts/replay_call_audio.py --only 11_officer` (about 2 minutes).
 
-### Step 5: Officer Takeover & Live Audio Bridge
-1. Officer opens `/calls` and clicks **Take Call**.
-2. Caller hears a two-note join chime and status updates to *"Officer {Name} joined"*.
-3. The AI goes silent. Caller PCM audio streams directly to the officer headset.
-4. Officer audio streams directly to the caller socket.
+### Step 5: Officer Takeover & Live Audio Bridge (the Call Desk)
+1. On **any** staff page the officer gets a transfer alert (bottom right): wait ring,
+   topic, language, reason, ticket — plus a chime (if **Sound on**), the tab title
+   `(1) Caller waiting — …`, and a desktop notification when the tab is hidden. The call
+   bar at the top shows Live / Waiting counts. Run **Check mic** once per shift.
+2. **Preview** opens `/calls?call=…`: the AI brief (why a person is needed, what was asked,
+   what the AI already said, what is open, details given, mood, a suggested first line) —
+   every line links (`↗7`) to the transcript turn it came from. The brief rebuilds every
+   `RECEPTIONIST_BRIEF_EVERY_TURNS` caller turns and on transfer.
+3. **Take call** (or `A`) claims it — first officer wins; a second gets *"Taken by Officer
+   …"*. The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
+   asked for, then the audio joins: the caller's player is cleared and they hear *"You're
+   now connected to Officer {Name}."* in the call's language. **Take over** does the same
+   for a call the AI is still handling.
+4. The AI goes silent: caller audio goes to the officer only, and anything the AI was
+   still saying is dropped. Officer audio streams directly to the caller socket.
 5. `EnergyVAD` segments officer speech, transcribes turns, and records them in the live transcript.
+6. The call follows the officer: open a ticket mid-call and a dock at the bottom of every
+   staff page keeps the timer, **Mute** (`M`), **End** (`E`) and **Back to call**. Leaving
+   the page asks first.
 
 ### Step 6: Hang-up & Performance Evaluation
-1. Either side clicks **End call** (or hangs up).
+1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
+   Goodbye."* and then hangs the caller up; the caller can hang up at any time.
 2. Background task runs `summary.py`:
    Generates a redacted structured JSON summary with subject, key facts, and resolution.
 3. Performance metrics are recorded in `voice_calls`:
