@@ -3,11 +3,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from '@/lib/i18n';
 import { useChatStore } from '@/store/useChatStore';
-import type { CaptionEntry } from '@/store/useCallStore';
+import type { CallLanguage, CallLanguageSource, CaptionEntry } from '@/store/useCallStore';
 import { useCall } from '@/hooks/useCall';
 import { CallOrb } from '@/components/call/CallOrb';
 import {
+  CheckIcon,
   ChevronDownIcon,
+  GlobeIcon,
   MicIcon,
   MicOffIcon,
   PhoneIcon,
@@ -24,6 +26,82 @@ function formatDuration(sec: number): string {
 
 /** Distance from the bottom, in px, still treated as "following the call". */
 const PIN_THRESHOLD = 48;
+
+interface CallLanguageChipProps {
+  language: CallLanguage;
+  source: CallLanguageSource;
+  languages: CallLanguage[];
+  onPick: (language: CallLanguage) => void;
+}
+
+/**
+ * "English · auto" — the language the assistant is answering in, and how it got
+ * there. The call follows the caller's own speech on its own; the menu is for
+ * a caller who would rather pin it (a choice holds for the rest of the call).
+ */
+function CallLanguageChip({ language, source, languages, onPick }: CallLanguageChipProps) {
+  const t = useTranslation();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const name = t(`call.lang.${language}`);
+  const pinned = source === 'override' || source === 'explicit';
+  const label = pinned ? t('call.languageChosen', { language: name }) : t('call.languageAuto', { language: name });
+
+  return (
+    <div className="call-lang" ref={rootRef}>
+      <button
+        type="button"
+        className={`call-lang-chip${pinned ? ' call-lang-chip--pinned' : ''}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={`${t('call.languageMenu')}: ${label}`}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <GlobeIcon />
+        <span>{label}</span>
+        <ChevronDownIcon />
+      </button>
+      {open && (
+        <div className="call-lang-menu" role="menu" aria-label={t('call.languageMenu')}>
+          <p className="call-lang-menu-hint">{t('call.languageMenuHint')}</p>
+          {languages.map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="menuitemradio"
+              aria-checked={option === language}
+              className={`call-lang-option${option === language ? ' call-lang-option--active' : ''}`}
+              onClick={() => {
+                onPick(option);
+                setOpen(false);
+              }}
+            >
+              <span>{t(`call.lang.${option}`)}</span>
+              {option === language && <CheckIcon />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function CallScreen() {
   const t = useTranslation();
@@ -42,6 +120,11 @@ export function CallScreen() {
     hangup,
     requestOfficer,
     toggleMute,
+    languageDetection,
+    languages,
+    language,
+    languageSource,
+    setLanguage,
   } = useCall();
 
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -151,6 +234,14 @@ export function CallScreen() {
             </span>
           </div>
           <div className="call-header-meta">
+            {languageDetection && (status === 'ai' || status === 'transferring') && (
+              <CallLanguageChip
+                language={language}
+                source={languageSource}
+                languages={languages}
+                onPick={setLanguage}
+              />
+            )}
             {status === 'transferring' && ticketRef && (
               <span className="call-ticket-chip">{`Ticket: ${ticketRef}`}</span>
             )}

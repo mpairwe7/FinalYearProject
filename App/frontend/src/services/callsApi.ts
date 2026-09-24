@@ -11,7 +11,7 @@ export interface CallTurn {
   call_id: string;
   seq: number;
   speaker: 'caller' | 'assistant' | 'officer' | 'system';
-  kind: 'utterance' | 'clarify' | 'confirm' | 'answer' | 'filler' | 'handoff' | 'notice';
+  kind: 'utterance' | 'clarify' | 'confirm' | 'answer' | 'filler' | 'handoff' | 'notice' | 'language';
   text: string;
   low_conf_words: Array<{ word: string; prob: number }>;
   mean_word_prob: number | null;
@@ -29,6 +29,9 @@ export interface CallSummary {
   follow_ups: string[];
   sentiment: string;
   ai_handling_notes: string;
+  /** The call's (final) language, e.g. `lg`. The summary text itself is always English. */
+  language?: string;
+  languages_used?: string[];
 }
 
 export interface CallRecord {

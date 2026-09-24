@@ -202,6 +202,14 @@ export const en = {
   'call.listening': 'Listening… speak your tax question naturally.',
   'call.listeningHint': 'Your words appear here as you speak.',
   'call.mutedHint': 'Microphone muted — unmute to keep talking.',
+  'call.languageAuto': '{language} · auto',
+  'call.languageChosen': '{language}',
+  'call.languageMenu': 'Call language',
+  'call.languageMenuHint': 'Pick one to keep the whole call in it.',
+  'call.languageSwitched': 'Now speaking {language}',
+  'call.lang.en': 'English',
+  'call.lang.lg': 'Luganda',
+  'call.lang.sw': 'Kiswahili',
 } as const;
 
 export type TranslationKey = keyof typeof en;

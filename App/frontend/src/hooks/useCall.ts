@@ -1,13 +1,22 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { useCallStore } from '@/store/useCallStore';
+import { useTranslation } from '@/lib/i18n';
+import {
+  type CallLanguage,
+  type CallLanguageSource,
+  isCallLanguage,
+  useCallStore,
+} from '@/store/useCallStore';
 import { CallSocket } from '@/services/callSocket';
 import { PCMPlayer } from '@/services/pcmPlayer';
 import { AudioRecorder } from '@/services/voiceService';
 import { playDialTone, playJoinChime } from '@/services/callTones';
 import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audioLevelBus';
 
+const LANGUAGE_SOURCES: readonly CallLanguageSource[] = ['default', 'auto', 'explicit', 'override'];
+
 export function useCall() {
   const store = useCallStore();
+  const t = useTranslation();
   const socketRef = useRef<CallSocket | null>(null);
   const playerRef = useRef<PCMPlayer | null>(null);
   const micCleanupRef = useRef<(() => void) | null>(null);
@@ -65,6 +74,17 @@ export function useCall() {
     store.setMuted((prev) => !prev);
   }, [store]);
 
+  /** Pin the call to *language* for the rest of the call (the server confirms). */
+  const setLanguage = useCallback(
+    (language: CallLanguage) => {
+      if (socketRef.current) {
+        socketRef.current.setLanguage(language);
+      }
+      store.setLanguage(language, 'override');
+    },
+    [store],
+  );
+
   const startCall = useCallback(
     async (locale = 'en') => {
       cleanupAudio();
@@ -100,6 +120,17 @@ export function useCall() {
                 dialToneCleanupRef.current = null;
               }
               store.setStatus('ai');
+              {
+                const offered = Array.isArray(msg.languages)
+                  ? msg.languages.filter(isCallLanguage)
+                  : [];
+                const opening = isCallLanguage(msg.language) ? msg.language : 'en';
+                store.setLanguageOptions(
+                  Boolean(msg.language_detection) && offered.length > 1,
+                  offered.length > 0 ? offered : [opening],
+                  opening,
+                );
+              }
               // Start call timer
               if (!timerRef.current) {
                 timerRef.current = setInterval(() => {
@@ -145,6 +176,21 @@ export function useCall() {
               }
               break;
             }
+            case 'language': {
+              const language = msg.language;
+              if (!isCallLanguage(language)) break;
+              const source = LANGUAGE_SOURCES.find((src) => src === msg.source) ?? 'auto';
+              const previous = useCallStore.getState().language;
+              store.setLanguage(language, source);
+              if (language !== previous) {
+                store.addCaption({
+                  speaker: 'system',
+                  text: t('call.languageSwitched', { language: t(`call.lang.${language}`) }),
+                  final: true,
+                });
+              }
+              break;
+            }
             case 'ended': {
               hangup();
               break;
@@ -165,8 +211,12 @@ export function useCall() {
       });
 
       socketRef.current = socket;
+      // `locale` stays the chat's language: a single-engine call is held in
+      // it. A multilingual call opens in English whatever it says and treats
+      // `preferred_locale` as a hint.
       socket.connect({
         locale,
+        preferred_locale: locale,
         voice_consent_accepted: true,
         sample_rate: 16000,
       });
@@ -217,7 +267,7 @@ export function useCall() {
         hangup();
       }
     },
-    [cleanupAudio, hangup, store],
+    [cleanupAudio, hangup, store, t],
   );
 
   useEffect(() => {
@@ -241,11 +291,16 @@ export function useCall() {
     isUserSpeaking: store.isUserSpeaking,
     activeAiText: store.activeAiText,
     error: store.error,
+    languageDetection: store.languageDetection,
+    languages: store.languages,
+    language: store.language,
+    languageSource: store.languageSource,
     openCall: store.openCall,
     closeCall: store.closeCall,
     startCall,
     hangup,
     requestOfficer,
     toggleMute,
+    setLanguage,
   };
 }

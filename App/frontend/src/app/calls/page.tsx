@@ -9,6 +9,7 @@ import { CallCase } from '@/components/staff/calls/CallCase';
 import SloGaugeCard from '@/components/charts/SloGaugeCard';
 import { ChartNote } from '@/components/charts/chartTheme';
 import { useCalls, useCallMetrics, useCallsLobby } from '@/hooks/useCalls';
+import { callLanguageName } from '@/lib/callLanguage';
 import '@/styles/call/call.css';
 import './calls.css';
 import '@/app/agent/agent.css';
@@ -69,6 +70,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             <span className="st-pill st-pill--urgent st-pill--pulse">Transfer Requested</span>
             <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#991b1b' }}>
               Caller waiting: {liveBanner.topic} ({liveBanner.reason})
+              {liveBanner.language && ` · ${callLanguageName(liveBanner.language)} caller`}
             </span>
           </div>
           <button

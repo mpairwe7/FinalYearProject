@@ -1,4 +1,12 @@
 import React from 'react';
+import { callLanguageName } from '@/lib/callLanguage';
+
+interface LanguageMetrics {
+  final?: string;
+  used?: string[];
+  switches?: number;
+  detection_latency_ms_p95?: number;
+}
 
 interface CallMetricsCardProps {
   metrics: {
@@ -10,6 +18,7 @@ interface CallMetricsCardProps {
       turn_to_audio_ms_p50?: number;
       turn_to_audio_ms_p95?: number;
     };
+    language?: LanguageMetrics;
   } | null;
 }
 
@@ -50,6 +59,26 @@ export function CallMetricsCard({ metrics }: CallMetricsCardProps) {
             {metrics.latency?.turn_to_audio_ms_p95 ? `${metrics.latency.turn_to_audio_ms_p95}ms` : '—'}
           </div>
         </div>
+        {metrics.language && (
+          <>
+            <div className="st-metric-tile">
+              <div className="st-metric-label">Language</div>
+              <div className="st-metric-value">{callLanguageName(metrics.language.final)}</div>
+            </div>
+            <div className="st-metric-tile">
+              <div className="st-metric-label">Language switches</div>
+              <div className="st-metric-value">{metrics.language.switches ?? 0}</div>
+            </div>
+            <div className="st-metric-tile">
+              <div className="st-metric-label">Language detection p95</div>
+              <div className="st-metric-value">
+                {metrics.language.detection_latency_ms_p95
+                  ? `${metrics.language.detection_latency_ms_p95}ms`
+                  : '—'}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

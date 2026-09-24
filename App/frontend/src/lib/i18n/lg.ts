@@ -177,4 +177,12 @@ export const lg: Partial<Dictionary> = {
   'call.listening': 'Tuwuliriza… buuza ekibuuzo kyo ku musolo.',
   'call.listeningHint': 'Bye woyogera bijja kulabika wano nga okyayogera.',
   'call.mutedHint': 'Eddoboozi lisiriziddwa — lizzeeyo osobole okweyongera okwogera.',
+  'call.languageAuto': '{language} · auto',
+  'call.languageChosen': '{language}',
+  'call.languageMenu': 'Olulimi lw’essimu',
+  'call.languageMenuHint': 'Londa olulimi essimu yonna mw’eneebeera.',
+  'call.languageSwitched': 'Kati twogera {language}',
+  'call.lang.en': 'Lungereza',
+  'call.lang.lg': 'Luganda',
+  'call.lang.sw': 'Kiswahili',
 };

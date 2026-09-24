@@ -65,6 +65,7 @@ export function useCallsLobby() {
     topic: string;
     reason: string;
     ticketId?: string;
+    language?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -81,7 +82,12 @@ export function useCallsLobby() {
       ws.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data);
-          if (payload.type === 'call.started' || payload.type === 'call.ended' || payload.type === 'call.bridged') {
+          if (
+            payload.type === 'call.started' ||
+            payload.type === 'call.ended' ||
+            payload.type === 'call.bridged' ||
+            payload.type === 'call.language'
+          ) {
             queryClient.invalidateQueries({ queryKey: queryKeys.calls.all() });
           }
           if (payload.type === 'call.transfer_requested') {
@@ -91,6 +97,7 @@ export function useCallsLobby() {
               topic: payload.data?.topic || 'General Support',
               reason: payload.data?.reason || 'Transfer requested',
               ticketId: payload.data?.ticket_id,
+              language: typeof payload.data?.language === 'string' ? payload.data.language : undefined,
             });
           }
         } catch {}
@@ -148,6 +155,8 @@ export function useCallLive(callId?: string | null) {
             setInterimCaption({ speaker: msg.data.speaker, text: msg.data.text });
           } else if (msg.type === 'status') {
             setCall((prev) => (prev ? { ...prev, status: msg.data.status } : null));
+          } else if (msg.type === 'language' && typeof msg.data?.language === 'string') {
+            setCall((prev) => (prev ? { ...prev, locale: msg.data.language } : null));
           }
         } catch {}
       };

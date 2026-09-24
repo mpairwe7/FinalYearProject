@@ -1,5 +1,6 @@
 import React from 'react';
 import { CallRecord } from '@/services/callsApi';
+import { callLanguageName } from '@/lib/callLanguage';
 
 interface CallRowProps {
   call: CallRecord;
@@ -53,6 +54,9 @@ export function CallRow({ call, isSelected, onSelect }: CallRowProps) {
     >
       <div className="ag-row-head">
         <span className={`st-pill ${statusClass}`}>{statusLabel}</span>
+        <span className="st-chip--language" title="Call language">
+          {callLanguageName(call.locale)}
+        </span>
         <span className="ag-row-time">{formatElapsed(call.started_at, call.ended_at)}</span>
       </div>
       <div className="ag-row-subject">{topic}</div>

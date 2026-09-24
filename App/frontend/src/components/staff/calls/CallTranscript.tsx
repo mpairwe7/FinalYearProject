@@ -78,6 +78,14 @@ export function CallTranscript({ turns, interimCaption }: CallTranscriptProps) {
         )}
 
         {turns.map((turn) => {
+          if (turn.kind === 'language') {
+            // A language lock or switch: a marker between turns, not a bubble.
+            return (
+              <div key={turn.id || turn.seq} className="st-language-note" role="note">
+                {turn.text}
+              </div>
+            );
+          }
           const isCaller = turn.speaker === 'caller';
           const isAssistant = turn.speaker === 'assistant';
           const isOfficer = turn.speaker === 'officer';

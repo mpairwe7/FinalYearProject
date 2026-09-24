@@ -7,6 +7,7 @@ import { CallSummaryCard } from './CallSummaryCard';
 import { CallMetricsCard } from './CallMetricsCard';
 import { CallReviewForm } from './CallReviewForm';
 import { PhoneIcon, MicIcon, MicOffIcon } from '@/components/Icons';
+import { callLanguageName } from '@/lib/callLanguage';
 
 interface CallCaseProps {
   initialCall: CallRecord;
@@ -24,6 +25,8 @@ export function CallCase({ initialCall, userRole = 'ura_staff' }: CallCaseProps)
   const reviewMutation = useReviewCall();
 
   const canAct = userRole !== 'ura_auditor';
+  const languageName = callLanguageName(call.locale);
+  const languagesUsed = (call.summary?.languages_used ?? []).map(callLanguageName);
   const isTransferring = call.status === 'transferring';
   const isEnded = call.status === 'ended';
 
@@ -57,7 +60,10 @@ export function CallCase({ initialCall, userRole = 'ura_staff' }: CallCaseProps)
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
             <span>Channel: {call.channel}</span>
-            <span>Locale: {call.locale}</span>
+            <span className="st-chip--language" title="Call language">
+              {`${languageName} caller`}
+            </span>
+            {languagesUsed.length > 1 && <span>Languages: {languagesUsed.join(' → ')}</span>}
             {call.ticket_id && (
               <Link
                 href={`/admin/tickets?ticket=${encodeURIComponent(call.ticket_id)}`}
@@ -156,6 +162,7 @@ export function CallCase({ initialCall, userRole = 'ura_staff' }: CallCaseProps)
             Handoff Briefing: {call.transfer_reason || 'Taxpayer requested human escalation'}
           </div>
           <div style={{ fontSize: '0.8125rem', color: '#78350f', marginTop: '0.25rem' }}>
+            {`${languageName} caller. `}
             The taxpayer was escalated to human staff. AI has held caller audio and prepared context below.
           </div>
         </div>

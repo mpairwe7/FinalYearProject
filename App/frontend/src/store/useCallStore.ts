@@ -9,6 +9,18 @@ export type CallStatus =
   | 'officer'
   | 'ended';
 
+/** A language the receptionist can hold a call in. */
+export type CallLanguage = 'en' | 'lg' | 'sw';
+
+/** How the call came to be in its current language. */
+export type CallLanguageSource = 'default' | 'auto' | 'explicit' | 'override';
+
+export const CALL_LANGUAGES: readonly CallLanguage[] = ['en', 'lg', 'sw'];
+
+export function isCallLanguage(value: unknown): value is CallLanguage {
+  return typeof value === 'string' && (CALL_LANGUAGES as readonly string[]).includes(value);
+}
+
 export interface CaptionEntry {
   speaker: 'caller' | 'assistant' | 'officer' | 'system';
   text: string;
@@ -29,6 +41,14 @@ interface CallStoreState {
   isUserSpeaking: boolean;
   activeAiText: string;
   error: string | null;
+  /**
+   * Whether this call follows the caller's language. Only when the server says
+   * so (`call_ready.language_detection`) does the call screen offer a choice.
+   */
+  languageDetection: boolean;
+  languages: CallLanguage[];
+  language: CallLanguage;
+  languageSource: CallLanguageSource;
 
   openCall: () => void;
   closeCall: () => void;
@@ -41,6 +61,8 @@ interface CallStoreState {
   setActiveAiText: (text: string) => void;
   addCaption: (caption: CaptionEntry) => void;
   setError: (error: string | null) => void;
+  setLanguageOptions: (detection: boolean, languages: CallLanguage[], language: CallLanguage) => void;
+  setLanguage: (language: CallLanguage, source: CallLanguageSource) => void;
   reset: () => void;
 }
 
@@ -56,6 +78,10 @@ const initialState = {
   isUserSpeaking: false,
   activeAiText: '',
   error: null,
+  languageDetection: false,
+  languages: ['en'] as CallLanguage[],
+  language: 'en' as CallLanguage,
+  languageSource: 'default' as CallLanguageSource,
 };
 
 export const useCallStore = create<CallStoreState>((set) => ({
@@ -71,6 +97,10 @@ export const useCallStore = create<CallStoreState>((set) => ({
       currentCaption: null,
       isUserSpeaking: false,
       activeAiText: '',
+      languageDetection: false,
+      languages: ['en'],
+      language: 'en',
+      languageSource: 'default',
     }),
   closeCall: () => set({ isOpen: false, status: 'idle' }),
   setStatus: (status) => set({ status }),
@@ -113,5 +143,8 @@ export const useCallStore = create<CallStoreState>((set) => ({
       };
     }),
   setError: (error) => set({ error }),
+  setLanguageOptions: (languageDetection, languages, language) =>
+    set({ languageDetection, languages, language, languageSource: 'default' }),
+  setLanguage: (language, languageSource) => set({ language, languageSource }),
   reset: () => set(initialState),
 }));

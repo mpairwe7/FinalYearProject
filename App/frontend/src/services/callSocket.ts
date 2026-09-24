@@ -7,6 +7,8 @@ import { appendAuthToken } from '@/lib/authSession';
 
 export interface CallStartPayload {
   locale: string;
+  /** The chat's language: a hint only — a multilingual call opens in English. */
+  preferred_locale?: string;
   voice_consent_accepted: boolean;
   sample_rate?: number;
 }
@@ -45,6 +47,7 @@ export class CallSocket {
           const initMsg = {
             type: 'call_start',
             locale: startPayload.locale,
+            preferred_locale: startPayload.preferred_locale ?? startPayload.locale,
             voice_consent_accepted: startPayload.voice_consent_accepted,
             sample_rate: startPayload.sample_rate || 16000,
           };
@@ -90,6 +93,13 @@ export class CallSocket {
   requestOfficer(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'request_officer' }));
+    }
+  }
+
+  /** The caller chose the call's language on screen; it holds for the rest of the call. */
+  setLanguage(language: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'set_language', language }));
     }
   }
 

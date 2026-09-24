@@ -222,6 +222,83 @@
   border: 1px solid var(--border-0, #e6e6e6);
 }
 
+/* Language chip — "English · auto" — and its three-item menu. Same tokens as
+ * the ticket chip; the menu hangs below it, right-aligned to the header. */
+.call-lang {
+  position: relative;
+}
+
+.call-lang-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 8px;
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-1, #3f3f3f);
+  border: 1px solid var(--border-0, #e6e6e6);
+  cursor: pointer;
+}
+
+.call-lang-chip:hover {
+  background: var(--surface-2, #efefef);
+}
+
+.call-lang-chip:focus-visible,
+.call-lang-option:focus-visible {
+  outline: 2px solid var(--cv2-accent, #1d3a70);
+  outline-offset: 2px;
+}
+
+.call-lang-chip--pinned {
+  color: var(--cv2-accent, #1d3a70);
+  border-color: currentColor;
+}
+
+.call-lang-menu {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  right: 0;
+  z-index: 2;
+  min-width: 13rem;
+  max-width: min(16rem, calc(100vw - 2rem));
+  padding: 0.375rem;
+  background: var(--bg-0, #ffffff);
+  border: 1px solid var(--border-0, #e6e6e6);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, 0.14));
+}
+
+.call-lang-menu-hint {
+  margin: 0.25rem 0.5rem 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-2, #6e6e6e);
+}
+
+.call-lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text-0, #0d0d0d);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.call-lang-option:hover,
+.call-lang-option--active {
+  background: var(--surface-1, #f7f7f7);
+}
+
 .call-timer {
   font-size: 0.8125rem;
   font-weight: 600;

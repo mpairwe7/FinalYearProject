@@ -152,6 +152,34 @@
   border-color: #b45309;
 }
 
+/* Call language — "Luganda caller" in the queue and the case header */
+.st-chip--language {
+  background: #e0f2fe;
+  color: #075985;
+  border: 1px solid #bae6fd;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+
+[data-theme='dark'] .st-chip--language {
+  background: #0c4a6e;
+  color: #e0f2fe;
+  border-color: #0369a1;
+}
+
+/* A language lock or switch, between transcript turns */
+.st-language-note {
+  align-self: center;
+  font-size: 0.75rem;
+  color: var(--text-secondary, #6b7280);
+  border-top: 1px dashed var(--border-default, #e5e7eb);
+  border-bottom: 1px dashed var(--border-default, #e5e7eb);
+  padding: 0.25rem 0.75rem;
+}
+
 .st-jump-bottom-btn {
   position: absolute;
   bottom: 1rem;
