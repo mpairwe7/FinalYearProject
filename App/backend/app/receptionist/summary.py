@@ -118,8 +118,11 @@ def _summarise_gemini(prompt: str) -> dict[str, Any] | None:
 def _summarise_local(prompt: str) -> dict[str, Any] | None:
     try:
         from ..llm import _vllm_generate
+        # Chat messages, not a string: given a string, _vllm_generate's own
+        # error handler returned "" and every Luganda summary silently fell
+        # through to Gemini or the template.
         raw_reply = _vllm_generate(
-            f"{SUMMARY_SYSTEM}\n\n{prompt}",
+            [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": prompt}],
             max_tokens=1000,
             temperature=0.0,
         )
