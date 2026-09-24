@@ -812,9 +812,11 @@
   color: var(--text-0, #fff);
 }
 
+/* The ink-on-fill pair: white on the old #10b981 was 2.53:1, and failed the
+   staff-surface axe audit. The tokens are tuned for 4.5:1 in both themes. */
 .st-trans-btn.is-active {
-  background: var(--ops-accent, #10b981);
-  color: #ffffff;
+  background: var(--ops-good-fill);
+  color: var(--ops-good-ink);
   font-weight: 600;
 }
 
