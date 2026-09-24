@@ -22,7 +22,7 @@ logged as `SpeechModel warm-up: {'lg': 'error: …'}`.
 |---|---|---|
 | `SPEECH_WARMUP` | `true` | Set `false` where the extra boot traffic is unwanted — a metered egress, a cold HF Space |
 | `SPEECH_WARMUP_LOCALES` | `en,lg,sw` | Comma-separated; one synthesis each, sequentially |
-| `SPEECH_TTS_CACHE_SIZE` | `64` | Repeated short phrases skip the backend chain entirely |
+| `SPEECH_TTS_CACHE_SIZE` | `256` | Repeated short phrases skip the backend chain entirely; the receptionist pre-warms its fixed Luganda lines into it |
 
 Warming is sequential on purpose: three locales at once would contend for the
 same bounded speech executor that live requests use, which is the opposite of
@@ -546,3 +546,55 @@ curl -X POST "$BASE/api/v1/asr?language=lg" \
 `language` is genuinely optional — auto-detect returned the same transcript.
 Note `/v1/tts` returns **MP3** for English (`edge_tts`, 24 kHz) and **RIFF
 WAV** for the SALT locales (16 kHz); don't assume one container for both.
+
+## Language identification — `SpeechModel.identify_language`
+
+The multilingual receptionist asks Whisper-SALT *which* language an utterance is
+in, not what it says: one encoder pass and one decoder step from
+`<|startoftranscript|>`, reading the logits only at the candidates' ids in
+`SALT_LANGUAGE_TOKEN_IDS` (en 50259, sw 50318, lg 50355) and softmaxing over those
+alone. Tens of milliseconds on an A6000 — cheap enough to run on every caller
+utterance. It never raises: a missing model, too little audio (< 0.3 s), a
+timeout (`SPEECH_LID_DEADLINE_S`, 2 s) or an open `speech.lid` breaker all come
+back as a result with `error` set and no vote.
+
+Accuracy is measured, not assumed — `scripts/eval_language_id.py` over
+`evals/language_id/` (FLEURS, SALT, AfriSpeech accented English; built by
+`evals/language_id/build_dataset.py`). Results: `evals/reports/language_id_*.md`.
+
+## Raw PCM and the format sniffer
+
+`_decode_audio_bytes` guesses the container from the first bytes. Raw 16-bit PCM
+that starts `FF Ex` — and a quiet sample of −1 is `FF FF` — passes for an MPEG
+frame sync, and libsndfile then "decodes" MP3 garbage out of speech. On the
+language-id set 7% of real clips start that way. Code that holds raw PCM (the
+receptionist's STT, live partials, the language sentinel, the officer leg) wraps
+it with `speech_service.pcm16_to_wav` before calling `transcribe`; a RIFF header
+is unambiguous. `identify_language` itself reads raw PCM16 directly.
+
+## TTS — Orpheus-3B (`Sunbird/orpheus-3b-tts-multilingual`)
+
+The receptionist's Luganda voice, and the first tier of `_synthesize_uncached` for
+any language listed in `ORPHEUS_TTS_LANGUAGES` (default `lg`) when
+`ORPHEUS_TTS_URL` is set — ahead of Spark-TTS-SALT (~4.3 s a sentence) and Sunbird
+cloud (~7.2 s), which remain the fallbacks. It runs as its own service
+(`App/backend/orpheus_sidecar`: vLLM + the SNAC 24 kHz codec, streaming PCM frame by
+frame) because vLLM pins its own torch/transformers.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `ORPHEUS_TTS_URL` | unset | Unset = the tier does not exist |
+| `ORPHEUS_TTS_LANGUAGES` | `lg` | Languages it voices (`lg,sw` to add Swahili) |
+| `ORPHEUS_TTS_SPEAKER_LG` | `salt_lug_0001` | From the model card's table; `waxal_lug_0002…0008` also exist |
+| `ORPHEUS_TTS_SPEAKER_SW` | `waxal_swa_0006` | |
+| `ORPHEUS_QUANTIZATION` (sidecar) | unset / `fp8` in compose | Weight-only FP8 via Marlin on Ampere |
+
+Measured on one RTX A6000 (`scripts/bench_orpheus_tts.py`, 30 Luganda sentences ×
+4 speakers): bf16 — 355 ms to first audio, 0.96× real time; **FP8 — 234 ms, 0.63×**;
+FP8 with two callers at once — 265 ms, 0.69×. At bf16 generation barely keeps pace
+with playback, so FP8 is the compose default. Not measured: how natural it sounds —
+that needs Luganda listeners (`evals/orpheus_tts/listening_sheet.csv`).
+
+A connection failure puts the client in a 30 s cooldown, so a dead sidecar costs
+one timeout rather than one per sentence.
+

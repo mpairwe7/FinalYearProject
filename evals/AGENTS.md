@@ -10,6 +10,8 @@ Deterministic gates. Do not call a hosted LLM from these jobs.
 | Routing golden sets | `app.agents.eval_routing` | EN ≥ 0.95 before `agentic_mode` |
 | Preference export | `evals/export_preferences.py` | thumbs-down + `officer_reply`; no fine-tune |
 | DPO scaffold | `evals/dpo_job.py` | refuses train unless `EVAL_GATE_OK` |
+| Spoken language id | `evals/language_id/` + `scripts/eval_language_id.py` | receptionist Phase 0A — measurement, GPU; see its README |
+| Orpheus Luganda voice | `evals/orpheus_tts/` + `scripts/bench_orpheus_tts.py` | receptionist Phase 0B — latency here, naturalness by listeners |
 
 `FLAG_HYDE` / `FLAG_GRAPH_FUSION` stay off until an unseen multi-hop set exists.
 
