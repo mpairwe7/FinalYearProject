@@ -93,6 +93,32 @@ def get_gemini_live_voice() -> str:
     return os.getenv("GEMINI_LIVE_VOICE", "Aoede").strip() or "Aoede"
 
 
+def get_gemini_vad_start_sensitivity() -> str:
+    """How readily Gemini hears the caller start talking: ``high`` (default) or ``low``.
+
+    High is what makes barge-in work: at ``low`` a caller talking over the
+    greeting was not heard as speech and the greeting played to the end.
+    """
+    value = os.getenv("GEMINI_LIVE_START_SENSITIVITY", "high").strip().lower()
+    return value if value in ("high", "low") else "high"
+
+
+def get_gemini_vad_end_sensitivity() -> str:
+    """How readily Gemini decides the caller has finished: ``high`` (default) or ``low``."""
+    value = os.getenv("GEMINI_LIVE_END_SENSITIVITY", "high").strip().lower()
+    return value if value in ("high", "low") else "high"
+
+
+def get_gemini_vad_silence_ms() -> int:
+    """Silence after which Gemini's own VAD ends the caller's turn."""
+    return max(0, _env_int("GEMINI_LIVE_SILENCE_MS", 300))
+
+
+def get_gemini_vad_prefix_padding_ms() -> int:
+    """Speech Gemini must hear before it commits to a start of speech."""
+    return max(0, _env_int("GEMINI_LIVE_PREFIX_PADDING_MS", 100))
+
+
 # ---------------------------------------------------------------------------
 # Multilingual receptionist (en / sw / lg) and language detection
 # ---------------------------------------------------------------------------
@@ -179,8 +205,18 @@ def get_lid_hysteresis_confidence() -> float:
 
 
 def get_lid_hysteresis_turns() -> int:
-    """Consecutive accumulating votes needed to switch a locked call."""
+    """Votes for the new language, within the window, that switch a locked call."""
     return max(1, _env_int("RECEPTIONIST_LID_HYSTERESIS_TURNS", 2))
+
+
+def get_lid_hysteresis_window() -> int:
+    """How many of a locked call's latest content votes are weighed together."""
+    return max(get_lid_hysteresis_turns(), _env_int("RECEPTIONIST_LID_HYSTERESIS_WINDOW", 3))
+
+
+def get_lid_support_confidence() -> float:
+    """The least confident vote that still counts towards moving a locked call."""
+    return _env_float("RECEPTIONIST_LID_SUPPORT_CONFIDENCE", 0.50)
 
 
 def get_lid_hold_timeout_ms() -> int:
@@ -196,6 +232,21 @@ def get_lg_mix_threshold() -> float:
 def get_turn_timeout_s() -> float:
     """Silence after the caller's last word before the cascaded turn closes."""
     return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
+
+
+def local_barge_in_enabled() -> bool:
+    """Whether the call's own VAD stops Gemini when the caller talks over it.
+
+    Gemini's VAD decides first; this catches the callers it misses. Turn it
+    off on a device whose speaker leaks into the microphone, where the
+    assistant's own voice would read as the caller talking.
+    """
+    return _env_bool("RECEPTIONIST_LOCAL_BARGE_IN", True)
+
+
+def get_barge_in_min_s() -> float:
+    """Speech after the VAD's onset (itself 0.2 s) that counts as talking over the assistant."""
+    return max(0.0, _env_float("RECEPTIONIST_BARGE_IN_MIN_S", 0.4))
 
 
 def get_clarify_threshold_for(language: str) -> float:

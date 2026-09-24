@@ -69,6 +69,15 @@ class FirstContentUtteranceLocks(unittest.TestCase):
         self.assertFalse(p.locked)
         self.assertEqual(p.active, "en")
 
+    def test_a_weak_vote_for_the_opening_language_leaves_the_call_open_too(self):
+        """A real Luganda caller's first question voted English at 0.63 and locked English."""
+        p = policy()
+        d = p.observe(vote("en", 0.63, text="Rwandakuyango na sema ya baama."))
+        self.assertEqual((d.action, d.reason), ("none", "weak_first_vote"))
+        self.assertFalse(p.locked)
+        d = p.observe(vote("lg", 0.78))
+        self.assertEqual((d.action, d.target), ("switch", "lg"))
+
 
 class LockedCallsNeedEvidenceToMove(unittest.TestCase):
     def locked(self) -> LanguagePolicy:
@@ -93,12 +102,30 @@ class LockedCallsNeedEvidenceToMove(unittest.TestCase):
         d = p.observe(vote("lg", 0.75))
         self.assertEqual((d.action, d.target, d.reason), ("switch", "lg", "hysteresis"))
 
-    def test_a_vote_for_the_current_language_breaks_the_run(self):
+    def test_one_vote_for_the_current_language_does_not_hide_the_others(self):
+        """Two Luganda votes among the last three move the call, whatever sits between them."""
+        p = self.locked()
+        p.observe(vote("lg", 0.8))
+        self.assertEqual(p.observe(vote("en", 0.9)).reason, "same_language")
+        d = p.observe(vote("lg", 0.8))
+        self.assertEqual((d.action, d.target, d.reason), ("switch", "lg", "hysteresis"))
+
+    def test_votes_older_than_the_window_are_forgotten(self):
         p = self.locked()
         p.observe(vote("lg", 0.8))
         p.observe(vote("en", 0.9))
+        p.observe(vote("en", 0.9))
         d = p.observe(vote("lg", 0.8))
         self.assertEqual((d.action, d.reason), ("none", "accumulating"))
+
+    def test_the_real_luganda_caller_moves_within_three_turns(self):
+        """Votes from a real Luganda caller's phone audio, locked into English (2026-09-24)."""
+        p = policy()
+        p.observe(vote("en", 0.73, text="Can we go to Ingolian in this one?"))
+        self.assertEqual(p.observe(vote("lg", 0.78)).reason, "accumulating")
+        self.assertEqual(p.observe(vote("en", 0.71, text="Katubuge oranku imashini.")).reason, "same_language")
+        d = p.observe(vote("lg", 0.72))
+        self.assertEqual((d.action, d.target), ("switch", "lg"))
 
     def test_moderate_votes_for_two_different_languages_do_not_add_up(self):
         p = self.locked()
@@ -107,13 +134,18 @@ class LockedCallsNeedEvidenceToMove(unittest.TestCase):
         self.assertEqual((d.action, d.reason), ("none", "accumulating"))
         self.assertEqual(p.active, "en")
 
-    def test_a_weak_vote_is_ignored_and_clears_the_run(self):
+    def test_a_vote_below_the_support_bar_does_not_count(self):
         p = self.locked()
         p.observe(vote("lg", 0.8))
-        d = p.observe(vote("lg", 0.6))
-        self.assertEqual((d.action, d.reason), ("none", "below_hysteresis"))
-        d = p.observe(vote("lg", 0.8))
-        self.assertEqual(d.reason, "accumulating")
+        d = p.observe(vote("lg", 0.4))
+        self.assertEqual((d.action, d.reason), ("none", "weak_vote"))
+        self.assertEqual(p.active, "en")
+
+    def test_a_moderate_vote_supports_one_before_it(self):
+        p = self.locked()
+        p.observe(vote("lg", 0.8))
+        d = p.observe(vote("lg", 0.55))
+        self.assertEqual((d.action, d.target, d.reason), ("switch", "lg", "hysteresis"))
 
     def test_hysteresis_turns_is_configurable(self):
         p = policy(hysteresis_turns=3)
@@ -203,7 +235,7 @@ class OneTurnSwitchWhenTheWordsAgree(unittest.TestCase):
         self.assertEqual(d.action, "none")
         self.assertEqual(p.active, "lg")
 
-    def test_without_corroborating_words_it_still_takes_two_turns(self):
+    def test_without_corroborating_words_it_still_takes_two_votes(self):
         p = self.luganda_call()
         self.assertEqual(p.observe(vote("en", 0.8, text="")).reason, "accumulating")
         self.assertEqual(p.observe(vote("en", 0.8, text="")).action, "switch")
@@ -298,6 +330,33 @@ class TextHelpers(unittest.TestCase):
         self.assertIs(fuse(v), v)
 
 
+class AnEngineCanReportTheLanguage(unittest.TestCase):
+    """Gemini Live hears Luganda that the language token took for English."""
+
+    def test_a_report_moves_a_call_locked_in_english(self):
+        p = policy()
+        p.observe(vote("en", 0.95))
+        d = p.report("lg", "gemini_live_heard")
+        self.assertEqual((d.action, d.target, d.reason, d.source), ("switch", "lg", "gemini_live_heard", "auto"))
+        self.assertTrue(p.locked)
+
+    def test_a_report_of_the_current_language_changes_nothing(self):
+        p = policy()
+        p.observe(vote("lg", 0.95))
+        self.assertEqual(p.report("lg", "gemini_live_heard").action, "none")
+
+    def test_an_on_screen_choice_beats_a_report(self):
+        p = policy()
+        p.set_override("en")
+        d = p.report("lg", "gemini_live_heard")
+        self.assertEqual((d.action, d.reason), ("none", "override_locked"))
+        self.assertEqual(p.active, "en")
+
+    def test_an_unoffered_language_is_not_reported_in(self):
+        p = policy(languages=("en", "sw"))
+        self.assertEqual(p.report("lg", "gemini_live_heard").reason, "unsupported_language")
+
+
 class ConfigFromEnvironment(unittest.TestCase):
     def test_env_overrides(self):
         env = {
@@ -305,6 +364,8 @@ class ConfigFromEnvironment(unittest.TestCase):
             "RECEPTIONIST_LID_SWITCH_CONFIDENCE": "0.95",
             "RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE": "0.75",
             "RECEPTIONIST_LID_HYSTERESIS_TURNS": "3",
+            "RECEPTIONIST_LID_HYSTERESIS_WINDOW": "2",
+            "RECEPTIONIST_LID_SUPPORT_CONFIDENCE": "0.6",
             "RECEPTIONIST_LG_MIX_THRESHOLD": "0.4",
             "RECEPTIONIST_LANGUAGES": "en,lg,xx",
         }
@@ -314,6 +375,8 @@ class ConfigFromEnvironment(unittest.TestCase):
         self.assertEqual(cfg.switch_confidence, 0.95)
         self.assertEqual(cfg.hysteresis_confidence, 0.75)
         self.assertEqual(cfg.hysteresis_turns, 3)
+        self.assertEqual(cfg.hysteresis_window, 3)  # never narrower than the votes it must hold
+        self.assertEqual(cfg.support_confidence, 0.6)
         self.assertEqual(cfg.lg_mix_threshold, 0.4)
         self.assertEqual(cfg.languages, ("en", "lg"))
 

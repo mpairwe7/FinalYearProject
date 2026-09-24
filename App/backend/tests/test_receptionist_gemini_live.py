@@ -133,10 +133,11 @@ class TestGeminiLiveMultilingual(unittest.IsolatedAsyncioTestCase):
         self.chat_model._build_handoff_packet.return_value = {"priority": "normal"}
         self.chat_model._maybe_create_ticket.return_value = "TICK-GML-1"
 
-    def tools(self, service_ref=None, may_act=None):
+    def tools(self, service_ref=None, may_act=None, on_luganda=None):
         from app.receptionist.gemini_live import build_gemini_tools
 
-        return {t.name: t.handler for t in build_gemini_tools(self.room, self.chat_model, service_ref or {}, may_act)}
+        built = build_gemini_tools(self.room, self.chat_model, service_ref or {}, may_act, on_luganda)
+        return {t.name: t.handler for t in built}
 
     def test_instruction_for_english_and_swahili(self):
         from app.receptionist.gemini_live import build_gemini_system_instruction
@@ -146,11 +147,54 @@ class TestGeminiLiveMultilingual(unittest.IsolatedAsyncioTestCase):
         self.assertIn("English or Swahili", text)
         self.assertIn("translated into English", text)
         self.assertIn("exactly as the tool returns it", text)
-        self.assertIn("passed automatically to a colleague", text)
-        self.assertIn("never request an officer because of the caller's language", text)
+        self.assertIn("reply briefly in English", text)
         self.assertIn("caller_language", text)
         self.assertIn("word for word", text)
         self.assertIn("query_ura_tax_knowledge", text)
+
+    def test_instruction_hands_luganda_over_when_it_can(self):
+        from app.receptionist.gemini_live import build_gemini_system_instruction
+
+        text = build_gemini_system_instruction(("en", "sw"), luganda_handover=True)
+        self.assertIn("call `hand_over_to_luganda`", text)
+        self.assertIn("Never tell a caller you cannot speak Luganda", text)
+        self.assertIn("never request an officer because of the caller's language", text)
+        self.assertNotIn("hand_over_to_luganda", build_gemini_system_instruction(("en", "sw")))
+
+    async def test_the_luganda_tool_moves_the_call(self):
+        from types import SimpleNamespace
+
+        heard: list[bool] = []
+
+        def on_luganda() -> bool:
+            heard.append(True)
+            return True
+
+        tools = self.tools(on_luganda=on_luganda)
+        params = SimpleNamespace(arguments={"heard": "Gyebale ko nnyabo"}, result_callback=AsyncMock())
+        await tools["hand_over_to_luganda"](params)
+        self.assertEqual(heard, [True])
+        self.assertTrue(params.result_callback.await_args.args[0]["handed_over"])
+        self.assertNotIn("hand_over_to_luganda", self.tools())  # single-engine calls have no Luganda colleague
+
+    async def test_the_luganda_tool_respects_an_on_screen_choice(self):
+        from types import SimpleNamespace
+
+        params = SimpleNamespace(arguments={}, result_callback=AsyncMock())
+        await self.tools(on_luganda=lambda: False)["hand_over_to_luganda"](params)
+        self.assertFalse(params.result_callback.await_args.args[0]["handed_over"])
+
+    def test_gemini_hears_the_caller_start_talking_readily(self):
+        from app.receptionist import config
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GEMINI_LIVE_START_SENSITIVITY", None)
+            self.assertEqual(config.get_gemini_vad_start_sensitivity(), "high")
+        with patch.dict(os.environ, {"GEMINI_LIVE_START_SENSITIVITY": "LOW", "GEMINI_LIVE_SILENCE_MS": "500"}):
+            self.assertEqual(config.get_gemini_vad_start_sensitivity(), "low")
+            self.assertEqual(config.get_gemini_vad_silence_ms(), 500)
+        with patch.dict(os.environ, {"GEMINI_LIVE_START_SENSITIVITY": "loudest"}):
+            self.assertEqual(config.get_gemini_vad_start_sensitivity(), "high")
 
     def test_instruction_for_english_only(self):
         from app.receptionist.gemini_live import build_gemini_system_instruction

@@ -17,7 +17,12 @@ from app.receptionist.sentinel import LanguageSentinel  # noqa: E402
 from app.receptionist.serializer import SetLanguageFrame  # noqa: E402
 from app.speech_service import LanguageIdResult  # noqa: E402
 from pipecat.audio.vad.vad_analyzer import VADState  # noqa: E402
-from pipecat.frames.frames import InputAudioRawFrame, InterruptionFrame  # noqa: E402
+from pipecat.frames.frames import (  # noqa: E402
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    InputAudioRawFrame,
+    InterruptionFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection  # noqa: E402
 
 CHUNK = b"\x10\x00" * 320  # 20 ms at 16 kHz
@@ -62,6 +67,10 @@ class RecordingRouter:
         self.turns: list[tuple[int, int]] = []
         self.voted = asyncio.Event()
         self.turn_ended = asyncio.Event()
+        self.barge_ins = 0
+
+    async def on_barge_in(self) -> None:
+        self.barge_ins += 1
 
     async def on_speech_started(self) -> None:
         self.started += 1
@@ -175,6 +184,52 @@ class SentinelTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(f.metadata["language_switch"] for f in frames))
         self.assertEqual({d for _, d in pushed}, {FrameDirection.DOWNSTREAM, FrameDirection.UPSTREAM})
 
+
+    async def barge(self, *, bot_speaking: bool, env: dict[str, str] | None = None) -> RecordingRouter:
+        """Six chunks of speech (120 ms) over — or not over — the assistant."""
+        states = [VADState.SPEAKING] * 6 + [VADState.QUIET]
+        lid = LanguageIdResult({"en": 0.9, "sw": 0.05, "lg": 0.05}, "en", 40.0, 0.2)
+        with patch.dict(os.environ, {"RECEPTIONIST_BARGE_IN_MIN_S": "0.06", **(env or {})}):
+            sentinel, router, _, _ = self.build(states, lid)
+        if bot_speaking:
+            await sentinel.process_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.feed(sentinel, 7)
+        await self.wait_vote(router)
+        await sentinel._stop()
+        return router
+
+    async def test_talking_over_the_assistant_is_a_barge_in_once_per_utterance(self):
+        router = await self.barge(bot_speaking=True)
+        self.assertEqual(router.barge_ins, 1)
+
+    async def test_talking_while_the_assistant_is_quiet_is_not(self):
+        router = await self.barge(bot_speaking=False)
+        self.assertEqual(router.barge_ins, 0)
+
+    async def test_the_assistant_stopping_ends_its_turn_to_be_talked_over(self):
+        states = [VADState.SPEAKING] * 6 + [VADState.QUIET]
+        lid = LanguageIdResult({"en": 0.9, "sw": 0.05, "lg": 0.05}, "en", 40.0, 0.2)
+        with patch.dict(os.environ, {"RECEPTIONIST_BARGE_IN_MIN_S": "0.06"}):
+            sentinel, router, _, _ = self.build(states, lid)
+        await sentinel.process_frame(BotStartedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await sentinel.process_frame(BotStoppedSpeakingFrame(), FrameDirection.UPSTREAM)
+        await self.feed(sentinel, 7)
+        await self.wait_vote(router)
+        await sentinel._stop()
+        self.assertEqual(router.barge_ins, 0)
+
+    async def test_local_barge_in_can_be_turned_off(self):
+        router = await self.barge(bot_speaking=True, env={"RECEPTIONIST_LOCAL_BARGE_IN": "false"})
+        self.assertEqual(router.barge_ins, 0)
+
+    async def test_a_barge_in_interruption_is_marked_as_one(self):
+        lid = LanguageIdResult({}, "", 0.0, 0.0, error="x")
+        sentinel, _, _, pushed = self.build([], lid)
+        await sentinel.interrupt_for_barge_in()
+        await sentinel._stop()
+        frames = [f for f, _ in pushed]
+        self.assertTrue(all(f.metadata.get("local_barge_in") for f in frames))
+        self.assertFalse(any(f.metadata.get("language_switch") for f in frames))
 
     async def test_segments_close_to_each_other_are_one_turn(self):
         # Two segments with a pause the VAD calls the end of speech, then silence.

@@ -26,6 +26,10 @@ from .config import (
     get_engine_by_language,
     get_gemini_live_model,
     get_gemini_live_voice,
+    get_gemini_vad_end_sensitivity,
+    get_gemini_vad_prefix_padding_ms,
+    get_gemini_vad_silence_ms,
+    get_gemini_vad_start_sensitivity,
     get_max_call_s,
     get_transfer_timeout_s,
 )
@@ -282,8 +286,14 @@ class OfficerRequestBridge(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-def build_gemini_system_instruction(languages: Sequence[str] = GEMINI_LANGUAGES) -> str:
-    """Gemini's system instruction for a call it may hold in *languages*."""
+def build_gemini_system_instruction(
+    languages: Sequence[str] = GEMINI_LANGUAGES, luganda_handover: bool = False
+) -> str:
+    """Gemini's system instruction for a call it may hold in *languages*.
+
+    ``luganda_handover``: the call can move to a Luganda engine, and Gemini
+    has the ``hand_over_to_luganda`` tool to move it.
+    """
     langs = [lang for lang in languages if lang in GEMINI_LANGUAGES] or ["en"]
     names = [LANGUAGE_NAMES[lang] for lang in langs]
     parts = [
@@ -296,11 +306,24 @@ def build_gemini_system_instruction(languages: Sequence[str] = GEMINI_LANGUAGES)
     else:
         parts.append(
             "The call starts in English. Reply in the language of the caller's latest question — "
-            f"{' or '.join(names)}. You yourself speak only {' and '.join(names)}: callers who speak "
-            "Luganda are passed automatically to a colleague who does — never request an officer because "
-            "of the caller's language. If a caller speaks any other language, reply briefly in English. English tax terms such as TIN, VAT or PAYE do not make "
-            "a sentence Swahili. The tool result's `caller_language` is what the call's speech "
-            "recognizer heard; trust it unless the words of the question are plainly in the other language."
+            f"{' or '.join(names)}. You yourself speak only {' and '.join(names)}."
+        )
+        if luganda_handover:
+            # Without this Gemini, hearing Luganda, told a real caller it only
+            # speaks English and Swahili while the language id still said
+            # "English" — the Luganda colleague never got the call.
+            parts.append(
+                "A colleague on this call speaks Luganda. As soon as the caller speaks Luganda — a "
+                "greeting, a question, or Luganda mixed with English tax words — or asks to speak "
+                "Luganda, call `hand_over_to_luganda` and say nothing yourself: the colleague answers "
+                "the same question in Luganda. Never tell a caller you cannot speak Luganda, and never "
+                "request an officer because of the caller's language."
+            )
+        parts.append(
+            "If a caller speaks any other language, reply briefly in English. English tax terms such as "
+            "TIN, VAT or PAYE do not make a sentence Swahili. The tool result's `caller_language` is what "
+            "the call's speech recognizer heard; trust it unless the words of the question are plainly "
+            "in the other language."
         )
     parts += [
         "CRITICAL REQUIREMENT: For any specific tax questions (including TIN registration, tax rates, "
@@ -398,14 +421,17 @@ def build_gemini_tools(
     chat_model: Any,
     service_ref: dict[str, Any],
     may_act: Callable[[], bool] | None = None,
+    on_luganda: Callable[[], bool] | None = None,
 ) -> list[Any]:
-    """The three tools Gemini may call, bound to *room*.
+    """The tools Gemini may call, bound to *room*.
 
     ``service_ref["service"]`` is filled in once the service exists — the
     transfer tool pushes the caller's status event through it. ``may_act``
     (multilingual calls) is false while the call is moving to another engine:
     Gemini still hears the caller then, and a transfer it opens or an answer
-    it logs would outlive the reply that is thrown away.
+    it logs would outlive the reply that is thrown away. ``on_luganda``
+    (multilingual calls with a Luganda engine) adds ``hand_over_to_luganda``;
+    it returns whether the call is moving to Luganda.
     """
     from pipecat.adapters.schemas.function_schema import FunctionSchema
 
@@ -508,6 +534,17 @@ def build_gemini_tools(
             "notice": "Transfer initiated. Let the caller know an officer is being connected.",
         })
 
+    async def luganda_handover_handler(params: Any) -> None:
+        """Gemini heard Luganda: move the call to the engine that speaks it."""
+        logger.info("Gemini Live tool call 'hand_over_to_luganda'")
+        if leaving("hand_over_to_luganda") or (on_luganda is not None and on_luganda()):
+            await params.result_callback({"handed_over": True, "notice": _LEAVING_NOTICE})
+            return
+        await params.result_callback({
+            "handed_over": False,
+            "notice": "The caller chose this call's language on screen; carry on in it.",
+        })
+
     async def verify_tin_handler(params: Any) -> None:
         """Validate TIN format and check registration."""
         tin = str(params.arguments.get("tin", "")).strip()
@@ -518,7 +555,7 @@ def build_gemini_tools(
             "status": "valid_tin" if valid else "invalid_tin_format",
         })
 
-    return [
+    tools = [
         FunctionSchema(
             name="query_ura_tax_knowledge",
             description="Query official Uganda Revenue Authority tax guides, laws, rates, TIN registration, and compliance procedures.",
@@ -556,6 +593,24 @@ def build_gemini_tools(
             handler=verify_tin_handler,
         ),
     ]
+    if on_luganda is not None:
+        tools.append(FunctionSchema(
+            name="hand_over_to_luganda",
+            description=(
+                "Pass the call to the colleague who speaks Luganda. Call it as soon as the caller "
+                "speaks Luganda (a greeting, a question, or Luganda mixed with English words) or asks "
+                "to speak Luganda, then say nothing more yourself."
+            ),
+            properties={
+                "heard": {
+                    "type": "string",
+                    "description": "A few of the caller's words, as you heard them.",
+                }
+            },
+            required=[],
+            handler=luganda_handover_handler,
+        ))
+    return tools
 
 
 async def _gemini_transfer_timeout(room: Any, service_ref: dict[str, Any], timeout_s: float, ticket_ref: str) -> None:
@@ -584,12 +639,13 @@ def build_gemini_live_service(
     chat_model: Any = None,
     languages: Sequence[str] | None = None,
     may_act: Callable[[], bool] | None = None,
+    on_luganda: Callable[[], bool] | None = None,
 ) -> tuple[Any, Any, Any]:
     """Gemini Live service plus its context and aggregator pair.
 
     Returns ``(service, context, context_aggregator)``. Shared by the
     single-engine pipeline below and the multilingual one, which passes
-    ``may_act`` (see :func:`build_gemini_tools`).
+    ``may_act`` and ``on_luganda`` (see :func:`build_gemini_tools`).
     """
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
@@ -608,22 +664,35 @@ def build_gemini_live_service(
         raise RuntimeError("Pipecat Google Gemini Live dependencies are not installed") from exc
 
     service_ref: dict[str, Any] = {}
-    tools = build_gemini_tools(room, chat_model, service_ref, may_act)
+    tools = build_gemini_tools(room, chat_model, service_ref, may_act, on_luganda)
 
     try:
         from google.genai.types import EndSensitivity, StartSensitivity
+        # Gemini's own VAD is what lets a caller talk over it — it sends
+        # "interrupted" and stops. At START_SENSITIVITY_LOW a caller talking
+        # over the greeting was never heard and it played to the end.
         vad_config = GeminiVADParams(
-            start_sensitivity=StartSensitivity.START_SENSITIVITY_LOW,
-            end_sensitivity=EndSensitivity.END_SENSITIVITY_HIGH,
-            silence_duration_ms=300,
-            prefix_padding_ms=100,
+            start_sensitivity=(
+                StartSensitivity.START_SENSITIVITY_HIGH
+                if get_gemini_vad_start_sensitivity() == "high"
+                else StartSensitivity.START_SENSITIVITY_LOW
+            ),
+            end_sensitivity=(
+                EndSensitivity.END_SENSITIVITY_HIGH
+                if get_gemini_vad_end_sensitivity() == "high"
+                else EndSensitivity.END_SENSITIVITY_LOW
+            ),
+            silence_duration_ms=get_gemini_vad_silence_ms(),
+            prefix_padding_ms=get_gemini_vad_prefix_padding_ms(),
         )
     except Exception:
         vad_config = None
 
     settings = GeminiLiveLLMSettings(
         model=get_gemini_live_model(),
-        system_instruction=build_gemini_system_instruction(languages or gemini_languages()),
+        system_instruction=build_gemini_system_instruction(
+            languages or gemini_languages(), luganda_handover=on_luganda is not None
+        ),
         voice=get_gemini_live_voice(),
         modalities=GeminiModalities.AUDIO,
         vad=vad_config,

@@ -6,10 +6,11 @@ the sentinel (``sentinel.py``) produces the votes and the router
 (``router.py``) carries the decisions out.
 
 The call always opens in the default language (English). The first *content*
-utterance decides — greetings and one-word replies are too short to vote on —
-and after that the language is *locked*: a single confident vote, or two
-moderately confident votes in a row, is needed to move it. That asymmetry is
-deliberate. Code-switched Luganda is full of English tax terms ("TIN", "VAT",
+utterance that votes with some confidence decides — greetings and one-word
+replies are too short to vote on — and after that the language is *locked*: a
+single confident vote, or two supporting votes among the last three, is needed
+to move it. Gemini Live, which hears the caller too, can also report Luganda
+(:meth:`LanguagePolicy.report`). That asymmetry is deliberate. Code-switched Luganda is full of English tax terms ("TIN", "VAT",
 "PAYE"), and an English caller with a strong Ugandan accent is the likeliest
 false Luganda vote; both would make a call flip-flop without hysteresis.
 """
@@ -27,7 +28,9 @@ from .config import (
     get_lg_mix_threshold,
     get_lid_hysteresis_confidence,
     get_lid_hysteresis_turns,
+    get_lid_hysteresis_window,
     get_lid_min_speech_s,
+    get_lid_support_confidence,
     get_lid_switch_confidence,
 )
 
@@ -109,7 +112,14 @@ class PolicyConfig:
     min_speech_s: float = 1.5
     switch_confidence: float = 0.90
     hysteresis_confidence: float = 0.70
+    #: A locked call moves when ``hysteresis_turns`` of its last
+    #: ``hysteresis_window`` content votes are for the same new language at
+    #: ``support_confidence`` or more. Not "in a row": on a real caller's
+    #: phone audio one Luganda utterance in three came back as English, and a
+    #: strict run never formed.
     hysteresis_turns: int = 2
+    hysteresis_window: int = 3
+    support_confidence: float = 0.50
     lg_mix_threshold: float = 0.35
     lg_mix_min_words: int = 2
     #: Words of the new language (and none of the current) that let a vote
@@ -124,6 +134,8 @@ class PolicyConfig:
             switch_confidence=get_lid_switch_confidence(),
             hysteresis_confidence=get_lid_hysteresis_confidence(),
             hysteresis_turns=get_lid_hysteresis_turns(),
+            hysteresis_window=get_lid_hysteresis_window(),
+            support_confidence=get_lid_support_confidence(),
             lg_mix_threshold=get_lg_mix_threshold(),
         )
 
@@ -252,6 +264,22 @@ class LanguagePolicy:
         self.pending.clear()
         return self._move(language, "ui_override", 1.0, "override")
 
+    def report(self, language: str, reason: str) -> Decision:
+        """An engine recognised the caller's language itself.
+
+        Gemini Live hears every word the caller says and knows Luganda when it
+        hears it — including the Luganda that Whisper-SALT's language token
+        called English on a real caller's phone. It cannot answer in Luganda,
+        so it says so; this moves the call instead. An on-screen choice still
+        wins.
+        """
+        if self.override is not None:
+            return Decision("none", self.active, "override_locked", source="override")
+        if language not in self.config.languages:
+            return Decision("none", self.active, "unsupported_language")
+        self.pending.clear()
+        return self._move(language, reason, 1.0, "auto")
+
     def observe(self, vote: LanguageVote) -> Decision:
         cfg = self.config
 
@@ -295,24 +323,26 @@ class LanguagePolicy:
         if top not in cfg.languages:
             return Decision("none", self.active, "unsupported_language")
 
-        # 5. First content utterance: lock. Moving off the opening language
-        #    needs at least the accumulate threshold; a weak vote for another
-        #    language leaves the call unlocked so the next utterance decides.
+        # 5. First content utterance: lock — on the accumulate threshold,
+        #    whichever language it is. A weak vote leaves the call unlocked so
+        #    the next utterance decides; that includes a weak vote for the
+        #    opening language, which once locked a Luganda caller into
+        #    English at P(en) 0.63.
         if not self.locked:
-            if top == self.active:
-                return self._move(top, "first_content", confidence, "auto")
             if confidence >= cfg.hysteresis_confidence:
                 return self._move(top, "first_content", confidence, "auto")
             return Decision("none", self.active, "weak_first_vote", confidence)
 
-        # 6. Same language again: any half-built case for switching is void.
+        # 6. Locked. The vote joins the window of recent content votes.
+        self.pending.append(LanguageVote(vote.probs, top, vote.speech_s, vote.text, vote.latency_ms))
+        del self.pending[: -cfg.hysteresis_window]
         if top == self.active:
-            self.pending.clear()
             return Decision("none", self.active, "same_language", confidence)
 
-        # 7. Locked, different language. One vote suffices when it is
-        #    confident, or when it clears the accumulate bar and the words
-        #    agree: several of the new language, none of the current one.
+        # 7. A different language. One vote suffices when it is confident, or
+        #    when it clears the accumulate bar and the words agree: several of
+        #    the new language, none of the current one. Otherwise it takes
+        #    enough supporting votes within the window.
         if confidence >= cfg.switch_confidence:
             self.pending.clear()
             return self._move(top, "confident_vote", confidence, "auto")
@@ -323,13 +353,10 @@ class LanguagePolicy:
         ):
             self.pending.clear()
             return self._move(top, "text_confirmed", confidence, "auto")
-        if confidence < cfg.hysteresis_confidence:
-            self.pending.clear()
-            return Decision("none", self.active, "below_hysteresis", confidence)
-        if self.pending and self.pending[-1].top != top:
-            self.pending.clear()
-        self.pending.append(LanguageVote(vote.probs, top, vote.speech_s, vote.text, vote.latency_ms))
-        if len(self.pending) >= cfg.hysteresis_turns:
+        if confidence < cfg.support_confidence:
+            return Decision("none", self.active, "weak_vote", confidence)
+        support = sum(1 for v in self.pending if v.top == top and v.confidence >= cfg.support_confidence)
+        if support >= cfg.hysteresis_turns:
             self.pending.clear()
             return self._move(top, "hysteresis", confidence, "auto")
         return Decision("none", self.active, "accumulating", confidence)

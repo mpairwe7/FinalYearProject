@@ -173,3 +173,59 @@ class OutputHoldGate(FrameProcessor):  # type: ignore[misc,valid-type]
     async def cleanup(self) -> None:
         self._cancel_timer()
         await super().cleanup()
+
+
+class InterruptedReplyMute(FrameProcessor):  # type: ignore[misc,valid-type]
+    """Drops the rest of a Gemini reply the caller talked over, when Gemini did not notice.
+
+    A local barge-in (``interrupt_for_barge_in``: the sentinel heard the
+    caller talking over Gemini) stops playback. Gemini, whose own VAD missed
+    the caller, is still streaming that reply, and each new chunk would start
+    it playing again. So from that interruption until the reply's end marker,
+    the reply's frames are dropped. Gemini's own interruption — or any other
+    — ends the mute: it stopped the reply itself. A reply already fully
+    received needs no mute; the interruption cleared what was queued.
+
+    Sits right after the Gemini service, so what is dropped is never
+    captioned or logged either.
+    """
+
+    #: A mute with no end marker in sight gives up rather than swallow the next answer.
+    MAX_MUTE_S = 10.0
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(enable_direct_mode=True, **kwargs)
+        self._streaming = False
+        self._muted_since: float | None = None
+
+    @property
+    def muted(self) -> bool:
+        return self._muted_since is not None
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if direction == FrameDirection.DOWNSTREAM and self._drops(frame):
+            return
+        await self.push_frame(frame, direction)
+
+    def _drops(self, frame: Frame) -> bool:
+        if isinstance(frame, InterruptionFrame):
+            if (getattr(frame, "metadata", None) or {}).get("local_barge_in"):
+                if self._streaming:
+                    self._muted_since = time.monotonic()
+                    logger.info("Caller talked over Gemini; dropping the rest of its reply")
+            else:
+                self._muted_since = None
+                self._streaming = False
+            return False
+        if self._muted_since is not None and time.monotonic() - self._muted_since > self.MAX_MUTE_S:
+            logger.info("No end to the interrupted Gemini reply after %.0f s; unmuting", self.MAX_MUTE_S)
+            self._muted_since = None
+        if isinstance(frame, LLMFullResponseStartFrame):
+            self._streaming = True
+        elif isinstance(frame, LLMFullResponseEndFrame):
+            self._streaming = False
+            if self._muted_since is not None:
+                self._muted_since = None
+                return True  # the end of the reply that was cut off
+        return self._muted_since is not None and isinstance(frame, _REPLY_FRAMES)

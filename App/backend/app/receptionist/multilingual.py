@@ -7,7 +7,8 @@
       → LanguageSentinel      (copies audio, votes on each utterance's language)
       → ParallelPipeline      (one branch per engine, gated by EngineSelector)
           ├─ gemini_live: EngineGate → user agg → GeminiCallerTap → OfficerRequestBridge → GeminiLiveLLMService
-          │               → GeminiLiveTranscriptTap → OutputHoldGate → assistant agg → EngineGate
+          │               → InterruptedReplyMute → GeminiLiveTranscriptTap → OutputHoldGate → assistant agg
+          │               → EngineGate
           └─ cascaded:    EngineGate → VAD → partials → Whisper-SALT → TranscriptTap → user agg
                           → UraReceptionistBrain → UraSpeechTTS (Orpheus for lg) → assistant agg → EngineGate
       → ClientEventOutlet     (the router's language events to the caller's screen)
@@ -147,7 +148,7 @@ def build_multilingual_pipeline(
         OfficerRequestBridge,
         build_gemini_live_service,
     )
-    from .hold_gate import OutputHoldGate
+    from .hold_gate import InterruptedReplyMute, OutputHoldGate
     from .pipeline import build_cascaded_branch, build_transport
     from .sentinel import LanguageSentinel
 
@@ -176,8 +177,16 @@ def build_multilingual_pipeline(
 
     if "gemini_live" in engines:
         gemini_langs = tuple(lang for lang, eng in engine_by_language.items() if eng == "gemini_live")
+        # Gemini hears every caller and knows Luganda when it hears it — a
+        # second listener beside the sentinel, for the Luganda that
+        # Whisper-SALT's language token takes for English.
+        luganda_elsewhere = engine_by_language.get("lg") not in (None, "gemini_live")
         service, context, aggregators = build_gemini_live_service(
-            room, chat_model, gemini_langs, may_act=lambda: router.engine_may_act("gemini_live")
+            room,
+            chat_model,
+            gemini_langs,
+            may_act=lambda: router.engine_may_act("gemini_live"),
+            on_luganda=(lambda: router.on_engine_heard("lg", "gemini_live")) if luganda_elsewhere else None,
         )
         hold_gate = OutputHoldGate(timeout_ms=get_lid_hold_timeout_ms(), on_held=router.on_held)
         router.hold_gate = hold_gate
@@ -190,6 +199,7 @@ def build_multilingual_pipeline(
             GeminiCallerTap(room=room, track_language=False, languages=gemini_langs),
             OfficerRequestBridge(),
             service,
+            InterruptedReplyMute(),
             gemini_tap,
             hold_gate,
             aggregators.assistant(),
@@ -211,6 +221,7 @@ def build_multilingual_pipeline(
 
     sentinel = LanguageSentinel(room, speech_model, router, languages)
     router.interrupt = sentinel.interrupt_for_switch
+    router.barge_in = sentinel.interrupt_for_barge_in
 
     transport = build_transport(room, websocket)
     pipeline = Pipeline([

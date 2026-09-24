@@ -18,6 +18,11 @@ nothing to the audio path. What it does happens off to the side:
 It also turns the caller's on-screen language choice (``SetLanguageFrame``)
 into a router override, and consumes that frame. It stops listening while the
 call is with an officer.
+
+Its VAD is also the call's second ear for barge-in: when the caller keeps
+talking over the assistant (``RECEPTIONIST_BARGE_IN_MIN_S`` past the onset),
+the router is told (``on_barge_in``), which stops Gemini if its own VAD has
+not.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ import time
 from typing import Any
 
 from ..speech_service import pcm16_to_wav
-from .config import get_lid_method, get_turn_timeout_s
+from .config import get_barge_in_min_s, get_lid_method, get_turn_timeout_s, local_barge_in_enabled
 from .language import LanguageVote, fuse
 from .serializer import SetLanguageFrame
 
@@ -36,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 try:
     from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
         CancelFrame,
         EndFrame,
         Frame,
@@ -96,6 +103,12 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
         self._turn_segments = 0
         self._turn_timer: asyncio.Task[None] | None = None
         self._turn_closing = False
+        # Barge-in: the assistant is audible (the output transport says so),
+        # and how much speech past the onset counts as talking over it.
+        self._bot_speaking = False
+        self._barge_in_bytes = (
+            int(get_barge_in_min_s() * _BYTES_PER_SECOND) if local_barge_in_enabled() else None
+        )
 
     # -- frame path ------------------------------------------------------
 
@@ -112,6 +125,10 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
             self._start()
         elif isinstance(frame, (EndFrame, CancelFrame)):
             await self._stop()
+        elif isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
         elif (
             isinstance(frame, InputAudioRawFrame)
             and direction == FrameDirection.DOWNSTREAM
@@ -131,9 +148,21 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
         A plain barge-in would be counted as the caller interrupting; this one
         carries ``metadata["language_switch"]`` so it is not.
         """
+        await self._interrupt("language_switch")
+
+    async def interrupt_for_barge_in(self) -> None:
+        """Interrupt the assistant because the caller is talking over it.
+
+        Marked ``metadata["local_barge_in"]``: Gemini did not stop by itself,
+        so the rest of the reply it is still streaming must be dropped
+        (``InterruptedReplyMute``).
+        """
+        await self._interrupt("local_barge_in")
+
+    async def _interrupt(self, reason: str) -> None:
         down, up = InterruptionFrame(), InterruptionFrame()
         for frame in (down, up):
-            frame.metadata["language_switch"] = True
+            frame.metadata[reason] = True
         down.broadcast_sibling_id, up.broadcast_sibling_id = up.id, down.id
         await self.push_frame(down, FrameDirection.DOWNSTREAM)
         await self.push_frame(up, FrameDirection.UPSTREAM)
@@ -188,6 +217,8 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
         speaking = False
         preroll = bytearray()
         utterance = bytearray()
+        heard = 0  # bytes of speech since the onset
+        barged = False
         while True:
             chunk = await self._queue.get()
             if chunk is None:
@@ -201,6 +232,15 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
             if speaking:
                 if len(utterance) < self._max_bytes:
                     utterance.extend(chunk)
+                heard += len(chunk)
+                if (
+                    not barged
+                    and self._bot_speaking
+                    and self._barge_in_bytes is not None
+                    and heard >= self._barge_in_bytes
+                ):
+                    barged = True
+                    await self.router.on_barge_in()
             else:
                 preroll.extend(chunk)
                 if len(preroll) > self._preroll_bytes:
@@ -210,6 +250,7 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
                 speaking = True
                 utterance = bytearray(preroll)
                 preroll.clear()
+                heard, barged = 0, False
                 self._turn_resumed()
                 await self.router.on_speech_started()
             elif speaking and state == VADState.QUIET:

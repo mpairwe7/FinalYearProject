@@ -118,6 +118,7 @@ class LanguageRouter:
         self.gemini_service = gemini_service
         # Set by the pipeline builder once the sentinel exists (it needs us first).
         self.interrupt: Any = None
+        self.barge_in: Any = None
         self._lock = asyncio.Lock()
         self._reasks: set[asyncio.Task[None]] = set()
         # One per engine: set when a switch interruption has passed that
@@ -125,6 +126,11 @@ class LanguageRouter:
         # before that would be flushed by the interruption arriving behind.
         self._settled: dict[str, asyncio.Event] = {"cascaded": asyncio.Event(), "gemini_live": asyncio.Event()}
         self._pending: _PendingSwitch | None = None
+        # The caller's turn, as the sentinel sees it: open from the first
+        # speech to the end-of-turn silence; the last closed turn's audio is
+        # what a switch reported by an engine re-asks.
+        self._turn_open = False
+        self._last_turn_pcm: bytes | None = None
 
     def switch_passed(self, engine: str) -> None:
         """Wired to the branch's ``on_switch_interrupt``."""
@@ -168,10 +174,26 @@ class LanguageRouter:
 
     async def on_speech_started(self) -> None:
         """An utterance began. Until the language is locked, hold Gemini's reply."""
+        self._turn_open = True
         if self.policy.locked or self.policy.override is not None:
             return
         if self.selector.active == "gemini_live" and self.hold_gate is not None:
             self.hold_gate.hold()
+
+    async def on_barge_in(self) -> None:
+        """The caller has been talking over the assistant: stop Gemini, as Gemini Live does.
+
+        Gemini's own VAD usually gets there first. On a real call it did not:
+        the caller talked over two answers for 2–3 s, the sentinel heard every
+        word, and Gemini played on. The cascaded engine stops itself (two
+        transcribed words), and a switch waiting for the turn to end has its
+        own interruption coming — so only a Gemini call with nothing pending.
+        """
+        if self.barge_in is None or self.selector.active != "gemini_live" or self._pending is not None:
+            return
+        self.room.state.barge_in_count += 1
+        logger.info("Caller talking over Gemini on call %s: interrupting", self.room.call_id)
+        await self.barge_in()
 
     async def on_vote(self, vote: LanguageVote, pcm: bytes | None, decoded: tuple[str, str] | None) -> None:
         state = self.room.state
@@ -224,8 +246,7 @@ class LanguageRouter:
                 # and nothing is said over the caller finishing it. Meanwhile
                 # Gemini's reply — if it is the engine being left — is held.
                 self._pending = _PendingSwitch(decision, decoded)
-                if self.hold_gate is not None and new_engine != self.selector.active and self.selector.active == "gemini_live":
-                    self.hold_gate.pin()
+                self._pin_if_leaving_gemini(new_engine)
                 return
 
             # A later vote in the same turn went back to the engine already in
@@ -236,6 +257,8 @@ class LanguageRouter:
     async def on_turn_end(self, pcm: bytes, segments: int) -> None:
         """The caller finished a turn. Carry out a switch decided during it."""
         async with self._lock:
+            self._turn_open = False
+            self._last_turn_pcm = pcm or self._last_turn_pcm
             pending, self._pending = self._pending, None
             if pending is None:
                 return
@@ -379,6 +402,39 @@ class LanguageRouter:
     async def _send(self, message: dict[str, Any]) -> None:
         if self.outlet is not None:
             await self.outlet.send(message)
+
+    def on_engine_heard(self, language: str, engine: str) -> bool:
+        """*engine* recognised the caller's language itself — Gemini hearing Luganda.
+
+        Returns whether the call is moving to (or already in) *language*. The
+        move runs in the background: it interrupts the very engine reporting
+        it, and an interruption cancels that engine's tool call in flight.
+        """
+        decision = self.policy.report(language, reason=f"{engine}_heard")
+        logger.info(
+            "%s heard %s -> %s %s (%s)", engine, language, decision.action, decision.target, decision.reason
+        )
+        if decision.action == "none":
+            return self.policy.active == language
+        self._spawn(self._carry_out_report(decision))
+        return True
+
+    async def _carry_out_report(self, decision: Decision) -> None:
+        if decision.action != "switch":
+            await self.apply(decision)
+            return
+        async with self._lock:
+            if self._turn_open:
+                # The caller is still talking: the whole turn is re-asked
+                # when it ends, as for a switch the sentinel decided.
+                self._pending = _PendingSwitch(decision, None)
+                self._pin_if_leaving_gemini(self.engine_by_language.get(decision.target, self.selector.active))
+                return
+            await self._execute(decision, self._last_turn_pcm, None)
+
+    def _pin_if_leaving_gemini(self, new_engine: str) -> None:
+        if self.hold_gate is not None and new_engine != self.selector.active and self.selector.active == "gemini_live":
+            self.hold_gate.pin()
 
     def _spawn(self, coro: Any) -> None:
         task = asyncio.create_task(coro)

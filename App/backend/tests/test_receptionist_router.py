@@ -92,7 +92,9 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.router.interrupt = AsyncMock(side_effect=interrupt)
 
     async def settle(self) -> None:
-        await asyncio.gather(*list(self.router._reasks))
+        # A task may spawn another (a reported switch spawns its re-ask).
+        while pending := [t for t in self.router._reasks if not t.done()]:
+            await asyncio.gather(*pending)
 
     async def turn(self, v: LanguageVote, pcm: bytes = PCM, decoded=None, segments: int = 1) -> None:
         """One caller turn: its vote, then its end (when deferred switches run)."""
@@ -249,6 +251,62 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         await self.router.on_override("lg")
         await self.settle()
         self.assertEqual(self.selector.active, "cascaded")
+
+    async def test_gemini_hearing_luganda_moves_a_call_locked_in_english(self):
+        # A real Luganda caller's votes kept coming back English; Gemini, which
+        # hears the same audio, knew better and now says so.
+        await self.turn(vote("en", 0.95))
+        self.assertEqual(self.selector.active, "gemini_live")
+        await self.router.on_speech_started()
+        await self.router.on_turn_end(PCM, 2)  # the Luganda turn, voted English
+        self.assertTrue(self.router.on_engine_heard("lg", "gemini_live"))
+        await self.settle()
+        state = self.room.state
+        self.assertEqual((self.selector.active, state.locale), ("cascaded", "lg"))
+        self.assertEqual(self.engine_when_interrupted, ["gemini_live"])
+        # The turn Gemini heard is the one answered, in Luganda.
+        self.speech.transcribe.assert_called_once_with(pcm16_to_wav(PCM), 16000, "lg", True)
+        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN", ["w"])
+        self.assertEqual(self.sent("language")[-1]["language"], "lg")
+
+    async def test_a_report_while_the_caller_is_still_talking_waits_for_the_turn(self):
+        await self.turn(vote("en", 0.95))
+        await self.router.on_speech_started()
+        self.assertTrue(self.router.on_engine_heard("lg", "gemini_live"))
+        await self.settle()
+        self.assertEqual(self.selector.active, "gemini_live")  # not over the caller
+        self.assertFalse(self.router.engine_may_act("gemini_live"))
+        await self.router.on_turn_end(PCM, 1)
+        await self.settle()
+        self.assertEqual(self.selector.active, "cascaded")
+        self.brain.handle_external_question.assert_awaited_once()
+
+    async def test_talking_over_gemini_stops_it(self):
+        self.router.barge_in = AsyncMock()
+        await self.router.on_barge_in()
+        self.router.barge_in.assert_awaited_once()
+        self.assertEqual(self.room.state.barge_in_count, 1)
+
+    async def test_the_cascaded_engine_stops_itself(self):
+        self.router.barge_in = AsyncMock()
+        await self.router.on_override("lg")
+        await self.settle()
+        await self.router.on_barge_in()
+        self.router.barge_in.assert_not_awaited()
+
+    async def test_no_barge_in_over_a_switch_waiting_for_the_turn(self):
+        self.router.barge_in = AsyncMock()
+        await self.router.on_speech_started()
+        await self.router.on_vote(vote("lg", 0.9), PCM, None)  # decided, deferred
+        await self.router.on_barge_in()
+        self.router.barge_in.assert_not_awaited()
+
+    async def test_a_report_does_not_beat_an_on_screen_choice(self):
+        await self.router.on_override("en")
+        await self.settle()
+        self.assertFalse(self.router.on_engine_heard("lg", "gemini_live"))
+        await self.settle()
+        self.assertEqual(self.selector.active, "gemini_live")
 
 
 if __name__ == "__main__":
