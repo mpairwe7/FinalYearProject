@@ -10,6 +10,7 @@ import {
   CallRecord,
   CallTurn,
 } from '@/services/callsApi';
+import { callTopicLabel } from '@/lib/callTopic';
 import { appendAuthToken } from '@/lib/authSession';
 import { AudioRecorder } from '@/services/voiceService';
 import { PCMPlayer } from '@/services/pcmPlayer';
@@ -66,6 +67,7 @@ export function useCallsLobby() {
     reason: string;
     ticketId?: string;
     language?: string;
+    priority?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -94,11 +96,17 @@ export function useCallsLobby() {
             queryClient.invalidateQueries({ queryKey: queryKeys.calls.all() });
             setLiveBanner({
               callId: payload.data?.call_id,
-              topic: payload.data?.topic || 'General Support',
+              topic: callTopicLabel(payload.data?.topic) || 'General tax support',
               reason: payload.data?.reason || 'Transfer requested',
-              ticketId: payload.data?.ticket_id,
+              ticketId: payload.data?.ticket_ref || undefined,
               language: typeof payload.data?.language === 'string' ? payload.data.language : undefined,
+              priority: typeof payload.data?.priority === 'string' ? payload.data.priority : undefined,
             });
+          }
+          if (payload.type === 'call.transfer_timed_out') {
+            // Nobody answered: the call is back with the AI and owed a callback.
+            queryClient.invalidateQueries({ queryKey: queryKeys.calls.all() });
+            setLiveBanner((b) => (b && b.callId === payload.data?.call_id ? null : b));
           }
         } catch {}
       };

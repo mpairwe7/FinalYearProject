@@ -10,6 +10,7 @@ import SloGaugeCard from '@/components/charts/SloGaugeCard';
 import { ChartNote } from '@/components/charts/chartTheme';
 import { useCalls, useCallMetrics, useCallsLobby } from '@/hooks/useCalls';
 import { callLanguageName } from '@/lib/callLanguage';
+import { isRaisedPriority } from '@/lib/callTopic';
 import '@/styles/call/call.css';
 import './calls.css';
 import '@/app/agent/agent.css';
@@ -71,6 +72,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#991b1b' }}>
               Caller waiting: {liveBanner.topic} ({liveBanner.reason})
               {liveBanner.language && ` · ${callLanguageName(liveBanner.language)} caller`}
+              {isRaisedPriority(liveBanner.priority) && ` · ${liveBanner.priority} priority`}
             </span>
           </div>
           <button

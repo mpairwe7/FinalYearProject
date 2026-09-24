@@ -1,6 +1,6 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StaffCalls } from '../../app/calls/page';
 import { callsApi, CallRecord } from '../../services/callsApi';
@@ -111,7 +111,60 @@ describe('StaffCalls page', () => {
   it('renders queued live call with topic and status pill', async () => {
     renderPage('ura_staff');
     expect(await screen.findByText('Group Import Tax')).toBeInTheDocument();
-    expect(screen.getByText('Transfer waiting')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for officer')).toBeInTheDocument();
+  });
+
+  it('shows a waiting call by its transfer topic and priority, and a timed-out one as owed a callback', async () => {
+    vi.spyOn(callsApi, 'listCalls').mockResolvedValue({
+      count: 1,
+      calls: [{
+        ...MOCK_CALL,
+        summary: undefined,
+        turns: [],
+        topic: 'objection_or_dispute',
+        priority: 'high',
+        needs_callback: 1,
+        callback_done_at: null,
+      }],
+    });
+    renderPage('ura_staff');
+    expect(await screen.findByText('Objection or dispute')).toBeInTheDocument();
+    expect(screen.getByTitle('Priority')).toHaveTextContent('high');
+    expect(screen.getByText('Callback')).toBeInTheDocument();
+  });
+
+  it('announces a waiting caller from the lobby, and clears it when nobody answered in time', async () => {
+    class FakeSocket {
+      static all: FakeSocket[] = [];
+      onmessage: ((e: { data: string }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      constructor(public url: string) {
+        FakeSocket.all.push(this);
+      }
+      close() {}
+    }
+    vi.stubGlobal('WebSocket', FakeSocket as unknown as typeof WebSocket);
+    try {
+      renderPage('ura_staff');
+      await screen.findByText('Group Import Tax');
+      const lobby = FakeSocket.all.find((ws) => ws.url.includes('/admin/calls/stream') && !ws.url.includes('call_id'));
+      expect(lobby).toBeDefined();
+      const send = (type: string, data: Record<string, unknown>) =>
+        act(() => lobby!.onmessage?.({ data: JSON.stringify({ type, data }) }));
+
+      send('call.transfer_requested', {
+        call_id: 'call-9', reason: 'caller_requested', topic: 'objection_or_dispute',
+        priority: 'high', language: 'lg', ticket_ref: 'T9',
+      });
+      const banner = await screen.findByText(/Caller waiting: Objection or dispute/);
+      expect(banner).toHaveTextContent('Luganda caller');
+      expect(banner).toHaveTextContent('high priority');
+
+      send('call.transfer_timed_out', { call_id: 'call-9', ticket_ref: 'T9' });
+      await waitFor(() => expect(screen.queryByText(/Caller waiting/)).not.toBeInTheDocument());
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('renders low-confidence words wrapped in mark tag with tooltip', async () => {

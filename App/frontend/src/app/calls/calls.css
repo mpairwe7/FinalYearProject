@@ -170,6 +170,32 @@
   border-color: #0369a1;
 }
 
+/* Call Desk: what the queue row says before the call is opened — a raised
+   priority, and a callback owed when no officer answered the transfer. */
+.call-chip {
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-medium);
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: var(--ops-radius-pill);
+  white-space: nowrap;
+}
+
+.call-chip--urgent {
+  color: var(--ops-bad-ink);
+  background: var(--ops-bad-fill);
+  border-color: var(--ops-bad-line);
+}
+
+.call-chip--high,
+.call-chip--callback {
+  color: var(--ops-warn-ink);
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+}
+
 /* A language lock or switch, between transcript turns */
 .st-language-note {
   align-self: center;

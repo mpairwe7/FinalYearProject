@@ -1,6 +1,7 @@
 import React from 'react';
 import { CallRecord } from '@/services/callsApi';
 import { callLanguageName } from '@/lib/callLanguage';
+import { callTopicLabel, isRaisedPriority } from '@/lib/callTopic';
 
 interface CallRowProps {
   call: CallRecord;
@@ -22,7 +23,7 @@ export function CallRow({ call, isSelected, onSelect }: CallRowProps) {
   const isEnded = call.status === 'ended';
 
   const statusLabel = isTransferWaiting
-    ? 'Transfer waiting'
+    ? 'Waiting for officer'
     : isBridged
     ? 'With officer'
     : isEnded
@@ -37,7 +38,12 @@ export function CallRow({ call, isSelected, onSelect }: CallRowProps) {
     ? 'st-pill--resolved'
     : 'st-pill--new';
 
-  const topic = call.summary?.subject || (call.turns && call.turns[0]?.text) || 'Tax Consultation';
+  const topic =
+    call.summary?.subject ||
+    callTopicLabel(call.topic) ||
+    (call.turns && call.turns[0]?.text) ||
+    'Tax Consultation';
+  const owedCallback = Boolean(call.needs_callback) && !call.callback_done_at;
 
   return (
     <div
@@ -57,6 +63,16 @@ export function CallRow({ call, isSelected, onSelect }: CallRowProps) {
         <span className="st-chip--language" title="Call language">
           {callLanguageName(call.locale)}
         </span>
+        {isRaisedPriority(call.priority) && (
+          <span className={`call-chip call-chip--${call.priority}`} title="Priority">
+            {call.priority}
+          </span>
+        )}
+        {owedCallback && (
+          <span className="call-chip call-chip--callback" title="No officer answered — the caller is owed a callback">
+            Callback
+          </span>
+        )}
         <span className="ag-row-time">{formatElapsed(call.started_at, call.ended_at)}</span>
       </div>
       <div className="ag-row-subject">{topic}</div>

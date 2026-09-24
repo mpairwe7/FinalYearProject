@@ -51,6 +51,29 @@ export interface CallRecord {
   officer_id: string | null;
   officer_rating: number | null;
   officer_note: string | null;
+  // Officer Call Desk (docs/plans/officer-call-desk-plan.md §5). Optional:
+  // rows written before the columns existed read back with their defaults.
+  /** Handoff-packet topic key, e.g. `objection_or_dispute`; '' until transferred. */
+  topic?: string;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  transfer_requested_at?: number | null;
+  target_team?: string;
+  claimed_by?: string;
+  claimed_at?: number | null;
+  bridged_at?: number | null;
+  hold_started_at?: number | null;
+  hold_total_s?: number;
+  outcome?: string;
+  wrapup_note?: string | null;
+  wrapup_at?: number | null;
+  /** 1 when nobody answered the transfer (or the caller left waiting) and a callback is owed. */
+  needs_callback?: number | boolean;
+  callback_reason?: string;
+  callback_done_at?: number | null;
+  callback_done_by?: string | null;
+  brief_json?: string | null;
+  brief_updated_at?: number | null;
+  risk_json?: string | null;
   summary?: CallSummary;
   metrics?: Record<string, unknown>;
   turns?: CallTurn[];
