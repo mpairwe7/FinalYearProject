@@ -13,6 +13,54 @@ from ..guardrails import redact_pii_text
 
 logger = logging.getLogger(__name__)
 
+#: Columns added to ``voice_calls`` after it first shipped, for the officer's
+#: Call Desk (docs/plans/officer-call-desk-plan.md §5). Added by
+#: :func:`_ensure_columns` on startup, so an existing database keeps its rows.
+_CALL_DESK_COLUMNS: dict[str, str] = {
+    "topic": "TEXT NOT NULL DEFAULT ''",
+    "priority": "TEXT NOT NULL DEFAULT 'normal'",
+    "transfer_requested_at": "DOUBLE PRECISION",
+    "target_team": "TEXT NOT NULL DEFAULT ''",
+    "claimed_by": "TEXT NOT NULL DEFAULT ''",
+    "claimed_at": "DOUBLE PRECISION",
+    "bridged_at": "DOUBLE PRECISION",
+    "hold_started_at": "DOUBLE PRECISION",
+    "hold_total_s": "DOUBLE PRECISION NOT NULL DEFAULT 0",
+    "outcome": "TEXT NOT NULL DEFAULT ''",
+    "wrapup_note": "TEXT",
+    "wrapup_at": "DOUBLE PRECISION",
+    "needs_callback": "INTEGER NOT NULL DEFAULT 0",
+    "callback_reason": "TEXT NOT NULL DEFAULT ''",
+    "callback_done_at": "DOUBLE PRECISION",
+    "callback_done_by": "TEXT",
+    "brief_json": "TEXT",
+    "brief_updated_at": "DOUBLE PRECISION",
+    "risk_json": "TEXT",
+}
+
+
+def _ensure_columns(table: str, columns: dict[str, str]) -> None:
+    """Add any of *columns* (name → DDL) that *table* lacks, on either backend.
+
+    Postgres has ``ADD COLUMN IF NOT EXISTS``; SQLite does not, so there the
+    existing columns are read first, and a "duplicate column" error from a
+    concurrent starter is ignored. *table* and the column names come from this
+    module, never from input.
+    """
+    if db._pg_module() is not None:
+        for name, ddl in columns.items():
+            db.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {name} {ddl}")  # noqa: S608 - fixed identifiers
+        return
+    existing = {row["name"] for row in db.query_all(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed identifier
+    for name, ddl in columns.items():
+        if name in existing:
+            continue
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")  # noqa: S608 - fixed identifiers
+        except Exception as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+
 
 def init_receptionist_schema() -> None:
     """Create the voice_calls and voice_call_turns tables if they do not exist."""
@@ -60,6 +108,14 @@ def init_receptionist_schema() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_voice_call_turns_call ON voice_call_turns(call_id, seq);
+            """
+        )
+        _ensure_columns("voice_calls", _CALL_DESK_COLUMNS)
+        db.execute_script(
+            """
+            CREATE INDEX IF NOT EXISTS idx_voice_calls_callback ON voice_calls(needs_callback, callback_done_at);
+            CREATE INDEX IF NOT EXISTS idx_voice_calls_claimed ON voice_calls(claimed_by);
+            CREATE INDEX IF NOT EXISTS idx_voice_calls_outcome ON voice_calls(outcome);
             """
         )
         logger.info("Voice receptionist schema initialized")
@@ -120,15 +176,16 @@ def update_call(call_id: str, **kwargs: Any) -> bool:
         "status", "ended_at", "end_reason", "transferred", "transfer_reason",
         "ticket_id", "officer_id", "summary_json", "metrics_json",
         "officer_rating", "officer_note", "locale",
+        *_CALL_DESK_COLUMNS,
     }
     updates: list[str] = []
     params: list[Any] = []
     for k, v in kwargs.items():
         if k in allowed_cols:
             updates.append(f"{k} = ?")
-            if k in ("summary_json", "metrics_json") and isinstance(v, (dict, list)):
+            if k.endswith("_json") and isinstance(v, (dict, list)):
                 params.append(json.dumps(v))
-            elif k == "transferred" and isinstance(v, bool):
+            elif k in ("transferred", "needs_callback") and isinstance(v, bool):
                 params.append(1 if v else 0)
             else:
                 params.append(v)

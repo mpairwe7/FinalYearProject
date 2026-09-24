@@ -27,7 +27,7 @@ from .config import (
 from .hub import hub
 from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, update_call
-from .transfer import open_transfer
+from .transfer import close_transfer_on_timeout, open_transfer
 
 logger = logging.getLogger(__name__)
 
@@ -535,13 +535,9 @@ class UraReceptionistBrain(LLMService):
     async def _transfer_timeout_countdown(self, timeout_s: float, ticket_ref: str) -> None:
         """Handle officer wait timeout when no officer joins within the window."""
         await asyncio.sleep(timeout_s)
-        if self.room.state.mode == "transferring":
-            logger.info("Transfer timeout reached for call %s", self.room.call_id)
-            self.room.state.mode = "ai"
-            msg = phrase("officers_busy", self.language, ref=ticket_ref or "URA-CALL")
-            await self._say_and_record(msg, kind="notice")
-            status_event = {"type": "status", "status": "ai", "ticket_ref": ticket_ref}
-            await self.push_frame(
-                OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
-            )
-            hub.publish_call(self.room.call_id, "status", status_event)
+        status_event = close_transfer_on_timeout(self.room, ticket_ref)
+        if status_event is None:
+            return
+        msg = phrase("officers_busy", self.language, ref=ticket_ref or "URA-CALL")
+        await self._say_and_record(msg, kind="notice")
+        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)

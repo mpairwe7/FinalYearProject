@@ -34,6 +34,9 @@ class CallState:
     ticket_id: str | None = None
     transfer_reason: str | None = None
     transfer_requested_at: float | None = None
+    # Times this call has been put in the officers' queue: the AI's transfer
+    # is the first; an officer passing it on (Call Desk, Phase 2) adds one.
+    transfer_attempts: int = 0
     generation_id: int = 0
     barge_in_count: int = 0
     caller_turns_count: int = 0

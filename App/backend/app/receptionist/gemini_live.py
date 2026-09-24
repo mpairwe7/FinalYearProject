@@ -39,7 +39,7 @@ from .phrases import phrase
 from .serializer import BrowserCallSerializer
 from .store import create_turn, update_call
 from .taps import CallerAudioTap
-from .transfer import open_transfer
+from .transfer import close_transfer_on_timeout, open_transfer
 
 try:
     from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
@@ -616,12 +616,9 @@ def build_gemini_tools(
 async def _gemini_transfer_timeout(room: Any, service_ref: dict[str, Any], timeout_s: float, ticket_ref: str) -> None:
     """No officer came: tell the caller their reference, through Gemini's own voice."""
     await asyncio.sleep(timeout_s)
-    if room.state.mode != "transferring":
+    status_event = close_transfer_on_timeout(room, ticket_ref)
+    if status_event is None:
         return
-    logger.info("Transfer timeout reached for call %s", room.call_id)
-    room.state.mode = "ai"
-    status_event = {"type": "status", "status": "ai", "ticket_ref": ticket_ref}
-    hub.publish_call(room.call_id, "status", status_event)
     service = service_ref.get("service")
     if service is None:
         return
