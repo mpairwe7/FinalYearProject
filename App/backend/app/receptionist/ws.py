@@ -22,7 +22,8 @@ from ..flags import flags
 from ..voice_consent import log_voice_event, require_voice_consent
 from ..ws_concurrency import is_ws_origin_allowed, release, try_acquire
 from .brain import UraReceptionistBrain
-from .config import get_max_call_s
+from ..query import SUPPORTED_LOCALES
+from .config import get_default_language, get_languages, get_max_call_s
 from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
 from .officer import OfficerLeg
@@ -106,7 +107,15 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             await websocket.close(code=1003)
             return
 
-        locale = init_msg.get("locale", "en")
+        # Both go into the call record and the staff UI: keep them to locales
+        # the app knows. (A multilingual call then opens in its default
+        # language regardless — see multilingual.py.)
+        locale = str(init_msg.get("locale") or "en").strip().lower()
+        if locale not in SUPPORTED_LOCALES:
+            locale = "en"
+        preferred_locale = str(init_msg.get("preferred_locale") or locale).strip().lower()
+        if preferred_locale not in SUPPORTED_LOCALES:
+            preferred_locale = locale
         consent_accepted = bool(init_msg.get("voice_consent_accepted"))
 
         # Consent check
@@ -135,6 +144,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             locale=locale,
             caller_ws=websocket,
         )
+        room.state.preferred_locale = preferred_locale
         create_call(
             call_id=call_id,
             conversation_id=room.state.conversation_id,
@@ -158,12 +168,17 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             },
         )
 
-        # 7. Notify client ready
+        # 7. Notify client ready. `language_detection` tells the call screen to
+        # show the language chip: without the flag the call has one language.
+        language_detection = flags.is_enabled("receptionist_language_detection")
         await websocket.send_text(
             json.dumps({
                 "type": "call_ready",
                 "call_id": call_id,
                 "assistant_name": "URA Virtual Assistant",
+                "language_detection": language_detection,
+                "languages": list(get_languages()) if language_detection else [locale],
+                "language": get_default_language() if language_detection else locale,
             })
         )
 
@@ -171,6 +186,21 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         try:
             task, transport, brain = build_call_pipeline(room, websocket)
             from pipecat.pipeline.runner import PipelineRunner
+
+            # Pipecat only *reports* a dropped socket; stopping the pipeline is
+            # the app's job. Without this a hung-up call ran on — Gemini
+            # session, per-caller slot and all — until the session timeout
+            # (RECEPTIONIST_MAX_CALL_S, 15 min), and a sixth call in that window
+            # was refused.
+            @transport.event_handler("on_client_disconnected")
+            async def _on_client_disconnected(_transport: Any, _ws: Any) -> None:
+                await task.cancel()
+
+            @transport.event_handler("on_session_timeout")
+            async def _on_session_timeout(_transport: Any, _ws: Any) -> None:
+                await room.end("timeout")
+                await task.cancel()
+
             runner = PipelineRunner()
             await brain.say_greeting()
             await runner.run(task)

@@ -21,6 +21,26 @@ logger = logging.getLogger(__name__)
 _LEXICON_PATH = PROJECT_ROOT / "Data" / "receptionist" / "lexicon_en.txt"
 _ALT_LEXICON_PATH = PROJECT_ROOT / "data" / "receptionist" / "lexicon_en.txt"
 
+# An acronym as Luganda or Swahili speakers say it: every word ends in a
+# vowel and long vowels are written double, so "VAT" is heard as "vati" and
+# "TIN" as "tiini". Undoing that and landing exactly on an acronym beats a
+# look-alike that happens to be a letter closer ("vati" is VAT, not VATA).
+_LOANWORD_SCORE: Final = 0.95
+_VOWELS: Final = frozenset("aeiou")
+
+
+def _squeeze(word: str) -> str:
+    """Collapse doubled letters: "tiini" → "tini"."""
+    return re.sub(r"(.)\1+", r"\1", word)
+
+
+def _loanword_stem(word: str) -> str:
+    """*word* without Bantu epenthesis: doubled letters collapsed, final vowel dropped."""
+    stem = _squeeze(word)
+    if len(stem) > 2 and stem[-1] in _VOWELS and stem[-2] not in _VOWELS:
+        stem = stem[:-1]
+    return stem
+
 
 class ReceptionistLexicon:
     """Tax domain vocabulary and phonetic index for speech clarification."""
@@ -28,6 +48,10 @@ class ReceptionistLexicon:
     def __init__(self) -> None:
         self.single_terms: set[str] = set()
         self.multi_terms: set[str] = set()
+        # The English loanwords a Luganda or Swahili sentence keeps as they are
+        # ("Nsaba okumanya ku TIN yange") — the only terms worth confirming in
+        # a call that is not in English. See ClarifyGate.assess.
+        self.acronyms: set[str] = set()
         self.term_metaphones: dict[str, str] = {}
         self._load_sources()
 
@@ -35,6 +59,7 @@ class ReceptionistLexicon:
         # 1. Abbreviations and expansions from query.py
         for abbr, full in _ABBREVIATIONS.items():
             self.single_terms.add(abbr.lower())
+            self.acronyms.add(abbr.lower())
             # Add words from full expansion
             for piece in re.findall(r"[A-Za-z]+", full):
                 if len(piece) > 2:
@@ -68,6 +93,7 @@ class ReceptionistLexicon:
                 raw = pattern.pattern.replace(r"\b", "").strip()
                 if raw.isalnum():
                     self.single_terms.add(raw.lower())
+                    self.acronyms.add(raw.lower())
                 spoken_clean = spoken.replace("-", "").lower().strip()
                 if " " in spoken_clean:
                     self.multi_terms.add(spoken_clean)
@@ -102,11 +128,14 @@ class ReceptionistLexicon:
                 except Exception:
                     pass
 
-    def candidates(self, word: str, context: str | None = None) -> list[tuple[str, float]]:
+    def candidates(
+        self, word: str, context: str | None = None, acronyms_only: bool = False
+    ) -> list[tuple[str, float]]:
         """Find candidate term corrections for a poorly recognized word.
 
         Combines Damerau-Levenshtein distance and Metaphone phonetic similarity.
         Boosts candidate score if context + candidate forms a known multi-word term.
+        ``acronyms_only`` limits the search to :attr:`acronyms`.
         """
         w = word.lower().strip(",.?!;:\"'()")
         if not w or len(w) < 2:
@@ -122,13 +151,15 @@ class ReceptionistLexicon:
             except Exception:
                 pass
 
+        loan_stem = _loanword_stem(w_no_dash)
+
         ctx_words: list[str] = []
         if context:
             ctx_words = [p.lower().strip(",.?!;:\"'()") for p in context.split() if p.strip()]
 
         matches: list[tuple[str, float]] = []
 
-        for term in self.single_terms:
+        for term in self.acronyms if acronyms_only else self.single_terms:
             t_len = len(term)
             w_len = len(w)
 
@@ -175,11 +206,13 @@ class ReceptionistLexicon:
                         multi_boost = max(multi_boost, 0.3)
 
             total_score = min(1.0, score + multi_boost)
+            if acronyms_only and loan_stem != w_no_dash and loan_stem == _squeeze(term):
+                total_score = max(total_score, _LOANWORD_SCORE)
             if total_score >= 0.5:
                 matches.append((term, round(total_score, 3)))
 
-        # Sort descending by score
-        matches.sort(key=lambda x: x[1], reverse=True)
+        # Best first; ties broken by name — set order varies between processes.
+        matches.sort(key=lambda x: (-x[1], x[0]))
         return matches
 
 
@@ -194,6 +227,8 @@ def get_lexicon() -> ReceptionistLexicon:
     return _LEXICON_INSTANCE
 
 
-def candidates(word: str, context: str | None = None) -> list[tuple[str, float]]:
+def candidates(
+    word: str, context: str | None = None, acronyms_only: bool = False
+) -> list[tuple[str, float]]:
     """Lookup candidate terms for *word* given surrounding *context*."""
-    return get_lexicon().candidates(word, context=context)
+    return get_lexicon().candidates(word, context=context, acronyms_only=acronyms_only)

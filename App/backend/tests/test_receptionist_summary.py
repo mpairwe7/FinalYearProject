@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
-from app.receptionist.summary import _fallback_summary, _parse_summary_json
+from app.receptionist import summary as summary_mod
+from app.receptionist.summary import _call_languages, _fallback_summary, _parse_summary_json
 
 
 class TestReceptionistSummary(unittest.TestCase):
@@ -70,3 +72,50 @@ class TestReceptionistSummary(unittest.TestCase):
         }
         res = _fallback_summary(turns, call)
         self.assertEqual(res["resolution"], "transferred")
+
+
+class TestSummaryLanguages(unittest.TestCase):
+    """Officers read English summaries; Luganda calls are summarised by Sunflower first."""
+
+    def test_languages_come_from_the_call_metrics(self):
+        call = {"locale": "lg", "metrics": {"language": {"final": "lg", "used": ["en", "lg"]}}}
+        self.assertEqual(_call_languages(call, []), ("lg", ["en", "lg"]))
+
+    def test_a_mostly_luganda_transcript_is_a_luganda_call(self):
+        turns = [{"speaker": "caller", "text": "Nsaba okumanya ku omusolo gwa TIN yange"}]
+        self.assertEqual(_call_languages({"locale": "en"}, turns), ("lg", ["en", "lg"]))
+
+    def test_english_stays_english(self):
+        turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
+        self.assertEqual(_call_languages({"locale": "en"}, turns), ("en", ["en"]))
+
+    def _summarise(self, call, turns, local, gemini):
+        with patch.object(summary_mod, "get_call", return_value=call), \
+                patch.object(summary_mod, "list_turns", return_value=turns), \
+                patch.object(summary_mod, "update_call"), \
+                patch.object(summary_mod, "_summarise_local", side_effect=local) as loc, \
+                patch.object(summary_mod, "_summarise_gemini", side_effect=gemini) as gem:
+            result = summary_mod.generate_call_summary("c1")
+        return result, loc, gem
+
+    def test_luganda_calls_try_sunflower_first(self):
+        parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
+        call = {"locale": "lg", "metrics": {"language": {"final": "lg", "used": ["en", "lg"]}}}
+        turns = [{"speaker": "caller", "text": "Nsaba okumanya ku TIN"}]
+        result, loc, gem = self._summarise(call, turns, [dict(parsed)], [None])
+        loc.assert_called_once()
+        gem.assert_not_called()
+        self.assertEqual((result["language"], result["languages_used"]), ("lg", ["en", "lg"]))
+        self.assertIn("Luganda", loc.call_args.args[0])
+
+    def test_english_calls_try_gemini_first(self):
+        parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
+        turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
+        result, loc, gem = self._summarise({"locale": "en"}, turns, [None], [dict(parsed)])
+        gem.assert_called_once()
+        loc.assert_not_called()
+        self.assertEqual(result["language"], "en")
+
+    def test_the_prompt_demands_english(self):
+        self.assertIn("write every field in English", summary_mod.SUMMARY_SYSTEM)
+

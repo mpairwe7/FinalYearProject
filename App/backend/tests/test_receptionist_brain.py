@@ -51,7 +51,7 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         turns = list_turns(self.call_id)
         self.assertEqual(len(turns), 1)
         self.assertEqual(turns[0]["speaker"], "assistant")
-        self.assertIn("Hello", turns[0]["text"])
+        self.assertTrue(turns[0]["text"].startswith("Hi, thanks for contacting URA."))
 
     async def test_answer_path_logs_conversation_and_turn(self):
         frame = LLMContextFrame(context="How do I register for a TIN?")
@@ -135,3 +135,95 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
             voice="en-KE-AsiliaNeural",
             language="en",
         )
+
+
+class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
+    """The brain speaks the call's current language and hears officer requests in any."""
+
+    async def asyncSetUp(self):
+        import uuid
+
+        db.init_db()
+        init_receptionist_schema()
+        self.call_id = f"call_brain_lang_{uuid.uuid4().hex[:8]}"
+        self.state = CallState(call_id=self.call_id, conversation_id=f"conv_{self.call_id}", mode="ai", locale="lg")
+        self.room = CallRoom(call_id=self.call_id, state=self.state)
+        self.chat_model = MagicMock()
+        self.chat_model.generate.return_value = {"reply": "Okwewandiisa ku TIN tekusasulwa.", "sources": []}
+        self.chat_model._build_handoff_packet.return_value = {"priority": "normal"}
+        self.chat_model._maybe_create_ticket.return_value = "TICK-LG-1"
+        self.brain = UraReceptionistBrain(room=self.room, chat_model=self.chat_model)
+        self.brain.push_frame = AsyncMock()
+
+    async def test_fillers_follow_the_call_language(self):
+        from app.receptionist.phrases import fillers
+
+        self.assertIn(self.brain._pick_filler(), fillers("lg"))
+        self.state.locale = "sw"
+        self.assertIn(self.brain._pick_filler(), fillers("sw"))
+
+    async def test_answers_are_generated_in_the_call_language(self):
+        await self.brain.process_frame(LLMContextFrame(context="Nnyinza ntya okufuna TIN?"))
+        self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "lg")
+
+    async def test_a_luganda_request_for_a_person_transfers_with_a_luganda_notice(self):
+        from app.receptionist.phrases import phrase
+
+        with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+            await self.brain.process_frame(LLMContextFrame(context="Njagala okwogera n'omuntu"))
+        self.assertEqual(self.state.mode, "transferring")
+        texts = [t["text"] for t in list_turns(self.call_id)]
+        self.assertIn(phrase("transfer", "lg"), texts)
+        handoff = self.chat_model._maybe_create_ticket.call_args.kwargs["handoff"]
+        self.assertEqual(handoff["language"], "lg")
+
+    async def test_a_swahili_request_for_an_officer_is_heard_on_any_call(self):
+        from app.receptionist.brain import is_human_request
+
+        self.assertTrue(is_human_request("Naomba msaada wa binadamu"))
+        self.assertTrue(is_human_request("I want to talk to an officer"))
+        self.assertFalse(is_human_request("Omusolo gwa VAT guli ki?"))
+
+    async def test_a_turn_closed_after_the_call_moved_to_gemini_is_dropped(self):
+        self.state.engine = "gemini_live"
+        await self.brain.process_frame(LLMContextFrame(context="Nnyinza ntya okufuna TIN?"))
+        self.chat_model.generate.assert_not_called()
+        self.assertEqual(list_turns(self.call_id), [])
+
+    async def test_a_language_switch_is_not_a_barge_in(self):
+        """The router bumps generation_id itself; the brain only reports the frame passing."""
+        seen = []
+        self.brain.on_switch_interrupt = lambda: seen.append(True)
+        switch = InterruptionFrame()
+        switch.metadata = {"language_switch": True}
+        await self.brain.process_frame(switch)
+        self.assertEqual((self.state.barge_in_count, self.state.generation_id), (0, 0))
+        self.assertEqual(seen, [True])
+        await self.brain.process_frame(InterruptionFrame())
+        self.assertEqual((self.state.barge_in_count, self.state.generation_id), (1, 1))
+
+    async def test_the_officers_busy_line_is_localised(self):
+        from app.receptionist.phrases import phrase
+
+        self.state.mode = "transferring"
+        await self.brain._transfer_timeout_countdown(0, "TICK-LG-1")
+        texts = [t["text"] for t in list_turns(self.call_id)]
+        self.assertIn(phrase("officers_busy", "lg", ref="TICK-LG-1"), texts)
+
+    async def test_a_prefilled_answer_does_not_get_a_second_filler(self):
+        import time as _time
+
+        def slow_generate(**_kwargs):
+            _time.sleep(0.7)  # past RECEPTIONIST_FILLER_AFTER_MS
+            return {"reply": "Okwewandiisa ku TIN tekusasulwa.", "sources": []}
+
+        self.chat_model.generate.side_effect = slow_generate
+        await self.brain.say_filler()
+        await self.brain.handle_external_question("Nnyinza ntya okufuna TIN?")
+        kinds = [c.args[0].message.get("text") for c in self.brain.push_frame.call_args_list
+                 if hasattr(c.args[0], "message") and isinstance(c.args[0].message, dict)
+                 and c.args[0].message.get("type") == "caption"]
+        from app.receptionist.phrases import fillers
+
+        self.assertEqual(sum(text in fillers("lg") for text in kinds), 1)
+

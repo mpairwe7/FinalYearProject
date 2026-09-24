@@ -9,18 +9,23 @@ from typing import Any
 
 from .. import database as db
 from ..guardrails import redact_pii_text
+from .language import LANGUAGE_NAMES, lexical_hits
 from .store import get_call, list_turns, update_call
 
 logger = logging.getLogger(__name__)
 
 SUMMARY_SYSTEM = (
     "You are a structured call summarization engine for Uganda Revenue Authority (URA). "
-    "Analyze the transcript and output strictly valid JSON without conversational commentary."
+    "Analyze the transcript and output strictly valid JSON without conversational commentary. "
+    "The transcript may be in English, Luganda or Swahili; write every field in English — "
+    "the officers reading it work in English."
 )
 
 _SUMMARY_PROMPT_TEMPLATE = """Analyze the following phone conversation transcript between a Taxpayer and URA:
 
 {transcript}
+
+The call was in: {languages}. Write the summary in English regardless.
 
 Return ONLY a JSON object matching this schema:
 {{
@@ -93,6 +98,59 @@ def _fallback_summary(turns: list[dict[str, Any]], call: dict[str, Any]) -> dict
     }
 
 
+def _summarise_gemini(prompt: str) -> dict[str, Any] | None:
+    try:
+        from ..providers.gateway import gemini_generate
+        raw_reply = gemini_generate(
+            prompt,
+            system=SUMMARY_SYSTEM,
+            model="gemini-2.5-flash",
+            max_tokens=1500,
+            temperature=0.0,
+            locale="en",
+        )
+        return _parse_summary_json(raw_reply)
+    except Exception:
+        logger.debug("Gemini summary generation failed", exc_info=True)
+        return None
+
+
+def _summarise_local(prompt: str) -> dict[str, Any] | None:
+    try:
+        from ..llm import _vllm_generate
+        raw_reply = _vllm_generate(
+            f"{SUMMARY_SYSTEM}\n\n{prompt}",
+            max_tokens=1000,
+            temperature=0.0,
+        )
+        return _parse_summary_json(raw_reply)
+    except Exception:
+        logger.debug("Local LLM summary generation failed", exc_info=True)
+        return None
+
+
+def _call_languages(call: dict[str, Any], turns: list[dict[str, Any]]) -> tuple[str, list[str]]:
+    """The call's language and every language it was in, oldest first.
+
+    From the per-call metrics when the call recorded them (multilingual
+    calls); otherwise from the row's locale — overruled by the transcript
+    when the caller's own words are mostly Luganda, which is how a Luganda
+    caller on a single-engine English call still gets a Sunflower summary.
+    """
+    metrics = call.get("metrics") or {}
+    lang_metrics = metrics.get("language") if isinstance(metrics, dict) else None
+    locale = str(call.get("locale") or "en")
+    used = list((lang_metrics or {}).get("used") or [locale])
+    language = str((lang_metrics or {}).get("final") or locale)
+    caller_text = " ".join(str(t.get("text", "")) for t in turns if t.get("speaker") == "caller")
+    hits = lexical_hits(caller_text)
+    if language != "lg" and hits["lg"] > max(hits["en"], hits["sw"]) and hits["lg"] >= 3:
+        language = "lg"
+    if language not in used:
+        used.append(language)
+    return language, used
+
+
 def generate_call_summary(call_id: str) -> dict[str, Any]:
     """Generate structured summary for a completed call and persist it."""
     call = get_call(call_id)
@@ -102,6 +160,7 @@ def generate_call_summary(call_id: str) -> dict[str, Any]:
     turns = list_turns(call_id)
     if not turns:
         summary = _fallback_summary([], call)
+        summary["language"], summary["languages_used"] = _call_languages(call, [])
         update_call(call_id, summary_json=summary)
         return summary
 
@@ -113,41 +172,28 @@ def generate_call_summary(call_id: str) -> dict[str, Any]:
         transcript_lines.append(f"{spk}: {txt}")
 
     transcript_str = "\n".join(transcript_lines)[:6000]
-    prompt = _SUMMARY_PROMPT_TEMPLATE.format(transcript=transcript_str)
+    language, languages_used = _call_languages(call, turns)
+    prompt = _SUMMARY_PROMPT_TEMPLATE.format(
+        transcript=transcript_str,
+        languages=", ".join(LANGUAGE_NAMES.get(lang, lang) for lang in languages_used),
+    )
 
     parsed_summary: dict[str, Any] | None = None
 
-    # 1. Try Gemini Gateway
-    try:
-        from ..providers.gateway import gemini_generate
-        raw_reply = gemini_generate(
-            prompt,
-            system=SUMMARY_SYSTEM,
-            model="gemini-2.5-flash",
-            max_tokens=1500,
-            temperature=0.0,
-            locale="en",
-        )
-        parsed_summary = _parse_summary_json(raw_reply)
-    except Exception:
-        logger.debug("Gemini summary generation failed; trying local LLM", exc_info=True)
-
-    # 2. Try Local vLLM if available
-    if not parsed_summary:
-        try:
-            from ..llm import _vllm_generate
-            raw_reply = _vllm_generate(
-                prompt,
-                max_tokens=1000,
-                temperature=0.0,
-            )
-            parsed_summary = _parse_summary_json(raw_reply)
-        except Exception:
-            logger.debug("Local LLM summary generation failed", exc_info=True)
+    # Sunflower reads Luganda far better than Gemini does, so a Luganda call
+    # is summarised there first; English and Swahili calls go to Gemini first.
+    generators = (_summarise_local, _summarise_gemini) if language == "lg" else (_summarise_gemini, _summarise_local)
+    for generate in generators:
+        parsed_summary = generate(prompt)
+        if parsed_summary:
+            break
 
     # 3. Fallback deterministic summary
     if not parsed_summary:
         parsed_summary = _fallback_summary(turns, call)
+
+    parsed_summary["language"] = language
+    parsed_summary["languages_used"] = languages_used
 
     # Persist summary on voice_calls row
     update_call(call_id, summary_json=parsed_summary)

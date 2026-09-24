@@ -109,6 +109,7 @@ def compute_call_metrics(
             turn_to_audio_latencies.append(float(lat["brain_ms"]) + float(lat["stt_ms"]))
 
     metrics_obj = {
+        "language": _language_metrics(state, call),
         "duration_s": duration_s,
         "caller_turns": caller_turns,
         "ai_answers": ai_answers,
@@ -139,6 +140,32 @@ def compute_call_metrics(
     return metrics_obj
 
 
+def _language_metrics(state: CallState | None, call: dict[str, Any]) -> dict[str, Any]:
+    """Which language(s) the call was in, and what detecting them cost.
+
+    On a single-engine call most of these stay at their defaults: one
+    language, no switches, no detection latency.
+    """
+    locale = call.get("locale") or "en"
+    if state is None:
+        return {"initial": locale, "final": locale, "used": [locale], "switches": 0, "overrides": 0}
+    confidences = state.lid_confidences
+    return {
+        "initial": state.initial_locale or locale,
+        "final": state.locale or locale,
+        "used": list(state.languages_used or [state.locale or locale]),
+        "preferred": state.preferred_locale or None,
+        "source": state.language_source,
+        "switches": state.language_switches,
+        "overrides": state.language_overrides,
+        "detection_latency_ms_p50": _percentile(state.lid_latencies_ms, 50),
+        "detection_latency_ms_p95": _percentile(state.lid_latencies_ms, 95),
+        "detection_confidence_mean": round(sum(confidences) / len(confidences), 3) if confidences else None,
+        "held_ms_p50": _percentile(state.held_ms, 50),
+        "held_ms_p95": _percentile(state.held_ms, 95),
+    }
+
+
 def record_call_end_metrics(call_id: str, state: CallState | None = None) -> dict[str, Any]:
     """Calculate and save final metrics JSON for a call."""
     call = get_call(call_id)
@@ -147,7 +174,12 @@ def record_call_end_metrics(call_id: str, state: CallState | None = None) -> dic
 
     turns = list_turns(call_id)
     metrics = compute_call_metrics(state, call, turns)
-    update_call(call_id, metrics_json=metrics)
+    fields: dict[str, Any] = {"metrics_json": metrics}
+    if state is not None and state.locale:
+        # The row ends on the language the call ended in, not the one it
+        # opened in (every multilingual call opens in English).
+        fields["locale"] = state.locale
+    update_call(call_id, **fields)
     return metrics
 
 

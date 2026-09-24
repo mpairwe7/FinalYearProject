@@ -91,3 +91,128 @@ def get_gemini_live_model() -> str:
 def get_gemini_live_voice() -> str:
     """Gemini Live voice identifier (Aoede, Charon, Fenrir, Kore, Puck)."""
     return os.getenv("GEMINI_LIVE_VOICE", "Aoede").strip() or "Aoede"
+
+
+# ---------------------------------------------------------------------------
+# Multilingual receptionist (en / sw / lg) and language detection
+# ---------------------------------------------------------------------------
+
+#: Languages the receptionist can hold a call in, in the order they are offered.
+KNOWN_LANGUAGES: tuple[str, ...] = ("en", "sw", "lg")
+_ENGINES = ("gemini_live", "cascaded")
+_DEFAULT_ENGINE_BY_LANGUAGE = {"en": "gemini_live", "sw": "gemini_live", "lg": "cascaded"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def get_default_language() -> str:
+    """The language every call opens in (the greeting is always spoken in it)."""
+    lang = os.getenv("RECEPTIONIST_DEFAULT_LANGUAGE", "en").strip().lower()
+    return lang if lang in KNOWN_LANGUAGES else "en"
+
+
+def get_languages() -> tuple[str, ...]:
+    """Languages detection may switch a call into. Unknown codes are dropped."""
+    raw = os.getenv("RECEPTIONIST_LANGUAGES", ",".join(KNOWN_LANGUAGES))
+    langs = tuple(dict.fromkeys(p.strip().lower() for p in raw.split(",") if p.strip().lower() in KNOWN_LANGUAGES))
+    default = get_default_language()
+    if default not in langs:
+        langs = (default, *langs)
+    return langs
+
+
+def get_engine_by_language() -> dict[str, str]:
+    """``RECEPTIONIST_ENGINE_BY_LANGUAGE`` as ``{lang: engine}``.
+
+    Format ``en:gemini_live,sw:gemini_live,lg:cascaded``. A malformed or
+    unknown pair keeps that language's default rather than failing the call.
+    Luganda is never routed to Gemini Live: Gemini does not speak it.
+    """
+    table = dict(_DEFAULT_ENGINE_BY_LANGUAGE)
+    raw = os.getenv("RECEPTIONIST_ENGINE_BY_LANGUAGE", "")
+    for pair in raw.split(","):
+        lang, _, engine = pair.strip().lower().partition(":")
+        if lang in KNOWN_LANGUAGES and engine in _ENGINES:
+            table[lang] = engine
+    table["lg"] = "cascaded"
+    return table
+
+
+def get_lid_method() -> str:
+    """How the sentinel votes: ``salt_token`` (default), ``fusion`` or ``keyword``."""
+    method = os.getenv("RECEPTIONIST_LID_METHOD", "salt_token").strip().lower()
+    return method if method in ("salt_token", "fusion", "keyword") else "salt_token"
+
+
+def get_lid_min_speech_s() -> float:
+    """Utterances shorter than this never decide the language (greetings, "yes")."""
+    return _env_float("RECEPTIONIST_LID_MIN_SPEECH_S", 1.5)
+
+
+def get_lid_switch_confidence() -> float:
+    """One vote at or above this switches a locked call."""
+    return _env_float("RECEPTIONIST_LID_SWITCH_CONFIDENCE", 0.90)
+
+
+def get_lid_hysteresis_confidence() -> float:
+    """Below the switch confidence, votes at or above this accumulate."""
+    return _env_float("RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE", 0.70)
+
+
+def get_lid_hysteresis_turns() -> int:
+    """Consecutive accumulating votes needed to switch a locked call."""
+    return max(1, _env_int("RECEPTIONIST_LID_HYSTERESIS_TURNS", 2))
+
+
+def get_lid_hold_timeout_ms() -> int:
+    """Longest the first reply is held back while its language is decided."""
+    return max(0, _env_int("RECEPTIONIST_LID_HOLD_TIMEOUT_MS", 600))
+
+
+def get_lg_mix_threshold() -> float:
+    """P(lg) above which Luganda function words in the text make the turn Luganda."""
+    return _env_float("RECEPTIONIST_LG_MIX_THRESHOLD", 0.35)
+
+
+def get_turn_timeout_s() -> float:
+    """Silence after the caller's last word before the cascaded turn closes."""
+    return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
+
+
+def get_clarify_threshold_for(language: str) -> float:
+    """``RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>``, else the global threshold."""
+    return _env_float(f"RECEPTIONIST_CLARIFY_THRESHOLD_{language.upper()}", get_clarify_threshold())
+
+
+def clarify_repeat_enabled(language: str) -> bool:
+    """Whether "please repeat that word" is asked in *language*.
+
+    Off for Luganda by default: Whisper-SALT's per-word probabilities have
+    not been calibrated on Luganda, where 14% WER on read speech means a low
+    word score is the norm rather than a signal.
+    """
+    return _env_bool(f"RECEPTIONIST_CLARIFY_REPEAT_{language.upper()}", language != "lg")
+
+
+def allow_edge_standin_lg() -> bool:
+    """Whether a Luganda call may fall back to an English edge voice reading Luganda."""
+    return _env_bool("RECEPTIONIST_ALLOW_EDGE_STANDIN_LG", False)

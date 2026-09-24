@@ -8,7 +8,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from ..speech_service import TranscribeResult
+from ..speech_service import TranscribeResult, pcm16_to_wav
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +57,20 @@ def _strip_wav_header(audio_bytes: bytes) -> bytes:
 
 
 class UraWhisperSTT(SegmentedSTTService):
-    """Segmented STT service running URA Whisper-SALT in an asyncio thread pool."""
+    """Segmented STT service running URA Whisper-SALT in an asyncio thread pool.
+
+    With a ``room`` the Whisper-SALT language token is read from
+    ``room.state.locale`` for every segment, so a call that changes language
+    is transcribed in its new one from the next utterance; ``language`` is
+    the value used without a room (and the initial one with).
+    """
 
     def __init__(
         self,
         speech_model: Any,
         user_id: str = "",
         language: str = "en",
+        room: Any = None,
         **kwargs: Any,
     ) -> None:
         settings = STTSettings(language=language) if STTSettings else None
@@ -76,8 +83,19 @@ class UraWhisperSTT(SegmentedSTTService):
         )
         self.speech_model = speech_model
         self.user_id = user_id
-        self.language = language
+        self.room = room
+        self._language = language
         self.last_stt_ms: float = 0.0
+
+    @property
+    def language(self) -> str:
+        if self.room is not None:
+            return self.room.state.locale or self._language
+        return self._language
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self._language = value
 
     @property
     def wants_wav_segments(self) -> bool:
@@ -95,14 +113,15 @@ class UraWhisperSTT(SegmentedSTTService):
         if not pcm or len(pcm) < 320:  # < 10ms of 16kHz audio
             return
 
-        logger.info("UraWhisperSTT.run_stt: transcribing %d bytes of PCM", len(pcm))
+        language = self.language
+        logger.info("UraWhisperSTT.run_stt: transcribing %d bytes of PCM (%s)", len(pcm), language)
         t0 = time.perf_counter()
         try:
             res: TranscribeResult = await asyncio.to_thread(
                 self.speech_model.transcribe,
-                pcm,
+                pcm16_to_wav(pcm, 16000),
                 16000,
-                self.language,
+                language,
                 with_words=True,
             )
         except Exception:
@@ -117,7 +136,7 @@ class UraWhisperSTT(SegmentedSTTService):
                 text=res.text,
                 user_id=self.user_id,
                 timestamp=str(time.time()),
-                language=self.language,
+                language=language,
             )
             # Stash the full TranscribeResult on the frame
             frame.result = res

@@ -10,7 +10,10 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from .config import clarify_repeat_enabled
+from .language import is_native_word
 from .lexicon import candidates
+from .phrases import phrase, yes_no_patterns
 
 logger = logging.getLogger(__name__)
 
@@ -51,25 +54,32 @@ _NO_RE = re.compile(
 )
 
 
-def classify_yes_no(text: str) -> str:
-    """Classify user response into 'yes', 'no', or 'neither'."""
+def _first_match(patterns: tuple[re.Pattern[str] | None, ...], text: str) -> int | None:
+    starts = [m.start() for p in patterns if p is not None and (m := p.search(text))]
+    return min(starts) if starts else None
+
+
+def classify_yes_no(text: str, language: str = "en") -> str:
+    """Classify user response into 'yes', 'no', or 'neither'.
+
+    English words are always recognised — a Luganda caller answering "yes"
+    is common — and *language* adds its own on top.
+    """
     clean = text.strip()
     if not clean:
         return "neither"
 
-    has_yes = bool(_YES_RE.search(clean))
-    has_no = bool(_NO_RE.search(clean))
+    extra_yes, extra_no = yes_no_patterns(language) if language != "en" else (None, None)
+    yes_at = _first_match((_YES_RE, extra_yes), clean)
+    no_at = _first_match((_NO_RE, extra_no), clean)
 
-    if has_yes and not has_no:
+    if yes_at is not None and no_at is None:
         return "yes"
-    if has_no and not has_yes:
+    if no_at is not None and yes_at is None:
         return "no"
-    if has_yes and has_no:
-        # Check which appears first
-        yes_m = _YES_RE.search(clean)
-        no_m = _NO_RE.search(clean)
-        if yes_m and no_m:
-            return "yes" if yes_m.start() < no_m.start() else "no"
+    if yes_at is not None and no_at is not None:
+        # Whichever the caller said first
+        return "yes" if yes_at < no_at else "no"
 
     return "neither"
 
@@ -95,6 +105,13 @@ class ClarifyState:
     attempts: int = 0
 
 
+def _spoken_term(term: str, language: str) -> str:
+    """Acronyms read as letters in a prompt ("TIN", not "tin")."""
+    if language != "en" and term.isalpha() and len(term) <= 5:
+        return term.upper()
+    return term
+
+
 def _replace_word(text: str, target: str, replacement: str) -> str:
     """Safely replace *target* word with *replacement* in *text*."""
     pattern = re.compile(rf"\b{re.escape(target)}\b", re.IGNORECASE)
@@ -115,9 +132,20 @@ class ClarifyGate:
         text: str,
         words: list[Any] | None = None,
         threshold: float | None = None,
+        language: str = "en",
     ) -> ClarifyAction:
-        """Assess caller utterance for low-confidence words requiring clarification."""
+        """Assess caller utterance for low-confidence words requiring clarification.
+
+        Outside English only URA's acronyms are ever confirmed ("did you say
+        TIN?"): the lexicon is English, so phonetic matching against a Luganda
+        or Swahili word finds English terms that were never said — and the
+        language's own known words are never candidates at all. Asking the
+        caller to repeat a word is further gated per language by
+        ``RECEPTIONIST_CLARIFY_REPEAT_<LANG>`` — off for Luganda, whose
+        per-word scores are not yet calibrated.
+        """
         th = threshold if threshold is not None else self.threshold
+        loanwords_only = language != "en"
 
         # Case 1: words is None (fallback STT backend)
         if words is None:
@@ -126,8 +154,10 @@ class ClarifyGate:
                 low_tok = tok.lower()
                 if low_tok in STOP_WORDS or low_tok in FILLERS or len(tok) < 3:
                     continue
+                if loanwords_only and is_native_word(low_tok, language):
+                    continue
                 prev_word = tokens[i - 1].lower() if i > 0 else None
-                cands = candidates(tok, context=prev_word)
+                cands = candidates(tok, context=prev_word, acronyms_only=loanwords_only)
                 if cands and cands[0][1] >= 0.7 and cands[0][0] != low_tok:
                     best_cand = cands[0][0]
                     return ClarifyAction(
@@ -135,7 +165,7 @@ class ClarifyGate:
                         candidate=best_cand,
                         target_word=tok,
                         previous_word=prev_word,
-                        prompt=f"Excuse me, did you say {best_cand}?",
+                        prompt=phrase("clarify_term", language, term=_spoken_term(best_cand, language)),
                     )
             return ClarifyAction(action="none")
 
@@ -145,6 +175,8 @@ class ClarifyGate:
             word_str = item.word if hasattr(item, "word") else item.get("word", "")
             w_clean = word_str.lower().strip(",.?!;:\"'()")
             if not w_clean or w_clean in STOP_WORDS or w_clean in FILLERS:
+                continue
+            if loanwords_only and is_native_word(w_clean, language):
                 continue
             if not any(c.isalpha() for c in w_clean):
                 continue
@@ -163,28 +195,36 @@ class ClarifyGate:
         if not low_items:
             return ClarifyAction(action="none")
 
-        # Pick lowest-probability content word
-        lowest_idx, lowest_item = min(
-            low_items,
-            key=lambda pair: pair[1].prob if hasattr(pair[1], "prob") else pair[1].get("prob", 1.0),
-        )
-        target_str = lowest_item.word if hasattr(lowest_item, "word") else lowest_item.get("word", "")
-        prev_str: str | None = None
-        if lowest_idx > 0:
-            p_item = words[lowest_idx - 1]
-            prev_str = p_item.word if hasattr(p_item, "word") else p_item.get("word", "")
-            prev_str = prev_str.strip(",.?!;:\"'()")
+        def prob_of(pair: tuple[int, Any]) -> float:
+            return pair[1].prob if hasattr(pair[1], "prob") else pair[1].get("prob", 1.0)
 
-        cands = candidates(target_str, context=prev_str)
-        if cands and cands[0][1] >= 0.7:
-            cand_term = cands[0][0]
-            return ClarifyAction(
-                action="ask_term",
-                candidate=cand_term,
-                target_word=target_str,
-                previous_word=prev_str,
-                prompt=f"Excuse me, did you say {cand_term}?",
-            )
+        def word_at(idx: int) -> str:
+            item = words[idx]
+            return item.word if hasattr(item, "word") else item.get("word", "")
+
+        # English: the lowest-probability content word is the one in question.
+        # Elsewhere most content words are not in the (English) lexicon at
+        # all, so look for the least certain word that is one of its acronyms.
+        ordered = sorted(low_items, key=prob_of)
+        for lowest_idx, _item in ordered if loanwords_only else ordered[:1]:
+            target_str = word_at(lowest_idx)
+            prev_str = word_at(lowest_idx - 1).strip(",.?!;:\"'()") if lowest_idx > 0 else None
+            cands = candidates(target_str, context=prev_str, acronyms_only=loanwords_only)
+            if cands and cands[0][1] >= 0.7:
+                cand_term = cands[0][0]
+                return ClarifyAction(
+                    action="ask_term",
+                    candidate=cand_term,
+                    target_word=target_str,
+                    previous_word=prev_str,
+                    prompt=phrase("clarify_term", language, term=_spoken_term(cand_term, language)),
+                )
+
+        lowest_idx = ordered[0][0]
+        target_str = word_at(lowest_idx)
+        prev_str = word_at(lowest_idx - 1).strip(",.?!;:\"'()") if lowest_idx > 0 else None
+        if not clarify_repeat_enabled(language):
+            return ClarifyAction(action="none")
 
         # No confident candidate match: check if mean prob is low
         probs = [
@@ -196,9 +236,9 @@ class ClarifyGate:
 
         if mean_prob < (th + 0.1):
             prompt = (
-                f"Sorry, I didn't catch the word after '{prev_str}' — could you say it again?"
+                phrase("clarify_repeat_after", language, prev=prev_str)
                 if prev_str
-                else "Sorry, I didn't catch that — could you say it again?"
+                else phrase("clarify_repeat", language)
             )
             return ClarifyAction(
                 action="ask_repeat",
@@ -215,14 +255,29 @@ class ClarifyGate:
         words: list[Any] | None = None,
         state: ClarifyState | None = None,
         max_attempts: int | None = None,
+        language: str = "en",
     ) -> ClarifyAction:
         """Resolve a pending clarification turn given the caller's reply."""
         if state is None:
             return ClarifyAction(action="none")
 
         limit = max_attempts if max_attempts is not None else self.max_attempts
-        decision = classify_yes_no(reply_text)
+        decision = classify_yes_no(reply_text, language)
         reply_lower = reply_text.lower()
+        loanwords_only = language != "en"
+        restart = phrase("clarify_restart", language)
+
+        def confirm_prompt(term: str | None) -> str:
+            spoken = _spoken_term(term or "", language)
+            # "group import": the previous word only belongs in the highlight
+            # when it is part of an English multi-word term. In a Luganda or
+            # Swahili sentence it is a local word ("ku TIN") the template
+            # already carries.
+            if state.previous_word and not loanwords_only:
+                highlight = f"{state.previous_word} {spoken}"
+            else:
+                highlight = spoken
+            return phrase("clarify_confirm", language, highlight=highlight)
 
         # ------------------------------------------------------------------
         # Stage 1: "term" (AI asked: "Excuse me, did you say {term}?")
@@ -240,31 +295,22 @@ class ClarifyGate:
                 state.stage = "confirm"
                 state.original_question = corrected
 
-                highlight = (
-                    f"{state.previous_word} {state.suggested_term}"
-                    if state.previous_word
-                    else state.suggested_term
-                )
-                prompt = f"So if I got it right, you're asking about {highlight} — is that right?"
                 return ClarifyAction(
                     action="ask_confirm_question",
                     candidate=state.suggested_term,
                     target_word=state.target_word,
                     corrected_text=corrected,
-                    prompt=prompt,
+                    prompt=confirm_prompt(state.suggested_term),
                 )
 
             if decision == "no":
                 state.attempts += 1
                 if state.attempts >= limit:
                     return ClarifyAction(action="transfer", reason="clarification_failed")
-                return ClarifyAction(
-                    action="restart",
-                    prompt="Sorry about that — please tell me your question again.",
-                )
+                return ClarifyAction(action="restart", prompt=restart)
 
             # Restatement / neither: caller spoke a replacement word
-            cands = candidates(reply_text, context=state.previous_word)
+            cands = candidates(reply_text, context=state.previous_word, acronyms_only=loanwords_only)
             if cands and cands[0][1] >= 0.7:
                 new_cand = cands[0][0]
                 corrected = _replace_word(
@@ -274,33 +320,24 @@ class ClarifyGate:
                 state.stage = "confirm"
                 state.original_question = corrected
 
-                highlight = (
-                    f"{state.previous_word} {new_cand}"
-                    if state.previous_word
-                    else new_cand
-                )
-                prompt = f"So if I got it right, you're asking about {highlight} — is that right?"
                 return ClarifyAction(
                     action="ask_confirm_question",
                     candidate=new_cand,
                     target_word=state.target_word,
                     corrected_text=corrected,
-                    prompt=prompt,
+                    prompt=confirm_prompt(new_cand),
                 )
 
             state.attempts += 1
             if state.attempts >= limit:
                 return ClarifyAction(action="transfer", reason="clarification_failed")
-            return ClarifyAction(
-                action="restart",
-                prompt="Sorry about that — please tell me your question again.",
-            )
+            return ClarifyAction(action="restart", prompt=restart)
 
         # ------------------------------------------------------------------
         # Stage 2: "repeat" (AI asked: "Sorry, I didn't catch the word...")
         # ------------------------------------------------------------------
         if state.stage == "repeat":
-            cands = candidates(reply_text, context=state.previous_word)
+            cands = candidates(reply_text, context=state.previous_word, acronyms_only=loanwords_only)
             if cands and cands[0][1] >= 0.7:
                 new_cand = cands[0][0]
                 corrected = _replace_word(
@@ -310,27 +347,18 @@ class ClarifyGate:
                 state.stage = "confirm"
                 state.original_question = corrected
 
-                highlight = (
-                    f"{state.previous_word} {new_cand}"
-                    if state.previous_word
-                    else new_cand
-                )
-                prompt = f"So if I got it right, you're asking about {highlight} — is that right?"
                 return ClarifyAction(
                     action="ask_confirm_question",
                     candidate=new_cand,
                     target_word=state.target_word,
                     corrected_text=corrected,
-                    prompt=prompt,
+                    prompt=confirm_prompt(new_cand),
                 )
 
             state.attempts += 1
             if state.attempts >= limit:
                 return ClarifyAction(action="transfer", reason="clarification_failed")
-            return ClarifyAction(
-                action="restart",
-                prompt="Sorry about that — please tell me your question again.",
-            )
+            return ClarifyAction(action="restart", prompt=restart)
 
         # ------------------------------------------------------------------
         # Stage 3: "confirm" (AI asked: "So if I got it right, you're asking about {X} — is that right?")
@@ -346,9 +374,6 @@ class ClarifyGate:
             state.attempts += 1
             if state.attempts >= limit:
                 return ClarifyAction(action="transfer", reason="clarification_failed")
-            return ClarifyAction(
-                action="restart",
-                prompt="Sorry about that — please tell me your question again.",
-            )
+            return ClarifyAction(action="restart", prompt=restart)
 
         return ClarifyAction(action="none")

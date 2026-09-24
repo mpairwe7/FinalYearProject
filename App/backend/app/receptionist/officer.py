@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Any
 
+from ..speech_service import pcm16_to_wav
 from ..voice_stream import EnergyVAD
 from .hub import hub
 from .store import create_turn
@@ -92,7 +93,7 @@ class OfficerLeg:
         try:
             res = await asyncio.to_thread(
                 self.speech_model.transcribe,
-                pcm_bytes,
+                pcm16_to_wav(pcm_bytes, 16000),
                 16000,
                 "en",
                 with_words=False,

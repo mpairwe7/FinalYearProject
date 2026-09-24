@@ -39,6 +39,12 @@ services:
       - SPEECH_ENABLED=true
       - WORKERS=1
       - RECEPTIONIST_ENGINE=${RECEPTIONIST_ENGINE:-gemini_live}
+      # Multilingual receptionist (en/sw on Gemini Live, lg on the cascaded
+      # engine). Off unless asked for; with it on, bring up the Orpheus voice
+      # below (`--profile multilingual`) and point ORPHEUS_TTS_URL at it, or
+      # Luganda answers fall back to Spark-TTS-SALT (~4 s a sentence).
+      - FLAG_RECEPTIONIST_LANGUAGE_DETECTION=${FLAG_RECEPTIONIST_LANGUAGE_DETECTION:-false}
+      - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-}
       - FLAG_VOICE_RECEPTIONIST=true
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true
@@ -132,6 +138,43 @@ services:
             - driver: nvidia
               device_ids: ["${GPU_ID:-2}"]
               capabilities: [gpu]
+
+  # Orpheus-3B (Sunbird multilingual) — the receptionist's Luganda voice.
+  # Its own vLLM, so its own image (App/backend/orpheus_sidecar); weight-only
+  # FP8 because at bf16 an A6000 only just keeps up with real time
+  # (evals/reports/orpheus_tts_2026-09-24_*.json). Needs ~6 GB of weights plus
+  # KV cache: give it a card of its own when one is free (ORPHEUS_GPU_ID) —
+  # Sunflower, Whisper-SALT and Orpheus together are too much for one 24 GB
+  # card, though they fit one 48 GB A6000.
+  #   ORPHEUS_GPU_ID=7 ORPHEUS_TTS_URL=http://orpheus-tts:8100 \
+  #   FLAG_RECEPTIONIST_LANGUAGE_DETECTION=true docker compose ... --profile multilingual up -d
+  orpheus-tts:
+    profiles: ["multilingual"]
+    build:
+      context: ./backend/orpheus_sidecar
+    image: ${DOCKER_IMAGE_ORPHEUS:-app-orpheus-tts}:latest
+    container_name: ura-app-orpheus-tts
+    environment:
+      - HF_HOME=/app/hf_cache
+      - HF_HUB_OFFLINE=0
+      - ORPHEUS_GPU_MEM_UTIL=${ORPHEUS_GPU_MEM_UTIL:-0.35}
+      - ORPHEUS_QUANTIZATION=${ORPHEUS_QUANTIZATION:-fp8}
+      - NVIDIA_VISIBLE_DEVICES=${ORPHEUS_GPU_ID:-${VLLM_GPU_ID:-${GPU_ID:-2}}}
+    volumes:
+      - type: bind
+        source: /mnt/nas1/caches/huggingface_cache
+        target: /app/hf_cache
+    ipc: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${ORPHEUS_GPU_ID:-${VLLM_GPU_ID:-${GPU_ID:-2}}}"]
+              capabilities: [gpu]
+    networks:
+      - app-network
 
   vllm:
     environment:

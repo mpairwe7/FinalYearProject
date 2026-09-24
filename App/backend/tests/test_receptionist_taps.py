@@ -37,7 +37,8 @@ class RecordingSpeech:
         self.calls: list[int] = []
 
     def transcribe(self, pcm: bytes, sample_rate: int, language: str, with_words: bool) -> Any:
-        self.calls.append(len(pcm))
+        # The tap hands over a WAV (see speech_service.pcm16_to_wav); count PCM.
+        self.calls.append(len(pcm) - 44 if pcm[:4] == b"RIFF" else len(pcm))
         text = self.texts[min(len(self.calls) - 1, len(self.texts) - 1)]
         return SimpleNamespace(text=text)
 

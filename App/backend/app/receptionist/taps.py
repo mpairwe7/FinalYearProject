@@ -7,6 +7,7 @@ import logging
 import time
 from typing import Any
 
+from ..speech_service import pcm16_to_wav
 from .config import get_partial_transcript_interval_s, live_partial_transcripts_enabled
 from .hub import hub
 
@@ -17,6 +18,7 @@ try:
     from pipecat.frames.frames import (
         Frame,
         InputAudioRawFrame,
+        InterimTranscriptionFrame,
         OutputTransportMessageFrame,
         OutputTransportMessageUrgentFrame,
         TranscriptionFrame,
@@ -59,6 +61,9 @@ except ImportError:
             self.text = text
             self.user_id = user_id
             self.timestamp = timestamp
+
+    class InterimTranscriptionFrame(TranscriptionFrame):  # type: ignore[no-redef]
+        pass
 
     class UserStartedSpeakingFrame(Frame):  # type: ignore[no-redef]
         pass
@@ -164,7 +169,7 @@ class LivePartialTranscriptTap(FrameProcessor):
         super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
         self.speech_model = speech_model
-        self.language = language
+        self._language = language
         self.interval_s = get_partial_transcript_interval_s() if interval_s is None else interval_s
         self._min_bytes = int(min_audio_s * _BYTES_PER_SECOND)
         # Whisper's receptive field is 30 s; past that a re-decode silently
@@ -186,6 +191,16 @@ class LivePartialTranscriptTap(FrameProcessor):
         self._last_started_at = 0.0
         self._last_text = ""
         self._pending: asyncio.Task[None] | None = None
+
+    @property
+    def language(self) -> str:
+        """The call's language now; the constructor value only without a room state."""
+        state = getattr(self.room, "state", None)
+        return getattr(state, "locale", None) or self._language
+
+    @language.setter
+    def language(self, value: str) -> None:
+        self._language = value
 
     @property
     def enabled(self) -> bool:
@@ -246,7 +261,7 @@ class LivePartialTranscriptTap(FrameProcessor):
     async def _decode_and_emit(self, pcm: bytes, turn: int) -> None:
         try:
             result = await asyncio.to_thread(
-                self.speech_model.transcribe, pcm, 16000, self.language, False
+                self.speech_model.transcribe, pcm16_to_wav(pcm, 16000), 16000, self.language, False
             )
         except Exception:
             logger.debug("Live partial transcription failed", exc_info=True)
@@ -273,3 +288,15 @@ class LivePartialTranscriptTap(FrameProcessor):
             OutputTransportMessageUrgentFrame(caption_data), FrameDirection.DOWNSTREAM
         )
         hub.publish_call(self.room.call_id, "caption", caption_data)
+        # The same hypothesis, as a frame the turn strategies read: while the
+        # assistant is talking, two words of it are what count as a barge-in
+        # (see turns.py). The user aggregator consumes it; it never reaches
+        # the brain as text.
+        await self.push_frame(
+            InterimTranscriptionFrame(
+                text=text,
+                user_id=getattr(self.room.state, "user_id", "") or "",
+                timestamp=str(time.time()),
+            ),
+            FrameDirection.DOWNSTREAM,
+        )

@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
+
+from .config import KNOWN_LANGUAGES
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +53,21 @@ except ImportError:
             self.message = message
 
 
+# Dataclasses, like every Pipecat frame: the base class's __post_init__ gives
+# each frame the id and name the pipeline relies on (a ParallelPipeline
+# de-duplicates by id). A hand-written __init__ skipped it.
+@dataclass
 class RequestOfficerFrame(Frame):
     """Custom frame fired when the caller clicks or requests 'talk to an officer'."""
 
-    def __init__(self, reason: str = "caller_requested"):
-        self.reason = reason
+    reason: str = "caller_requested"
+
+
+@dataclass
+class SetLanguageFrame(Frame):
+    """The caller picked the call's language on screen — an override for the rest of the call."""
+
+    language: str = "en"
 
 
 class BrowserCallSerializer(FrameSerializer):
@@ -99,6 +112,12 @@ class BrowserCallSerializer(FrameSerializer):
 
             if msg_type == "request_officer":
                 return RequestOfficerFrame(reason=msg.get("reason", "caller_requested"))
+
+            if msg_type == "set_language":
+                language = str(msg.get("language", "")).strip().lower()
+                if language in KNOWN_LANGUAGES:
+                    return SetLanguageFrame(language=language)
+                return None
 
             if msg_type == "hangup":
                 if self.room and hasattr(self.room, "end"):

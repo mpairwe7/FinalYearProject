@@ -397,6 +397,12 @@ _REGISTRY: dict[str, Flag] = {
             False,
             "Simulated phone receptionist: Pipecat call socket, staff Calls page, audio bridge",
         ),
+        Flag(
+            "receptionist_language_detection",
+            False,
+            "Receptionist answers in the language the caller speaks (en/sw on Gemini Live, "
+            "lg on the cascaded engine), detected per utterance; needs voice_receptionist",
+        ),
     ]
 }
 

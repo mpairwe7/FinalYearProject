@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import re
 import time
+from functools import lru_cache
 from typing import Any
 
 from .. import database as db
@@ -15,15 +15,19 @@ from ..flags import flags
 from ..speech_normalization import clean_text_for_speech
 from .clarify import ClarifyGate, ClarifyState
 from .config import (
+    KNOWN_LANGUAGES,
     get_clarify_threshold,
+    get_clarify_threshold_for,
+    get_default_language,
     get_filler_after_ms,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
     get_transfer_timeout_s,
 )
 from .hub import hub
-from .serializer import RequestOfficerFrame
+from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, update_call
+from .transfer import open_transfer
 
 logger = logging.getLogger(__name__)
 
@@ -78,21 +82,49 @@ _HUMAN_REQUEST_RE = re.compile(
     re.IGNORECASE,
 )
 
-GREETING_TEXT = (
-    "Hello, you've reached URA. I'm the virtual assistant; this call is "
-    "transcribed so an officer can help if needed. How can I help you?"
-)
-FILLER_POOL: tuple[str, ...] = (
-    "mm, one sec",
-    "okay, so",
-    "let me see",
-    "right, checking now",
-    "one moment",
-    "let me check that",
-    "just a second",
-    "Let me check that for you.",
-)
+# Every call opens in the default language, whatever the caller selected in
+# the chat: taxpayers routinely pick English and then speak Luganda, so the
+# first real question decides (see language.py). Both engines speak this line.
+GREETING_TEXT = phrase("greeting", get_default_language())
+FILLER_POOL: tuple[str, ...] = fillers("en")
 FILLER_TEXT = FILLER_POOL[-1]
+
+
+@lru_cache(maxsize=1)
+def _local_human_request_patterns() -> tuple[re.Pattern[str], ...]:
+    """The supervisor's own "I want a person" patterns for lg and sw.
+
+    Only the human-request rules — the tables also route legal disputes to
+    escalation, which on a call is ChatModel.generate's decision, not a
+    keyword's.
+    """
+    from ..agents.patterns.lg import LG_PATTERNS
+    from ..agents.patterns.sw import SW_PATTERNS
+
+    # Read from the locale modules directly: the supervisor registers only
+    # the Ugandan-language extensions (for_locale("sw") is English-only), and
+    # widening that registry would change chat routing, not just calls.
+    tables = {"lg": LG_PATTERNS, "sw": SW_PATTERNS}
+    found: list[re.Pattern[str]] = []
+    for lang in KNOWN_LANGUAGES:
+        table = tables.get(lang)
+        if table is None:
+            continue
+        for pattern, reason in table.escalate:
+            if "asked for a human" in reason or "officer request" in reason:
+                found.append(pattern)
+    return tuple(found)
+
+
+def is_human_request(text: str) -> bool:
+    """True when *text* asks for a person, in any language the call can be in.
+
+    Checked in all of them rather than the call's current one: the request
+    that matters most is the one made right after a mis-detected switch.
+    """
+    return bool(_HUMAN_REQUEST_RE.search(text)) or any(
+        p.search(text) for p in _local_human_request_patterns()
+    )
 
 
 def _split_into_sentences(text: str) -> list[str]:
@@ -119,11 +151,20 @@ class UraReceptionistBrain(LLMService):
             max_attempts=get_max_clarify_attempts(),
         )
         self._last_filler: str | None = None
+        # Set by say_filler(): the next answer already has its filler.
+        self._prefilled = False
+        # Called once a language-switch interruption has passed this brain
+        # (the router waits for it before speaking here — see router.py).
+        self.on_switch_interrupt: Any = None
+
+    @property
+    def language(self) -> str:
+        """The call's language right now — it can change mid-call."""
+        return self.room.state.locale or "en"
 
     def _pick_filler(self) -> str:
-        """Select a filler from FILLER_POOL avoiding consecutive repetition."""
-        choices = [f for f in FILLER_POOL if f != self._last_filler]
-        chosen = random.choice(choices) if choices else FILLER_POOL[0]
+        """A filler in the call's language, never the one just used."""
+        chosen = pick_filler(self.language, self._last_filler)
         self._last_filler = chosen
         return chosen
 
@@ -131,14 +172,38 @@ class UraReceptionistBrain(LLMService):
         """Push initial greeting to caller and publish turn."""
         await self._say_and_record(GREETING_TEXT, kind="notice")
 
+    async def say_filler(self) -> None:
+        """A filler now, ahead of an answer that is about to be worked out.
+
+        The language router calls this the moment a call moves to this engine:
+        by then deciding the language has already cost the caller about a
+        second, so waiting the usual RECEPTIONIST_FILLER_AFTER_MS on top would
+        only lengthen the silence. The answer that follows skips its own filler.
+        """
+        self._prefilled = True
+        await self._say_and_record(self._pick_filler(), kind="filler", skip_log=True)
+
     async def process_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ) -> None:
         """Process incoming Pipecat frames."""
         if isinstance(frame, InterruptionFrame):
-            # Caller barged in: invalidate pending LLM generation
+            switching = bool((getattr(frame, "metadata", None) or {}).get("language_switch"))
+            if switching:
+                # The router bumped generation_id itself before interrupting
+                # (dropping our in-flight answer if the call is leaving us).
+                # Bumping again here would also drop the answer it is about to
+                # ask for if the call is arriving — this frame can land after.
+                await self.push_frame(frame, direction)
+                if self.on_switch_interrupt is not None:
+                    self.on_switch_interrupt()
+                return
+            # Caller barged in: invalidate pending LLM generation. On a
+            # multilingual call interruptions reach this branch even while the
+            # other engine is talking; only count the ones that interrupted us.
             self.room.state.generation_id += 1
-            self.room.state.barge_in_count += 1
+            if self.room.state.engine in ("", "cascaded"):
+                self.room.state.barge_in_count += 1
             await self.push_frame(frame, direction)
             return
 
@@ -177,13 +242,33 @@ class UraReceptionistBrain(LLMService):
         # Pop turn words stashed by TranscriptTap
         words = list(self.room.state.turn_words)
         self.room.state.turn_words = []
+        if self.room.state.engine not in ("", "cascaded"):
+            # A multilingual call moved to Gemini while this turn was still
+            # being transcribed; the router has already re-asked it there.
+            logger.info("Dropping cascaded turn closed after the call left this engine")
+            return
+        await self.handle_external_question(user_text, words)
+
+    async def handle_external_question(self, user_text: str, words: list[Any] | None = None) -> None:
+        """Record the caller's turn and respond to it.
+
+        The context aggregator reaches this through ``_handle_context_frame``;
+        the language router calls it directly when a call moves to this engine
+        mid-turn, so the question that triggered the switch is answered
+        without the caller repeating it.
+        """
+        user_text = user_text.strip()
+        if not user_text:
+            return
+        words = list(words or [])
+        language = self.language
 
         # Record caller turn in persistence and pub/sub
         self.room.state.turn_seq += 1
         self.room.state.caller_turns_count += 1
 
         low_conf_list: list[dict[str, Any]] = []
-        th = get_clarify_threshold()
+        th = get_clarify_threshold_for(language)
         word_probs: list[float] = []
         for w in words:
             prob = getattr(w, "prob", None) or (w.get("prob") if isinstance(w, dict) else 1.0)
@@ -217,7 +302,7 @@ class UraReceptionistBrain(LLMService):
 
         # Mode is "ai"
         # 1. Explicit Human Request
-        if _HUMAN_REQUEST_RE.search(user_text):
+        if is_human_request(user_text):
             await self._transfer("caller_requested")
             return
 
@@ -228,6 +313,7 @@ class UraReceptionistBrain(LLMService):
                 words=words,
                 state=self.room.state.clarify,
                 max_attempts=get_max_clarify_attempts(),
+                language=language,
             )
             if action.action == "ask_confirm_question":
                 self.room.state.clarifications_asked += 1
@@ -255,7 +341,7 @@ class UraReceptionistBrain(LLMService):
                 return
 
         # 3. New Question — Assess via ClarifyGate
-        action = self.clarify_gate.assess(user_text, words=words)
+        action = self.clarify_gate.assess(user_text, words=words, threshold=th, language=language)
         if action.action in ("ask_term", "ask_repeat"):
             self.room.state.clarifications_asked += 1
             self.room.state.clarify = ClarifyState(
@@ -276,6 +362,7 @@ class UraReceptionistBrain(LLMService):
         """Run ChatModel.generate with filler delay, trim for speech, and play reply."""
         curr_gen_id = self.room.state.generation_id
         t0 = time.perf_counter()
+        prefilled, self._prefilled = self._prefilled, False
 
         # Start background task for LLM answer
         gen_task = asyncio.create_task(
@@ -295,7 +382,7 @@ class UraReceptionistBrain(LLMService):
         filler_ms = get_filler_after_ms()
         done, _ = await asyncio.wait([gen_task], timeout=filler_ms / 1000.0)
 
-        if not done:
+        if not done and not prefilled:
             # Answer is taking more than threshold; play filler if not barged in
             if curr_gen_id == self.room.state.generation_id and self.room.state.mode == "ai":
                 filler = self._pick_filler()
@@ -307,21 +394,13 @@ class UraReceptionistBrain(LLMService):
         except asyncio.TimeoutError:
             logger.warning("ChatModel.generate timed out for call %s", self.room.call_id)
             if self.room.state.mode == "ai":
-                await self._say_and_record(
-                    "I'm sorry, checking the database is taking longer than expected. "
-                    "Let me connect you to an officer.",
-                    kind="answer",
-                )
+                await self._say_and_record(phrase("timeout_transfer", self.language), kind="answer")
                 await self._transfer("timeout")
             return
         except Exception:
             logger.exception("ChatModel.generate failed for call %s", self.room.call_id)
             if self.room.state.mode == "ai":
-                await self._say_and_record(
-                    "I encountered an error looking up that tax information. "
-                    "Let me connect you to an officer.",
-                    kind="answer",
-                )
+                await self._say_and_record(phrase("error_transfer", self.language), kind="answer")
                 await self._transfer("system_error")
             return
 
@@ -367,11 +446,11 @@ class UraReceptionistBrain(LLMService):
         sentences = _split_into_sentences(bot_reply)
         max_sentences = get_max_spoken_sentences()
         if len(sentences) > max_sentences:
-            spoken_text = " ".join(sentences[:max_sentences]) + " Would you like more detail?"
+            spoken_text = " ".join(sentences[:max_sentences]) + " " + phrase("more_detail", self.language)
         else:
             spoken_text = bot_reply
 
-        spoken_text = clean_text_for_speech(spoken_text, locale=self.room.state.locale)
+        spoken_text = clean_text_for_speech(spoken_text, locale=self.language)
 
         self.room.state.ai_answers_count += 1
         await self._say_and_record(
@@ -432,78 +511,20 @@ class UraReceptionistBrain(LLMService):
         """Transfer caller to human officer, enforcing ticket_queue invariant."""
         # 1. Human oversight uses ticket_queue: if disabled, do NOT promise a handoff
         if not flags.is_enabled("ticket_queue"):
-            await self._say_and_record(
-                "I can't transfer you right now; please call 0800 117 000 during working hours.",
-                kind="notice",
-            )
+            await self._say_and_record(phrase("queue_disabled", self.language), kind="notice")
             update_call(self.room.call_id, transfer_reason=f"{reason}_queue_disabled")
             return
 
-        # 2. Create ticket if not already created
-        tid = ticket_id or self.room.state.ticket_id
-        if not tid:
-            last_q = self.room.state.clarify.original_question if self.room.state.clarify else "Taxpayer assistance requested on call"
-            packet = handoff or self.chat_model._build_handoff_packet(
-                message=last_q,
-                reason=reason,
-            )
-            try:
-                tid = self.chat_model._maybe_create_ticket(
-                    reason=reason,
-                    user_query=last_q,
-                    bot_reply="Connecting to officer...",
-                    session_id=self.room.call_id,
-                    conversation_id=self.room.state.conversation_id,
-                    priority=packet.get("priority", "normal"),
-                    handoff=packet,
-                    user_id=self.room.state.user_id,
-                    locale=self.room.state.locale,
-                    modality="voice",
-                )
-            except Exception:
-                logger.exception("Failed creating ticket during transfer")
-
-        # 3. Transition to transferring
-        self.room.state.mode = "transferring"
-        self.room.state.ticket_id = tid
-        self.room.state.transfer_reason = reason
-        self.room.state.transfer_requested_at = time.time()
-
-        update_call(
-            self.room.call_id,
-            status="transferring",
-            transferred=True,
-            transfer_reason=reason,
-            ticket_id=tid or "",
+        # 2-3. Ticket, call state, voice_calls row, staff lobby event
+        tid, status_event = open_transfer(
+            self.room, self.chat_model, reason, ticket_id=ticket_id, handoff=handoff
         )
 
         # 4. Spoken notice & status event to caller
-        transfer_msg = "I'm connecting you to a URA officer, please hold."
-        await self._say_and_record(transfer_msg, kind="handoff")
-
-        status_event = {
-            "type": "status",
-            "status": "transferring",
-            "ticket_ref": tid or "",
-        }
+        await self._say_and_record(phrase("transfer", self.language), kind="handoff")
         await self.push_frame(
             OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
         )
-
-        # 5. Publish to staff lobby (metadata only!)
-        hub.publish_lobby(
-            "call.transfer_requested",
-            {
-                "call_id": self.room.call_id,
-                "status": "transferring",
-                "started_at": self.room.state.started_at,
-                "reason": reason,
-                "ticket_id": tid or "",
-                "topic": "General Tax Support",
-                "priority": "normal",
-            },
-        )
-        hub.publish_call(self.room.call_id, "status", status_event)
 
         # 6. Start transfer timeout timer
         timeout_s = get_transfer_timeout_s()
@@ -517,10 +538,7 @@ class UraReceptionistBrain(LLMService):
         if self.room.state.mode == "transferring":
             logger.info("Transfer timeout reached for call %s", self.room.call_id)
             self.room.state.mode = "ai"
-            msg = (
-                f"All our officers are busy. Your reference is {ticket_ref or 'URA-CALL'}; "
-                "an officer will call you back."
-            )
+            msg = phrase("officers_busy", self.language, ref=ticket_ref or "URA-CALL")
             await self._say_and_record(msg, kind="notice")
             status_event = {"type": "status", "status": "ai", "ticket_ref": ticket_ref}
             await self.push_frame(

@@ -29,6 +29,7 @@ class CallState:
     end_reason: str = ""
     turn_seq: int = 0
     turn_words: list[Any] = field(default_factory=list)
+    last_caller_text: str = ""
     clarify: ClarifyState | None = None
     ticket_id: str | None = None
     transfer_reason: str | None = None
@@ -47,6 +48,18 @@ class CallState:
     officer_name: str | None = None
     officer_id: str | None = None
     transfer_timer_task: asyncio.Task | None = None
+    # Multilingual calls (receptionist_language_detection). `locale` above is
+    # the language the call is in *now*; these record how it got there.
+    engine: str = ""  # "gemini_live" | "cascaded"; "" on a single-engine call
+    initial_locale: str = "en"
+    preferred_locale: str = ""  # what the chat was set to; a hint, never the call's language
+    language_source: str = "default"  # "default" | "auto" | "explicit" | "override"
+    languages_used: list[str] = field(default_factory=list)
+    language_switches: int = 0
+    language_overrides: int = 0
+    lid_latencies_ms: list[float] = field(default_factory=list)
+    lid_confidences: list[float] = field(default_factory=list)
+    held_ms: list[float] = field(default_factory=list)
 
 
 class CallRoom:
@@ -122,6 +135,8 @@ class CallRegistry:
             locale=locale,
             mode="ai",
             started_at=time.time(),
+            initial_locale=locale,
+            languages_used=[locale],
         )
         room = CallRoom(call_id=call_id, state=state, caller_ws=caller_ws)
         async with self._lock:

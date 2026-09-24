@@ -145,3 +145,93 @@ class TestClarifyGatePureLogic(unittest.TestCase):
         # Completely clean text -> none
         clean_action = self.gate.assess("How do I register for TIN?", words=None)
         self.assertEqual(clean_action.action, "none")
+
+
+class TestClarifyGateLanguages(unittest.TestCase):
+    """Luganda and Swahili calls: localised prompts; Luganda confirms acronyms only."""
+
+    def setUp(self):
+        self.gate = ClarifyGate(threshold=0.55, max_attempts=2)
+
+    def test_luganda_confirms_a_misheard_acronym_in_luganda(self):
+        words = [
+            WordConf("Nsaba", 0.9),
+            WordConf("okumanya", 0.3),
+            WordConf("ku", 0.9),
+            WordConf("tinn", 0.3),
+            WordConf("yange", 0.8),
+        ]
+        action = self.gate.assess("Nsaba okumanya ku tinn yange", words, language="lg")
+        self.assertEqual(action.action, "ask_term")
+        self.assertEqual(action.candidate, "tin")
+        self.assertEqual(action.prompt, "Nsonyiwa, ogambye TIN?")
+
+    def test_luganda_never_asks_about_its_own_words_or_to_repeat(self):
+        words = [WordConf("Nsaba", 0.3), WordConf("okumanya", 0.25), WordConf("omusolo", 0.3)]
+        action = self.gate.assess("Nsaba okumanya omusolo", words, language="lg")
+        self.assertEqual(action.action, "none")
+
+    def test_luganda_loanword_vowel_points_at_the_acronym_said(self):
+        # "VAT" said the Luganda way is transcribed "Vati": a final vowel
+        # added, not VATA (the VAT Act) with one letter changed.
+        words = [WordConf("Vati", 0.3), WordConf("yange", 0.9), WordConf("ntya", 0.9)]
+        action = self.gate.assess("Vati yange ntya okugisasula", words, language="lg")
+        self.assertEqual(action.action, "ask_term")
+        self.assertEqual(action.candidate, "vat")
+        self.assertEqual(action.prompt, "Nsonyiwa, ogambye VAT?")
+
+    def test_swahili_never_asks_about_its_own_question_words(self):
+        # "nini" ("what") is a letter from NIN.
+        words = [WordConf("Kodi", 0.9), WordConf("ya", 0.9), WordConf("nini", 0.2)]
+        action = self.gate.assess("Kodi ya nini", words, language="sw")
+        self.assertNotEqual(action.candidate, "nin")
+        self.assertEqual(self.gate.assess("Kodi ya nini", None, language="sw").action, "none")
+
+    def test_repeat_can_be_turned_on_for_luganda(self):
+        import os
+
+        words = [WordConf("Nsaba", 0.3), WordConf("okumanya", 0.25), WordConf("xyzqqq", 0.2)]
+        with patch.dict(os.environ, {"RECEPTIONIST_CLARIFY_REPEAT_LG": "true"}):
+            action = self.gate.assess("Nsaba okumanya xyzqqq", words, language="lg")
+        self.assertEqual(action.action, "ask_repeat")
+        self.assertIn("Nsonyiwa", action.prompt or "")
+
+    def test_swahili_repeat_prompt_is_in_swahili(self):
+        words = [WordConf("Naomba", 0.5), WordConf("kujua", 0.5), WordConf("xyzqqq", 0.2)]
+        action = self.gate.assess("Naomba kujua xyzqqq", words, language="sw")
+        self.assertEqual(action.action, "ask_repeat")
+        self.assertTrue((action.prompt or "").startswith("Samahani"))
+
+    def test_luganda_yes_leads_to_a_luganda_confirmation(self):
+        state = ClarifyState(
+            stage="term", original_question="Nsaba okumanya ku tinn yange",
+            target_word="tinn", suggested_term="tin", previous_word="ku",
+        )
+        action = self.gate.resolve("Yee", state=state, language="lg")
+        self.assertEqual(action.action, "ask_confirm_question")
+        self.assertEqual(action.corrected_text, "Nsaba okumanya ku tin yange")
+        self.assertEqual(action.prompt, "Kale, obuuza ku TIN — kituufu?")
+
+    def test_luganda_no_restarts_in_luganda(self):
+        state = ClarifyState(stage="confirm", original_question="Nsaba okumanya ku tin yange")
+        action = self.gate.resolve("Nedda", state=state, language="lg")
+        self.assertEqual(action.action, "restart")
+        self.assertIn("Nsonyiwa", action.prompt or "")
+
+
+class TestLexiconLoanwords(unittest.TestCase):
+    """Acronyms as Luganda/Swahili speakers pronounce them."""
+
+    def test_epenthetic_vowels_are_undone(self):
+        from app.receptionist.lexicon import candidates
+
+        self.assertEqual(candidates("Vati", acronyms_only=True)[0][0], "vat")
+        self.assertEqual(candidates("tiini", acronyms_only=True)[0][0], "tin")
+        # An exact acronym is still itself.
+        self.assertEqual(candidates("VATA", acronyms_only=True)[0], ("vata", 1.0))
+
+    def test_equal_scores_rank_the_same_in_every_process(self):
+        from app.receptionist.lexicon import candidates
+
+        ranked = candidates("Vata", acronyms_only=True)
+        self.assertEqual(ranked, sorted(ranked, key=lambda m: (-m[1], m[0])))
