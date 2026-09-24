@@ -1,0 +1,1471 @@
+{
+ "date": "2026-09-24",
+ "runs": {
+  "fp8": {
+   "clips": 120,
+   "cer_mean": 0.102,
+   "cer_median": 0.075,
+   "by_speaker": {
+    "salt_lug_0001": 0.095,
+    "waxal_lug_0003": 0.113,
+    "waxal_lug_0005": 0.092,
+    "waxal_lug_0007": 0.108
+   },
+   "details": [
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota ey'omusolo gw'enfuno ewebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "cer": 0.043
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nkebera kati.",
+     "heard": "Nkebera kati.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsonyiwa dam natty?",
+     "cer": 0.211
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkutegedde.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oyagala kumanya ki?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku tinto okusasulwa era agula okukikola ku mukutu gwa ULA.",
+     "cer": 0.141
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okujjako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eriyuula buli mweezi.",
+     "cer": 0.063
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusasula omusolo omukalu.",
+     "cer": 0.48
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku ttiimu, ggenda ku mukutu gwa wola, jjuzaamu foomu olw'ofuna enamba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.1
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo kuba ku nnamba ey'obwerere obw'agenda ku mukutu gwa ORA ku yintaneeti.",
+     "cer": 0.057
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bwoba tuli mu mativu n'omusolo gwe bakusalidde, obululu okuwakanya mu bbanga eri ennaku amakumi asatu.",
+     "cer": 0.1
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwa sikuwulidde bulungi oyinza okuddamu ekibuuzo kyo?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi w'awula ajja kukuyira essimu mu bbanga ttono.",
+     "cer": 0.113
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo, kozesa bank oba essimu.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsonyi waddamu nate?",
+     "cer": 0.105
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singa oleme okusasula omusolo ku budde, Pula eyinza okukusalira ekiwono, n'olwekyo kirungi okusasula mangu.",
+     "cer": 0.083
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkutegedde.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi wa U R ajja kwekuubira essimu mu bbanga ttono.",
+     "cer": 0.094
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi wa UR ajja kukubira essimu mu bbanga ttono.",
+     "cer": 0.057
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwa sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Nyiza okukuyamba ku by'okwewandiisa okusasula n'ebyokumwalo.",
+     "cer": 0.063
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya n'omukozi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwanannyini bw'emmotoka omuguzi n'omutunzi balina okujja n'ettin zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.028
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwa payee ku musaala gw'abakozi.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsabuundinde katono nga ntebeera amawulire gano.",
+     "cer": 0.106
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa owannanyi w'emmotoka, omuguzi n'omutunzi baalina okujja ne ttiini zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.084
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwanenini bw'emmotoka, omuguzi n'omutunzi balina okuggya ne ttini zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.084
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya n'omukozi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku ttindi tekusasulwa era okula okukikola ku nkutuwa ku lyaalye.",
+     "cer": 0.268
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Lindako katono.",
+     "heard": "Ok.",
+     "cer": 0.857
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo kuba ku nnamba ey'obwerere bwe bagendaendaendaenda ku nkutu gwa URN ku yintaneeti.",
+     "cer": 0.239
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Nkukwataganya n'omukozi wa URK kati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.009
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsaba ondi ndekatono nga nkebera amawulire gano.",
+     "cer": 0.043
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo kozesa bank oba essimu.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okuggyako omusolo gwa payee ku misaala gy'abakozi baabwe ge bagusasula eriwaale buli mweezi.",
+     "cer": 0.072
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webale kukuba ku U R.",
+     "cer": 0.143
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsabondinde katono ngakebera amawulire gano.",
+     "cer": 0.085
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkotegedde.",
+     "cer": 0.067
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "EFris nkola ya Uura ey'okufulumya lisiti ku kompyuta era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "cer": 0.028
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwa PAY ku musaala gw'abakozi.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota y'omusolo gw'enfuno eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "cer": 0.014
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyokujuliza eri ku ssimu yo gikuume bulungi.",
+     "cer": 0.057
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bw'oba toli mu mativu n'omusolo gwe bakusalidde kw'oboola okuwakanya mu bbanga eri ennaku amakumi asatu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bw'oba ng'ofunayo okuba mu nnimba z'opangisa, olina okuwayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "cer": 0.091
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Kiki ekirala?",
+     "heard": "Kiki ekirala?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku tini tekusasulwa era aluubulwa okukikola ku n'okutugwaayo ra.",
+     "cer": 0.211
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyokujuliza eri ku ssimu yo gikuumye bulungi.",
+     "cer": 0.075
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi wa Uu aa ajja kukubira essimu mu bbanga ttono.",
+     "cer": 0.094
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bwoba w'ofuna enfuno okuva mu nnyumba z'opangisa, olina okuwayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "cer": 0.041
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tudatuleme omukuuzi.",
+     "cer": 0.545
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Ensonyiwa dda lunate.",
+     "cer": 0.211
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webale kukuba ku uura.",
+     "cer": 0.095
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Kiki ekirala?",
+     "heard": "Ki ekirala?",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuuza abatono baasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "cer": 0.127
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwo sikuulidde bulungi oyinza okuddamu ekibuuzo kyo.",
+     "cer": 0.035
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo kuba ku ŋŋambe ey'obwerere obwagenda ku mukutu gwe abawawululia ku yintaneeti.",
+     "cer": 0.193
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Yee, kituufu.",
+     "heard": "Ye kituufu.",
+     "cer": 0.091
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Yee, kituufu.",
+     "heard": "Yee kituufu.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Kiki ekirala?",
+     "heard": "Ki ekirala?",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Simba olulima okusula omusolo ku budde U R a ez'okusalira ekiwonerezo n'olwekyo kirungi okusula mangu.",
+     "cer": 0.185
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Nkukwataganya n'omukozi waali kati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.037
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nkebera kati.",
+     "heard": "Ntebera kati.",
+     "cer": 0.083
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nkebera kati.",
+     "heard": "Ngerera kati.",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bw'oba atabiri mu matevu n'omusolo gwe bakusalidde, kookula okuwakanya mu bbanga erinako amakumi asatu.",
+     "cer": 0.16
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyokujuliza eri ku ssimu yo gikuume bulungi.",
+     "cer": 0.057
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Yee, kituufu.",
+     "heard": "Yee kituufu.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Lindako katono.",
+     "heard": "Tebiyingaako katono.",
+     "cer": 0.5
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bw'oba ng'ofuna ofunye enfuno okuva mu nnyumba z'opangisa, olina okuwayo a ripoota y'omusolo gw'ennyumba ezangisibwa buli mwaka.",
+     "cer": 0.107
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkutegedde.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Nyiza okuyamba ku by'okwewandiisa, okusula, ne by'okumwalo.",
+     "cer": 0.143
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "Efris nkola ya aa ey'okufulumya he city ku kompyuta era buli muntu awandiisiddwa ku VAT alina okujikozesa.",
+     "cer": 0.075
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku ttiini gyenda kunkutu gwa wula, gizaamu foomu olw'ofuna enambaayo munnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.15
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Kiki ekirala?",
+     "heard": "Ki ekirala?",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota y'omusolo gw'enfune eweebwayo ng'omwaka gw'ebyensimbi gw'edde.",
+     "cer": 0.043
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mbuulira ttinyo?",
+     "cer": 0.133
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo, kozesa abantu oba essimu.",
+     "cer": 0.053
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webale kukuba kuwula.",
+     "cer": 0.143
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwa payee ku musa gw'abakozi?",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Lindako katono.",
+     "heard": "Linako katono.",
+     "cer": 0.071
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "Efris nkola ya UR ey'okufulumya lisiti ku kompyuta era buli muntu awandiisiddwa okuva ati alina okugikozesa.",
+     "cer": 0.075
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo okuzesa banka obw'essimu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Olegala kumanya ki?",
+     "cer": 0.111
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mbulira tini yo?",
+     "cer": 0.133
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gw'evvati buli ebituli kkumi na munaana ku buli kikumi.",
+     "cer": 0.131
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "EFIS enkola ya ORA ey'okufulumya lisiti ku kompyuta era buli muntu awandiisiddwa kuva ati alina okugikozesa.",
+     "cer": 0.085
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku TIN ggenda ku mukutu gwa URA juzaamu ffooomu olw'ofuna enamba yo munnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.075
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Ndulira ttinywa.",
+     "cer": 0.467
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsongi wa Dhamma ate?",
+     "cer": 0.316
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Ninza okuyamba ku by'okwewandiisa, okusasula n'ebyokumwalo.",
+     "cer": 0.095
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Mu kukwataganya n'omukozi wa U R kati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.046
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singa olulimi okusula omusolo ku budde y'ewala eyinza okusalira ekibonerezo, n'olwekyo kirungi okusula mangu.",
+     "cer": 0.157
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota y'omusolo gw'efuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "cer": 0.014
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku tini genda ku mukutu gwa OLA, juzamu ffomu olw'ofunye nnamba yo munnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.092
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mbuulira tini yo.",
+     "cer": 0.067
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Niyinza okweyamba ku by'okwewandiisa okusasula n'ebyokunwalo.",
+     "cer": 0.111
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webale kukubaali.",
+     "cer": 0.381
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singa olimu okusula omusolo ku budde, U R eyinza okusalira ekibonerezo, n'olwekyo kirungi okusula mangu.",
+     "cer": 0.102
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsaba ondinja katono nga ntebeya amawulire gano.",
+     "cer": 0.085
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwa sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Yee, kituufu.",
+     "heard": "Y'ekituufu?",
+     "cer": 0.182
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "cer": 0.02
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Lindako katono.",
+     "heard": "Lindako kitono.",
+     "cer": 0.071
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya n'omukozi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku ttiimu kye kusasulwa era awulwa okukikola ku mukutu gwa wula.",
+     "cer": 0.211
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okujjako omusolo gwa ppeeyi ku misaala gy'abakozi baabwe ne bagusasula eriyuulale buli mwezi.",
+     "cer": 0.108
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisinga kuba ku nnamba ey'obwerere obw'agenda ku mukutu gwa ku yintaneti.",
+     "cer": 0.125
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Nkukwataganya n'omukozi wa URA kati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bwoba toli mumativu n'omusolo bwe bakusalidde okola okuwakanya mu bbanga eri ennaku amakumi asatu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bw'oba ng'ofuna efunye okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "cer": 0.025
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okujjako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri U A A buli mweezi.",
+     "cer": 0.063
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oyagala kumanya ki?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwapeeye ku musaala gw'abakozi?",
+     "cer": 0.053
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oyagala kumanya ki?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "cer": 0.02
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nkebera kati.",
+     "heard": "Ntebera kati.",
+     "cer": 0.083
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwannannyini bw'emmotoka omuguzi n'omutunzi balina okujja ne ttiimu zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.037
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yo ey'okujuliza eri ku ssimulo gikuume bulungi.",
+     "cer": 0.038
+    }
+   ]
+  },
+  "bf16": {
+   "clips": 120,
+   "cer_mean": 0.096,
+   "cer_median": 0.07,
+   "by_speaker": {
+    "salt_lug_0001": 0.07,
+    "waxal_lug_0003": 0.111,
+    "waxal_lug_0005": 0.111,
+    "waxal_lug_0007": 0.092
+   },
+   "details": [
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota y'omusolo gw'ebifano ewebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "cer": 0.071
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nkebera kati.",
+     "heard": "Ntebeera kati.",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsonyiwa ddamunate?",
+     "cer": 0.053
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkutegedde.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oya ddala kumenya ki?",
+     "cer": 0.222
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku TIN teekusasulwa era buli okukola ku mukutu gwa ORA.",
+     "cer": 0.127
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okujjako omusolo gwa paye ku misaala gy'abakozi baabwe ne babusaula eri URA buli mwezi.",
+     "cer": 0.045
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusula omusolo omukalu buli mwaka singa enfuna yaabwe teri wabulu nnyo.",
+     "cer": 0.039
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku ttiina ku mukutu gwa ULA, jjuzaamu foomu olw'ofunee nnambaayo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.1
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo kuba ku nnamba ey'obwerere obw'agenda ku mukutu gwa URA ku yintaneeti.",
+     "cer": 0.045
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, koloolo kuwakanya mu bbanga eri ennaku amakumi asatu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwa sikuulidde bulungi, oyinza okuddamu ekibuuzo kyo.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi wa waliwo ajja kukubira essimu mu bbanga ttono.",
+     "cer": 0.151
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusula ssente mu ngalo, kozesa bank b'essimu.",
+     "cer": 0.105
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsonyiwa ddamu na te?",
+     "cer": 0.053
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singwoolimu okusasula omusolo ku wudde, yiwe eyinze okusalira ekibonezo, n'olwekyo kirungi okusasula mangu.",
+     "cer": 0.139
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkutegedde.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi wa U R ajja kukubira essimu mu bbanga ttono.",
+     "cer": 0.075
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi w'e Yuuwa ajja kukubira essimu mu bbanga ttono.",
+     "cer": 0.132
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwa sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Niyinza okukuyamba ku by'okwewandiisa okusasula n'ebyokumwalu.",
+     "cer": 0.063
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya n'omukozi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwanannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne ttiimu zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.047
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwa PAY omusaala ow'abakozi.",
+     "cer": 0.088
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsaba ondindi katono nga ntebera amawulire gano.",
+     "cer": 0.043
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwanannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne ttini zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.028
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwannannyini bw'emmotoka omuguzi n'omutunzi balina okuggya ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.028
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya omukozi.",
+     "cer": 0.091
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku ttiini tekusasulwa era okulwokikola ku mukutu gwa OLA.",
+     "cer": 0.183
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Lindako katono.",
+     "heard": "Lindako katono.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo ku nnamba ey'obwerere bwe bagenda ku nkutu gwa UR ku yintaneeti.",
+     "cer": 0.159
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Nkukwataganya n'omukozi wa Urakaati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.019
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsaba ndi mmeka tono nga nkebera amawulire gano.",
+     "cer": 0.128
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo okukozesa bank oba essimu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okujjako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusa Suleyri URA buli mweezi.",
+     "cer": 0.072
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webale kuba kuwuula.",
+     "cer": 0.286
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsaba ondindo katono nga nkebera amawulire gano.",
+     "cer": 0.021
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kali nkutegedde.",
+     "cer": 0.067
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "Efuraizi nkola ya URA ey'okufulumya lisiti ku kompyuta era buli muntu awandiisiddwa okuva talina okugikozesa.",
+     "cer": 0.094
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwa PAY ku musaala gw'abakozi.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota y'omusolo gw'enfuna ewaayo n'omwaka gw'ebyensimbi guwedde.",
+     "cer": 0.071
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyongeduriza eri ku ssimu yo gikuumye bulungi.",
+     "cer": 0.17
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bw'oba toli mu mativu n'omusolo gwe bakusalidde, tuzuula okuwakanya mu bbanga eby'ennaku amakumi asatu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bwoba ng'ofumye enfuna okuva mu nnyumba z'opangisa, olina okuwayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "cer": 0.041
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Kiki ekirala?",
+     "heard": "Kiki ekirala?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku tinte ebisasulo era alookola okukikola ku mukutu gwa Aura.",
+     "cer": 0.169
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyongera okujuliza eri ku ssimu yo gikuumye bulungi.",
+     "cer": 0.17
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+     "heard": "Omukozi wa Ola ajja kukubira essimu mu bbanga ttono.",
+     "cer": 0.075
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bwoba ng'ofuna enfuno okuva mu nnyumba z'opangisa, olina okuwayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "cer": 0.025
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya n'omukozi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsonyiwa damu nate?",
+     "cer": 0.053
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webano kukubako OLA.",
+     "cer": 0.333
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Kiki ekirala?",
+     "heard": "Ki ekirala.",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusula omusolo omupale buli mwaka singa enfuna ya Waiteli waggulu nnyo.",
+     "cer": 0.088
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsanyuwa sikuwulidde bulungi, oyinza okuddamu nkibuuzo kyo.",
+     "cer": 0.053
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo kuba ku nnamba ey'obwerere bwe bagendaendaendaenda ku mukutu gwa Ullar ku yintaneeti.",
+     "cer": 0.239
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Yee, kituufu.",
+     "heard": "Y'ekituufu.",
+     "cer": 0.182
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Yee, kituufu.",
+     "heard": "Yekituufu.",
+     "cer": 0.182
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Kiki ekirala?",
+     "heard": "Ki ekirala?",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singa olimwa okusasula omusolo ku budde U R eriyo okusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "cer": 0.083
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Nikwataganya n'omukozi wa U R kati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.037
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nkebera kati.",
+     "heard": "Nkabera kati.",
+     "cer": 0.083
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nkebera kati.",
+     "heard": "Ngebera kati.",
+     "cer": 0.083
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bw'oba toli mu mati buno omusolo gw'akusalidde olw'olukuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "cer": 0.15
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyokujuliza eri ku ssimu yo gikuume bulungi.",
+     "cer": 0.057
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Yee, kituufu.",
+     "heard": "Yee kituufu.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Lindako katono.",
+     "heard": "Tebiyinzaako katono.",
+     "cer": 0.5
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bw'oba ng'ofuna enfuno okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "cer": 0.008
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Kale, nkutegedde.",
+     "heard": "Kale nkutegedde.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Miisa okukuyamba ku by'okwewandiisa okusula n'ebyokumwalo.",
+     "cer": 0.143
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "EFris nkolayawula ey'okufulumya lisiti ku kompyuta era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "cer": 0.047
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku ttiini, gyonna ku mukutu gwa URA gizaamu fwoomu olw'ofuna enamba yo munnaku ntono nga tusasudde kintu kyonna.",
+     "cer": 0.133
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Kiki ekirala?",
+     "heard": "Ki ekirala?",
+     "cer": 0.167
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Alipoota y'omusolo gw'enfuno ewebwayo ng'omwata gw'ebyensimbi guwedde.",
+     "cer": 0.043
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mboolira ttiini yo.",
+     "cer": 0.333
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo, kozesa banki oba essimu.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Oweebale okukuba ku ula.",
+     "cer": 0.143
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana n'omusolo gwa payee ku nsaala gwa bakozi.",
+     "cer": 0.088
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Lindako katono.",
+     "heard": "Linako katono.",
+     "cer": 0.071
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "EFRIES nkola ya URA ey'okufulumya lisiti ku kompyuta era buli muntu awandiisiddwa okuva ati alina okujikozesa.",
+     "cer": 0.085
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+     "heard": "Tosobola kusasula ssente mu ngalo, kozesa bank b'essimu.",
+     "cer": 0.07
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oyagala kumanya ki?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mbulira tini yo?",
+     "cer": 0.133
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+     "heard": "Omusolo gwa VAT buli ebitundu kkumi na munaana ku buli kikumi.",
+     "cer": 0.016
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+     "heard": "Efris nkola ya U R ey'okufulumya bisiiti ku kompyuta era buli mwe bawandiisiddwa kuva nti alina okugikozesa.",
+     "cer": 0.113
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku TIN genda ku mukutu gwa URA, tuzaamu fomu olw'ofuna enamba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.058
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mbulira ttiimu.",
+     "cer": 0.4
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nsonyiwa, ddamu nate.",
+     "heard": "Nsoonyiwa ddamu nate?",
+     "cer": 0.053
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Ninza okuyamba ku by'okwewandiisa, okusasula, ne by'okumwamu.",
+     "cer": 0.143
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Mu kukwataanya n'omukozi wa U R Kati nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.056
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singa olimu okusasula omusolo ku budde, wuulo eyinza okukosalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "cer": 0.074
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+     "heard": "Kalipoota y'omusolo gw'enfuna ewebayo mu mabaka gw'ebyensimbi guwedde.",
+     "cer": 0.129
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "heard": "Okwewandiisa ku ttenda kumukulu gwa R gye za mufoomu olwo ofunye nnamba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+     "cer": 0.133
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Mbuulira TIN yo.",
+     "heard": "Mbuulira tini yo?",
+     "cer": 0.067
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+     "heard": "Nyinza okukuyaala ku by'okwewandiisa, okusasula n'ebyokumwalo.",
+     "cer": 0.079
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Weebale kukuba ku URA.",
+     "heard": "Webale kuba ku wa?",
+     "cer": 0.238
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+     "heard": "Singa oleme okusasula omusolo ku budde, wuula eyinza okusalira ebibonerezo, n'olwekyo kirungi okusula mangu.",
+     "cer": 0.093
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "heard": "Nsaba ondinde katono nga nkebera amawulire gano.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+     "heard": "Nsonyiwa sikuulidde bulungi, oyinza okuddamu ekibuuzo kyo.",
+     "cer": 0.018
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Yee, kituufu.",
+     "heard": "Y'ekituufu.",
+     "cer": 0.182
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "cer": 0.02
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Lindako katono.",
+     "heard": "Lindako katono.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Tukwataganya n'omukozi.",
+     "heard": "Tukwataganya n'omukozi.",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+     "heard": "Okwewandiisa ku tti tekusasulwa era obawo ku kikoola ku mukutu gwa ULA.",
+     "cer": 0.155
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Abakozesa bonna balina okujjako omusolo gwa pay wire ku misaala gya bakozi ba bwe naye bagusasula eriyuwaale buli mwezi.",
+     "cer": 0.153
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+     "heard": "Okufuna ebisingawo kuba ku nnamba ey'obwerere wagenda ku mukutu gwa ORAE ku yintaneeti.",
+     "cer": 0.068
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "heard": "Mukukwataganya n'omukozi wa UR kati ensaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+     "cer": 0.037
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+     "heard": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, okulula okuwakanya mu bbanga eri ennaku amakumi asatu.",
+     "cer": 0.06
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+     "heard": "Bw'oba ng'ofuna ofunaanaanaanaanaanaanaanaanaanaanaanaanaana",
+     "cer": 0.678
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+     "heard": "Awakozesa bonna balina okujjako omusolo gwa paye ku misaala gy'abakozi baabwe naye bagusasula eri URAE buli mwezi.",
+     "cer": 0.063
+    },
+    {
+     "speaker": "salt_lug_0001",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oyagala kumanya ki?",
+     "cer": 0.0
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+     "heard": "Kino kikwatagana omusolo gwa PAYE ku musaala gw'abakozi.",
+     "cer": 0.035
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Oyagala kumanya ki?",
+     "heard": "Oyaga kumanya ki?",
+     "cer": 0.111
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "heard": "Abasuubuzi abatono basobola okusula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+     "cer": 0.02
+    },
+    {
+     "speaker": "waxal_lug_0005",
+     "text": "Nkebera kati.",
+     "heard": "Nukeza kati.",
+     "cer": 0.333
+    },
+    {
+     "speaker": "waxal_lug_0007",
+     "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+     "heard": "Okukyusa obwannannyini bw'emmotoka omuguzi n'omutunzi balina okujja ne ttiimu zaabwe n'ebiwandiiko by'emmotoka.",
+     "cer": 0.037
+    },
+    {
+     "speaker": "waxal_lug_0003",
+     "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+     "heard": "Namba yeeyokujuliza eri ku ssimu yo gikuume bulungi.",
+     "cer": 0.057
+    }
+   ]
+  }
+ }
+}

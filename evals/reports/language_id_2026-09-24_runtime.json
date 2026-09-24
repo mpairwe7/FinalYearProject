@@ -1,0 +1,120 @@
+{
+ "date": "2026-09-24",
+ "manifest": "evals/language_id/manifest.jsonl",
+ "clips": 1518,
+ "policy": {
+  "min_speech_s": 1.5,
+  "switch_confidence": 0.9,
+  "hysteresis_confidence": 0.7
+ },
+ "notes": {},
+ "methods": {
+  "A": {
+   "n": 1518,
+   "accuracy_ge_1_5s": 0.9379,
+   "accuracy_ge_3s": 0.936,
+   "per_class_ge_1_5s": {
+    "en": 0.9321,
+    "sw": 0.8969,
+    "lg": 0.9871
+   },
+   "per_class_ge_3s": {
+    "en": 0.9273,
+    "sw": 0.8969,
+    "lg": 0.9868
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": 0.7269,
+    "<1.5s/8k": 0.7154,
+    "1.5-4s/16k": 0.9097,
+    "1.5-4s/8k": 0.9206,
+    ">4s/16k": 0.964,
+    ">4s/8k": 0.9685
+   },
+   "per_source_ge_1_5s": {
+    "afrispeech_luganda": 0.9392,
+    "afrispeech_swahili": 0.7949,
+    "fleurs_lg_ug": 0.975,
+    "fleurs_sw_ke": 0.8969,
+    "salt_eng": 1.0,
+    "salt_lug": 1.0
+   },
+   "confusion_ge_1_5s": {
+    "en": {
+     "en": 343,
+     "sw": 25
+    },
+    "lg": {
+     "lg": 306,
+     "en": 2,
+     "sw": 2
+    },
+    "sw": {
+     "sw": 287,
+     "lg": 16,
+     "en": 17
+    }
+   },
+   "en_to_lg_false_switch_raw": 0.0,
+   "en_to_lg_false_switch_policy_gated": 0.0,
+   "mixed_to_lg": null,
+   "latency_ms_p50": 56.0,
+   "latency_ms_p95": 80.2
+  },
+  "R": {
+   "n": 1518,
+   "accuracy_ge_1_5s": 0.9279,
+   "accuracy_ge_3s": 0.9256,
+   "per_class_ge_1_5s": {
+    "en": 0.9674,
+    "sw": 0.8344,
+    "lg": 0.9774
+   },
+   "per_class_ge_3s": {
+    "en": 0.9651,
+    "sw": 0.8344,
+    "lg": 0.977
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": 0.3846,
+    "<1.5s/8k": 0.3846,
+    "1.5-4s/16k": 0.8881,
+    "1.5-4s/8k": 0.8773,
+    ">4s/16k": 0.982,
+    ">4s/8k": 0.9865
+   },
+   "per_source_ge_1_5s": {
+    "afrispeech_luganda": 0.9662,
+    "afrispeech_swahili": 0.9103,
+    "fleurs_lg_ug": 0.9563,
+    "fleurs_sw_ke": 0.8344,
+    "salt_eng": 1.0,
+    "salt_lug": 1.0
+   },
+   "confusion_ge_1_5s": {
+    "en": {
+     "en": 356,
+     "sw": 12
+    },
+    "lg": {
+     "lg": 303,
+     "en": 7
+    },
+    "sw": {
+     "sw": 267,
+     "en": 46,
+     "lg": 7
+    }
+   },
+   "en_to_lg_false_switch_raw": 0.0,
+   "en_to_lg_false_switch_policy_gated": 0.0,
+   "mixed_to_lg": null,
+   "latency_ms_p50": 266.1,
+   "latency_ms_p95": 657.5
+  }
+ },
+ "gate": {
+  "A": "FAIL",
+  "R": "FAIL"
+ }
+}

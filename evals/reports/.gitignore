@@ -1,0 +1,3 @@
+# Per-clip predictions from scripts/eval_language_id.py (~1 MB a run);
+# the summary report next to each is what is kept.
+*_clips.json

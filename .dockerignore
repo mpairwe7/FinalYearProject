@@ -32,6 +32,10 @@ Results/
 Data/pdfs/
 Data/lgaudio/
 Data/TTT/
+# Generated eval audio (receptionist language id, Orpheus samples, call replay)
+evals/language_id/data/
+evals/orpheus_tts/samples/
+evals/call_replay/audio/
 
 # OS
 .DS_Store

@@ -62,6 +62,7 @@ repos:
             .*\.ipynb$|
             Data/.*|
             Results/.*|
+            evals/language_id/manifest.*\.jsonl|
             test_env/.*
           )$
         stages: [pre-commit]

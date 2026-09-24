@@ -1,0 +1,364 @@
+{
+ "date": "2026-09-24",
+ "ws": "ws://127.0.0.1:8083/v1/calls/stream",
+ "passed": 8,
+ "scenarios": 8,
+ "first_audio_ms_p50": 3313.0,
+ "results": [
+  {
+   "name": "1_english_stays_english",
+   "note": "English caller: locks English, never leaves it.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 4150,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 18055,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.8
+      }
+     ],
+     "assistant": [
+      "To register for a TIN, please visit the official URA web portal, navigate to **eServices** and select **TIN Registration**. You will need to complete the online application form. Are you registering as an individual or an organisation?"
+     ],
+     "caller": [],
+     "status": []
+    },
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 11562,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 20310,
+     "languages": [],
+     "assistant": [
+      "The standard Value Added Tax (VAT) rate in Uganda is 18%. This is charged on taxable supplies of goods and services."
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_3bba93cff646",
+   "language_detection": true,
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "2_selected_english_speaks_luganda",
+   "note": "First answer in Luganda, same question, not repeated.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 1264,
+     "filler_caption_ms": 1257,
+     "answer_caption_ms": 26964,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka ndabe.",
+      "Nsonyiwa, okunoonya kutwala ekiseera kiwanvu okusinga bwe kyandibadde. Ka nkukwataganye n'omukozi wa URA."
+     ],
+     "caller": [
+      "Omukyala ageza nti okwewandiisa okufuna ttiimu yange okuva n'era?"
+     ],
+     "status": []
+    }
+   ],
+   "call_id": "call_f5b7a8784301",
+   "language_detection": true,
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "3_swahili_on_gemini",
+   "note": "Answered in Swahili by Gemini Live.",
+   "turns": [
+    {
+     "utterance": "sw_tin",
+     "said": "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+     "first_audio_ms": 10054,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 35160,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Ili kujiandikisha kupata nambari ya TIN na URA, tembelea tovuti rasmi ya URA https://ura.go.ug Kisha, nenda kwenye **eServices** > **TIN Registration**, jaza fomu ya maombi ya mtandaoni na utume. Je, unajisajili kama **mtu binafsi** (unahitaji kitambulisho cha Taifa/NIN) au **Shirika** (unahitaji cheti cha usajili)?"
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_b243241e19f2",
+   "language_detection": true,
+   "language_sequence": [
+    "sw"
+   ],
+   "passed": true
+  },
+  {
+   "name": "4_luganda_then_english",
+   "note": "Mid-call switch followed within one turn.",
+   "turns": [
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1254,
+     "filler_caption_ms": 1252,
+     "answer_caption_ms": 2816,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Nkebera kati.",
+      "Nsonyiwa, ogambye VAT?"
+     ],
+     "caller": [
+      "Vati yange ntya okugisasula, era ebitundu bimeeka?"
+     ],
+     "status": []
+    },
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 5002,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 20301,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.8
+      }
+     ],
+     "assistant": [
+      "To register for a TIN with URA, visit the official URA web portal. Navigate to **eServices** > **TIN Registration**, then complete and submit the online application form. Are you registering as an individual or an organisation?"
+     ],
+     "caller": [
+      "Elo.",
+      "How do I register for a tin number with ORA?"
+     ],
+     "status": []
+    }
+   ],
+   "call_id": "call_02fc7a1d902f",
+   "language_detection": true,
+   "language_sequence": [
+    "lg",
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "5_code_switched_luganda_stays",
+   "note": "Luganda with TIN/VAT: no flip-flop.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 1284,
+     "filler_caption_ms": 1277,
+     "answer_caption_ms": 5077,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka ndabe.",
+      "Nkukwataganya n'omukozi wa URA, nsaba olindeko."
+     ],
+     "caller": [
+      "Omuzi antya okwewandiisa okufuna ttiimu yange okuva n'era?"
+     ],
+     "status": [
+      "transferring"
+     ]
+    },
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": null,
+     "filler_caption_ms": null,
+     "answer_caption_ms": null,
+     "languages": [],
+     "assistant": [],
+     "caller": [
+      "Vat yange ntya okugisasula?",
+      "Era ebitundu bimeeka?"
+     ],
+     "status": []
+    }
+   ],
+   "call_id": "call_82d3c430dc2d",
+   "language_detection": true,
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "6_explicit_request",
+   "note": "Immediate switch.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 8734,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 21436,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.86
+      }
+     ],
+     "assistant": [
+      "To register for a TIN, visit the official URA web portal, navigate to eServices > TIN Registration, and complete the online application. Are you registering as an individual or an organisation?"
+     ],
+     "caller": [],
+     "status": []
+    },
+    {
+     "utterance": "en_ask_sw",
+     "said": "Can we speak Swahili, please?",
+     "first_audio_ms": 8642,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 15232,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "explicit",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Hakika, tunaweza kuongea Swahili. Je, ungependa kuendelea na usajili wa TIN au una swali lingine?"
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_34e24ad32056",
+   "language_detection": true,
+   "language_sequence": [
+    "en",
+    "sw"
+   ],
+   "passed": true
+  },
+  {
+   "name": "7_override_luganda_holds",
+   "note": "Pinned to Luganda on screen; English speech does not move it.",
+   "turns": [
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 1840,
+     "filler_caption_ms": 1834,
+     "answer_caption_ms": 5890,
+     "languages": [],
+     "assistant": [
+      "Lindako katono.",
+      "Omusolo ogw'omuwendo ogwongerwako (V-A-T / omusolo gwa V-A-T / ushuru wa V-A-T) guli ku ebitundu 18 ku buli kikumi (ebitundu 18 ku buli kikumi) (FY2026-27). Omusolo gw'omuwendo ogwongerwako guwoozebwa ku ebitundu 18 ku buli kikumi ku bintu n'obuweereza ebisabibwa omusolo; bizinensi ezoogera omusolo guno zikungaanya okuva ku bakasitoma era ne zigutwalira U-R-A.\nAmateeka agagobererwa: Etteeka ly'Omusolo gw'Omugatte ogw'Omugaso\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, U-R-A yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0 800, 117, 0 0 0 / 0 800, 217, 0 0 0, oba WhatsApp 0772 140 000."
+     ],
+     "caller": [
+      "What is the standard VAT rate in Uganda?"
+     ],
+     "status": []
+    }
+   ],
+   "call_id": "call_72fc84b59ae7",
+   "language_detection": true,
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "8_transfer_from_luganda",
+   "note": "Officer request in Luganda transfers; staff see a Luganda caller.",
+   "turns": [
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1245,
+     "filler_caption_ms": 1239,
+     "answer_caption_ms": 2207,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka ndabe.",
+      "Nsonyiwa, ogambye VAT?"
+     ],
+     "caller": [
+      "Vati yange ntya okugisasula, era ebitundu bimeeka?"
+     ],
+     "status": []
+    },
+    {
+     "utterance": "lg_person",
+     "said": "Njagala okwogera n'omuntu, omukozi wa URA.",
+     "first_audio_ms": 2476,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 2472,
+     "languages": [],
+     "assistant": [
+      "Nkukwataganya n'omukozi wa URA, nsaba olindeko."
+     ],
+     "caller": [
+      "Njagala okwogera n'omuntu omukozi wa URA."
+     ],
+     "status": [
+      "transferring"
+     ]
+    }
+   ],
+   "call_id": "call_8ecb3b7c65fe",
+   "language_detection": true,
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  }
+ ]
+}
