@@ -56,6 +56,7 @@ UTTERANCES: dict[str, tuple[str, str]] = {
     "lg_tin": ("lg", "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?"),
     "lg_vat": ("lg", "VAT yange ntya okugisasula, era ebitundu bimeka?"),
     "lg_person": ("lg", "Njagala okwogera n'omuntu, omukozi wa URA."),
+    "en_officer": ("en", "I would like to talk to an officer about my account balance, please."),
     "sw_tin": ("sw", "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?"),
 }
 
@@ -64,7 +65,7 @@ UTTERANCES: dict[str, tuple[str, str]] = {
 class Scenario:
     name: str
     turns: list[str]
-    expect_languages: list[str]  # language events in order, as the caller should see them
+    expect_languages: list[str] | None  # language events in order, as the caller should see them; None: not checked
     override: str | None = None
     expect_status: str | None = None
     expect_status_on: str | None = None  # the utterance that must trigger it
@@ -72,6 +73,11 @@ class Scenario:
     # greeting (0) or into the answer to the turn before it, and must stop it.
     barge_turn: int | None = None
     barge_after_s: float = 2.0
+    # Stay on the line, silent, this long after the last turn — long enough
+    # for a server-side timer (the officer wait) to run out — and expect this
+    # status to arrive meanwhile.
+    linger_s: float = 0.0
+    expect_after_linger: str | None = None
     note: str = ""
 
 
@@ -102,6 +108,13 @@ SCENARIOS = [
              note="Talking over Gemini's greeting stops it, and the question is answered."),
     Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1,
              note="Talking over a Luganda answer stops it (cascaded engine, Orpheus voice)."),
+    # The Call Desk's Phase 0 check: RECEPTIONIST_TRANSFER_TIMEOUT_S is 90 by default.
+    # The language is not what this checks: an English caller whose vote lands
+    # just under the lock threshold rightly stays unlocked, with no event.
+    Scenario("11_officer_request_times_out", ["en_officer"], None, expect_status="transferring",
+             expect_status_on="en_officer", linger_s=100.0, expect_after_linger="ai",
+             note="Gemini queues the call with the packet's topic (account) and priority (high); "
+                  "nobody answers, so it returns to the AI owing a callback."),
 ]
 
 
@@ -300,6 +313,11 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
                 "status": [m.get("status") for m in new if m.get("type") == "status"],
                 **({"barge": barge_metrics(listener, started)} if sc.barge_turn == index else {}),
             })
+        if sc.linger_s:
+            mark = len(listener.messages)
+            await asyncio.sleep(sc.linger_s)  # the silence filler keeps the line open
+            result["after_linger"] = [m.get("status") for _, m in listener.messages[mark:]
+                                      if m.get("type") == "status"]
         stop.set()
         await filler
         await ws.send(json.dumps({"type": "hangup"}))
@@ -319,9 +337,13 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
             sc.expect_status in t["status"] for t in before
         )
     barge_ok = all(t["barge"]["stopped"] for t in result["turns"] if "barge" in t)
+    linger_ok = sc.expect_after_linger is None or sc.expect_after_linger in result.get("after_linger", [])
     result["language_sequence"] = seen
     result["passed"] = (
-        bool(result["language_detection"]) and seen == sc.expect_languages and status_ok and barge_ok
+        bool(result["language_detection"])
+        and (sc.expect_languages is None or seen == sc.expect_languages)
+        and status_ok and barge_ok
+        and linger_ok
     )
     return result
 
@@ -344,6 +366,8 @@ async def main_async(args: argparse.Namespace) -> None:
                   f"  status={turn['status']}  reply={[a[:90] for a in turn['assistant'][-1:]]}", flush=True)
             if "barge" in turn:
                 print(f"      barge-in: {turn['barge']}", flush=True)
+        if "after_linger" in res:
+            print(f"   after lingering: status={res['after_linger']}", flush=True)
     lat = [t["first_audio_ms"] for r in results for t in r.get("turns", []) if t.get("first_audio_ms") is not None]
     report = {
         "date": dt.date.today().isoformat(),

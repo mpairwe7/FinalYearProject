@@ -1,6 +1,6 @@
 # Plan: the officer's Call Desk — phone-call handling in the staff console
 
-Status: **approved for implementation, not started.** Written 2026-09-24 and re-checked against `dev` @
+Status: **in implementation — Phase 0 done (2026-09-25), Phase 1 next.** Written 2026-09-24 and re-checked against `dev` @
 `e887627f` — i.e. **after** the multilingual receptionist landed (`docs/plans/multilingual-receptionist.md`:
 language detection, `router.py`/`sentinel.py`, `phrases.py`, `transfer.py`). Line numbers below are
 approximate; search for the named symbol if a line has moved.
@@ -799,7 +799,7 @@ Three browsers: taxpayer (A), officer 1 (B), officer 2 (C); optionally an audito
 
 | Date | Item | Decision / result |
 |---|---|---|
-| | Phase 0 transfer unification | |
+| 2026-09-25 | Phase 0 transfer unification | Done. `open_transfer` publishes and stores the packet's topic/priority (fallback `general_tax_support`/`normal`; a priority outside `low…urgent` reads `normal`), `waiting_since`, `target_team`, `attempt` (`CallState.transfer_attempts`); the lobby key is now `ticket_ref` (§7), replacing `ticket_id` — `useCallsLobby` updated. `close_transfer_on_timeout` is shared by both engines and also sets the row back to `status=ai` (it stayed `transferring` before, so a timed-out call looked like it was still waiting). 19 columns + 3 indexes via `store._ensure_columns`, checked on SQLite (tests) and once on Postgres 16 (existing row keeps defaults, idempotent). **Not done here:** `brief.build_now` on transfer (§6.1 item 3) — `brief.py` is Phase 1; `needs_callback` is not yet cleared when a later transfer is answered (claims, Phase 1). Live check on the GPU stack (Gemini Live): "talk to an officer about my account balance" → `account_specific`/`high` on the row, 90 s later `needs_callback=1`, `no_officer_available` (`evals/reports/call_replay_2026-09-24_call_desk_phase0.json`) |
 | | Brief model and latency measured | |
 | | Claim race test | |
 | | Navigation keeps audio (singleton approach) | |

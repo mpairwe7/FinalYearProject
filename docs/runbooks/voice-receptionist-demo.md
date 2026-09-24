@@ -160,7 +160,16 @@ ngrok http 8000
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
 2. AI announces: *"I'm connecting you to a URA officer, please hold."*
 3. Status changes to **Transferring** with a ticket reference generated via `_maybe_create_ticket`.
-4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill.
+4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill: the
+   topic and priority come from the handoff packet ("My account balance" → *Account
+   question*, high), and the queue row shows **Waiting for officer**. Both engines go
+   through `receptionist/transfer.py`, which also stores `topic`, `priority` and
+   `transfer_requested_at` on the call.
+5. If nobody takes it within `RECEPTIONIST_TRANSFER_TIMEOUT_S` (90 s), the caller hears
+   their ticket reference, the call returns to the AI, and it is marked as owed a
+   callback (`needs_callback`, reason `no_officer_available`; lobby
+   `call.transfer_timed_out`) — a **Callback** chip on its row. Replay check:
+   `scripts/replay_call_audio.py --only 11_officer` (about 2 minutes).
 
 ### Step 5: Officer Takeover & Live Audio Bridge
 1. Officer opens `/calls` and clicks **Take Call**.
