@@ -55,6 +55,16 @@ export function CallQueueItem({
             <span className="cq-time">{formatClock(now / 1000 - call.started_at)}</span>
           )}
           <span className={`cq-chip cq-chip--${chip.tone}`}>{chip.label}</span>
+          {call.risk_level === 'at_risk' && (
+            <span className="cq-risk-badge cq-risk-badge--at-risk" title="At risk conversation">
+              ▲ at risk
+            </span>
+          )}
+          {call.risk_level === 'watch' && (
+            <span className="cq-risk-badge cq-risk-badge--watch" title="Watching risk signals">
+              ▲ watch
+            </span>
+          )}
           {isRaisedPriority(call.priority) && role !== 'ai' && (
             <span className={`call-chip call-chip--${call.priority}`}>{call.priority}</span>
           )}

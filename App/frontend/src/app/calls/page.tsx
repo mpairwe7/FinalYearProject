@@ -10,6 +10,7 @@ import { CallContextRail } from '@/components/staff/calls/CallContextRail';
 import { CallbacksList } from '@/components/staff/calls/CallbacksList';
 import { CallHistoryFilters } from '@/components/staff/calls/CallHistoryFilters';
 import { CallHistoryTable } from '@/components/staff/calls/CallHistoryTable';
+import { SupervisorBoard } from '@/components/staff/calls/SupervisorBoard';
 import SloGaugeCard from '@/components/charts/SloGaugeCard';
 import { ChartNote } from '@/components/charts/chartTheme';
 import { useCall, useCallHistory, useCallMetrics, useCalls } from '@/hooks/useCalls';
@@ -22,14 +23,15 @@ import '@/styles/call/call.css';
 import './calls.css';
 import '@/app/agent/agent.css';
 
-const CALL_TABS = ['desk', 'callbacks', 'history', 'performance'] as const;
-type CallTab = (typeof CALL_TABS)[number];
+const ALL_TABS = ['desk', 'callbacks', 'history', 'performance', 'supervisor'] as const;
+type CallTab = (typeof ALL_TABS)[number];
 
 const TAB_LABEL: Record<CallTab, string> = {
   desk: 'Desk',
   callbacks: 'Callbacks',
   history: 'History',
   performance: 'Performance',
+  supervisor: 'Supervisor',
 };
 
 function readUrl(): { tab: CallTab; call: string | null } {
@@ -37,7 +39,7 @@ function readUrl(): { tab: CallTab; call: string | null } {
   const p = new URLSearchParams(window.location.search);
   const tab = p.get('tab');
   return {
-    tab: (CALL_TABS as readonly string[]).includes(tab || '') ? (tab as CallTab) : 'desk',
+    tab: (ALL_TABS as readonly string[]).includes(tab || '') ? (tab as CallTab) : 'desk',
     call: p.get('call'),
   };
 }
@@ -152,6 +154,12 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [tab, order, deskCallId, canTake, myCallId, sections.waiting]);
 
+  const availableTabs = useMemo(() => {
+    return role === 'ura_admin'
+      ? (['desk', 'callbacks', 'history', 'performance', 'supervisor'] as const)
+      : (['desk', 'callbacks', 'history', 'performance'] as const);
+  }, [role]);
+
   const waitingCount = sections.waiting.length;
   const callbacksCount = callbackCalls.length;
 
@@ -159,7 +167,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
     <OpsPage title="Phone Calls" description="Live calls, callers waiting for an officer, and how the receptionist is doing">
       <div className="ag-tabbar">
         <div className="ag-tabs" role="tablist">
-          {CALL_TABS.map((t) => (
+          {availableTabs.map((t) => (
             <button
               key={t}
               role="tab"
@@ -278,7 +286,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             }}
           />
         </div>
-      ) : (
+      ) : tab === 'history' ? (
         <div className="calls-history-tab">
           <CallHistoryFilters filters={historyFilters} onChange={setHistoryFilters} />
           {historyError ? (
@@ -306,6 +314,17 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             </div>
           )}
         </div>
+      ) : (
+        tab === 'supervisor' && role === 'ura_admin' ? (
+          <SupervisorBoard
+            waitingCalls={sections.waiting}
+            metrics={metricsData}
+            onOpenCall={(id) => {
+              setSelectedId(id);
+              setTab('desk');
+            }}
+          />
+        ) : null
       )}
     </OpsPage>
   );

@@ -22,6 +22,7 @@ from ..voice_consent import log_voice_event, require_voice_consent
 from ..ws_concurrency import is_ws_origin_allowed, release, try_acquire
 from . import brief as call_brief
 from . import desk
+from . import risk
 from .brain import UraReceptionistBrain
 from ..query import SUPPORTED_LOCALES
 from .config import get_default_language, get_languages, get_max_call_s
@@ -159,6 +160,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
         log_voice_event(user_id=user_id or "", session_id=call_id, event_type="call_started", tenant_id=tenant_id or "default")
         call_brief.start(call_id)
+        risk.start(call_id)
         hub.publish_lobby(
             "call.started",
             {
@@ -233,6 +235,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     finally:
         if room:
             call_brief.stop(call_id)
+            risk.stop(call_id)
             abandoned_while_waiting = (room.state.mode == "transferring")
             if abandoned_while_waiting:
                 update_call(call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned")

@@ -85,6 +85,17 @@ def compute_call_metrics(
         if officer_joined_at:
             officer_wait_s = max(0.0, round(officer_joined_at - state.transfer_requested_at, 1))
 
+    # Phase 2–3 metrics
+    bridged_at = call.get("bridged_at") or (state.bridged_at if state else None)
+    transfer_requested_at = call.get("transfer_requested_at") or (state.transfer_requested_at if state else None)
+    time_to_answer_s = max(0.0, round(bridged_at - transfer_requested_at, 1)) if bridged_at and transfer_requested_at else None
+    handle_time_s = max(0.0, round(ended_at - bridged_at, 1)) if bridged_at else None
+    hold_total_s = float(call.get("hold_total_s") or (state.hold_total_s if state else 0.0))
+    wrapup_at = call.get("wrapup_at")
+    wrapup_time_s = max(0.0, round(wrapup_at - ended_at, 1)) if wrapup_at and ended_at else None
+    abandoned_while_waiting = bool(call.get("needs_callback") and call.get("callback_reason") == "caller_left_waiting")
+    callback_created = bool(call.get("needs_callback"))
+
     # Containment
     end_reason = call.get("end_reason", "")
     contained = bool(ai_answers >= 1 and not transferred and end_reason != "timeout")
@@ -125,6 +136,12 @@ def compute_call_metrics(
         "transfer_reason": transfer_reason,
         "time_to_transfer_s": time_to_transfer_s,
         "officer_wait_s": officer_wait_s,
+        "time_to_answer_s": time_to_answer_s,
+        "handle_time_s": handle_time_s,
+        "hold_total_s": hold_total_s,
+        "wrapup_time_s": wrapup_time_s,
+        "abandoned_while_waiting": abandoned_while_waiting,
+        "callback_created": callback_created,
         "contained": contained,
         "latency": {
             "stt_ms_p50": _percentile(stt_latencies, 50),
@@ -219,6 +236,13 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
     turn_latencies: list[float] = []
     ratings: list[int] = []
 
+    time_to_answers: list[float] = []
+    handle_times: list[float] = []
+    abandoned_count = 0
+    callbacks_created_count = 0
+    callbacks_closed_count = 0
+    per_officer_counts: dict[str, int] = {}
+
     for r in rows:
         d = dict(r)
         m = {}
@@ -253,6 +277,21 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
         if d.get("officer_rating"):
             ratings.append(int(d["officer_rating"]))
 
+        # Phase 3 metrics
+        if m.get("time_to_answer_s") is not None:
+            time_to_answers.append(float(m["time_to_answer_s"]))
+        if m.get("handle_time_s") is not None:
+            handle_times.append(float(m["handle_time_s"]))
+        if m.get("abandoned_while_waiting") or d.get("callback_reason") == "caller_left_waiting":
+            abandoned_count += 1
+        if d.get("needs_callback"):
+            callbacks_created_count += 1
+        if d.get("callback_done_at"):
+            callbacks_closed_count += 1
+        officer = d.get("officer_id")
+        if officer:
+            per_officer_counts[officer] = per_officer_counts.get(officer, 0) + 1
+
     containment_rate = round(contained_count / total_calls, 3)
     transfer_rate = round(transferred_count / total_calls, 3)
     clarification_rate = round(clarify_calls / total_calls, 3)
@@ -276,4 +315,11 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
         "avg_officer_rating": avg_officer_rating,
         "latency_p50_ms": _percentile(turn_latencies, 50),
         "latency_p95_ms": _percentile(turn_latencies, 95),
+        "median_time_to_answer_s": _percentile(time_to_answers, 50),
+        "p90_time_to_answer_s": _percentile(time_to_answers, 90),
+        "median_handle_time_s": _percentile(handle_times, 50),
+        "abandonment_rate": round(abandoned_count / total_calls, 3),
+        "callbacks_created": callbacks_created_count,
+        "callbacks_closed": callbacks_closed_count,
+        "per_officer_counts": per_officer_counts,
     }

@@ -1068,3 +1068,62 @@
   display: flex;
   gap: var(--ops-space-2);
 }
+
+/* ── Phase 3: Risk Badges & Supervisor Board ─────────────────────────── */
+
+.cq-risk-badge {
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  padding: 2px 6px;
+  border-radius: var(--ops-radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.cq-risk-badge--at-risk {
+  background: var(--ops-warn-fill, #fffbeb);
+  color: var(--ops-warn-ink, #92400e);
+  border: 1px solid var(--ops-warn-line, #fef3c7);
+}
+
+.cq-risk-badge--watch {
+  background: var(--ops-neutral-fill, #f3f4f6);
+  color: var(--ops-neutral-ink, #4b5563);
+  border: 1px solid var(--ops-hairline);
+}
+
+.sup-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-2) 0;
+}
+
+.sup-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--ops-gutter);
+}
+
+.sup-officers-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ops-space-3);
+  background: var(--ops-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-md);
+  padding: var(--ops-space-4);
+}
+
+.sup-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sup-section-head h3 {
+  margin: 0;
+  font-size: var(--ops-text-base);
+  font-weight: var(--ops-weight-semi);
+}

@@ -34,6 +34,8 @@ export interface LobbyCall {
   claimed_name: string;
   officer_name: string;
   needs_callback: boolean;
+  risk_level?: 'none' | 'watch' | 'at_risk';
+  risk_signals?: string[];
 }
 
 export type Availability = 'available' | 'busy' | 'away';
@@ -143,6 +145,7 @@ function fromRecord(r: CallRecord): LobbyCall | null {
     claimed_by: r.claimed_by || '',
     officer_name: r.status === 'bridged' ? r.officer_id || '' : '',
     needs_callback: Boolean(r.needs_callback) && !r.callback_done_at,
+    risk_level: r.risk_json ? (JSON.parse(r.risk_json).level || 'none') : 'none',
   };
 }
 
@@ -261,6 +264,11 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
         }
         case 'call.transfer_timed_out':
           return put({ status: 'ai', waiting_since: null, needs_callback: true, claimed_by: '', claimed_name: '' });
+        case 'call.risk':
+          return put({
+            risk_level: (typeof data.level === 'string' && (data.level === 'at_risk' || data.level === 'watch') ? data.level : 'none'),
+            risk_signals: Array.isArray(data.signals) ? (data.signals as string[]) : [],
+          });
         case 'call.wrapped_up':
         case 'call.ended': {
           const calls = { ...state.calls };
@@ -321,6 +329,8 @@ export interface QueueSections {
   ai: LobbyCall[];
 }
 
+const RISK_RANK: Record<string, number> = { at_risk: 0, watch: 1, none: 2 };
+
 /** The Desk's queue, in the order an officer reads it (plan §3.2). */
 export function queueSections(calls: Record<string, LobbyCall>, myCallId: string | null): QueueSections {
   const all = Object.values(calls);
@@ -331,7 +341,13 @@ export function queueSections(calls: Record<string, LobbyCall>, myCallId: string
     withOfficers: all
       .filter((c) => notMine(c) && (c.status === 'bridged' || (c.status === 'transferring' && c.claimed_by)))
       .sort((a, b) => a.started_at - b.started_at),
-    ai: all.filter((c) => notMine(c) && c.status === 'ai').sort((a, b) => a.started_at - b.started_at),
+    ai: all
+      .filter((c) => notMine(c) && c.status === 'ai')
+      .sort(
+        (a, b) =>
+          (RISK_RANK[a.risk_level || 'none'] ?? 2) - (RISK_RANK[b.risk_level || 'none'] ?? 2) ||
+          a.started_at - b.started_at,
+      ),
   };
 }
 
