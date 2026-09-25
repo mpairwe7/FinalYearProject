@@ -194,7 +194,7 @@ rebuild_stack_and_tunnel() {
 
   log_info "2. Rebuilding frontend Docker container..."
   (cd "${ROOT_DIR}/App" && docker compose build frontend)
-  (cd "${ROOT_DIR}/App" && docker compose up -d frontend)
+  (cd "${ROOT_DIR}/App" && docker compose up -d --no-deps frontend)
   log_ok "Frontend container rebuilt and listening on port ${LOCAL_PORT}."
 
   log_info "3. Restarting ngrok tunnel..."

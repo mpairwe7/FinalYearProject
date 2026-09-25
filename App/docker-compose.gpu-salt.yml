@@ -40,11 +40,10 @@ services:
       - WORKERS=1
       - RECEPTIONIST_ENGINE=${RECEPTIONIST_ENGINE:-gemini_live}
       # Multilingual receptionist (en/sw on Gemini Live, lg on the cascaded
-      # engine). Off unless asked for; with it on, bring up the Orpheus voice
-      # below (`--profile multilingual`) and point ORPHEUS_TTS_URL at it, or
-      # Luganda answers fall back to Spark-TTS-SALT (~4 s a sentence).
-      - FLAG_RECEPTIONIST_LANGUAGE_DETECTION=${FLAG_RECEPTIONIST_LANGUAGE_DETECTION:-false}
-      - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-}
+      # engine). Default on with Gemini Live; brings up the Orpheus voice
+      # below (`--profile multilingual`) with ORPHEUS_TTS_URL pointed at it.
+      - FLAG_RECEPTIONIST_LANGUAGE_DETECTION=${FLAG_RECEPTIONIST_LANGUAGE_DETECTION:-true}
+      - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-http://orpheus-tts:8100}
       - FLAG_VOICE_RECEPTIONIST=true
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true
