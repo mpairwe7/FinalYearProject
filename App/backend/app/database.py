@@ -1515,6 +1515,7 @@ def list_tickets(
     locale: str | None = None,
     modality: str | None = None,
     q: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
 
@@ -1564,6 +1565,9 @@ def list_tickets(
         clause = "(id LIKE ? OR reason LIKE ? OR user_query LIKE ? OR assignee LIKE ? OR team LIKE ? OR staff_note LIKE ? OR officer_reply LIKE ? OR transcript_json LIKE ?)"
         sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
         params.extend([q_like] * 8)
+    if user_id:
+        sql += " AND user_id = ?" if (" WHERE " in sql) else " WHERE user_id = ?"
+        params.append(user_id)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"

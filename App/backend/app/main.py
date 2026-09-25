@@ -2994,15 +2994,41 @@ def voice_audit_endpoint(
 @app.get("/v1/admin/calls", tags=["admin"])
 def list_calls_endpoint(
     status: str | None = None,
+    q: str | None = None,
+    date_from: float | None = None,
+    date_to: float | None = None,
+    outcome: str | None = None,
+    language: str | None = None,
+    officer_id: str | None = None,
+    has_ticket: bool | None = None,
+    topic: str | None = None,
+    needs_callback: bool | None = None,
+    sort: str = "started_desc",
     limit: int = 50,
     offset: int = 0,
     _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """List phone calls filtered by status (live, ended, all)."""
+    """List phone calls with filtering, search, and pagination."""
     from .receptionist.store import list_calls
-    calls = list_calls(status=status, limit=limit, offset=offset)
+    calls, total = list_calls(
+        status=status,
+        limit=limit,
+        offset=offset,
+        q=q,
+        date_from=date_from,
+        date_to=date_to,
+        outcome=outcome,
+        language=language,
+        officer_id=officer_id,
+        has_ticket=has_ticket,
+        topic=topic,
+        needs_callback=needs_callback,
+        sort=sort,
+        return_total=True,
+    )
     return {
         "calls": calls,
+        "total": total,
         "count": len(calls),
         "status_filter": status or "all",
         "limit": limit,
@@ -3180,6 +3206,153 @@ async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_adm
     log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_ended_call",
                     tenant_id=ctx.tenant_id or "default")
     return result
+
+
+@app.post("/v1/admin/calls/{call_id}/hold", tags=["admin"])
+async def hold_call_endpoint(
+    call_id: str,
+    body: dict = Body(...),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Put an active call on hold or resume it."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    on = bool(body.get("on", True))
+    try:
+        result = await desk.hold(call_id, ctx.user_id, on=on, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id,
+                    event_type="officer_hold_on" if on else "officer_hold_off",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/transfer", tags=["admin"])
+async def transfer_call_endpoint(
+    call_id: str,
+    body: dict = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Transfer the call to a specialized team or another officer."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    team = str(body.get("team") or "").strip()
+    target_officer_id = str(body.get("officer_id") or "").strip()
+    note = str(body.get("note") or "").strip()
+    try:
+        result = await desk.transfer(call_id, ctx.user_id, team=team, target_officer_id=target_officer_id,
+                                     note=note, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_transferred",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/wrapup", tags=["admin"])
+async def wrapup_call_endpoint(
+    call_id: str,
+    body: dict = Body(...),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Submit post-call wrap-up note, outcome, and ticket action."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    outcome = str(body.get("outcome") or "").strip()
+    note = str(body.get("note") or "").strip()
+    ticket_action = body.get("ticket_action")
+    rating = body.get("rating")
+    rating_note = body.get("rating_note")
+    try:
+        result = await desk.wrapup(
+            call_id,
+            ctx.user_id,
+            outcome=outcome,
+            note=note,
+            ticket_action=ticket_action,
+            rating=rating,
+            rating_note=rating_note,
+            is_admin=ctx.role == "ura_admin",
+        )
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_wrapup_saved",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/callback-done", tags=["admin"])
+async def callback_done_endpoint(
+    call_id: str,
+    body: dict = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Mark an open callback as resolved."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    _desk_writer(ctx)
+    note = str(body.get("note") or "").strip()
+    try:
+        result = await desk.callback_done(call_id, ctx.user_id, note=note, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_callback_done",
+                    tenant_id=ctx.tenant_id or "default")
+    return result
+
+
+@app.get("/v1/admin/calls/{call_id}/caller-history", tags=["admin"])
+def caller_history_endpoint(
+    call_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Retrieve previous calls and tickets for the same caller."""
+    from .receptionist import desk
+    from .voice_consent import log_voice_event
+    _desk_call_id(call_id)
+    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_caller_history",
+                    tenant_id=ctx.tenant_id or "default")
+    return desk.caller_history(call_id)
+
+
+@app.put("/v1/admin/officers/me/presence", tags=["admin"])
+def update_my_presence_endpoint(
+    body: dict = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Update presence state for current officer or heartbeat last_seen."""
+    from .receptionist import presence
+    _desk_writer(ctx)
+    display_name = body.get("display_name")
+    if not display_name:
+        display_name = _desk_officer_name(ctx)
+    status = body.get("status")
+    languages = body.get("languages")
+    teams = body.get("teams")
+    return presence.upsert_presence(
+        ctx.user_id,
+        display_name=display_name,
+        status=status,
+        languages=languages,
+        teams=teams,
+    )
+
+
+@app.get("/v1/admin/officers/presence", tags=["admin"])
+def get_officers_presence_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """List online and active officers and valid transfer teams."""
+    from .receptionist import presence
+    return presence.get_presence_board()
 
 
 @app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)

@@ -279,6 +279,16 @@ def clarify_repeat_enabled(language: str) -> bool:
     return _env_bool(f"RECEPTIONIST_CLARIFY_REPEAT_{language.upper()}", language != "lg")
 
 
+def get_presence_ttl_s() -> float:
+    """Seconds after last heartbeat before an officer is considered offline."""
+    return max(5.0, _env_float("RECEPTIONIST_PRESENCE_TTL_S", 60.0))
+
+
+def get_officer_reconnect_grace_s() -> float:
+    """Seconds an officer has to reconnect to a dropped audio call before it re-queues."""
+    return max(5.0, _env_float("RECEPTIONIST_OFFICER_RECONNECT_GRACE_S", 30.0))
+
+
 def allow_edge_standin_lg() -> bool:
     """Whether a Luganda call may fall back to an English edge voice reading Luganda."""
     return _env_bool("RECEPTIONIST_ALLOW_EDGE_STANDIN_LG", False)

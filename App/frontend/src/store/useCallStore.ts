@@ -7,6 +7,8 @@ export type CallStatus =
   | 'ai'
   | 'transferring'
   | 'officer'
+  | 'on_hold'
+  | 'reconnecting'
   | 'ended';
 
 /** A language the receptionist can hold a call in. */

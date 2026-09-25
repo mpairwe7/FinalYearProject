@@ -48,8 +48,10 @@ _PHRASES: dict[str, dict[str, str]] = {
         "clarify_repeat": "Sorry, I didn't catch that — could you say it again?",
         "clarify_restart": "Sorry about that — please tell me your question again.",
         "switched": "Sure — let's continue in English.",
-        # Call Desk: an officer joins the call, and ends it.
+        # Call Desk: an officer joins the call, holds it, reconnects, and ends it.
         "officer_joining": "You're now connected to {name}.",
+        "officer_reconnecting": "Please hold, I'm reconnecting you.",
+        "on_hold": "Please hold.",
         "officer_closing": "Thank you for calling URA. Goodbye.",
     },
     "lg": {
@@ -83,6 +85,8 @@ _PHRASES: dict[str, dict[str, str]] = {
         "clarify_restart": "Nsonyiwa ku ekyo — nsaba oddemu ekibuuzo kyo.",
         "switched": "Kale — tweyongere mu Luganda.",
         "officer_joining": "Kati oyogera ne {name}.",
+        "officer_reconnecting": "Nsaba olindeko, nkyakukwataganya n'omukozi.",
+        "on_hold": "Nsaba olindeko.",
         "officer_closing": "Webale okukuba essimu eri URA. Weeraba.",
     },
     "sw": {
@@ -116,6 +120,8 @@ _PHRASES: dict[str, dict[str, str]] = {
         "clarify_restart": "Samahani kwa hilo — tafadhali niambie swali lako tena.",
         "switched": "Sawa — tuendelee kwa Kiswahili.",
         "officer_joining": "Sasa umeunganishwa na {name}.",
+        "officer_reconnecting": "Tafadhali subiri, ninaendelea kukuunganisha na afisa.",
+        "on_hold": "Tafadhali subiri.",
         "officer_closing": "Asante kwa kupiga simu URA. Kwaheri.",
     },
 }

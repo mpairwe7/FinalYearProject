@@ -172,6 +172,13 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/admin/calls/{call_id}/claim"),
     ("POST", "/v1/admin/calls/{call_id}/release"),
     ("POST", "/v1/admin/calls/{call_id}/end"),
+    ("POST", "/v1/admin/calls/{call_id}/hold"),
+    ("POST", "/v1/admin/calls/{call_id}/transfer"),
+    ("POST", "/v1/admin/calls/{call_id}/wrapup"),
+    ("POST", "/v1/admin/calls/{call_id}/callback-done"),
+    ("GET", "/v1/admin/calls/{call_id}/caller-history"),
+    ("PUT", "/v1/admin/officers/me/presence"),
+    ("GET", "/v1/admin/officers/presence"),
     # --- WebSocket ---
     ("WS", "/v1/voice/chat/stream"),
     ("WS", "/v2/chat/stream"),
@@ -263,6 +270,13 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/admin/calls/{call_id}/claim"): "App.backend.tests.test_receptionist_claims",
     ("POST", "/v1/admin/calls/{call_id}/release"): "App.backend.tests.test_receptionist_claims",
     ("POST", "/v1/admin/calls/{call_id}/end"): "App.backend.tests.test_receptionist_claims",
+    ("POST", "/v1/admin/calls/{call_id}/hold"): "App.backend.tests.test_receptionist_officer_actions",
+    ("POST", "/v1/admin/calls/{call_id}/transfer"): "App.backend.tests.test_receptionist_officer_actions",
+    ("POST", "/v1/admin/calls/{call_id}/wrapup"): "App.backend.tests.test_receptionist_officer_actions",
+    ("POST", "/v1/admin/calls/{call_id}/callback-done"): "App.backend.tests.test_receptionist_officer_actions",
+    ("GET", "/v1/admin/calls/{call_id}/caller-history"): "App.backend.tests.test_receptionist_history",
+    ("PUT", "/v1/admin/officers/me/presence"): "App.backend.tests.test_receptionist_presence",
+    ("GET", "/v1/admin/officers/presence"): "App.backend.tests.test_receptionist_presence",
     ("WS", "/v1/voice/chat/stream"): "test_voice_ws_hardening",
     ("WS", "/v2/chat/stream"): "test_chat_ws_lifecycle",
     ("WS", "/v2/voice/chat/stream"): "test_native_voice",
@@ -397,10 +411,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (78 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (85 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 78, f"expected 78 HTTP endpoints, found {len(http)}"
+    assert len(http) == 85, f"expected 85 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

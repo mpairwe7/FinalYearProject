@@ -23,8 +23,19 @@ try:
         OutputTransportMessageUrgentFrame,
     )
 except ImportError:
+    import itertools
+    _fallback_frame_id_seq = itertools.count(1)
+
     class Frame:  # type: ignore[no-redef]
-        pass
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.id = next(_fallback_frame_id_seq)
+            self.name = self.__class__.__name__
+
+        def __post_init__(self) -> None:
+            if not hasattr(self, "id"):
+                self.id = next(_fallback_frame_id_seq)
+            if not hasattr(self, "name"):
+                self.name = self.__class__.__name__
 
     class FrameSerializer:  # type: ignore[no-redef]
         pass

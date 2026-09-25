@@ -154,6 +154,8 @@ export const sw: Partial<Dictionary> = {
   'call.talkOfficer': 'Ongea na afisa',
   'call.hangup': 'Kata simu',
   'call.transferring': 'Inakuunganisha na afisa wa URA…',
+  'call.onHold': 'Uko kwenye kusubiri',
+  'call.reconnecting': 'Tunakuunganisha tena na afisa…',
   'call.officerJoined': 'Afisa {name} amejiunga',
   'call.officerSpeaking': 'Afisa Anaongea',
   'call.ended': 'Simu imekatika',

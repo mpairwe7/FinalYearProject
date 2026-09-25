@@ -1028,6 +1028,7 @@ def list_tickets(
     locale: str | None = None,
     modality: str | None = None,
     q: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
     if pool is None:
@@ -1059,6 +1060,9 @@ def list_tickets(
         clause = "(id ILIKE %s OR reason ILIKE %s OR user_query ILIKE %s OR assignee ILIKE %s OR team ILIKE %s OR staff_note ILIKE %s OR officer_reply ILIKE %s OR transcript_json ILIKE %s)"
         sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
         params.extend([q_like] * 8)
+    if user_id:
+        sql += " AND user_id = %s" if (" WHERE " in sql) else " WHERE user_id = %s"
+        params.append(user_id)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"

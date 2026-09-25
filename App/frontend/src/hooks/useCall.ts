@@ -9,7 +9,7 @@ import {
 import { CallSocket } from '@/services/callSocket';
 import { PCMPlayer } from '@/services/pcmPlayer';
 import { AudioRecorder } from '@/services/voiceService';
-import { playDialTone, playJoinChime } from '@/services/callTones';
+import { playDialTone, playHoldTone, playJoinChime } from '@/services/callTones';
 import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audioLevelBus';
 
 const LANGUAGE_SOURCES: readonly CallLanguageSource[] = ['default', 'auto', 'explicit', 'override'];
@@ -21,6 +21,7 @@ export function useCall() {
   const playerRef = useRef<PCMPlayer | null>(null);
   const micCleanupRef = useRef<(() => void) | null>(null);
   const dialToneCleanupRef = useRef<(() => void) | null>(null);
+  const holdToneCleanupRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -39,6 +40,10 @@ export function useCall() {
     if (dialToneCleanupRef.current) {
       dialToneCleanupRef.current();
       dialToneCleanupRef.current = null;
+    }
+    if (holdToneCleanupRef.current) {
+      holdToneCleanupRef.current();
+      holdToneCleanupRef.current = null;
     }
     if (micCleanupRef.current) {
       micCleanupRef.current();
@@ -160,16 +165,39 @@ export function useCall() {
             }
             case 'status': {
               if (msg.status === 'transferring') {
+                if (holdToneCleanupRef.current) {
+                  holdToneCleanupRef.current();
+                  holdToneCleanupRef.current = null;
+                }
                 store.setStatus('transferring');
                 if (msg.ticket_ref) store.setTicketRef(String(msg.ticket_ref));
               } else if (msg.status === 'bridged') {
+                if (holdToneCleanupRef.current) {
+                  holdToneCleanupRef.current();
+                  holdToneCleanupRef.current = null;
+                }
                 store.setStatus('officer');
                 if (msg.officer_name) store.setOfficerName(String(msg.officer_name));
                 // Play join chime
                 if (audioCtxRef.current) {
                   playJoinChime(audioCtxRef.current);
                 }
+              } else if (msg.status === 'on_hold') {
+                store.setStatus('on_hold');
+                if (!holdToneCleanupRef.current && audioCtxRef.current) {
+                  holdToneCleanupRef.current = playHoldTone(audioCtxRef.current);
+                }
+              } else if (msg.status === 'reconnecting') {
+                if (holdToneCleanupRef.current) {
+                  holdToneCleanupRef.current();
+                  holdToneCleanupRef.current = null;
+                }
+                store.setStatus('reconnecting');
               } else if (msg.status === 'ai') {
+                if (holdToneCleanupRef.current) {
+                  holdToneCleanupRef.current();
+                  holdToneCleanupRef.current = null;
+                }
                 store.setStatus('ai');
               } else if (msg.status === 'ended') {
                 hangup();

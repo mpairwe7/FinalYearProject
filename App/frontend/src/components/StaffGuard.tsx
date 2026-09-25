@@ -413,7 +413,7 @@ export default function StaffGuard({
       <div className="staff-shell-content">
         {/* Phone calls on every staff page: the call bar, transfer alerts and
             the officer's own call, which outlives navigation (Call Desk §8.2). */}
-        <StaffCallLayer role={state.who.role} />
+        <StaffCallLayer role={state.who.role} who={state.who} />
         <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
         {children(state.who)}
       </div>

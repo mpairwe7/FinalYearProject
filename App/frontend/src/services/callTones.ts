@@ -95,3 +95,42 @@ export function playAlertChime(ctx: AudioContext): void {
     osc.stop(start + 0.32);
   });
 }
+
+/**
+ * Looping soft hold tone played to caller while on hold. Returns stop callback.
+ */
+export function playHoldTone(ctx: AudioContext): () => void {
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+  }
+  let active = true;
+  let timer: number | null = null;
+
+  const pulse = () => {
+    if (!active || ctx.state === 'closed') return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(440, now);
+    osc.frequency.exponentialRampToValueAtTime(350, now + 0.4);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.03, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.55);
+
+    timer = window.setTimeout(pulse, 3500);
+  };
+
+  pulse();
+
+  return () => {
+    active = false;
+    if (timer !== null) window.clearTimeout(timer);
+  };
+}

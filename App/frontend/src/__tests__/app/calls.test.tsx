@@ -27,8 +27,9 @@ const ENDED: CallRecord = callRecord({
 
 function mockCalls(live: CallRecord[]) {
   vi.spyOn(callsApi, 'listCalls').mockImplementation(async (status = 'all') => {
-    const calls = status === 'live' ? live : [ENDED];
-    return { count: calls.length, calls };
+    const s = typeof status === 'string' ? status : status.status || 'all';
+    const calls = s === 'live' ? live : [ENDED];
+    return { count: calls.length, total: calls.length, calls, status_filter: s, limit: 50, offset: 0 };
   });
   vi.spyOn(callsApi, 'getCall').mockImplementation(
     async (id: string) => [...live, ENDED].find((c) => c.call_id === id) || ENDED,

@@ -19,9 +19,11 @@ import { CallSummaryCard } from './CallSummaryCard';
 import { CallTranscript } from './CallTranscript';
 import { LevelMeter } from './console/LevelMeter';
 import { WaitRing } from './console/WaitRing';
+import { TransferDialog } from './TransferDialog';
+import { WrapUpPanel } from './WrapUpPanel';
 
 /** Which of the plan's workspace states (§3.3) a call is in, for this officer. */
-export type WorkspaceState = 'mine' | 'waiting' | 'claimed' | 'ai' | 'officer' | 'ended';
+export type WorkspaceState = 'mine' | 'wrap_up' | 'waiting' | 'claimed' | 'ai' | 'officer' | 'ended';
 
 const FLASH_MS = 1200;
 
@@ -43,6 +45,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   const review = useReviewCall();
   const [flashSeq, setFlashSeq] = useState<number | null>(null);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
   const muteRef = useRef<HTMLButtonElement>(null);
@@ -55,25 +58,45 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
 
   const call = live.call || detail || null;
   const turns = live.turns.length ? live.turns : detail?.turns || [];
-  const mine = activeCall !== null && activeCall.callId === callId && activeCall.state !== 'idle';
-  const state: WorkspaceState | null = mine
-    ? 'mine'
-    : !call
-      ? null
-      : call.status === 'ended'
-        ? 'ended'
-        : call.status === 'transferring'
-          ? lobby?.claimed_by
-            ? 'claimed'
-            : 'waiting'
-          : call.status === 'bridged'
-            ? 'officer'
-            : 'ai';
+  const isWrapUp =
+    (activeCall !== null && activeCall.callId === callId && activeCall.state === 'wrap_up') ||
+    Boolean(call?.status === 'ended' && !call.wrapup_at && activeCall?.callId === callId);
+  const mine = activeCall !== null && activeCall.callId === callId && activeCall.state !== 'idle' && !isWrapUp;
+  const state: WorkspaceState | null = isWrapUp
+    ? 'wrap_up'
+    : mine
+      ? 'mine'
+      : !call
+        ? null
+        : call.status === 'ended'
+          ? 'ended'
+          : call.status === 'transferring'
+            ? lobby?.claimed_by
+              ? 'claimed'
+              : 'waiting'
+            : call.status === 'bridged'
+              ? 'officer'
+              : 'ai';
 
   // Joined: focus lands on the controls (plan §9, accessibility).
   const bridged = mine && activeCall?.state === 'bridged';
   useEffect(() => {
     if (bridged) muteRef.current?.focus();
+  }, [bridged]);
+
+  // Shortcut T opens Transfer dialog
+  useEffect(() => {
+    if (!bridged) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === 't' || e.key === 'T') && !e.metaKey && !e.ctrlKey) {
+        const target = e.target as HTMLElement | null;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+        e.preventDefault();
+        setTransferOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [bridged]);
 
   if (isLoading && !call) return <SkeletonRows rows={5} />;
@@ -238,7 +261,33 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
             compact
           />
           <div className="cw-transcript">{transcript}</div>
-          <CallControls ref={muteRef} call={activeCall} confirmEnd={confirmEnd} onConfirmEnd={setConfirmEnd} />
+          <CallControls
+            ref={muteRef}
+            call={activeCall}
+            confirmEnd={confirmEnd}
+            onConfirmEnd={setConfirmEnd}
+            onOpenTransfer={() => setTransferOpen(true)}
+          />
+          <TransferDialog
+            open={transferOpen}
+            callId={callId}
+            onClose={() => setTransferOpen(false)}
+            onTransferred={() => void refetch()}
+          />
+        </>
+      )}
+
+      {state === 'wrap_up' && (
+        <>
+          <WrapUpPanel
+            callId={callId}
+            initialNote={call.wrapup_note || ''}
+            ticketId={call.ticket_id}
+            onFinished={() => {
+              void refetch();
+            }}
+          />
+          <div className="cw-transcript">{transcript}</div>
         </>
       )}
 

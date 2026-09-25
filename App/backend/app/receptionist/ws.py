@@ -36,6 +36,7 @@ from .store import (
     get_call_with_turns,
     list_calls,
     save_call_review,
+    update_call,
 )
 from .summary import generate_call_summary
 
@@ -232,6 +233,9 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
     finally:
         if room:
             call_brief.stop(call_id)
+            abandoned_while_waiting = (room.state.mode == "transferring")
+            if abandoned_while_waiting:
+                update_call(call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned")
             await room.end("caller_hangup")
             record_call_end_metrics(call_id, room.state)
             asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))
@@ -242,6 +246,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                     "call_id": call_id,
                     "status": "ended",
                     "reason": room.state.end_reason or "caller_hangup",
+                    "abandoned_while_waiting": abandoned_while_waiting,
                 },
             )
             await registry.remove(call_id)
@@ -335,9 +340,11 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         await websocket.close(code=4404 if not room else 4400)
         return
 
-    # Only the officer who claimed the call (POST …/claim) may join it; that
-    # is what keeps it to one officer when two press "Take call" together.
-    if room.officer is not None or room.state.claimed_by != user_id:
+    # Only the officer who claimed the call (POST …/claim), or the officer
+    # reconnecting within grace period, may join it.
+    is_claimant = (room.state.claimed_by == user_id)
+    is_reconnecting = (getattr(room.state, "reconnecting_officer", None) == user_id)
+    if room.officer is not None or (not is_claimant and not is_reconnecting):
         # Accept first: a close before the handshake is an HTTP 403, which a
         # browser reports as 1006 — the officer would see "could not connect"
         # instead of "another officer has this call".
@@ -384,9 +391,7 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         await officer_leg.close()
         room.officer = None
         if room.state.mode == "bridged":
-            # The officer's connection went without an End: the caller must not
-            # be left on a silent line. (A grace period to rejoin: Phase 2.)
-            await desk.hang_up_caller(room, "officer_hangup")
+            await desk.handle_officer_disconnect(room, user_id, speech_model)
 
 
 # ---------------------------------------------------------------------------

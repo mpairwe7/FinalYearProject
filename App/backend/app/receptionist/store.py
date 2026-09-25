@@ -110,6 +110,20 @@ def init_receptionist_schema() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_voice_call_turns_call ON voice_call_turns(call_id, seq);
+
+            CREATE TABLE IF NOT EXISTS officer_presence (
+                user_id         TEXT PRIMARY KEY,
+                display_name    TEXT NOT NULL DEFAULT '',
+                status          TEXT NOT NULL DEFAULT 'offline',
+                languages_json  TEXT NOT NULL DEFAULT '["en"]',
+                teams_json      TEXT NOT NULL DEFAULT '[]',
+                current_call_id TEXT NOT NULL DEFAULT '',
+                previous_status TEXT NOT NULL DEFAULT 'available',
+                last_seen       DOUBLE PRECISION NOT NULL,
+                updated_at      DOUBLE PRECISION NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_officer_presence_status ON officer_presence(status);
             """
         )
         _ensure_columns("voice_calls", _CALL_DESK_COLUMNS)
@@ -277,22 +291,94 @@ def list_calls(
     status: str | None = None,
     limit: int = 50,
     offset: int = 0,
-) -> list[dict[str, Any]]:
-    """List calls ordered by started_at DESC."""
-    query = "SELECT * FROM voice_calls"
+    *,
+    q: str | None = None,
+    date_from: float | None = None,
+    date_to: float | None = None,
+    outcome: str | None = None,
+    language: str | None = None,
+    officer_id: str | None = None,
+    has_ticket: bool | None = None,
+    topic: str | None = None,
+    needs_callback: bool | None = None,
+    sort: str = "started_desc",
+    return_total: bool = False,
+) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
+    """List calls with filtering, search and server-side pagination."""
+    conditions: list[str] = []
     params: list[Any] = []
+
     if status and status != "all":
         if status == "live":
-            query += " WHERE status IN ('ai', 'transferring', 'bridged')"
+            conditions.append("status IN ('ai', 'transferring', 'bridged')")
         elif status == "ended":
-            query += " WHERE status = 'ended'"
+            conditions.append("status = 'ended'")
         else:
-            query += " WHERE status = ?"
+            conditions.append("status = ?")
             params.append(status)
 
-    query += " ORDER BY started_at DESC LIMIT ? OFFSET ?"
-    params.extend([max(1, limit), max(0, offset)])
-    rows = db.query_all(query, tuple(params))
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        conditions.append(
+            "(summary_json LIKE ? OR EXISTS (SELECT 1 FROM voice_call_turns t WHERE t.call_id = voice_calls.call_id AND t.text LIKE ?))"
+        )
+        params.extend([term, term])
+
+    if date_from is not None:
+        conditions.append("started_at >= ?")
+        params.append(date_from)
+
+    if date_to is not None:
+        conditions.append("started_at <= ?")
+        params.append(date_to)
+
+    if outcome:
+        conditions.append("outcome = ?")
+        params.append(outcome)
+
+    if language:
+        conditions.append("locale = ?")
+        params.append(language)
+
+    if officer_id:
+        conditions.append("(officer_id = ? OR claimed_by = ?)")
+        params.extend([officer_id, officer_id])
+
+    if has_ticket is not None:
+        if has_ticket:
+            conditions.append("ticket_id IS NOT NULL AND ticket_id != ''")
+        else:
+            conditions.append("(ticket_id IS NULL OR ticket_id = '')")
+
+    if topic:
+        conditions.append("topic = ?")
+        params.append(topic)
+
+    if needs_callback is not None:
+        if needs_callback:
+            conditions.append("needs_callback = 1 AND (callback_done_at IS NULL OR callback_done_at = 0)")
+        else:
+            conditions.append("(needs_callback = 0 OR needs_callback IS NULL OR callback_done_at > 0)")
+
+    where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    total = 0
+    if return_total:
+        count_rows = db.query_all(f"SELECT COUNT(*) as c FROM voice_calls{where_clause}", tuple(params))
+        total = int(count_rows[0]["c"]) if count_rows else 0
+
+    order_by = " ORDER BY started_at DESC"
+    if sort == "started_asc":
+        order_by = " ORDER BY started_at ASC"
+    elif sort == "duration_desc":
+        order_by = " ORDER BY (COALESCE(ended_at, started_at) - started_at) DESC"
+    elif sort == "priority_desc":
+        order_by = " ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END, started_at DESC"
+
+    query = f"SELECT * FROM voice_calls{where_clause}{order_by} LIMIT ? OFFSET ?"
+    query_params = list(params) + [max(1, limit), max(0, offset)]
+    rows = db.query_all(query, tuple(query_params))
+
     calls: list[dict[str, Any]] = []
     for r in rows:
         d = dict(r)
@@ -306,8 +392,60 @@ def list_calls(
                 d["metrics"] = json.loads(d["metrics_json"])
             except Exception:
                 d["metrics"] = None
+        if d.get("brief_json"):
+            try:
+                d["brief"] = json.loads(d["brief_json"])
+            except Exception:
+                d["brief"] = None
         calls.append(d)
+
+    if return_total:
+        return calls, total
     return calls
+
+
+def mark_callback_done(call_id: str, done_by: str, note: str = "") -> bool:
+    """Mark a waiting callback as resolved."""
+    now = time.time()
+    call = get_call(call_id)
+    if not call:
+        return False
+    current_note = call.get("officer_note") or ""
+    new_note = f"{current_note}\n[Callback completed by {done_by}: {note}]".strip() if note else current_note
+    return update_call(
+        call_id,
+        callback_done_at=now,
+        callback_done_by=done_by,
+        officer_note=new_note,
+        needs_callback=0,
+    )
+
+
+def get_caller_history(call_id: str) -> dict[str, Any]:
+    """Retrieve previous calls and tickets for the same taxpayer (user_id)."""
+    call = get_call(call_id)
+    if not call:
+        return {"anonymous": False, "calls": [], "tickets": []}
+    user_id = str(call.get("user_id") or "").strip()
+    if not user_id or user_id.startswith("anon::"):
+        return {"anonymous": True, "calls": [], "tickets": []}
+
+    rows = db.query_all(
+        "SELECT * FROM voice_calls WHERE user_id = ? AND call_id != ? ORDER BY started_at DESC LIMIT 10",
+        (user_id, call_id),
+    )
+    calls: list[dict[str, Any]] = []
+    for r in rows:
+        d = dict(r)
+        if d.get("summary_json"):
+            try:
+                d["summary"] = json.loads(d["summary_json"])
+            except Exception:
+                d["summary"] = None
+        calls.append(d)
+
+    tickets = db.list_tickets(user_id=user_id, limit=10)
+    return {"anonymous": False, "user_id": user_id, "calls": calls, "tickets": tickets}
 
 
 def create_turn(

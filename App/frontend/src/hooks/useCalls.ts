@@ -10,6 +10,7 @@ import {
   CallBrief,
   CallRecord,
   CallTurn,
+  ListCallsParams,
 } from '@/services/callsApi';
 import { appendAuthToken } from '@/lib/authSession';
 
@@ -22,6 +23,13 @@ export function useCalls(status = 'all', limit = 50) {
     queryKey: [...queryKeys.calls.list(status), limit],
     queryFn: () => callsApi.listCalls(status, limit),
     refetchInterval: 5000,
+  });
+}
+
+export function useCallHistory(filters: ListCallsParams) {
+  return useQuery({
+    queryKey: ['calls', 'history', filters],
+    queryFn: () => callsApi.listCalls(filters),
   });
 }
 

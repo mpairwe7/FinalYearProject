@@ -136,8 +136,8 @@ async function joinCall(callId: string): Promise<void> {
         const samples = new Int16Array(chunk);
         let sum = 0;
         for (let i = 0; i < samples.length; i += 2) sum += samples[i] * samples[i];
-        setInputLevel(muted ? 0 : Math.sqrt(sum / Math.max(1, samples.length / 2)) / 6000);
-        if (!muted && ws && ws.readyState === WebSocket.OPEN) ws.send(chunk);
+        setInputLevel(muted || Boolean(current?.onHold) ? 0 : Math.sqrt(sum / Math.max(1, samples.length / 2)) / 6000);
+        if (!muted && !current?.onHold && ws && ws.readyState === WebSocket.OPEN) ws.send(chunk);
       },
       { echoCancellation: true, noiseSuppression: true },
     );
@@ -163,7 +163,10 @@ async function joinCall(callId: string): Promise<void> {
     if (ws !== socket) return;
     ws = null;
     if (current?.state === 'ending') {
-      finish();
+      teardownAudio();
+      update({ state: 'wrap_up' });
+    } else if (current?.state === 'wrap_up') {
+      /* already in wrap-up */
     } else if (event.code === 4409) {
       finish('Another officer has this call.');
     } else if (current?.state === 'connecting') {
@@ -181,6 +184,30 @@ export function toggleMute(): void {
   update({ muted });
 }
 
+export async function toggleHold(targetOn?: boolean): Promise<void> {
+  if (!current || current.state !== 'bridged') return;
+  const on = targetOn !== undefined ? targetOn : !current.onHold;
+  try {
+    await callsApi.holdCall(current.callId, on);
+    update({ onHold: on });
+  } catch (err) {
+    update({ error: (err as Error).message || 'Could not change hold status' });
+  }
+}
+
+export async function transferCall(payload: { team?: string; officer_id?: string; note?: string }): Promise<void> {
+  if (!current || current.state !== 'bridged') return;
+  const { callId } = current;
+  try {
+    await callsApi.transferCall(callId, payload);
+    teardownAudio();
+    update({ state: 'wrap_up' });
+  } catch (err) {
+    update({ error: (err as Error).message || 'Could not transfer the call' });
+    throw err;
+  }
+}
+
 /** End the call: the caller hears a closing line, then the server hangs up both sides. */
 export async function endCall(): Promise<void> {
   if (!current || current.state !== 'bridged') return;
@@ -192,9 +219,33 @@ export async function endCall(): Promise<void> {
     update({ state: 'bridged', error: (err as Error).message || 'Could not end the call' });
     return;
   }
-  // The server closes the audio socket once the caller is hung up; if it is
-  // already gone, finish here.
-  if (!ws) finish();
+  // If the server socket closed already:
+  if (!ws) {
+    teardownAudio();
+    update({ state: 'wrap_up' });
+  }
+}
+
+export async function wrapUpCall(payload: {
+  outcome: 'resolved' | 'follow_up' | 'callback' | 'referred' | 'abandoned' | 'ai_resolved';
+  note: string;
+  ticket_action?: 'resolve' | 'keep_open' | 'create';
+  rating?: number;
+  rating_note?: string;
+}): Promise<void> {
+  if (!current || (current.state !== 'wrap_up' && current.state !== 'bridged')) return;
+  const { callId } = current;
+  try {
+    await callsApi.wrapUpCall(callId, payload);
+    finish();
+  } catch (err) {
+    update({ error: (err as Error).message || 'Could not save wrap-up' });
+    throw err;
+  }
+}
+
+export function finishWrapUp(): void {
+  finish();
 }
 
 /** Clear a finished call's leftover message. */

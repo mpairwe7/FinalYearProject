@@ -35,6 +35,7 @@ class OfficerLeg:
         self._caller_audio_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
         self._sender_task: asyncio.Task | None = None
         self._running = True
+        self.on_hold = False
 
     def start(self) -> None:
         """Start background loop forwarding caller audio to officer WebSocket."""
@@ -67,6 +68,8 @@ class OfficerLeg:
     async def handle_officer_message(self, data: bytes | str) -> None:
         """Process incoming message/audio from the officer."""
         if isinstance(data, bytes):
+            if self.on_hold:
+                return
             # 1. Forward directly to caller WebSocket, bypassing Pipecat pipeline
             if self.room.caller_ws is not None:
                 try:

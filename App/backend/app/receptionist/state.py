@@ -34,6 +34,8 @@ class CallState:
     ticket_id: str | None = None
     transfer_reason: str | None = None
     transfer_requested_at: float | None = None
+    topic: str = ""
+    priority: str = "normal"
     # Times this call has been put in the officers' queue: the AI's transfer
     # is the first; an officer passing it on (Call Desk, Phase 2) adds one.
     transfer_attempts: int = 0
@@ -56,6 +58,12 @@ class CallState:
     claimed_name: str = ""  # "Officer Nakato" — from the claimant's token, not their id
     claimed_at: float | None = None
     bridged_at: float | None = None
+    on_hold: bool = False
+    hold_started_at: float | None = None
+    hold_total_s: float = 0.0
+    target_team: str = ""
+    reconnecting_officer: str | None = None
+    reconnect_timer: asyncio.Task | None = None
     transfer_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
     # the language the call is in *now*; these record how it got there.

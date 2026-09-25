@@ -28,7 +28,16 @@ vi.mock('@/services/voiceService', () => ({
   },
 }));
 
-import { endCall, resetSessionForTests, takeCall, toggleMute } from '@/services/officerCallSession';
+import {
+  endCall,
+  finishWrapUp,
+  resetSessionForTests,
+  takeCall,
+  toggleHold,
+  toggleMute,
+  transferCall,
+  wrapUpCall,
+} from '@/services/officerCallSession';
 
 const active = () => useCallConsoleStore.getState().activeCall;
 
@@ -74,7 +83,7 @@ describe('officerCallSession', () => {
     expect(audio.sent).toHaveLength(1);
   });
 
-  it('ends the call and goes idle when the server hangs up', async () => {
+  it('ends the call and transitions to wrap_up when the server hangs up', async () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
@@ -82,8 +91,50 @@ describe('officerCallSession', () => {
     expect(callsApi.endCall).toHaveBeenCalledWith('c1');
     expect(active()?.state).toBe('ending');
     audio.shut(1000);
-    expect(active()).toBeNull();
+    expect(active()?.state).toBe('wrap_up');
     expect(mic.stop).toHaveBeenCalled();
+    finishWrapUp();
+    expect(active()).toBeNull();
+  });
+
+  it('puts the call on hold and resumes', async () => {
+    vi.spyOn(callsApi, 'holdCall').mockResolvedValue({ hold: true, call_id: 'c1' });
+    await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    await toggleHold(true);
+    expect(callsApi.holdCall).toHaveBeenCalledWith('c1', true);
+    expect(active()?.onHold).toBe(true);
+
+    vi.spyOn(callsApi, 'holdCall').mockResolvedValue({ hold: false, call_id: 'c1' });
+    await toggleHold(false);
+    expect(callsApi.holdCall).toHaveBeenCalledWith('c1', false);
+    expect(active()?.onHold).toBe(false);
+  });
+
+  it('transfers the call and transitions to wrap_up', async () => {
+    vi.spyOn(callsApi, 'transferCall').mockResolvedValue({ transferred: true, call_id: 'c1', target_team: 'disputes' });
+    await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    await transferCall({ team: 'disputes', note: 'Escalating' });
+    expect(callsApi.transferCall).toHaveBeenCalledWith('c1', { team: 'disputes', note: 'Escalating' });
+    expect(active()?.state).toBe('wrap_up');
+    expect(mic.stop).toHaveBeenCalled();
+  });
+
+  it('submits wrap-up and returns to idle', async () => {
+    vi.spyOn(callsApi, 'wrapUpCall').mockResolvedValue({ wrapped_up: true, call_id: 'c1', outcome: 'resolved' });
+    await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    await endCall();
+    audio.shut(1000);
+    expect(active()?.state).toBe('wrap_up');
+
+    await wrapUpCall({ outcome: 'resolved', note: 'All set' });
+    expect(callsApi.wrapUpCall).toHaveBeenCalledWith('c1', { outcome: 'resolved', note: 'All set' });
+    expect(active()).toBeNull();
   });
 
   it('gives the call back when the microphone is refused', async () => {

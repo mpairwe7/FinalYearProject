@@ -5,24 +5,29 @@ import StaffGuard, { type StaffIdentity } from '@/components/StaffGuard';
 import { OpsPage } from '@/components/ops/OpsPage';
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/ops/States';
 import { CallQueue, queueOrder } from '@/components/staff/calls/CallQueue';
-import { CallRow } from '@/components/staff/calls/CallRow';
 import { CallWorkspace } from '@/components/staff/calls/CallWorkspace';
+import { CallContextRail } from '@/components/staff/calls/CallContextRail';
+import { CallbacksList } from '@/components/staff/calls/CallbacksList';
+import { CallHistoryFilters } from '@/components/staff/calls/CallHistoryFilters';
+import { CallHistoryTable } from '@/components/staff/calls/CallHistoryTable';
 import SloGaugeCard from '@/components/charts/SloGaugeCard';
 import { ChartNote } from '@/components/charts/chartTheme';
-import { useCallMetrics, useCalls } from '@/hooks/useCalls';
+import { useCall, useCallHistory, useCallMetrics, useCalls } from '@/hooks/useCalls';
 import { isTypingTarget } from '@/lib/ticketUi';
 import { acquireLobby } from '@/services/callLobbySocket';
 import { takeCall } from '@/services/officerCallSession';
+import type { ListCallsParams } from '@/services/callsApi';
 import { queueSections, useCallConsoleStore } from '@/store/useCallConsoleStore';
 import '@/styles/call/call.css';
 import './calls.css';
 import '@/app/agent/agent.css';
 
-const CALL_TABS = ['desk', 'history', 'performance'] as const;
+const CALL_TABS = ['desk', 'callbacks', 'history', 'performance'] as const;
 type CallTab = (typeof CALL_TABS)[number];
 
 const TAB_LABEL: Record<CallTab, string> = {
   desk: 'Desk',
+  callbacks: 'Callbacks',
   history: 'History',
   performance: 'Performance',
 };
@@ -52,19 +57,24 @@ function writeUrl(tab: CallTab, call: string | null): void {
 
 /**
  * The officer's Call Desk (docs/plans/officer-call-desk-plan.md §3.2): the
- * live queue and one call in the workspace, plus history and performance.
+ * live queue and one call in the workspace, plus callbacks, history and performance.
  * `?tab=` and `?call=` make any view a link.
  */
 export function StaffCalls({ who }: { who?: StaffIdentity }) {
   const role = who?.role || 'ura_staff';
   const canTake = role === 'ura_staff' || role === 'ura_admin';
-  // StaffGuard renders this only on the client, after the identity check, so
-  // the URL (a shared or refreshed link) is there to read on the first render.
-  // A call another page asked for ("Preview", "Back to call") wins over it.
+
   const [tab, setTab] = useState<CallTab>(() => (useCallConsoleStore.getState().deskRequest ? 'desk' : readUrl().tab));
   const [selectedId, setSelectedId] = useState<string | null>(
     () => useCallConsoleStore.getState().deskRequest ?? readUrl().call,
   );
+
+  const [historyFilters, setHistoryFilters] = useState<ListCallsParams>({
+    status: 'ended',
+    limit: 25,
+    offset: 0,
+    sort: 'started_desc',
+  });
 
   const calls = useCallConsoleStore((s) => s.calls);
   const activeCall = useCallConsoleStore((s) => s.activeCall);
@@ -72,7 +82,8 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
   const resync = useCallConsoleStore((s) => s.resync);
 
   const { data: liveData } = useCalls('live');
-  const { data: historyData, isLoading: loadingHistory, error: historyError } = useCalls('ended');
+  const { data: allCallsData, refetch: refetchAllCalls } = useCalls('all', 100);
+  const { data: historyResp, isLoading: loadingHistory, error: historyError } = useCallHistory(historyFilters);
   const { data: metricsData, isLoading: loadingMetrics } = useCallMetrics(7);
 
   useEffect(() => acquireLobby(), []);
@@ -82,8 +93,6 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
     if (liveData && lobbyStatus !== 'open') resync(liveData.calls ?? []);
   }, [liveData, lobbyStatus, resync]);
 
-  // An alert's "Preview" or the dock's "Back to call": taken on the first
-  // render if it came with the navigation here, and live while on this page.
   useEffect(() => {
     useCallConsoleStore.getState().requestDesk(null);
     return useCallConsoleStore.subscribe((state, prev) => {
@@ -99,12 +108,18 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
   const myCallId = activeCall && activeCall.state !== 'idle' ? activeCall.callId : null;
   const sections = useMemo(() => queueSections(calls, myCallId), [calls, myCallId]);
   const order = useMemo(() => queueOrder(sections), [sections]);
-  const historyCalls = useMemo(() => historyData?.calls || [], [historyData]);
+
+  const callbackCalls = useMemo(() => {
+    return (allCallsData?.calls || []).filter((c) => Boolean(c.needs_callback) && !c.callback_done_at);
+  }, [allCallsData]);
+
+  const historyCalls = useMemo(() => historyResp?.calls || [], [historyResp]);
 
   // A chosen call stays chosen — the workspace shows it ended when it ends.
   // Nothing chosen: my call, else the head of the queue (longest wait first).
   const deskCallId = tab === 'desk' ? selectedId ?? myCallId ?? order[0] ?? null : null;
   const historyCallId = tab === 'history' ? selectedId ?? historyCalls[0]?.call_id ?? null : null;
+  const { data: deskDetail } = useCall(deskCallId);
 
   const select = useCallback((id: string) => setSelectedId(id), []);
 
@@ -138,6 +153,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
   }, [tab, order, deskCallId, canTake, myCallId, sections.waiting]);
 
   const waitingCount = sections.waiting.length;
+  const callbacksCount = callbackCalls.length;
 
   return (
     <OpsPage title="Phone Calls" description="Live calls, callers waiting for an officer, and how the receptionist is doing">
@@ -153,12 +169,13 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             >
               {TAB_LABEL[t]}
               {t === 'desk' && waitingCount > 0 && <span className="ag-tab-count">{waitingCount}</span>}
+              {t === 'callbacks' && callbacksCount > 0 && <span className="ag-tab-count">{callbacksCount}</span>}
             </button>
           ))}
         </div>
         {tab === 'desk' && (
           <span className="ag-hints calls-hints">
-            <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> take · <kbd>M</kbd> mute · <kbd>E</kbd> end
+            <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>A</kbd> take · <kbd>M</kbd> mute · <kbd>H</kbd> hold · <kbd>T</kbd> transfer · <kbd>E</kbd> end
           </span>
         )}
       </div>
@@ -235,7 +252,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
           )}
         </div>
       ) : tab === 'desk' ? (
-        <div className={`ag-split calls-split${deskCallId ? ' is-open' : ''}`}>
+        <div className={`calls-split--desk${deskCallId ? ' is-open' : ''}`}>
           <div className="ag-queue-pane">
             <CallQueue sections={sections} selectedId={deskCallId} sessionState={activeCall?.state ?? null} onSelect={select} />
           </div>
@@ -246,29 +263,48 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
               <EmptyState title="No call selected" body="Waiting callers and live calls appear on the left." />
             )}
           </div>
+          {deskCallId && deskDetail && (
+            <CallContextRail callId={deskCallId} call={deskDetail} onOpenCall={select} />
+          )}
+        </div>
+      ) : tab === 'callbacks' ? (
+        <div className="calls-callbacks-tab">
+          <CallbacksList
+            calls={callbackCalls}
+            onRefresh={() => void refetchAllCalls()}
+            onOpenCall={(id) => {
+              setSelectedId(id);
+              setTab('desk');
+            }}
+          />
         </div>
       ) : (
-        <div className={`ag-split calls-split${historyCallId ? ' is-open' : ''}`}>
-          <div className="ag-queue-pane calls-history-list">
-            {loadingHistory ? (
-              <SkeletonRows rows={4} />
-            ) : historyError ? (
-              <ErrorState title="Failed to load calls" body="Unable to reach the call registry." />
-            ) : historyCalls.length === 0 ? (
-              <EmptyState title="No call history" body="No calls recorded yet." />
-            ) : (
-              historyCalls.map((c) => (
-                <CallRow key={c.call_id} call={c} isSelected={historyCallId === c.call_id} onSelect={select} />
-              ))
-            )}
-          </div>
-          <div className="ag-detail">
-            {historyCallId ? (
-              <CallWorkspace key={historyCallId} callId={historyCallId} role={role} />
-            ) : (
-              <EmptyState title="No call selected" body="Pick a call on the left." />
-            )}
-          </div>
+        <div className="calls-history-tab">
+          <CallHistoryFilters filters={historyFilters} onChange={setHistoryFilters} />
+          {historyError ? (
+            <ErrorState title="Failed to load call history" body="Unable to reach the call registry." />
+          ) : (
+            <div className={`ag-split calls-split${historyCallId ? ' is-open' : ''}`}>
+              <div className="ag-queue-pane calls-history-table-pane">
+                <CallHistoryTable
+                  calls={historyCalls}
+                  total={historyResp?.total || historyCalls.length}
+                  limit={historyFilters.limit ?? 25}
+                  offset={historyFilters.offset ?? 0}
+                  loading={loadingHistory}
+                  onPageChange={(nextOffset) => setHistoryFilters((f) => ({ ...f, offset: nextOffset }))}
+                  onSelectCall={(id) => setSelectedId(id)}
+                />
+              </div>
+              <div className="ag-detail">
+                {historyCallId ? (
+                  <CallWorkspace key={historyCallId} callId={historyCallId} role={role} />
+                ) : (
+                  <EmptyState title="No call selected" body="Pick a call on the left." />
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </OpsPage>
@@ -282,3 +318,4 @@ export default function Page() {
     </StaffGuard>
   );
 }
+

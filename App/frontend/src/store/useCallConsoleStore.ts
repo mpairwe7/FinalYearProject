@@ -13,7 +13,7 @@
  */
 
 import { create } from 'zustand';
-import type { CallRecord } from '@/services/callsApi';
+import type { CallRecord, OfficerPresence } from '@/services/callsApi';
 
 export type LiveCallStatus = 'ai' | 'transferring' | 'bridged';
 
@@ -29,6 +29,7 @@ export interface LobbyCall {
   reason: string;
   ticket_ref: string;
   attempt: number;
+  target_team?: string;
   claimed_by: string;
   claimed_name: string;
   officer_name: string;
@@ -38,7 +39,7 @@ export interface LobbyCall {
 export type Availability = 'available' | 'busy' | 'away';
 
 /** The officer's own call, mirrored from `officerCallSession`. */
-export type SessionState = 'idle' | 'claiming' | 'connecting' | 'bridged' | 'ending';
+export type SessionState = 'idle' | 'claiming' | 'connecting' | 'bridged' | 'wrap_up' | 'ending';
 
 export interface ActiveCall {
   callId: string;
@@ -46,6 +47,7 @@ export interface ActiveCall {
   /** When the current state began — the dock's timer on a bridged call. */
   since: number;
   muted: boolean;
+  onHold?: boolean;
   officerName: string;
   error: string | null;
 }
@@ -63,6 +65,10 @@ interface CallConsoleState {
   /** "Taken by Officer Nakato" — shown on everyone else's alert for a moment. */
   takenBy: Record<string, { name: string; at: number }>;
   availability: Availability;
+  myLanguages: string[];
+  myTeams: string[];
+  officers: Record<string, OfficerPresence>;
+  teams: string[];
   soundEnabled: boolean;
   micReady: boolean;
   lobbyStatus: LobbyStatus;
@@ -78,6 +84,10 @@ interface CallConsoleState {
   resync: (records: CallRecord[]) => void;
   dismissAlert: (callId: string) => void;
   setAvailability: (availability: Availability) => void;
+  setMyLanguages: (languages: string[]) => void;
+  setMyTeams: (teams: string[]) => void;
+  setOfficers: (officers: Record<string, OfficerPresence>) => void;
+  setTeams: (teams: string[]) => void;
   setSoundEnabled: (on: boolean) => void;
   setMicReady: (ready: boolean) => void;
   setLobbyStatus: (status: LobbyStatus) => void;
@@ -129,6 +139,7 @@ function fromRecord(r: CallRecord): LobbyCall | null {
     waiting_since: r.status === 'transferring' ? (r.transfer_requested_at ?? r.started_at) : null,
     reason: r.transfer_reason || '',
     ticket_ref: r.ticket_id || '',
+    target_team: r.target_team || '',
     claimed_by: r.claimed_by || '',
     officer_name: r.status === 'bridged' ? r.officer_id || '' : '',
     needs_callback: Boolean(r.needs_callback) && !r.callback_done_at,
@@ -140,6 +151,10 @@ const INITIAL = {
   dismissed: {} as Record<string, true>,
   takenBy: {} as Record<string, { name: string; at: number }>,
   availability: 'available' as Availability,
+  myLanguages: [] as string[],
+  myTeams: [] as string[],
+  officers: {} as Record<string, OfficerPresence>,
+  teams: [] as string[],
   soundEnabled: true,
   micReady: false,
   lobbyStatus: 'idle' as LobbyStatus,
@@ -156,8 +171,8 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
     set((state) => {
       const data = event.data || {};
       const id = str(data.call_id);
-      if (!id) return state;
-      const current = state.calls[id] || blank(id);
+      if (!id && event.type !== 'officer.presence') return state;
+      const current = id ? (state.calls[id] || blank(id)) : blank('');
       const put = (patch: Partial<LobbyCall>) => ({ calls: { ...state.calls, [id]: { ...current, ...patch } } });
 
       switch (event.type) {
@@ -178,6 +193,7 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
               waiting_since: num(data.waiting_since) ?? Date.now() / 1000,
               reason: str(data.reason),
               ticket_ref: str(data.ticket_ref),
+              target_team: str(data.target_team, current.target_team),
               attempt: num(data.attempt) ?? current.attempt + 1,
               claimed_by: '',
               claimed_name: '',
@@ -208,8 +224,44 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
             officer_name: str(data.officer_name, current.claimed_name),
             waiting_since: null,
           });
+        case 'call.on_hold': {
+          const on = Boolean(data.on);
+          const activeCall = state.activeCall && state.activeCall.callId === id ? { ...state.activeCall, onHold: on } : state.activeCall;
+          return { activeCall };
+        }
+        case 'call.officer_disconnected':
+          return put({
+            status: 'transferring',
+            waiting_since: Date.now() / 1000,
+            reason: 'officer_disconnected',
+            claimed_by: '',
+            claimed_name: '',
+          });
+        case 'officer.presence': {
+          const userId = str(data.user_id);
+          if (!userId) return state;
+          const status = str(data.status, 'offline') as OfficerPresence['status'];
+          const displayName = str(data.display_name);
+          const prev = state.officers[userId] || {
+            user_id: userId,
+            display_name: displayName,
+            status,
+            languages: ['en'],
+            teams: [],
+            current_call_id: '',
+            last_seen: Date.now() / 1000,
+            updated_at: Date.now() / 1000,
+          };
+          return {
+            officers: {
+              ...state.officers,
+              [userId]: { ...prev, display_name: displayName || prev.display_name, status },
+            },
+          };
+        }
         case 'call.transfer_timed_out':
           return put({ status: 'ai', waiting_since: null, needs_callback: true, claimed_by: '', claimed_name: '' });
+        case 'call.wrapped_up':
         case 'call.ended': {
           const calls = { ...state.calls };
           delete calls[id];
@@ -232,6 +284,10 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
 
   dismissAlert: (callId) => set((state) => ({ dismissed: { ...state.dismissed, [callId]: true } })),
   setAvailability: (availability) => set({ availability }),
+  setMyLanguages: (myLanguages) => set({ myLanguages }),
+  setMyTeams: (myTeams) => set({ myTeams }),
+  setOfficers: (officers) => set({ officers }),
+  setTeams: (teams) => set({ teams }),
   setSoundEnabled: (soundEnabled) => set({ soundEnabled }),
   setMicReady: (micReady) => set({ micReady }),
   setLobbyStatus: (lobbyStatus) => set({ lobbyStatus }),
@@ -281,9 +337,21 @@ export function queueSections(calls: Record<string, LobbyCall>, myCallId: string
 
 /** The calls that deserve an alert card for this officer right now. */
 export function alertCalls(
-  state: Pick<CallConsoleState, 'calls' | 'dismissed' | 'availability' | 'activeCall'>,
+  state: Pick<CallConsoleState, 'calls' | 'dismissed' | 'availability' | 'activeCall'> & {
+    myLanguages?: string[];
+    myTeams?: string[];
+  },
 ): LobbyCall[] {
   const onACall = state.activeCall !== null && state.activeCall.state !== 'idle';
   if (state.availability !== 'available' || onACall) return [];
-  return waitingCalls(state.calls).filter((c) => !state.dismissed[c.call_id]);
+  return waitingCalls(state.calls).filter((c) => {
+    if (state.dismissed[c.call_id]) return false;
+    if (c.target_team && state.myTeams && state.myTeams.length > 0) {
+      if (!state.myTeams.includes(c.target_team)) return false;
+    }
+    if (c.language && state.myLanguages && state.myLanguages.length > 0) {
+      if (!state.myLanguages.includes(c.language)) return false;
+    }
+    return true;
+  });
 }

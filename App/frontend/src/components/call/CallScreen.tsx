@@ -173,7 +173,12 @@ export function CallScreen() {
 
   if (!isOpen) return null;
 
-  const live = status === 'ai' || status === 'transferring' || status === 'officer';
+  const live =
+    status === 'ai' ||
+    status === 'transferring' ||
+    status === 'officer' ||
+    status === 'on_hold' ||
+    status === 'reconnecting';
 
   /* ---------------------------------------------------------------- pre-call */
   if (status === 'consent') {
@@ -218,7 +223,7 @@ export function CallScreen() {
             className={`call-status-pill ${
               status === 'ai' || status === 'officer'
                 ? 'call-status-pill--active'
-                : status === 'transferring'
+                : status === 'transferring' || status === 'on_hold' || status === 'reconnecting'
                 ? 'call-status-pill--transferring'
                 : ''
             }`}
@@ -228,6 +233,8 @@ export function CallScreen() {
               {status === 'dialing' && t('call.dialing')}
               {status === 'ai' && t('call.connected')}
               {status === 'transferring' && t('call.transferring')}
+              {status === 'on_hold' && t('call.onHold')}
+              {status === 'reconnecting' && t('call.reconnecting')}
               {status === 'officer' &&
                 (officerName ? `Officer ${officerName}` : t('call.officerSpeaking'))}
               {status === 'ended' && t('call.ended')}

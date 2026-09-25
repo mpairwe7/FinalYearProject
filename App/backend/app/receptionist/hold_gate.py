@@ -49,7 +49,22 @@ try:
         TTSStoppedFrame,
     )
 except ImportError:  # pragma: no cover — the gate only exists inside a Pipecat pipeline
-    FrameProcessor = object  # type: ignore[assignment,misc]
+    class FrameProcessor:  # type: ignore[no-redef]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        async def process_frame(self, frame: Any, direction: Any) -> None:
+            pass
+
+        async def push_frame(self, frame: Any, direction: Any = None) -> None:
+            pass
+
+    class FrameDirection:  # type: ignore[no-redef]
+        DOWNSTREAM = 1
+        UPSTREAM = 2
+
+    class Frame:  # type: ignore[no-redef]
+        pass
 
 
 def is_reply_frame(frame: Frame) -> bool:

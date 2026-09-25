@@ -5,7 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { callLanguageName } from '@/lib/callLanguage';
 import { callTopicLabel } from '@/lib/callTopic';
 import { formatClock, useNow } from '@/hooks/useNow';
-import { dismissSessionError, endCall, toggleMute } from '@/services/officerCallSession';
+import { dismissSessionError, endCall, toggleHold, toggleMute } from '@/services/officerCallSession';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { LevelMeter } from './LevelMeter';
 
@@ -42,11 +42,13 @@ export function ActiveCallDock({ onBackToCall }: { onBackToCall: (callId: string
   const lobby = calls[activeCall.callId];
   const topic = callTopicLabel(lobby?.topic) || 'Call';
   const label =
-    activeCall.state === 'bridged'
-      ? `On call ${formatClock((now - activeCall.since) / 1000)}`
-      : activeCall.state === 'ending'
-        ? 'Ending…'
-        : 'Connecting…';
+    activeCall.state === 'wrap_up'
+      ? `Wrap-up pending · ${formatClock((now - activeCall.since) / 1000)}`
+      : activeCall.state === 'bridged'
+        ? `${activeCall.onHold ? 'On hold' : 'On call'} ${formatClock((now - activeCall.since) / 1000)}`
+        : activeCall.state === 'ending'
+          ? 'Ending…'
+          : 'Connecting…';
 
   return (
     <div className="cc-dock" role="region" aria-label="Your call">
@@ -55,33 +57,49 @@ export function ActiveCallDock({ onBackToCall }: { onBackToCall: (callId: string
         {label} · {topic}
         {lobby && ` · ${callLanguageName(lobby.language)}`}
       </span>
-      {activeCall.state === 'bridged' && <LevelMeter source="input" label="Your microphone" />}
+      {activeCall.state === 'bridged' && !activeCall.onHold && <LevelMeter source="input" label="Your microphone" />}
       <div className="cc-dock-actions">
-        {activeCall.state === 'bridged' && (
+        {activeCall.state === 'wrap_up' ? (
+          <button type="button" className="cc-btn cc-btn--primary" onClick={() => onBackToCall(activeCall.callId)}>
+            Finish wrap-up
+          </button>
+        ) : (
           <>
-            <button type="button" className="cc-btn" aria-pressed={activeCall.muted} onClick={toggleMute}>
-              {activeCall.muted ? 'Unmute' : 'Mute'} <kbd>M</kbd>
-            </button>
-            {confirmEnd ? (
-              <span className="cc-confirm" role="group" aria-label="End the call?">
-                End the call?
-                <button type="button" className="cc-btn cc-btn--danger" onClick={() => void endCall()}>
-                  End
+            {activeCall.state === 'bridged' && (
+              <>
+                <button type="button" className="cc-btn" aria-pressed={activeCall.muted} onClick={toggleMute}>
+                  {activeCall.muted ? 'Unmute' : 'Mute'} <kbd>M</kbd>
                 </button>
-                <button type="button" className="cc-btn cc-btn--quiet" onClick={() => setConfirmEnd(false)}>
-                  Cancel
+                <button
+                  type="button"
+                  className="cc-btn"
+                  aria-pressed={Boolean(activeCall.onHold)}
+                  onClick={() => void toggleHold()}
+                >
+                  {activeCall.onHold ? 'Resume' : 'Hold'} <kbd>H</kbd>
                 </button>
-              </span>
-            ) : (
-              <button type="button" className="cc-btn cc-btn--danger" onClick={() => setConfirmEnd(true)}>
-                End <kbd>E</kbd>
-              </button>
+                {confirmEnd ? (
+                  <span className="cc-confirm" role="group" aria-label="End the call?">
+                    End the call?
+                    <button type="button" className="cc-btn cc-btn--danger" onClick={() => void endCall()}>
+                      End
+                    </button>
+                    <button type="button" className="cc-btn cc-btn--quiet" onClick={() => setConfirmEnd(false)}>
+                      Cancel
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" className="cc-btn cc-btn--danger" onClick={() => setConfirmEnd(true)}>
+                    End <kbd>E</kbd>
+                  </button>
+                )}
+              </>
             )}
+            <button type="button" className="cc-btn cc-btn--primary" onClick={() => onBackToCall(activeCall.callId)}>
+              Back to call
+            </button>
           </>
         )}
-        <button type="button" className="cc-btn cc-btn--primary" onClick={() => onBackToCall(activeCall.callId)}>
-          Back to call
-        </button>
       </div>
     </div>
   );

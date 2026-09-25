@@ -2,14 +2,16 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { StaffIdentity } from '@/components/StaffGuard';
 import { isTypingTarget } from '@/lib/ticketUi';
 import { acquireLobby } from '@/services/callLobbySocket';
-import { toggleMute } from '@/services/officerCallSession';
+import { toggleHold, toggleMute } from '@/services/officerCallSession';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { ActiveCallDock } from './ActiveCallDock';
 import { CallAlertStack } from './CallAlertStack';
 import { CallConsoleBar } from './CallConsoleBar';
 import { DeviceCheckDialog } from './DeviceCheckDialog';
+import { usePresenceHeartbeat } from './usePresenceHeartbeat';
 import './callConsole.css';
 
 /** Roles that take calls; auditors watch. */
@@ -21,7 +23,7 @@ const CALL_TAKERS = new Set(['ura_staff', 'ura_admin']);
  * `StaffGuard`; the state it shows lives outside React, so navigating between
  * pages neither drops the officer's call nor reopens the lobby socket.
  */
-export function StaffCallLayer({ role }: { role: string }) {
+export function StaffCallLayer({ role, who }: { role: string; who?: StaffIdentity }) {
   const router = useRouter();
   const lobbyStatus = useCallConsoleStore((s) => s.lobbyStatus);
   const requestDesk = useCallConsoleStore((s) => s.requestDesk);
@@ -29,6 +31,7 @@ export function StaffCallLayer({ role }: { role: string }) {
   const canTake = CALL_TAKERS.has(role);
 
   useEffect(() => acquireLobby(), []);
+  usePresenceHeartbeat(canTake ? who?.external_id || who?.email || 'staff' : undefined);
 
   const openCall = useCallback(
     (callId: string) => {
@@ -38,7 +41,7 @@ export function StaffCallLayer({ role }: { role: string }) {
     [requestDesk, router],
   );
 
-  // M and E work on every page while the officer is on a call.
+  // M, H, and E work on every page while the officer is on a call.
   useEffect(() => {
     if (!canTake) return;
     const onKey = (event: KeyboardEvent) => {
@@ -48,6 +51,9 @@ export function StaffCallLayer({ role }: { role: string }) {
       if (event.key === 'm' || event.key === 'M') {
         event.preventDefault();
         toggleMute();
+      } else if (event.key === 'h' || event.key === 'H') {
+        event.preventDefault();
+        toggleHold();
       } else if (event.key === 'e' || event.key === 'E') {
         event.preventDefault();
         setConfirmEnd(true);

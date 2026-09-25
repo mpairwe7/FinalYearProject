@@ -181,6 +181,8 @@ export const en = {
   'call.talkOfficer': 'Talk to an officer',
   'call.hangup': 'End call',
   'call.transferring': 'Connecting you to an officer…',
+  'call.onHold': 'On hold',
+  'call.reconnecting': 'Reconnecting you to the officer…',
   'call.officerJoined': 'Officer {name} joined',
   'call.officerSpeaking': 'Officer Speaking',
   'call.ended': 'Call ended',
