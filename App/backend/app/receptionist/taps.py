@@ -96,6 +96,8 @@ class CallerAudioTap(FrameProcessor):
             # caller over the officer.
             if self.room.officer is not None:
                 self.room.officer.send_caller_audio(frame.audio)
+            if hasattr(self.room, "broadcast_audio"):
+                self.room.broadcast_audio(frame.audio)
             return
 
         await self.push_frame(frame, direction)

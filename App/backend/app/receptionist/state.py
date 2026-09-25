@@ -99,6 +99,25 @@ class CallRoom:
         self.desk_lock = asyncio.Lock()
         self.claim_timer: asyncio.Task[None] | None = None
         self.end_event = asyncio.Event()
+        self.listeners: list[asyncio.Queue[bytes]] = []
+
+    def add_listener(self, queue: asyncio.Queue[bytes]) -> None:
+        self.listeners.append(queue)
+
+    def remove_listener(self, queue: asyncio.Queue[bytes]) -> None:
+        self.listeners = [q for q in self.listeners if q is not queue]
+
+    def broadcast_audio(self, pcm: bytes) -> None:
+        for q in list(self.listeners):
+            if q.full():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                q.put_nowait(pcm)
+            except asyncio.QueueFull:
+                pass
 
     async def end(self, reason: str = "normal") -> None:
         """End the call room and trigger teardown."""

@@ -76,6 +76,8 @@ class OfficerLeg:
                     await self.room.caller_ws.send_bytes(data)
                 except Exception:
                     pass
+            if hasattr(self.room, "broadcast_audio"):
+                self.room.broadcast_audio(data)
 
             # 2. Feed officer PCM to EnergyVAD for transcription
             is_speech, complete = self.vad.detect(data)

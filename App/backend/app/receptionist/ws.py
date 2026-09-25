@@ -333,7 +333,30 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         await websocket.close(code=4401)
         return
 
-    # Auditors are refused on audio bridge (view only)
+    listen_mode = websocket.query_params.get("listen", "").lower() in ("true", "1")
+    if listen_mode:
+        if role not in ("ura_admin", "ura_auditor", "ura_staff"):
+            await websocket.close(code=4403)
+            return
+        room = registry.get(call_id)
+        if not room or room.state.mode != "bridged":
+            await websocket.accept()
+            await websocket.close(code=4404 if not room else 4400)
+            return
+        await websocket.accept()
+        queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
+        room.add_listener(queue)
+        try:
+            while room.state.mode == "bridged":
+                chunk = await queue.get()
+                await websocket.send_bytes(chunk)
+        except (WebSocketDisconnect, Exception):
+            pass
+        finally:
+            room.remove_listener(queue)
+            return
+
+    # Auditors are refused on active audio bridge (view only)
     if role not in ("ura_staff", "ura_admin"):
         await websocket.close(code=4403)
         return

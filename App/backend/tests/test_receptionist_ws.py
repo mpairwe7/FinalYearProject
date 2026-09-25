@@ -14,8 +14,8 @@ from app.auth.jwt_auth import make_dev_token
 from app.flags import flags
 from app.main import app
 from app.receptionist.hub import hub
-from app.receptionist.state import CallState, registry
-from app.receptionist.store import create_call, create_turn, init_receptionist_schema
+from app.receptionist.state import CallRoom, CallState, registry
+from app.receptionist.store import create_call, create_turn, init_receptionist_schema, update_call
 
 
 class TestReceptionistWSAndHTTP(unittest.TestCase):
@@ -111,3 +111,21 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
         )
         self.assertEqual(r4.status_code, 200)
         self.assertTrue(r4.json().get("ok"))
+
+    def test_supervisor_listen_in(self):
+        call_id = f"call_{uuid.uuid4().hex[:8]}"
+        create_call(call_id, status="bridged")
+        update_call(call_id, officer_id="officer_alice")
+        state = CallState(call_id=call_id, conversation_id=call_id, mode="bridged", officer_id="officer_alice")
+        room = CallRoom(call_id=call_id, state=state)
+        registry._rooms[call_id] = room
+        try:
+            token = make_dev_token("supervisor_1", role="ura_admin")
+            with patch.object(flags, "is_enabled", return_value=True):
+                with self.client.websocket_connect(f"/v1/admin/calls/{call_id}/audio?listen=true&token={token}") as ws:
+                    chunk = b"\x00\x01" * 160
+                    room.broadcast_audio(chunk)
+                    received = ws.receive_bytes()
+                    self.assertEqual(received, chunk)
+        finally:
+            registry._rooms.pop(call_id, None)
