@@ -48,6 +48,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "clarify_repeat": "Sorry, I didn't catch that — could you say it again?",
         "clarify_restart": "Sorry about that — please tell me your question again.",
         "switched": "Sure — let's continue in English.",
+        "officer_offer": "Would you like to speak to an officer about this?",
         # Call Desk: an officer joins the call, holds it, reconnects, and ends it.
         "officer_joining": "You're now connected to {name}.",
         "officer_reconnecting": "Please hold, I'm reconnecting you.",
@@ -84,6 +85,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "clarify_repeat": "Nsonyiwa, sikuwulidde bulungi — oyinza okuddamu?",
         "clarify_restart": "Nsonyiwa ku ekyo — nsaba oddemu ekibuuzo kyo.",
         "switched": "Kale — tweyongere mu Luganda.",
+        "officer_offer": "Wandiyagadde okwogera n'omukozi ku nsonga eno?",
         "officer_joining": "Kati oyogera ne {name}.",
         "officer_reconnecting": "Nsaba olindeko, nkyakukwataganya n'omukozi.",
         "on_hold": "Nsaba olindeko.",
@@ -119,6 +121,7 @@ _PHRASES: dict[str, dict[str, str]] = {
         "clarify_repeat": "Samahani, sikusikia vizuri — unaweza kurudia?",
         "clarify_restart": "Samahani kwa hilo — tafadhali niambie swali lako tena.",
         "switched": "Sawa — tuendelee kwa Kiswahili.",
+        "officer_offer": "Je, ungependa kuzungumza na afisa kuhusu hili?",
         "officer_joining": "Sasa umeunganishwa na {name}.",
         "officer_reconnecting": "Tafadhali subiri, ninaendelea kukuunganisha na afisa.",
         "on_hold": "Tafadhali subiri.",

@@ -232,3 +232,82 @@ def candidates(
 ) -> list[tuple[str, float]]:
     """Lookup candidate terms for *word* given surrounding *context*."""
     return get_lexicon().candidates(word, context=context, acronyms_only=acronyms_only)
+
+
+# ---------------------------------------------------------------------------
+# Bilingual Luganda-English URA tax query mapping dictionary (Pillar 3)
+# ---------------------------------------------------------------------------
+LUGANDA_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
+    # Rental income tax
+    "omusolo gwa rental": "Rental Income Tax",
+    "omusolo gw'enju": "Rental Income Tax",
+    "omusolo gw enju": "Rental Income Tax",
+    "musolo gwa rental": "Rental Income Tax",
+    "rental tax": "Rental Income Tax",
+    # TIN registration / application
+    "okwewandiisa otya okufuna tin": "how to register for TIN",
+    "okwewandiisa ku tin": "TIN registration",
+    "okwewandiisa tin": "TIN registration",
+    "okusaba tin": "TIN registration",
+    "okufuna tin": "TIN registration",
+    "saba tin": "TIN registration",
+    # Tax returns filing
+    "okufayiringa return": "file tax return",
+    "okufayingisa return": "file tax return",
+    "okuggyamu return": "file tax return",
+    "okussaayo return": "file tax return",
+    "obutagyamu return": "late tax return filing penalty",
+    # VAT
+    "omusolo gwa vat": "VAT rate",
+    "musolo gwa vat": "VAT rate",
+    "vat gw'ameka": "VAT rate Uganda",
+    "vat y'emeka": "VAT rate Uganda",
+    # Motor vehicle transfer
+    "omusolo gw'emmotoka": "motor vehicle transfer tax",
+    "omusolo gw emmotoka": "motor vehicle transfer tax",
+    "omusolo gwa motoka": "motor vehicle transfer tax",
+    "okukyusa emmotoka": "motor vehicle transfer ownership",
+    "kyusa emmotoka": "motor vehicle transfer ownership",
+    # EFRIS
+    "efris kye ki": "EFRIS electronic fiscal receipting system",
+    "enkola ya efris": "EFRIS electronic fiscal receipting system",
+    # Payment & PRN
+    "okusasula emisolo ku ssimu": "pay taxes via mobile money PRN",
+    "okusasula ku ssimu": "pay tax using mobile money PRN",
+    "ennamba ya prn": "PRN payment registration number",
+    # Withholding tax
+    "withholding tax": "Withholding Tax WHT",
+    "omusolo gwa withholding": "Withholding Tax WHT",
+    # Corporate tax
+    "corporate tax": "Corporate Income Tax rate",
+    "omusolo gwa kkampuni": "Corporate Income Tax rate",
+    # Tax clearance
+    "tax clearance": "tax clearance certificate TCC",
+    "ennyingiza y'emisolo egy'entadde": "tax clearance certificate TCC",
+    # Penalties / late payment
+    "okusasula nga wayiise obudde": "late tax payment penalty",
+    "nga wayiise obudde": "late payment penalty interest",
+    # Disputes & objections
+    "okuwakanya assessment": "tax assessment objection Section 23",
+    "okuwakanya omusolo": "tax assessment objection dispute",
+}
+
+
+def normalize_luganda_tax_query(text: str) -> str:
+    """Pre-process common code-switched URA tax terms in Luganda queries into standard English domain terms.
+
+    Replaces matched Luganda idioms (longest matches first) with English tax terms
+    so that downstream BM25 and dense retrieval accurately hit relevant statutory passages.
+    """
+    if not text:
+        return ""
+    normalized = text
+    # Sort terms by descending length to match longer idioms before substrings
+    sorted_terms = sorted(LUGANDA_ENGLISH_TAX_TERMS.keys(), key=len, reverse=True)
+    for term in sorted_terms:
+        pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+        if pattern.search(normalized):
+            replacement = LUGANDA_ENGLISH_TAX_TERMS[term]
+            normalized = pattern.sub(replacement, normalized)
+    return normalized.strip()
+

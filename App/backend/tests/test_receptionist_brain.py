@@ -163,8 +163,13 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         self.assertIn(self.brain._pick_filler(), fillers("sw"))
 
     async def test_answers_are_generated_in_the_call_language(self):
+        self.state.locale = "sw"
+        await self.brain.process_frame(LLMContextFrame(context="Ninawezaje kupata TIN?"))
+        self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "sw")
+
+    async def test_luganda_answers_use_cross_lingual_knowledge_bridge(self):
         await self.brain.process_frame(LLMContextFrame(context="Nnyinza ntya okufuna TIN?"))
-        self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "lg")
+        self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "en")
 
     async def test_a_luganda_request_for_a_person_transfers_with_a_luganda_notice(self):
         from app.receptionist.phrases import phrase

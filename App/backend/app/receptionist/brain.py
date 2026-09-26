@@ -16,6 +16,7 @@ from ..speech_normalization import clean_text_for_speech
 from .clarify import ClarifyGate, ClarifyState
 from .config import (
     KNOWN_LANGUAGES,
+    get_brief_model,
     get_clarify_threshold,
     get_clarify_threshold_for,
     get_default_language,
@@ -80,6 +81,39 @@ _HUMAN_REQUEST_RE = re.compile(
     r"\b(?:i\s+want|can\s+i|need\s+to)\s+(?:talk\s+to|speak\s+with|see)\s+(?:an?\s+)?officer\b|"
     r"\btalk\s+to\s+an\s+officer\b",
     re.IGNORECASE,
+)
+
+_DISPUTE_RE = re.compile(
+    r"\b(dispute|object(?:ion)?|appeal|tribunal|tat|court|lawyer|advocate|illegal|fraud|"
+    r"okuwakanya|kuwakanya|nwakanya|okujulira|omusango|loya)\b",
+    re.IGNORECASE,
+)
+
+
+def is_tax_dispute(text: str, reason: str = "") -> bool:
+    """True when the question or escalation reason involves a tax dispute or legal objection."""
+    return bool(_DISPUTE_RE.search(text) or _DISPUTE_RE.search(reason))
+
+
+# Direct context-to-Luganda generation prompt templates (Pillars 1 & 2)
+LUGANDA_RAG_SYSTEM = (
+    "You are the official voice receptionist of the Uganda Revenue Authority (URA) speaking directly to a taxpayer in Luganda. "
+    "Synthesize a direct, concise 1 to 2 sentence answer in natural Luganda based strictly on the provided English context. "
+    "You MUST preserve all exact figures, percentages (e.g. 18%, 2%), statutory timeframes, rates, and legal numbers from the context. "
+    "Speak directly to the caller without any preamble, metadata, or English filler."
+)
+
+LUGANDA_RAG_PROMPT_TEMPLATE = (
+    "Context (English URA Statutes):\n{passages}\n\n"
+    "Taxpayer Question (Luganda):\n{luganda_query}\n\n"
+    "Provide a concise 1-2 sentence response directly in Luganda using exact figures from the context:"
+)
+
+QUERY_EXTRACT_SYSTEM = (
+    "You convert Luganda taxpayer questions into concise English search queries "
+    "for the Uganda Revenue Authority legal knowledge base. "
+    "Focus on the core tax type, rates, deadlines, or procedure. "
+    "Output ONLY the English search query and nothing else."
 )
 
 # Every call opens in the default language, whatever the caller selected in
@@ -358,25 +392,185 @@ class UraReceptionistBrain(LLMService):
         # 4. Standard Answer Generation
         await self._answer_question(user_text, mean_word_prob=mean_prob)
 
+    def _extract_english_tax_query(self, luganda_query: str) -> str:
+        """Extract a clean English search query from a Luganda taxpayer question."""
+        from .lexicon import normalize_luganda_tax_query
+
+        normalized = normalize_luganda_tax_query(luganda_query)
+
+        def _gemini_query() -> str:
+            from ..providers.gateway import gemini_generate
+
+            model = get_brief_model()
+            prompt = f"Luganda question: {luganda_query}\nEnglish search query:"
+            return gemini_generate(
+                prompt,
+                system=QUERY_EXTRACT_SYSTEM,
+                model=model,
+                max_tokens=64,
+                temperature=0.0,
+                locale="en",
+            ).strip().strip('"')
+
+        def _sunflower_query() -> str:
+            from ..llm import _vllm_generate
+
+            prompt = f"Luganda question: {luganda_query}\nEnglish search query:"
+            messages = [
+                {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
+                {"role": "user", "content": prompt},
+            ]
+            return _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
+
+        for gen in (_gemini_query, _sunflower_query):
+            try:
+                res = gen()
+                if res and len(res) > 2:
+                    return res
+            except Exception:
+                continue
+
+        return normalized or luganda_query
+
+    def _synthesize_luganda_reply(self, context_text: str, question: str) -> str:
+        """Single-pass synthesis from English statutory context directly into Luganda."""
+        prompt = LUGANDA_RAG_PROMPT_TEMPLATE.format(passages=context_text, luganda_query=question)
+
+        def _gemini_synth() -> str:
+            from ..providers.gateway import gemini_generate
+
+            model = get_brief_model()
+            return gemini_generate(
+                prompt,
+                system=LUGANDA_RAG_SYSTEM,
+                model=model,
+                max_tokens=256,
+                temperature=0.1,
+                locale="en",
+            ).strip()
+
+        def _sunflower_synth() -> str:
+            from ..llm import _vllm_generate
+
+            messages = [
+                {"role": "system", "content": LUGANDA_RAG_SYSTEM},
+                {"role": "user", "content": prompt},
+            ]
+            return _vllm_generate(messages, max_tokens=256, temperature=0.1).strip()
+
+        for synth in (_gemini_synth, _sunflower_synth):
+            try:
+                res = synth()
+                if res and len(res) > 3:
+                    return res
+            except Exception:
+                continue
+        return ""
+
+    async def _generate_luganda_answer(self, question: str) -> dict[str, Any]:
+        """Fast Cross-Lingual RAG Bridge (Gemini 2.5 Flash Lite + Sunflower Fallback).
+
+        Replaces the slow 4-hop MT pipeline with direct cross-lingual understanding,
+        English URA knowledge base retrieval, and direct Luganda synthesis in a single pass.
+        """
+        # 1. Clean query extraction
+        english_query = await asyncio.to_thread(self._extract_english_tax_query, question)
+
+        # 2. Query official URA tax knowledge in English
+        rag_result = await asyncio.to_thread(
+            self.chat_model.generate,
+            message=english_query,
+            conversation_id=self.room.state.conversation_id,
+            session_id=self.room.call_id,
+            top_k=4,
+            locale="en",
+            user_id=self.room.state.user_id,
+            tenant_id=self.room.state.tenant_id,
+        )
+
+        english_reply = (rag_result.get("reply", "") or rag_result.get("text", "")).strip()
+        sources = rag_result.get("sources", [])
+
+        # Hard failure: zero retrieval hits & no reply
+        if not english_reply and not sources:
+            return {
+                "reply": "",
+                "sources": [],
+                "escalation_required": True,
+                "escalation_reason": "no_knowledge_match",
+                "ticket_id": rag_result.get("ticket_id"),
+                "handoff": rag_result.get("handoff"),
+                "locale": "lg",
+            }
+
+        # Assemble grounding context
+        passages: list[str] = []
+        if english_reply:
+            passages.append(english_reply)
+        for s in sources:
+            if isinstance(s, dict) and s.get("text"):
+                passages.append(s["text"])
+            elif isinstance(s, str) and s:
+                passages.append(s)
+        context_text = "\n\n".join(passages[:3])
+
+        # 3. Direct Luganda Generation
+        luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
+        if not luganda_reply:
+            if english_reply:
+                from ..query import detect_language
+
+                loc_fn = getattr(self.chat_model, "_localize_reply", None)
+                if callable(loc_fn):
+                    try:
+                        localized = loc_fn(english_reply, "lg")
+                        if isinstance(localized, str) and localized.strip():
+                            luganda_reply = localized.strip()
+                        else:
+                            luganda_reply = english_reply
+                    except Exception:
+                        luganda_reply = english_reply
+                else:
+                    luganda_reply = english_reply
+            else:
+                luganda_reply = phrase("error_transfer", "lg")
+
+        return {
+            "reply": str(luganda_reply),
+            "sources": sources,
+            "citations": rag_result.get("citations", []),
+            "faithfulness_score": rag_result.get("faithfulness_score", 0.95),
+            "confidence": rag_result.get("confidence") or rag_result.get("retrieval_confidence", 0.8),
+            "escalation_required": rag_result.get("escalation_required", False),
+            "escalation_reason": rag_result.get("escalation_reason", ""),
+            "ticket_id": rag_result.get("ticket_id"),
+            "handoff": rag_result.get("handoff"),
+            "locale": "lg",
+            "english_query": english_query,
+        }
+
     async def _answer_question(self, question: str, mean_word_prob: float | None = None) -> None:
-        """Run ChatModel.generate with filler delay, trim for speech, and play reply."""
+        """Run answer generation with filler delay, calibrated escalations, and speech playout."""
         curr_gen_id = self.room.state.generation_id
         t0 = time.perf_counter()
         prefilled, self._prefilled = self._prefilled, False
 
         # Start background task for LLM answer
-        gen_task = asyncio.create_task(
-            asyncio.to_thread(
-                self.chat_model.generate,
-                message=question,
-                conversation_id=self.room.state.conversation_id,
-                session_id=self.room.call_id,
-                top_k=4,
-                locale=self.room.state.locale,
-                user_id=self.room.state.user_id,
-                tenant_id=self.room.state.tenant_id,
+        if self.language == "lg":
+            gen_task = asyncio.create_task(self._generate_luganda_answer(question))
+        else:
+            gen_task = asyncio.create_task(
+                asyncio.to_thread(
+                    self.chat_model.generate,
+                    message=question,
+                    conversation_id=self.room.state.conversation_id,
+                    session_id=self.room.call_id,
+                    top_k=4,
+                    locale=self.room.state.locale,
+                    user_id=self.room.state.user_id,
+                    tenant_id=self.room.state.tenant_id,
+                )
             )
-        )
 
         # Wait up to FILLER_AFTER_MS before sending filler audio
         filler_ms = get_filler_after_ms()
@@ -392,13 +586,13 @@ class UraReceptionistBrain(LLMService):
         try:
             result = await asyncio.wait_for(gen_task, timeout=25.0)
         except asyncio.TimeoutError:
-            logger.warning("ChatModel.generate timed out for call %s", self.room.call_id)
+            logger.warning("Generation timed out for call %s", self.room.call_id)
             if self.room.state.mode == "ai":
                 await self._say_and_record(phrase("timeout_transfer", self.language), kind="answer")
                 await self._transfer("timeout")
             return
         except Exception:
-            logger.exception("ChatModel.generate failed for call %s", self.room.call_id)
+            logger.exception("Generation failed for call %s", self.room.call_id)
             if self.room.state.mode == "ai":
                 await self._say_and_record(phrase("error_transfer", self.language), kind="answer")
                 await self._transfer("system_error")
@@ -409,7 +603,7 @@ class UraReceptionistBrain(LLMService):
             logger.info("Dropping late generation for call %s after barge-in", self.room.call_id)
             return
 
-        bot_reply = result.get("reply", "") or result.get("text", "")
+        bot_reply = (result.get("reply", "") or result.get("text", "")).strip()
         faithfulness = result.get("faithfulness_score")
         if faithfulness is not None:
             self.room.state.faithfulness_scores.append(float(faithfulness))
@@ -433,14 +627,39 @@ class UraReceptionistBrain(LLMService):
         except Exception:
             logger.debug("Failed logging conversation turn to DB", exc_info=True)
 
-        # Check escalation flags from chat_model
-        if result.get("escalation_required") or result.get("ticket_id"):
+        # Voice-Calibrated Escalation Policy (Pillar 2)
+        escalation_required = bool(result.get("escalation_required"))
+        ticket_id = result.get("ticket_id")
+        esc_reason = str(result.get("escalation_reason", "") or "rule_triggered")
+        sources = result.get("sources", [])
+        confidence = float(result.get("confidence") or mean_word_prob or 1.0)
+
+        # 1. Hard escalation: Explicit human request
+        if is_human_request(question) or esc_reason in ("user_requested", "caller_requested", "human_requested"):
+            await self._transfer("caller_requested", ticket_id=ticket_id, handoff=result.get("handoff"))
+            return
+
+        # 2. Hard escalation: Hard failure / zero retrieval hits
+        if not bot_reply or (not sources and confidence < 0.35):
             await self._transfer(
-                result.get("escalation_reason", "rule_triggered"),
-                ticket_id=result.get("ticket_id"),
+                esc_reason if esc_reason != "rule_triggered" else "no_knowledge_match",
+                ticket_id=ticket_id,
                 handoff=result.get("handoff"),
             )
             return
+
+        # 3. Hard escalation: Verified tax dispute / legal objection requiring human handling
+        if is_tax_dispute(question, esc_reason):
+            await self._transfer(
+                esc_reason if esc_reason != "rule_triggered" else "tax_dispute",
+                ticket_id=ticket_id,
+                handoff=result.get("handoff"),
+            )
+            return
+
+        # 4. Moderate retrieval confidence (0.35–0.50) or soft abstain:
+        # Deliver best statutory answer with confirmation prompt rather than hard transfer.
+        offer_officer = escalation_required or (0.35 <= confidence < 0.50)
 
         # Trim reply for spoken output
         sentences = _split_into_sentences(bot_reply)
@@ -449,6 +668,9 @@ class UraReceptionistBrain(LLMService):
             spoken_text = " ".join(sentences[:max_sentences]) + " " + phrase("more_detail", self.language)
         else:
             spoken_text = bot_reply
+
+        if offer_officer:
+            spoken_text = f"{spoken_text} {phrase('officer_offer', self.language)}"
 
         spoken_text = clean_text_for_speech(spoken_text, locale=self.language)
 

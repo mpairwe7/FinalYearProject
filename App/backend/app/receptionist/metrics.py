@@ -119,8 +119,12 @@ def compute_call_metrics(
         elif "brain_ms" in lat and "stt_ms" in lat:
             turn_to_audio_latencies.append(float(lat["brain_ms"]) + float(lat["stt_ms"]))
 
+    lang_info = _language_metrics(state, call)
+    is_lg = (state and state.locale == "lg") or call.get("locale") == "lg" or "lg" in lang_info.get("used", [])
+    luganda_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_lg else None
+
     metrics_obj = {
-        "language": _language_metrics(state, call),
+        "language": lang_info,
         "duration_s": duration_s,
         "caller_turns": caller_turns,
         "ai_answers": ai_answers,
@@ -143,6 +147,7 @@ def compute_call_metrics(
         "abandoned_while_waiting": abandoned_while_waiting,
         "callback_created": callback_created,
         "contained": contained,
+        "luganda_turn_latency_ms": luganda_turn_latency_ms,
         "latency": {
             "stt_ms_p50": _percentile(stt_latencies, 50),
             "stt_ms_p95": _percentile(stt_latencies, 95),
@@ -223,6 +228,10 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
             "avg_officer_rating": 0.0,
             "latency_p50_ms": 0.0,
             "latency_p95_ms": 0.0,
+            "luganda_total_calls": 0,
+            "luganda_containment_rate": 0.0,
+            "luganda_transfer_rate": 0.0,
+            "luganda_turn_latency_ms": 0.0,
         }
 
     contained_count = 0
@@ -235,6 +244,11 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
     durations: list[float] = []
     turn_latencies: list[float] = []
     ratings: list[int] = []
+
+    luganda_calls_count = 0
+    luganda_contained_count = 0
+    luganda_transferred_count = 0
+    luganda_turn_latencies: list[float] = []
 
     time_to_answers: list[float] = []
     handle_times: list[float] = []
@@ -258,6 +272,19 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
             transferred_count += 1
             reason = d.get("transfer_reason") or "unspecified"
             transfers_by_reason[reason] = transfers_by_reason.get(reason, 0) + 1
+
+        # Luganda-specific tracking (Pillar 2 / Phase B.2)
+        locale = d.get("locale") or (m.get("language") or {}).get("final") or ""
+        used_langs = (m.get("language") or {}).get("used") or []
+        if locale == "lg" or "lg" in used_langs:
+            luganda_calls_count += 1
+            if m.get("contained"):
+                luganda_contained_count += 1
+            if d.get("transferred"):
+                luganda_transferred_count += 1
+            lg_lat = m.get("luganda_turn_latency_ms") or (m.get("latency") or {}).get("turn_to_audio_ms_p50")
+            if lg_lat:
+                luganda_turn_latencies.append(float(lg_lat))
 
         c_asked = m.get("clarifications_asked", 0)
         if c_asked > 0:
@@ -302,6 +329,16 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
     avg_duration_s = round(sum(durations) / len(durations), 1) if durations else 0.0
     avg_officer_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
 
+    luganda_containment_rate = (
+        round(luganda_contained_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
+    )
+    luganda_transfer_rate = (
+        round(luganda_transferred_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
+    )
+    luganda_turn_latency_ms = (
+        _percentile(luganda_turn_latencies, 50) if luganda_turn_latencies else 0.0
+    )
+
     return {
         "period_days": days,
         "total_calls": total_calls,
@@ -322,4 +359,8 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
         "callbacks_created": callbacks_created_count,
         "callbacks_closed": callbacks_closed_count,
         "per_officer_counts": per_officer_counts,
+        "luganda_total_calls": luganda_calls_count,
+        "luganda_containment_rate": luganda_containment_rate,
+        "luganda_transfer_rate": luganda_transfer_rate,
+        "luganda_turn_latency_ms": luganda_turn_latency_ms,
     }
