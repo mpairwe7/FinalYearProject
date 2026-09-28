@@ -636,9 +636,12 @@ def check_links(timeout: float = 30.0) -> list[tuple[str, str, str]]:
     """Fetch every registry URL; return ``(id, url, problem)`` for each failure."""
     failures: list[tuple[str, str, str]] = []
     for res in _RESOURCES:
+        if not res.url.startswith("https://"):
+            failures.append((res.id, res.url, "Scheme must be https://"))
+            continue
         request = urllib.request.Request(res.url, headers={"User-Agent": "ura-chatbot-link-check/1.0"})
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 — https URA hosts only
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310 # noqa: S310 — audited https URA hosts only
                 if response.status != 200:
                     failures.append((res.id, res.url, f"HTTP {response.status}"))
         except Exception as exc:  # noqa: BLE001 — every failure is reported, none is fatal
