@@ -1,6 +1,6 @@
 {
  "base": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
- "run_at": "2026-09-29T07:07:05+0900",
+ "run_at": "2026-09-29T07:22:23+0900",
  "results": [
   {
    "name": "how-to return answered with guide offer",
@@ -17,7 +17,7 @@
    "reply_lacks": [],
    "passed": true,
    "misses": [],
-   "seconds": 0.6,
+   "seconds": 0.7,
    "observed": {
     "retrieval_mode": "faq_priority",
     "workflow": null,
@@ -244,7 +244,7 @@
    "reply_lacks": [],
    "passed": true,
    "misses": [],
-   "seconds": 0.5,
+   "seconds": 5.2,
    "observed": {
     "retrieval_mode": "faq_priority",
     "workflow": null,
@@ -299,7 +299,7 @@
    "reply_lacks": [],
    "passed": true,
    "misses": [],
-   "seconds": 0.5,
+   "seconds": 4.3,
    "observed": {
     "retrieval_mode": "hybrid",
     "workflow": null,
@@ -308,7 +308,7 @@
     "next_actions": [
      "Guide me step by step through Motor Vehicle Registration"
     ],
-    "reply_start": "To register your motor vehicle, you will need to complete the following steps:\n\n1. **Obtain a New Logbook**: Ensure you have a valid logbook for your vehicle. I"
+    "reply_start": "To register your motor vehicle, follow these steps:\n\n1. **Access the Portal**: Log in to ura.go.ug with your TIN and password to access e-services.\n2. **Motor V"
    }
   },
   {
@@ -354,7 +354,7 @@
    "reply_lacks": [],
    "passed": true,
    "misses": [],
-   "seconds": 0.5,
+   "seconds": 3.8,
    "observed": {
     "retrieval_mode": "faq_priority",
     "workflow": null,
@@ -389,7 +389,7 @@
      "Prepare the listed reference details before speaking to a URA officer.",
      "Use the URA Contact Centre if you need immediate human assistance."
     ],
-    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket e185b90f) — meanwhile, you can also reach URA directly at https:"
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket fbde0fea) — meanwhile, you can also reach URA directly at https:"
    }
   },
   {
@@ -417,7 +417,7 @@
      "Prepare the listed reference details before speaking to a URA officer.",
      "Use the URA Contact Centre if you need immediate human assistance."
     ],
-    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 6bace7c6) — meanwhile, you can also reach URA directly at https:"
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 869bcd15) — meanwhile, you can also reach URA directly at https:"
    }
   },
   {
@@ -481,6 +481,151 @@
    }
   },
   {
+   "name": "contraction still reads as a feeling",
+   "turns": [
+    "I'm confused"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": "clarification",
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "clarification",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "File a return",
+     "Make a payment",
+     "Register for a TIN",
+     "Talk to an officer"
+    ],
+    "reply_start": "What are you trying to do: file a return, make a payment, register for a TIN, or something else? Tell me where it stops and I'll take it from there."
+   }
+  },
+  {
+   "name": "a past event does not start a flow",
+   "turns": [
+    "I filed my return yesterday but the portal shows an error"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [
+    "I can guide you through the Return Filing process"
+   ],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "escalated",
+    "workflow": null,
+    "escalation_required": true,
+    "locale": "en",
+    "next_actions": [
+     "Prepare the listed reference details before speaking to a URA officer.",
+     "Use the URA Contact Centre if you need immediate human assistance."
+    ],
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket cd1d3fed) — meanwhile, you can also reach URA directly at https:"
+   }
+  },
+  {
+   "name": "nil return starts return filing",
+   "turns": [
+    "Help me submit the nil return for my company"
+   ],
+   "workflow": "Return Filing",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Return Filing",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Return Filing process step by step.\n\nAre you filing as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "asking for another flow inside one switches to it",
+   "turns": [
+    "Guide me through getting a tax clearance certificate",
+    "help me file my return"
+   ],
+   "workflow": "Return Filing",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 1.0,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Return Filing",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Return Filing process step by step.\n\nAre you filing as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "account-locked plea still escalates",
+   "turns": [
+    "Please help me, my account is locked"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": true,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "escalated",
+    "workflow": null,
+    "escalation_required": true,
+    "locale": "en",
+    "next_actions": [
+     "Prepare the listed reference details before speaking to a URA officer.",
+     "Use the URA Contact Centre if you need immediate human assistance."
+    ],
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 1ecc33a5) — meanwhile, you can also reach URA directly at https:"
+   }
+  },
+  {
    "name": "sustained frustration brings in an officer",
    "turns": [
     "This is useless",
@@ -529,7 +674,7 @@
    ],
    "passed": true,
    "misses": [],
-   "seconds": 5.4,
+   "seconds": 5.3,
    "observed": {
     "retrieval_mode": "workflow",
     "workflow": "TIN Registration Help",

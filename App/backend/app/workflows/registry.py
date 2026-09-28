@@ -157,28 +157,36 @@ def _make_turn(
     )
 
 
-#: Verb forms people use for the task a trigger names. Triggers are written
-#: with the base verb ("file a return"), so "filing my VAT return" never
-#: matched, and an explicit "walk me through filing my VAT return" fell
+#: The "-ing" forms people use for the task a trigger names. Triggers are
+#: written with the base verb ("file a return"), so "filing my VAT return"
+#: never matched, and an explicit "walk me through filing my VAT return" fell
 #: through to a VAT explainer instead of the Return Filing flow (measured on
 #: the local stack, 2026-09-29).
+#:
+#: Past tense is deliberately NOT folded. "I filed my return yesterday but the
+#: portal shows an error" and "I registered for a TIN and lost the
+#: certificate" report something already done; folding them to "file my
+#: return" / "register for a tin" started a fresh guided flow instead of
+#: answering the problem (code review, 2026-09-29).
 _VERB_FORMS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"\bfil(?:ing|ed)\b"), "file"),
-    (re.compile(r"\bregister(?:ing|ed)\b"), "register"),
-    (re.compile(r"\bsubmit(?:ting|ted)\b"), "submit"),
+    (re.compile(r"\bfiling\b"), "file"),
+    (re.compile(r"\bregistering\b"), "register"),
+    (re.compile(r"\bsubmitting\b"), "submit"),
     (re.compile(r"\bpaying\b"), "pay"),
-    (re.compile(r"\bgenerat(?:ing|ed)\b"), "generate"),
-    (re.compile(r"\bclear(?:ing|ed)\b"), "clear"),
-    (re.compile(r"\bobject(?:ing|ed)\b"), "object"),
+    (re.compile(r"\bgenerating\b"), "generate"),
+    (re.compile(r"\bclearing\b"), "clear"),
+    (re.compile(r"\bobjecting\b"), "object"),
     (re.compile(r"\bgetting\b"), "get"),
-    (re.compile(r"\bappl(?:ying|ied)\b"), "apply"),
+    (re.compile(r"\bapplying\b"), "apply"),
 )
 
 #: A tax-type word between the determiner and "return" — "my VAT return" is
-#: still "my return" for the purpose of finding the filing flow.
+#: still "my return" for the purpose of finding the filing flow. "nil" is not
+#: folded: "nil return" is itself a trigger phrase, and folding it away left
+#: "submit the nil return" matching nothing.
 _RETURN_QUALIFIER_RE = re.compile(
     r"\b(my|a|the|our)\s+(?:vat|paye|income\s+tax|corporation\s+tax|withholding\s+tax"
-    r"|rental(?:\s+income)?\s+tax|nil|annual|monthly|provisional)\s+return\b"
+    r"|rental(?:\s+income)?\s+tax|annual|monthly|provisional)\s+return\b"
 )
 
 

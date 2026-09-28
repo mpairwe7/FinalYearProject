@@ -147,6 +147,83 @@ def test_journey_funnel_events_are_counted(client):
     assert delta(key("cancelled", "collect_taxpayer_type")) == 1
 
 
+def test_asking_for_another_flow_inside_one_switches_to_it(client):
+    # The Tax Clearance checklist tells the taxpayer to say "help me file my
+    # return"; inside the flow that used to be validated as a yes/no answer.
+    conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
+    first = client.post(
+        "/v1/chat",
+        json={"message": "Guide me through getting a tax clearance certificate", "conversation_id": conversation_id},
+    ).json()
+    assert first["workflow"]["name"] == "Tax Clearance Certificate"
+    switched = client.post(
+        "/v1/chat", json={"message": "help me file my return", "conversation_id": conversation_id}
+    ).json()
+    assert switched["retrieval_mode"] == "workflow"
+    assert switched["workflow"]["name"] == "Return Filing"
+
+
+def test_i_dont_understand_after_a_real_question_is_not_restarted(client):
+    conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
+    client.post("/v1/chat", json={"message": "What is chargeable income?", "conversation_id": conversation_id})
+    follow_up = client.post(
+        "/v1/chat", json={"message": "I don't understand", "conversation_id": conversation_id}
+    ).json()
+    assert follow_up.get("agent_role") != "conversation_repair"
+
+
+def test_resume_does_not_count_a_step_twice(client):
+    step_key = 'journey_events_total{event="step_entered",step="collect_taxpayer_type",workflow="return_filing"}'
+    before = service_module.metrics.snapshot()["counters"].get(step_key, 0)
+    conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
+    client.post("/v1/chat", json={"message": "Help me file my return", "conversation_id": conversation_id})
+    client.post("/v1/chat", json={"message": "resume", "conversation_id": conversation_id})
+    after = service_module.metrics.snapshot()["counters"].get(step_key, 0)
+    assert after - before == 1
+
+
+def test_the_streaming_abstention_neither_repeats_the_opener_nor_competes_with_a_handoff(client):
+    from App.backend.app.text_signals import empathy_ack  # noqa: PLC0415
+    from App.backend.app.turn_guidance import GUIDE_PREFIX, HANDOFF_ACTION  # noqa: PLC0415
+
+    ack = empathy_ack("anxiety")
+    model = mock.MagicMock()
+    model.generate_retrieval_only.return_value = {
+        "reply": "",
+        "retrieval_mode": "hybrid",
+        "locale": "en",
+        "next_actions": [],
+        "_hits": [],
+        "_distress": "anxiety",
+        "_history": [{"user_message": "I'm worried about my return", "bot_reply": f"{ack}\n\nFirst answer."}],
+    }
+    model._maybe_create_ticket.return_value = ""
+    model._build_handoff_packet.return_value = None
+
+    async def _run():
+        return [
+            event
+            async for event in service_module.run_chat_turn(
+                model,
+                message="I'm still worried, how do I file my return?",
+                conversation_id=None,
+                top_k=4,
+                locale="en",
+                session_id=None,
+                request_id=None,
+                user_id=None,
+                tenant_id="default",
+            )
+        ]
+
+    events = asyncio.run(_run())
+    reply = "".join(payload for kind, payload in events if kind == "token")
+    grounding = next(payload for kind, payload in events if kind == "grounding")
+    assert not reply.startswith(ack)
+    if grounding["escalation_required"]:
+        assert not any(a.startswith(GUIDE_PREFIX) or a == HANDOFF_ACTION for a in grounding["next_actions"])
+
+
 def test_the_streaming_core_applies_the_same_guidance(client):
     # ``client`` builds the real ChatModel, which loads the workflow flows the
     # guided-mode offer is matched against.

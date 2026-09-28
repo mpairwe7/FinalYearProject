@@ -48,8 +48,9 @@ steps:
   - id: tin_guidance
     title: "Get a TIN first"
     question: >
-      Get your TIN before anything else; say **help me register for a TIN**
-      and I will guide you.
+      Get your TIN before anything else. Say **help me register for a TIN**
+      and I will switch you to the TIN guide; come back to this one
+      afterwards.
     when: "has_tin == False"
     slot: ""
     validator: text

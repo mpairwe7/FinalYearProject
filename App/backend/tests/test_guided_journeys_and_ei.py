@@ -23,11 +23,18 @@ from app.text_signals import (
     distress_trajectory,
     empathy_ack,
     is_feeling_only,
+    names_a_task,
     repair_reply,
     strip_repeated_ack,
 )
 from app.tools.empathy import assess
-from app.turn_guidance import HANDOFF_ACTION, apply_turn_guidance, guided_mode_action
+from app.turn_guidance import (
+    HANDOFF_ACTION,
+    apply_turn_guidance,
+    finalize_turn_actions,
+    guided_mode_action,
+    turns_from_history,
+)
 from app.verified_resources import is_authoritative_ura_url
 from app.workflows.loader import load_workflow
 from app.workflows.registry import WorkflowRegistry, WorkflowSession, compute_workflow_progress
@@ -77,6 +84,81 @@ class TriggerNormalisationTests(unittest.TestCase):
         self.assertTrue(matched is None or not matched.id.startswith("calc_"))
 
 
+class ReviewRegressionTests(unittest.TestCase):
+    """Findings from the 2026-09-29 code review of this branch, one test each."""
+
+    def setUp(self) -> None:
+        _load_all_flows()
+
+    def test_a_past_event_does_not_start_a_flow(self) -> None:
+        for message in (
+            "I filed my return yesterday but the portal shows an error",
+            "I registered for a TIN last year and lost the certificate",
+            "I applied for tin but got no email",
+        ):
+            with self.subTest(message=message):
+                matched = WorkflowRegistry.match_trigger(message)
+                self.assertTrue(matched is None or matched.id not in ("return_filing", "tin_registration"))
+
+    def test_nil_return_still_starts_return_filing(self) -> None:
+        matched = WorkflowRegistry.match_trigger("I want to submit the nil return for my company")
+        self.assertEqual(matched.id, "return_filing")
+
+    def test_account_state_requests_escalate_even_with_help_me(self) -> None:
+        for query in ("Please help me, my account is locked", "Help me check my balance"):
+            with self.subTest(query=query):
+                self.assertEqual(supervisor.classify(query).route, AgentRoute.ESCALATE)
+        self.assertNotEqual(supervisor.classify("How to file my return").route, AgentRoute.ESCALATE)
+
+    def test_no_guide_offer_outside_answer_turns(self) -> None:
+        for mode in ("out_of_jurisdiction", "out_of_scope", "officer_reply", "greeting", "calculator"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    guided_mode_action("How do I file a return in Kenya?", {"retrieval_mode": mode}), ""
+                )
+
+    def test_contractions_do_not_hide_a_feeling(self) -> None:
+        for message in ("I'm confused", "I'm so frustrated, this is useless", "I've had enough, it's useless"):
+            with self.subTest(message=message):
+                self.assertTrue(is_feeling_only(message))
+
+    def test_confusion_repair_does_not_promise_a_rephrase(self) -> None:
+        self.assertNotIn(empathy_ack("confusion"), repair_reply("confusion", repeated=False))
+
+    def test_a_real_question_names_a_task_and_small_talk_does_not(self) -> None:
+        self.assertTrue(names_a_task("What is chargeable income?"))
+        self.assertFalse(names_a_task("Hello, good morning"))
+        self.assertFalse(names_a_task("This is useless"))
+
+    def test_escalation_clears_competing_actions(self) -> None:
+        result = {"next_actions": ["Guide me step by step through Return Filing", HANDOFF_ACTION, "Prepare your TIN"]}
+        finalize_turn_actions(result, escalated=True)
+        self.assertEqual(result["next_actions"], ["Prepare your TIN"])
+        kept = {"next_actions": [HANDOFF_ACTION]}
+        self.assertEqual(finalize_turn_actions(kept, escalated=False)["next_actions"], [HANDOFF_ACTION])
+
+    def test_history_in_either_shape_becomes_turns(self) -> None:
+        stored = [{"user_message": "hi", "bot_reply": "hello"}]
+        chat = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+        self.assertEqual(turns_from_history(stored), stored)
+        self.assertEqual(turns_from_history(chat), stored)
+
+
+class FlowShapeTests(unittest.TestCase):
+    def test_no_question_follows_an_information_step(self) -> None:
+        # advance() shows an information-only step once and moves on, so a
+        # question after one receives the reply meant for the information step.
+        for path in sorted(FLOWS_DIR.glob("*.yaml")):
+            wf = load_workflow(path)
+            info_seen = ""
+            for step in wf.steps:
+                if not step.slot and not step.tool:
+                    info_seen = info_seen or step.id
+                elif step.slot:
+                    with self.subTest(flow=wf.id, step=step.id):
+                        self.assertEqual(info_seen, "", f"{step.id} follows information step {info_seen}")
+
+
 class NewJourneyTests(unittest.TestCase):
     def setUp(self) -> None:
         _load_all_flows()
@@ -112,6 +194,29 @@ class NewJourneyTests(unittest.TestCase):
         self.assertNotIn("collect_partners_filed", ids)
         self.assertNotIn("annual_note", ids)
         self.assertNotIn("payment_guidance", ids)
+
+    def test_tax_clearance_asks_every_question_before_any_guidance(self) -> None:
+        # v1 showed the annual-certificate note between questions, and the
+        # taxpayer's "ok" was stored as the answer to "have you filed every
+        # return?", a question they never saw.
+        session = WorkflowRegistry.create_session("tax_clearance")
+        turn = WorkflowRegistry.advance(session, "")
+        asked = []
+        for answer in ("company", "annual", "no", "no", "yes"):
+            asked.append(turn.step_id)
+            turn = WorkflowRegistry.advance(session, answer)
+        self.assertEqual(
+            asked,
+            [
+                "collect_taxpayer_type",
+                "collect_certificate_type",
+                "collect_returns_filed",
+                "collect_directors_filed",
+                "collect_tax_paid",
+            ],
+        )
+        self.assertEqual(session.slots["returns_filed"], False)
+        self.assertEqual(turn.step_id, "annual_note")
 
     def test_vehicle_journey_separates_first_registration_from_upgrade(self) -> None:
         wf = WorkflowRegistry.get("motor_vehicle_registration")

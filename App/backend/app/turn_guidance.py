@@ -37,19 +37,26 @@ if TYPE_CHECKING:
 #: straight to the ticket queue.
 HANDOFF_ACTION = "Talk to an officer"
 
-#: Turns that must not carry a guided-mode offer: a flow is already running,
-#: the input was refused, the assistant is asking a question back, or a person
-#: is already being brought in. An abstention is deliberately *not* here: "I
-#: couldn't find a reliable answer" with a step-by-step guide under it is a way
-#: forward instead of a dead end.
-_NO_OFFER_MODES = frozenset(
+#: Prefix of every guided-mode offer; the flow's name follows it.
+GUIDE_PREFIX = "Guide me step by step through "
+
+#: The turns that answer a question, and so may carry a guided-mode offer. An
+#: allow-list, not a deny-list: a deny-list missed out_of_jurisdiction ("How do
+#: I file a return in Kenya?" was offered the *Uganda* filing flow),
+#: out_of_scope and officer_reply, and any mode added later would have been
+#: offered too. An abstention is included on purpose: "I couldn't find a
+#: reliable answer" with a step-by-step guide under it is a way forward.
+_OFFER_MODES = frozenset(
     {
-        "workflow",
-        "blocked",
-        "clarification",
-        "escalated",
-        "false_premise_rejected",
-        "crisis_support",
+        "hybrid",
+        "hybrid_corrected",
+        "keyword",
+        "vector",
+        "faq_priority",
+        "graph",
+        "agentic",
+        "education",
+        "abstained",
     }
 )
 
@@ -60,14 +67,54 @@ def guided_mode_action(message: str, result: Mapping[str, Any], rewritten: str =
         return ""
     if result.get("workflow") or result.get("escalation_required"):
         return ""
-    if str(result.get("retrieval_mode") or "") in _NO_OFFER_MODES:
+    if str(result.get("retrieval_mode") or "") not in _OFFER_MODES:
         return ""
     wf = WorkflowRegistry.match_trigger(message)
     if wf is None and rewritten:
         wf = WorkflowRegistry.match_trigger(rewritten)
     if wf is None or not wf.trigger_phrases:
         return ""
-    return f"Guide me step by step through {wf.name}"
+    return f"{GUIDE_PREFIX}{wf.name}"
+
+
+def turns_from_history(history: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """Earlier turns as ``{user_message, bot_reply}``, whichever shape *history* has.
+
+    ``database.get_recent_turns`` returns that shape already; the WebSocket
+    override path carries chat messages (``role`` / ``content``), which are
+    paired up here so the streaming core can reuse the history it has already
+    loaded instead of querying the database again.
+    """
+    turns: list[dict[str, str]] = []
+    pending_user = ""
+    for item in history or ():
+        if "user_message" in item or "bot_reply" in item:
+            turns.append(
+                {"user_message": str(item.get("user_message") or ""), "bot_reply": str(item.get("bot_reply") or "")}
+            )
+        elif item.get("role") == "user":
+            pending_user = str(item.get("content") or "")
+        elif item.get("role") == "assistant":
+            turns.append({"user_message": pending_user, "bot_reply": str(item.get("content") or "")})
+            pending_user = ""
+    return turns
+
+
+def finalize_turn_actions(result: dict[str, Any], *, escalated: bool) -> dict[str, Any]:
+    """Drop actions a later decision made wrong, in place.
+
+    The streaming core decides some escalations after guidance has run (an
+    abstention that opens a ticket). Once a person is being brought in, a
+    guided-mode offer and a second "talk to an officer" action only compete
+    with the handoff.
+    """
+    if escalated:
+        result["next_actions"] = [
+            a
+            for a in (result.get("next_actions") or [])
+            if a != HANDOFF_ACTION and not str(a).startswith(GUIDE_PREFIX)
+        ]
+    return result
 
 
 def apply_turn_guidance(

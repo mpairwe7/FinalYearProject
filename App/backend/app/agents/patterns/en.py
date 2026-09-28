@@ -194,9 +194,14 @@ _CUSTOMS = (
 #: return or TIN has a public, procedural answer; only a question about the
 #: account's current state needs an authenticated lookup or a person. Shared
 #: with the answer judge in ``service.py`` so the two cannot disagree.
+#:
+#: "help me" is not here: it opens account-state requests as often as how-to
+#: ones — "Please help me, my account is locked" must still reach a person.
+#: "how to" is, because "How to file my return" is the same question as "How
+#: do I file my return?" (both found in code review, 2026-09-29).
 HOW_TO_QUESTION_RE = re.compile(
-    r"\b(?:how\s+(?:do|does|can|should|would)\s+(?:i|we|one)|what\s+are\s+the\s+steps"
-    r"|where\s+(?:do|can)\s+i|help\s+me|guide\s+me|walk\s+me\s+through|steps\s+to"
+    r"\b(?:how\s+(?:do|does|can|should|would)\s+(?:i|we|one)|how\s+to|what\s+are\s+the\s+steps"
+    r"|where\s+(?:do|can)\s+i|guide\s+me|walk\s+me\s+through|steps\s+to"
     r"|procedure|process\s+(?:to|for|of))\b",
     re.IGNORECASE,
 )

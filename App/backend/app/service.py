@@ -141,6 +141,7 @@ from .text_signals import (
     REPAIR_NEXT_ACTIONS,
     REPAIR_QUESTION,
     REPAIR_REPEAT_REPLY,
+    ack_already_given,
     crisis_support_reply,
     detect_crisis,
     repair_reply,
@@ -148,6 +149,7 @@ from .text_signals import (
     empathy_ack,
     is_feeling_only,
     jurisdiction_scope_caveat,
+    names_a_task,
     local_government_tax_reply,
     out_of_jurisdiction_reply,
     is_courtesy_sentence,
@@ -157,7 +159,7 @@ from .text_signals import (
 )
 from .topics import classify_topic, resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
-from .turn_guidance import apply_turn_guidance
+from .turn_guidance import apply_turn_guidance, finalize_turn_actions, turns_from_history
 from .verified_resources import resources_for_turn
 from .workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from .workflows.slots import validate_slot
@@ -1557,11 +1559,17 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         result["resources"] = resources_for_turn(
             message, result, rewritten=str(result.get("_rewritten") or "")
         )
+        # Reuse the history generate_retrieval_only already loaded; read the
+        # database only when it loaded none, and off the event loop.
+        history_turns = turns_from_history(result.get("_history") or [])
+        if not history_turns:
+            history_turns = await asyncio.to_thread(_recent_turns_for_guidance, result, user_id)
+        prior_replies = [t["bot_reply"] for t in history_turns]
         apply_turn_guidance(
             message,
             result,
             rewritten=str(result.get("_rewritten") or ""),
-            recent_turns=_recent_turns_for_guidance(result, user_id),
+            recent_turns=history_turns,
         )
 
         yield (
@@ -1625,6 +1633,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         personalization_context = result.get("_personalization_context", "")
         tone_hint = str(result.get("_tone_hint") or "")
         distress = str(result.get("_distress") or "")
+        # Guidance ran before these branches built their reply, so the opener
+        # they prepend is de-duplicated here rather than stripped afterwards.
+        turn_ack = "" if ack_already_given(distress, prior_replies) else empathy_ack(distress)
 
         # ── Phase 2: optional agentic branch ─────────────────────────
         # When tool_use is enabled or forced by routing, run the bounded
@@ -1726,8 +1737,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         # and passages fail the confidence threshold, abstain (parity with REST path).
         if not attachments and not (agentic_used_tools and full_reply) and _output_guard.should_abstain(hits, locale=locale):
             abstained_reply = ABSTENTION_REPLY
-            if distress:
-                abstained_reply = f"{empathy_ack(distress)}\n\n{abstained_reply}"
+            if turn_ack:
+                abstained_reply = f"{turn_ack}\n\n{abstained_reply}"
             escalate, esc_reason = _output_guard.should_escalate(None, hits)
             handoff = None
             response_judge = {
@@ -1762,6 +1773,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
+            finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
             full_reply = localize_reply(abstained_reply, locale)
@@ -1891,8 +1903,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     finalized = model._finalize_reply(full_reply, attachments=attachments)
                     if isinstance(finalized, str):
                         full_reply = finalized
-                if distress and full_reply:
-                    full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+                if turn_ack and full_reply:
+                    full_reply = f"{turn_ack}\n\n{full_reply}"
                 # One frame, so localize before sending rather than revising
                 # after — and localize at all, which this branch did not: an
                 # open breaker or an empty stream answered a Luganda question
@@ -1958,6 +1970,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
+            finalize_turn_actions(result, escalated=escalate)
 
             yield (
                 "grounding",
@@ -2000,8 +2013,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         else:
             # No LLM tier at all — extractive reply, same EI parity as above.
             full_reply = result.get("reply", "")
-            if distress and full_reply:
-                full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+            if turn_ack and full_reply:
+                full_reply = f"{turn_ack}\n\n{full_reply}"
             # One frame, so localize before sending rather than revising after.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
@@ -5356,6 +5369,11 @@ class ChatModel:
             recent = []
         previous = str(recent[-1].get("bot_reply") or "") if recent else ""
         repeated = REPAIR_QUESTION in previous or REPAIR_REPEAT_REPLY in previous
+        if recent and not repeated and names_a_task(str(recent[-1].get("user_message") or "")):
+            # "I don't understand" right after a real question wants that
+            # answer re-explained (the pipeline has the history and the
+            # confusion tone hint), not a fresh "what are you trying to do?".
+            return None
         actions = list(REPAIR_NEXT_ACTIONS)
         if repeated:
             actions = [actions[-1], *actions[:-1]]
@@ -5748,9 +5766,16 @@ class ChatModel:
         session: WorkflowSession,
         user_input: str,
         conversation_id: str = "",
+        *,
+        record: bool = True,
     ) -> tuple[Any, list[str]]:
-        """Advance a workflow and execute any deterministic tool steps inline."""
+        """Advance a workflow and execute any deterministic tool steps inline.
+
+        *record* is False where the turn re-shows a step already counted (a
+        resume), so the funnel counts each step once per journey.
+        """
         tool_messages: list[str] = []
+        before = WorkflowRegistry.pending_step(session)
         turn = WorkflowRegistry.advance(session, user_input, self._resolve_slot_choice)
         while turn.tool_call:
             tool_name = str(turn.tool_call.get("name", ""))
@@ -5778,7 +5803,8 @@ class ChatModel:
             if warning:
                 tool_messages.append(f"_{warning}_")
             turn = WorkflowRegistry.advance(session, "")
-        self._record_journey_turn(session, turn)
+        if record:
+            self._record_journey_turn(session, turn, previous_step=before.id if before else "", answered=bool(user_input))
         return turn, tool_messages
 
     @staticmethod
@@ -5794,14 +5820,19 @@ class ChatModel:
         """
         metrics.inc("journey_events_total", labels={"workflow": workflow_id, "event": event, "step": step})
 
-    def _record_journey_turn(self, session: WorkflowSession, turn: Any) -> None:
+    def _record_journey_turn(
+        self, session: WorkflowSession, turn: Any, *, previous_step: str = "", answered: bool = False
+    ) -> None:
+        step = str(getattr(turn, "step_id", "") or "")
         if getattr(turn, "validation_error", ""):
             event = "step_invalid"
         elif session.completed or getattr(turn, "is_complete", False):
             event = "completed"
+        elif answered and step == previous_step:
+            return  # the same step asked again after an answer: not a new entry
         else:
             event = "step_entered"
-        self._record_journey(session.workflow_id, event, str(getattr(turn, "step_id", "") or ""))
+        self._record_journey(session.workflow_id, event, step)
 
     def _maybe_handle_fast_paths(
         self,
@@ -6655,6 +6686,31 @@ class ChatModel:
         is_valid, _, _ = validate_slot(user_input, step.validator, None)
         return not is_valid
 
+    def _leaves_flow_for_another(
+        self, persisted: dict[str, Any], *, message: str, rewritten: str, thread_id: str
+    ) -> bool:
+        """Close the active flow when the taxpayer explicitly asks for a different one.
+
+        A flow owns its thread, so without this "help me file my return" typed
+        inside the Tax Clearance checklist, which tells the taxpayer to do
+        exactly that, was validated as the answer to the pending question and
+        the filing guide never started. Only an explicit start ("help me file",
+        "guide me", "walk me through", "start") that names another flow counts;
+        a slot answer never does. The closed flow is counted as cancelled at
+        the step it was on.
+        """
+        combined = f"{message or ''} {rewritten or ''}"
+        if not _EXPLICIT_WORKFLOW_START_RE.search(combined):
+            return False
+        target = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
+        current = str(persisted.get("workflow_id") or "")
+        if target is None or target.id == current:
+            return False
+        pending = WorkflowRegistry.pending_step(self._restore_workflow_session(persisted))
+        db.complete_workflow_session(thread_id, status="cancelled")
+        self._record_journey(current, "cancelled", pending.id if pending else "")
+        return True
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -6669,6 +6725,10 @@ class ChatModel:
             return None
 
         persisted = db.get_workflow_session(thread_id)
+        if persisted and persisted.get("status") == "active" and self._leaves_flow_for_another(
+            persisted, message=message, rewritten=rewritten, thread_id=thread_id
+        ):
+            persisted = None
         if persisted and persisted.get("status") == "active":
             session = self._restore_workflow_session(persisted)
             self._apply_personalization_to_workflow(session, personalization)
@@ -6706,7 +6766,7 @@ class ChatModel:
                 }
 
             if user_input.lower() in _WORKFLOW_RESUME_WORDS:
-                turn, _tool_messages = self._advance_workflow(session, "", thread_id)
+                turn, _tool_messages = self._advance_workflow(session, "", thread_id, record=False)
                 prompt = turn.question or ""
                 workflow = self._workflow_view(
                     session,

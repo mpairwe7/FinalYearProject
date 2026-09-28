@@ -494,19 +494,30 @@ def empathy_ack(kind: str) -> str:
     return _EMPATHY_ACKS.get(kind, "")
 
 
+def ack_already_given(kind: str, prior_replies: Sequence[str], lookback: int = 2) -> bool:
+    """Whether the opener for *kind* began one of the last *lookback* replies.
+
+    The openers are fixed sentences, so a taxpayer who stays worried for three
+    turns would read the same line three times — the formulaic empathy that
+    makes an assistant sound scripted. Callers that prepend an opener ask this
+    first; :func:`strip_repeated_ack` covers replies that already carry one.
+    """
+    ack = _EMPATHY_ACKS.get(kind, "")
+    if not ack:
+        return False
+    return any((r or "").lstrip().startswith(ack) for r in list(prior_replies)[-lookback:])
+
+
 def strip_repeated_ack(reply: str, prior_replies: Sequence[str], lookback: int = 2) -> str:
     """Drop a leading empathy opener already used in the last *lookback* replies.
 
-    The openers are fixed sentences, so a taxpayer who stays worried for three
-    turns reads the same line three times — the formulaic empathy that makes an
-    assistant sound scripted. The first acknowledgement stays; repeats go, and
-    the answer below them is untouched.
+    The first acknowledgement stays; repeats go, and the answer below them is
+    untouched.
     """
     text = reply or ""
     stripped = text.lstrip()
-    recent = [(r or "").lstrip() for r in list(prior_replies)[-lookback:]]
-    for ack in _EMPATHY_ACKS.values():
-        if stripped.startswith(ack) and any(r.startswith(ack) for r in recent):
+    for kind, ack in _EMPATHY_ACKS.items():
+        if stripped.startswith(ack) and ack_already_given(kind, prior_replies, lookback):
             return stripped[len(ack):].lstrip()
     return text
 
@@ -590,7 +601,10 @@ _FEELING_WORDS = frozenset(
         "confused", "confusing", "lost", "understand", "still", "work", "works", "working",
         "worked", "nothing", "again", "help", "please", "anything", "don", "doesn", "isn",
         "won", "can", "cannot", "t", "s", "so", "really", "very", "totally", "completely",
-        "fed", "up", "same", "problem", "why", "going", "happening", "wrong",
+        "fed", "up", "same", "problem", "why", "going", "happening", "wrong", "had", "enough",
+        # Contraction fragments: the tokenizer splits "I'm" into "i" + "m", so
+        # without these "I'm confused" named a task called "m".
+        "i", "m", "ve", "re", "ll", "d",
     }
 )
 
@@ -600,11 +614,32 @@ def is_feeling_only(message: str) -> bool:
     return not (content_tokens(message) - _FEELING_WORDS)
 
 
+#: Small talk that names no task either ("hello", "thanks, ok").
+_SMALL_TALK_WORDS = frozenset(
+    {"hello", "hi", "hey", "thanks", "thank", "good", "morning", "afternoon", "evening", "ok", "okay", "yes", "no"}
+)
+
+
+def names_a_task(message: str) -> bool:
+    """True when *message* carries something beyond feelings and small talk.
+
+    Used on the *previous* user turn: "I don't understand" after a real
+    question wants that answer re-explained, not a fresh "what are you trying
+    to do?"; after a greeting or another outburst it does.
+    """
+    return bool(content_tokens(message) - _FEELING_WORDS - _SMALL_TALK_WORDS)
+
+
 def repair_reply(kind: str, *, repeated: bool) -> str:
-    """Clarifying reply for a distressed turn that names no task."""
+    """Clarifying reply for a distressed turn that names no task.
+
+    Frustration is acknowledged. Confusion is not given its usual opener,
+    "Let me put that a different way.", because a repair has nothing to
+    rephrase — it asks what the taxpayer wants to do.
+    """
     if repeated:
         return REPAIR_REPEAT_REPLY
-    ack = empathy_ack(kind)
+    ack = empathy_ack(kind) if kind != "confusion" else ""
     return f"{ack}\n\n{REPAIR_QUESTION}" if ack else REPAIR_QUESTION
 
 

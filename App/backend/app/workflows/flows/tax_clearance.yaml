@@ -1,15 +1,22 @@
 id: tax_clearance
 name: Tax Clearance Certificate
-version: "1"
+version: "2"
 description: >
   Check the four conditions URA applies before approving a tax clearance
-  certificate, route each unmet one to its fix, then guide the application,
-  tracking and authenticity check.
+  certificate, then route each unmet one to its fix, and guide the
+  application, tracking and authenticity check.
 # Conditions and certificate types from https://ura.go.ug/en/tax-clearance/
 # (read 2026-09-29): profile up to date, every return filed, associated
 # persons' returns filed, returns satisfactory, tax paid or under an
 # instalment agreement. Annual certificates go to clients monitored as
 # compliant for 3+ years; a transactional one expires once submitted.
+#
+# Every question comes before every guidance step. WorkflowRegistry.advance
+# shows an information-only step once and moves on, so a question placed
+# after one would receive the reply meant for the information step (v1 did
+# exactly that: "ok" after the annual-certificate note was stored as
+# returns_filed = yes). test_guided_journeys_and_ei.FlowShapeTests pins this
+# for every flow.
 requires_auth: false
 
 trigger_phrases:
@@ -36,18 +43,6 @@ steps:
     slot: certificate_type
     validator: "enum[one transaction,annual]"
 
-  - id: annual_note
-    title: "Annual certificates"
-    question: >
-      URA issues annual certificates to taxpayers it has monitored as
-      compliant for three years or more. If you are newer than that, apply
-      for a one-transaction certificate instead.
-    when: "certificate_type == annual"
-    slot: ""
-    validator: text
-    resources:
-      - tax_clearance
-
   - id: collect_returns_filed
     title: "Returns filed"
     question: >
@@ -55,18 +50,6 @@ steps:
       for? (yes/no)
     slot: returns_filed
     validator: boolean
-
-  - id: returns_guidance
-    title: "File missing returns"
-    question: >
-      URA will not approve the certificate while any return is outstanding.
-      File the missing returns first; say **help me file my return** and I
-      will guide you through it.
-    when: "returns_filed == False"
-    slot: ""
-    validator: text
-    resources:
-      - file_return
 
   - id: collect_directors_filed
     title: "Directors' returns"
@@ -86,16 +69,6 @@ steps:
     slot: associates_filed
     validator: boolean
 
-  - id: associates_guidance
-    title: "Associates must file"
-    question: >
-      Each director or partner with an outstanding return must file it
-      before the certificate can be approved. They can use the same filing
-      guide: **help me file my return**.
-    when: "associates_filed == False"
-    slot: ""
-    validator: text
-
   - id: collect_tax_paid
     title: "Tax paid"
     question: >
@@ -103,6 +76,41 @@ steps:
       (yes/no)
     slot: tax_paid
     validator: boolean
+
+  - id: annual_note
+    title: "Annual certificates"
+    question: >
+      URA issues annual certificates to taxpayers it has monitored as
+      compliant for three years or more. If you are newer than that, apply
+      for a one-transaction certificate instead.
+    when: "certificate_type == annual"
+    slot: ""
+    validator: text
+    resources:
+      - tax_clearance
+
+  - id: returns_guidance
+    title: "File missing returns"
+    question: >
+      URA will not approve the certificate while any return is outstanding,
+      so file the missing returns first. Say **help me file my return** and I
+      will switch you to the filing guide; come back to this checklist
+      afterwards.
+    when: "returns_filed == False"
+    slot: ""
+    validator: text
+    resources:
+      - file_return
+
+  - id: associates_guidance
+    title: "Associates must file"
+    question: >
+      Each director or partner with an outstanding return must file it
+      before the certificate can be approved. They can ask me for the same
+      filing guide: **help me file my return**.
+    when: "associates_filed == False"
+    slot: ""
+    validator: text
 
   - id: payment_guidance
     title: "Pay or agree instalments"
@@ -119,9 +127,10 @@ steps:
   - id: apply
     title: "Apply in eTax"
     question: >
-      Sign in to eTax with your TIN and password, open the tax clearance
-      application, choose the certificate type, state the purpose and
-      submit. Keep the reference number it gives you.
+      Once every condition above is met, sign in to eTax with your TIN and
+      password, open the tax clearance application, choose the certificate
+      type, state the purpose and submit. Keep the reference number it gives
+      you.
     slot: ""
     validator: text
     portal_action: etax_login

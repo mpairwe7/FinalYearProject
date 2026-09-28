@@ -51,6 +51,11 @@ stacks, not production.
 | Self-harm gets crisis lines, no tax content | crisis | `text_signals.detect_crisis`, `service._crisis_support_result` |
 | A feeling with no task gets a clarifying question | feeling-only turn | `text_signals.is_feeling_only`, `service._conversation_repair_result` |
 | Distress across turns brings in an officer | sustained frustration (3 turns) | repair's second reply, or `distress_trajectory` |
+| "I'm …" still reads as a feeling | contraction | `_FEELING_WORDS` includes contraction fragments |
+| A past event does not start a flow | "I filed my return yesterday but …" | `_VERB_FORMS` folds "-ing" forms only |
+| "nil return" still starts Return Filing | nil return | `_RETURN_QUALIFIER_RE` leaves "nil" alone |
+| Asking for another flow inside one switches | TCC, then "help me file my return" | `service._leaves_flow_for_another` |
+| "Help me" does not exempt an account problem | "Please help me, my account is locked" | `HOW_TO_QUESTION_RE` has no "help me" |
 | Luganda / Kiswahili questions are answered in that language | Luganda TIN, Kiswahili TIN | `localize_reply` (G64 open for Kiswahili) |
 
 "I need a tax clearance certificate" is **answered, not captured**: "I need …"
@@ -71,8 +76,9 @@ one-tap offer. Do not widen the entrance to make that case start the flow.
 | I can't pay this tax, I want to kill myself | (not tested before) | crisis lines, officer offered |
 | Nitasajili vipi … TIN … ? (Kiswahili) | English reply | English reply — **G64, open** |
 
-**After: 19 of 20 cases pass**; every English case answered in 0.5–1.5 s with
-the stack idle, Luganda in 5.4 s (translation). Record:
+**After: 24 of 25 cases pass** (Phases 1–5, including the code-review fixes);
+English cases answered in 0.5–5.2 s on an idle stack with caches cold after the
+restart, Luganda in 5.3 s (translation). The one miss is G64. Record:
 [`docs/Reports/data/guided_journey_probes_2026-09-29_local_after.json`](../Reports/data/guided_journey_probes_2026-09-29_local_after.json).
 
 **Latency caveat.** The "before" run shared the stack with a 2,000-FAQ

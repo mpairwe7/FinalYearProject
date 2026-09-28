@@ -50,6 +50,21 @@ those before changing a fee or a condition.
    flow, on a clarification, a refused input or an escalation; it *is* added to
    an abstention, where it is a way forward.
 
+## While a journey is running
+
+A flow owns its conversation until it completes or is cancelled ("cancel",
+"stop"). Two things take the turn back:
+
+- a message that reads as a new question and does not fit the pending slot
+  is answered from the corpus, and the flow stays open ("resume" continues it);
+- an explicit request for a **different** flow ("help me file my return"
+  inside the Tax Clearance checklist) closes the current flow as cancelled and
+  starts the requested one (`service._leaves_flow_for_another`).
+
+Trigger matching folds "-ing" forms only. Past tense is left alone, so "I
+filed my return yesterday but …" reports a problem instead of starting a new
+filing flow.
+
 ## Funnel metrics
 
 Every session start, turn and cancel increments
@@ -61,8 +76,12 @@ its drop-off. No slot value is ever a label.
 ## Adding a journey
 
 1. Write `flows/<id>.yaml` (see `tax_clearance.yaml` for conditional steps and
-   links). Links are ids from `app/verified_resources.py`; add a new page there
-   only after it has passed `python -m app.verified_resources --check`.
+   links). Put **every question before every information-only step**:
+   `advance` shows an information step once and moves on, so a question after
+   one receives the reply meant for the information step. `FlowShapeTests`
+   fails the build otherwise. Links are ids from `app/verified_resources.py`;
+   add a new page there only after it has passed
+   `python -m app.verified_resources --check`.
 2. Pick trigger phrases a taxpayer would type as a task, not as a question.
 3. Add cases to `App/backend/tests/test_guided_journeys_and_ei.py` and a live
    case to `scripts/probe_guided_journeys.py`, then follow
