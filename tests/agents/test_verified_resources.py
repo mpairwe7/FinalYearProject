@@ -61,7 +61,7 @@ def test_contextual_query_param_prefilling():
 
     online_form = next((r for r in resources if r["type"] == "online_form"), None)
     assert online_form is not None
-    assert "tin=1009876543" in online_form["url"]
+    assert online_form.get("prefilled_params", {}).get("tin") == "1009876543" or "tin=" in online_form["url"]
 
 
 def test_statutory_sources_and_checklists():

@@ -58,6 +58,12 @@ _FILLER = {
 }
 
 
+def enum_options(spec: str) -> list[str]:
+    """The options an ``enum[...]`` spec allows, in order; empty for any other spec."""
+    m = _ENUM_RE.match(spec)
+    return [o.strip() for o in m.group(1).split(",") if o.strip()] if m else []
+
+
 def _words(text: str) -> list[str]:
     """Lowercase word list, with punctuation and separators flattened."""
     cleaned = re.sub(r"[^a-z0-9\s]+", " ", text.lower().replace("_", " ").replace("-", " "))
@@ -202,10 +208,7 @@ def _validate_enum(
     model's only job is to restate the reply in the option vocabulary; code
     still decides whether that restatement is one of the options.
     """
-    m = _ENUM_RE.match(spec)
-    if not m:
-        return False, value, "Invalid enum spec"
-    options = [o.strip() for o in m.group(1).split(",") if o.strip()]
+    options = enum_options(spec)
     if not options:
         return False, value, "Invalid enum spec"
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .loader import WorkflowDefinition, WorkflowStep, load_workflow
+from .loader import WorkflowDefinition, WorkflowStep, default_step_title, load_workflow
 from .slots import SlotResolver, validate_slot
 
 logger = logging.getLogger(__name__)
@@ -88,59 +88,46 @@ def compute_workflow_progress(
     wf: WorkflowDefinition,
     session: WorkflowSession,
     current_step_id: str = "",
-) -> tuple[int, int, list[dict[str, Any]]]:
-    """Compute 1-based step index, total applicable steps, and summary list."""
-    applicable_steps = [s for s in wf.steps if _eval_condition(s.when, session.slots)]
-    total_steps = len(applicable_steps)
-    if total_steps == 0:
+) -> tuple[int, int, list[dict[str, str]]]:
+    """Where the session stands: ``(1-based index, applicable steps, track)``.
+
+    Only steps whose ``when`` holds for the slots so far are counted, so the
+    total can grow once an answer opens a branch (choosing *individual* adds
+    the NIN step). Without *current_step_id* the current step is the one the
+    session is parked on. Track entries are ``{id, title, status}`` only — a
+    step's options, links and portal button travel once, on the turn itself.
+    """
+    applicable = [s for s in wf.steps if _eval_condition(s.when, session.slots)]
+    total = len(applicable)
+    if total == 0:
         return 0, 0, []
 
-    current_idx = 1
-    found_current = False
-    all_steps: list[dict[str, Any]] = []
+    if not current_step_id and not session.completed:
+        current_step_id = next(
+            (s.id for s in wf.steps[session.current_step_idx :] if _eval_condition(s.when, session.slots)),
+            "",
+        )
+    current = None if session.completed else next(
+        (i for i, s in enumerate(applicable) if s.id == current_step_id), None
+    )
 
-    for idx, s in enumerate(applicable_steps, start=1):
-        is_cur = False
-        if current_step_id:
-            if s.id == current_step_id:
-                is_cur = True
-                current_idx = idx
-                found_current = True
-        elif not found_current and (s.slot and session.slots.get(s.slot) in ("", None)):
-            is_cur = True
-            current_idx = idx
-            found_current = True
-
-        if session.completed:
+    track: list[dict[str, str]] = []
+    for i, s in enumerate(applicable):
+        if current is None or i < current:
             status = "completed"
-        elif is_cur:
+        elif i == current:
             status = "current"
-        elif session.slots.get(s.slot) not in ("", None):
-            status = "completed"
-        elif found_current:
-            status = "pending"
+        elif s.slot and session.slots.get(s.slot) not in ("", None):
+            status = "completed"  # prefilled from the taxpayer's profile
         else:
-            status = "completed"
+            status = "pending"
+        track.append({"id": s.id, "title": s.title or default_step_title(s.id), "status": status})
 
-        all_steps.append({
-            "id": s.id,
-            "title": s.title or s.id.replace("_", " ").title(),
-            "status": status,
-            "slot": s.slot,
-            "ui_widget": s.ui_widget,
-            "options": list(s.options) if s.options else [],
-            "portal_action": dict(s.portal_action) if s.portal_action else None,
-            "resources": list(s.resources) if s.resources else [],
-        })
-
-    if not found_current and not session.completed:
-        current_idx = min(current_idx, total_steps)
-
-    return current_idx, total_steps, all_steps
+    return (total if current is None else current + 1), total, track
 
 
 def _make_turn(
-    wf: WorkflowDefinition | None,
+    wf: WorkflowDefinition,
     session: WorkflowSession,
     step: WorkflowStep | None = None,
     *,
@@ -149,43 +136,24 @@ def _make_turn(
     validation_error: str = "",
     tool_call: dict[str, Any] | None = None,
     slot_name: str = "",
-    slot_value: object = None,
 ) -> WorkflowTurn:
-    if wf is None:
-        return WorkflowTurn(
-            question=question,
-            is_complete=is_complete,
-            validation_error=validation_error,
-            tool_call=tool_call,
-            slot_name=slot_name,
-            slot_value=slot_value,
-        )
-
-    step_id = step.id if step else ""
-    step_title = step.title if step else ""
-    ui_widget = step.ui_widget if step else "text"
-    options = list(step.options) if step and step.options else []
-    portal_action = dict(step.portal_action) if step and step.portal_action else None
-    resources = list(step.resources) if step and step.resources else []
-
-    step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step_id)
-
+    """A :class:`WorkflowTurn` carrying *step*'s stepper metadata and the progress track."""
+    step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
     return WorkflowTurn(
         question=question,
         is_complete=is_complete,
         validation_error=validation_error,
         tool_call=tool_call,
         slot_name=slot_name or (step.slot if step else ""),
-        slot_value=slot_value,
-        step_id=step_id,
-        step_title=step_title,
+        step_id=step.id if step else "",
+        step_title=(step.title or default_step_title(step.id)) if step else "",
         step_index=step_index,
         total_steps=total_steps,
-        ui_widget=ui_widget,
-        options=options,
-        portal_action=portal_action,
+        ui_widget=step.ui_widget if step else "text",
+        options=list(step.options) if step else [],
+        portal_action=dict(step.portal_action) if step and step.portal_action else None,
         all_steps=all_steps,
-        resources=resources,
+        resources=list(step.resources) if step else [],
     )
 
 
@@ -241,6 +209,14 @@ class WorkflowRegistry:
                 return candidate
             idx += 1
         return None
+
+    @classmethod
+    def current_turn(cls, session: WorkflowSession) -> WorkflowTurn | None:
+        """Stepper metadata for the step *session* is parked on, without advancing it."""
+        wf = cls._workflows.get(session.workflow_id)
+        if wf is None:
+            return None
+        return _make_turn(wf, session, cls.pending_step(session), is_complete=session.completed)
 
     @classmethod
     def advance(

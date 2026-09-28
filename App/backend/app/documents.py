@@ -1284,6 +1284,32 @@ def reconcile_tax_document(
     }
 
 
+#: Document types that get verification guidance even without portal signals.
+_GUIDED_DOC_TYPES = frozenset(
+    {"receipt", "invoice", "tin_card", "assessment", "customs_declaration", "filing_form"}
+)
+#: Text that only appears on a portal *screen* — a login, an error page, a menu.
+_PORTAL_SCREEN_TERMS = (
+    "portal.ura.go.ug",
+    "e-services",
+    "eservices",
+    "ura web portal",
+    "e-tax",
+    "generate prn",
+    "search prn",
+    "login to e-services",
+    "internal server error",
+    "error 500",
+    "session expired",
+    "taxpayer dashboard",
+    "error code",
+)
+#: Portal vocabulary that printed documents carry too (receipts, slips, SADs).
+_PORTAL_DOCUMENT_TERMS = ("efris", "asycuda", "payment registration number", "customs entry")
+#: "tin" as a word — not the one inside "printing" or "meeting".
+_TIN_WORD_RE = re.compile(r"(?<![a-z])tin(?![a-z])")
+
+
 def diagnose_portal_screenshot(
     *,
     text: str,
@@ -1298,38 +1324,21 @@ def diagnose_portal_screenshot(
     text_lower = (text or "").lower()
     is_shot_named = any(k in clean_fn for k in ("screenshot", "screen", "portal", "error", "capture", "snip"))
     is_image = kind == "image" or any(clean_fn.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"))
+    shows_screen = any(term in text_lower for term in _PORTAL_SCREEN_TERMS)
 
     is_portal = (
         doc_type == "portal_screenshot"
         or is_shot_named
-        or any(
-            term in text_lower
-            for term in (
-                "portal.ura.go.ug",
-                "e-services",
-                "eservices",
-                "efris",
-                "asycuda",
-                "ura web portal",
-                "e-tax",
-                "payment registration number",
-                "generate prn",
-                "search prn",
-                "login to e-services",
-                "internal server error",
-                "error 500",
-                "session expired",
-                "taxpayer dashboard",
-                "error code",
-                "customs entry",
-            )
-        )
+        or shows_screen
+        or any(term in text_lower for term in _PORTAL_DOCUMENT_TERMS)
     )
 
-    if not is_portal and not is_image and doc_type not in (
-        "receipt", "invoice", "tin_card", "assessment", "customs_declaration", "filing_form"
-    ):
+    # An unrecognised photo is not a URA screen: guidance needs portal signals
+    # or a tax document type the classifier is sure of.
+    if not is_portal and doc_type not in _GUIDED_DOC_TYPES:
         return {}
+    # Any screen capture or visual document image gets a visual layout map.
+    is_screen_capture = doc_type == "portal_screenshot" or is_image
 
     # 1. Identify specific portal or tax verification domain
     if "efris" in text_lower or "efris" in clean_fn or doc_type in ("receipt", "invoice"):
@@ -1338,15 +1347,19 @@ def diagnose_portal_screenshot(
         portal_category = "efris"
     elif "asycuda" in text_lower or "customs" in text_lower or "bill of entry" in text_lower or doc_type == "customs_declaration":
         detected_portal = "URA Customs ASYCUDA World Portal"
-        portal_url = "https://customs.ura.go.ug"
+        portal_url = "https://ura.go.ug/en/customs-systems/"
         portal_category = "customs"
-    elif "tin" in clean_fn or ("registration" in text_lower and "tin" in text_lower) or doc_type == "tin_card":
+    elif (
+        _TIN_WORD_RE.search(clean_fn)
+        or ("registration" in text_lower and _TIN_WORD_RE.search(text_lower))
+        or doc_type == "tin_card"
+    ):
         detected_portal = "URA e-Services Taxpayer Registration"
         portal_url = "https://portal.ura.go.ug"
         portal_category = "tin"
     elif "prn" in text_lower or "payment" in text_lower or any(k in text_lower for k in ("momo", "airtel money", "mtn money", "stanbic", "centenary")):
         detected_portal = "URA e-Services PRN & Payments Portal"
-        portal_url = "https://portal.ura.go.ug/payment"
+        portal_url = "https://portal.ura.go.ug"
         portal_category = "prn"
     elif doc_type == "assessment":
         detected_portal = "URA Assessment & Dispute Management"
@@ -1384,23 +1397,25 @@ def diagnose_portal_screenshot(
         if not fields.get("efris_invoices"):
             issues_detected.append("Fiscal Document Number (FDN) or QR verification code not detected.")
         steps = [
-            "Step 1: Check that the 20-digit Fiscal Document Number (FDN) and QR code are visible.",
-            "Step 2: Verify authenticity online at https://efris.ura.go.ug or via the URA Kakasa mobile app.",
+            "Step 1: Check that the Fiscal Document Number (FDN) and QR code are visible.",
+            "Step 2: Verify authenticity at https://ura.go.ug/en/efris/fdn-validation/ or with the URA Kakasa mobile app.",
             "Step 3: Retain this document for input tax credit reconciliation in your next VAT return.",
         ]
     elif doc_type == "tin_card":
         detected_state = "Taxpayer Identification Certificate Verification"
         steps = [
-            "Step 1: Confirm your 10-digit TIN is valid on https://portal.ura.go.ug.",
+            "Step 1: Confirm the TIN at https://ura.go.ug/en/domestic-taxes/tin-application/search-tin/.",
             "Step 2: Log in to e-Services to check active tax account registrations.",
             "Step 3: Ensure registered contact details (email and phone) are current for OTP authentication.",
         ]
     elif doc_type == "assessment":
         detected_state = "Statutory Assessment Review & Payment Notice"
+        # 45 days: Tax Procedures Code Act s.24, as URA's own "Object to a Tax
+        # Assessment" page and the objections FAQ corpus both state it.
         steps = [
-            "Step 1: Review the assessed tax liability and the statutory 30-day payment deadline.",
-            "Step 2: If the assessment is accepted, generate a PRN on https://portal.ura.go.ug/payment to settle.",
-            "Step 3: If you dispute the assessment, lodge a formal objection under Section 24 of the TPCA within 30 days.",
+            "Step 1: Check the amount assessed and the payment due date printed on the notice.",
+            "Step 2: If you accept the assessment, register the payment for a PRN at https://ura.go.ug/en/domestic-taxes/make-a-payment/.",
+            "Step 3: If you dispute it, lodge an objection within 45 days of receiving the notice (Tax Procedures Code Act, section 24).",
         ]
     elif "prn" in text_lower or "payment" in text_lower:
         detected_state = "PRN Generation & Bank Selection"
@@ -1453,7 +1468,7 @@ def diagnose_portal_screenshot(
         error_selector = ".seller-tin, .fiscal-header"
         action_bbox = [65, 55, 78, 88]
         action_selector = ".total-amount, .vat-breakdown"
-        action_instruction = "Verify 18% VAT and gross settlement amount"
+        action_instruction = "Check the VAT charged and the total amount"
     elif "Taxpayer Identification Certificate" in detected_state:
         error_bbox = [18, 15, 32, 85]
         error_selector = ".tin-number, #txtTIN"
@@ -1491,26 +1506,33 @@ def diagnose_portal_screenshot(
         action_selector = "button.btn-primary, .action-link"
         action_instruction = "Click the highlighted action button or input field to advance"
 
-    hotspots = [
-        {
-            "id": "spot-error",
-            "type": "error" if issues_detected else "target",
-            "label": "Notice / Target Area",
-            "instruction": issues_detected[0] if issues_detected else "Primary action target region on screen",
-            "bbox": error_bbox,
-            "dom_selector": error_selector,
-            "confidence": 0.95,
-        },
-        {
-            "id": "spot-action",
-            "type": "action",
-            "label": "Next Click Target",
-            "instruction": action_instruction,
-            "bbox": action_bbox,
-            "dom_selector": action_selector,
-            "confidence": 0.92,
-        },
-    ]
+    # The boxes are where this screen's elements usually sit ([top, left,
+    # bottom, right] in percent), not a detection on the uploaded image —
+    # hence bbox_basis, and no confidence score to imply otherwise.
+    hotspots = (
+        [
+            {
+                "id": "spot-error",
+                "type": "error" if issues_detected else "target",
+                "label": "Notice / Target Area",
+                "instruction": issues_detected[0] if issues_detected else "Primary action target region on screen",
+                "bbox": error_bbox,
+                "bbox_basis": "typical_layout",
+                "dom_selector": error_selector,
+            },
+            {
+                "id": "spot-action",
+                "type": "action",
+                "label": "Next Click Target",
+                "instruction": action_instruction,
+                "bbox": action_bbox,
+                "bbox_basis": "typical_layout",
+                "dom_selector": action_selector,
+            },
+        ]
+        if is_screen_capture
+        else []
+    )
 
     return {
         "is_screenshot": True,

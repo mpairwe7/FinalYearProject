@@ -17,12 +17,14 @@ trigger_phrases:
 
 steps:
   - id: collect_taxpayer_type
+    title: "Taxpayer type"
     question: >
       Are you filing as an **individual**, a **company**, or an **NGO**?
     slot: taxpayer_type
     validator: "enum[individual,company,ngo]"
 
   - id: collect_tax_type
+    title: "Tax type"
     question: >
       Which return are you filing: **VAT**, **PAYE**, **corporation tax**,
       **withholding tax**, or **stamp duty**?
@@ -30,6 +32,7 @@ steps:
     validator: "enum[vat,paye,corporation tax,withholding tax,stamp duty]"
 
   - id: collect_period
+    title: "Filing period"
     question: >
       Which filing period is involved? For example, `March 2026`,
       `Q1 2026`, or `FY2025-26`.
@@ -37,6 +40,7 @@ steps:
     validator: text
 
   - id: collect_records_ready
+    title: "Supporting records"
     question: >
       Do you already have the supporting figures or schedules you need
       to complete the return? (yes/no)
@@ -44,12 +48,14 @@ steps:
     validator: boolean
 
   - id: collect_portal_access
+    title: "Portal access"
     question: >
       Can you access the URA portal account that will submit this return? (yes/no)
     slot: portal_access
     validator: boolean
 
   - id: access_guidance
+    title: "Recover portal access"
     question: >
       If portal access is blocked, recover the account first through the
       URA portal sign-in recovery options or contact the URA Contact Centre
@@ -57,8 +63,10 @@ steps:
     when: "portal_access == False"
     slot: ""
     validator: text
+    portal_action: etax_login
 
   - id: records_guidance
+    title: "Prepare records"
     question: >
       Before submission, prepare the working papers, invoices, payroll, or
       ledgers that support the figures in the return so you can validate the
@@ -66,33 +74,19 @@ steps:
     when: "supporting_records_ready == False"
     slot: ""
     validator: text
+    resources:
+      - return_forms
 
   - id: summary
+    title: "Submit the return"
     question: >
       Next step: sign in to the URA portal, open the returns module, select
       the correct tax type and filing period, validate the declaration, submit
       it, and keep the acknowledgement or PRN if payment is due.
     slot: ""
     validator: text
+    # Ids in app/verified_resources.py — every link there was checked live.
+    portal_action: etax_login
     resources:
-      - title: "VAT Return Offline Excel Template (FY2026-27)"
-        type: "downloadable_form"
-        format: "xlsx"
-        size: "245 KB"
-        url: "https://portal.ura.go.ug/downloads/forms/vat_return_template.xlsx"
-        description: "Official URA macro-enabled Excel return template"
-      - title: "PAYE Monthly Return Excel Template (FY2026-27)"
-        type: "downloadable_form"
-        format: "xlsx"
-        size: "180 KB"
-        url: "https://portal.ura.go.ug/downloads/forms/paye_return_template.xlsx"
-        description: "Official payroll schedule template with revised statutory tax bands"
-      - title: "File Return Online — e-Services"
-        type: "online_form"
-        url: "https://portal.ura.go.ug/eservices/returns"
-        description: "Direct e-Services portal return upload and declaration module"
-      - title: "Tax Procedures Code Act 2014"
-        type: "statutory_source"
-        format: "pdf"
-        url: "https://ura.go.ug/storage/2023/08/Tax-Procedures-Code-Act-2014.pdf"
-        citation: "Act 14 of 2014, Section 15 & 24"
+      - file_return
+      - return_forms
