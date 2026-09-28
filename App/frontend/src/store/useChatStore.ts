@@ -22,6 +22,54 @@ export interface ChatAttachment {
   analysis?: DocumentAnalysisData;
 }
 
+export interface ContextResource {
+  id?: string;
+  title: string;
+  type: 'downloadable_form' | 'online_form' | 'statutory_source' | 'guide' | string;
+  format?: 'xlsx' | 'pdf' | 'docx' | 'web' | string;
+  size?: string;
+  url: string;
+  description?: string;
+  citation?: string;
+  tax_head?: string;
+  checklist?: string[];
+  is_verified?: boolean;
+  verification_badge?: string;
+  effective_year?: string;
+  source_domain?: string;
+}
+
+export interface WorkflowStepSummary {
+  id: string;
+  title: string;
+  status: 'completed' | 'current' | 'pending';
+  slot?: string;
+  ui_widget?: string;
+  options?: string[];
+  portal_action?: { label: string; url: string; selector?: string } | null;
+  resources?: ContextResource[];
+}
+
+export interface WorkflowState {
+  id: string;
+  name: string;
+  status: 'active' | 'completed' | 'cancelled';
+  current_step_idx?: number;
+  step_index?: number;
+  total_steps?: number;
+  step_id?: string;
+  step_title?: string;
+  ui_widget?: 'options' | 'boolean' | 'text' | 'number' | 'portal_action' | string;
+  options?: string[];
+  portal_action?: { label: string; url: string; selector?: string } | null;
+  all_steps?: WorkflowStepSummary[];
+  resources?: ContextResource[];
+  filled_slots?: string[];
+  masked_slots?: string[];
+  pending_slot?: string;
+  completed?: boolean;
+}
+
 export interface ChatTurn {
   id: string;
   role: 'user' | 'assistant';
@@ -34,6 +82,10 @@ export interface ChatTurn {
   escalationReason?: string;
   /** Suggested follow-up action chips offered by the assistant */
   nextActions?: string[];
+  /** Active multi-step workflow status and interactive stepper state */
+  workflow?: WorkflowState;
+  /** Relevant downloadable forms, online portal links, and statutory sources */
+  resources?: ContextResource[];
   /** Whether this turn was answered from the offline RAG pipeline */
   offlineMode?: boolean;
   /** Documents attached to this (user) turn */

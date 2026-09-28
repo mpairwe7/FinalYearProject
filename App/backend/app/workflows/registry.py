@@ -29,6 +29,15 @@ class WorkflowTurn:
     tool_call: dict[str, Any] | None = None
     slot_name: str = ""
     slot_value: object = None
+    step_id: str = ""
+    step_title: str = ""
+    step_index: int = 0
+    total_steps: int = 0
+    ui_widget: str = "text"
+    options: list[str] = field(default_factory=list)
+    portal_action: dict[str, Any] | None = None
+    all_steps: list[dict[str, Any]] = field(default_factory=list)
+    resources: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -73,6 +82,111 @@ def _interpolate_args(template: dict[str, Any], slots: dict[str, Any]) -> dict[s
         else:
             args[key] = value
     return args
+
+
+def compute_workflow_progress(
+    wf: WorkflowDefinition,
+    session: WorkflowSession,
+    current_step_id: str = "",
+) -> tuple[int, int, list[dict[str, Any]]]:
+    """Compute 1-based step index, total applicable steps, and summary list."""
+    applicable_steps = [s for s in wf.steps if _eval_condition(s.when, session.slots)]
+    total_steps = len(applicable_steps)
+    if total_steps == 0:
+        return 0, 0, []
+
+    current_idx = 1
+    found_current = False
+    all_steps: list[dict[str, Any]] = []
+
+    for idx, s in enumerate(applicable_steps, start=1):
+        is_cur = False
+        if current_step_id:
+            if s.id == current_step_id:
+                is_cur = True
+                current_idx = idx
+                found_current = True
+        elif not found_current and (s.slot and session.slots.get(s.slot) in ("", None)):
+            is_cur = True
+            current_idx = idx
+            found_current = True
+
+        if session.completed:
+            status = "completed"
+        elif is_cur:
+            status = "current"
+        elif session.slots.get(s.slot) not in ("", None):
+            status = "completed"
+        elif found_current:
+            status = "pending"
+        else:
+            status = "completed"
+
+        all_steps.append({
+            "id": s.id,
+            "title": s.title or s.id.replace("_", " ").title(),
+            "status": status,
+            "slot": s.slot,
+            "ui_widget": s.ui_widget,
+            "options": list(s.options) if s.options else [],
+            "portal_action": dict(s.portal_action) if s.portal_action else None,
+            "resources": list(s.resources) if s.resources else [],
+        })
+
+    if not found_current and not session.completed:
+        current_idx = min(current_idx, total_steps)
+
+    return current_idx, total_steps, all_steps
+
+
+def _make_turn(
+    wf: WorkflowDefinition | None,
+    session: WorkflowSession,
+    step: WorkflowStep | None = None,
+    *,
+    question: str = "",
+    is_complete: bool = False,
+    validation_error: str = "",
+    tool_call: dict[str, Any] | None = None,
+    slot_name: str = "",
+    slot_value: object = None,
+) -> WorkflowTurn:
+    if wf is None:
+        return WorkflowTurn(
+            question=question,
+            is_complete=is_complete,
+            validation_error=validation_error,
+            tool_call=tool_call,
+            slot_name=slot_name,
+            slot_value=slot_value,
+        )
+
+    step_id = step.id if step else ""
+    step_title = step.title if step else ""
+    ui_widget = step.ui_widget if step else "text"
+    options = list(step.options) if step and step.options else []
+    portal_action = dict(step.portal_action) if step and step.portal_action else None
+    resources = list(step.resources) if step and step.resources else []
+
+    step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step_id)
+
+    return WorkflowTurn(
+        question=question,
+        is_complete=is_complete,
+        validation_error=validation_error,
+        tool_call=tool_call,
+        slot_name=slot_name or (step.slot if step else ""),
+        slot_value=slot_value,
+        step_id=step_id,
+        step_title=step_title,
+        step_index=step_index,
+        total_steps=total_steps,
+        ui_widget=ui_widget,
+        options=options,
+        portal_action=portal_action,
+        all_steps=all_steps,
+        resources=resources,
+    )
 
 
 class WorkflowRegistry:
@@ -147,7 +261,7 @@ class WorkflowRegistry:
         """
         wf = cls._workflows.get(session.workflow_id)
         if not wf or session.completed:
-            return WorkflowTurn(is_complete=True)
+            return _make_turn(wf, session, is_complete=True) if wf else WorkflowTurn(is_complete=True)
 
         # Find the next applicable step (skip steps whose condition is false)
         step: WorkflowStep | None = None
@@ -160,7 +274,7 @@ class WorkflowRegistry:
 
         if step is None:
             session.completed = True
-            return WorkflowTurn(is_complete=True)
+            return _make_turn(wf, session, is_complete=True)
 
         # Prefilled slots from profile / consented memory should skip the
         # question entirely so guided flows feel stateful rather than repetitive.
@@ -175,17 +289,20 @@ class WorkflowRegistry:
         if step.question and not step.slot and not step.tool:
             session.current_step_idx += 1
             session.completed = session.current_step_idx >= len(wf.steps)
-            return WorkflowTurn(question=step.question, is_complete=session.completed)
+            return _make_turn(wf, session, step, question=step.question, is_complete=session.completed)
 
         # First call for this step (no user input yet) — emit the question
         if not user_input and step.question and step.slot:
-            return WorkflowTurn(question=step.question, slot_name=step.slot)
+            return _make_turn(wf, session, step, question=step.question, slot_name=step.slot)
 
         # Tool step (no slot to fill, just dispatch)
         if step.tool and not step.slot:
             args = _interpolate_args(step.args, session.slots)
             session.current_step_idx += 1
-            return WorkflowTurn(
+            return _make_turn(
+                wf,
+                session,
+                step,
                 tool_call={"name": step.tool, "arguments": args},
                 slot_name=step.id,
             )
@@ -194,7 +311,10 @@ class WorkflowRegistry:
         if step.slot and step.validator:
             is_valid, normalised, error = validate_slot(user_input, step.validator, resolver)
             if not is_valid:
-                return WorkflowTurn(
+                return _make_turn(
+                    wf,
+                    session,
+                    step,
                     question=f"{error}\n\n{step.question}",
                     validation_error=error,
                     slot_name=step.slot,
@@ -215,7 +335,10 @@ class WorkflowRegistry:
             if nxt.tool and not nxt.slot:
                 args = _interpolate_args(nxt.args, session.slots)
                 session.current_step_idx += 1
-                return WorkflowTurn(
+                return _make_turn(
+                    wf,
+                    session,
+                    nxt,
                     tool_call={"name": nxt.tool, "arguments": args},
                     slot_name=nxt.id,
                 )
@@ -223,14 +346,14 @@ class WorkflowRegistry:
             if nxt.question and not nxt.slot and not nxt.tool:
                 session.current_step_idx += 1
                 session.completed = session.current_step_idx >= len(wf.steps)
-                return WorkflowTurn(question=nxt.question, is_complete=session.completed)
+                return _make_turn(wf, session, nxt, question=nxt.question, is_complete=session.completed)
 
             if nxt.question:
-                return WorkflowTurn(question=nxt.question, slot_name=nxt.slot)
+                return _make_turn(wf, session, nxt, question=nxt.question, slot_name=nxt.slot)
             break
 
         session.completed = True
-        return WorkflowTurn(is_complete=True)
+        return _make_turn(wf, session, is_complete=True)
 
 
 def auto_load_flows(flows_dir: Path) -> int:

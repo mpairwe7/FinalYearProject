@@ -2101,6 +2101,7 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
         "response_judge": result.get("response_judge"),
         "next_actions": result.get("next_actions", []),
         "ticket_id": result.get("ticket_id", ""),
+        "resources": result.get("resources", []),
     }
     if include_short_circuit:
         payload.update(
@@ -3688,12 +3689,13 @@ class ChatModel:
         name: str,
         status: str,
         pending_slot: str = "",
+        turn: Any | None = None,
     ) -> dict[str, Any]:
         """Return UI-safe workflow metadata without echoing sensitive slot values."""
         filled_slots = [k for k in session.slots if session.slots.get(k) not in ("", None)]
         masked_slots = sorted(set(filled_slots) & _WORKFLOW_SENSITIVE_SLOTS)
         visible_slots = sorted(set(filled_slots) - _WORKFLOW_SENSITIVE_SLOTS)
-        return {
+        view: dict[str, Any] = {
             "id": session.workflow_id,
             "name": name,
             "status": status,
@@ -3703,6 +3705,56 @@ class ChatModel:
             "pending_slot": pending_slot,
             "completed": status == "completed",
         }
+
+        # Step-by-step progress and UI widget metadata for interactive steppers
+        wf = WorkflowRegistry.get(session.workflow_id)
+        if turn is not None and getattr(turn, "total_steps", 0) > 0:
+            view.update({
+                "step_index": turn.step_index,
+                "total_steps": turn.total_steps,
+                "step_id": turn.step_id,
+                "step_title": turn.step_title,
+                "ui_widget": turn.ui_widget,
+                "options": turn.options,
+                "portal_action": turn.portal_action,
+                "all_steps": turn.all_steps,
+            })
+        elif wf is not None:
+            from .workflows.registry import compute_workflow_progress
+            step_idx, total_steps, all_steps = compute_workflow_progress(wf, session)
+            pending_step = WorkflowRegistry.pending_step(session)
+            view.update({
+                "step_index": step_idx,
+                "total_steps": total_steps,
+                "step_id": pending_step.id if pending_step else "",
+                "step_title": (pending_step.title or pending_step.id.replace("_", " ").title()) if pending_step else "",
+                "ui_widget": pending_step.ui_widget if pending_step else "text",
+                "options": list(pending_step.options) if pending_step and pending_step.options else [],
+                "portal_action": dict(pending_step.portal_action) if pending_step and pending_step.portal_action else None,
+                "all_steps": all_steps,
+            })
+
+        # Collect verified downloadable forms, online portals, and statutory sources for this step
+        from .verified_resources import get_verified_resources
+        resources: list[dict[str, Any]] = []
+        if turn is not None and getattr(turn, "resources", None):
+            resources = list(turn.resources)
+        elif wf is not None:
+            pending_step = WorkflowRegistry.pending_step(session)
+            if pending_step and pending_step.resources:
+                resources = list(pending_step.resources)
+
+        if not resources:
+            resources = get_verified_resources(
+                query=session.workflow_id,
+                tax_type=str(session.slots.get("tax_type", "")),
+                intent=session.workflow_id,
+                entities=session.slots,
+                max_items=3,
+            )
+
+        view["resources"] = resources
+        return view
 
     @staticmethod
     def _default_next_actions(
@@ -6448,6 +6500,7 @@ class ChatModel:
                 name=wf.name,
                 status=status,
                 pending_slot=turn.slot_name,
+                turn=turn,
             )
             return {
                 "reply": prompt,
@@ -6520,6 +6573,7 @@ class ChatModel:
             name=matched.name,
             status=status,
             pending_slot=turn.slot_name,
+            turn=turn,
         )
         reply = (
             f"I can guide you through the {matched.name} process step by step.\n\n{prompt}"
@@ -6588,8 +6642,20 @@ class ChatModel:
         # off the parameter meant an auto-detected Luganda turn was answered in
         # English — the exact case a taxpayer who just types Luganda hits.
         effective = str((result or {}).get("locale") or locale or "en")
-        if isinstance(result, dict) and effective not in ("", "en"):
-            result["reply"] = self._localize_reply(str(result.get("reply", "")), effective)
+        if isinstance(result, dict):
+            if not result.get("resources"):
+                if result.get("workflow") and result["workflow"].get("resources"):
+                    result["resources"] = list(result["workflow"]["resources"])
+                else:
+                    from .verified_resources import get_verified_resources
+                    topic = str(result.get("current_topic") or "")
+                    result["resources"] = get_verified_resources(
+                        message,
+                        tax_type=topic,
+                        max_items=3,
+                    )
+            if effective not in ("", "en"):
+                result["reply"] = self._localize_reply(str(result.get("reply", "")), effective)
         return result
 
     def _generate_en(
@@ -8929,6 +8995,8 @@ class ChatModel:
             user_id=user_id or "",
         )
 
+        from .verified_resources import get_verified_resources
+
         return {
             "reply": reply,
             "sources": sources,
@@ -8960,6 +9028,11 @@ class ChatModel:
             "_force_agentic": force_agentic,
             "_force_tool_whitelist": force_tool_whitelist,
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
+            "resources": get_verified_resources(
+                message,
+                tax_type=str(stream_topic_ctx.get("current_topic") or ""),
+                max_items=3,
+            ),
         }
 
     @staticmethod

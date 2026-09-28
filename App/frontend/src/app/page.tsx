@@ -978,6 +978,8 @@ export default function Page() {
         escalationRequired: d.escalation_required ?? false,
         escalationReason: d.escalation_reason ?? '',
         nextActions: d.next_actions ?? [],
+        workflow: d.workflow ?? undefined,
+        resources: d.resources ?? (d.workflow?.resources ?? []),
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -1074,6 +1076,8 @@ export default function Page() {
                   retrievalMode: p.retrieval_mode ?? t.retrievalMode,
                   escalationRequired: p.escalation_required ?? t.escalationRequired,
                   escalationReason: p.escalation_reason ?? t.escalationReason,
+                  workflow: p.workflow ?? t.workflow,
+                  resources: p.resources ?? (p.workflow?.resources ?? t.resources),
                 }));
               }
             } catch {}
@@ -1107,6 +1111,8 @@ export default function Page() {
                 escalationRequired: p.escalation_required ?? t.escalationRequired,
                 escalationReason: p.escalation_reason ?? t.escalationReason,
                 nextActions: p.next_actions ?? t.nextActions,
+                workflow: p.workflow ?? t.workflow,
+                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
               }));
             } catch {}
           }
@@ -1122,15 +1128,17 @@ export default function Page() {
             const p = JSON.parse(data);
             meta = { ...meta, ...p };
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-            updateLastTurn((t) => ({
-              ...t,
-              citations: p.citations ?? t.citations,
-              faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-              retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-              escalationRequired: p.escalation_required ?? t.escalationRequired,
-              escalationReason: p.escalation_reason ?? t.escalationReason,
-              nextActions: p.next_actions ?? t.nextActions,
-            }));
+              updateLastTurn((t) => ({
+                ...t,
+                citations: p.citations ?? t.citations,
+                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                escalationRequired: p.escalation_required ?? t.escalationRequired,
+                escalationReason: p.escalation_reason ?? t.escalationReason,
+                nextActions: p.next_actions ?? t.nextActions,
+                workflow: p.workflow ?? t.workflow,
+                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+              }));
           } catch {}
           return;
         }

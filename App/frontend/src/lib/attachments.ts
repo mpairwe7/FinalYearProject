@@ -17,11 +17,24 @@ export interface DocumentTaxReconciliation {
   notes?: string[];
 }
 
+export interface PortalDomAction {
+  step_number: number;
+  element: string;
+  selector: string;
+  action_type: 'click' | 'fill' | 'select' | 'spotlight' | 'inspect';
+  fill_value?: string | null;
+  tooltip: string;
+  security_gate: 'safe' | 'requires_confirmation' | 'blocked';
+}
+
 export interface ScreenshotHotspot {
   id: string;
   type: 'error' | 'action' | 'target';
   label: string;
   instruction: string;
+  bbox?: [number, number, number, number];
+  dom_selector?: string;
+  confidence?: number;
 }
 
 export interface ScreenshotGuidance {
@@ -33,6 +46,7 @@ export interface ScreenshotGuidance {
   issues_detected?: string[];
   steps?: string[];
   hotspots?: ScreenshotHotspot[];
+  dom_recipe?: PortalDomAction[];
   direct_action?: {
     label: string;
     url: string;
