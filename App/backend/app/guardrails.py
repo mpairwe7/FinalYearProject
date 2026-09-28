@@ -428,12 +428,12 @@ class OutputGuard:
         # Remove script tags
         text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags
-        text = re.sub(r"<[^>]+>", "", text)
+        text = re.sub(r"<[^<>]+>", "", text)
         # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
         text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
         # Remove markdown image links to non-URA domains
         text = re.sub(
-            r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
+            r"!\[[^\]\n]*\]\((?!https?://ura\.go\.ug)[^)\n]*\)",
             "[link removed]",
             text,
         )
@@ -491,9 +491,9 @@ class OutputGuard:
         text = re.sub(r"\bura\.go\.tz\b", "ura.go.ug", text, flags=re.IGNORECASE)
 
         # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
-        text = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", text)
+        text = re.sub(r"(\d+)[ \t]*\[+[^0-9\r\n\[\]]*[ \t]*(\d+)", r"\1\2", text)
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
-        text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]+", "", text, flags=re.IGNORECASE)
 
         # Standardize exotic bullet glyphs (, ►, ▪, ▫, •, –, —) to clean Markdown lists
         text = re.sub(r"^[ \t]*[►▪▫•–—][ \t]*", "- ", text, flags=re.MULTILINE)
@@ -553,7 +553,7 @@ class OutputGuard:
         text = "\n".join(formatted_lines)
 
         # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
-        text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
+        text = re.sub(r"(?:^|\n)([ \t]*\d{1,2}\.[ \t]+)(?!\*\*)([A-Za-z0-9/&,-][A-Za-z0-9 /&,-]{0,60}?):([ \t]+)", r"\n\1**\2**:\3", text)
         # Separate smashed bullet items (e.g. 'including:* Item' or 'laws.- Item')
         text = re.sub(
             r"([;:])\s*([*\-•])(?!\*)\s*([A-Za-z])",
@@ -567,7 +567,7 @@ class OutputGuard:
         )
         # Ensure blank line before and after markdown headings
         text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
-        text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)
+        text = re.sub(r"(#{1,4}[ \t]+[^\r\n]+)\n([^\r\n#])", r"\1\n\n\2", text)
         # Normalize excessive blank lines
         text = re.sub(r"\n{3,}", "\n\n", text)
         # Ensure ordered list items increment sequentially (fixes repeated 1. or non-ascending numbers)

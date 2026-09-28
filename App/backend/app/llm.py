@@ -1367,13 +1367,13 @@ def translate_text(
                 messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=VLLM_HTTP_TIMEOUT,
             ) or "").strip()
             # Clean stray digit bracket glitches and rogue language tags
-            raw = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", raw)
-            raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", raw, flags=re.IGNORECASE)
-            raw = re.sub(r"\[+([a-zA-Z_]+)\]*", r"\1", raw)
+            raw = re.sub(r"(\d+)[ \t]*\[+[^0-9\r\n\[\]]*[ \t]*(\d+)", r"\1\2", raw)
+            raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]+", "", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"\[+([a-zA-Z_]+)\]+", r"\1", raw)
             raw = re.sub(r"\[{2,}", "", raw)
             raw = re.sub(r"[(\[{\-.,=~]{4,}.*$", "", raw)
             raw = re.sub(r"([(\[{])\1+", r"\1", raw)
-            raw = re.sub(r"(?:\n\s*)+(?:Note|Kumbuka|Zingatia|Tanbihi|Okulabula|Tahadhari)\s*:\s*(?:As an AI|Kama msaidizi|Nze nga|Please note that this is an automated|Huu ni ushauri tu)[^\n]*$", "", raw, flags=re.IGNORECASE)
+            raw = re.sub(r"\n+[ \t]*(?:Note|Kumbuka|Zingatia|Tanbihi|Okulabula|Tahadhari)\s*:\s*(?:As an AI|Kama msaidizi|Nze nga|Please note that this is an automated|Huu ni ushauri tu)[^\n]*$", "", raw, flags=re.IGNORECASE)
             return raw.strip()
         except Exception:  # noqa: BLE001 — MT is best-effort; caller falls through
             logger.debug("Prompted MT via vLLM failed", exc_info=True)

@@ -201,7 +201,7 @@ class TestPillarIRobustness:
     def test_fzz_028_url_in_prompt(self):
         """FZZ-028: URL in prompt treated as plain text."""
         raw = "look at https://ura.go.ug/taxes/vat and tell me the rate"
-        assert "https://ura.go.ug" in raw
+        assert "https://ura.go.ug/taxes/vat" in raw
 
     def test_fzz_029_arithmetic_expression_safety(self):
         """FZZ-029: Mathematical expressions not passed to dangerous eval."""

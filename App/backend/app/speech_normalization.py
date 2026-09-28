@@ -19,10 +19,10 @@ from __future__ import annotations
 import re
 
 # Citation markers: [1], [1, 2], [1; 3], ignoring markdown links [1](url)
-_CITATION_RE = re.compile(r"\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()")
+_CITATION_RE = re.compile(r"[ \t]*\[\d+(?:[ \t]*[,;][ \t]*\d+)*\](?!\()")
 
 # Markdown links: [Title](url) -> Title
-_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
+_MD_LINK_RE = re.compile(r"\[([^\]\[\r\n]+)\]\([^)\r\n]+\)")
 
 # Code blocks and inline code
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -30,7 +30,7 @@ _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
 
 # Markdown tables (lines starting with | or containing multiple |)
 _TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$", re.MULTILINE)
-_TABLE_PIPE_RE = re.compile(r"\s*\|\s*")
+_TABLE_PIPE_RE = re.compile(r"[ \t]*\|[ \t]*")
 
 # Headers and list bullets
 _HEADER_RE = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)

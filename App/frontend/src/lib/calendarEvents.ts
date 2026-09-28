@@ -24,10 +24,24 @@ function formatUtcCompact(d: Date): string {
   );
 }
 
+function getRandomNonce(): string {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    if (typeof crypto.getRandomValues === 'function') {
+      const arr = new Uint32Array(2);
+      crypto.getRandomValues(arr);
+      return `${arr[0].toString(36)}-${arr[1].toString(36)}`;
+    }
+  }
+  return `${Date.now()}-${Math.floor(Date.now() / 1000)}`;
+}
+
 /** Generate an RFC 5545 iCalendar (.ics) string with a 1-day reminder alarm. */
 export function generateIcs(event: CalendarEventData): string {
   const now = new Date();
-  const uid = `ura-event-${Date.now()}-${Math.random().toString(36).slice(2, 9)}@ura.go.ug`;
+  const uid = `ura-event-${Date.now()}-${getRandomNonce()}@ura.go.ug`;
   const dtStart = formatUtcCompact(event.startDate);
   const dtEnd = formatUtcCompact(
     event.endDate || new Date(event.startDate.getTime() + 8 * 3600 * 1000)

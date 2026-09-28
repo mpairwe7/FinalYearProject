@@ -121,7 +121,7 @@ def test_tin_registration_portal_navigation_matches_faq_knowledge_base():
 
     assert res["ok"] is True
     assert "Taxpayer Registration" in res["portal_metadata"]["name"]
-    assert "https://portal.ura.go.ug" in res["portal_metadata"]["canonical_url"]
+    assert res["portal_metadata"]["canonical_url"].startswith("https://portal.ura.go.ug")
 
     steps = res["navigation_guidance"]["steps"]
     # Check consistency with ura_instant_tin_application_faqs.csv
