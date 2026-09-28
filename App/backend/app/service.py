@@ -539,7 +539,7 @@ def _structure_excerpt(text: str) -> str:
         if len(items) >= 2:
             bullets = "\n".join(f"- {item[:1].upper() + item[1:]}" for item in items)
             t = f"{prefix}\n\n{bullets}{suffix}"
-    return t
+    return OutputGuard.normalize_structure(t)
 
 # Shared executor for LLM calls — bounded so one slow generation cannot
 # exhaust worker threads under load.  Size is small on purpose: Qwen runs
