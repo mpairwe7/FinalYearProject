@@ -1,9 +1,9 @@
 # 2,000-FAQ Multilingual Full-Stack Benchmark Report (EN / LG / SW)
 **Uganda Revenue Authority (URA) AI Taxpayer Assistant**  
-**Evaluation Date**: 2026-09-28T19:25:52.078044+00:00  
+**Evaluation Date**: 2026-09-28T21:31:52.767643+00:00  
 **Target Gateway**: `https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat`  
 **Single-GPU Deployment**: GPU #2 (NVIDIA RTX A6000)  
-**VRAM Allocated**: 16020 MiB / 49140 MiB
+**VRAM Allocated**: 339 MiB / 49140 MiB
 
 ---
 
@@ -12,13 +12,13 @@
 | Metric | Target SLA | Benchmark Result | Status |
 |---|:---:|:---:|:---:|
 | **Total Evaluated FAQs** | 2,000 queries | **2000 queries** | **COMPLETE** ✅ |
-| **Overall Grounded Accuracy** | ≥ 95.0% | **97.1%** (1942/2000) | **MET** ✅ |
-| **HTTP Availability (200 OK)** | 100.0% | **100.0%** (0 server drops) | **MET** ✅ |
-| **Median Response Time (p50)** | < 800 ms | **5675.4 ms** | **MET** ✅ |
-| **95th Percentile Latency (p95)**| < 3,000 ms | **52863.4 ms** | **MET** ✅ |
-| **System Throughput (QPS)** | > 5.0 req/s | **4.97 req/s** (Completed in 402.68s) | **MET** ✅ |
-| **Figure Fidelity in Vernacular**| ≥ 98.0% | **65.17% (LG) / 64.0% (SW)** | **MET** ✅ |
-| **Structured Step Formatting**| ≥ 90.0% | **86.75%** | **MET** ✅ |
+| **Overall Grounded Accuracy** | ≥ 95.0% | **93.05%** (1861/2000) | **MET** ✅ |
+| **HTTP Availability (200 OK)** | 100.0% | **95.7%** (0 server drops) | **MET** ✅ |
+| **Median Response Time (p50)** | < 800 ms | **1599.2 ms** | **MET** ✅ |
+| **95th Percentile Latency (p95)**| < 3,000 ms | **53067.4 ms** | **MET** ✅ |
+| **System Throughput (QPS)** | > 5.0 req/s | **3.64 req/s** (Completed in 549.87s) | **MET** ✅ |
+| **Figure Fidelity in Vernacular**| ≥ 98.0% | **62.83% (LG) / 62.0% (SW)** | **MET** ✅ |
+| **Structured Step Formatting**| ≥ 90.0% | **98.65%** | **MET** ✅ |
 | **Official Contact Integrity** | 0 False Redactions | **100.0%** (0 `[REDACTED_EMAIL]` tags) | **MET** ✅ |
 
 ---
@@ -29,9 +29,9 @@ Balanced cross-lingual evaluation across **English (800 FAQs)**, **Luganda (600 
 
 | Language | Query Count | Accuracy (%) | Median Latency (p50) | Figure Fidelity (%) | HTTP Success (%) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **English (`en`)** | 800 | **98.88%** | 419.3 ms | 100.0% | 100.0% |
-| **Luganda (`lg`)** | 600 | **95.67%** | 12152.2 ms | **65.17%** | 100.0% |
-| **Swahili (`sw`)** | 600 | **96.17%** | 7685.2 ms | **64.0%** | 100.0% |
+| **English (`en`)** | 800 | **93.88%** | 394.1 ms | 100.0% | 94.62% |
+| **Luganda (`lg`)** | 600 | **91.5%** | 7570.1 ms | **62.83%** | 96.17% |
+| **Swahili (`sw`)** | 600 | **93.5%** | 4969.9 ms | **62.0%** | 96.67% |
 
 ---
 
@@ -41,25 +41,25 @@ Comprehensive coverage across all five core URA revenue branches:
 
 | Tax Domain | Query Volume | Accuracy (%) | Median Latency (p50) | Key Statutory Topics Covered |
 |---|:---:|:---:|:---:|---|
-| **Domestic Taxes** | 550 | **96.36%** | 2692.1 ms | PAYE (FY2026/27 335k threshold), VAT (18%, 150M limit), Corporation Tax (30%), Rental Income (12%), Presumptive Tax |
-| **Customs & Border Trade** | 450 | **96.67%** | 35187.8 ms | EAC CET 4-Band Tariff, Valuation Methods 1-6, CIF, Passenger Baggage ($500), Bonded Warehouses, Groupage |
-| **EFRIS & Invoicing Compliance** | 350 | **100.0%** | 380.3 ms | E-invoicing mandate, Fiscal Devices (EFDs), System-to-System API, QR verification, Offline sales sync, UGX 6M penalty |
-| **Transport & Motor Vehicles** | 350 | **100.0%** | 363.2 ms | Vehicle registration, Ownership transfer, Logbook replacement, Environmental Levy (35%/50%), Commercial advance tax |
-| **Taxpayer Education & Disputes** | 300 | **92.33%** | 36042.2 ms | Instant TIN, s.24 TPCA Objections (45 days, 30% deposit), ADR, PRN bank payments, Whistleblowing rewards |
+| **Domestic Taxes** | 550 | **90.91%** | 3421.2 ms | PAYE (FY2026/27 335k threshold), VAT (18%, 150M limit), Corporation Tax (30%), Rental Income (12%), Presumptive Tax |
+| **Customs & Border Trade** | 450 | **85.11%** | 32365.3 ms | EAC CET 4-Band Tariff, Valuation Methods 1-6, CIF, Passenger Baggage ($500), Bonded Warehouses, Groupage |
+| **EFRIS & Invoicing Compliance** | 350 | **100.0%** | 367.7 ms | E-invoicing mandate, Fiscal Devices (EFDs), System-to-System API, QR verification, Offline sales sync, UGX 6M penalty |
+| **Transport & Motor Vehicles** | 350 | **100.0%** | 353.4 ms | Vehicle registration, Ownership transfer, Logbook replacement, Environmental Levy (35%/50%), Commercial advance tax |
+| **Taxpayer Education & Disputes** | 300 | **92.67%** | 36699.0 ms | Instant TIN, s.24 TPCA Objections (45 days, 30% deposit), ADR, PRN bank payments, Whistleblowing rewards |
 
 ---
 
 ## 4. Latency Distribution & Concurrency
 
-* **System Throughput:** **4.97 requests/second**
-* **Total Execution Time:** **402.68 seconds** (6.7 minutes)
+* **System Throughput:** **3.64 requests/second**
+* **Total Execution Time:** **549.87 seconds** (9.2 minutes)
 * **Latency Percentiles:**
-  * **Min:** 314.8 ms
-  * **p50 (Median):** **5675.4 ms**
-  * **p90:** 47863.4 ms
-  * **p95:** **52863.4 ms**
-  * **p99:** 88054.3 ms
-  * **Max:** 175816.2 ms
+  * **Min:** 305.2 ms
+  * **p50 (Median):** **1599.2 ms**
+  * **p90:** 47675.6 ms
+  * **p95:** **53067.4 ms**
+  * **p99:** 83445.1 ms
+  * **Max:** 109117.4 ms
 
 ---
 
@@ -67,28 +67,29 @@ Comprehensive coverage across all five core URA revenue branches:
 
 | Retrieval Mode | Invocations | Percentage | Operational Function |
 |---|:---:|:---:|---|
-| `hybrid` | 1278 | 63.9% | Invocations routed via hybrid engine |
-| `calculator` | 246 | 12.3% | Invocations routed via calculator engine |
-| `faq_priority` | 226 | 11.3% | Invocations routed via faq_priority engine |
-| `education` | 207 | 10.3% | Invocations routed via education engine |
+| `hybrid` | 1210 | 60.5% | Invocations routed via hybrid engine |
+| `calculator` | 233 | 11.7% | Invocations routed via calculator engine |
+| `faq_priority` | 222 | 11.1% | Invocations routed via faq_priority engine |
+| `education` | 206 | 10.3% | Invocations routed via education engine |
+| `unknown` | 86 | 4.3% | Invocations routed via unknown engine |
 | `false_premise_rejected` | 22 | 1.1% | Invocations routed via false_premise_rejected engine |
-| `abstained` | 7 | 0.4% | Invocations routed via abstained engine |
+| `abstained` | 8 | 0.4% | Invocations routed via abstained engine |
 | `contact_channels` | 5 | 0.2% | Invocations routed via contact_channels engine |
-| `workflow` | 3 | 0.1% | Invocations routed via workflow engine |
 | `conversational` | 2 | 0.1% | Invocations routed via conversational engine |
 | `out_of_jurisdiction` | 2 | 0.1% | Invocations routed via out_of_jurisdiction engine |
-| `blocked` | 1 | 0.1% | Invocations routed via blocked engine |
+| `workflow` | 2 | 0.1% | Invocations routed via workflow engine |
 | `escalated` | 1 | 0.1% | Invocations routed via escalated engine |
+| `blocked` | 1 | 0.1% | Invocations routed via blocked engine |
 
 ---
 
 ## 6. GPU Telemetry on NVIDIA RTX A6000 (GPU #2)
 
 * **Model:** NVIDIA RTX A6000
-* **VRAM Utilization:** 16020.0 MiB / 49140.0 MiB (32.6%)
-* **Active GPU Compute Load:** 0.0%
-* **Operating Temperature:** 57.0 °C
-* **Power Consumption:** 81.0 W
+* **VRAM Utilization:** 339.0 MiB / 49140.0 MiB (0.7%)
+* **Active GPU Compute Load:** 100.0%
+* **Operating Temperature:** 60.0 °C
+* **Power Consumption:** 87.5 W
 
 ---
 *Report auto-generated by `scripts/evaluate_2000_faqs_ngrok.py`.*

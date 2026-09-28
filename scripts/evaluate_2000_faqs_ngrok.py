@@ -380,11 +380,16 @@ class TurnResult:
 class URAEvaluationEngine2000:
     def __init__(self, base_url: str, concurrency: int = 16, gpu_id: int = 2, fresh: bool = False):
         self.base_url = base_url.rstrip("/")
-        if not self.base_url.endswith("/api") and not self.base_url.endswith("/v1"):
-            self.api_url = f"{self.base_url}/api"
+        if self.base_url.endswith("/v1/chat"):
+            self.chat_endpoint = self.base_url
+        elif self.base_url.endswith("/api"):
+            self.chat_endpoint = f"{self.base_url}/v1/chat"
+        elif self.base_url.endswith("/v1"):
+            self.chat_endpoint = f"{self.base_url}/chat"
+        elif ":8083" in self.base_url or ":8000" in self.base_url:
+            self.chat_endpoint = f"{self.base_url}/v1/chat"
         else:
-            self.api_url = self.base_url
-        self.chat_endpoint = f"{self.api_url}/v1/chat"
+            self.chat_endpoint = f"{self.base_url}/api/v1/chat"
         self.concurrency = concurrency
         self.gpu_id = gpu_id
         self.fresh = fresh
