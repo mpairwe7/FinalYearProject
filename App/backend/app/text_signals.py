@@ -16,6 +16,10 @@ create an import cycle.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Superset of claim_verifier's historical stopword list; used to reduce
 # sentences to content tokens so function words cannot dominate overlap.
@@ -139,11 +143,16 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"|still (can't|cannot|no|not)"
         ),
     ),
+    # "help me" and "lost my" used to be anxiety cues. They are how people ask
+    # for things — "help me register for a TIN", "I lost my TIN certificate" —
+    # and on 2026-09-29 every "Help me …" request to the live stack opened with
+    # "I understand this can feel stressful". A request is not distress; a
+    # worried request still carries a worry word, which stays below.
     (
         "anxiety",
         re.compile(
             r"worried|worry|worrying|scared|afraid|anxious|confus|stress"
-            r"|help me|don't know what|don't understand|do not understand|lost my"
+            r"|don't know what|don't understand|do not understand"
         ),
     ),
     (
@@ -483,6 +492,90 @@ def empathy_ack(kind: str) -> str:
     acknowledgment never dilutes faithfulness or claim verification.
     """
     return _EMPATHY_ACKS.get(kind, "")
+
+
+def strip_repeated_ack(reply: str, prior_replies: Sequence[str], lookback: int = 2) -> str:
+    """Drop a leading empathy opener already used in the last *lookback* replies.
+
+    The openers are fixed sentences, so a taxpayer who stays worried for three
+    turns reads the same line three times — the formulaic empathy that makes an
+    assistant sound scripted. The first acknowledgement stays; repeats go, and
+    the answer below them is untouched.
+    """
+    text = reply or ""
+    stripped = text.lstrip()
+    recent = [(r or "").lstrip() for r in list(prior_replies)[-lookback:]]
+    for ack in _EMPATHY_ACKS.values():
+        if stripped.startswith(ack) and any(r.startswith(ack) for r in recent):
+            return stripped[len(ack):].lstrip()
+    return text
+
+
+#: Distress kinds that, repeated across turns, mean the conversation is not
+#: working for the person and a human should be offered.
+_SUSTAINED_KINDS = frozenset({"frustration", "confusion", "anxiety", "hardship"})
+
+
+def distress_trajectory(
+    current_kind: str, prior_user_messages: Sequence[str], window: int = 3
+) -> dict[str, Any]:
+    """Distress across the last *window* user turns, the current one included.
+
+    One upset message is handled by tone. The same upset over consecutive
+    turns means the answers are not landing, which is the moment to offer a
+    person rather than another rephrasing. ``sustained`` needs the current turn
+    to be negative too, so a taxpayer who has calmed down is not offered a
+    handoff for how they felt two messages ago.
+    """
+    earlier = [detect_user_distress(m) for m in list(prior_user_messages)[-(window - 1):]]
+    kinds = [*earlier, current_kind or ""]
+    negative = sum(1 for k in kinds if k in _SUSTAINED_KINDS)
+    return {
+        "kinds": kinds,
+        "negative_turns": negative,
+        "sustained": negative >= 2 and (current_kind or "") in _SUSTAINED_KINDS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Crisis
+#
+# A message about ending one's life is not a tax question and must not be
+# answered as one — least of all by retrieval, which would find a penalty
+# table for "I can't pay, I want to die". It is checked before routing, and the
+# reply points to people who can help now. English plus the Luganda
+# (okwetta) and Kiswahili (kujiua) verbs for killing oneself.
+# ---------------------------------------------------------------------------
+
+_CRISIS_RE = re.compile(
+    r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
+    r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
+    r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
+    r"|okwetta|kujiua)\b"
+)
+
+#: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency
+#: page (upf.go.ug); 0800 21 21 21 as published by Mental Health Uganda. Check
+#: both again before moving this date.
+CRISIS_LINES_VERIFIED_ON = "2026-09-29"
+
+
+def detect_crisis(message: str) -> bool:
+    """True when *message* expresses intent to self-harm."""
+    return bool(_CRISIS_RE.search(_normalise(message)))
+
+
+def crisis_support_reply() -> str:
+    """Supportive reply with Ugandan crisis lines. Never carries tax content."""
+    return (
+        "I'm really sorry you're feeling this way. You don't have to face this alone, "
+        "and your safety matters more than any tax matter.\n\n"
+        "- If you are in danger right now, call **999** or **112**.\n"
+        "- To talk to a trained counsellor for free, call Mental Health Uganda on "
+        "**0800 21 21 21** (Monday to Friday, 8:30am to 5pm).\n\n"
+        "The tax side can wait. When you're ready, a URA officer can talk through "
+        "your options with you, including paying in instalments."
+    )
 
 
 def tone_hint_for(kind: str) -> str:

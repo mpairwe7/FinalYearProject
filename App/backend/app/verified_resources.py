@@ -37,7 +37,7 @@ from .topics import classify_topic
 logger = logging.getLogger(__name__)
 
 #: The date every URL in :data:`_RESOURCES` was last confirmed live.
-VERIFIED_ON = "2026-09-28"
+VERIFIED_ON = "2026-09-29"
 CURRENT_FISCAL_YEAR = "FY2026-27"
 
 #: Resources shown beside one answer. More than three is a reading list.
@@ -504,6 +504,22 @@ _RESOURCES: tuple[OfficialResource, ...] = (
         url="https://ura.go.ug/en/tax-clearance/",
         description="Apply for a tax clearance certificate (TCC).",
         phrases=("tax clearance", "tcc", "clearance certificate"),
+    ),
+    OfficialResource(
+        id="track_application_status",
+        title="Track application status",
+        kind="online_form",
+        url="https://ura.go.ug/en/domestic-taxes/track-application-status/",
+        description="Follow a submitted application, such as a tax clearance or vehicle application, by its reference.",
+        phrases=("track my application", "application status", "track application", "status of my application"),
+    ),
+    OfficialResource(
+        id="document_authentication",
+        title="Document authentication",
+        kind="online_form",
+        url="https://ura.go.ug/en/document-authentication/",
+        description="Check that a URA document, such as a tax clearance certificate, is genuine.",
+        phrases=("authenticate a document", "document authentication", "verify a certificate", "is my certificate genuine"),
     ),
     OfficialResource(
         id="stamp_duty",

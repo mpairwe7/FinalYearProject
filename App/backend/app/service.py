@@ -49,6 +49,7 @@ from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.en import (
+    HOW_TO_QUESTION_RE,
     _FAREWELL_PHRASES as _EN_FAREWELL_PHRASES,
     _GRATITUDE_PHRASES as _EN_GRATITUDE_PHRASES,
     _GREETING_PHRASES as _EN_GREETING_PHRASES,
@@ -137,6 +138,8 @@ from .text_signals import (
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
     detect_local_government_tax,
+    crisis_support_reply,
+    detect_crisis,
     detect_user_distress,
     empathy_ack,
     jurisdiction_scope_caveat,
@@ -149,6 +152,7 @@ from .text_signals import (
 )
 from .topics import resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
+from .turn_guidance import apply_turn_guidance
 from .verified_resources import resources_for_turn
 from .workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from .workflows.slots import validate_slot
@@ -1414,6 +1418,22 @@ def _apply_output_guards(
     }
 
 
+def _recent_turns_for_guidance(result: dict[str, Any], user_id: str | None) -> list[dict[str, str]]:
+    """Earlier turns of this conversation for :func:`apply_turn_guidance`.
+
+    Read before the current turn is logged (``main.py`` logs after the reply
+    is built), so the current reply is never compared against itself.
+    """
+    conversation_id = str(result.get("conversation_id") or "")
+    if not conversation_id:
+        return []
+    try:
+        return db.get_recent_turns(conversation_id=conversation_id, limit=3, user_id=user_id or None)
+    except Exception:
+        logger.debug("recent turns unavailable for turn guidance", exc_info=True)
+        return []
+
+
 async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE generator one-to-one
     model: Any,
     *,
@@ -1531,6 +1551,12 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         # English rewrite lets a Luganda or Kiswahili question match too.
         result["resources"] = resources_for_turn(
             message, result, rewritten=str(result.get("_rewritten") or "")
+        )
+        apply_turn_guidance(
+            message,
+            result,
+            rewritten=str(result.get("_rewritten") or ""),
+            recent_turns=_recent_turns_for_guidance(result, user_id),
         )
 
         yield (
@@ -5131,7 +5157,11 @@ class ChatModel:
             if escalation_reason:
                 reasons.append(escalation_reason)
 
-        if decision != "escalate" and _ACCOUNT_QUERY_RE.search(message):
+        if (
+            decision != "escalate"
+            and _ACCOUNT_QUERY_RE.search(message)
+            and not HOW_TO_QUESTION_RE.search(message)
+        ):
             decision = "escalate"
             reasons.append("account-specific query needs authenticated lookup or human review")
 
@@ -5293,6 +5323,29 @@ class ChatModel:
         except Exception:
             logger.exception("failed to mark officer reply delivered; it will re-deliver")
         return text
+
+    def _crisis_support_result(self, *, thread_id: str, locale: str) -> dict[str, Any]:
+        """Turn result for a message expressing intent to self-harm.
+
+        Checked before every router, so no tax content — least of all a
+        penalty table — is ever put in front of it. No ticket is opened
+        automatically: what the message says is sensitive personal data, and
+        the officer is offered, not imposed.
+        """
+        return {
+            "reply": crisis_support_reply(),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "crisis_support",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "safety_guard",
+            "next_actions": ["Talk to an officer"],
+        }
 
     def _maybe_create_ticket(
         self,
@@ -6818,6 +6871,12 @@ class ChatModel:
         if isinstance(result, dict):
             # Same single decision the streaming path makes in run_chat_turn.
             result["resources"] = resources_for_turn(message, result)
+            apply_turn_guidance(
+                message,
+                result,
+                rewritten=str(result.get("_rewritten") or ""),
+                recent_turns=_recent_turns_for_guidance(result, user_id),
+            )
             if effective not in ("", "en"):
                 result["reply"] = self._localize_reply(str(result.get("reply", "")), effective)
         return result
@@ -7030,6 +7089,13 @@ class ChatModel:
                     message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
                 )
                 return blocked
+
+            if detect_crisis(message) or detect_crisis(router_message):
+                crisis = self._crisis_support_result(thread_id=thread_id, locale=locale)
+                self._audit_turn(
+                    message=message, result=crisis, session_id=session_id, trace_ctx=trace_ctx
+                )
+                return crisis
 
             if flags.is_enabled("workflows"):
                 with trace_stage("workflow_router", timings=timings):
@@ -8520,6 +8586,14 @@ class ChatModel:
                 "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
                 "_hits": [],
                 "_history": [],
+            }
+
+        if detect_crisis(message) or detect_crisis(rewritten):
+            return {
+                **self._crisis_support_result(thread_id=thread_id, locale=locale),
+                "_hits": [],
+                "_history": [],
+                "_short_circuit": True,
             }
 
         workflow_result = self._maybe_handle_workflow(

@@ -157,6 +157,39 @@ def _make_turn(
     )
 
 
+#: Verb forms people use for the task a trigger names. Triggers are written
+#: with the base verb ("file a return"), so "filing my VAT return" never
+#: matched, and an explicit "walk me through filing my VAT return" fell
+#: through to a VAT explainer instead of the Return Filing flow (measured on
+#: the local stack, 2026-09-29).
+_VERB_FORMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bfil(?:ing|ed)\b"), "file"),
+    (re.compile(r"\bregister(?:ing|ed)\b"), "register"),
+    (re.compile(r"\bsubmit(?:ting|ted)\b"), "submit"),
+    (re.compile(r"\bpaying\b"), "pay"),
+    (re.compile(r"\bgenerat(?:ing|ed)\b"), "generate"),
+    (re.compile(r"\bclear(?:ing|ed)\b"), "clear"),
+    (re.compile(r"\bobject(?:ing|ed)\b"), "object"),
+    (re.compile(r"\bgetting\b"), "get"),
+    (re.compile(r"\bappl(?:ying|ied)\b"), "apply"),
+)
+
+#: A tax-type word between the determiner and "return" — "my VAT return" is
+#: still "my return" for the purpose of finding the filing flow.
+_RETURN_QUALIFIER_RE = re.compile(
+    r"\b(my|a|the|our)\s+(?:vat|paye|income\s+tax|corporation\s+tax|withholding\s+tax"
+    r"|rental(?:\s+income)?\s+tax|nil|annual|monthly|provisional)\s+return\b"
+)
+
+
+def _normalise_for_triggers(text: str) -> str:
+    """Lower-case, collapse spaces, base verbs, drop the tax type before "return"."""
+    q = " ".join((text or "").lower().split())
+    for pattern, base in _VERB_FORMS:
+        q = pattern.sub(base, q)
+    return _RETURN_QUALIFIER_RE.sub(r"\1 return", q)
+
+
 class WorkflowRegistry:
     """Global workflow registry (module-level singleton)."""
 
@@ -177,11 +210,22 @@ class WorkflowRegistry:
 
     @classmethod
     def match_trigger(cls, query: str) -> WorkflowDefinition | None:
-        """Return the first workflow whose trigger phrases match *query*."""
-        q = query.lower()
+        """Return the first workflow whose trigger phrases match *query*.
+
+        Both sides are normalised (:func:`_normalise_for_triggers`), and a
+        flow's own name counts as a trigger — "guide me through Return
+        Filing" is the most explicit way to ask for it, and it is the text
+        the guided-mode offer puts on its button. Flows with no trigger
+        phrases (the calculators) are started programmatically only, and a
+        name match does not change that.
+        """
+        q = _normalise_for_triggers(query)
         for wf in cls._workflows.values():
-            for phrase in wf.trigger_phrases:
-                if phrase.lower() in q:
+            phrases = list(wf.trigger_phrases)
+            if phrases and wf.name:
+                phrases.append(wf.name)
+            for phrase in phrases:
+                if _normalise_for_triggers(phrase) in q:
                     return wf
         return None
 

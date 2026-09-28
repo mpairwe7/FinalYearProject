@@ -190,6 +190,17 @@ _CUSTOMS = (
 )
 
 # Escalation triggers — sensitive topics or explicit human requests.
+#: How-to phrasing. A question asking *how* to do something with one's own
+#: return or TIN has a public, procedural answer; only a question about the
+#: account's current state needs an authenticated lookup or a person. Shared
+#: with the answer judge in ``service.py`` so the two cannot disagree.
+HOW_TO_QUESTION_RE = re.compile(
+    r"\b(?:how\s+(?:do|does|can|should|would)\s+(?:i|we|one)|what\s+are\s+the\s+steps"
+    r"|where\s+(?:do|can)\s+i|help\s+me|guide\s+me|walk\s+me\s+through|steps\s+to"
+    r"|procedure|process\s+(?:to|for|of))\b",
+    re.IGNORECASE,
+)
+
 _ESCALATE = (
     (
         re.compile(
@@ -206,9 +217,14 @@ _ESCALATE = (
         "Legal / dispute context needs human handling",
     ),
     (
+        # Measured 2026-09-29 on the local GPU stack: without the how-to
+        # exemption, "How do I file my return?" opened an officer ticket in
+        # 0.5 s instead of getting the published filing steps. The lookahead is
+        # anchored, so the pattern still scans the query once.
         re.compile(
-            r"\b(my\s+tin|my\s+filing|my\s+return|my\s+account|my\s+balance)\b",
-            re.IGNORECASE,
+            r"^(?!.*" + HOW_TO_QUESTION_RE.pattern + r")"
+            r".*\b(my\s+tin|my\s+filing|my\s+return|my\s+account|my\s+balance)\b",
+            re.IGNORECASE | re.DOTALL,
         ),
         "Account-specific query — needs authenticated lookup or human",
     ),

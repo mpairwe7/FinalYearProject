@@ -1,0 +1,141 @@
+id: motor_vehicle_registration
+name: Motor Vehicle Registration
+version: "1"
+description: >
+  Guide first-time registration of a vehicle entering Uganda, or the move of
+  an already registered vehicle to digital number plates.
+# Process, fees and requirements from the Ministry of Works and Transport's
+# "Application for Digital Number Plates" (May 2026):
+# https://works.go.ug/wp-content/uploads/2026/05/Digital-Number-Plates-Application-Process-1.pdf
+# First registration: agent appointed on the URA portal, ASYCUDA declaration
+# and taxes, customs clearance, plate fee UGX 714,300 paid through the bank,
+# fitment. Post registration: "Get Digital Number plate" on the URA portal,
+# slips by email, bank payment (UGX 150,000 motor vehicle / 50,000
+# motorcycle for old-to-new series), documents to URA Nakawa (NIP building),
+# fitment date. Re-check the fees against that document before changing them.
+requires_auth: false
+
+trigger_phrases:
+  - "register my car"
+  - "register my vehicle"
+  - "register my motor vehicle"
+  - "register my motorcycle"
+  - "register my imported car"
+  - "register an imported car"
+  - "register a vehicle"
+  - "vehicle registration"
+  - "digital number plate"
+  - "digital plate"
+
+steps:
+  - id: collect_registration_kind
+    title: "Registration type"
+    question: >
+      Is this a **first registration** (a vehicle entering Uganda, or never
+      registered here), or an **already registered** vehicle that needs
+      digital number plates?
+    slot: registration_kind
+    validator: "enum[first registration,already registered]"
+
+  - id: collect_has_tin
+    title: "TIN"
+    question: >
+      The vehicle is registered to a TIN. Do you have a TIN in your own name?
+      (yes/no)
+    slot: has_tin
+    validator: boolean
+
+  - id: tin_guidance
+    title: "Get a TIN first"
+    question: >
+      Get your TIN before anything else; say **help me register for a TIN**
+      and I will guide you.
+    when: "has_tin == False"
+    slot: ""
+    validator: text
+    resources:
+      - tin_application
+
+  - id: appoint_agent
+    title: "Appoint a clearing agent"
+    question: >
+      Step 1 of 5: sign in to the URA portal and appoint a licensed clearing
+      agent for the vehicle.
+    when: "registration_kind == first registration"
+    slot: ""
+    validator: text
+    portal_action: etax_login
+    resources:
+      - customs_systems
+
+  - id: declaration_and_clearance
+    title: "Declaration and clearance"
+    question: >
+      Steps 2 and 3 are your agent's: they declare the vehicle on ASYCUDA,
+      you pay the import taxes on the assessment, and the agent completes
+      customs clearance. Ask the agent for the declaration number and keep it.
+    when: "registration_kind == first registration"
+    slot: ""
+    validator: text
+    resources:
+      - make_payment
+
+  - id: plate_fee
+    title: "Pay the plate fee"
+    question: >
+      Step 4 of 5: pay the digital number plate fee of **UGX 714,300**
+      through a bank and keep the receipt. This fee is paid at the bank, not
+      by mobile money.
+    when: "registration_kind == first registration"
+    slot: ""
+    validator: text
+
+  - id: fitment
+    title: "Plate fitment"
+    question: >
+      Step 5 of 5: accept the fitment date you are given and take the vehicle
+      for fitment. If you miss the date, ask to **talk to an officer** so it
+      can be rescheduled.
+    when: "registration_kind == first registration"
+    slot: ""
+    validator: text
+
+  - id: request_digital_plate
+    title: "Request digital plates"
+    question: >
+      Sign in to the URA portal with your TIN and password, open the motor
+      vehicle registration function and choose **Get Digital Number plate**.
+      The vehicle must be registered in your name. Have ready the application
+      form, a copy of your National ID (or passport or refugee card) and a
+      copy of the logbook.
+    when: "registration_kind == already registered"
+    slot: ""
+    validator: text
+    portal_action: etax_login
+    resources:
+      - motor_vehicle_forms
+
+  - id: upgrade_payment
+    title: "Pay and submit"
+    question: >
+      Download the assessment and acknowledgement slips from your email and
+      pay through a bank: **UGX 150,000** for a motor vehicle or **UGX 50,000**
+      for a motorcycle moving from old-series plates. Then take your documents
+      to the motor vehicle registration office at URA Nakawa (NIP building)
+      and accept the fitment date.
+    when: "registration_kind == already registered"
+    slot: ""
+    validator: text
+
+  - id: summary
+    title: "Check the record"
+    question: >
+      You can check the vehicle's record any time with **Search Vehicle
+      Details**, and confirm your documents are genuine on **Document
+      Authentication**.
+    slot: ""
+    validator: text
+    portal_action: motor_vehicle
+    resources:
+      - motor_vehicle_search
+      - document_authentication
