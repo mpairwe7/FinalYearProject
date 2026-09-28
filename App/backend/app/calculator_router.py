@@ -17,12 +17,18 @@ Production rules encoded here:
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+import threading
+import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .tax.tables import RateTable
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Amount extraction
@@ -160,7 +166,7 @@ class CalcPlan:
 
 
 _CALC_VERB_RE = re.compile(
-    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out|bala|kubala|balira|hesabu|kuhesabu"
+    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out|bala|kubala|okubala|okubalira|balira|hesabu|kuhesabu|kokotoa"
     r"|what\s+(?:will|would|tax)\b"
     r"|what\s+(?:will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)\b",
     re.IGNORECASE,
@@ -231,7 +237,15 @@ _EXPENSE_KW_RE = re.compile(r"\b(expense\w*|repair\w*|maintenance|costs)\b", re.
 _NO_VAT_RE = re.compile(r"\b(without|excluding|no|minus)\s+vat\b", re.IGNORECASE)
 _DUTY_KW_RE = re.compile(r"\bduty\b", re.IGNORECASE)
 
-_VAT_WORD_RE = re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)
+# "vati" is how Whisper-SALT spells VAT in Luganda. The longer phrases are
+# the ordinary Luganda and Kiswahili names; the English token stays.
+_VAT_WORD_RE = re.compile(
+    r"\bv\.?a\.?t\.?\b|\bvati\b|\bvalue\s+added\s+tax\b"
+    r"|\bomusolo\s+gw['’]?okwongerako\b"
+    r"|\bushuru\s+wa\s+(?:ongezeko|vat)\b"
+    r"|\bkodi\s+ya\s+(?:ongezeko|vat)\b",
+    re.IGNORECASE,
+)
 _REGISTER_WORD_RE = re.compile(
     r"\b(?:register(?:ed|ing|ation)?|usajili|kujisajili|jisajili|okwewandiisa|kwewandiisa|gunteeka|nteekwa|nilazimika)\b",
     re.IGNORECASE,
@@ -318,13 +332,16 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             re.IGNORECASE,
         ),
     ),
-    ("vat", re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)),
+    ("vat", _VAT_WORD_RE),
 ]
 
 # Ordered most specific first: "management fees" must beat the looser
 # "services" pattern, and the FY2026-27 categories must beat both.
 _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
-    ("management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
+    (
+        "management_fees",
+        re.compile(r"\bmanagement\s+(?:fees?|consultan\w+)\b", re.IGNORECASE),
+    ),
     ("dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
     ("royalty", re.compile(r"\broyalt(?:y|ies)\b", re.IGNORECASE)),
     (
@@ -386,6 +403,204 @@ def detect_calculator_intent(message: str) -> str | None:
     if not text or _INFO_ONLY_RE.search(text):
         return None
     return next((name for name, pat in _INTENT_RES if pat.search(text)), None)
+
+
+# The one numeric slot a later "what about 2 million?" replaces. Capital
+# gains needs two figures, so a single follow-up amount is not replayed.
+AMOUNT_SLOT_BY_TOOL: dict[str, str] = {
+    "calculate_paye": "monthly_gross",
+    "calculate_vat": "amount",
+    "calculate_corporation_tax": "chargeable_income",
+    "calculate_customs_duty": "cif_value",
+    "calculate_excise_duty": "amount",
+    "check_vat_registration": "annual_turnover",
+    "calculate_rental_tax": "annual_gross_rent",
+    "calculate_withholding": "amount",
+}
+_AMOUNT_SLOTS = frozenset(AMOUNT_SLOT_BY_TOOL.values())
+_CALC_MEMORY_TTL_S = 6 * 60 * 60
+_CALC_MEMORY_PREFIX = "mcp:calc:"
+_calc_lock = threading.Lock()
+_calc_memory: dict[str, tuple[float, dict[str, Any]]] = {}
+
+_SLOT_QUESTION = {
+    "monthly_gross": "What is the gross monthly salary in UGX?",
+    "amount": "What is the amount in UGX?",
+    "annual_turnover": "What is the annual turnover in UGX?",
+    "cif_value": "What is the CIF value in UGX?",
+    "annual_gross_rent": "What is the annual rent in UGX?",
+    "chargeable_income": "What is the chargeable income in UGX?",
+    "payment_type": (
+        "Which withholding applies: services or goods at 6%, "
+        "or a management fee at 15%?"
+    ),
+    "sale_price": "What was the sale price in UGX?",
+    "cost_base": "What was the cost in UGX?",
+    "excise_type": "Which excise applies — for example fuel, beer, or airtime?",
+}
+
+# Words left after the figure in "what about 2 million?" / "ate 2m".
+_FOLLOWUP_FILLER_RE = re.compile(
+    r"^(?:what\s+about|how\s+about|and(?:\s+(?:what|if|for))?|if\s+it\s+(?:was|were)|"
+    r"instead|same\s+for|now|then|ku|na|kuhusu|ate|kya|nga)$",
+    re.IGNORECASE,
+)
+_PAYMENT_TYPE_REPLY = {
+    "services": "services",
+    "service": "services",
+    "goods": "goods",
+    "management": "management_fees",
+    "management fee": "management_fees",
+    "management fees": "management_fees",
+}
+
+
+def slot_question(slot: str) -> str:
+    """One question for a calculator slot the message did not carry."""
+    return _SLOT_QUESTION.get(slot, "I need one more detail before I can calculate that.")
+
+
+def _redis_store() -> Any:
+    try:
+        from .mcp.client import _shared_store
+    except Exception:
+        return None
+    try:
+        return _shared_store()
+    except Exception:
+        return None
+
+
+def remember_calculation(
+    conversation_id: str,
+    tool: str,
+    params: dict[str, Any],
+    *,
+    pending: list[str] | None = None,
+    assumptions: list[str] | None = None,
+) -> None:
+    """Remember the last calculator so the next amount stays on that tax."""
+    if not conversation_id or tool not in AMOUNT_SLOT_BY_TOOL:
+        return
+    record = {
+        "tool": tool,
+        "params": {k: v for k, v in params.items() if k != "fiscal_year"},
+        "pending": list(pending or []),
+        "assumptions": list(assumptions or []),
+    }
+    with _calc_lock:
+        _calc_memory[conversation_id] = (time.monotonic() + _CALC_MEMORY_TTL_S, record)
+    store = _redis_store()
+    if store is None:
+        return
+    try:
+        store.setex(
+            _CALC_MEMORY_PREFIX + conversation_id,
+            _CALC_MEMORY_TTL_S,
+            json.dumps(record),
+        )
+    except Exception:
+        logger.debug("calc memory redis set failed", exc_info=True)
+
+
+def recall_calculation(conversation_id: str) -> dict[str, Any] | None:
+    """The last calculator for this conversation, or None when it has expired."""
+    if not conversation_id:
+        return None
+    store = _redis_store()
+    if store is not None:
+        try:
+            raw = store.get(_CALC_MEMORY_PREFIX + conversation_id)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, dict) and data.get("tool"):
+                    return data
+        except Exception:
+            logger.debug("calc memory redis get failed", exc_info=True)
+    with _calc_lock:
+        cached = _calc_memory.get(conversation_id)
+        if cached is None:
+            return None
+        expires, record = cached
+        if time.monotonic() >= expires:
+            _calc_memory.pop(conversation_id, None)
+            return None
+        return dict(record)
+
+
+def clear_calculation(conversation_id: str) -> None:
+    """Drop a remembered calculator. Tests use this; a new plan overwrites it."""
+    with _calc_lock:
+        _calc_memory.pop(conversation_id, None)
+    store = _redis_store()
+    if store is None:
+        return
+    try:
+        store.delete(_CALC_MEMORY_PREFIX + conversation_id)
+    except Exception:
+        logger.debug("calc memory redis delete failed", exc_info=True)
+
+
+def lone_amount(message: str) -> float | None:
+    """One money figure that does not name a tax head.
+
+    "200 million" and "what about 200 million?" qualify. "VAT on 200 million"
+    does not — that message belongs to :func:`plan_calculation`.
+    """
+    text = (message or "").strip()
+    if not text or detect_calculator_intent(text):
+        return None
+    amounts = extract_amounts(text)
+    if len(amounts) != 1:
+        return None
+    val, start, end = amounts[0]
+    if val <= 0:
+        return None
+    remainder = (text[:start] + " " + text[end:]).strip()
+    remainder = re.sub(_CURRENCY, " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"[\s.,!?:;/\-=]+", " ", remainder).strip()
+    if not remainder or _FOLLOWUP_FILLER_RE.match(remainder):
+        return float(val)
+    return None
+
+
+def payment_type_reply(message: str) -> str | None:
+    """A short reply that names a withholding category, or None."""
+    return _PAYMENT_TYPE_REPLY.get(re.sub(r"\s+", " ", (message or "").strip().lower()))
+
+
+def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] | None:
+    """Fill the pending slot of a remembered calculator from *message*.
+
+    Returns ``{"ready": True, ...}`` when the tool can run, ``{"ready": False}``
+    when another slot is still open, and None when the message is a new question.
+    """
+    tool = str(saved.get("tool") or "")
+    if tool not in AMOUNT_SLOT_BY_TOOL:
+        return None
+    params = dict(saved.get("params") or {})
+    pending = [str(slot) for slot in (saved.get("pending") or [])]
+    assumptions = list(saved.get("assumptions") or [])
+    if pending and pending[0] == "payment_type":
+        kind = payment_type_reply(message)
+        if kind is None:
+            return None
+        params["payment_type"] = kind
+        pending = pending[1:]
+    else:
+        amount = lone_amount(message)
+        if amount is None:
+            return None
+        slot = pending[0] if pending and pending[0] in _AMOUNT_SLOTS else AMOUNT_SLOT_BY_TOOL[tool]
+        params[slot] = amount
+        pending = [item for item in pending if item != slot]
+    return {
+        "tool": tool,
+        "params": params,
+        "pending": pending,
+        "assumptions": assumptions,
+        "ready": not pending,
+    }
 
 
 def has_money_amount(message: str) -> bool:
@@ -610,9 +825,13 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
 
     if intent == "withholding":
         params, missing = {}, []
-        wht_type = next((name for name, pat in _WHT_TYPE_RES if pat.search(text)), None)
-        if wht_type is not None:
-            params["payment_type"] = wht_type
+        # "management consultancy" matches both a 15% fee and 6% services.
+        # Ask, rather than silently billing the lower rate.
+        matched = [name for name, pat in _WHT_TYPE_RES if pat.search(text)]
+        if "management_fees" in matched and "services" in matched:
+            missing.append("payment_type")
+        elif matched:
+            params["payment_type"] = matched[0]
         else:
             missing.append("payment_type")
         if single is not None:

@@ -478,6 +478,29 @@ class UraReceptionistBrain(LLMService):
         Replaces the slow 4-hop MT pipeline with direct cross-lingual understanding,
         English URA knowledge base retrieval, and direct Luganda synthesis in a single pass.
         """
+        # A Luganda calculation is answered by the same MCP calculator as chat,
+        # before retrieval can substitute a nearby tax fact.
+        from .lexicon import repair_asr_entities
+
+        repaired = repair_asr_entities(question)
+        thread_id = self.room.state.conversation_id or self.room.call_id
+        calc = await asyncio.to_thread(
+            self.chat_model._maybe_handle_fast_paths,
+            message=repaired,
+            rewritten=repaired,
+            thread_id=thread_id,
+            locale="lg",
+        )
+        if isinstance(calc, dict) and calc.get("reply"):
+            answered = dict(calc)
+            answered["locale"] = "lg"
+            answered["english_query"] = repaired
+            # A calculator reply has no retrieval passages. Leaving confidence
+            # empty made the call treat that as "no knowledge" and transfer.
+            if not answered.get("confidence"):
+                answered["confidence"] = 1.0
+            return answered
+
         # 1. Clean query extraction
         english_query = await asyncio.to_thread(self._extract_english_tax_query, question)
 

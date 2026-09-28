@@ -353,11 +353,17 @@ Three deterministic fast paths intercept BEFORE routing
    `tin_procedure_help` flow), then returns the matching curated template;
    typed asks answer immediately.
 2. **Calculator** (`calculator_router.py`): a message that already carries
-   the figures ("VAT on 1.5m") is answered instantly from the registered
-   calculator tool (`retrieval_mode="calculator"`, no LLM); missing figures
-   start the matching `calc_*` guided workflow pre-filled with everything
-   already extracted. Defaults applied (residency, VAT direction, landlord
-   type, annual→monthly conversion) are stated as visible assumptions.
+   the figures ("VAT on 1.5m", Luganda `vati`) is answered instantly from
+   the registered calculator tool through the MCP client
+   (`retrieval_mode="calculator"`, no LLM). The conversation remembers that
+   tool, so "what about 2 million?" recomputes the same tax. A bare amount
+   with no prior tool still shows PAYE, VAT, and services withholding, with
+   every figure taken from the rate table. Missing figures start the matching
+   `calc_*` guided workflow, or ask for the missing slot when workflows are
+   off. Defaults (residency, VAT direction, landlord type, annual→monthly)
+   are stated as assumptions. A withholding line that matches both services
+   and a management fee asks which rate applies. A tool result that fails
+   its output schema is not spoken.
 3. **Rate lookup** — "what is the current VAT rate?" answers with the real
    figure from the versioned FY rate table (gated on the authority-manifest
    freshness check) instead of retrieval passages.
