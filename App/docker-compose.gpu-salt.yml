@@ -95,6 +95,7 @@ services:
       # one-time network fetch; the NAS mount below is read-write so it
       # persists for the next run instead of re-downloading every time.
       - HF_HUB_OFFLINE=0
+      - HF_HOME=/app/hf_cache
     volumes:
       - type: bind
         source: /mnt/nas1/caches/huggingface_cache
