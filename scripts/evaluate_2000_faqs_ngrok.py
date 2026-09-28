@@ -378,7 +378,7 @@ class TurnResult:
 
 
 class URAEvaluationEngine2000:
-    def __init__(self, base_url: str, concurrency: int = 16):
+    def __init__(self, base_url: str, concurrency: int = 16, gpu_id: int = 2, fresh: bool = False):
         self.base_url = base_url.rstrip("/")
         if not self.base_url.endswith("/api") and not self.base_url.endswith("/v1"):
             self.api_url = f"{self.base_url}/api"
@@ -386,6 +386,8 @@ class URAEvaluationEngine2000:
             self.api_url = self.base_url
         self.chat_endpoint = f"{self.api_url}/v1/chat"
         self.concurrency = concurrency
+        self.gpu_id = gpu_id
+        self.fresh = fresh
         self.sem = asyncio.Semaphore(concurrency)
 
     async def evaluate_turn(self, client: httpx.AsyncClient, faq: EvalFAQ) -> TurnResult:
@@ -481,15 +483,15 @@ class URAEvaluationEngine2000:
 
     async def run(self, faqs: list[EvalFAQ]) -> dict[str, Any]:
         print(f"🚀 Starting Benchmark: 2,000 FAQs over {self.chat_endpoint}")
-        print(f"   Concurrency: {self.concurrency} async workers")
+        print(f"   Concurrency: {self.concurrency} async workers | Telemetry GPU: {self.gpu_id}")
         
-        gpu_pre = get_gpu_telemetry(4)
+        gpu_pre = get_gpu_telemetry(self.gpu_id)
         t_start = time.perf_counter()
         
         results: list[TurnResult] = []
         completed_ids: set[str] = set()
         ckpt_path = Path("Results/metrics/2000_faqs_ngrok_evaluation_report.json")
-        if ckpt_path.exists():
+        if not self.fresh and ckpt_path.exists():
             try:
                 with open(ckpt_path, "r", encoding="utf-8") as cf:
                     existing_data = json.load(cf)
@@ -523,7 +525,7 @@ class URAEvaluationEngine2000:
                     print(f"[{completed:04d}/{len(faqs)}] Progress: {(completed/len(faqs))*100:.1f}% | QPS: {qps:.2f} | Latency p50: {p50:.0f}ms | Accuracy: {acc:.1f}%", flush=True)
                 if completed % 50 == 0 or completed == len(faqs):
                     try:
-                        interm = self._compile_report(faqs, results, time.perf_counter() - t_start, gpu_pre, get_gpu_telemetry(4))
+                        interm = self._compile_report(faqs, results, time.perf_counter() - t_start, gpu_pre, get_gpu_telemetry(self.gpu_id))
                         with open("Results/metrics/2000_faqs_ngrok_evaluation_report.json", "w") as cf:
                             json.dump(interm, cf, indent=2)
                         with open("docs/Reports/data/eval_2000_faqs_ngrok.json", "w") as mf:
@@ -534,7 +536,7 @@ class URAEvaluationEngine2000:
                         pass
 
         total_duration = time.perf_counter() - t_start
-        gpu_post = get_gpu_telemetry(4)
+        gpu_post = get_gpu_telemetry(self.gpu_id)
         
         return self._compile_report(faqs, results, total_duration, gpu_pre, gpu_post)
 
@@ -755,6 +757,8 @@ def main():
         help="Target API gateway URL",
     )
     parser.add_argument("--concurrency", type=int, default=24, help="Concurrent workers (default: 24)")
+    parser.add_argument("--gpu", type=int, default=int(os.getenv("GPU_ID", "2")), help="GPU ID for telemetry (default: 2)")
+    parser.add_argument("--fresh", action="store_true", help="Start fresh without loading existing checkpoint")
     parser.add_argument("--limit", type=int, default=2000, help="Number of FAQs (default: 2000)")
     parser.add_argument(
         "--out",
@@ -785,7 +789,7 @@ def main():
     print("  Domain breakdown:", dict(Counter(f.domain for f in faqs)))
     print("  Language breakdown:", dict(Counter(f.locale for f in faqs)))
 
-    engine = URAEvaluationEngine2000(base_url=args.target, concurrency=args.concurrency)
+    engine = URAEvaluationEngine2000(base_url=args.target, concurrency=args.concurrency, gpu_id=args.gpu, fresh=args.fresh)
     report = asyncio.run(engine.run(faqs))
 
     out_path = Path(args.out)
