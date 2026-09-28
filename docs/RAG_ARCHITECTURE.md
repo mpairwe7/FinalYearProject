@@ -258,6 +258,12 @@ questions in English while `ChatModel.generate()` handled them correctly.
 - Only the figure and its indices are emitted, never a quotation of the surrounding prose. Passage bodies are isolated inside hash-bound `<passage>` spotlight markers, and lifting a clause out to caption a number would move attacker-controlled text outside that isolation for attribution the citation index already gives.
 - Ordering follows retrieval rank and truncation is declared in the block rather than silent, because a partial list that reads as exhaustive is worse than no list.
 
+**Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`faq_corpus.py`, `service.py`, `mt.py`):
+- High-frequency statutory FAQ CSVs in `Data/dataset/ura_*_faqs.csv` (e.g. VAT, Corporation Tax) contain canonical trilingual columns: `question`, `answer`, `question_lg`, `answer_lg`, `question_sw`, `answer_sw`.
+- During corpus compilation (`python -m app.faq_corpus`), `_validate_vernacular_figures` tests every localized answer with `mt.figures_survived`, enforcing statutory rates (18%, 30%), currency limits, and calendar deadlines at build time.
+- `_simple_search` in `service.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
+- When an exact native FAQ match is not found, queries fall back seamlessly to lazy translate-then-retrieve (`translate_query_for_retrieval`), ensuring comprehensive coverage.
+
 **Escalation** (`guardrails.py` → `OutputGuard.should_escalate()`):
 - Low faithfulness score (< 0.25)
 - No retrieval results

@@ -134,6 +134,44 @@ class FaqJsonlCorpusTests(unittest.TestCase):
             with self.assertRaisesRegex(CorpusValidationError, "invalid JSONL"):
                 ingest_teacher_qa_jsonls(path.parent)
 
+    def test_multilingual_export_and_ingest_preserves_vernacular_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            csv_dir, jsonl_dir = root / "csv", root / "faq_jsonl"
+            csv_dir.mkdir()
+            csv_path = csv_dir / "ura_vat_faqs.csv"
+            csv_path.write_text(
+                'question,answer,question_lg,answer_lg,question_sw,answer_sw\n'
+                '"What is VAT?","VAT is 18%.","VAT kye ki?","Omusolo gwa VAT guli 18%.","VAT ni nini?","Kodi ya VAT ni 18%."\n',
+                encoding="utf-8",
+            )
+
+            stats = export_faq_csvs_to_jsonl(csv_dir, jsonl_dir)
+            self.assertEqual(stats["records"], 1)
+            manifest = json.loads((jsonl_dir / "faq_corpus_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest.get("multilingual_records"), {"lg": 1, "sw": 1})
+
+            docs = ingest_faq_jsonls(csv_dir, jsonl_dir)
+            self.assertEqual(len(docs), 1)
+            self.assertEqual(docs[0]["question_lg"], "VAT kye ki?")
+            self.assertEqual(docs[0]["answer_lg"], "Omusolo gwa VAT guli 18%.")
+            self.assertEqual(docs[0]["question_sw"], "VAT ni nini?")
+            self.assertEqual(docs[0]["answer_sw"], "Kodi ya VAT ni 18%.")
+
+    def test_multilingual_export_rejects_mutated_figures(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            csv_dir, jsonl_dir = root / "csv", root / "faq_jsonl"
+            csv_dir.mkdir()
+            csv_path = csv_dir / "ura_vat_faqs.csv"
+            csv_path.write_text(
+                'question,answer,question_lg,answer_lg\n'
+                '"What is VAT?","The VAT rate is 18%.","VAT kye ki?","Omusolo gwa VAT guli 12%."\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CorpusValidationError, "statutory figures mutated or missing"):
+                export_faq_csvs_to_jsonl(csv_dir, jsonl_dir)
+
 
 if __name__ == "__main__":
     unittest.main()
