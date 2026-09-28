@@ -28,6 +28,11 @@ class WorkflowStep:
     tool: str = ""  # tool name to invoke (action step)
     args: dict[str, Any] = field(default_factory=dict)
     confirmation_required: bool = False
+    title: str = ""
+    ui_widget: str = "text"
+    options: list[str] = field(default_factory=list)
+    portal_action: dict[str, Any] = field(default_factory=dict)
+    resources: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -53,16 +58,64 @@ def load_workflow(path: Path) -> WorkflowDefinition:
 
     steps: list[WorkflowStep] = []
     for s in raw.get("steps", []):
+        step_id = str(s.get("id", ""))
+        validator = str(s.get("validator", "text"))
+        title = str(s.get("title", "")) or step_id.replace("_", " ").title()
+
+        # Derive interactive ui_widget and options if not explicitly specified
+        raw_options = s.get("options")
+        if isinstance(raw_options, list):
+            options = [str(opt).strip() for opt in raw_options if opt]
+        else:
+            options = []
+
+        ui_widget = str(s.get("ui_widget", ""))
+        if not ui_widget:
+            if validator.startswith("enum[") and validator.endswith("]"):
+                ui_widget = "options"
+                if not options:
+                    options = [opt.strip() for opt in validator[5:-1].split(",") if opt.strip()]
+            elif validator == "boolean":
+                ui_widget = "boolean"
+                if not options:
+                    options = ["yes", "no"]
+            elif "portal" in step_id or s.get("portal_action"):
+                ui_widget = "portal_action"
+            else:
+                ui_widget = "text"
+
+        portal_action = s.get("portal_action") or {}
+        if not portal_action and ("portal" in step_id or "summary" in step_id):
+            # Check if step references URA portal
+            q = str(s.get("question", "")).lower()
+            if "efris.ura.go.ug" in q:
+                portal_action = {"label": "Open URA EFRIS Portal ↗", "url": "https://efris.ura.go.ug"}
+            elif "portal.ura.go.ug/payment" in q or "prn" in q:
+                portal_action = {"label": "Open URA PRN Payments ↗", "url": "https://portal.ura.go.ug/payment"}
+            elif "ura.go.ug" in q or "portal" in q:
+                portal_action = {"label": "Open URA e-Services Portal ↗", "url": "https://portal.ura.go.ug"}
+
+        raw_resources = s.get("resources")
+        if isinstance(raw_resources, list):
+            resources = [dict(r) for r in raw_resources if isinstance(r, dict)]
+        else:
+            resources = []
+
         steps.append(
             WorkflowStep(
-                id=str(s.get("id", "")),
+                id=step_id,
                 question=str(s.get("question", "")),
                 slot=str(s.get("slot", "")),
-                validator=str(s.get("validator", "text")),
+                validator=validator,
                 when=str(s.get("when", "")),
                 tool=str(s.get("tool", "")),
                 args=s.get("args") or {},
                 confirmation_required=bool(s.get("confirmation_required", False)),
+                title=title,
+                ui_widget=ui_widget,
+                options=options,
+                portal_action=portal_action,
+                resources=resources,
             )
         )
 

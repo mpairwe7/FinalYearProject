@@ -800,6 +800,138 @@
   margin-bottom: 14px;
 }
 
+.doc-modal-screen-canvas {
+  width: 100%;
+  height: 180px;
+  background: #0f172a;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.doc-modal-canvas-screen-bar {
+  height: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.doc-modal-canvas-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.doc-modal-canvas-dot.red { background: #ef4444; }
+.doc-modal-canvas-dot.yellow { background: #f59e0b; }
+.doc-modal-canvas-dot.green { background: #10b981; }
+
+.doc-modal-canvas-url {
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: monospace;
+  margin-left: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-modal-canvas-viewport {
+  flex: 1;
+  position: relative;
+  background: radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.9) 100%);
+  width: 100%;
+}
+
+.doc-modal-canvas-box {
+  position: absolute;
+  border-radius: 6px;
+  border: 2px dashed #0284c7;
+  background: rgba(2, 132, 199, 0.15);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  transition: all 150ms ease;
+  box-sizing: border-box;
+}
+
+.doc-modal-canvas-box.is-error {
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.doc-modal-canvas-box.is-action {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.2);
+}
+
+.doc-modal-canvas-box.is-selected {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4), 0 0 12px currentColor;
+}
+
+.doc-modal-canvas-beacon {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  animation: pulse-beacon 1.6s infinite;
+}
+
+@keyframes pulse-beacon {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.4); opacity: 0.3; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.doc-modal-canvas-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 2px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.doc-modal-hotspot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.doc-modal-dom-selector {
+  font-size: 9.5px;
+  font-family: monospace;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: var(--text-2, #64748b);
+}
+
+.doc-modal-hotspot-item {
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.doc-modal-hotspot-item.is-selected {
+  border-width: 2px;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+}
+
 .doc-modal-sub-title {
   margin: 0 0 8px;
   font-size: 12.5px;
@@ -869,4 +1001,513 @@
 
 .doc-modal-step-copy:hover {
   opacity: 1;
+}
+
+/* -------------------------------------------------------------------------
+ * Guided Multi-Step Workflow Stepper
+ * ------------------------------------------------------------------------- */
+.workflow-stepper-container {
+  margin-top: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(14, 165, 233, 0.05);
+  border: 1px solid rgba(14, 165, 233, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.workflow-stepper-container.is-completed {
+  background: rgba(16, 185, 129, 0.05);
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.workflow-stepper-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.workflow-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #0284c7;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.workflow-stepper-container.is-completed .workflow-badge {
+  background: #10b981;
+}
+
+.workflow-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-0, #0f172a);
+}
+
+.workflow-progress-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+}
+
+.workflow-status-pill.is-complete {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(16, 185, 129, 0.14);
+  color: #059669;
+}
+
+.workflow-step-track {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  overflow-x: auto;
+  padding: 6px 0 10px 0;
+  scrollbar-width: thin;
+}
+
+.workflow-step-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  min-width: 80px;
+  flex: 1;
+  text-align: center;
+}
+
+.workflow-step-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  z-index: 2;
+  transition: all 150ms ease;
+}
+
+.workflow-step-node.is-done .workflow-step-dot {
+  background: #10b981;
+  color: #fff;
+}
+
+.workflow-step-node.is-current .workflow-step-dot {
+  background: #0284c7;
+  color: #fff;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.25);
+}
+
+.workflow-step-node.is-pending .workflow-step-dot {
+  background: var(--bg-2, #e2e8f0);
+  color: var(--text-2, #64748b);
+}
+
+.workflow-step-label {
+  margin-top: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-2, #64748b);
+  max-width: 75px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workflow-step-node.is-current .workflow-step-label {
+  color: #0284c7;
+  font-weight: 700;
+}
+
+.workflow-step-line {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--border, #cbd5e1);
+  z-index: 1;
+}
+
+.workflow-step-node.is-done .workflow-step-line {
+  background: #10b981;
+}
+
+.workflow-current-step-banner {
+  background: rgba(2, 132, 199, 0.08);
+  border-left: 3px solid #0284c7;
+  padding: 6px 10px;
+  border-radius: 0 6px 6px 0;
+  font-size: 12.5px;
+  color: var(--text-1, #1e293b);
+}
+
+.workflow-options-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workflow-options-prompt {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2, #64748b);
+}
+
+.workflow-options-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-option-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: var(--surface-card, #ffffff);
+  border: 1px solid rgba(2, 132, 199, 0.3);
+  color: #0284c7;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.workflow-option-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+}
+
+.workflow-option-bullet {
+  font-size: 8px;
+  opacity: 0.7;
+}
+
+.workflow-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.workflow-portal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: #0284c7;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 120ms ease;
+}
+
+.workflow-portal-btn:hover {
+  background: #0369a1;
+}
+
+.workflow-cancel-btn {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  color: var(--text-2, #64748b);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.workflow-cancel-btn:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+/* -------------------------------------------------------------------------
+ * Contextual Resource Cards (Downloadable Forms, Online Forms & Statutes)
+ * ------------------------------------------------------------------------- */
+.resource-cards-container {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(2, 132, 199, 0.04);
+  border: 1px solid rgba(2, 132, 199, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.resource-cards-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resource-cards-title-icon {
+  font-size: 14px;
+}
+
+.resource-cards-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-0, #0f172a);
+}
+
+.resource-cards-count-badge {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(2, 132, 199, 0.14);
+  color: #0284c7;
+}
+
+.resource-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.resource-card {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-card, #ffffff);
+  border: 1px solid var(--border-0, #e2e8f0);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  transition: all 120ms ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.resource-card:hover {
+  border-color: rgba(2, 132, 199, 0.4);
+  box-shadow: 0 3px 8px rgba(2, 132, 199, 0.08);
+}
+
+.resource-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.resource-type-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+}
+
+.resource-type-pill.is-downloadable_form {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.resource-type-pill.is-statutory_source {
+  background: rgba(139, 92, 246, 0.12);
+  color: #7c3aed;
+}
+
+.resource-meta-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.resource-format-tag {
+  font-size: 9.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.resource-format-tag.is-xlsx {
+  background: #107c41;
+  color: #ffffff;
+}
+
+.resource-format-tag.is-pdf {
+  background: #d9381e;
+  color: #ffffff;
+}
+
+.resource-format-tag.is-docx {
+  background: #2b579a;
+  color: #ffffff;
+}
+
+.resource-format-tag.is-web {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.resource-size-tag {
+  font-size: 9.5px;
+  color: var(--text-2, #64748b);
+}
+
+.resource-card-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-0, #0f172a);
+  line-height: 1.4;
+}
+
+.resource-card-desc {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-1, #334155);
+  line-height: 1.45;
+  flex: 1;
+}
+
+.resource-citation-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 10px;
+  background: rgba(139, 92, 246, 0.06);
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.resource-citation-label {
+  font-weight: 700;
+  color: #7c3aed;
+}
+
+.resource-citation-text {
+  color: var(--text-1, #334155);
+}
+
+.resource-card-actions {
+  margin-top: 6px;
+}
+
+.resource-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 120ms ease;
+  box-sizing: border-box;
+}
+
+.resource-action-btn.is-download {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.resource-action-btn.is-download:hover {
+  background: #059669;
+}
+
+.resource-action-btn.is-portal {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.resource-action-btn.is-portal:hover {
+  background: #0369a1;
+}
+
+.resource-verified-banner {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: #059669;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.resource-year-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+}
+
+.resource-checklist-wrap {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px dashed var(--border-0, #e2e8f0);
+}
+
+.resource-checklist-title {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-2, #64748b);
+  margin-bottom: 3px;
+}
+
+.resource-checklist-list {
+  margin: 0;
+  padding-left: 14px;
+  font-size: 10.5px;
+  color: var(--text-1, #334155);
+  line-height: 1.4;
+}
+
+.resource-checklist-list li {
+  margin-bottom: 2px;
+}
+
+.resource-domain-footnote {
+  margin-top: 2px;
+  font-size: 9px;
+  color: var(--text-2, #94a3b8);
+  font-family: monospace;
+  text-align: right;
 }

@@ -1291,11 +1291,13 @@ def diagnose_portal_screenshot(
     fields: dict[str, list[str]],
     meta: dict[str, Any],
     doc_type: str,
+    kind: str = "",
 ) -> dict[str, Any]:
-    """Diagnose URA portal screenshots, detect error states, and generate interactive navigation steps."""
+    """Diagnose URA portal screenshots, captured receipts, and document images with interactive navigation steps."""
     clean_fn = (filename or "").lower()
     text_lower = (text or "").lower()
     is_shot_named = any(k in clean_fn for k in ("screenshot", "screen", "portal", "error", "capture", "snip"))
+    is_image = kind == "image" or any(clean_fn.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"))
 
     is_portal = (
         doc_type == "portal_screenshot"
@@ -1323,26 +1325,33 @@ def diagnose_portal_screenshot(
             )
         )
     )
-    if not is_portal:
+
+    if not is_portal and not is_image and doc_type not in (
+        "receipt", "invoice", "tin_card", "assessment", "customs_declaration", "filing_form"
+    ):
         return {}
 
-    # 1. Identify specific portal
-    if "efris" in text_lower or "efris" in clean_fn:
+    # 1. Identify specific portal or tax verification domain
+    if "efris" in text_lower or "efris" in clean_fn or doc_type in ("receipt", "invoice"):
         detected_portal = "URA EFRIS Invoicing & Fiscal Portal"
         portal_url = "https://efris.ura.go.ug"
         portal_category = "efris"
-    elif "asycuda" in text_lower or "customs" in text_lower or "bill of entry" in text_lower:
+    elif "asycuda" in text_lower or "customs" in text_lower or "bill of entry" in text_lower or doc_type == "customs_declaration":
         detected_portal = "URA Customs ASYCUDA World Portal"
         portal_url = "https://customs.ura.go.ug"
         portal_category = "customs"
-    elif "tin" in clean_fn or ("registration" in text_lower and "tin" in text_lower):
+    elif "tin" in clean_fn or ("registration" in text_lower and "tin" in text_lower) or doc_type == "tin_card":
         detected_portal = "URA e-Services Taxpayer Registration"
         portal_url = "https://portal.ura.go.ug"
         portal_category = "tin"
-    elif "prn" in text_lower or "payment" in text_lower:
+    elif "prn" in text_lower or "payment" in text_lower or any(k in text_lower for k in ("momo", "airtel money", "mtn money", "stanbic", "centenary")):
         detected_portal = "URA e-Services PRN & Payments Portal"
-        portal_url = "https://portal.ura.go.ug"
+        portal_url = "https://portal.ura.go.ug/payment"
         portal_category = "prn"
+    elif doc_type == "assessment":
+        detected_portal = "URA Assessment & Dispute Management"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "e_services"
     else:
         detected_portal = "URA e-Services Web Portal"
         portal_url = "https://portal.ura.go.ug"
@@ -1367,6 +1376,31 @@ def diagnose_portal_screenshot(
             "Step 1: Click 'Back to Login' on the URA e-Services homepage.",
             "Step 2: Enter your 10-digit TIN and password. If prompted, verify the SMS OTP.",
             "Step 3: Once authenticated, re-open the filing or PRN form directly.",
+        ]
+    elif doc_type in ("receipt", "invoice"):
+        detected_state = "EFRIS Invoice & Fiscal Receipt Validation"
+        if not fields.get("tins"):
+            issues_detected.append("Seller TIN is not clearly identifiable on the image.")
+        if not fields.get("efris_invoices"):
+            issues_detected.append("Fiscal Document Number (FDN) or QR verification code not detected.")
+        steps = [
+            "Step 1: Check that the 20-digit Fiscal Document Number (FDN) and QR code are visible.",
+            "Step 2: Verify authenticity online at https://efris.ura.go.ug or via the URA Kakasa mobile app.",
+            "Step 3: Retain this document for input tax credit reconciliation in your next VAT return.",
+        ]
+    elif doc_type == "tin_card":
+        detected_state = "Taxpayer Identification Certificate Verification"
+        steps = [
+            "Step 1: Confirm your 10-digit TIN is valid on https://portal.ura.go.ug.",
+            "Step 2: Log in to e-Services to check active tax account registrations.",
+            "Step 3: Ensure registered contact details (email and phone) are current for OTP authentication.",
+        ]
+    elif doc_type == "assessment":
+        detected_state = "Statutory Assessment Review & Payment Notice"
+        steps = [
+            "Step 1: Review the assessed tax liability and the statutory 30-day payment deadline.",
+            "Step 2: If the assessment is accepted, generate a PRN on https://portal.ura.go.ug/payment to settle.",
+            "Step 3: If you dispute the assessment, lodge a formal objection under Section 24 of the TPCA within 30 days.",
         ]
     elif "prn" in text_lower or "payment" in text_lower:
         detected_state = "PRN Generation & Bank Selection"
@@ -1394,12 +1428,68 @@ def diagnose_portal_screenshot(
             "Step 3: Click 'Validate & Submit'.",
         ]
     else:
-        detected_state = f"{detected_portal} - Navigation Screen"
+        detected_state = f"{detected_portal} - Navigation & Verification Screen"
         steps = [
             "Step 1: Confirm your 10-digit TIN is correctly populated in the taxpayer banner.",
             "Step 2: Choose the corresponding statutory flow under e-Services.",
             "Step 3: Follow the guided prompts and save your submission reference code.",
         ]
+
+    # 3. Configure bounding boxes and DOM selectors based on screen state
+    if "Server Error" in detected_state:
+        error_bbox = [10, 8, 24, 92]
+        error_selector = "#error-banner, .alert-danger, .server-error"
+        action_bbox = [28, 40, 38, 60]
+        action_selector = "button#btnBack, button#btnRefresh"
+        action_instruction = "Click 'Refresh' or re-authenticate via Incognito browser"
+    elif "Session Timeout" in detected_state:
+        error_bbox = [15, 12, 28, 88]
+        error_selector = ".session-expired-notice, .login-prompt"
+        action_bbox = [34, 38, 44, 62]
+        action_selector = "a#loginLink, button#btnLogin"
+        action_instruction = "Click 'Back to Login' on the URA e-Services header"
+    elif "Invoice & Fiscal Receipt" in detected_state:
+        error_bbox = [12, 10, 26, 90]
+        error_selector = ".seller-tin, .fiscal-header"
+        action_bbox = [65, 55, 78, 88]
+        action_selector = ".total-amount, .vat-breakdown"
+        action_instruction = "Verify 18% VAT and gross settlement amount"
+    elif "Taxpayer Identification Certificate" in detected_state:
+        error_bbox = [18, 15, 32, 85]
+        error_selector = ".tin-number, #txtTIN"
+        action_bbox = [55, 30, 68, 70]
+        action_selector = ".taxpayer-name, .entity-status"
+        action_instruction = "Review registered taxpayer name and legal category"
+    elif "Statutory Assessment" in detected_state:
+        error_bbox = [16, 12, 30, 88]
+        error_selector = ".assessment-notice-ref, .tax-period"
+        action_bbox = [62, 50, 74, 85]
+        action_selector = "button#btnPayPRN, a#lodgeObjection"
+        action_instruction = "Click to generate PRN or lodge formal objection"
+    elif "PRN Generation" in detected_state:
+        error_bbox = [36, 18, 48, 82]
+        error_selector = "select#ddlPaymentMode, select#bankSelect"
+        action_bbox = [65, 62, 76, 88]
+        action_selector = "button#btnGeneratePRN, input#btnSubmit"
+        action_instruction = "Click the green 'Generate PRN' button after selecting bank"
+    elif "EFRIS Synchronization" in detected_state:
+        error_bbox = [12, 10, 24, 90]
+        error_selector = ".sync-alert-banner, .offline-warning"
+        action_bbox = [46, 35, 56, 65]
+        action_selector = "button#btnOfflineSync, #menu_offline_sync"
+        action_instruction = "Click 'Sync All Pending Records' in System Management"
+    elif "Missing Mandatory" in detected_state:
+        error_bbox = [34, 20, 52, 80]
+        error_selector = ".field-required.has-error, input:required:invalid"
+        action_bbox = [68, 62, 78, 88]
+        action_selector = "button#btnValidateSubmit, input#btnValidate"
+        action_instruction = "Click 'Validate & Submit' after entering required inputs"
+    else:
+        error_bbox = [8, 12, 18, 88]
+        error_selector = ".taxpayer-banner, #top-nav"
+        action_bbox = [58, 55, 68, 85]
+        action_selector = "button.btn-primary, .action-link"
+        action_instruction = "Click the highlighted action button or input field to advance"
 
     hotspots = [
         {
@@ -1407,12 +1497,18 @@ def diagnose_portal_screenshot(
             "type": "error" if issues_detected else "target",
             "label": "Notice / Target Area",
             "instruction": issues_detected[0] if issues_detected else "Primary action target region on screen",
+            "bbox": error_bbox,
+            "dom_selector": error_selector,
+            "confidence": 0.95,
         },
         {
             "id": "spot-action",
             "type": "action",
             "label": "Next Click Target",
-            "instruction": "Click the highlighted action button or input field to advance",
+            "instruction": action_instruction,
+            "bbox": action_bbox,
+            "dom_selector": action_selector,
+            "confidence": 0.92,
         },
     ]
 
@@ -1517,6 +1613,7 @@ def analyze_document(
         fields=fields,
         meta=extraction.meta,
         doc_type=classification.doc_type.value,
+        kind=kind,
     )
 
     record = DocumentRecord(

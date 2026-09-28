@@ -14,8 +14,8 @@
 - risk_id: T-FE-02
   severity: Medium
   accepted_by: Engineering Lead
-  accepted_date: "2026-03-24"
-  review_date: "2026-09-24"
+  accepted_date: "2026-09-24"
+  review_date: "2027-03-24"
   justification: >
     Client-side UI state tampering is mitigated by mandatory server-side JWT
     role verification on all protected staff/admin endpoints.

@@ -97,6 +97,10 @@ class ChatResponse(BaseModel):
         "",
         description="Persisted conversation task id (G6), empty when none is active",
     )
+    resources: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Relevant downloadable forms, verified online forms, and statutory source links",
+    )
 
 
 # ---------------------------------------------------------------------------

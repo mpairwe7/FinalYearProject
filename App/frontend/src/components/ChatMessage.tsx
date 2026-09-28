@@ -13,6 +13,8 @@ import HumanHandoff from './HumanHandoff';
 import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
+import WorkflowStepper from './WorkflowStepper';
+import ResourceCards from './ResourceCards';
 
 /** Copy an assistant reply to the clipboard with a brief confirmation. */
 function CopyButton({ text, noun = 'reply' }: { text: string; noun?: string }) {
@@ -164,6 +166,14 @@ function ChatMessageInner({
             turn.content
           )}
         </div>
+
+        {isAssistant && turn.workflow && (
+          <WorkflowStepper workflow={turn.workflow} onSelectOption={onActionClick} />
+        )}
+
+        {isAssistant && turn.resources && turn.resources.length > 0 && !turn.workflow && (
+          <ResourceCards resources={turn.resources} />
+        )}
 
         {!isAssistant && turn.content && (
           <div className="bubble-actions bubble-actions-user">
@@ -456,6 +466,8 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&
     prev.turn.escalationReason === next.turn.escalationReason &&
+    prev.turn.workflow?.status === next.turn.workflow?.status &&
+    prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
     actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&
     prev.onActionClick === next.onActionClick &&
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&

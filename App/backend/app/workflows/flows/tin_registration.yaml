@@ -83,3 +83,20 @@ steps:
       Reference information has been saved to this conversation.
     slot: ""
     validator: text
+    resources:
+      - title: "Apply for Individual TIN (Instant NIN Verification)"
+        type: "online_form"
+        url: "https://portal.ura.go.ug/registration/individual"
+        description: "Instant online registration with automated NIRA National ID (NIN) validation"
+      - title: "Form DT-1001 — Manual Taxpayer Registration Form"
+        type: "downloadable_form"
+        format: "pdf"
+        size: "340 KB"
+        url: "https://portal.ura.go.ug/downloads/forms/DT-1001_taxpayer_registration.pdf"
+        description: "Official paper registration form for manual submission at URA offices"
+      - title: "URA Taxpayer Starter Pack"
+        type: "guide"
+        format: "pdf"
+        size: "6.0 MB"
+        url: "https://ura.go.ug/download-category/taxpayer-registration-starter-pack/"
+        description: "Comprehensive national onboarding guide for newly registered taxpayers"

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import type { DocumentAnalysisData } from '../lib/attachments';
 import { formatDocType, formatFileSize } from '../lib/attachments';
 import { useTranslation } from '../lib/i18n';
@@ -52,6 +52,8 @@ export function DocumentInspectionModal({
   const copyToClipboard = useCallback((text: string) => {
     void navigator.clipboard.writeText(text);
   }, []);
+
+  const [activeHotspotId, setActiveHotspotId] = useState<string | null>(null);
 
   if (!isOpen || !document) return null;
 
@@ -172,14 +174,72 @@ export function DocumentInspectionModal({
 
               {sg.hotspots && sg.hotspots.length > 0 && (
                 <div className="doc-modal-hotspots-panel">
-                  <h4 className="doc-modal-sub-title">🎯 UI Click Targets & Guidance Points</h4>
+                  <h4 className="doc-modal-sub-title">🎯 Visual Screen Map & UI Hotspots</h4>
+
+                  {/* Interactive Screen Canvas with Bounding-Box Hotspots */}
+                  <div className="doc-modal-screen-canvas" role="region" aria-label="Portal Screen Hotspots">
+                    <div className="doc-modal-canvas-screen-bar">
+                      <span className="doc-modal-canvas-dot red" />
+                      <span className="doc-modal-canvas-dot yellow" />
+                      <span className="doc-modal-canvas-dot green" />
+                      <span className="doc-modal-canvas-url">{sg.portal_url || 'https://portal.ura.go.ug'}</span>
+                    </div>
+                    <div className="doc-modal-canvas-viewport">
+                      {sg.hotspots.map((spot) => {
+                        const bbox = spot.bbox || [20, 15, 40, 85];
+                        const top = bbox[0];
+                        const left = bbox[1];
+                        const height = Math.max(12, bbox[2] - bbox[0]);
+                        const width = Math.max(16, bbox[3] - bbox[1]);
+                        const isSelected = activeHotspotId === spot.id;
+
+                        return (
+                          <div
+                            key={spot.id}
+                            className={`doc-modal-canvas-box is-${spot.type} ${isSelected ? 'is-selected' : ''}`}
+                            style={{
+                              top: `${top}%`,
+                              left: `${left}%`,
+                              height: `${height}%`,
+                              width: `${width}%`,
+                            }}
+                            onClick={() => setActiveHotspotId(isSelected ? null : spot.id)}
+                            title={`${spot.label}: ${spot.instruction}`}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Hotspot ${spot.label}: ${spot.instruction}`}
+                          >
+                            <span className="doc-modal-canvas-beacon" aria-hidden="true" />
+                            <span className="doc-modal-canvas-label">{spot.label}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
                   <div className="doc-modal-hotspots-grid">
-                    {sg.hotspots.map((spot) => (
-                      <div key={spot.id} className={`doc-modal-hotspot-item is-${spot.type}`}>
-                        <span className="doc-modal-hotspot-tag">{spot.label}</span>
-                        <p className="doc-modal-hotspot-inst">{spot.instruction}</p>
-                      </div>
-                    ))}
+                    {sg.hotspots.map((spot) => {
+                      const isSelected = activeHotspotId === spot.id;
+                      return (
+                        <div
+                          key={spot.id}
+                          className={`doc-modal-hotspot-item is-${spot.type} ${isSelected ? 'is-selected' : ''}`}
+                          onClick={() => setActiveHotspotId(isSelected ? null : spot.id)}
+                          role="button"
+                          tabIndex={0}
+                        >
+                          <div className="doc-modal-hotspot-header">
+                            <span className="doc-modal-hotspot-tag">{spot.label}</span>
+                            {spot.dom_selector && (
+                              <code className="doc-modal-dom-selector" title="DOM Selector">
+                                {spot.dom_selector.split(',')[0]}
+                              </code>
+                            )}
+                          </div>
+                          <p className="doc-modal-hotspot-inst">{spot.instruction}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

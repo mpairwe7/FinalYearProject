@@ -113,6 +113,10 @@ domains:
       - ura_groupage_cargo_faqs.csv
       - ura_smuggling_effects_faqs.csv
       - ura_authorised_economic_operator_faqs.csv
+      - ura_customs_audits_refunds_faqs.csv
+      - ura_customs_enforcements_faqs.csv
+      - ura_customs_systems_faqs.csv
+      - ura_warehousing_faqs.csv
 
   export:
     label: "Export procedures"
@@ -126,6 +130,12 @@ domains:
     floor: 0.60
     sources:
       - ura_objections_and_appeals_faqs.csv
+      - ura_alternative_dispute_resolution_faqs.csv
+      - ura_case_summary_reports_faqs.csv
+      - ura_court_of_appeal_faqs.csv
+      - ura_debt_collections_faqs.csv
+      - ura_tax_refunds_faqs.csv
+      - ura_tax_waiver_faqs.csv
 
   payments:
     label: "Making a payment (PRN)"
@@ -138,6 +148,9 @@ domains:
     floor: 0.60
     sources:
       - ura_processes_systems_faqs.csv
+      - ura_help_tool_touchpoint_faqs.csv
+      - ura_opportunities_tenders_auctions_faqs.csv
+      - ura_research_publications_faqs.csv
 
   small_business:
     label: "Small business and presumptive tax"
@@ -146,6 +159,21 @@ domains:
       - ura_taxes_on_small_businesses_faqs.csv
       - ura_financial_management_skills_faqs.csv
       - ura_business_records_faqs.csv
+      - ura_agriculture_sector_faqs.csv
+      - ura_business_formalisation_faqs.csv
+      - ura_construction_sector_faqs.csv
+      - ura_education_sector_faqs.csv
+      - ura_entertainment_events_sector_faqs.csv
+      - ura_fishing_sector_faqs.csv
+      - ura_health_and_medical_sector_faqs.csv
+      - ura_hotel_and_hospitality_sector_faqs.csv
+      - ura_manufacturing_sector_faqs.csv
+      - ura_mining_sector_faqs.csv
+      - ura_non_tax_revenues_faqs.csv
+      - ura_oil_and_gas_petroleum_faqs.csv
+      - ura_real_estate_sector_faqs.csv
+      - ura_schools_tax_curriculum_faqs.csv
+      - ura_wholesale_and_retail_sector_faqs.csv
 
   ngo_religious:
     label: "NGOs and religious institutions"
@@ -153,6 +181,7 @@ domains:
     sources:
       - ura_tax_obligations_ngos_faqs.csv
       - ura_religious_institution_fy2024_25_faqs.csv
+      - ura_government_agencies_faqs.csv
 
   stamp_duty:
     label: "Stamp duty"
@@ -171,6 +200,7 @@ domains:
     floor: 0.75
     sources:
       - ura_advance_tax_transport_faqs.csv
+      - ura_transport_sector_faqs.csv
 
   exemptions:
     label: "Tax exemptions"
@@ -190,6 +220,10 @@ domains:
     floor: 0.50
     sources:
       - ura_exchange_of_information_faqs.csv
+      - ura_delegated_competent_authority_faqs.csv
+      - ura_double_taxation_agreements_faqs.csv
+      - ura_financial_intelligence_authority_faqs.csv
+      - ura_foreign_asset_voluntary_disclosure_faqs.csv
 
   about_ura:
     label: "About URA and whistleblowing"

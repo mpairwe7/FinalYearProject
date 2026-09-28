@@ -2636,3 +2636,188 @@ def test_research_publications_navigation():
         assert expected_state in r["screen_diagnostic"]["detected_state"]
         assert any(expected_step_keyword.lower() in s.lower() for s in r["navigation_guidance"]["steps"])
 
+
+def test_portal_navigator_deep_link_generation_and_prefilling():
+    tool = ToolRegistry.get("navigate_external_portal")
+    assert tool is not None
+
+    screen_text = (
+        "URA Payment Portal\n"
+        "TIN: 1001234567\n"
+        "Generate PRN for VAT liability\n"
+        "Amount: UGX 2,500,000\n"
+        "Tax Head: 0010 - Value Added Tax\n"
+    )
+
+    r = tool.execute(
+        extracted_text=screen_text,
+        portal_name="prn_payments",
+        workflow_intent="generate_prn",
+    )
+
+    assert r["ok"] is True
+    meta = r["portal_metadata"]
+    guidance = r["navigation_guidance"]
+
+    assert "deep_link_url" in meta
+    assert "https://portal.ura.go.ug/payment" in meta["deep_link_url"]
+    assert "tin=1001234567" in meta["deep_link_url"]
+    assert "amount=2500000" in meta["deep_link_url"]
+
+    assert guidance["prefilled_params"]["tin"] == "1001234567"
+    assert guidance["prefilled_params"]["amount"] == "2500000"
+    assert len(guidance["breadcrumb_trail"]) >= 3
+    assert any("Payments" in b or "PRN" in b for b in guidance["breadcrumb_trail"])
+    assert guidance["direct_links"][0]["url"] == meta["deep_link_url"]
+
+
+def test_portal_navigator_efris_invoicing_intent():
+    tool = ToolRegistry.get("navigate_external_portal")
+    assert tool is not None
+
+    r = tool.execute(
+        extracted_text="EFRIS fiscal invoice generation",
+        portal_name="efris",
+        workflow_intent="invoicing",
+    )
+
+    assert r["ok"] is True
+    meta = r["portal_metadata"]
+    assert "efris.ura.go.ug" in meta["deep_link_url"]
+    assert any("Invoicing" in b for b in meta["breadcrumb_trail"])
+
+
+def test_diagnose_portal_screenshot_bounding_boxes_and_selectors():
+    from app.documents import diagnose_portal_screenshot
+
+    res = diagnose_portal_screenshot(
+        text="Internal Server Error 500 on URA e-services payment submission",
+        filename="error_shot.png",
+        fields={},
+        meta={},
+        doc_type="portal_screenshot",
+    )
+
+    assert res["is_screenshot"] is True
+    assert "Server Error" in res["detected_state"]
+    assert len(res["hotspots"]) >= 2
+
+    error_spot = next(h for h in res["hotspots"] if h["type"] == "error")
+    assert "bbox" in error_spot
+    assert len(error_spot["bbox"]) == 4
+    assert error_spot["bbox"][0] < error_spot["bbox"][2]  # ymin < ymax
+    assert "dom_selector" in error_spot
+    assert "#error-banner" in error_spot["dom_selector"] or ".server-error" in error_spot["dom_selector"]
+
+    action_spot = next(h for h in res["hotspots"] if h["type"] == "action")
+    assert "bbox" in action_spot
+    assert len(action_spot["bbox"]) == 4
+    assert "button" in action_spot["dom_selector"]
+
+
+def test_companion_manifest_and_security_contract():
+    tool = ToolRegistry.get("navigate_external_portal")
+    assert tool is not None
+    manifest = tool.get_companion_manifest()
+
+    assert manifest["manifest_version"] == 3
+    assert "activeTab" in manifest["permissions"]
+    assert any("*.ura.go.ug" in p for p in manifest["host_permissions"])
+    assert "portal.ura.go.ug" in manifest["safe_domains"]
+
+    # Invariant: password and OTP selectors MUST be prohibited from auto-fill
+    prohibited = manifest["security_policy"]["prohibited_selectors"]
+    assert any("password" in s for s in prohibited)
+    assert any("otp" in s for s in prohibited)
+    assert manifest["security_policy"]["requires_user_confirmation_for_writes"] is True
+
+
+def test_portal_dom_action_recipes_and_navigation():
+    tool = ToolRegistry.get("navigate_external_portal")
+    assert tool is not None
+
+    screen_text = (
+        "URA Payment Portal\n"
+        "Generate PRN for Assessment\n"
+        "TIN: 1009876543\n"
+        "Amount: UGX 1,500,000\n"
+    )
+
+    res = tool.execute(
+        extracted_text=screen_text,
+        portal_name="prn_payments",
+        workflow_intent="generate_prn",
+    )
+
+    assert res["ok"] is True
+    assert "dom_recipe" in res["navigation_guidance"]
+    recipe = res["navigation_guidance"]["dom_recipe"]
+
+    assert len(recipe) >= 4
+    tin_step = next(s for s in recipe if "TIN" in s["element"])
+    assert tin_step["action_type"] == "fill"
+    assert tin_step["fill_value"] == "1009876543"
+
+    submit_step = next(s for s in recipe if "Generate PRN" in s["element"])
+    assert submit_step["security_gate"] == "requires_confirmation"
+    assert submit_step["action_type"] == "click"
+
+
+def test_image_and_receipt_visual_guidance_and_navigation():
+    from app.documents import diagnose_portal_screenshot
+
+    # 1. Receipt image capture
+    res_receipt = diagnose_portal_screenshot(
+        text="EFRIS Fiscal Receipt Cash Sale 18% VAT Total: UGX 150,000 FDN: 10001234567890123456",
+        filename="scanned_receipt.jpg",
+        fields={"tins": ["1001234567"], "amounts": ["UGX 150,000"]},
+        meta={},
+        doc_type="receipt",
+        kind="image",
+    )
+
+    assert res_receipt["is_screenshot"] is True
+    assert "EFRIS" in res_receipt["detected_portal"]
+    assert "efris.ura.go.ug" in res_receipt["portal_url"]
+    assert len(res_receipt["hotspots"]) >= 2
+    assert any("VAT" in h["instruction"] or "VAT" in h["label"] for h in res_receipt["hotspots"])
+
+    # 2. TIN card image capture
+    res_tin = diagnose_portal_screenshot(
+        text="Taxpayer Identification Certificate URA TIN: 1009876543 Name: KAMPALA TRADERS LTD",
+        filename="tin_card.png",
+        fields={"tins": ["1009876543"]},
+        meta={},
+        doc_type="tin_card",
+        kind="image",
+    )
+
+    assert res_tin["is_screenshot"] is True
+    assert "Registration" in res_tin["detected_portal"]
+    assert "portal.ura.go.ug" in res_tin["portal_url"]
+    assert len(res_tin["steps"]) >= 3
+    assert any("TIN" in s for s in res_tin["steps"])
+
+
+def test_find_relevant_forms_and_resources():
+    from app.tools.portal_navigator_data import find_relevant_forms_and_resources
+
+    # 1. VAT Return matching
+    vat_res = find_relevant_forms_and_resources("how to file monthly VAT return", tax_type="vat")
+    assert len(vat_res) > 0
+    assert any("vat" in r["id"] for r in vat_res)
+    assert any(r["type"] in ("downloadable_form", "online_form") for r in vat_res)
+    assert any(r.get("format") in ("xlsx", "web") for r in vat_res)
+
+    # 2. TIN Registration matching
+    tin_res = find_relevant_forms_and_resources("instant tin registration for individual", intent="tin")
+    assert len(tin_res) > 0
+    assert any("tin" in r["id"] for r in tin_res)
+
+    # 3. Objections and appeals matching
+    objection_res = find_relevant_forms_and_resources("notice of objection to assessment section 24", intent="disputes")
+    assert len(objection_res) > 0
+    assert any("objection" in r["id"] or "tpca" in r["id"] for r in objection_res)
+
+
+

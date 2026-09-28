@@ -10,7 +10,13 @@ import re
 from typing import Any
 
 from . import Tool, ToolRegistry, ToolSchema
-from .portal_navigator_data import EXTERNAL_URA_PORTALS, _diagnose_portal_state
+from .portal_navigator_data import (
+    EXTERNAL_URA_PORTALS,
+    _diagnose_portal_state,
+    build_portal_deep_link,
+    export_companion_manifest,
+    get_portal_dom_recipe,
+)
 
 PORTAL_NAVIGATOR_NAMESPACE = "portal_navigator"
 
@@ -235,7 +241,17 @@ class NavigateExternalPortalTool(Tool):
         # 3. Diagnose issue & detect screen state
         state, issue, severity, steps = self._diagnose_portal_state(portal_key, text_lower, err_msg)
 
-        # 4. Generate UI hotspots and navigation targets
+        # 4. Build verified deep-link with prefilled query parameters and breadcrumbs
+        deep_link_url, breadcrumbs, prefilled_params = build_portal_deep_link(
+            portal_key,
+            intent=workflow_intent,
+            entities=collected_data,
+        )
+
+        # 5. Build DOM action recipe for in-browser companion overlays
+        dom_recipe = get_portal_dom_recipe(portal_key, state=state, entities=collected_data)
+
+        # 6. Generate UI hotspots and navigation targets
         ui_targets = [
             {
                 "element": "Error / Alert Banner",
@@ -250,21 +266,22 @@ class NavigateExternalPortalTool(Tool):
         ]
 
         direct_links = [
-            {"label": f"Open {portal_info['name']}", "url": portal_info["canonical_url"]},
+            {"label": f"Open {portal_info['name']}", "url": deep_link_url or portal_info["canonical_url"]},
         ]
         if portal_key == "prn_payments":
             direct_links.append({"label": "Search PRN Status", "url": "https://portal.ura.go.ug/payment"})
         elif portal_key == "efris":
             direct_links.append({"label": "EFRIS Knowledge & Guides", "url": "https://efris.ura.go.ug"})
 
-        # 5. Build clear conversational explanation for the agent/user
+        # 7. Build clear conversational explanation for the agent/user
         steps_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps))
         explanation = (
             f"**External Portal Navigation & Diagnostic — {portal_info['name']}**\n\n"
             f"• **Screen State**: {state}\n"
-            f"• **Status / Alert**: {issue}\n\n"
+            f"• **Status / Alert**: {issue}\n"
+            f"• **Navigation Trail**: {' › '.join(breadcrumbs)}\n\n"
             f"**Recommended Action Steps**:\n{steps_text}\n\n"
-            f"Official Link: [{portal_info['name']}]({portal_info['canonical_url']})"
+            f"Official Link: [{portal_info['name']}]({deep_link_url})"
         )
 
         return {
@@ -273,9 +290,11 @@ class NavigateExternalPortalTool(Tool):
                 "key": portal_key,
                 "name": portal_info["name"],
                 "canonical_url": portal_info["canonical_url"],
+                "deep_link_url": deep_link_url,
                 "status": portal_info["status"],
                 "category": portal_info["category"],
                 "service_scope": portal_info["service_scope"],
+                "breadcrumb_trail": breadcrumbs,
             },
             "collected_data": collected_data,
             "screen_diagnostic": {
@@ -287,6 +306,10 @@ class NavigateExternalPortalTool(Tool):
                 "steps": steps,
                 "ui_targets": ui_targets,
                 "direct_links": direct_links,
+                "breadcrumb_trail": breadcrumbs,
+                "prefilled_params": prefilled_params,
+                "deep_link_url": deep_link_url,
+                "dom_recipe": dom_recipe,
             },
             "explanation": explanation,
         }
@@ -833,5 +856,10 @@ class NavigateExternalPortalTool(Tool):
         return "e_services"
 
     _diagnose_portal_state = staticmethod(_diagnose_portal_state)
+
+    @staticmethod
+    def get_companion_manifest() -> dict[str, Any]:
+        """Return the browser companion manifest contract for external URA portals."""
+        return export_companion_manifest()
 
 ToolRegistry.register(NavigateExternalPortalTool())
