@@ -215,6 +215,8 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     # Strip percentage per-hundred idioms so "kikumi" in "ku buli kikumi" is not read as 100
     stripped = re.sub(r"\bku\s+buli\s+kikumi\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\bkatika\s+kila\s+(?:mia\s+moja|mia)\b", " ", stripped, flags=re.IGNORECASE)
+    # Strip Swahili idiom "moja kwa moja" (direct/directly) so "moja" is not read as 1.0
+    stripped = re.sub(r"\bmoja\s+kwa\s+moja\b", " ", stripped, flags=re.IGNORECASE)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
     stripped_lower = stripped.lower()
@@ -311,7 +313,9 @@ _LG_WORD_NUMBERS: dict[str, float] = {
     "kkumi": 10.0,
     "ekkumi": 10.0,
     "kkumi na bbiri": 12.0,
+    "kkumi n'ebiri": 12.0,
     "ekkumi n'ebbiri": 12.0,
+    "ekkumi n'ebiri": 12.0,
     "kkumi na ttaano": 15.0,
     "kkumi na munaana": 18.0,
     "ekkumi n'omunaana": 18.0,

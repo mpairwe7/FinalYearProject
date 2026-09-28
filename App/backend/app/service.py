@@ -2206,7 +2206,15 @@ def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dic
                     q = (row.get("question") or row.get("Question") or "").strip()
                     a = (row.get("answer") or row.get("Answer") or "").strip()
                     if q and a:
-                        entries.append({"question": q, "answer": a, "source": csv_path.name})
+                        entry: dict[str, Any] = {"question": q, "answer": a, "source": csv_path.name}
+                        for lang in ("lg", "sw"):
+                            q_l = (row.get(f"question_{lang}") or row.get(f"Question_{lang}") or "").strip()
+                            a_l = (row.get(f"answer_{lang}") or row.get(f"Answer_{lang}") or "").strip()
+                            if q_l:
+                                entry[f"question_{lang}"] = q_l
+                            if a_l:
+                                entry[f"answer_{lang}"] = a_l
+                        entries.append(entry)
         except Exception:
             logger.exception("Failed to load %s", csv_path)
 
@@ -2638,7 +2646,7 @@ def _faq_subject_terms(text: str) -> frozenset[str]:
     return frozenset(_faq_terms(_fold_acronyms(text or "")))
 
 
-def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
+def _faq_match_score(query: str, entry: dict[str, Any], locale: str | None = None) -> float:
     """Score whether an FAQ row is bound to *query*, independently of BM25.
 
     The score combines coverage in the full Q&A with how well the FAQ's own
@@ -2661,41 +2669,26 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
 
     # G35: coverage is judged against the terms that *constitute the question*,
     # not every term the taxpayer supplied.
-    #
-    # The denominator used to be the whole query, so context lowered the score
-    # of the row that answers it. "I am opening a hardware store in Jinja. Do I
-    # have to charge VAT?" scored 0.273 against the 0.58 floor; the bare
-    # question scored 0.700, and the answer is in ura_vat_faqs.csv throughout.
-    # Four words of situation — opening, hardware, store, Jinja — no FAQ row
-    # can cover are what the row was charged for.
-    #
-    # This is the narrowing the *scorer* needs, and deliberately not the one
-    # the call sites tried. Ungating `extract_question_span` on the retrieval
-    # query was measured on 2026-09-01 and cost 37 points of VAT-journey fact
-    # coverage (81.2% -> 43.8%): against a healthy dense index the preamble is
-    # useful retrieval signal. Nothing here reaches retrieval.
-    #
-    # Both sides of the ratio narrow, and that is load-bearing. The first
-    # version of this fix kept the whole query in the numerator, meaning to
-    # credit a row that also covers the situation. What it actually did was let
-    # situation terms *substitute* for question terms: a row about the licences
-    # a hardware store in Jinja needs scored 0.7955 on "Do I have to charge
-    # VAT?" — above the 0.640 of the row that answers it. Coverage of the
-    # question is not something the preamble can pay for (found by CodeRabbit
-    # on #487).
     asked_terms = _faq_terms(extract_question_span(query)) or query_terms
 
-    q_raw = str(entry.get("question") or "")
-    a_raw = str(entry.get("answer") or "")
-    text_raw = str(entry.get("text") or "")
-    if (not q_raw or not a_raw) and text_raw.startswith("Question: ") and "\nAnswer: " in text_raw:
-        parts = text_raw[len("Question: ") :].split("\nAnswer: ", 1)
-        if not q_raw:
-            q_raw = parts[0].strip()
-            entry["question"] = q_raw
-        if not a_raw:
-            a_raw = parts[1].strip()
-            entry["answer"] = a_raw
+    loc = locale or entry.get("_matched_locale")
+    q_loc = str(entry.get(f"question_{loc}") or "") if loc and loc != "en" else ""
+    a_loc = str(entry.get(f"answer_{loc}") or "") if loc and loc != "en" else ""
+    if q_loc and a_loc:
+        q_raw = q_loc
+        a_raw = a_loc
+    else:
+        q_raw = str(entry.get("question") or "")
+        a_raw = str(entry.get("answer") or "")
+        text_raw = str(entry.get("text") or "")
+        if (not q_raw or not a_raw) and text_raw.startswith("Question: ") and "\nAnswer: " in text_raw:
+            parts = text_raw[len("Question: ") :].split("\nAnswer: ", 1)
+            if not q_raw:
+                q_raw = parts[0].strip()
+                entry["question"] = q_raw
+            if not a_raw:
+                a_raw = parts[1].strip()
+                entry["answer"] = a_raw
 
     question_terms = _faq_terms(q_raw)
     answer_terms = _faq_terms(a_raw)
@@ -2703,8 +2696,16 @@ def _faq_match_score(query: str, entry: dict[str, Any]) -> float:
 
     # Timing is an intent, not merely a topic.  Do not answer a deadline/due
     # date question from a passage that never states a timing rule.
-    timing_terms = {"deadline", "due", "date", "period"}
-    timing_evidence = {"deadline", "due", "date", "period", "monthly", "annual"}
+    timing_terms = {
+        "deadline", "due", "date", "period",
+        "obudde", "olunaku", "ekkomo", "mwezi",
+        "tarehe", "muda", "kipindi",
+    }
+    timing_evidence = {
+        "deadline", "due", "date", "period", "monthly", "annual",
+        "obudde", "olunaku", "ekkomo", "mwezi",
+        "tarehe", "muda", "kipindi",
+    }
     if query_terms & timing_terms and not (timing_evidence & body_terms):
         return 0.0
 
@@ -3228,6 +3229,29 @@ def _simple_search(
                         scored_fallback.append((float(overlap), entry, match))
         return _retain_faq_candidates(bind_text, scored_fallback, top_k)
 
+    def _vernacular_pass(search_text: str, bind_text: str, target_locale: str) -> list[dict[str, str]]:
+        """Score rows that have pre-translated question/answer in target_locale."""
+        query_tokens_set = _faq_terms(search_text)
+        if not query_tokens_set:
+            return []
+        scored: list[tuple[float, dict[str, str], float]] = []
+        for entries in faq_index.values():
+            for entry in entries:
+                q_loc = entry.get(f"question_{target_locale}")
+                a_loc = entry.get(f"answer_{target_locale}")
+                if not q_loc or not a_loc:
+                    continue
+                q_tokens = _faq_terms(q_loc)
+                a_tokens = _faq_terms(a_loc)
+                overlap = len(query_tokens_set & (q_tokens | a_tokens))
+                if overlap > 0:
+                    match = _faq_match_score(bind_text, entry, locale=target_locale)
+                    if match > 0:
+                        entry_copy = dict(entry)
+                        entry_copy["_matched_locale"] = target_locale
+                        scored.append((float(overlap), entry_copy, match))
+        return _retain_faq_candidates(bind_text, scored, top_k)
+
     hits = _one_pass(query, match_query)
     if not hits:
         expanded_query = _expand_faq_synonyms(query)
@@ -3235,6 +3259,16 @@ def _simple_search(
             hits = _one_pass(expanded_query, expanded_query)
     if hits or not locale or locale == "en":
         return hits
+
+    # Check for direct native matches against versioned multilingual FAQ translations
+    # before incurring machine translation round-trip latency.
+    vernacular_hits = _vernacular_pass(query, match_query, locale)
+    if vernacular_hits:
+        logger.info(
+            "Direct native FAQ hit (%s): %r, %d hit(s)",
+            locale, query[:60], len(vernacular_hits),
+        )
+        return vernacular_hits
 
     # Nothing matched and the question was not asked in English. The corpus is
     # English, so a Luganda or Runyankole question shares no terms with it:
@@ -3449,16 +3483,30 @@ def _canonical_faq_url(source: str) -> str:
     return canonical_source_url(source)
 
 
-def _faq_hits_to_retrieval_hits(entries: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _faq_hits_to_retrieval_hits(
+    entries: list[dict[str, str]],
+    locale: str = "en",
+) -> list[dict[str, Any]]:
     """Convert FAQ index rows into the retrieval-hit shape used downstream."""
     hits: list[dict[str, Any]] = []
     for entry in entries:
         tag = str(entry.get("tag") or "")
+        loc = entry.get("_matched_locale") or locale
+        q = (
+            entry.get(f"question_{loc}")
+            if loc and loc != "en" and entry.get(f"question_{loc}")
+            else entry["question"]
+        )
+        a = (
+            entry.get(f"answer_{loc}")
+            if loc and loc != "en" and entry.get(f"answer_{loc}")
+            else entry["answer"]
+        )
         hits.append(
             {
-                "text": f"Question: {entry['question']}\nAnswer: {entry['answer']}",
-                "answer": entry["answer"],
-                "question": entry["question"],
+                "text": f"Question: {q}\nAnswer: {a}",
+                "answer": a,
+                "question": q,
                 "source": entry["source"],
                 "chunk_id": "",
                 "page": "",
@@ -7358,7 +7406,7 @@ class ChatModel:
                         binding_query=binding_query,
                         locale=locale,
                     )
-                    hits = _faq_hits_to_retrieval_hits(kw_hits)
+                    hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
 
             # 3b. Corrective RAG — re-retrieve if quality is low (Phase 6)
             if hits and self._retriever_ready:
@@ -7414,18 +7462,29 @@ class ChatModel:
                 if _prepend_unique(hits, priority_hits, seen_texts):
                     retrieval_mode = "faq_priority"
                 for h in kw_hits:
-                    faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
+                    h_loc = h.get("_matched_locale") or locale
+                    q_val = (
+                        h.get(f"question_{h_loc}")
+                        if h_loc and h_loc != "en" and h.get(f"question_{h_loc}")
+                        else h["question"]
+                    )
+                    a_val = (
+                        h.get(f"answer_{h_loc}")
+                        if h_loc and h_loc != "en" and h.get(f"answer_{h_loc}")
+                        else h["answer"]
+                    )
+                    faq_text = f"Question: {q_val}\nAnswer: {a_val}"
                     existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
                     if existing is not None:
                         if not existing.get("question"):
-                            existing["question"] = h["question"]
+                            existing["question"] = q_val
                         if not existing.get("answer"):
-                            existing["answer"] = h["answer"]
+                            existing["answer"] = a_val
                     elif faq_text[:80] not in seen_texts:
                         hits.append({
                             "text": faq_text,
-                            "answer": h["answer"],
-                            "question": h["question"],
+                            "answer": a_val,
+                            "question": q_val,
                             "source": h["source"],
                             "chunk_id": "",
                             "page": "",
@@ -8697,7 +8756,7 @@ class ChatModel:
                 binding_query=binding_query,
                 locale=locale,
             )
-            hits = _faq_hits_to_retrieval_hits(kw_hits)
+            hits = _faq_hits_to_retrieval_hits(kw_hits, locale=locale)
 
         # Corrective RAG (Phase 6)
         if hits and self._retriever_ready:
@@ -8749,17 +8808,28 @@ class ChatModel:
         if _prepend_unique(hits, priority_hits, seen_texts):
             retrieval_mode = "faq_priority"
         for h in kw_hits:
-            faq_text = f"Question: {h['question']}\nAnswer: {h['answer']}"
+            h_loc = h.get("_matched_locale") or locale
+            q_val = (
+                h.get(f"question_{h_loc}")
+                if h_loc and h_loc != "en" and h.get(f"question_{h_loc}")
+                else h["question"]
+            )
+            a_val = (
+                h.get(f"answer_{h_loc}")
+                if h_loc and h_loc != "en" and h.get(f"answer_{h_loc}")
+                else h["answer"]
+            )
+            faq_text = f"Question: {q_val}\nAnswer: {a_val}"
             existing = next((x for x in hits if x.get("text", "")[:80] == faq_text[:80]), None)
             if existing is not None:
                 if not existing.get("question"):
-                    existing["question"] = h["question"]
+                    existing["question"] = q_val
                 if not existing.get("answer"):
-                    existing["answer"] = h["answer"]
+                    existing["answer"] = a_val
             elif faq_text[:80] not in seen_texts:
                 hits.append({
-                    "text": faq_text, "answer": h["answer"],
-                    "question": h["question"], "source": h["source"],
+                    "text": faq_text, "answer": a_val,
+                    "question": q_val, "source": h["source"],
                     "chunk_id": "", "page": "", "section": h.get("tag", ""),
                     "doc_type": "csv", "score_rrf": 0.5,
                 })

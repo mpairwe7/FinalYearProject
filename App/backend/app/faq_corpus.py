@@ -40,6 +40,24 @@ def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def _validate_vernacular_figures(
+    source: str,
+    row_number: int,
+    en_answer: str,
+    lang: str,
+    localized_answer: str,
+) -> None:
+    """Validate that statutory numbers and rates survived in the translated answer."""
+    try:
+        from .mt import figures_survived
+    except Exception:
+        return
+    if not figures_survived(en_answer, localized_answer, locale=lang):
+        raise CorpusValidationError(
+            f"{source}:{row_number}: statutory figures mutated or missing in {lang} translation"
+        )
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -69,7 +87,20 @@ def _csv_rows(csv_path: Path) -> list[dict[str, Any]]:
             answer = _clean(row.get("answer") or row.get("Answer"))
             if not question or not answer:
                 raise CorpusValidationError(f"{csv_path}:{row_number}: question and answer are required")
-            rows.append({"question": question, "answer": answer, "row_number": row_number})
+            row_dict: dict[str, Any] = {
+                "question": question,
+                "answer": answer,
+                "row_number": row_number,
+            }
+            for lang in ("lg", "sw"):
+                q_lang = _clean(row.get(f"question_{lang}") or row.get(f"Question_{lang}"))
+                a_lang = _clean(row.get(f"answer_{lang}") or row.get(f"Answer_{lang}"))
+                if q_lang:
+                    row_dict[f"question_{lang}"] = q_lang
+                if a_lang:
+                    row_dict[f"answer_{lang}"] = a_lang
+                    _validate_vernacular_figures(csv_path.name, row_number, answer, lang, a_lang)
+            rows.append(row_dict)
     if not rows:
         raise CorpusValidationError(f"{csv_path}: contains no FAQ rows")
     return rows
@@ -110,19 +141,23 @@ def _canonical_faq_records(
         )
         for row in source_rows:
             question, answer, row_number = row["question"], row["answer"], row["row_number"]
-            candidates[_question_key(question)].append(
-                {
-                    "schema_version": FAQ_JSONL_SCHEMA_VERSION,
-                    "record_type": "faq",
-                    "chunk_id": _stable_id(source, row_number, question, answer),
-                    "question": question,
-                    "answer": answer,
-                    "source": source,
-                    "source_sha256": source_sha256,
-                    "tag": _faq_tag(csv_path),
-                    "row_number": row_number,
-                }
-            )
+            candidate_record: dict[str, Any] = {
+                "schema_version": FAQ_JSONL_SCHEMA_VERSION,
+                "record_type": "faq",
+                "chunk_id": _stable_id(source, row_number, question, answer),
+                "question": question,
+                "answer": answer,
+                "source": source,
+                "source_sha256": source_sha256,
+                "tag": _faq_tag(csv_path),
+                "row_number": row_number,
+            }
+            for lang in ("lg", "sw"):
+                if f"question_{lang}" in row:
+                    candidate_record[f"question_{lang}"] = row[f"question_{lang}"]
+                if f"answer_{lang}" in row:
+                    candidate_record[f"answer_{lang}"] = row[f"answer_{lang}"]
+            candidates[_question_key(question)].append(candidate_record)
 
     duplicate_audit: list[dict[str, Any]] = []
     for question_key in sorted(candidates):
@@ -197,7 +232,10 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
     source_row_count = sum(source["source_rows"] for source in source_data)
     total_records = sum(len(records) for records in records_by_source.values())
 
-    manifest = {
+    lg_count = sum(1 for records in records_by_source.values() for r in records if "answer_lg" in r)
+    sw_count = sum(1 for records in records_by_source.values() for r in records if "answer_sw" in r)
+
+    manifest: dict[str, Any] = {
         "schema_version": FAQ_JSONL_SCHEMA_VERSION,
         "deduplication_policy": FAQ_DEDUPLICATION_POLICY,
         "source_count": len(manifest_sources),
@@ -207,6 +245,8 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
         "sources": manifest_sources,
         "duplicates": duplicate_audit,
     }
+    if lg_count or sw_count:
+        manifest["multilingual_records"] = {"lg": lg_count, "sw": sw_count}
     manifest_path = jsonl_dir / FAQ_MANIFEST_NAME
     temporary_manifest = manifest_path.with_suffix(".json.tmp")
     with temporary_manifest.open("w", encoding="utf-8", newline="\n") as handle:
@@ -346,23 +386,27 @@ def ingest_faq_jsonls(csv_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
             if question_key in seen_questions:
                 raise CorpusValidationError(f"{jsonl_path}:{line_number}: duplicate canonical question {question}")
             seen_questions.add(question_key)
-            documents.append(
-                {
-                    "text": f"Question: {question}\nAnswer: {answer}",
-                    "source": csv_path.name,
-                    "chunk_id": chunk_id,
-                    "page": "",
-                    "section": _clean(record["tag"]).replace("_", " ").title(),
-                    "doc_type": "faq_jsonl",
-                    "question": question,
-                    "answer": answer,
-                    "tag": _clean(record["tag"]),
-                    "row_number": int(record["row_number"]),
-                    "source_sha256": source_sha256,
-                    "corpus_file": jsonl_path.name,
-                    "duplicate_question_count": record["duplicate_question_count"],
-                }
-            )
+            doc: dict[str, Any] = {
+                "text": f"Question: {question}\nAnswer: {answer}",
+                "source": csv_path.name,
+                "chunk_id": chunk_id,
+                "page": "",
+                "section": _clean(record["tag"]).replace("_", " ").title(),
+                "doc_type": "faq_jsonl",
+                "question": question,
+                "answer": answer,
+                "tag": _clean(record["tag"]),
+                "row_number": int(record["row_number"]),
+                "source_sha256": source_sha256,
+                "corpus_file": jsonl_path.name,
+                "duplicate_question_count": record["duplicate_question_count"],
+            }
+            for lang in ("lg", "sw"):
+                if f"question_{lang}" in record:
+                    doc[f"question_{lang}"] = _clean(record[f"question_{lang}"])
+                if f"answer_{lang}" in record:
+                    doc[f"answer_{lang}"] = _clean(record[f"answer_{lang}"])
+            documents.append(doc)
 
     if len(documents) != expected_records:
         raise CorpusValidationError("FAQ corpus manifest record_count does not match loaded documents")
