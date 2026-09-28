@@ -45,6 +45,21 @@ class Citation(BaseModel):
     title: str = Field("", description="Document title when present")
 
 
+class ResourceLink(BaseModel):
+    """An official URA page offered beside an answer (see ``app.verified_resources``)."""
+
+    id: str = Field(..., description="Registry id, stable across releases")
+    title: str
+    type: Literal["online_form", "downloadable_form", "statutory_source", "guide"]
+    format: Literal["web", "pdf"] = "web"
+    url: str = Field(..., description="https URL on an official URA host; never carries user data")
+    description: str = ""
+    citation: str = Field("", description="Statutory provision the page implements, when one applies")
+    checklist: list[str] = Field(default_factory=list, description="What to have ready, from URA's own page")
+    source_domain: str = Field(..., description="Host the link opens on")
+    verified_on: str = Field(..., description="ISO date the link was last confirmed live")
+
+
 class ChatResponse(BaseModel):
     reply: str
     sources: list[str] = Field(default_factory=list)
@@ -97,9 +112,9 @@ class ChatResponse(BaseModel):
         "",
         description="Persisted conversation task id (G6), empty when none is active",
     )
-    resources: list[dict[str, Any]] = Field(
+    resources: list[ResourceLink] = Field(
         default_factory=list,
-        description="Relevant downloadable forms, verified online forms, and statutory source links",
+        description="Official URA pages for this answer; empty for refusals, abstentions and small talk",
     )
 
 

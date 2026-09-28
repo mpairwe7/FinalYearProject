@@ -13,7 +13,17 @@ from typing import Any
 
 import yaml
 
+from ..verified_resources import portal_action_for, resolve_resource_ids
+from .slots import enum_options
+
 logger = logging.getLogger(__name__)
+
+#: Words a derived step title keeps upper-case.
+_TITLE_ACRONYMS = frozenset(
+    {"cgt", "cit", "dts", "efris", "ngo", "nin", "paye", "prn", "tcc", "tin", "ursb", "vat", "wht"}
+)
+#: Verb prefixes that name what the step does, not what it is about.
+_TITLE_VERBS = frozenset({"ask", "collect", "get"})
 
 
 @dataclass
@@ -28,10 +38,16 @@ class WorkflowStep:
     tool: str = ""  # tool name to invoke (action step)
     args: dict[str, Any] = field(default_factory=dict)
     confirmation_required: bool = False
+    #: Short label for the progress stepper; derived from ``id`` when omitted.
     title: str = ""
+    #: How the client offers an answer: ``options`` (enum), ``boolean``,
+    #: ``portal_action`` or free ``text``.
     ui_widget: str = "text"
+    #: The values the stepper offers as buttons — each one a valid slot answer.
     options: list[str] = field(default_factory=list)
-    portal_action: dict[str, Any] = field(default_factory=dict)
+    #: ``{label, url}`` button, resolved from an official-resource id.
+    portal_action: dict[str, str] = field(default_factory=dict)
+    #: Official-resource payloads, resolved from the ids the YAML names.
     resources: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -48,8 +64,35 @@ class WorkflowDefinition:
     steps: list[WorkflowStep] = field(default_factory=list)
 
 
+def default_step_title(step_id: str) -> str:
+    """``collect_nin`` → ``NIN``; ``collect_taxpayer_type`` → ``Taxpayer type``."""
+    words = [w for w in step_id.split("_") if w]
+    if len(words) > 1 and words[0] in _TITLE_VERBS:
+        words = words[1:]
+    title = " ".join(w.upper() if w in _TITLE_ACRONYMS else w for w in words)
+    return title[:1].upper() + title[1:]
+
+
+def _step_widget(validator: str, has_portal_action: bool) -> tuple[str, list[str]]:
+    """The answer widget a validator implies, with the options it accepts."""
+    options = enum_options(validator)
+    if options:
+        return "options", options
+    if validator == "boolean":
+        return "boolean", ["yes", "no"]
+    if has_portal_action:
+        return "portal_action", []
+    return "text", []
+
+
 def load_workflow(path: Path) -> WorkflowDefinition:
-    """Parse a YAML file into a :class:`WorkflowDefinition`."""
+    """Parse a YAML file into a :class:`WorkflowDefinition`.
+
+    ``resources`` and ``portal_action`` name entries in
+    :mod:`app.verified_resources` by id rather than carrying URLs, so every
+    link a guided flow shows is one that was checked live; an unknown id is
+    logged and dropped.
+    """
     with open(path) as f:
         raw = yaml.safe_load(f)
 
@@ -60,46 +103,11 @@ def load_workflow(path: Path) -> WorkflowDefinition:
     for s in raw.get("steps", []):
         step_id = str(s.get("id", ""))
         validator = str(s.get("validator", "text"))
-        title = str(s.get("title", "")) or step_id.replace("_", " ").title()
+        context = f"{path.name}:{step_id}"
 
-        # Derive interactive ui_widget and options if not explicitly specified
-        raw_options = s.get("options")
-        if isinstance(raw_options, list):
-            options = [str(opt).strip() for opt in raw_options if opt]
-        else:
-            options = []
-
-        ui_widget = str(s.get("ui_widget", ""))
-        if not ui_widget:
-            if validator.startswith("enum[") and validator.endswith("]"):
-                ui_widget = "options"
-                if not options:
-                    options = [opt.strip() for opt in validator[5:-1].split(",") if opt.strip()]
-            elif validator == "boolean":
-                ui_widget = "boolean"
-                if not options:
-                    options = ["yes", "no"]
-            elif "portal" in step_id or s.get("portal_action"):
-                ui_widget = "portal_action"
-            else:
-                ui_widget = "text"
-
-        portal_action = s.get("portal_action") or {}
-        if not portal_action and ("portal" in step_id or "summary" in step_id):
-            # Check if step references URA portal
-            q = str(s.get("question", "")).lower()
-            if "efris.ura.go.ug" in q:
-                portal_action = {"label": "Open URA EFRIS Portal ↗", "url": "https://efris.ura.go.ug"}
-            elif "portal.ura.go.ug/payment" in q or "prn" in q:
-                portal_action = {"label": "Open URA PRN Payments ↗", "url": "https://portal.ura.go.ug/payment"}
-            elif "ura.go.ug" in q or "portal" in q:
-                portal_action = {"label": "Open URA e-Services Portal ↗", "url": "https://portal.ura.go.ug"}
-
-        raw_resources = s.get("resources")
-        if isinstance(raw_resources, list):
-            resources = [dict(r) for r in raw_resources if isinstance(r, dict)]
-        else:
-            resources = []
+        portal_action_id = str(s.get("portal_action") or "")
+        portal_action = portal_action_for(portal_action_id, context=context) if portal_action_id else {}
+        ui_widget, options = _step_widget(validator, bool(portal_action))
 
         steps.append(
             WorkflowStep(
@@ -111,11 +119,11 @@ def load_workflow(path: Path) -> WorkflowDefinition:
                 tool=str(s.get("tool", "")),
                 args=s.get("args") or {},
                 confirmation_required=bool(s.get("confirmation_required", False)),
-                title=title,
+                title=str(s.get("title", "")) or default_step_title(step_id),
                 ui_widget=ui_widget,
                 options=options,
                 portal_action=portal_action,
-                resources=resources,
+                resources=resolve_resource_ids(s.get("resources") or [], context=context),
             )
         )
 

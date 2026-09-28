@@ -17,12 +17,14 @@ trigger_phrases:
 
 steps:
   - id: collect_type
+    title: "Taxpayer type"
     question: >
       Are you registering as an **individual**, a **company**, or an **NGO**?
     slot: taxpayer_type
     validator: "enum[individual,company,ngo]"
 
   - id: collect_name
+    title: "Legal name"
     question: >
       What is your full legal name (as it appears on your national ID or
       certificate of incorporation)?
@@ -30,6 +32,7 @@ steps:
     validator: text
 
   - id: collect_nin
+    title: "National ID (NIN)"
     question: >
       Please provide your National Identification Number (NIN).
       Format: CM or CF followed by 2 digits, 5 letters, 5 digits, and 1 letter
@@ -39,6 +42,7 @@ steps:
     when: "taxpayer_type == individual"
 
   - id: collect_company_reg
+    title: "Company registration"
     question: >
       Please provide your company registration number from URSB
       (Uganda Registration Services Bureau).
@@ -47,6 +51,7 @@ steps:
     when: "taxpayer_type == company"
 
   - id: collect_ngo_reg
+    title: "NGO registration"
     question: >
       Please provide your NGO registration number from the
       National Bureau for NGOs.
@@ -55,18 +60,21 @@ steps:
     when: "taxpayer_type == ngo"
 
   - id: collect_phone
+    title: "Phone number"
     question: >
       What is your phone number? (e.g. 0771234567 or +256771234567)
     slot: phone
     validator: "regex[^\\+?\\d{10,13}$]"
 
   - id: collect_email
+    title: "Email address"
     question: >
       What is your email address?
     slot: email
     validator: "regex[^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$]"
 
   - id: confirm
+    title: "Confirm"
     question: >
       Thank you. I have collected your details. Would you like to proceed
       with the TIN application? (yes/no)
@@ -74,6 +82,7 @@ steps:
     validator: boolean
 
   - id: summary
+    title: "Next steps"
     question: >
       Your TIN registration request has been recorded. To complete the
       process, please visit the URA web portal at https://ura.go.ug and
@@ -83,20 +92,9 @@ steps:
       Reference information has been saved to this conversation.
     slot: ""
     validator: text
+    # Ids in app/verified_resources.py — every link there was checked live.
+    portal_action: tin_application
     resources:
-      - title: "Apply for Individual TIN (Instant NIN Verification)"
-        type: "online_form"
-        url: "https://portal.ura.go.ug/registration/individual"
-        description: "Instant online registration with automated NIRA National ID (NIN) validation"
-      - title: "Form DT-1001 — Manual Taxpayer Registration Form"
-        type: "downloadable_form"
-        format: "pdf"
-        size: "340 KB"
-        url: "https://portal.ura.go.ug/downloads/forms/DT-1001_taxpayer_registration.pdf"
-        description: "Official paper registration form for manual submission at URA offices"
-      - title: "URA Taxpayer Starter Pack"
-        type: "guide"
-        format: "pdf"
-        size: "6.0 MB"
-        url: "https://ura.go.ug/download-category/taxpayer-registration-starter-pack/"
-        description: "Comprehensive national onboarding guide for newly registered taxpayers"
+      - tin_individual
+      - tin_non_individual
+      - starter_pack

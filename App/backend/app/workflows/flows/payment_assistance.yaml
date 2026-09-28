@@ -17,12 +17,14 @@ trigger_phrases:
 
 steps:
   - id: collect_tax_type
+    title: "Tax type"
     question: >
       Which tax type or liability are you paying for?
     slot: tax_type
     validator: text
 
   - id: collect_reference_kind
+    title: "Reference type"
     question: >
       Do you already have a **PRN**, a **return** reference, an **assessment**
       reference, or is it **unknown**?
@@ -30,12 +32,14 @@ steps:
     validator: "enum[prn,return,assessment,unknown]"
 
   - id: collect_amount_known
+    title: "Amount"
     question: >
       Do you already know the exact amount to pay? (yes/no)
     slot: amount_known
     validator: boolean
 
   - id: collect_amount
+    title: "Amount due"
     question: >
       What amount do you expect to pay? You can enter the figure in UGX.
     slot: payment_amount
@@ -43,6 +47,7 @@ steps:
     when: "amount_known == True"
 
   - id: collect_channel
+    title: "Payment channel"
     question: >
       Which payment channel do you prefer: **bank**, **mobile money**,
       **online card**, or **other**?
@@ -50,6 +55,7 @@ steps:
     validator: "enum[bank,mobile money,online card,other]"
 
   - id: amount_warning
+    title: "Confirm the amount"
     question: >
       If the amount is not confirmed yet, generate or review the PRN first in the
       URA portal so the amount, tax head, and period all match before payment.
@@ -58,9 +64,15 @@ steps:
     validator: text
 
   - id: summary
+    title: "Pay and keep proof"
     question: >
       Next step: confirm the liability in the URA portal, generate or review the PRN,
       pay through your chosen channel, and keep the payment confirmation so it can be
       matched back to the tax obligation.
     slot: ""
     validator: text
+    # Ids in app/verified_resources.py — every link there was checked live.
+    portal_action: make_payment
+    resources:
+      - payment_status
+      - reactivate_prn

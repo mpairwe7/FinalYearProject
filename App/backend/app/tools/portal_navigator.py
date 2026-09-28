@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..verified_resources import get_resource
 from . import Tool, ToolRegistry, ToolSchema
 from .portal_navigator_data import (
     EXTERNAL_URA_PORTALS,
@@ -241,12 +242,9 @@ class NavigateExternalPortalTool(Tool):
         # 3. Diagnose issue & detect screen state
         state, issue, severity, steps = self._diagnose_portal_state(portal_key, text_lower, err_msg)
 
-        # 4. Build verified deep-link with prefilled query parameters and breadcrumbs
-        deep_link_url, breadcrumbs, prefilled_params = build_portal_deep_link(
-            portal_key,
-            intent=workflow_intent,
-            entities=collected_data,
-        )
+        # 4. The official page for this task and its place in the ura.go.ug menu
+        #    (no user data in the URL — see build_portal_deep_link)
+        deep_link_url, breadcrumbs = build_portal_deep_link(portal_key, intent=workflow_intent)
 
         # 5. Build DOM action recipe for in-browser companion overlays
         dom_recipe = get_portal_dom_recipe(portal_key, state=state, entities=collected_data)
@@ -265,13 +263,17 @@ class NavigateExternalPortalTool(Tool):
             },
         ]
 
-        direct_links = [
-            {"label": f"Open {portal_info['name']}", "url": deep_link_url or portal_info["canonical_url"]},
-        ]
+        direct_links = [{"label": f"Open {portal_info['name']}", "url": portal_info["canonical_url"]}]
+        if deep_link_url != portal_info["canonical_url"]:
+            direct_links.append({"label": f"URA guide: {breadcrumbs[-1]}", "url": deep_link_url})
         if portal_key == "prn_payments":
-            direct_links.append({"label": "Search PRN Status", "url": "https://portal.ura.go.ug/payment"})
+            status_page = get_resource("payment_status")
+            if status_page and status_page["url"] != deep_link_url:
+                direct_links.append({"label": "View payment status", "url": status_page["url"]})
         elif portal_key == "efris":
-            direct_links.append({"label": "EFRIS Knowledge & Guides", "url": "https://efris.ura.go.ug"})
+            guides = get_resource("efris_guides")
+            if guides:
+                direct_links.append({"label": "EFRIS guides", "url": guides["url"]})
 
         # 7. Build clear conversational explanation for the agent/user
         steps_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps))
@@ -281,7 +283,7 @@ class NavigateExternalPortalTool(Tool):
             f"• **Status / Alert**: {issue}\n"
             f"• **Navigation Trail**: {' › '.join(breadcrumbs)}\n\n"
             f"**Recommended Action Steps**:\n{steps_text}\n\n"
-            f"Official Link: [{portal_info['name']}]({deep_link_url})"
+            f"Official page: [{breadcrumbs[-1]}]({deep_link_url})"
         )
 
         return {
@@ -307,7 +309,6 @@ class NavigateExternalPortalTool(Tool):
                 "ui_targets": ui_targets,
                 "direct_links": direct_links,
                 "breadcrumb_trail": breadcrumbs,
-                "prefilled_params": prefilled_params,
                 "deep_link_url": deep_link_url,
                 "dom_recipe": dom_recipe,
             },

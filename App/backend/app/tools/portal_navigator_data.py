@@ -6,6 +6,8 @@ import re
 import urllib.parse
 from typing import Any
 
+from ..verified_resources import get_resource, is_authoritative_ura_url
+
 EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
     "e_services": {
         "name": "URA e-Services Web Portal",
@@ -106,7 +108,9 @@ EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
     },
     "asycuda": {
         "name": "URA Customs ASYCUDA World Portal",
-        "canonical_url": "https://customs.ura.go.ug",
+        # customs.ura.go.ug has no DNS record (checked 2026-09-28); this is
+        # URA's own page for its customs systems, ASYCUDA World included.
+        "canonical_url": "https://ura.go.ug/en/customs-systems/",
         "status": "operational",
         "category": "customs_and_border",
         "service_scope": [
@@ -6320,160 +6324,78 @@ def _diagnose_portal_state(
 
 
 # ---------------------------------------------------------------------------
-# Dynamic Deep-Link Graph & Query-Param Pre-Filling
+# Deep links: the official page for a portal task, and the route to it
 # ---------------------------------------------------------------------------
 
-PORTAL_DEEP_LINK_ROUTES: dict[str, dict[str, dict[str, Any]]] = {
+#: portal key → intent → (official resource id, navigation trail).
+#:
+#: Links resolve through ``app.verified_resources``, so each is a page that was
+#: checked live. The eTax and EFRIS portals sit behind a login and publish no
+#: stable deep links, so a route names URA's public page for the task, and the
+#: trail is that page's position in the ura.go.ug menu. Nothing from the
+#: conversation is ever added to the URL: a TIN, NIN or PRN in a query string
+#: lands in browser history and server logs, and the portal reads none of them.
+PORTAL_DEEP_LINK_ROUTES: dict[str, dict[str, tuple[str, tuple[str, ...]]]] = {
     "prn_payments": {
-        "default": {
-            "url": "https://portal.ura.go.ug/payment",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "Payments", "Generate PRN"],
-            "supported_params": ["tin", "amount", "tax_head"],
-        },
-        "generate_prn": {
-            "url": "https://portal.ura.go.ug/payment",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "Payments", "Generate PRN"],
-            "supported_params": ["tin", "amount", "tax_head"],
-        },
-        "search_prn": {
-            "url": "https://portal.ura.go.ug/payment",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "Payments", "Search PRN Status"],
-            "supported_params": ["prn"],
-        },
+        "default": ("make_payment", ("ura.go.ug", "Domestic Taxes", "Make a Payment")),
+        "generate_prn": ("make_payment", ("ura.go.ug", "Domestic Taxes", "Make a Payment")),
+        "search_prn": (
+            "payment_status",
+            ("ura.go.ug", "Domestic Taxes", "Make a Payment", "View Payment Status"),
+        ),
+        "reactivate_prn": (
+            "reactivate_prn",
+            ("ura.go.ug", "Domestic Taxes", "Make a Payment", "Reactivate Expired PRN"),
+        ),
     },
     "e_services": {
-        "default": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services"],
-            "supported_params": ["tin"],
-        },
-        "file_return": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "Returns", "File Return"],
-            "supported_params": ["tin", "period", "tax_type"],
-        },
-        "tin_amend": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "TIN", "Amend Registration"],
-            "supported_params": ["tin"],
-        },
-        "tax_clearance": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "Certificates", "Tax Clearance (TCC)"],
-            "supported_params": ["tin"],
-        },
+        "default": ("etax_login", ("ura.go.ug", "e-Services", "eTax Portal")),
+        "file_return": ("file_return", ("ura.go.ug", "Domestic Taxes", "File a Return")),
+        "tin_amend": ("etax_login", ("ura.go.ug", "e-Services", "eTax Portal")),
+        "tax_clearance": ("tax_clearance", ("ura.go.ug", "Domestic Taxes", "Tax Clearance")),
     },
     "efris": {
-        "default": {
-            "url": "https://efris.ura.go.ug",
-            "breadcrumbs": ["URA EFRIS", "Invoicing Portal"],
-            "supported_params": ["tin"],
-        },
-        "invoicing": {
-            "url": "https://efris.ura.go.ug",
-            "breadcrumbs": ["URA EFRIS", "Invoicing", "Issue Fiscal Document"],
-            "supported_params": ["tin", "buyer_tin"],
-        },
-        "offline_sync": {
-            "url": "https://efris.ura.go.ug",
-            "breadcrumbs": ["URA EFRIS", "System Management", "Offline Sync"],
-            "supported_params": [],
-        },
+        "default": ("efris_portal", ("efris.ura.go.ug",)),
+        "invoicing": ("efris_invoicing_guide", ("ura.go.ug", "EFRIS", "Invoice/Receipt Issuance")),
+        "offline_sync": ("efris_portal", ("efris.ura.go.ug",)),
     },
     "tin_registration": {
-        "default": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "TIN Registration"],
-            "supported_params": ["nin"],
-        },
-        "individual": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "TIN Registration", "Individual"],
-            "supported_params": ["nin"],
-        },
-        "non_individual": {
-            "url": "https://portal.ura.go.ug",
-            "breadcrumbs": ["URA Web Portal", "e-Services", "TIN Registration", "Non-Individual / Entity"],
-            "supported_params": ["company_reg"],
-        },
+        "default": ("tin_individual", ("ura.go.ug", "Domestic Taxes", "Get a TIN")),
+        "individual": (
+            "tin_individual",
+            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "TIN Registration - Individual"),
+        ),
+        "non_individual": (
+            "tin_non_individual",
+            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "TIN Registration - Non Individual"),
+        ),
     },
     "asycuda": {
-        "default": {
-            "url": "https://customs.ura.go.ug",
-            "breadcrumbs": ["URA Customs", "ASYCUDA World"],
-            "supported_params": [],
-        },
-        "declaration": {
-            "url": "https://customs.ura.go.ug",
-            "breadcrumbs": ["URA Customs", "ASYCUDA World", "Customs Declaration"],
-            "supported_params": ["tin", "reference"],
-        },
-        "bill_of_entry": {
-            "url": "https://customs.ura.go.ug",
-            "breadcrumbs": ["URA Customs", "ASYCUDA World", "Bill of Entry"],
-            "supported_params": ["reference"],
-        },
+        "default": ("single_window", ("singlewindow.go.ug",)),
+        "declaration": ("single_window", ("singlewindow.go.ug",)),
+        "bill_of_entry": ("single_window", ("singlewindow.go.ug",)),
     },
 }
 
 
-def build_portal_deep_link(
-    portal_key: str,
-    intent: str = "",
-    entities: dict[str, Any] | None = None,
-) -> tuple[str, list[str], dict[str, str]]:
-    """Build a verified deep link URL with encoded query params and breadcrumb trail.
+def build_portal_deep_link(portal_key: str, intent: str = "") -> tuple[str, list[str]]:
+    """``(url, breadcrumb trail)`` for a portal task; the URL never carries user data.
 
-    Returns (deep_link_url, breadcrumb_trail, prefilled_params).
+    Falls back to the portal's own canonical URL when no route is mapped, and
+    to the eTax page when that URL is not an https URA address.
     """
-    portal = EXTERNAL_URA_PORTALS.get(portal_key, EXTERNAL_URA_PORTALS.get("e_services", {}))
-    canonical_url = portal.get("canonical_url", "https://portal.ura.go.ug")
-    portal_routes = PORTAL_DEEP_LINK_ROUTES.get(portal_key, {})
+    routes = PORTAL_DEEP_LINK_ROUTES.get(portal_key, {})
+    route = routes.get((intent or "").strip().lower()) or routes.get("default")
+    if route is not None:
+        resource = get_resource(route[0])
+        if resource is not None:
+            return resource["url"], list(route[1])
 
-    clean_intent = (intent or "").strip().lower()
-    route_cfg = portal_routes.get(clean_intent) or portal_routes.get("default") or {
-        "url": canonical_url,
-        "breadcrumbs": [portal.get("name", "URA Portal")],
-        "supported_params": ["tin", "prn", "tax_head", "amount", "period", "nin"],
-    }
-
-    base_url = route_cfg.get("url", canonical_url)
-    breadcrumbs = list(route_cfg.get("breadcrumbs", [portal.get("name", "URA Portal")]))
-    supported = route_cfg.get("supported_params", [])
-
-    prefilled: dict[str, str] = {}
-    if entities:
-        for param in supported:
-            val = None
-            if param in entities and not isinstance(entities[param], list):
-                val = entities[param]
-            elif param == "tin" and entities.get("tins"):
-                val = entities["tins"][0]
-            elif param == "prn" and entities.get("prns"):
-                val = entities["prns"][0]
-            elif param == "tax_head" and entities.get("tax_heads"):
-                val = entities["tax_heads"][0]
-            elif param == "amount" and entities.get("amounts"):
-                raw_amt = str(entities["amounts"][0])
-                cleaned_amt = re.sub(r"[^\d.]", "", raw_amt)
-                if cleaned_amt:
-                    val = cleaned_amt
-            elif param == "nin" and entities.get("nins"):
-                val = entities["nins"][0]
-            elif param == "period" and entities.get("dates"):
-                val = entities["dates"][0]
-
-            if val is not None and str(val).strip():
-                prefilled[param] = str(val).strip()
-
-    if prefilled:
-        query_string = urllib.parse.urlencode(prefilled)
-        delimiter = "&" if "?" in base_url else "?"
-        full_url = f"{base_url}{delimiter}{query_string}"
-    else:
-        full_url = base_url
-
-    return full_url, breadcrumbs, prefilled
+    portal = EXTERNAL_URA_PORTALS.get(portal_key) or EXTERNAL_URA_PORTALS.get("e_services", {})
+    url = str(portal.get("canonical_url") or "")
+    if not is_authoritative_ura_url(url) or urllib.parse.urlsplit(url).query:
+        url = (get_resource("etax_login") or {}).get("url", "https://ura.go.ug/en/etax-login/")
+    return url, [str(portal.get("name") or "URA portal")]
 
 
 # ---------------------------------------------------------------------------
@@ -6694,261 +6616,6 @@ def export_companion_manifest() -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# Official URA Forms, Downloadable Templates & Statutory Sources
-# ---------------------------------------------------------------------------
-
-URA_OFFICIAL_FORMS_AND_RESOURCES: list[dict[str, Any]] = [
-    # VAT
-    {
-        "id": "form_vat_offline_template",
-        "title": "VAT Return Offline Excel Template (FY2026-27)",
-        "type": "downloadable_form",
-        "tax_head": "vat",
-        "format": "xlsx",
-        "size": "245 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/vat_return_template.xlsx",
-        "description": "Official URA macro-enabled Excel template for offline compilation of VAT output and input tax schedules.",
-        "keywords": ["vat", "value added tax", "return", "template", "excel", "input credit", "schedule"],
-    },
-    {
-        "id": "form_vat_online_file",
-        "title": "Submit VAT Return Online — e-Services",
-        "type": "online_form",
-        "tax_head": "vat",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/eservices/returns?tax_type=vat",
-        "description": "Direct URA e-Services portal return upload and declaration module.",
-        "keywords": ["vat", "file vat", "submit vat", "online return"],
-    },
-    {
-        "id": "statute_vat_act",
-        "title": "Value Added Tax Act (Cap. 349)",
-        "type": "statutory_source",
-        "tax_head": "vat",
-        "format": "pdf",
-        "size": "1.8 MB",
-        "url": "https://ura.go.ug/en/download/value-added-tax-amendment-act-2023/",
-        "citation": "Cap. 349, Section 31 (Returns) & Section 24 (EFRIS)",
-        "description": "Governing statutory act for VAT rates (18%), exemptions, and filing rules in Uganda.",
-        "keywords": ["vat act", "law", "statute", "cap 349"],
-    },
-    # PAYE
-    {
-        "id": "form_paye_payroll_template",
-        "title": "PAYE Monthly Return Excel Template (FY2026-27)",
-        "type": "downloadable_form",
-        "tax_head": "paye",
-        "format": "xlsx",
-        "size": "180 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/paye_return_template.xlsx",
-        "description": "Official URA payroll schedule template with FY2026-27 statutory tax bands (UGX 335k nil band).",
-        "keywords": ["paye", "payroll", "salary", "employment", "template", "excel"],
-    },
-    {
-        "id": "form_paye_online_file",
-        "title": "File PAYE Return Online — e-Services",
-        "type": "online_form",
-        "tax_head": "paye",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/eservices/returns?tax_type=paye",
-        "description": "Direct link to upload and submit monthly employment tax returns by the 15th.",
-        "keywords": ["file paye", "paye return", "submit payroll"],
-    },
-    {
-        "id": "statute_income_tax_act",
-        "title": "Income Tax Act (Cap. 340)",
-        "type": "statutory_source",
-        "tax_head": "income_tax",
-        "format": "pdf",
-        "size": "2.4 MB",
-        "url": "https://ura.go.ug/storage/2023/08/Income-Tax-Act-1997.pdf",
-        "citation": "Cap. 340, Section 116 & Fifth Schedule",
-        "description": "Principal legislation for employment taxes, corporation tax, and rental income.",
-        "keywords": ["income tax act", "cap 340", "paye statute", "employment"],
-    },
-    # TIN Registration
-    {
-        "id": "form_tin_individual_online",
-        "title": "Apply for Individual TIN (Instant NIN Verification)",
-        "type": "online_form",
-        "tax_head": "tin",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/registration/individual",
-        "description": "Automated online registration with instant NIRA National ID (NIN) biometric verification.",
-        "keywords": ["tin", "register", "apply tin", "individual tin", "get tin"],
-    },
-    {
-        "id": "form_tin_non_individual_online",
-        "title": "Apply for Non-Individual TIN (Company / NGO)",
-        "type": "online_form",
-        "tax_head": "tin",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/registration/non-individual",
-        "description": "Online registration portal for businesses, incorporating URSB validation.",
-        "keywords": ["company tin", "ngo tin", "business tin", "non individual"],
-    },
-    {
-        "id": "form_dt_1001_manual_tin",
-        "title": "Form DT-1001 — Manual Taxpayer Registration Application",
-        "type": "downloadable_form",
-        "tax_head": "tin",
-        "format": "pdf",
-        "size": "340 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/DT-1001_taxpayer_registration.pdf",
-        "description": "Paper application form for registration or amendments submitted at URA offices.",
-        "keywords": ["dt 1001", "dt-1001", "paper tin form", "manual registration"],
-    },
-    {
-        "id": "form_dt_1015_ngo_exemption",
-        "title": "Form DT-1015 — Application for Income Tax Exemption (NGOs)",
-        "type": "downloadable_form",
-        "tax_head": "income_tax",
-        "format": "pdf",
-        "size": "210 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/DT-1015_exemption_application.pdf",
-        "description": "Official statutory form for charitable, religious, and public educational institutions seeking tax exemption.",
-        "keywords": ["dt 1015", "dt-1015", "ngo exemption", "charity exemption"],
-    },
-    # PRN & Payment
-    {
-        "id": "form_prn_generate_online",
-        "title": "Generate PRN Payment Slip — URA Payments",
-        "type": "online_form",
-        "tax_head": "payment",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/payment",
-        "description": "Select tax head, enter amount, choose commercial bank or Mobile Money gateway to generate a 12-digit PRN.",
-        "keywords": ["prn", "pay tax", "generate prn", "payment slip", "momo pay", "bank"],
-    },
-    {
-        "id": "form_prn_search_online",
-        "title": "Search & Verify PRN Settlement Status",
-        "type": "online_form",
-        "tax_head": "payment",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/payment/search",
-        "description": "Track whether bank or mobile money tax payments have settled and download e-receipts.",
-        "keywords": ["search prn", "verify payment", "payment status", "e-receipt"],
-    },
-    # Objections & Disputes
-    {
-        "id": "form_objection_dt_1016",
-        "title": "Form DT-1016 — Notice of Objection to Tax Assessment",
-        "type": "downloadable_form",
-        "tax_head": "disputes",
-        "format": "pdf",
-        "size": "280 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/DT-1016_notice_of_objection.pdf",
-        "description": "Statutory notice of objection form under Section 24 of the Tax Procedures Code Act 2014.",
-        "keywords": ["objection", "dispute", "appeal", "dt 1016", "dt-1016", "section 24"],
-    },
-    {
-        "id": "form_objection_online",
-        "title": "Lodge Assessment Objection Online — e-Services",
-        "type": "online_form",
-        "tax_head": "disputes",
-        "format": "web",
-        "url": "https://portal.ura.go.ug/eservices/objections",
-        "description": "Submit digital objection grounds, upload supporting ledgers, and track review status.",
-        "keywords": ["lodge objection", "online appeal", "dispute assessment"],
-    },
-    {
-        "id": "statute_tpca_act",
-        "title": "Tax Procedures Code Act 2014",
-        "type": "statutory_source",
-        "tax_head": "procedure",
-        "format": "pdf",
-        "size": "1.5 MB",
-        "url": "https://ura.go.ug/storage/2023/08/Tax-Procedures-Code-Act-2014.pdf",
-        "citation": "Act 14 of 2014, Section 24 (Objections) & Section 47B (Waivers)",
-        "description": "Harmonized tax administration law governing TINs, return deadlines, objections, and audits.",
-        "keywords": ["tpca", "tax procedures code", "section 24", "law"],
-    },
-    # Tax Refunds
-    {
-        "id": "form_refund_dt_4001",
-        "title": "Form DT-4001 — Domestic Tax Refund Application",
-        "type": "downloadable_form",
-        "tax_head": "refunds",
-        "format": "pdf",
-        "size": "195 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/DT-4001_tax_refund.pdf",
-        "description": "Standard claim voucher for overpaid VAT, Withholding Tax, or Corporation Income Tax.",
-        "keywords": ["refund", "dt 4001", "dt-4001", "overpaid tax", "vat refund"],
-    },
-    {
-        "id": "form_ntr_refund_dt_3008",
-        "title": "Form DT-3008 — Non-Tax Revenue Refund Claim Voucher",
-        "type": "downloadable_form",
-        "tax_head": "refunds",
-        "format": "pdf",
-        "size": "180 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/DT-3008_ntr_refund.pdf",
-        "description": "Claim form for refund of erroneously remitted ministry, department, and agency (MDA) fees.",
-        "keywords": ["ntr refund", "dt 3008", "mda fees refund", "overpayment"],
-    },
-    # Customs
-    {
-        "id": "form_customs_c30_drawback",
-        "title": "Customs Form C30 — Application for Duty Drawback Registration",
-        "type": "downloadable_form",
-        "tax_head": "customs",
-        "format": "pdf",
-        "size": "215 KB",
-        "url": "https://customs.ura.go.ug/downloads/forms/Form_C30_duty_drawback.pdf",
-        "description": "Manufacturers' registration form for refund of import duties on exported finished goods.",
-        "keywords": ["c30", "form c30", "duty drawback", "customs refund"],
-    },
-    {
-        "id": "form_customs_asycuda_online",
-        "title": "ASYCUDA World Customs Clearance Portal",
-        "type": "online_form",
-        "tax_head": "customs",
-        "format": "web",
-        "url": "https://customs.ura.go.ug",
-        "description": "Official UNCTAD ASYCUDA portal for lodging Single Administrative Documents (SAD) and manifests.",
-        "keywords": ["asycuda", "customs entry", "single administrative document", "bill of entry"],
-    },
-    {
-        "id": "statute_eaccma_act",
-        "title": "East African Community Customs Management Act (EACCMA 2004)",
-        "type": "statutory_source",
-        "tax_head": "customs",
-        "format": "pdf",
-        "size": "3.2 MB",
-        "url": "https://ura.go.ug/en/download/the-east-african-community-customs-management-act-2004/",
-        "citation": "EACCMA 2004, Sections 34, 138-144 (Refunds & Drawbacks)",
-        "description": "Regional customs law governing valuation (ACV), warehousing, exemptions, and regional tariffs.",
-        "keywords": ["eaccma", "customs act", "east african community customs"],
-    },
-    # Motor Vehicle
-    {
-        "id": "form_motor_vehicle_tr_vii",
-        "title": "Form TR VII — Motor Vehicle Transfer of Ownership Deed",
-        "type": "downloadable_form",
-        "tax_head": "motor_vehicle",
-        "format": "pdf",
-        "size": "310 KB",
-        "url": "https://portal.ura.go.ug/downloads/forms/Form_TR_VII_transfer.pdf",
-        "description": "Official legal transfer document signed by seller and buyer for motor vehicle logbook transfers.",
-        "keywords": ["tr vii", "tr 7", "transfer motor vehicle", "logbook transfer", "car transfer"],
-    },
-    # Handbooks
-    {
-        "id": "guide_taxation_handbook_8th",
-        "title": "URA Taxation Handbook (8th Edition FY2025-26)",
-        "type": "guide",
-        "tax_head": "general",
-        "format": "pdf",
-        "size": "4.1 MB",
-        "url": "https://ura.go.ug/download-category/taxation-handbook/",
-        "description": "Comprehensive national tax compendium covering direct and indirect taxes, rates, and compliance.",
-        "keywords": ["handbook", "taxation handbook", "8th edition", "tax guide"],
-    },
-]
-
-
 def find_relevant_forms_and_resources(
     query: str,
     tax_type: str = "",
@@ -6958,4 +6625,3 @@ def find_relevant_forms_and_resources(
     """Match and return verified downloadable forms, online portals, and statutory sources."""
     from ..verified_resources import get_verified_resources
     return get_verified_resources(query, tax_type=tax_type, intent=intent, max_items=max_items)
-
