@@ -1,66 +1,69 @@
-# `app.workflows` — multi-step flow engine (Phase 18)
+# `app.workflows` — guided multi-step journeys
 
-> **Status:** scaffolded — the directory, loader, and state shape
-> exist; concrete YAML workflows land in Phase 18.
+Slot-filling flows that walk a taxpayer through a URA task one step at a
+time, persist across turns (`workflow_sessions` table, keyed by
+conversation), and show progress in the web stepper (`WorkflowStepper`).
+On by default (`workflows` flag).
 
-## What this package will do
+| File | Role |
+| --- | --- |
+| `loader.py` | YAML → `WorkflowDefinition`; resolves `portal_action` and `resources` ids against `app/verified_resources.py` |
+| `registry.py` | `WorkflowRegistry` (load, `match_trigger`, `advance`, `pending_step`) and `compute_workflow_progress` for the stepper |
+| `slots.py` | Validators: `text`, `boolean`, `number[min=…]`, `enum[a,b]`, `regex[…]` |
+| `flows/*.yaml` | One file per journey |
 
-Multi-step tax tasks like *"Register for a TIN"*, *"File my VAT
-return"*, *"Declare imported goods"* — anything that needs slot
-filling across multiple turns and resumes across sessions.
+## Journeys
 
-## Target architecture (Phase 18)
+| id | Name | Started by |
+| --- | --- | --- |
+| `tin_registration` | TIN Registration | trigger phrases |
+| `tin_procedure_help` | TIN Registration Help | the TIN-procedure path in `service.py` (no triggers) |
+| `return_filing` | Return Filing | trigger phrases |
+| `payment_assistance` | Payment Assistance | trigger phrases |
+| `tax_clearance` | Tax Clearance Certificate | trigger phrases |
+| `motor_vehicle_registration` | Motor Vehicle Registration | trigger phrases |
+| `customs_clearance` | Customs Clearance | trigger phrases |
+| `objection_or_dispute` | Objection or Dispute | trigger phrases |
+| `audit_invoice_compliance` | Tax Invoice & EFRIS Compliance Audit | trigger phrases |
+| `calc_*` (9 flows) | Calculators | the calculator router only (no triggers) |
 
-```
-workflows/
-├── __init__.py         # registry of loaded flows
-├── registry.py         # loader + runtime
-├── loader.py           # YAML → StateGraph builder
-├── flows/
-│   ├── tin_registration.yaml
-│   ├── vat_filing.yaml
-│   ├── customs_declaration.yaml
-│   └── objection_filing.yaml
-├── slots.py            # Pydantic-AI slot validators
-└── tests/
-```
+`tax_clearance` checks the four conditions URA applies before approving a
+certificate and routes each unmet one to its fix; `motor_vehicle_registration`
+covers first registration and the move to digital number plates. Their YAML
+headers name the URA and Ministry of Works pages the steps come from; re-check
+those before changing a fee or a condition.
 
-## YAML workflow shape (proposed)
+## How a journey starts
 
-```yaml
-id: tin_registration
-name: Register for a TIN
-version: "2026-04"
-requires_auth: true
-steps:
-  - id: collect_type
-    question: "Are you registering as an individual, company, or NGO?"
-    slot: taxpayer_type
-    validator: enum[individual,company,ngo]
-  - id: collect_nin_or_reg
-    when: taxpayer_type == "individual"
-    question: "What is your National ID (NIN)?"
-    slot: nin
-    validator: regex[^C[MF]\d{2}[A-Z]{5}\d{5}[A-Z]$]
-  - id: confirm
-    question: "Ready to submit your application?"
-    slot: confirm
-    validator: boolean
-  - id: submit
-    tool: ura_actions.submit_tin_application
-    args:
-      taxpayer_type: "{{ taxpayer_type }}"
-      nin: "{{ nin }}"
-    confirmation_required: true
-```
+1. `match_trigger` normalises both sides — base verb forms ("filing" →
+   "file"), and a tax type before "return" ("my VAT return" → "my return") —
+   and treats a flow's own **name** as a trigger when the flow has trigger
+   phrases. Calculators are never started by name.
+2. The entrance rule (G39, `service._maybe_handle_workflow`): a message that
+   reads as a question (`_reads_as_question`, which includes "I need…" and "I
+   want…") is **answered**, not captured, unless it also asks to be guided
+   ("guide me", "walk me through", "help me file/register/apply/submit",
+   "start", …).
+3. When a question is answered instead, `app/turn_guidance.py` adds a next
+   action `Guide me step by step through <flow name>`. Its text satisfies both
+   rules above, so a click starts that flow. The offer is not added inside a
+   flow, on a clarification, a refused input or an escalation; it *is* added to
+   an abstention, where it is a way forward.
 
-## Dependencies
+## Funnel metrics
 
-- Phase 14 auth
-- Phase 15 Lite MCP + LangGraph orchestrator
-- Phase 17 `mcp_ura_account` + `mcp_ura_actions`
-- Phase 21 audit ledger
+Every session start, turn and cancel increments
+`journey_events_total{workflow, event, step}` on `/metrics` (admin auth), with
+`event` one of `started`, `step_entered`, `step_invalid`, `completed`,
+`cancelled`. The fall in `step_entered` between consecutive steps of one flow is
+its drop-off. No slot value is ever a label.
 
-## Effort
+## Adding a journey
 
-4 weeks once dependencies land.
+1. Write `flows/<id>.yaml` (see `tax_clearance.yaml` for conditional steps and
+   links). Links are ids from `app/verified_resources.py`; add a new page there
+   only after it has passed `python -m app.verified_resources --check`.
+2. Pick trigger phrases a taxpayer would type as a task, not as a question.
+3. Add cases to `App/backend/tests/test_guided_journeys_and_ei.py` and a live
+   case to `scripts/probe_guided_journeys.py`, then follow
+   `docs/runbooks/guided-journey-probes.md`.

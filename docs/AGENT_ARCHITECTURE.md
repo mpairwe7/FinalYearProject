@@ -179,7 +179,7 @@ The routing is handled in
 |---|---|---|---|
 | 1 | `ESCALATE` | Human-contact phrases (`speak to`, `talk to`, `contact a human/agent/officer`) | None |
 | 1 | `ESCALATE` | Dispute / legal vocab (`dispute`, `objection`, `audit`, `appeal`, `court`, `lawyer`, `fraud`) | None |
-| 1 | `ESCALATE` | Account-specific (`my TIN`, `my filing`, `my return`, `my account`, `my balance`) | None |
+| 1 | `ESCALATE` | Account-specific (`my TIN`, `my filing`, `my return`, `my account`, `my balance`) | Not phrased as a how-to (`HOW_TO_QUESTION_RE` in `agents/patterns/en.py`: "how do I", "where can I", "help me", "guide me", "walk me through", "steps to", "procedure"). "How do I file my return?" is answered; "What is my balance?" escalates. The answer judge applies the same exemption. |
 | 2 | `CLARIFY` | Single-word stop-word-only queries | No conversation history |
 | 3 | `TOOLS` | Calculation intent: `how much X` / `calculate X` for VAT, PAYE, CIT, CGT, customs duty | None |
 | 4 | `TOOLS` | Temporal: `today`, `now`, `current fiscal year`, `next deadline`, `this month` | None |

@@ -113,7 +113,7 @@ for normal chat usage.
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
 7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
-8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
+8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use; given the conversation `history` it flags distress sustained across turns. Every turn also passes `app/turn_guidance.py`: a repeated empathy opener is dropped, sustained distress adds a "Talk to an officer" action, and a "How do I…" answer offers the matching guided journey. A turn that is all feeling and no task gets a clarifying question instead of retrieval, and a message about self-harm gets Uganda crisis lines before any router. See [`docs/runbooks/guided-journey-probes.md`](../docs/runbooks/guided-journey-probes.md)
 9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
 10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
 11. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
@@ -318,7 +318,7 @@ see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 | `get_current_date` | `calendar.py` | `calendar` | Current date for deadline logic |
 | `get_next_deadlines` | `calendar.py` | `calendar` | Upcoming tax filing deadlines |
 | `search_ura_knowledge_base` | `rag_tool.py` | `rag` | Semantic search (wraps hybrid retriever) |
-| `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance |
+| `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance; optional `history` flags distress sustained across turns, and `crisis` short-circuits to crisis lines |
 | `explain_tax_concept` | `education.py` | `education` | Teach a concept: scaffolded explanation, worked example computed from the live rate tables, misconceptions, check question |
 
 | `escalate_to_human` | `escalate.py` | `core` | Create escalation ticket from tool loop |
