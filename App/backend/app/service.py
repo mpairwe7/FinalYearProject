@@ -5778,7 +5778,30 @@ class ChatModel:
             if warning:
                 tool_messages.append(f"_{warning}_")
             turn = WorkflowRegistry.advance(session, "")
+        self._record_journey_turn(session, turn)
         return turn, tool_messages
+
+    @staticmethod
+    def _record_journey(workflow_id: str, event: str, step: str = "") -> None:
+        """One guided-journey funnel event, exported on ``/metrics``.
+
+        ``journey_events_total{workflow, event, step}`` with ``event`` one of
+        started, step_entered, step_invalid, completed, cancelled. Where the
+        ``step_entered`` count drops between consecutive steps is the drop-off
+        the CX team fixes first (docs/runbooks/guided-journey-probes.md). Slot
+        values are never labels: the counter carries no personal data, so it
+        needs no analytics consent.
+        """
+        metrics.inc("journey_events_total", labels={"workflow": workflow_id, "event": event, "step": step})
+
+    def _record_journey_turn(self, session: WorkflowSession, turn: Any) -> None:
+        if getattr(turn, "validation_error", ""):
+            event = "step_invalid"
+        elif session.completed or getattr(turn, "is_complete", False):
+            event = "completed"
+        else:
+            event = "step_entered"
+        self._record_journey(session.workflow_id, event, str(getattr(turn, "step_id", "") or ""))
 
     def _maybe_handle_fast_paths(
         self,
@@ -6191,6 +6214,7 @@ class ChatModel:
         session = WorkflowRegistry.create_session(wf.id)
         if session is None:
             return None
+        self._record_journey(session.workflow_id, "started")
         turn, _tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or ""
         db.upsert_workflow_session(
@@ -6340,6 +6364,7 @@ class ChatModel:
         session = WorkflowRegistry.create_session(plan.workflow_id)
         if session is None:
             return None
+        self._record_journey(session.workflow_id, "started")
         session.slots.update(plan.params)
 
         turn, tool_messages = self._advance_workflow(session, "", thread_id)
@@ -6654,6 +6679,8 @@ class ChatModel:
             user_input = (message or "").strip()
             if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
                 db.complete_workflow_session(thread_id, status="cancelled")
+                pending = WorkflowRegistry.pending_step(session)
+                self._record_journey(session.workflow_id, "cancelled", pending.id if pending else "")
                 workflow = self._workflow_view(
                     session,
                     name=wf.name,
@@ -6829,6 +6856,7 @@ class ChatModel:
         session = WorkflowRegistry.create_session(matched.id)
         if session is None:
             return None
+        self._record_journey(session.workflow_id, "started")
         self._apply_personalization_to_workflow(session, personalization)
 
         turn, tool_messages = self._advance_workflow(session, "", thread_id)

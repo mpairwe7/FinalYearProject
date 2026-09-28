@@ -127,6 +127,26 @@ def test_a_feeling_only_turn_is_repaired_not_retrieved(client):
     assert second["next_actions"][0] == "Talk to an officer"
 
 
+def test_journey_funnel_events_are_counted(client):
+    # The funnel the CX team reads on /metrics: where journeys start, which
+    # step each one reached, and where they were abandoned.
+    def key(event: str, step: str) -> str:
+        return f'journey_events_total{{event="{event}",step="{step}",workflow="return_filing"}}'
+
+    before = dict(service_module.metrics.snapshot()["counters"])
+    conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
+    client.post("/v1/chat", json={"message": "Help me file my return", "conversation_id": conversation_id})
+    client.post("/v1/chat", json={"message": "cancel", "conversation_id": conversation_id})
+    after = service_module.metrics.snapshot()["counters"]
+
+    def delta(counter: str) -> int:
+        return after.get(counter, 0) - before.get(counter, 0)
+
+    assert delta(key("started", "")) == 1
+    assert delta(key("step_entered", "collect_taxpayer_type")) == 1
+    assert delta(key("cancelled", "collect_taxpayer_type")) == 1
+
+
 def test_the_streaming_core_applies_the_same_guidance(client):
     # ``client`` builds the real ChatModel, which loads the workflow flows the
     # guided-mode offer is matched against.
