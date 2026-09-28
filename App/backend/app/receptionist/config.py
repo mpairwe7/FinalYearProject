@@ -119,6 +119,17 @@ def get_gemini_vad_prefix_padding_ms() -> int:
     return max(0, _env_int("GEMINI_LIVE_PREFIX_PADDING_MS", 100))
 
 
+def get_gemini_audio_deadline_s() -> float:
+    """Seconds of silence after a Gemini caller turn before the local cascade answers.
+
+    15s sits above the measured 11–14s first-audio turns on this GPU stack and
+    below the 30s+ hangs. ``0`` disables the fallback. The local answer uses
+    Whisper-SALT, Sunflower on vLLM, Qdrant, and Spark-TTS-SALT (or Orpheus
+    when that sidecar is up).
+    """
+    return max(0.0, _env_float("RECEPTIONIST_GEMINI_AUDIO_DEADLINE_S", 15.0))
+
+
 # ---------------------------------------------------------------------------
 # Multilingual receptionist (en / sw / lg) and language detection
 # ---------------------------------------------------------------------------

@@ -394,15 +394,28 @@ class UraReceptionistBrain(LLMService):
 
     def _extract_english_tax_query(self, luganda_query: str) -> str:
         """Extract a clean English search query from a Luganda taxpayer question."""
-        from .lexicon import normalize_luganda_tax_query
+        from .lexicon import normalize_luganda_tax_query, repair_asr_entities
 
-        normalized = normalize_luganda_tax_query(luganda_query)
+        # The GPU stack's Sunflower reads this. Repair Whisper's TIN/URA
+        # mishears first so Qdrant is searched for the tax the caller named.
+        repaired = repair_asr_entities(luganda_query)
+        normalized = normalize_luganda_tax_query(repaired)
+
+        def _sunflower_query() -> str:
+            from ..llm import _vllm_generate
+
+            prompt = f"Luganda question: {repaired}\nEnglish search query:"
+            messages = [
+                {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
+                {"role": "user", "content": prompt},
+            ]
+            return _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
 
         def _gemini_query() -> str:
             from ..providers.gateway import gemini_generate
 
             model = get_brief_model()
-            prompt = f"Luganda question: {luganda_query}\nEnglish search query:"
+            prompt = f"Luganda question: {repaired}\nEnglish search query:"
             return gemini_generate(
                 prompt,
                 system=QUERY_EXTRACT_SYSTEM,
@@ -412,17 +425,8 @@ class UraReceptionistBrain(LLMService):
                 locale="en",
             ).strip().strip('"')
 
-        def _sunflower_query() -> str:
-            from ..llm import _vllm_generate
-
-            prompt = f"Luganda question: {luganda_query}\nEnglish search query:"
-            messages = [
-                {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
-                {"role": "user", "content": prompt},
-            ]
-            return _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
-
-        for gen in (_gemini_query, _sunflower_query):
+        # Local Sunflower on vLLM first. Gemini is only the outage fallback.
+        for gen in (_sunflower_query, _gemini_query):
             try:
                 res = gen()
                 if res and len(res) > 2:
@@ -435,6 +439,15 @@ class UraReceptionistBrain(LLMService):
     def _synthesize_luganda_reply(self, context_text: str, question: str) -> str:
         """Single-pass synthesis from English statutory context directly into Luganda."""
         prompt = LUGANDA_RAG_PROMPT_TEMPLATE.format(passages=context_text, luganda_query=question)
+
+        def _sunflower_synth() -> str:
+            from ..llm import _vllm_generate
+
+            messages = [
+                {"role": "system", "content": LUGANDA_RAG_SYSTEM},
+                {"role": "user", "content": prompt},
+            ]
+            return _vllm_generate(messages, max_tokens=256, temperature=0.1).strip()
 
         def _gemini_synth() -> str:
             from ..providers.gateway import gemini_generate
@@ -449,16 +462,8 @@ class UraReceptionistBrain(LLMService):
                 locale="en",
             ).strip()
 
-        def _sunflower_synth() -> str:
-            from ..llm import _vllm_generate
-
-            messages = [
-                {"role": "system", "content": LUGANDA_RAG_SYSTEM},
-                {"role": "user", "content": prompt},
-            ]
-            return _vllm_generate(messages, max_tokens=256, temperature=0.1).strip()
-
-        for synth in (_gemini_synth, _sunflower_synth):
+        # Same order as query extraction: the local Sunflower weights, then Gemini.
+        for synth in (_sunflower_synth, _gemini_synth):
             try:
                 res = synth()
                 if res and len(res) > 3:

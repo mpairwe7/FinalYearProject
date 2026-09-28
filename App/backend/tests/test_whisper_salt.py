@@ -92,9 +92,30 @@ class TranscribeWhisperSaltUnitTests(unittest.TestCase):
     def test_no_language_argument_at_all_also_gets_no_forcing(self) -> None:
         model, fake_model, fake_processor = self._model_with_salt({})
         with patch("torch.no_grad"):
-            ss.SpeechModel._transcribe_whisper_salt(model, b"\x00" * 3200, 16000, None)
+            result = ss.SpeechModel._transcribe_whisper_salt(model, b"\x00" * 3200, 16000, None)
         fake_processor.tokenizer.decode.assert_not_called()
         self.assertIsNone(fake_model.generate.call_args.kwargs["language"])
+        # No detection on a stand-in model: the prompt is the neutral line,
+        # not the English customs-duty sentence.
+        prompt = fake_processor.get_prompt_ids.call_args.args[0]
+        self.assertNotIn("customs duty", prompt)
+        self.assertIsNone(result.language)
+
+    def test_a_detected_language_is_forced_when_the_caller_sent_none(self) -> None:
+        model, fake_model, fake_processor = self._model_with_salt({50355: "<|ba|>"})
+        model._detect_salt_language = lambda *_a, **_kw: "lg"
+        with patch("torch.no_grad"):
+            result = ss.SpeechModel._transcribe_whisper_salt(model, b"\x00" * 3200, 16000, None)
+        self.assertEqual(fake_model.generate.call_args.kwargs["language"], "<|ba|>")
+        self.assertIn("omusolo", fake_processor.get_prompt_ids.call_args.args[0])
+        self.assertEqual(result.language, "lg")
+
+    def test_domain_prompt_is_neutral_without_a_language(self) -> None:
+        self.assertIn("customs duty", ss.salt_domain_prompt("en"))
+        self.assertIn("omusolo", ss.salt_domain_prompt("lg"))
+        self.assertIn("kodi", ss.salt_domain_prompt("sw"))
+        self.assertNotIn("customs duty", ss.salt_domain_prompt(None))
+        self.assertNotIn("customs duty", ss.salt_domain_prompt("nyn"))
 
     def test_no_loaded_model_returns_none_rather_than_raising(self) -> None:
         model = ss.SpeechModel.__new__(ss.SpeechModel)

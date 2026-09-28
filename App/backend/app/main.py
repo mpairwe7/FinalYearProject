@@ -1595,15 +1595,24 @@ def speech_health(
     request: Request,
     _ctx: AuthContext = Depends(optional_user),
 ) -> SpeechHealthResponse:
-    """Report whether the speech pipeline is ready to serve requests."""
+    """Report whether the speech pipeline is ready to serve requests.
+
+    ``degraded`` is still HTTP 200: Whisper-SALT and Spark-TTS-SALT on the
+    local GPU are up, but the Orpheus sidecar named by ``ORPHEUS_TTS_URL``
+    is not. Callers that only check the status code keep working; callers
+    that check ``status`` can see the Luganda voice is the slow tier.
+    """
+    from .speech_service import speech_health_report
+
     speech = getattr(request.app.state, "speech", None)
-    enabled = SPEECH_ENABLED and speech is not None and speech.is_ready()
     return SpeechHealthResponse(
-        status="ready" if enabled else "unavailable",
-        enabled=SPEECH_ENABLED,
-        asr_backend=SPEECH_ASR_BACKEND,
-        tts_backend=SPEECH_TTS_BACKEND,
-        mt_backend=SPEECH_MT_BACKEND,
+        **speech_health_report(
+            speech,
+            enabled_flag=SPEECH_ENABLED,
+            asr_backend=SPEECH_ASR_BACKEND,
+            tts_backend=SPEECH_TTS_BACKEND,
+            mt_backend=SPEECH_MT_BACKEND,
+        )
     )
 
 

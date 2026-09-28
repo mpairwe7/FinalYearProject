@@ -16,17 +16,24 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "orpheus_sidecar"))
+# Backend package first. The sidecar directory also contains an app.py; putting
+# it on sys.path before this import makes `app` that module and every later
+# test file in the same process fails.
+_BACKEND = str(Path(__file__).resolve().parents[1])
+sys.path.insert(0, _BACKEND)
 
 from app import orpheus_tts  # noqa: E402
 from app import speech_service as ss  # noqa: E402
+
+sys.path.insert(0, str(Path(_BACKEND) / "orpheus_sidecar"))
 
 ON = {"ORPHEUS_TTS_URL": "http://orpheus:8100"}
 
 
 def reset_cooldown() -> None:
     orpheus_tts._down_until = 0.0
+    orpheus_tts._probe_until = 0.0
+    orpheus_tts._probe_state = "unknown"
 
 
 class SpeakerSelection(unittest.TestCase):
@@ -178,6 +185,29 @@ class ChainOrder(unittest.TestCase):
         ), self.no_local_voice(model):
             res = model._synthesize_uncached("Oli otya?", "lg-voice", "lg")
         self.assertEqual(res.backend, "spark_tts_salt")
+
+    def test_cooldown_does_not_call_orpheus(self):
+        model = chain_model()
+        orpheus_tts._down_until = orpheus_tts.time.monotonic() + 30
+        with patch.dict(os.environ, ON), patch.object(orpheus_tts, "synthesize") as synth, self.no_local_voice(model):
+            res = model._synthesize_uncached("Oli otya?", "lg-voice", "lg")
+        synth.assert_not_called()
+        self.assertEqual(res.backend, "spark_tts_salt")
+
+    def test_health_is_degraded_while_the_sidecar_is_down(self):
+        model = chain_model()
+        model._initialised = True
+        with patch.dict(os.environ, ON), patch.object(orpheus_tts, "_tcp_probe", return_value="down"):
+            report = ss.speech_health_report(
+                model,
+                enabled_flag=True,
+                asr_backend="auto",
+                tts_backend="auto",
+                mt_backend="prompted",
+            )
+        self.assertEqual(report["status"], "degraded")
+        self.assertEqual(report["orpheus"], "cooldown")
+        self.assertTrue(orpheus_tts.in_cooldown())
 
     def test_without_the_url_the_chain_is_unchanged(self):
         model = chain_model()

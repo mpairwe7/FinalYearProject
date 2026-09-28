@@ -109,6 +109,15 @@ def test_legal_section_expansion():
     assert "Section 122" in res
 
 
+def test_broken_and_bare_urls_are_not_spoken():
+    raw = "Genda ku www.ura.go.ug](http://www.ura.go.ug/) oba ku email."
+    res = clean_text_for_speech(raw, locale="lg")
+    assert "http" not in res
+    assert "www." not in res
+    assert "ura.go.ug" not in res
+    assert "Genda ku" in res
+
+
 def test_empty_and_whitespace():
     assert clean_text_for_speech("") == ""
     assert clean_text_for_speech("   ") == ""

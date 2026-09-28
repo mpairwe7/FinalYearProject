@@ -148,6 +148,8 @@ def build_multilingual_pipeline(
         OfficerRequestBridge,
         build_gemini_live_service,
     )
+    from .config import get_gemini_audio_deadline_s
+    from .gemini_stall import GeminiStallGuard
     from .hold_gate import InterruptedReplyMute, OfficerOutputGate, OutputHoldGate
     from .pipeline import build_cascaded_branch, build_transport
     from .sentinel import LanguageSentinel
@@ -173,6 +175,8 @@ def build_multilingual_pipeline(
     engines = set(engine_by_language.values())
     branches: list[list[Any]] = []
     gemini_brain = None
+    caller_tap = None
+    gemini_tap = None
     task_ref: dict[str, Any] = {}
 
     if "gemini_live" in engines:
@@ -193,10 +197,11 @@ def build_multilingual_pipeline(
         router.gemini_service = service
         gemini_tap = GeminiLiveTranscriptTap(room=room)
         gemini_tap.on_switch_interrupt = lambda: router.switch_passed("gemini_live")
+        caller_tap = GeminiCallerTap(room=room, track_language=False, languages=gemini_langs)
         branches.append([
             EngineGate(selector, "gemini_live", head=True),
             aggregators.user(),
-            GeminiCallerTap(room=room, track_language=False, languages=gemini_langs),
+            caller_tap,
             OfficerRequestBridge(),
             service,
             InterruptedReplyMute(),
@@ -218,6 +223,17 @@ def build_multilingual_pipeline(
             assistant_aggregator,
             EngineGate(selector, "cascaded", head=False),
         ])
+
+    # Gemini silence hands the turn to the local cascade (Whisper-SALT,
+    # Sunflower, Qdrant, Spark/Orpheus). Without a cascaded branch there is
+    # nowhere to hand it, so the guard stays off.
+    if caller_tap is not None and gemini_tap is not None and cascaded_brain is not None:
+        guard = GeminiStallGuard(
+            get_gemini_audio_deadline_s(),
+            router.fallback_after_gemini_stall,
+        )
+        caller_tap.stall = guard
+        gemini_tap.stall = guard
 
     sentinel = LanguageSentinel(room, speech_model, router, languages)
     router.interrupt = sentinel.interrupt_for_switch

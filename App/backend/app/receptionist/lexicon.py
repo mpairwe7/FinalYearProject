@@ -262,6 +262,9 @@ LUGANDA_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
     "musolo gwa vat": "VAT rate",
     "vat gw'ameka": "VAT rate Uganda",
     "vat y'emeka": "VAT rate Uganda",
+    "vat yange": "VAT",
+    "ebitundu bimeeka": "what percentage",
+    "ebitundu bimeka": "what percentage",
     # Motor vehicle transfer
     "omusolo gw'emmotoka": "motor vehicle transfer tax",
     "omusolo gw emmotoka": "motor vehicle transfer tax",
@@ -293,6 +296,45 @@ LUGANDA_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
 }
 
 
+_ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
+    # Whisper-SALT's fluent mishears of TIN. "tiini" is the normal Luganda
+    # pronunciation and is left alone; these are the ones that retrieved VAT.
+    (re.compile(r"\btti+mu\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\btiimu\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\btimu\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\bttini\b", re.IGNORECASE), "TIN"),
+    # Same frames as clarify._CONTEXT_MISHEARS. "era" alone is "and".
+    # "ora" is the GPU Whisper-SALT hearing of URA on lg_tin.wav
+    # ("okuva mu ora"), not the conjunction.
+    (re.compile(r"\bmu era\b", re.IGNORECASE), "mu URA"),
+    (re.compile(r"\bku era\b", re.IGNORECASE), "ku URA"),
+    (re.compile(r"\bfrom era\b", re.IGNORECASE), "from URA"),
+    (re.compile(r"\bkwa era\b", re.IGNORECASE), "kwa URA"),
+    (re.compile(r"\bkutoka era\b", re.IGNORECASE), "kutoka URA"),
+    (re.compile(r"\bokuva era\b", re.IGNORECASE), "okuva URA"),
+    (re.compile(r"\bmu ora\b", re.IGNORECASE), "mu URA"),
+    (re.compile(r"\bku ora\b", re.IGNORECASE), "ku URA"),
+    (re.compile(r"\bfrom ora\b", re.IGNORECASE), "from URA"),
+    (re.compile(r"\bkwa ora\b", re.IGNORECASE), "kwa URA"),
+    (re.compile(r"\bkutoka ora\b", re.IGNORECASE), "kutoka URA"),
+    (re.compile(r"\bokuva ora\b", re.IGNORECASE), "okuva URA"),
+)
+
+
+def repair_asr_entities(text: str) -> str:
+    """Rewrite known Whisper mishears of TIN and URA before retrieval.
+
+    The local stack searches Qdrant with this string. "ttiimu" does not hit
+    the TIN passages; "TIN" does.
+    """
+    if not text:
+        return ""
+    repaired = text
+    for pattern, replacement in _ASR_ENTITY_FIXES:
+        repaired = pattern.sub(replacement, repaired)
+    return repaired
+
+
 def normalize_luganda_tax_query(text: str) -> str:
     """Pre-process common code-switched URA tax terms in Luganda queries into standard English domain terms.
 
@@ -301,7 +343,7 @@ def normalize_luganda_tax_query(text: str) -> str:
     """
     if not text:
         return ""
-    normalized = text
+    normalized = repair_asr_entities(text)
     # Sort terms by descending length to match longer idioms before substrings
     sorted_terms = sorted(LUGANDA_ENGLISH_TAX_TERMS.keys(), key=len, reverse=True)
     for term in sorted_terms:

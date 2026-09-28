@@ -105,6 +105,50 @@ class ClarifyState:
     attempts: int = 0
 
 
+# Whisper-SALT hears these as fluent words, so the probability gate never
+# opens. They are not the loanword shape of the acronym ("tiini" → TIN,
+# "vati" → VAT), which is left to the low-confidence path so a clear
+# Luganda pronunciation is not confirmed on every turn.
+_SURE_MISHEARS: dict[str, str] = {
+    "ttiimu": "tin",
+    "tiimu": "tin",
+    "ttimu": "tin",
+    "timu": "tin",
+    "ttini": "tin",
+    "efrisi": "efris",
+    "eifalisi": "efris",
+    "ifalisi": "efris",
+}
+# "era" is Luganda for "and". Only the preposition frame from the live
+# TIN calls ("okuva mu era") is URA.
+_CONTEXT_MISHEARS: dict[tuple[str, str], str] = {
+    ("mu", "era"): "ura",
+    ("ku", "era"): "ura",
+    ("from", "era"): "ura",
+    ("kwa", "era"): "ura",
+    ("kutoka", "era"): "ura",
+    ("okuva", "era"): "ura",
+    # The GPU Whisper-SALT pass on lg_tin.wav returned "okuva mu ora",
+    # not "mu era". "ora" is not the Luganda word for "and".
+    ("mu", "ora"): "ura",
+    ("ku", "ora"): "ura",
+    ("from", "ora"): "ura",
+    ("kwa", "ora"): "ura",
+    ("kutoka", "ora"): "ura",
+    ("okuva", "ora"): "ura",
+}
+
+
+def entity_mishear(token: str, previous: str | None = None) -> str | None:
+    """Canonical tax acronym for a known Whisper mishear, else None."""
+    tok = token.lower().strip(",.?!;:\"'()")
+    prev = (previous or "").lower().strip(",.?!;:\"'()")
+    hit = _CONTEXT_MISHEARS.get((prev, tok))
+    if hit:
+        return hit
+    return _SURE_MISHEARS.get(tok)
+
+
 def _spoken_term(term: str, language: str) -> str:
     """Acronyms read as letters in a prompt ("TIN", not "tin")."""
     if language != "en" and term.isalpha() and len(term) <= 5:
@@ -151,6 +195,18 @@ class ClarifyGate:
         if words is None:
             tokens = [w.strip(",.?!;:\"'()") for w in text.split()]
             for i, tok in enumerate(tokens):
+                prev_word = tokens[i - 1] if i > 0 else None
+                misheard = entity_mishear(tok, prev_word)
+                if misheard:
+                    return ClarifyAction(
+                        action="ask_term",
+                        candidate=misheard,
+                        target_word=tok,
+                        previous_word=prev_word.lower() if prev_word else None,
+                        prompt=phrase(
+                            "clarify_term", language, term=_spoken_term(misheard, language)
+                        ),
+                    )
                 low_tok = tok.lower()
                 if low_tok in STOP_WORDS or low_tok in FILLERS or len(tok) < 3:
                     continue
@@ -169,10 +225,34 @@ class ClarifyGate:
                     )
             return ClarifyAction(action="none")
 
-        # Case 2: words with per-word probabilities provided
+        # Case 2: words with per-word probabilities provided.
+        # Known mishears are confirmed even when Whisper is sure, and even
+        # when the token is also an ordinary word ("era" is Luganda for
+        # "and", and also how URA comes back after "mu"). This pass runs
+        # before the native-word filter, which would otherwise drop it.
+        def word_at(idx: int) -> str:
+            item = words[idx]
+            return item.word if hasattr(item, "word") else item.get("word", "")
+
+        for idx in range(len(words)):
+            prev = word_at(idx - 1) if idx > 0 else None
+            misheard = entity_mishear(word_at(idx), prev)
+            if not misheard:
+                continue
+            target_str = word_at(idx)
+            return ClarifyAction(
+                action="ask_term",
+                candidate=misheard,
+                target_word=target_str,
+                previous_word=prev.strip(",.?!;:\"'()") if prev else None,
+                prompt=phrase(
+                    "clarify_term", language, term=_spoken_term(misheard, language)
+                ),
+            )
+
         content_items: list[tuple[int, Any]] = []
         for idx, item in enumerate(words):
-            word_str = item.word if hasattr(item, "word") else item.get("word", "")
+            word_str = word_at(idx)
             w_clean = word_str.lower().strip(",.?!;:\"'()")
             if not w_clean or w_clean in STOP_WORDS or w_clean in FILLERS:
                 continue
@@ -197,10 +277,6 @@ class ClarifyGate:
 
         def prob_of(pair: tuple[int, Any]) -> float:
             return pair[1].prob if hasattr(pair[1], "prob") else pair[1].get("prob", 1.0)
-
-        def word_at(idx: int) -> str:
-            item = words[idx]
-            return item.word if hasattr(item, "word") else item.get("word", "")
 
         # English: the lowest-probability content word is the one in question.
         # Elsewhere most content words are not in the (English) lexicon at

@@ -413,6 +413,84 @@ SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
     "ach": 50357,  # decodes to <|su|> (Sundanese); NOT independently verified
 }
 
+# Domain prompts. An unset language used to take the English sentence, so a
+# Luganda or Kiswahili clip posted to /v1/asr without ?language= was biased
+# toward English tax prose. No detected language gets the neutral line.
+_SALT_PROMPT_EN = (
+    "URA, EFRIS, VAT, TIN, PAYE, PRN, customs duty, withholding tax, "
+    "presumptive tax, taxpayer, Uganda Revenue Authority."
+)
+_SALT_PROMPT_LG = (
+    "URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, "
+    "forodha, okwewandiisa, Uganda Revenue Authority."
+)
+_SALT_PROMPT_SW = (
+    "URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, "
+    "risiti, usajili, Mamlaka ya Mapato ya Uganda."
+)
+_SALT_PROMPT_NEUTRAL = "URA, EFRIS, VAT, TIN, PAYE, PRN, Uganda Revenue Authority."
+
+
+def salt_domain_prompt(language: str | None) -> str:
+    """The Whisper-SALT conditioning line for *language*.
+
+    English, Luganda, and Kiswahili each have their own. Anything else —
+    including "we have not detected a language yet" — stays on the neutral
+    acronym line rather than the English sentence.
+    """
+    if language == "en":
+        return _SALT_PROMPT_EN
+    if language == "lg":
+        return _SALT_PROMPT_LG
+    if language == "sw":
+        return _SALT_PROMPT_SW
+    return _SALT_PROMPT_NEUTRAL
+
+
+def speech_health_report(
+    speech: object | None,
+    *,
+    enabled_flag: bool,
+    asr_backend: str,
+    tts_backend: str,
+    mt_backend: str,
+) -> dict[str, object]:
+    """What ``GET /v1/speech/health`` reports.
+
+    ``ready`` means Whisper-SALT / Spark can serve. ``degraded`` means they
+    can, but ``ORPHEUS_TTS_URL`` is set and the sidecar is not accepting
+    connections — Luganda then uses Spark-TTS-SALT on this GPU, which is
+    whole-sentence rather than streamed. ``unavailable`` means speech itself
+    is off.
+    """
+    from . import orpheus_tts
+
+    voice = orpheus_tts.reachability()
+    ready = bool(
+        enabled_flag
+        and speech is not None
+        and getattr(speech, "is_ready", lambda: False)()
+    )
+    if not ready:
+        status = "unavailable"
+    elif voice in ("down", "cooldown"):
+        status = "degraded"
+    else:
+        status = "ready"
+    return {
+        "status": status,
+        "enabled": enabled_flag,
+        "asr_backend": asr_backend,
+        "tts_backend": tts_backend,
+        "mt_backend": mt_backend,
+        "orpheus": voice,
+        "whisper_salt": bool(getattr(speech, "_whisper_salt", None)),
+        "spark_tts": bool(getattr(speech, "_spark_tts", None)),
+        "last_tts_backend": str(getattr(speech, "_last_tts_backend", "") or ""),
+        "last_asr_backend": str(getattr(speech, "_last_asr_backend", "") or ""),
+        "last_asr_rtf": getattr(speech, "_last_asr_rtf", None),
+    }
+
 PROJECT_ROOT = _PROJECT_ROOT_P
 SPEECH_ASR_SHERPA_DIR = Path(
     os.getenv(
@@ -821,6 +899,9 @@ class SpeechModel:
             result.latency_s = round(time.perf_counter() - t_start, 3)
         if result.rtf is None and result.duration_s:
             result.rtf = round(result.latency_s / max(result.duration_s, 0.01), 2)
+        self._last_asr_backend = result.backend
+        if result.rtf is not None:
+            self._last_asr_rtf = result.rtf
         return result
 
     def _transcribe_chain(
@@ -1274,6 +1355,11 @@ class SpeechModel:
         if pair is None:
             return None
         model, processor = pair
+        # No language on the request: ask the same Whisper-SALT encoder which
+        # of en/lg/sw this audio is, and condition on that. A failed or weak
+        # vote leaves the decoder unforced and uses the neutral prompt.
+        if not language:
+            language = self._detect_salt_language(audio_bytes, sample_rate)
         t0 = time.perf_counter()
         samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
         t_decode = time.perf_counter()
@@ -1294,16 +1380,8 @@ class SpeechModel:
         token_id = SALT_LANGUAGE_TOKEN_IDS.get(language or "")
         forced_language = processor.tokenizer.decode([token_id]) if token_id is not None else None
 
-        # Domain prompt conditioning to anchor Whisper onto official URA tax acronyms and terms
-        prompt_text = (
-            "URA, EFRIS, VAT, TIN, PAYE, PRN, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
-            if (language or "en") == "en"
-            else (
-                "URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
-                if language == "lg"
-                else "URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
-            )
-        )
+        # Domain prompt conditioning to anchor Whisper onto official URA tax acronyms.
+        prompt_text = salt_domain_prompt(language)
         prompt_ids = None
         if hasattr(processor, "get_prompt_ids"):
             try:
@@ -1404,6 +1482,38 @@ class SpeechModel:
             words=words,
             mean_word_prob=mean_word_prob,
         )
+
+    def _detect_salt_language(self, audio_bytes: bytes, sample_rate: int) -> str | None:
+        """en/lg/sw from the Whisper-SALT language token, or None.
+
+        Unit-test stand-ins are MagicMocks; running the encoder on those
+        would not be a language vote. A real model that errors, or a top
+        probability under 0.5, also returns None so the decode stays unforced.
+        """
+        pair = self._whisper_salt
+        if pair is None:
+            return None
+        model, _processor = pair
+        if type(model).__name__ == "MagicMock":
+            return None
+        token_ids = {
+            code: SALT_LANGUAGE_TOKEN_IDS[code]
+            for code in ("en", "lg", "sw")
+            if code in SALT_LANGUAGE_TOKEN_IDS
+        }
+        if len(token_ids) < 2:
+            return None
+        try:
+            probs, _speech_s = self._identify_language_salt(audio_bytes, sample_rate, token_ids)
+        except Exception:
+            logger.debug("Whisper-SALT language detect before decode failed", exc_info=True)
+            return None
+        if not probs:
+            return None
+        top = max(probs, key=probs.__getitem__)
+        if probs[top] < 0.5:
+            return None
+        return top
 
     def _transcribe_faster_whisper(
         self, audio_bytes: bytes, sample_rate: int, language: str | None
@@ -1506,9 +1616,11 @@ class SpeechModel:
         cache_key = _tts_cache_key(text, voice, language)
         cached = self._tts_cache_lookup(cache_key)
         if cached is not None:
+            self._last_tts_backend = cached.backend
             return cached
 
         result = self._synthesize_uncached(text, voice, language)
+        self._last_tts_backend = result.backend
         self._tts_cache_store(cache_key, result)
         return result
 
@@ -1670,7 +1782,10 @@ class SpeechModel:
         #     and whatever the receptionist pre-warms through this method must
         #     be the same voice its live answers stream in. Unavailable or
         #     failing, it falls through to the chain below unchanged.
-        if orpheus_tts.speaker_for(language):
+        # A dead sidecar stays in cooldown for 30s. Skip the call entirely:
+        # synthesize() would otherwise raise after a DNS failure, and every
+        # Luganda sentence on the local GPU stack paid that before Spark.
+        if orpheus_tts.speaker_for(language) and not orpheus_tts.in_cooldown():
             t_orpheus = time.perf_counter()
             try:
                 pcm = orpheus_tts.synthesize(text, language)

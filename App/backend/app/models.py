@@ -434,6 +434,14 @@ class SpeechHealthResponse(BaseModel):
     asr_backend: str
     tts_backend: str
     mt_backend: str
+    # unconfigured | up | down | cooldown. cooldown and down mean Luganda
+    # is on Spark-TTS-SALT, not the streaming Orpheus sidecar.
+    orpheus: str = "unconfigured"
+    whisper_salt: bool = False
+    spark_tts: bool = False
+    last_tts_backend: str = ""
+    last_asr_backend: str = ""
+    last_asr_rtf: float | None = None
 
 
 # ---------------------------------------------------------------------------
