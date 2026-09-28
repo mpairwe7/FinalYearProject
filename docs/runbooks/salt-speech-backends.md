@@ -598,3 +598,24 @@ that needs Luganda listeners (`evals/orpheus_tts/listening_sheet.csv`).
 A connection failure puts the client in a 30 s cooldown, so a dead sidecar costs
 one timeout rather than one per sentence.
 
+## Multilingual Speech & Translation Enhancements (September 2026)
+
+Verified against Sunbird AI's Sunflower v2 research release (September 2026):
+
+### 1. Domain-conditioned Whisper ASR (Prompt Conditioning)
+Whisper-SALT transcribers receive language-specific initial prompts (`prompt_text` via `get_prompt_ids`) to anchor phonetics onto Ugandan tax terminology:
+- **English (`en`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."`
+- **Luganda (`lg`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."`
+- **Swahili (`sw`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."`
+
+This eliminates phonetic confusion (e.g. transcribing spoken "P-R-N" as "peer end" or "piano").
+
+### 2. Statutory Compound Figure & Orthography Normalization
+Statutory tax percentages and rates must survive translation without distortion whether spoken in digits or written in vernacular prose:
+- **Luganda**: Dual orthography (`kkumi`/`kumi`) for 18% (`kkumi na munaana` / `kumi na munaana ku buli kikumi`), 12% (`kkumi na bbiri`), 15% (`kkumi na ttaano`), and 30% (`asatu`). Idiomatic "ku buli kikumi" ("per hundred") is protected from false 100.0 extractions.
+- **Swahili**: Support for compound rate words: 18% (`kumi na nane`), 12% (`kumi na mbili`), 15% (`kumi na tano`), 30% (`thelathini`), 35% (`thelathini na tano`), and 40% (`arobaini`).
+
+### 3. Cross-Lingual RAG Bridge Architecture
+Aligning with Sunflower v2 benchmarks, single-hop cross-lingual RAG replaces legacy 4-hop cascade translation (ASR → MT to English → LLM → MT to vernacular → TTS). Sunflower-14B / Gemini natively synthesizes concise vernacular answers grounded on English statutory retrieval passages in a single inference pass, eliminating translation latency and compound figure drift.
+
+

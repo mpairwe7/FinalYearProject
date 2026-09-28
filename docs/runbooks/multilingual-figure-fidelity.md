@@ -262,3 +262,13 @@ Still open:
     it cannot be pointed at the Space without editing.
   - `scripts/` is outside the CI lint scope (`ruff check ml/ App/backend/`), so
     its unused-variable and swallowed-exception findings do not surface.
+
+## Decision 4 — compound statutory rate words and vernacular orthography (2026-09-28)
+
+**Current behaviour.** When statutory tax rates and figures appear as spelled-out words rather than digits:
+- **Luganda (`lg`)**: `_LG_WORD_NUMBERS` in `app/mt.py` and `_LUGANDA_PCT_WORDS` in `app/entailment.py` recognize both geminate and single consonant orthographies (`kkumi na munaana` / `kumi na munaana` for 18%, `kkumi na bbiri` for 12%, `kkumi na ttaano` for 15%, `asatu` for 30%). Vernacular percentage idiom `ku buli kikumi` ("per hundred") is stripped during normalization so that "kikumi" is not falsely parsed as a standalone 100.0 tax amount.
+- **Swahili (`sw`)**: `_SW_WORD_NUMBERS` in `app/mt.py` supports compound statutory rate phrases (`kumi na nane` for 18%, `kumi na mbili` for 12%, `kumi na tano` for 15%, `thelathini` for 30%).
+- **English (`en`)**: `_EN_WORD_NUMBERS` supports `eighteen` (18.0) and `twelve` (12.0).
+
+Parsing evaluates compound words in descending order of key length so that larger compound numbers (`18.0`) are matched without leaving component single digits (`10.0`, `8.0`) behind.
+
