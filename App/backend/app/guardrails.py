@@ -495,9 +495,11 @@ class OutputGuard:
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
         text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
 
-        # Standardize exotic bullet glyphs (, ►, ▪, ▫, •, –, —) to clean Markdown lists
+        # Standardize exotic bullet glyphs (, ►, ▪, ▫, •, –, —) and standalone line asterisks to clean Markdown lists
         text = re.sub(r"^[ \t]*[►▪▫•–—][ \t]*", "- ", text, flags=re.MULTILINE)
         text = re.sub(r"([;:\.!?])[ \t]*[►▪▫•–—][ \t]*", r"\1\n\n- ", text)
+        text = re.sub(r"(?m)^[ \t]*\*[ \t]+", "- ", text)
+        text = re.sub(r"(?m)^[ \t]*\(?(\d{1,2})\)[ \t]*", r"\1. ", text)
 
         # Multilingual procedural step unsmashing (English, Swahili, Luganda)
         # English: Step 1: -> 1.
@@ -551,6 +553,61 @@ class OutputGuard:
                     continue
             formatted_lines.append(line)
         text = "\n".join(formatted_lines)
+
+        # Convert inline arrow navigation chains (e.g. 'e-Services -> TIN Registration -> Instant TIN') into numbered steps
+        if " → " in text or " -> " in text:
+            arrow = " → " if " → " in text else " -> "
+            lines = text.split("\n")
+            formatted_lines = []
+            for line in lines:
+                if arrow in line and not line.strip().startswith(("-", "*", "1.", "2.")):
+                    parts = [p.strip() for p in line.split(arrow) if p.strip()]
+                    if len(parts) >= 2:
+                        formatted_lines.extend(f"{i}. **{p}**" if i == 1 else f"{i}. {p}" for i, p in enumerate(parts, 1))
+                        continue
+                formatted_lines.append(line)
+            text = "\n".join(formatted_lines)
+
+        # Convert inline semicolon-separated lists (e.g. 'Item 1; Item 2; Item 3') into vertical bullet points
+        lines = text.split("\n")
+        formatted_lines = []
+        for line in lines:
+            if ";" in line and not line.strip().startswith(("-", "*", "1.", "2.")):
+                if not any(k in line.lower() for k in ("http", "0800", "whatsapp", "services@")):
+                    parts = [p.strip() for p in line.split(";") if p.strip()]
+                    if len(parts) >= 3:
+                        formatted_lines.extend(f"- {p}" for p in parts)
+                        continue
+            formatted_lines.append(line)
+        text = "\n".join(formatted_lines)
+
+        # Bold affirmative/negative opening statutory verdicts in EN, LG, SW
+        text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana)[,\.][ \t]*", r"**\1**: ", text)
+        text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana)[,\.][ \t]*", r"\1**\2**: ", text)
+
+        # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded
+        if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d+\.\s|\n-\s", text)):
+            text = re.sub(r"\b(Section\s+\d+[A-Za-z]?|Ekitundu\s+\d+|Kifungu\s+cha\s+\d+)\b", r"**\1**", text, flags=re.IGNORECASE)
+            text = re.sub(r"\b(Income Tax Act|Value Added Tax Act|Tax Procedures Code Act|East African Community Customs Management Act|Excise Duty Act|EACCMA)\b", r"**\1**", text, flags=re.IGNORECASE)
+            text = re.sub(r"\b(TIN|VAT|PAYE|EFRIS|WHT|CIT|PIT|LED|AEO|AEOI|MAAC|CRS|FATCA|WCO|ASYCUDA|DTS|PRN|NIN|URSB)\b", r"**\1**", text)
+            if "**" not in text:
+                text = re.sub(
+                    r"^(Here's the most relevant guidance I found in official URA sources:)",
+                    r"**Official Guidance**:\n\nHere's the most relevant guidance I found in official URA sources:",
+                    text,
+                )
+                text = re.sub(
+                    r"^(Hapa kuna mwongozo muhimu zaidi niliyopata kutoka vyanzo rasmi vya URA:)",
+                    r"**Mwongozo Rasmi**:\n\nHapa kuna mwongozo muhimu zaidi niliyopata kutoka vyanzo rasmi vya URA:",
+                    text,
+                )
+                text = re.sub(
+                    r"^(Bino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:)",
+                    r"**Obulagirizi obw'obutongole**:\n\nBino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:",
+                    text,
+                )
+            if "**" not in text and not re.search(r"\d+\.\s|\n-\s", text):
+                text = re.sub(r"^([A-Z][a-zA-Z0-9 \'\-]{3,35}?)([:,\.][ \t]+)", r"**\1**\2", text)
 
         # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
         text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)

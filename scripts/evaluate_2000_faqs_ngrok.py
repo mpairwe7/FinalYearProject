@@ -453,7 +453,7 @@ class URAEvaluationEngine2000:
                 missing = list(faq.expected_keywords)
             
             # Check formatting (numbered steps, bold anchors, lists)
-            has_steps = bool(re.search(r"\d+\.\s|\n-\s", reply))
+            has_steps = bool(re.search(r"\d+[\.\)]\s|\n[-*•]\s", reply))
             has_bold = "**" in reply
             formatting_ok = has_steps or has_bold or len(reply.split()) < 40
             
