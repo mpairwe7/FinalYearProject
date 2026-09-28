@@ -69,3 +69,7 @@ steps:
       a verified PDF compliance report.
     slot: ""
     validator: text
+    portal_action: efris_portal
+    resources:
+      - efris_fdn_validation
+      - efris_portal

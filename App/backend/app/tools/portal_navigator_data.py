@@ -131,6 +131,77 @@ EXTERNAL_URA_PORTALS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "bwims": {
+        "name": "URA Bonded Warehouse Information Management System (BWIMS)",
+        "canonical_url": "https://ura.go.ug/en/bwims/",
+        "status": "operational",
+        "category": "customs_and_border",
+        "service_scope": [
+            "Bonded Warehouse Cargo Tracking & Manifest Management",
+            "Customs Bond Auto-Conversion & CB6 Bond Reconciliation",
+            "Warehouse Goods Receipt & Delivery Orders",
+            "Cargo Ageing, Overstay Alerts & Want of Entry Tracking",
+            "Transit and Bonded Transfer Oversight",
+        ],
+        "common_issues": {
+            "cargo_manifest_mismatch": {
+                "symptoms": ["cargo mismatch", "manifest discrepancy", "package count error", "discrepancy report"],
+                "cause": "Tally count at bonded warehouse gate does not match ASYCUDA IM7 manifest.",
+                "steps": [
+                    "Perform joint physical tally with URA resident customs officer.",
+                    "Lodge discrepancy report on BWIMS within 24 hours of vessel/truck discharge.",
+                    "Submit amendment to Customs Valuation and Warehousing unit before IM4 entry.",
+                ],
+            },
+        },
+    },
+    "touchpoint": {
+        "name": "URA Touchpoint Client Support Portal",
+        "canonical_url": "https://touchpoint.ura.go.ug",
+        "status": "operational",
+        "category": "customer_support",
+        "service_scope": [
+            "Taxpayer Inquiry & Complaint Ticket Management",
+            "Ticket Status Tracking & Resolution Feedback",
+            "Client Service Charter Escalations",
+            "Contact Centre Service Requests",
+            "ASYCUDA Client Software Downloads",
+        ],
+        "common_issues": {
+            "ticket_delayed": {
+                "symptoms": ["ticket delayed", "no response", "escalate inquiry", "pending support"],
+                "cause": "Case pending assignment to specialized business unit or officer review.",
+                "steps": [
+                    "Log in to touchpoint.ura.go.ug with your Ticket Number and PIN.",
+                    "Click 'View Ticket Status' to inspect the assigned officer and SLA window.",
+                    "If beyond Service Charter turnaround, click 'Escalate Ticket' or call toll-free 0800 117 000.",
+                ],
+            },
+        },
+    },
+    "elearning": {
+        "name": "URA eLearning Platform",
+        "canonical_url": "https://elearning.ura.go.ug",
+        "status": "operational",
+        "category": "tax_education",
+        "service_scope": [
+            "Taxpayer Education Modules (TIN, VAT, PAYE, EFRIS, Customs)",
+            "Webinar Recordings & Public Sensitization Materials",
+            "Tax Compliance Certification & Quizzes",
+            "Business Formalization & SME Tax Clinics",
+        ],
+        "common_issues": {
+            "course_access_error": {
+                "symptoms": ["cannot access course", "login failed elearning", "enrollment key"],
+                "cause": "Unregistered eLearning account or expired course session.",
+                "steps": [
+                    "Visit elearning.ura.go.ug and click 'Create new account'.",
+                    "Confirm your email address through the activation link sent.",
+                    "Enroll in the free public tax education modules.",
+                ],
+            },
+        },
+    },
     "export_process": {
         "name": "URA Customs Export Process Portal (https://ura.go.ug/en/the-exports-process/)",
         "canonical_url": "https://ura.go.ug/en/the-exports-process/",
@@ -6337,8 +6408,8 @@ def _diagnose_portal_state(
 #: lands in browser history and server logs, and the portal reads none of them.
 PORTAL_DEEP_LINK_ROUTES: dict[str, dict[str, tuple[str, tuple[str, ...]]]] = {
     "prn_payments": {
-        "default": ("make_payment", ("ura.go.ug", "Domestic Taxes", "Make a Payment")),
-        "generate_prn": ("make_payment", ("ura.go.ug", "Domestic Taxes", "Make a Payment")),
+        "default": ("make_payment", ("ura.go.ug", "Domestic Taxes", "Make a Payment", "Generate Payment Slip")),
+        "generate_prn": ("make_payment", ("ura.go.ug", "Domestic Taxes", "Make a Payment", "Generate Payment Slip")),
         "search_prn": (
             "payment_status",
             ("ura.go.ug", "Domestic Taxes", "Make a Payment", "View Payment Status"),
@@ -6350,30 +6421,48 @@ PORTAL_DEEP_LINK_ROUTES: dict[str, dict[str, tuple[str, tuple[str, ...]]]] = {
     },
     "e_services": {
         "default": ("etax_login", ("ura.go.ug", "e-Services", "eTax Portal")),
-        "file_return": ("file_return", ("ura.go.ug", "Domestic Taxes", "File a Return")),
+        "file_return": ("file_return", ("ura.go.ug", "e-Services", "eTax Login - File Returns")),
         "tin_amend": ("etax_login", ("ura.go.ug", "e-Services", "eTax Portal")),
         "tax_clearance": ("tax_clearance", ("ura.go.ug", "Domestic Taxes", "Tax Clearance")),
     },
     "efris": {
-        "default": ("efris_portal", ("efris.ura.go.ug",)),
+        "default": ("efris_portal", ("ura.go.ug", "EFRIS Login Portal")),
+        "registration": ("efris_registration", ("ura.go.ug", "EFRIS", "EFRIS Registration")),
         "invoicing": ("efris_invoicing_guide", ("ura.go.ug", "EFRIS", "Invoice/Receipt Issuance")),
-        "offline_sync": ("efris_portal", ("efris.ura.go.ug",)),
+        "validation": ("efris_fdn_validation", ("ura.go.ug", "EFRIS", "FDN Validation")),
+        "offline_sync": ("efris_portal", ("ura.go.ug", "EFRIS Login Portal")),
     },
     "tin_registration": {
-        "default": ("tin_individual", ("ura.go.ug", "Domestic Taxes", "Get a TIN")),
+        "default": ("tin_individual", ("ura.go.ug", "Domestic Taxes", "Get a TIN", "Individual TIN Application")),
         "individual": (
             "tin_individual",
-            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "TIN Registration - Individual"),
+            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "Individual TIN Application"),
         ),
         "non_individual": (
             "tin_non_individual",
-            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "TIN Registration - Non Individual"),
+            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "Non-Individual TIN Application"),
+        ),
+        "instant": (
+            "tin_instant",
+            ("ura.go.ug", "Domestic Taxes", "Get a TIN", "Instant TIN Registration"),
         ),
     },
     "asycuda": {
         "default": ("single_window", ("singlewindow.go.ug",)),
         "declaration": ("single_window", ("singlewindow.go.ug",)),
         "bill_of_entry": ("single_window", ("singlewindow.go.ug",)),
+    },
+    "bwims": {
+        "default": ("bwims_portal", ("ura.go.ug", "Customs", "BWIMS")),
+        "warehousing": ("bwims_portal", ("ura.go.ug", "Customs", "BWIMS")),
+    },
+    "touchpoint": {
+        "default": ("touchpoint_portal", ("touchpoint.ura.go.ug",)),
+        "ticket": ("touchpoint_portal", ("touchpoint.ura.go.ug", "Support Ticket")),
+    },
+    "elearning": {
+        "default": ("elearning_portal", ("elearning.ura.go.ug",)),
+        "courses": ("elearning_portal", ("elearning.ura.go.ug", "Tax Courses")),
     },
 }
 
