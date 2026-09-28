@@ -111,6 +111,22 @@ def test_a_stated_need_is_answered_with_the_journey_one_tap_away(client):
     assert "Guide me step by step through Tax Clearance Certificate" in body["next_actions"]
 
 
+def test_a_feeling_only_turn_is_repaired_not_retrieved(client):
+    # On the local stack "It still does not work" retrieved a passage about
+    # URA's own funding problems. It now gets a clarifying question, and the
+    # second time the officer comes first.
+    conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
+    first = client.post("/v1/chat", json={"message": "This is useless", "conversation_id": conversation_id}).json()
+    assert first["retrieval_mode"] == "clarification"
+    assert first["agent_role"] == "conversation_repair"
+    assert "File a return" in first["next_actions"]
+    second = client.post(
+        "/v1/chat", json={"message": "It still does not work", "conversation_id": conversation_id}
+    ).json()
+    assert second["retrieval_mode"] == "clarification"
+    assert second["next_actions"][0] == "Talk to an officer"
+
+
 def test_the_streaming_core_applies_the_same_guidance(client):
     # ``client`` builds the real ChatModel, which loads the workflow flows the
     # guided-mode offer is matched against.

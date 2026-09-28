@@ -16,11 +16,14 @@ from pathlib import Path
 from app.agents import AgentRoute, supervisor
 from app.service import _EXPLICIT_WORKFLOW_START_RE
 from app.text_signals import (
+    REPAIR_QUESTION,
     crisis_support_reply,
     detect_crisis,
     detect_user_distress,
     distress_trajectory,
     empathy_ack,
+    is_feeling_only,
+    repair_reply,
     strip_repeated_ack,
 )
 from app.tools.empathy import assess
@@ -154,6 +157,30 @@ class EmotionSignalTests(unittest.TestCase):
         self.assertTrue(distress_trajectory("frustration", upset)["sustained"])
         self.assertFalse(distress_trajectory("", upset)["sustained"])
         self.assertFalse(distress_trajectory("frustration", ["What is VAT?", "Thanks"])["sustained"])
+
+
+class ConversationRepairTests(unittest.TestCase):
+    def test_feeling_only_messages_name_no_task(self) -> None:
+        for message in ("This is useless", "It still does not work", "I am so confused", "Why is this not working"):
+            with self.subTest(message=message):
+                self.assertTrue(is_feeling_only(message))
+
+    def test_a_named_thing_is_still_answered(self) -> None:
+        for message in (
+            "The portal is not working",
+            "I don't understand what chargeable income means",
+            "My eTax password does not work",
+        ):
+            with self.subTest(message=message):
+                self.assertFalse(is_feeling_only(message))
+
+    def test_repair_asks_first_then_leads_with_a_person(self) -> None:
+        first = repair_reply("frustration", repeated=False)
+        self.assertTrue(first.startswith(empathy_ack("frustration")))
+        self.assertIn(REPAIR_QUESTION, first)
+        again = repair_reply("frustration", repeated=True)
+        self.assertNotIn(REPAIR_QUESTION, again)
+        self.assertIn("Talk to an officer", again)
 
 
 class CrisisTests(unittest.TestCase):

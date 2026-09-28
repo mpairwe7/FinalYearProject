@@ -138,10 +138,15 @@ from .text_signals import (
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
     detect_local_government_tax,
+    REPAIR_NEXT_ACTIONS,
+    REPAIR_QUESTION,
+    REPAIR_REPEAT_REPLY,
     crisis_support_reply,
     detect_crisis,
+    repair_reply,
     detect_user_distress,
     empathy_ack,
+    is_feeling_only,
     jurisdiction_scope_caveat,
     local_government_tax_reply,
     out_of_jurisdiction_reply,
@@ -150,7 +155,7 @@ from .text_signals import (
     split_sentences,
     tone_hint_for,
 )
-from .topics import resolve_topic, topic_retrieval_query
+from .topics import classify_topic, resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
 from .turn_guidance import apply_turn_guidance
 from .verified_resources import resources_for_turn
@@ -5324,6 +5329,51 @@ class ChatModel:
             logger.exception("failed to mark officer reply delivered; it will re-deliver")
         return text
 
+    def _conversation_repair_result(
+        self, *, message: str, thread_id: str, locale: str
+    ) -> dict[str, Any] | None:
+        """A clarifying turn for a message that is all feeling and no task.
+
+        "This is useless" or "It still does not work", with no task named and
+        none bound to the conversation yet, gives retrieval nothing to search
+        for; on the local stack (2026-09-29) it retrieved a passage about URA's
+        own funding problems and read it back. Ask what the taxpayer is trying
+        to do instead, with the common tasks as one-tap actions. Asked twice,
+        the reply leads with the officer rather than repeating the question.
+        Runs after the workflow router, so a flow in progress keeps its turn.
+        """
+        kind = detect_user_distress(message)
+        if kind not in ("frustration", "confusion"):
+            return None
+        if classify_topic(message) is not None or not is_feeling_only(message):
+            return None
+        try:
+            if db.get_conversation_topic(thread_id):
+                return None
+            recent = db.get_recent_turns(conversation_id=thread_id, limit=1)
+        except Exception:
+            logger.debug("conversation state unavailable for repair", exc_info=True)
+            recent = []
+        previous = str(recent[-1].get("bot_reply") or "") if recent else ""
+        repeated = REPAIR_QUESTION in previous or REPAIR_REPEAT_REPLY in previous
+        actions = list(REPAIR_NEXT_ACTIONS)
+        if repeated:
+            actions = [actions[-1], *actions[:-1]]
+        return {
+            "reply": repair_reply(kind, repeated=repeated),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "clarification",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "conversation_repair",
+            "next_actions": actions,
+        }
+
     def _crisis_support_result(self, *, thread_id: str, locale: str) -> dict[str, Any]:
         """Turn result for a message expressing intent to self-harm.
 
@@ -7120,6 +7170,11 @@ class ChatModel:
                     )
                     return workflow_result
 
+            repair = self._conversation_repair_result(message=router_message, thread_id=thread_id, locale=locale)
+            if repair is not None:
+                self._audit_turn(message=message, result=repair, session_id=session_id, trace_ctx=trace_ctx)
+                return repair
+
             # 1a1b. Deterministic tax calculator — instant when the message
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
@@ -8615,6 +8670,10 @@ class ChatModel:
                 "_rewritten": rewritten,
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
             }
+
+        repair = self._conversation_repair_result(message=message, thread_id=thread_id, locale=locale)
+        if repair is not None:
+            return {**repair, "_hits": [], "_history": conversation_history, "_rewritten": rewritten}
 
         # Deterministic tax calculator (parity with generate()) — instant
         # answer or guided elicitation, both as a single bundled payload.

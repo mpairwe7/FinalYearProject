@@ -565,6 +565,49 @@ def detect_crisis(message: str) -> bool:
     return bool(_CRISIS_RE.search(_normalise(message)))
 
 
+#: Conversational repair: a turn that is all feeling and no task ("This is
+#: useless", "It still does not work") gives retrieval nothing to search for.
+#: On the local stack (2026-09-29) exactly that turn retrieved a passage about
+#: URA's own funding problems and read it back to the taxpayer. Asking what they
+#: are trying to do is the repair a person at a counter would make.
+REPAIR_QUESTION = (
+    "What are you trying to do: file a return, make a payment, register for a TIN, "
+    "or something else? Tell me where it stops and I'll take it from there."
+)
+REPAIR_REPEAT_REPLY = (
+    "It sounds like this still isn't working for you. An officer can look at it with "
+    "you: tap **Talk to an officer**. Or tell me the task and the step where it stops."
+)
+REPAIR_NEXT_ACTIONS = ("File a return", "Make a payment", "Register for a TIN", "Talk to an officer")
+
+#: Words that carry how the taxpayer feels, not what they are doing. A message
+#: made only of these names no task. "The portal is not working" keeps
+#: "portal" and "I don't understand what chargeable income means" keeps
+#: "chargeable income", so both are still answered.
+_FEELING_WORDS = frozenset(
+    {
+        "useless", "ridiculous", "annoying", "annoyed", "frustrating", "frustrated", "angry",
+        "confused", "confusing", "lost", "understand", "still", "work", "works", "working",
+        "worked", "nothing", "again", "help", "please", "anything", "don", "doesn", "isn",
+        "won", "can", "cannot", "t", "s", "so", "really", "very", "totally", "completely",
+        "fed", "up", "same", "problem", "why", "going", "happening", "wrong",
+    }
+)
+
+
+def is_feeling_only(message: str) -> bool:
+    """True when *message* expresses a feeling but names nothing to act on."""
+    return not (content_tokens(message) - _FEELING_WORDS)
+
+
+def repair_reply(kind: str, *, repeated: bool) -> str:
+    """Clarifying reply for a distressed turn that names no task."""
+    if repeated:
+        return REPAIR_REPEAT_REPLY
+    ack = empathy_ack(kind)
+    return f"{ack}\n\n{REPAIR_QUESTION}" if ack else REPAIR_QUESTION
+
+
 def crisis_support_reply() -> str:
     """Supportive reply with Ugandan crisis lines. Never carries tax content."""
     return (
