@@ -1585,7 +1585,7 @@ class SpeechModel:
         outcomes: dict[str, str] = {}
         if not self.enabled:
             return outcomes
-        for locale in ("en",):
+        for locale in SPEECH_WARMUP_LOCALES:
             try:
                 result = self.synthesize(text="URA.", language=locale)
                 outcomes[locale] = result.backend if not result.error else f"error: {result.error}"

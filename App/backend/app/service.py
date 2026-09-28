@@ -2271,6 +2271,7 @@ _FAQ_TERM_ALIASES = {
     "taxes": "tax",
     "thresholds": "threshold",
     "vehicles": "vehicle",
+    "translation": "translate",
     # Vehicles & Transport domain synonyms
     "lorry": "vehicle",
     "lorries": "vehicle",
