@@ -39,6 +39,14 @@ A locale reporting `error: …` here is the same failure a taxpayer would have
 hit on their first request — it is now visible at boot instead of in one
 person's session.
 
+`GET /v1/speech/health` says whether that boot is actually serving. `ready`
+means the local Whisper-SALT and Spark-TTS-SALT tiers are up. `degraded`
+means they are up but `ORPHEUS_TTS_URL` points at a sidecar that is not
+accepting connections: Luganda falls through to Spark on this GPU, and the
+call path does not open a stream to Orpheus again until the 30 second
+cooldown ends. `orpheus: up` is the streaming Luganda voice. A health check
+that only looks at HTTP 200 cannot tell these apart; read `status`.
+
 ## ASR — `Sunbird/asr-whisper-large-v3-salt`
 
 One `whisper-large-v3` fine-tune covering English, Luganda, Kiswahili,
@@ -608,7 +616,7 @@ Whisper-SALT transcribers receive language-specific initial prompts (`prompt_tex
 - **Luganda (`lg`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."`
 - **Swahili (`sw`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."`
 
-This eliminates phonetic confusion (e.g. transcribing spoken "P-R-N" as "peer end" or "piano").
+The prompt steers common acronyms. It does not stop a confident mishear: the live GPU pass of `evals/call_replay/audio/lg_tin.wav` still returned `ttiimu` and `okuva mu ora`. ClarifyGate asks before answering those, and `repair_asr_entities` rewrites them to `TIN` and `mu URA` before the Qdrant search. Bare `era` stays the Luganda word for "and".
 
 ### 2. Statutory Compound Figure & Orthography Normalization
 Statutory tax percentages and rates must survive translation without distortion whether spoken in digits or written in vernacular prose:

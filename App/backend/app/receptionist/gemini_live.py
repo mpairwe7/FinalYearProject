@@ -125,6 +125,7 @@ class GeminiCallerTap(FrameProcessor):
         self.room = room
         self.track_language = track_language
         self.languages = tuple(languages)
+        self.stall: Any = None
 
     async def process_frame(
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
@@ -146,6 +147,8 @@ class GeminiCallerTap(FrameProcessor):
         )
         hub.publish_call(self.room.call_id, "turn", turn)
         self.room.state.last_caller_text = text
+        if self.stall is not None:
+            self.stall.arm(text)
         if self.track_language:
             await self._follow_language(text)
 
@@ -170,6 +173,7 @@ class GeminiLiveTranscriptTap(FrameProcessor):
     def __init__(self, room: Any, **kwargs: Any) -> None:
         super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
+        self.stall: Any = None
         # Multilingual calls: called once a language-switch interruption has
         # passed Gemini (this tap sits right after the service).
         self.on_switch_interrupt: Any = None
@@ -206,6 +210,8 @@ class GeminiLiveTranscriptTap(FrameProcessor):
             # User started speaking or barged in: clear assistant text buffer
             self._assistant_buffer = ""
             self._last_emitted_text = ""
+            if self.stall is not None and not (getattr(frame, "metadata", None) or {}).get("language_switch"):
+                self.stall.cancel()
             # Notify frontend that user is speaking to reset active AI text
             # display — unless this is a language switch cutting Gemini off.
             if not (getattr(frame, "metadata", None) or {}).get("language_switch"):
@@ -213,6 +219,8 @@ class GeminiLiveTranscriptTap(FrameProcessor):
 
         elif isinstance(frame, TTSTextFrame):
             text = getattr(frame, "text", "") or ""
+            if text and self.stall is not None:
+                self.stall.heard()
             if text:
                 self._assistant_buffer += text
                 accumulated = self._assistant_buffer.strip()

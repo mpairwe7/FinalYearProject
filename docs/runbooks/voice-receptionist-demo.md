@@ -317,7 +317,9 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 
 | Symptom | Look at |
 |---|---|
-| Luganda answers in an English accent, or silent | `ORPHEUS_TTS_URL` unset or sidecar down (`Orpheus TTS unreachable` in api logs); `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG=false` drops the English stand-in on purpose |
+| Luganda answers in an English accent, or silent | `ORPHEUS_TTS_URL` unset or sidecar down (`Orpheus TTS unreachable` in api logs); `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG=false` drops the English stand-in on purpose. `GET /v1/speech/health` reports `status: degraded` and `orpheus: cooldown` while the sidecar is down; Luganda then uses Spark-TTS-SALT and does not wait out the Orpheus timeout |
+| Luganda TIN question comes back as VAT, or “ttiimu” / “mu ora” never hits the TIN passages | Whisper-SALT can be confident and still wrong (`ttiimu`, `timu`, `okuva mu ora` on `lg_tin.wav`). ClarifyGate asks before answering. Before Qdrant, `repair_asr_entities` rewrites those to `TIN` and `mu URA`. Bare “era” stays “and” |
+| English or Kiswahili caller hears nothing for a long time | Gemini produced no audio. After `RECEPTIONIST_GEMINI_AUDIO_DEADLINE_S` (15s) the turn is answered on the local cascade (Whisper-SALT, Sunflower, Qdrant, Spark or Orpheus). The api log says `answering locally`. Needs the cascaded branch, which language detection builds |
 | English caller moved to Luganda | api log `Language vote lg p=…` lines; raise `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` or `RECEPTIONIST_LID_MIN_SPEECH_S` |
 | First English answer feels late | `language.held_ms_p95` in the call metrics; lower `RECEPTIONIST_LID_HOLD_TIMEOUT_MS` |
 | Call never leaves English | `SpeechModel.identify_language` returning `whisper_salt_unavailable` — Whisper-SALT not loaded; `gemini_live heard lg` lines show whether Gemini reported Luganda |

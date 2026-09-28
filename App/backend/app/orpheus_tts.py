@@ -56,10 +56,19 @@ _DEFAULT_SPEAKERS = {"lg": "salt_lug_0001", "sw": "waxal_swa_0006"}
 
 _lock = threading.Lock()
 _down_until = 0.0
+_probe_lock = threading.Lock()
+_probe_until = 0.0
+_probe_state = "unknown"
 
 
 def is_configured() -> bool:
     return bool(_url())
+
+
+def in_cooldown() -> bool:
+    """True when a recent connection failure said not to call the sidecar."""
+    with _lock:
+        return time.monotonic() < _down_until
 
 
 def speaker_for(language: str) -> str | None:
@@ -83,6 +92,54 @@ def _mark_down(exc: Exception) -> None:
     with _lock:
         _down_until = time.monotonic() + COOLDOWN_S
     logger.warning("Orpheus TTS unreachable (%s); skipping it for %.0fs", type(exc).__name__, COOLDOWN_S)
+
+
+def _tcp_probe() -> str:
+    """``up`` when the sidecar port accepts a connection, else ``down``.
+
+    A name that does not resolve (the container is stopped) fails here in
+    well under a second. The speech request path must not rediscover that
+    with ``ORPHEUS_TTS_TIMEOUT_S``.
+    """
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(_url())
+    host = parsed.hostname
+    if not host:
+        return "down"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=0.4):
+            return "up"
+    except OSError:
+        return "down"
+
+
+def reachability() -> str:
+    """``unconfigured``, ``cooldown``, ``up``, or ``down``.
+
+    A down result opens the same cooldown as a failed synthesis, so the next
+    Luganda sentence goes straight to Spark-TTS-SALT on the local GPU instead
+    of waiting on a sidecar that is not there. Cached for 15 seconds.
+    """
+    global _probe_until, _probe_state
+    if not is_configured():
+        return "unconfigured"
+    if in_cooldown():
+        return "cooldown"
+    now = time.monotonic()
+    with _probe_lock:
+        if now < _probe_until and _probe_state in ("up", "down"):
+            return _probe_state
+    state = _tcp_probe()
+    with _probe_lock:
+        _probe_state = state
+        _probe_until = time.monotonic() + 15.0
+    if state == "down":
+        _mark_down(OSError("sidecar probe failed"))
+        return "cooldown"
+    return "up"
 
 
 def _request(text: str, language: str, response_format: str) -> tuple[str, dict[str, object]]:

@@ -171,7 +171,7 @@ class UraSpeechTTS(TTSService):
             await asyncio.sleep(0.001)
 
     def _should_stream(self, text: str, language: str) -> bool:
-        if not orpheus_tts.speaker_for(language):
+        if not orpheus_tts.speaker_for(language) or orpheus_tts.in_cooldown():
             return False
         cache_get = getattr(self.speech_model, "tts_cache_get", None)
         # A pre-warmed or already-spoken line is instant from the cache.

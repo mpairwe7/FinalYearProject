@@ -153,6 +153,39 @@ class LanguageRouter:
         if self.interrupt is not None:
             await self.interrupt()
 
+    async def fallback_after_gemini_stall(self, text: str) -> None:
+        """Gemini produced no audio. Answer this turn on the local cascade.
+
+        The cascade is Whisper-SALT, Sunflower against Qdrant, and the local
+        voice (Orpheus, or Spark-TTS-SALT when the sidecar is down). The call
+        stays on that engine afterwards so a later Gemini frame cannot talk
+        over the local answer. No cascaded brain means there is nothing local
+        to hand the turn to; the silence is logged and left.
+        """
+        text = (text or "").strip()
+        if not text or self.selector.active != "gemini_live" or self.room.state.mode != "ai":
+            return
+        if self.brain is None:
+            logger.warning(
+                "Gemini produced no audio for call %s and this call has no local cascade",
+                self.room.call_id,
+            )
+            return
+        logger.warning(
+            "Gemini produced no audio within the deadline on call %s; answering locally",
+            self.room.call_id,
+        )
+        async with self._lock:
+            if self.selector.active != "gemini_live" or self.room.state.mode != "ai":
+                return
+            self.room.state.generation_id += 1
+            if self.hold_gate is not None:
+                await self.hold_gate.discard()
+            await self._interrupt_for_switch()
+            self.selector.active = "cascaded"
+            self.room.state.engine = "cascaded"
+            await self.brain.handle_external_question(text, None)
+
     def engine_may_act(self, engine: str) -> bool:
         """Whether *engine*'s tool calls may take effect: it is in use and not being left.
 

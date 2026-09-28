@@ -153,6 +153,47 @@ class TestClarifyGateLanguages(unittest.TestCase):
     def setUp(self):
         self.gate = ClarifyGate(threshold=0.55, max_attempts=2)
 
+    def test_a_confident_timu_is_still_confirmed_as_tin(self):
+        # Live Whisper-SALT returns this at high probability. The old gate
+        # only looked at words under 0.55, so the call answered it as-is.
+        words = [WordConf("namba", 0.95), WordConf("ya", 0.97), WordConf("timu", 0.99)]
+        action = self.gate.assess("namba ya timu", words, language="sw")
+        self.assertEqual(action.action, "ask_term")
+        self.assertEqual(action.candidate, "tin")
+
+    def test_luganda_and_is_not_read_as_ura(self):
+        words = [WordConf("okugisasula", 0.9), WordConf("era", 0.95), WordConf("ebitundu", 0.9)]
+        action = self.gate.assess("okugisasula era ebitundu", words, language="lg")
+        self.assertNotEqual(action.candidate, "ura")
+
+    def test_mu_era_is_ura(self):
+        words = [WordConf("okuva", 0.9), WordConf("mu", 0.95), WordConf("era", 0.99)]
+        action = self.gate.assess("okuva mu era", words, language="lg")
+        self.assertEqual(action.action, "ask_term")
+        self.assertEqual(action.candidate, "ura")
+
+    def test_live_whisper_mu_ora_is_ura(self):
+        # lg_tin.wav on the running GPU stack: "okuva mu ora", all confident.
+        words = [
+            WordConf("Ninza", 0.9),
+            WordConf("ntya", 0.9),
+            WordConf("okwewandiisa", 0.9),
+            WordConf("okufuna", 0.9),
+            WordConf("ttiimu", 0.99),
+            WordConf("yange", 0.9),
+            WordConf("okuva", 0.9),
+            WordConf("mu", 0.95),
+            WordConf("ora", 0.99),
+        ]
+        action = self.gate.assess(
+            "Ninza ntya okwewandiisa okufuna ttiimu yange okuva mu ora",
+            words,
+            language="lg",
+        )
+        self.assertEqual(action.action, "ask_term")
+        # The first fluent mishear in the sentence is TIN, before URA.
+        self.assertEqual(action.candidate, "tin")
+
     def test_luganda_confirms_a_misheard_acronym_in_luganda(self):
         words = [
             WordConf("Nsaba", 0.9),

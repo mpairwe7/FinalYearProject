@@ -678,11 +678,19 @@ GET /v1/speech/health
   "enabled": true,
   "asr_backend": "auto",
   "tts_backend": "auto",
-  "mt_backend": "auto"
+  "mt_backend": "auto",
+  "orpheus": "unconfigured",
+  "whisper_salt": true,
+  "spark_tts": true,
+  "last_tts_backend": "",
+  "last_asr_backend": "",
+  "last_asr_rtf": null
 }
 ```
 
-Always returns 200 (even when speech is unavailable). Check `status` field.
+Always returns 200. `status` is `ready`, `degraded`, or `unavailable`.
+
+`degraded` means Whisper-SALT and Spark-TTS-SALT are serving, but `ORPHEUS_TTS_URL` is set and the sidecar is not accepting connections (`orpheus` is `down` or `cooldown`). Luganda speech then uses Spark on the local GPU, one sentence at a time. `unavailable` means the speech pipeline itself is off.
 
 ---
 
@@ -1809,11 +1817,17 @@ class VoiceChatResponse(BaseModel):
 ### SpeechHealthResponse
 ```python
 class SpeechHealthResponse(BaseModel):
-    status: str       # "ready" or "unavailable"
+    status: str       # "ready", "degraded", or "unavailable"
     enabled: bool
     asr_backend: str
     tts_backend: str
     mt_backend: str
+    orpheus: str      # "unconfigured", "up", "down", or "cooldown"
+    whisper_salt: bool
+    spark_tts: bool
+    last_tts_backend: str
+    last_asr_backend: str
+    last_asr_rtf: float | None
 ```
 
 ---
