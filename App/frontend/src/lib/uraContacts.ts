@@ -70,6 +70,7 @@ const SOURCE_ACRONYMS: Record<string, string> = {
   tin: 'TIN',
   efris: 'EFRIS',
   dts: 'DTS',
+  bwims: 'BWIMS',
   aeo: 'AEO',
   ngo: 'NGO',
   ngos: 'NGOs',
