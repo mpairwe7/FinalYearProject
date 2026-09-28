@@ -2110,7 +2110,7 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 - **Multi-turn Memory**: 5-turn sliding window from SQLite conversation history
 - **Circuit Breaker**: Thread-safe Qdrant circuit breaker with exponential backoff (10s→300s)
 - **Rate Limiting**: `slowapi` with configurable per-IP limits on chat endpoints
-- **OutputGuard on SSE**: PII redaction and XSS sanitization applied to streaming tokens
+- **OutputGuard on SSE**: PII redaction, XSS sanitization, and reply structure (steps, paragraphs of at most three sentences, rates and section numbers left intact) applied to streaming tokens
 - **Per-stage Tracing**: OpenTelemetry spans with automatic timing for each RAG stage
 
 ### v1.4.0 (2026-04-29) — Quantization, Offline RAG & Voice-First Mobile
