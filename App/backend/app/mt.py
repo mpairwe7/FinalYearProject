@@ -212,23 +212,35 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     stripped = re.sub(r"\b(?:19|20)\d{2}\b", " ", stripped)
     # Strip tariff chapter references (Chapters 84 and 85, Sura 84)
     stripped = re.sub(r"\b(?:chapters?|sura|essuula)\s+\d+(?:\s*(?:and|ne|na|&)\s*\d+)?\b", " ", stripped, flags=re.IGNORECASE)
+    # Strip percentage per-hundred idioms so "kikumi" in "ku buli kikumi" is not read as 100
+    stripped = re.sub(r"\bku\s+buli\s+kikumi\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\bkatika\s+kila\s+(?:mia\s+moja|mia)\b", " ", stripped, flags=re.IGNORECASE)
     values = canonical_amounts(stripped)
     values |= {float(value) for value in percentages(stripped)}
     stripped_lower = stripped.lower()
+
+    target_words = None
     if locale == "sw":
-        for word, val in _SW_WORD_NUMBERS.items():
-            if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", stripped_lower):
-                values.add(val)
+        target_words = _SW_WORD_NUMBERS
     elif locale == "lg":
-        for word, val in _LG_WORD_NUMBERS.items():
-            if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", stripped_lower):
-                values.add(val)
+        target_words = _LG_WORD_NUMBERS
     elif locale == "en":
-        for word, val in _EN_WORD_NUMBERS.items():
-            if re.search(r"(?<![a-z])" + re.escape(word) + r"(?![a-z])", stripped_lower):
+        target_words = _EN_WORD_NUMBERS
+
+    if target_words:
+        for word, val in sorted(target_words.items(), key=lambda x: len(x[0]), reverse=True):
+            pat = r"(?<![a-z])" + re.escape(word) + r"(?![a-z])"
+            if re.search(pat, stripped_lower):
                 values.add(val)
+                stripped_lower = re.sub(pat, " ", stripped_lower)
     elif locale is None:
-        for word, val in (("kumi na tano", 15.0), ("arobaini na tano", 45.0), ("ana mu bitaano", 45.0)):
+        for word, val in (
+            ("kumi na nane", 18.0),
+            ("kkumi na munaana", 18.0),
+            ("kumi na tano", 15.0),
+            ("arobaini na tano", 45.0),
+            ("ana mu bitaano", 45.0),
+        ):
             if word in stripped_lower:
                 values.add(val)
     return values
@@ -245,12 +257,17 @@ _EN_WORD_NUMBERS: dict[str, float] = {
     "eight": 8.0,
     "nine": 9.0,
     "ten": 10.0,
+    "twelve": 12.0,
     "fifteen": 15.0,
+    "eighteen": 18.0,
     "twenty": 20.0,
     "thirty": 30.0,
+    "thirty five": 35.0,
     "forty": 40.0,
     "forty five": 45.0,
     "fifty": 50.0,
+    "one hundred": 100.0,
+    "one thousand": 1000.0,
 }
 
 
@@ -268,12 +285,17 @@ _SW_WORD_NUMBERS: dict[str, float] = {
     "minane": 8.0,
     "tisa": 9.0,
     "kumi": 10.0,
+    "kumi na mbili": 12.0,
     "kumi na tano": 15.0,
+    "kumi na nane": 18.0,
     "ishirini": 20.0,
     "thelathini": 30.0,
+    "thelathini na tano": 35.0,
     "arobaini": 40.0,
     "arobaini na tano": 45.0,
     "hamsini": 50.0,
+    "mia moja": 100.0,
+    "elfu moja": 1000.0,
 }
 
 _LG_WORD_NUMBERS: dict[str, float] = {
@@ -288,12 +310,19 @@ _LG_WORD_NUMBERS: dict[str, float] = {
     "mwenda": 9.0,
     "kkumi": 10.0,
     "ekkumi": 10.0,
+    "kkumi na bbiri": 12.0,
+    "ekkumi n'ebbiri": 12.0,
     "kkumi na ttaano": 15.0,
+    "kkumi na munaana": 18.0,
+    "ekkumi n'omunaana": 18.0,
     "abiri": 20.0,
     "asatu": 30.0,
+    "asatu mu bitaano": 35.0,
     "amakumi ana": 40.0,
     "ana mu bitaano": 45.0,
     "ataano": 50.0,
+    "kikumi": 100.0,
+    "lukumi": 1000.0,
 }
 
 

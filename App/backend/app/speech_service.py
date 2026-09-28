@@ -1296,12 +1296,12 @@ class SpeechModel:
 
         # Domain prompt conditioning to anchor Whisper onto official URA tax acronyms and terms
         prompt_text = (
-            "URA, EFRIS, VAT, TIN, PAYE, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
+            "URA, EFRIS, VAT, TIN, PAYE, PRN, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
             if (language or "en") == "en"
             else (
-                "URA, EFRIS, VAT, TIN, PAYE, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
+                "URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
                 if language == "lg"
-                else "URA, EFRIS, VAT, TIN, PAYE, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
+                else "URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
             )
         )
         prompt_ids = None
