@@ -84,6 +84,7 @@ from .cache import create_cache
 from .calculator_router import (
     _CURRENCY,
     NEXT_ACTIONS_BY_TOOL,
+    continue_calculation,
     extract_amounts,
     format_calc_reply,
     format_rate_reply,
@@ -92,6 +93,9 @@ from .calculator_router import (
     plan_calculation,
     rate_lookup_calendar_years,
     plan_rate_lookup,
+    recall_calculation,
+    remember_calculation,
+    slot_question,
 )
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
@@ -5640,23 +5644,28 @@ class ChatModel:
         self,
         session: WorkflowSession,
         user_input: str,
+        conversation_id: str = "",
     ) -> tuple[Any, list[str]]:
         """Advance a workflow and execute any deterministic tool steps inline."""
         tool_messages: list[str] = []
         turn = WorkflowRegistry.advance(session, user_input, self._resolve_slot_choice)
         while turn.tool_call:
+            tool_name = str(turn.tool_call.get("name", ""))
+            tool_args = dict(turn.tool_call.get("arguments") or {})
             try:
                 from .mcp import get_client  # noqa: PLC0415
 
                 call = get_client().call_tool(
-                    turn.tool_call.get("name", ""),
-                    turn.tool_call.get("arguments", {}) or {},
+                    tool_name,
+                    tool_args,
                     user_role="public",
                 )
                 result = call.result
             except Exception:
                 logger.exception("workflow tool execution failed")
                 result = {"ok": False, "error": "workflow tool execution failed"}
+            if result.get("ok") and conversation_id:
+                remember_calculation(conversation_id, tool_name, tool_args)
             explanation = result.get("explanation") or result.get("message") or ""
             if explanation:
                 tool_messages.append(str(explanation))
@@ -5704,6 +5713,9 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
             or self._maybe_handle_calculator(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
+            or self._maybe_handle_calc_followup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
             or self._maybe_handle_bare_amount(
@@ -6076,7 +6088,7 @@ class ChatModel:
         session = WorkflowRegistry.create_session(wf.id)
         if session is None:
             return None
-        turn, _tool_messages = self._advance_workflow(session, "")
+        turn, _tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or ""
         db.upsert_workflow_session(
             thread_id,
@@ -6109,6 +6121,47 @@ class ChatModel:
                 agent_role="workflow_guide",
                 workflow=workflow,
             ),
+        }
+
+    def _calculator_turn(
+        self,
+        reply: str,
+        *,
+        thread_id: str,
+        locale: str,
+        tool: str,
+    ) -> dict[str, Any]:
+        """The shared calculator reply, spoken in the caller's language."""
+        text = self._finalize_reply(reply)
+        if locale not in ("", "en"):
+            text = localize_reply(text, locale)
+        return {
+            "reply": text,
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "calculator",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "tool_specialist",
+            "handoff": None,
+            "response_judge": {
+                "decision": "approve",
+                "final_decision": "approve",
+                "applied_revision": False,
+                "reasons": ["deterministic tax calculator"],
+                "confidence_band": "high",
+            },
+            "next_actions": (
+                [f"Resume {suspended} workflow or continue asking general tax questions."]
+                if (suspended := self._get_suspended_workflow_name(thread_id))
+                else []
+            )
+            + NEXT_ACTIONS_BY_TOOL.get(tool, []),
+            "ticket_id": "",
         }
 
     def _maybe_handle_calculator(
@@ -6146,44 +6199,38 @@ class ChatModel:
             if not result.get("ok"):
                 logger.info("calculator rejected extracted args: %s", result.get("error", ""))
                 return None
-            reply = self._finalize_reply(
-                format_calc_reply(plan.tool, result, plan.assumptions)
+            remember_calculation(
+                thread_id,
+                plan.tool,
+                dict(plan.params),
+                assumptions=list(plan.assumptions),
             )
-            if locale not in ("", "en"):
-                reply = localize_reply(reply, locale)
-            return {
-                "reply": reply,
-                "sources": [],
-                "citations": [],
-                "faithfulness_score": None,
-                "retrieval_mode": "calculator",
-                "model": self.name,
-                "conversation_id": thread_id,
-                "locale": locale,
-                "escalation_required": False,
-                "escalation_reason": "",
-                "agent_role": "tool_specialist",
-                "handoff": None,
-                "response_judge": {
-                    "decision": "approve",
-                    "final_decision": "approve",
-                    "applied_revision": False,
-                    "reasons": ["deterministic tax calculator"],
-                    "confidence_band": "high",
-                },
-                "next_actions": (
-                    [f"Resume {suspended} workflow or continue asking general tax questions."]
-                    if (suspended := self._get_suspended_workflow_name(thread_id))
-                    else []
-                ) + NEXT_ACTIONS_BY_TOOL.get(plan.tool, []),
-                "ticket_id": "",
-            }
+            return self._calculator_turn(
+                format_calc_reply(plan.tool, result, plan.assumptions),
+                thread_id=thread_id,
+                locale=locale,
+                tool=plan.tool,
+            )
 
         # Missing details → guided elicitation via the matching workflow,
         # sharing the durable-session machinery (and flag gate) of
         # _maybe_handle_workflow so mid-flow answers keep working.
+        # With workflows off, still ask for the missing slot instead of
+        # letting retrieval invent the figure.
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
-            return None
+            remember_calculation(
+                thread_id,
+                plan.tool,
+                dict(plan.params),
+                pending=list(plan.missing),
+                assumptions=list(plan.assumptions),
+            )
+            ask = slot_question(plan.missing[0])
+            if plan.assumptions:
+                ask += "\n\n_Assumptions so far: " + "; ".join(plan.assumptions) + "._"
+            return self._calculator_turn(
+                ask, thread_id=thread_id, locale=locale, tool=plan.tool
+            )
         wf = WorkflowRegistry.get(plan.workflow_id)
         if wf is None:
             return None
@@ -6192,7 +6239,7 @@ class ChatModel:
             return None
         session.slots.update(plan.params)
 
-        turn, tool_messages = self._advance_workflow(session, "")
+        turn, tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or ""
         if tool_messages:
             prompt = "\n\n".join(tool_messages + [prompt]).strip()
@@ -6240,6 +6287,63 @@ class ChatModel:
             ),
         }
 
+    def _maybe_handle_calc_followup(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Replay the last calculator when the next turn is only a new amount.
+
+        "What about 2 million?" after a VAT answer stays on VAT. It does not
+        open the PAYE, VAT, and withholding menu.
+        """
+        saved = recall_calculation(thread_id)
+        if not saved:
+            return None
+        nxt = continue_calculation(saved, message) or continue_calculation(saved, rewritten)
+        if nxt is None:
+            return None
+        if not nxt["ready"]:
+            remember_calculation(
+                thread_id,
+                nxt["tool"],
+                nxt["params"],
+                pending=list(nxt["pending"]),
+                assumptions=list(nxt["assumptions"]),
+            )
+            return self._calculator_turn(
+                slot_question(nxt["pending"][0]),
+                thread_id=thread_id,
+                locale=locale,
+                tool=nxt["tool"],
+            )
+        try:
+            from .mcp import get_client  # noqa: PLC0415
+
+            call = get_client().call_tool(nxt["tool"], dict(nxt["params"]), user_role="public")
+            result = call.result
+        except Exception:
+            logger.exception("calculator follow-up failed")
+            return None
+        if not result.get("ok"):
+            logger.info("calculator follow-up rejected: %s", result.get("error", ""))
+            return None
+        remember_calculation(
+            thread_id,
+            nxt["tool"],
+            dict(nxt["params"]),
+            assumptions=list(nxt["assumptions"]),
+        )
+        return self._calculator_turn(
+            format_calc_reply(nxt["tool"], result, list(nxt["assumptions"])),
+            thread_id=thread_id,
+            locale=locale,
+            tool=nxt["tool"],
+        )
+
     def _maybe_handle_bare_amount(
         self,
         *,
@@ -6273,19 +6377,40 @@ class ChatModel:
         except Exception:
             pass
 
-        # 2. VAT (18%)
-        vat_tax = val * 0.18
-        gross_with_vat = val + vat_tax
-        vat_inclusive_net = val / 1.18
-        vat_inclusive_tax = val - vat_inclusive_net
+        # VAT and withholding come from the same MCP tools as a named
+        # question. A handwritten 18% or 6% would drift from the rate table.
+        vat_add = vat_extract = wht_result = None
+        fiscal_year = (paye_result or {}).get("fiscal_year") or ""
+        try:
+            from .mcp import get_client  # noqa: PLC0415
 
-        # 3. WHT (6%)
-        wht_tax = val * 0.06
-        net_after_wht = val - wht_tax
+            client = get_client()
+            added = client.call_tool(
+                "calculate_vat", {"amount": val, "direction": "add"}, user_role="public"
+            )
+            if added.result.get("ok"):
+                vat_add = added.result
+                fiscal_year = fiscal_year or str(vat_add.get("fiscal_year") or "")
+            extracted = client.call_tool(
+                "calculate_vat", {"amount": val, "direction": "extract"}, user_role="public"
+            )
+            if extracted.result.get("ok"):
+                vat_extract = extracted.result
+            withheld = client.call_tool(
+                "calculate_withholding",
+                {"payment_type": "services", "amount": val},
+                user_role="public",
+            )
+            if withheld.result.get("ok"):
+                wht_result = withheld.result
+                fiscal_year = fiscal_year or str(wht_result.get("fiscal_year") or "")
+        except Exception:
+            logger.exception("bare-amount tax tools failed")
 
+        year_label = fiscal_year or "the current fiscal year"
         lines = [
             f"I recognise **{amt_str}** as a monetary amount. "
-            f"Here is the statutory tax computation for **{amt_str}** across Uganda's primary tax heads (FY2026-27):\n"
+            f"Here is the statutory tax computation for **{amt_str}** across Uganda's primary tax heads ({year_label}):\n"
         ]
 
         if paye_result:
@@ -6303,15 +6428,31 @@ class ChatModel:
             lines.append(f"- Net Take-Home Pay: **UGX {p_takehome:,.0f}**")
             lines.append(f"- Band Applied: {band_str}\n")
 
-        lines.append("### 2. 🧾 Value Added Tax (VAT at 18%)")
-        lines.append(f"- Exclusive of VAT: Net amount **{amt_str}** + 18% VAT **UGX {vat_tax:,.0f}** = Total **UGX {gross_with_vat:,.0f}**")
-        lines.append(f"- Inclusive of VAT: If **{amt_str}** is gross, Net supply is **UGX {vat_inclusive_net:,.0f}** (VAT component: **UGX {vat_inclusive_tax:,.0f}**)\n")
+        if vat_add and vat_extract:
+            vat_pct = float(vat_add.get("rate") or 0) * 100
+            lines.append(f"### 2. 🧾 Value Added Tax (VAT at {vat_pct:.0f}%)")
+            lines.append(
+                f"- Exclusive of VAT: Net amount **{amt_str}** + {vat_pct:.0f}% VAT "
+                f"**UGX {float(vat_add['vat']):,.0f}** = Total **UGX {float(vat_add['gross']):,.0f}**"
+            )
+            lines.append(
+                f"- Inclusive of VAT: If **{amt_str}** is gross, Net supply is "
+                f"**UGX {float(vat_extract['net']):,.0f}** "
+                f"(VAT component: **UGX {float(vat_extract['vat']):,.0f}**)\n"
+            )
 
-        lines.append("### 3. ⚖️ Withholding Tax (WHT at 6%)")
-        lines.append(f"- 6% WHT on goods or services (payments exceeding UGX 1,000,000 threshold): **UGX {wht_tax:,.0f}**")
-        lines.append(f"- Net Payable: **UGX {net_after_wht:,.0f}**\n")
+        if wht_result:
+            wht_pct = float(wht_result.get("rate") or 0) * 100
+            lines.append(f"### 3. ⚖️ Withholding Tax (WHT at {wht_pct:.0f}% on services)")
+            lines.append(
+                f"- {wht_pct:.0f}% WHT on services: **UGX {float(wht_result['withholding_tax']):,.0f}**"
+            )
+            lines.append(f"- Net Payable: **UGX {float(wht_result['net_payable']):,.0f}**\n")
 
-        lines.append("_Figures use the official URA FY2026-27 rate table under the Income Tax Act and VAT Act._")
+        lines.append(
+            f"_Figures use the {year_label} rate table. "
+            "Withholding here is the services rate; say management fee if that is the payment._"
+        )
 
         reply = "\n".join(lines)
         if locale not in ("", "en"):
@@ -6435,7 +6576,7 @@ class ChatModel:
                 }
 
             if user_input.lower() in _WORKFLOW_RESUME_WORDS:
-                turn, _tool_messages = self._advance_workflow(session, "")
+                turn, _tool_messages = self._advance_workflow(session, "", thread_id)
                 prompt = turn.question or ""
                 workflow = self._workflow_view(
                     session,
@@ -6469,7 +6610,7 @@ class ChatModel:
             if self._workflow_input_changes_subject(session, user_input):
                 return None
 
-            turn, tool_messages = self._advance_workflow(session, user_input)
+            turn, tool_messages = self._advance_workflow(session, user_input, thread_id)
 
             # The TIN clarification flow ends in a curated deterministic
             # answer keyed on the collected taxpayer kind — not a generic
@@ -6587,7 +6728,7 @@ class ChatModel:
             return None
         self._apply_personalization_to_workflow(session, personalization)
 
-        turn, tool_messages = self._advance_workflow(session, "")
+        turn, tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or f"Let's start the {matched.name} workflow."
         if tool_messages:
             prompt = "\n\n".join(tool_messages + [prompt]).strip()

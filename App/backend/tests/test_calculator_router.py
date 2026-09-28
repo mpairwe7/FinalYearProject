@@ -133,6 +133,25 @@ class PlanCalculationTests(unittest.TestCase):
         self.assertEqual(plan.params["payment_type"], "services")
         self.assertEqual(plan.params["amount"], 3_000_000.0)
 
+    def test_management_consultancy_asks_which_rate(self) -> None:
+        plan = plan_calculation("how much withholding tax on a 3m management consultancy")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_withholding")
+        self.assertIn("payment_type", plan.missing)
+        self.assertNotIn("payment_type", plan.params)
+
+    def test_luganda_vati_registration_reaches_the_calculator(self) -> None:
+        plan = plan_calculation("Ninza okwewandiisa vati, omusolo 350000000")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "check_vat_registration")
+        self.assertEqual(plan.params["annual_turnover"], 350_000_000.0)
+
+    def test_luganda_okubala_vati_is_a_vat_calculation(self) -> None:
+        plan = plan_calculation("okubala vati ku 1500000")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_vat")
+        self.assertEqual(plan.params["amount"], 1_500_000.0)
+
     def test_capital_gains_keyword_mapping(self) -> None:
         plan = plan_calculation("calculate capital gains: bought at 20m, sold for 50m")
         self.assertEqual(plan.missing, [])
@@ -233,6 +252,83 @@ class ServiceCalculatorPathTests(unittest.TestCase):
             self.assertNotIn("provisional", reply.lower())
         else:
             self.assertIn("provisional", reply.lower())
+
+    def test_followup_amount_stays_on_the_same_tax(self) -> None:
+        from app.tools import ToolRegistry
+
+        thread = str(uuid.uuid4())
+        first = self.model.generate_retrieval_only(
+            message="Calculate VAT on 1,000,000",
+            conversation_id=thread,
+        )
+        self.assertEqual(first["retrieval_mode"], "calculator")
+        second = self.model.generate_retrieval_only(
+            message="what about 2,000,000",
+            conversation_id=thread,
+        )
+        expected = ToolRegistry.call("calculate_vat", {"amount": 2_000_000})
+        self.assertEqual(second["retrieval_mode"], "calculator")
+        self.assertIn(f"{expected['vat']:,.0f}", second["reply"])
+        self.assertNotIn("PAYE", second["reply"])
+
+    def test_bare_amount_reads_vat_from_the_rate_table(self) -> None:
+        from app.tools import ToolRegistry
+
+        out = self.model.generate_retrieval_only(
+            message="1000000",
+            conversation_id=str(uuid.uuid4()),
+        )
+        vat = ToolRegistry.call("calculate_vat", {"amount": 1_000_000, "direction": "add"})
+        self.assertEqual(out["retrieval_mode"], "calculator")
+        self.assertIn(f"{float(vat['vat']):,.0f}", out["reply"])
+        self.assertIn("services", out["reply"].lower())
+
+    def test_workflows_off_asks_for_the_missing_figure(self) -> None:
+        from app.tools import ToolRegistry
+
+        self._flags.set("workflows", False)
+        try:
+            thread = str(uuid.uuid4())
+            asked = self.model.generate_retrieval_only(
+                message="How much PAYE will I pay?",
+                conversation_id=thread,
+            )
+            self.assertEqual(asked["retrieval_mode"], "calculator")
+            self.assertIn("gross monthly salary", asked["reply"].lower())
+            answered = self.model.generate_retrieval_only(
+                message="1.5m",
+                conversation_id=thread,
+            )
+            expected = ToolRegistry.call("calculate_paye", {"monthly_gross": 1_500_000})
+            self.assertIn(f"{expected['paye']:,.0f}", answered["reply"])
+            self.assertNotIn("primary tax heads", answered["reply"].lower())
+        finally:
+            self._flags.set("workflows", True)
+
+    def test_a_tax_figure_is_not_small_talk(self) -> None:
+        from app.conversational import handle_conversational_turn
+
+        self.assertIsNone(handle_conversational_turn("why do we pay VAT on 350000000"))
+        civic = handle_conversational_turn("why do we pay taxes?")
+        self.assertIsNotNone(civic)
+        self.assertEqual(civic.intent_type, "civic_philosophy")
+
+    def test_schema_drift_is_not_spoken_as_a_figure(self) -> None:
+        from unittest.mock import patch
+
+        from app.mcp import get_client
+
+        client = get_client()
+        healthy = client.call_tool("calculate_vat", {"amount": 1000}, user_role="public")
+        self.assertTrue(healthy.ok)
+        self.assertIn("vat", healthy.result)
+        with patch(
+            "app.mcp.client.result_matches_schema",
+            return_value=["ok: not a boolean"],
+        ):
+            drifted = client.call_tool("calculate_vat", {"amount": 1000}, user_role="public")
+        self.assertFalse(drifted.ok)
+        self.assertNotIn("vat", drifted.result)
 
     def test_invalid_slot_answer_reprompts(self) -> None:
         thread = str(uuid.uuid4())

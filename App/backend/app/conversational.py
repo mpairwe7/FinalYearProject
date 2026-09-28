@@ -290,13 +290,22 @@ _DIVERT_RESPONSES = {
 # Turn Handler
 # ---------------------------------------------------------------------------
 
+# A philosophy sentence that also names a tax and a figure is a calculation,
+# not small talk. The calculator router runs first; this keeps a miss from
+# being answered with the civic essay.
+_TAX_AND_FIGURE_RE = re.compile(
+    r"(?is)(?:\b(?:vat|vati|paye|wht|withholding|customs|rental|omusolo|kodi|ushuru)\b.{0,80}\d"
+    r"|\d.{0,80}\b(?:vat|vati|paye|wht|withholding|customs|rental|omusolo|kodi|ushuru)\b)"
+)
+
+
 def handle_conversational_turn(message: str, locale: str = "en") -> ConversationalResult | None:
     """Evaluate whether *message* is a natural dialog turn, and return rich response.
 
     Returns None if the message should proceed to deterministic calculators or RAG.
     """
     text = (message or "").strip()
-    if not text:
+    if not text or _TAX_AND_FIGURE_RE.search(text):
         return None
 
     eff_loc = _resolve_courtesy_locale(text, locale)
