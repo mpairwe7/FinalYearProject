@@ -189,7 +189,7 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
     # Strip legal references (e.g. section 40, subsection (4), cap 349, Sura. 339, sehemu 5, Form XII, Fomu 12, Kifungu cha 2, article 1.2, First Schedule, jedwali 2, enteekateeka 2, foomu y'ekitongole 20)
     stripped = re.sub(
-        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\b(?:[ \t]+[a-zA-Z']{1,20})?[ \t]*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
         " ",
         stripped,
         flags=re.IGNORECASE,
@@ -559,7 +559,7 @@ def protect_figures(text: str) -> tuple[str, dict[str, str]]:
     clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
     # 3. Shield legal references (e.g. section 40, article 1.2, cap 349, First Schedule, jedwali 2)
     clean_text = re.sub(
-        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\b(?:[ \t]+[a-zA-Z']{1,20})?[ \t]*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
         _shield,
         clean_text,
         flags=re.IGNORECASE,

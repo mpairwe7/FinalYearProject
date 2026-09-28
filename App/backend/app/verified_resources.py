@@ -637,7 +637,7 @@ def check_links(timeout: float = 30.0) -> list[tuple[str, str, str]]:
     failures: list[tuple[str, str, str]] = []
     for res in _RESOURCES:
         if not res.url.startswith("https://"):
-            failures.append((res.id, res.url, "Insecure or unpermitted scheme: URL must start with https://"))
+            failures.append((res.id, res.url, "Scheme must be https://"))
             continue
         request = urllib.request.Request(res.url, headers={"User-Agent": "ura-chatbot-link-check/1.0"})
         try:

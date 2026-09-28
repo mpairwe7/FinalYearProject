@@ -28,11 +28,9 @@ _CONTRADICTION_PROB_MIN = float(os.getenv("ENTAILMENT_CONTRADICTION_MIN", "0.6")
 # or Luganda ("ebitundu 18 ku buli kikumi").
 _PCT_RE = re.compile(
     r"(?:"
-    r"\b(?:asilimia|ebitundu|kigero\s+kya)\s+(\d+(?:\.\d+)?)\b"
+    r"\b(?:asilimia|ebitundu|kigero\s+kya)\s*(\d+(?:\.\d+)?)\b"
     r"|"
-    r"\b(\d+(?:\.\d+)?)\s*%"
-    r"|"
-    r"\b(\d+(?:\.\d+)?)\s+(?:per\s?cent(?:age)?|kwa\s+mia|ku\s+buli\s+kikumi|ku\s+100)\b"
+    r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?|\b(?:kwa\s+mia|ku\s+buli\s+kikumi|ku\s+100)\b)"
     r")",
     re.IGNORECASE,
 )
@@ -144,10 +142,9 @@ _AMOUNT_SUFFIX = {
 
 # Multipliers placed BEFORE digits (common in Swahili & Luganda, e.g. "milioni 150", "obukadde 150", "bukadde bwa siringi 5")
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)\b"
-    r"(?:\s+(?:bwa|kwa|za|ya|nga))?"
-    r"(?:\s+(?:ssente|sente|siringi|shilingi|shs|ugx))?"
-    r"\s+(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
+    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)"
+    r"(?:\s+(?:bwa|kwa|za|ya|nga)?\s*(?:ssente|sente|siringi|shilingi|shs|ugx)?)?\s+"
+    r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
 )
 _AMOUNT_PREFIX_MULTIPLIERS = {
@@ -190,9 +187,9 @@ _model_loaded = False
 def percentages(text: str) -> set[str]:
     """Numeric values stated as percentages, e.g. {"18"} from "18%" / "asilimia 18"."""
     results: set[str] = set()
-    lowered = re.sub(r"(\d+)\.[ \t]+(\d+)", r"\1.\2", (text or "").lower())
+    lowered = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", (text or "").lower())
     for m in _PCT_RE.finditer(lowered):
-        val = m.group(1) or m.group(2) or m.group(3)
+        val = m.group(1) or m.group(2)
         if val:
             results.add(val)
 
@@ -223,8 +220,8 @@ def canonical_amounts(text: str) -> set[float]:
     (Luganda obukadde, Swahili milioni) were dropped, falsely triggering
     numerical mismatch warnings on correct translations.
     """
-    clean_text = re.sub(r"<[^<>]+>", " ", text or "")
-    clean_text = re.sub(r"(\d+)\.[ \t]+(\d+)", r"\1.\2", clean_text)
+    clean_text = re.sub(r"<[^>]+>", " ", text or "")
+    clean_text = re.sub(r"(\d+)\.\s+(\d+)", r"\1.\2", clean_text)
     lowered = clean_text.lower()
     # Percentages are handled separately; drop them so "18%" is not read
     # as the amount 18.
@@ -254,7 +251,7 @@ def canonical_amounts(text: str) -> set[float]:
     remainder = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", r"\1", remainder, flags=re.IGNORECASE)
     # Strip common non-numeric idioms containing cardinal/ordinal words (e.g. "third party", "mtu wa tatu", "pande mbili")
     remainder = re.sub(r"\b(?:mtu|watu|upande|pande|chama|mtu\s+yeyote)\s+wa\s+tatu\b", " ", remainder, flags=re.IGNORECASE)
-    remainder = re.sub(r"\b(?:pande|upande|sehemu)(?:\s+(?:za|ya|wa))?\s+mbili\b", " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"\b(?:pande|upande|sehemu)\s+(?:za|ya|wa)?\s*mbili\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\b(?:njuyi|enjuyi|empande)\s+(?:zombi|z'ebbiri)\b", " ", remainder, flags=re.IGNORECASE)
     remainder = re.sub(r"\bthird[-\s]part(?:y|ies)\b", " ", remainder, flags=re.IGNORECASE)
     # Strip legal references (e.g. Cap 340, Cap. 343, Section 118, Article VII) so statute chapters are not parsed as monetary rules

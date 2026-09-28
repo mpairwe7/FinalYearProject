@@ -2168,8 +2168,8 @@ def _closing_courtesy_reply(message: str, locale: str = "en") -> str:
 
 
 _CONTACT_ASK_RE = re.compile(
-    r"\b(how\s+can\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get(?:\s+\w+){0,3}\s+(?:help|assistance)\s+from)|"
-    r"how\s+do\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get(?:\s+\w+){0,3}\s+(?:help|assistance)\s+from)|"
+    r"\b(how\s+can\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+[^?]*?(?:help|assistance)\s+from)|"
+    r"how\s+do\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+[^?]*?(?:help|assistance)\s+from)|"
     r"where\s+can\s+i\s+get\s+(?:help|assistance)|"
     r"i\s+need\s+help\s+from\s+ura|"
     r"how\s+to\s+contact\s+ura|"
@@ -3055,10 +3055,14 @@ def localize_reply(reply: str, locale: str) -> str:
     # are never mangled by MT and never falsely trigger figure-change guards.
     contact_footer_present = False
     source_to_translate = text
-    footer_idx = text.lower().find("if you get stuck at any step, ura is happy to help:")
-    if footer_idx != -1:
+    footer_match = re.search(
+        r"\n*If you get stuck at any step, URA is happy to help:[^\n]*(?:\n[^\n]*?(?:0800|0772|whatsapp)[^\n]*)*",
+        text,
+        re.IGNORECASE,
+    )
+    if footer_match:
         contact_footer_present = True
-        source_to_translate = text[:footer_idx].strip()
+        source_to_translate = (text[:footer_match.start()] + text[footer_match.end():]).strip()
     elif CONTACT_FOOTER in text:
         contact_footer_present = True
         source_to_translate = text.replace(CONTACT_FOOTER, "").strip()
@@ -4268,8 +4272,8 @@ class ChatModel:
             "",
             cleaned,
         )
-        cleaned = re.sub(r"\[User-attached document:[^\]\n]+\]", "", cleaned)
-        cleaned = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA[ \t]+)?\d+[ \t]*\|[ \t]*P\s?a\s?g\s?e", "", cleaned)
+        cleaned = re.sub(r"\[User-attached document:[^\]]+\]", "", cleaned)
+        cleaned = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", cleaned)
         cleaned = re.sub(r"^summary\s*\n+", "", cleaned, flags=re.IGNORECASE)
         leakage = self._output_guard.check_prompt_leakage(cleaned)
         return self._output_guard.normalize_structure(leakage.sanitized_text).strip()
