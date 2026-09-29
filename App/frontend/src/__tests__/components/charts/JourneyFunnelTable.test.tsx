@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
-import JourneyFunnelTable from "../../../components/charts/JourneyFunnelTable";
+import JourneyFunnelTable, { leastHelpful } from "../../../components/charts/JourneyFunnelTable";
 import type { JourneyFunnel } from "../../../services/analyticsApi";
 
 const step = (step_id: string, title: string, stopped = 0, helpful = 0, not_helpful = 0) => ({
@@ -55,7 +55,7 @@ describe("JourneyFunnelTable", () => {
     const row = screen.getByRole("row", { name: /Tax Clearance Certificate/ });
     expect(within(row).getByText("6 (60%)")).toBeInTheDocument();
     expect(within(row).getByText("Returns filed (3)")).toBeInTheDocument();
-    expect(within(row).getByText("Returns filed (2 not helpful)")).toBeInTheDocument();
+    expect(within(row).getByText("Returns filed (2 of 3 not helpful)")).toBeInTheDocument();
     // cancelled + abandoned, with the split on hover
     expect(within(row).getByTitle("1 cancelled, 2 abandoned")).toHaveTextContent("3");
   });
@@ -75,5 +75,17 @@ describe("JourneyFunnelTable", () => {
   it("states how abandonment is counted", () => {
     render(<JourneyFunnelTable data={data} />);
     expect(screen.getByText(/untouched for 24 hours counts as abandoned/)).toBeInTheDocument();
+  });
+
+  it("ranks the least helpful step by share of ratings, not by count", () => {
+    const steps = [
+      step("a", "Busy step", 0, 980, 20),
+      step("b", "Quiet step", 0, 0, 3),
+      step("c", "Unrated step"),
+    ];
+    expect(leastHelpful(steps)?.title).toBe("Quiet step");
+    // equal share: the one more people rated wins
+    expect(leastHelpful([step("a", "Few", 0, 1, 1), step("b", "Many", 0, 5, 5)])?.title).toBe("Many");
+    expect(leastHelpful([step("c", "Unrated step"), step("d", "Liked", 0, 4, 0)])).toBeNull();
   });
 });

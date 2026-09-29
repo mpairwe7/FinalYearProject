@@ -12,21 +12,50 @@ import type { JourneyFunnel, JourneyStats, JourneyStepStats } from "../../servic
  *
  * The two right-hand columns are what the customer experience team acts on:
  * the step where most journeys stop is the drop-off to fix first, and the
- * step taxpayers rated least helpful is the reply to reword first.
+ * step with the highest share of "not helpful" ratings is the reply to reword
+ * first.
  */
 
-function worst(steps: JourneyStepStats[], key: "stopped" | "not_helpful"): JourneyStepStats | null {
-  let best: JourneyStepStats | null = null;
+/** The step where the most journeys stopped. */
+function mostStopped(steps: JourneyStepStats[]): JourneyStepStats | null {
+  let found: JourneyStepStats | null = null;
   for (const step of steps) {
-    if (step[key] > 0 && (!best || step[key] > best[key])) best = step;
+    if (step.stopped > 0 && (!found || step.stopped > found.stopped)) found = step;
   }
-  return best;
+  return found;
+}
+
+/** Share of a step's ratings that were "not helpful"; 0 when nobody rated it. */
+export function notHelpfulShare(step: JourneyStepStats): number {
+  const rated = step.helpful + step.not_helpful;
+  return rated > 0 ? step.not_helpful / rated : 0;
+}
+
+/**
+ * The least helpful rated step: the highest share of "not helpful" ratings,
+ * so 3 of 3 outranks 20 of 1,000. Ties go to the step with more ratings.
+ */
+export function leastHelpful(steps: JourneyStepStats[]): JourneyStepStats | null {
+  let found: JourneyStepStats | null = null;
+  for (const step of steps) {
+    if (step.not_helpful === 0) continue;
+    if (!found) {
+      found = step;
+      continue;
+    }
+    const share = notHelpfulShare(step);
+    const best = notHelpfulShare(found);
+    if (share > best || (share === best && step.not_helpful + step.helpful > found.not_helpful + found.helpful)) {
+      found = step;
+    }
+  }
+  return found;
 }
 
 function Row({ journey }: { journey: JourneyStats }) {
   const stopped = journey.cancelled + journey.abandoned;
-  const dropOff = worst(journey.steps, "stopped");
-  const unhelpful = worst(journey.steps, "not_helpful");
+  const dropOff = mostStopped(journey.steps);
+  const unhelpful = leastHelpful(journey.steps);
   return (
     <tr>
       <th scope="row">{journey.name}</th>
@@ -42,7 +71,11 @@ function Row({ journey }: { journey: JourneyStats }) {
         )}
       </td>
       <td>{dropOff ? `${dropOff.title} (${dropOff.stopped})` : "—"}</td>
-      <td>{unhelpful ? `${unhelpful.title} (${unhelpful.not_helpful} not helpful)` : "—"}</td>
+      <td>
+        {unhelpful
+          ? `${unhelpful.title} (${unhelpful.not_helpful} of ${unhelpful.helpful + unhelpful.not_helpful} not helpful)`
+          : "—"}
+      </td>
     </tr>
   );
 }

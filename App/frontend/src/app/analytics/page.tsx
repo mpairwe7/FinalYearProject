@@ -280,7 +280,13 @@ function Dashboard() {
             ) : null}
           </section>
 
-          {journeys.data && Array.isArray(journeys.data.journeys) ? (
+          {journeys.isError ? (
+            <ErrorState
+              title="Guided journey figures did not load"
+              body="The rest of this page is current; the journey funnel is not. An empty panel would read as no journeys in this period."
+              onRetry={() => void journeys.refetch()}
+            />
+          ) : journeys.data && Array.isArray(journeys.data.journeys) ? (
             <JourneyFunnelTable data={journeys.data} />
           ) : null}
 
