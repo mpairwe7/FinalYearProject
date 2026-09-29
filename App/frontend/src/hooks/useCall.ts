@@ -197,8 +197,7 @@ export function useCall() {
               {
                 const media = msg.media as LiveKitCallCredentials | undefined;
                 if (media?.transport === 'livekit') {
-                  let session: LiveKitCallSession;
-                  session = new LiveKitCallSession({
+                  const session: LiveKitCallSession = new LiveKitCallSession({
                     onMessage: (message) => socket.dispatchMessage(message),
                     onReconnecting: () => {
                       const status = useCallStore.getState().status;

@@ -11,13 +11,18 @@ const sdk = vi.hoisted(() => {
   };
   const rooms: Array<InstanceType<typeof MockRoom>> = [];
   class MockRoom {
-    handlers = new Map<string, (arg: any) => void>();
+    handlers = new Map<string, (...args: unknown[]) => void>();
     connect = vi.fn(async () => {});
     disconnect = vi.fn(async () => {});
     localParticipant = { setMicrophoneEnabled: vi.fn(async () => {}) };
     constructor() { rooms.push(this); }
-    on(event: string, callback: (arg: any) => void) { this.handlers.set(event, callback); }
-    emit(event: string, arg: any) { this.handlers.get(event)?.(arg); }
+    // `never[]` accepts every typed SDK callback; stored as `unknown[]` so the
+    // test can emit the SDK's positional event arguments without `any`.
+    on(event: string, callback: (...args: never[]) => void) {
+      this.handlers.set(event, callback as (...args: unknown[]) => void);
+      return this;
+    }
+    emit(event: string, ...args: unknown[]) { this.handlers.get(event)?.(...args); }
   }
   return { roomEvent, rooms, MockRoom };
 });
