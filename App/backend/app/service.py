@@ -2970,6 +2970,42 @@ def _translate_reply(text: str, locale: str) -> str | None:
     return None
 
 
+#: A blank line between paragraphs, kept so the translation keeps the layout.
+_PARAGRAPH_BREAK_RE = re.compile(r"(\n[ \t]*\n+)")
+
+
+def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
+    """English -> *locale* one paragraph at a time: ``(text, "ok")`` or ``(None, reason)``.
+
+    Sunflower, decoding greedily, can stop after the first paragraph of a
+    longer reply: the TIN registration guide came back to a Swahili caller as
+    its opening line alone ("Ninafurahi kukusaidia…", 50 of 379 characters).
+    Each paragraph on its own translates whole. And a paragraph that still
+    comes back truncated is caught here: measured over the whole reply, a
+    two-paragraph answer cut to its first sentence kept 21% of its length and
+    passed the 15% floor, shipping a fragment instead of the answer.
+    Paragraphs are translated concurrently; any failure fails the reply, so
+    the caller gets the English answer rather than part of a translated one.
+    """
+    pieces = _PARAGRAPH_BREAK_RE.split(text)
+    paragraphs = [(i, piece) for i, piece in enumerate(pieces) if i % 2 == 0 and piece.strip()]
+    if len(paragraphs) <= 1:
+        out = _translate_reply(text, locale)
+        return (out, "ok") if out is not None else (None, "mt_failed")
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(4, len(paragraphs)), thread_name_prefix="reply-mt"
+    ) as pool:
+        results = list(pool.map(lambda item: _translate_reply(item[1], locale), paragraphs))
+    translated = list(pieces)
+    for (index, source), out in zip(paragraphs, results):
+        if out is None or not out.strip():
+            return None, "mt_failed"
+        if not mt.length_plausible(source, out):
+            return None, "collapsed"
+        translated[index] = out.strip()
+    return "".join(translated), "ok"
+
+
 #: Withhold an answer whose figures contradict the URA passage it cites.
 #: Env, not a feature flag, because it is a safety threshold in the same family
 #: as GROUNDING_THRESHOLD and SELF_REFLECT_THRESHOLD — and because the failure
@@ -3129,9 +3165,9 @@ def localize_reply(reply: str, locale: str) -> str:
 
     def _attempt(source_text: str, figure_map: dict[str, str]) -> tuple[str | None, str]:
         """One MT round trip and every guard, returning the text and a reason."""
-        out = _translate_reply(source_text, locale)
+        out, why = _translate_by_paragraph(source_text, locale)
         if out is None:
-            return None, "mt_failed"
+            return None, why
         if not out or not out.strip():
             return None, "empty"
         candidate = out.strip()

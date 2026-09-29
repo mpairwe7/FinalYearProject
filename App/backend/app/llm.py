@@ -1253,6 +1253,9 @@ def translate_text(
     """
     from .guardrails import InputGuard  # noqa: PLC0415 — avoids an import cycle at module load
 
+    if not (text or "").strip():
+        # Given nothing, the model translates the instructions themselves.
+        return ""
     verdict = InputGuard().check(text)
     if not verdict.allowed and "prompt_injection" in verdict.flags:
         logger.warning("Prompted MT refused input (flags=%s)", verdict.flags)
