@@ -163,6 +163,28 @@ def is_human_request(text: str) -> bool:
     )
 
 
+_REPEAT_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:repeat\s+that|say\s+that\s+again|could\s+you\s+repeat|pardon\s+me|what\s+did\s+you\s+say"
+    r"|kiddemu|ddamu|nsaba\s+oddemu|kiddemu\s+katono"
+    r"|rudia\s+tena|rudia|sema\s+tena|rudia\s+uliyosema)\b",
+    re.IGNORECASE,
+)
+
+_SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:speak\s+slower|more\s+slowly|talk\s+slower|slow\s+down"
+    r"|yogera\s+mpola|kiddemu\s+mpola|oyogere\s+mpola"
+    r"|ongea\s+polepole|ongea\s+taratibu|sema\s+polepole)\b",
+    re.IGNORECASE,
+)
+
+_HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:hang\s+up|end\s+(?:the\s+)?call|disconnect|goodbye"
+    r"|komya\s+essimu|katikoma\s+wano|weeraba"
+    r"|kata\s+simu|maliza\s+simu|kwaheri)\b",
+    re.IGNORECASE,
+)
+
+
 _TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
 _TRAILING_ABBREVIATION_RE = re.compile(
     r"(?:^|\s)(?:e\.g|i\.e|etc|No|Sec|Art|Cap|Mr|Mrs|Ms|Dr|St|vs)\.$", re.IGNORECASE
@@ -431,6 +453,42 @@ class UraReceptionistBrain(LLMService):
             await self._transfer("caller_requested")
             return
 
+        # 1b. In-Call User Control: Repeat Request
+        if _REPEAT_PATTERNS.search(user_text):
+            last_ans = getattr(self.room.state, "last_assistant_answer", "")
+            if last_ans:
+                prefix = {
+                    "en": "Sure, let me repeat that: ",
+                    "lg": "Kale, ka nkiddemu: ",
+                    "sw": "Sawa, ngoja nirudie: ",
+                }.get(language, "Sure, let me repeat that: ")
+                await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
+                return
+
+        # 1c. In-Call User Control: Speech Rate Adjustment
+        if _SPEED_SLOW_PATTERNS.search(user_text):
+            self.room.state.speech_rate_slow = True
+            ack = {
+                "en": "I'll speak more slowly. What is your question?",
+                "lg": "Nja kwogera mpola. Ekibuuzo kyo kiri kki?",
+                "sw": "Nitaongea polepole zaidi. Una swali gani?",
+            }.get(language, "I'll speak more slowly. What is your question?")
+            await self._say_and_record(ack, kind="notice")
+            return
+
+        # 1d. In-Call User Control: Voice Hangup / Disconnect
+        if _HANGUP_VOICE_PATTERNS.search(user_text):
+            farewell = {
+                "en": "Thank you for calling URA. Goodbye!",
+                "lg": "Webale okukuba essimu eri URA. Weeraba!",
+                "sw": "Asante kwa kupiga simu URA. Kwaheri!",
+            }.get(language, "Thank you for calling URA. Goodbye!")
+            from .desk import hang_up_caller
+
+            await self._say_and_record(farewell, kind="notice")
+            await hang_up_caller(self.room, "caller_voice_hangup")
+            return
+
         # 2. Pending Clarification
         if self.room.state.clarify is not None:
             action = self.clarify_gate.resolve(
@@ -495,7 +553,7 @@ class UraReceptionistBrain(LLMService):
         def _sunflower_query() -> str:
             from ..llm import _vllm_generate
 
-            prompt = f"Luganda question: {repaired}\nEnglish search query:"
+            prompt = f"Luganda question: {normalized}\nEnglish search query:"
             messages = [
                 {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
                 {"role": "user", "content": prompt},
@@ -506,7 +564,7 @@ class UraReceptionistBrain(LLMService):
             from ..providers.gateway import gemini_generate
 
             model = get_brief_model()
-            prompt = f"Luganda question: {repaired}\nEnglish search query:"
+            prompt = f"Luganda question: {normalized}\nEnglish search query:"
             return gemini_generate(
                 prompt,
                 system=QUERY_EXTRACT_SYSTEM,
@@ -876,6 +934,8 @@ class UraReceptionistBrain(LLMService):
         """Output text via Pipecat TTS pipeline, save turn, and send caption."""
         self.room.state.turn_seq += 1
         turn_seq = self.room.state.turn_seq
+        if kind == "answer":
+            self.room.state.last_assistant_answer = text
 
         if not skip_log:
             turn = create_turn(

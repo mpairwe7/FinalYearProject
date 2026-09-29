@@ -1,5 +1,5 @@
 {
-  "timestamp": 1790717587.6908417,
+  "timestamp": 1790718134.1957502,
   "target_url": "ws://127.0.0.1:8083/v1/calls/stream",
   "all_passed": true,
   "total_tests": 6,
@@ -29,7 +29,7 @@
     {
       "test": "barge_in_user_control",
       "passed": true,
-      "bot_stop_ms": 1140,
+      "bot_stop_ms": 1149,
       "interrupt_seen": true
     },
     {
@@ -48,7 +48,7 @@
         },
         "lg_vat_accuracy": {
           "passed": true,
-          "text": "Okusasula omusolo gwa takisi, olina okwewandiisa ne U-R-A n'ofuna nnamba ya U-R-A. Oluvannyuma osasula ssente z'okwewandiisa emitwalo 20 n'olukusa lw'omwaka olwa 120,000. Kakasa nti otuukiriza ebisaanyizo bino okwewala engassi. Wandiyagadde okwogera n'omukozi ku nsonga eno?"
+          "text": "Okusinziira ku mateeka ga U-R-A ag'omwaka 2025/26, omuntu alina okusasula omusolo gwa ebitundu 30 ku buli kikumi ku magoba ge (net chargeable profits), nga kino kye kimanyiddwa ng\u2019omusolo gw\u2019ekitongole oguteeberezebwa (Corporate Income Tax). Okugeza, singa bizineesi yo ekola amagoba ga bukadde 100, olina okusasula obukadde 30 mu musolo."
         },
         "sw_tin_accuracy": {
           "passed": true,

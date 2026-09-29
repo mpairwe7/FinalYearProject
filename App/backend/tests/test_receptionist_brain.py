@@ -268,4 +268,30 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertGreaterEqual(len(text_frames), 2)
 
+    async def test_in_call_voice_control_repeat(self):
+        self.state.locale = "en"
+        self.state.last_assistant_answer = "The standard VAT rate is 18 percent."
+        frame = LLMContextFrame(context="Could you repeat that please?")
+        await self.brain.process_frame(frame)
+        turns = list_turns(self.call_id)
+        last_turn = turns[-1]
+        self.assertEqual(last_turn["speaker"], "assistant")
+        self.assertIn("18 percent", last_turn["text"])
+
+    async def test_in_call_voice_control_speed_slower(self):
+        self.state.locale = "lg"
+        self.assertFalse(self.state.speech_rate_slow)
+        frame = LLMContextFrame(context="Yogera mpola")
+        await self.brain.process_frame(frame)
+        self.assertTrue(self.state.speech_rate_slow)
+        turns = list_turns(self.call_id)
+        self.assertTrue(any("Nja kwogera mpola" in t["text"] for t in turns))
+
+    async def test_in_call_voice_control_hangup(self):
+        self.state.locale = "en"
+        with patch("app.receptionist.desk.hang_up_caller", new_callable=AsyncMock) as mock_hangup:
+            frame = LLMContextFrame(context="Goodbye, thank you")
+            await self.brain.process_frame(frame)
+            mock_hangup.assert_called_once_with(self.room, "caller_voice_hangup")
+
 

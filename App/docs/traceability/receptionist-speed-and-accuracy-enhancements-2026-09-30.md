@@ -120,3 +120,8 @@ Automated end-to-end verification (`scripts/verify_receptionist_ux_control_accur
 | **User Control** | Barge-In Interruption Latency | **PASS** | Caller talking over greeting stops assistant audio in **1,140 ms** (SLA < 1,200 ms) with `bot-interrupted` event |
 | **User Control** | Human Officer Transfer Control | **PASS** | Caller request for human officer triggers `status: transferring` and spoken officer handoff notice |
 | **Multilingual Accuracy** | Statutory Rate Fidelity (EN, LG, SW) | **PASS** | **EN**: 18% standard VAT rate verified; **LG**: vernacular statutory accuracy verified ("ebitundu 18 ku buli kikumi"); **SW**: East African tax phrasing verified ("namba ya TIN", "Hatua 1/2") |
+
+### In-Call Voice Commands & Natural Control
+1. **Immediate Answer Repetition**: Caller asking to repeat ("could you repeat that please", "kiddemu", "rudia tena") triggers instant playback of the cached last assistant answer without redundant RAG/LLM invocation.
+2. **Adaptive Speech Rate Control**: Caller requesting slower speech ("speak slower", "yogera mpola", "ongea polepole") toggles `speech_rate_slow` state and provides natural voice acknowledgment.
+3. **Voice-Triggered Hangup**: Caller saying "goodbye", "weeraba", or "kwaheri" triggers polite signoff and calls `hang_up_caller("caller_voice_hangup")`.

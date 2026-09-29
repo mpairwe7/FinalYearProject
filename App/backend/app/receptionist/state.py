@@ -30,6 +30,8 @@ class CallState:
     turn_seq: int = 0
     turn_words: list[Any] = field(default_factory=list)
     last_caller_text: str = ""
+    last_assistant_answer: str = ""
+    speech_rate_slow: bool = False
     clarify: ClarifyState | None = None
     ticket_id: str | None = None
     transfer_reason: str | None = None
