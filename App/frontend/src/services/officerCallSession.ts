@@ -15,7 +15,7 @@
  * page asks for confirmation.
  */
 
-import { appendAuthToken } from '@/lib/authSession';
+import { getAuthToken } from '@/lib/authSession';
 import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audioLevelBus';
 import { callsApi } from '@/services/callsApi';
 import { PCMPlayer } from '@/services/pcmPlayer';
@@ -149,15 +149,24 @@ async function joinCall(callId: string): Promise<void> {
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(
-    appendAuthToken(`${protocol}//${window.location.host}/api/v1/admin/calls/${encodeURIComponent(callId)}/audio`),
+    `${protocol}//${window.location.host}/api/v1/admin/calls/${encodeURIComponent(callId)}/audio`,
   );
   socket.binaryType = 'arraybuffer';
   ws = socket;
   socket.onopen = () => {
-    if (ws === socket) update({ state: 'bridged' });
+    socket.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
   };
   socket.onmessage = (event: MessageEvent) => {
-    if (event.data instanceof ArrayBuffer) player?.push(event.data);
+    if (event.data instanceof ArrayBuffer) {
+      player?.push(event.data);
+    } else if (typeof event.data === 'string') {
+      try {
+        const message = JSON.parse(event.data);
+        if (message?.type === 'authenticated' && ws === socket) update({ state: 'bridged' });
+      } catch {
+        /* Ignore non-JSON control frames. */
+      }
+    }
   };
   socket.onclose = (event: CloseEvent) => {
     if (ws !== socket) return;

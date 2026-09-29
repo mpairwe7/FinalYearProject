@@ -103,7 +103,7 @@ Taxpayer hears natural Luganda audio answer in < 2.5s
    - Ensure the direct Luganda answer text streams directly to `ORPHEUS_TTS_URL`.
    - Keep generation to 1–3 short sentences for telephony naturalness.
 2. **Telemetry & Quality Tracking**:
-   - Track `luganda_turn_latency_ms`, `luganda_containment_rate`, and `luganda_transfer_rate` in `metrics.py`.
+   - Track `luganda_turn_latency_ms`, `luganda_ai_only_completion_rate`, and `luganda_transfer_rate` in `metrics.py` (AI-only routing is not confirmed resolution).
 
 ### Phase C: Unit & E2E Validation
 1. **Automated Test Scenarios (`test_receptionist_luganda_knowledge.py`)**:

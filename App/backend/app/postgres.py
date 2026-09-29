@@ -363,6 +363,8 @@ def cleanup_expired_data() -> dict[str, int]:
                 deleted[table] = 0
         ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
         try:
+            from .voice_consent import retention_policy
+            voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM tickets WHERE status IN ('resolved', 'wontfix') "
@@ -374,11 +376,11 @@ def cleanup_expired_data() -> dict[str, int]:
                 # Voice receptionist tables retention
                 cur.execute(
                     "DELETE FROM voice_call_turns WHERE created_at < %s",
-                    (now - (_CONVERSATION_TTL_DAYS * 86400),),
+                    (voice_transcript_cutoff,),
                 )
                 deleted["voice_call_turns"] = cur.rowcount
 
-                conv_cutoff = now - (_CONVERSATION_TTL_DAYS * 86400)
+                conv_cutoff = voice_transcript_cutoff
                 cur.execute(
                     """DELETE FROM voice_calls
                        WHERE ((ticket_id IS NULL OR ticket_id = '') AND started_at < %s)

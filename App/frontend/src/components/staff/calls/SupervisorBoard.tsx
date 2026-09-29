@@ -82,11 +82,11 @@ export function SupervisorBoard({
         </div>
 
         <div className="st-case-card">
-          <div className="st-metric-label">Containment (7d)</div>
+          <div className="st-metric-label">AI-only calls (7d)</div>
           <div className="st-metric-value">
-            {metrics ? `${Math.round(metrics.containment_rate * 100)}%` : '—'}
+            {metrics ? `${Math.round(metrics.ai_only_completion_rate * 100)}%` : '—'}
           </div>
-          <p className="cc-hint">Calls resolved without officer escalation</p>
+          <p className="cc-hint">AI answered, no officer transfer; resolution not confirmed</p>
         </div>
 
         <div className="st-case-card">

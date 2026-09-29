@@ -12,7 +12,7 @@ import {
   CallTurn,
   ListCallsParams,
 } from '@/services/callsApi';
-import { appendAuthToken } from '@/lib/authSession';
+import { getAuthToken } from '@/lib/authSession';
 
 // ---------------------------------------------------------------------------
 // 1. REST Query Hooks
@@ -82,12 +82,15 @@ export function useCallLive(callId?: string | null) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const url = appendAuthToken(`${protocol}//${host}/api/v1/admin/calls/stream?call_id=${encodeURIComponent(callId)}`);
+    const url = `${protocol}//${host}/api/v1/admin/calls/stream?call_id=${encodeURIComponent(callId)}`;
 
     let ws: WebSocket | null = null;
 
     try {
       ws = new WebSocket(url);
+      ws.onopen = () => {
+        ws?.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
+      };
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);

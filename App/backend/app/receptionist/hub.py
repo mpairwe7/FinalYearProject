@@ -18,7 +18,7 @@ class CallEventHub:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._lobby: list[tuple[asyncio.Queue[dict[str, Any]], asyncio.AbstractEventLoop]] = []
+        self._lobby: list[tuple[asyncio.Queue[dict[str, Any]], asyncio.AbstractEventLoop, str | None]] = []
         self._call_channels: dict[
             str, list[tuple[asyncio.Queue[dict[str, Any]], asyncio.AbstractEventLoop]]
         ] = {}
@@ -27,25 +27,49 @@ class CallEventHub:
     # Lobby (metadata only)
     # ------------------------------------------------------------------
 
-    def subscribe_lobby(self, loop: asyncio.AbstractEventLoop) -> asyncio.Queue[dict[str, Any]]:
+    def subscribe_lobby(
+        self, loop: asyncio.AbstractEventLoop, tenant_id: str | None = None
+    ) -> asyncio.Queue[dict[str, Any]]:
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=QUEUE_MAXSIZE)
         with self._lock:
-            self._lobby.append((queue, loop))
+            self._lobby.append((queue, loop, tenant_id))
         return queue
 
     def unsubscribe_lobby(self, queue: asyncio.Queue[dict[str, Any]]) -> None:
         with self._lock:
-            self._lobby = [(q, loop) for q, loop in self._lobby if q is not queue]
+            self._lobby = [(q, loop, tenant) for q, loop, tenant in self._lobby if q is not queue]
 
     def publish_lobby(self, event_type: str, payload: dict[str, Any]) -> None:
         """Publish a metadata-only event to all lobby subscribers. No transcripts."""
+        call_id = str(payload.get("call_id") or "")
+        tenant_id: str | None = None
+        if call_id:
+            try:
+                from .state import registry
+
+                room = registry.get(call_id)
+                if room is not None:
+                    tenant_id = room.state.tenant_id or "default"
+                else:
+                    from .store import get_call
+
+                    call = get_call(call_id)
+                    tenant_id = str(call.get("tenant_id") or "default") if call else None
+            except Exception:
+                logger.exception("Could not resolve tenant for lobby event %s", event_type)
         event = {
             "type": event_type,
             "data": payload,
             "ts": time.time(),
         }
         with self._lock:
-            targets = list(self._lobby)
+            targets = [
+                (queue, loop)
+                for queue, loop, subscriber_tenant in self._lobby
+                if subscriber_tenant is None
+                or not call_id
+                or tenant_id == subscriber_tenant
+            ]
 
         for queue, loop in targets:
             self._safe_enqueue(queue, loop, event)

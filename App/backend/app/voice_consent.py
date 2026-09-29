@@ -10,7 +10,7 @@ Privacy design:
   recorded in the audit trail for tamper-evidence.
 * ``VOICE_STORE_RAW_AUDIO=true`` enables temporary storage with TTL
   cleanup (default 24h).
-* Transcripts follow the existing ``CONVERSATION_TTL_DAYS`` policy.
+* Transcripts follow ``VOICE_TRANSCRIPT_TTL_DAYS`` (90d by default).
 * Voice audit entries are retained for ``ANALYTICS_TTL_DAYS`` (365d).
 """
 
@@ -117,7 +117,7 @@ def init_voice_consent_schema() -> None:
 # ---------------------------------------------------------------------------
 
 
-def require_voice_consent(user_id: str) -> bool:
+def require_voice_consent(user_id: str, tenant_id: str = "default") -> bool:
     """Check if user has granted ``voice_recording`` consent.
 
     Returns ``True`` if:
@@ -136,7 +136,7 @@ def require_voice_consent(user_id: str) -> bool:
     try:
         from . import database as db
 
-        return db.has_active_consent(user_id, "voice_recording")
+        return db.has_active_consent(user_id, "voice_recording", tenant_id=tenant_id)
     except Exception:
         logger.exception("Consent check failed for user=%s", user_id)
         return False

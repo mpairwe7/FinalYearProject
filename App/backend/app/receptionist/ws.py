@@ -5,27 +5,28 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from ..auth import AuthContext, require_role
 from ..chat_ws_v2 import _resolve_ws_principal
 
-require_admin_access = require_role("ura_staff", "ura_admin", "ura_auditor")
 from ..flags import flags
+from ..query import SUPPORTED_LOCALES
+from ..tenancy import tenant_enabled
 from ..voice_consent import log_voice_event, require_voice_consent
-from ..ws_concurrency import is_ws_origin_allowed, release, try_acquire
+from ..ws_concurrency import is_ws_origin_allowed, release, rekey_slot, try_acquire
 from . import brief as call_brief
 from . import desk
 from . import risk
 from .brain import UraReceptionistBrain
-from ..query import SUPPORTED_LOCALES
-from .config import get_default_language, get_languages, get_max_call_s
+from .config import get_default_language, get_languages
 from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
 from .officer import OfficerLeg
@@ -41,11 +42,21 @@ from .store import (
 )
 from .summary import generate_call_summary
 
+require_admin_access = require_role("ura_staff", "ura_admin", "ura_auditor")
 logger = logging.getLogger(__name__)
 
+
+def _voice_receptionist_enabled() -> bool:
+    """Fail closed in production even if a persisted flag override is enabled."""
+    return os.getenv("APP_ENV", "development").strip().lower() != "production" and flags.is_enabled(
+        "voice_receptionist"
+    )
+
+
+def _tenant_scope(ctx: AuthContext) -> str | None:
+    return (ctx.tenant_id or "default") if tenant_enabled() else None
+
 router = APIRouter()
-
-
 class ReviewCallRequest(BaseModel):
     rating: int = Field(ge=1, le=5)
     note: str = Field(default="", max_length=1000)
@@ -59,13 +70,11 @@ class ReviewCallRequest(BaseModel):
 async def call_stream_endpoint(websocket: WebSocket) -> None:
     """Taxpayer phone call simulation WebSocket (/v1/calls/stream)."""
     logger.info(
-        "call_stream_endpoint: flag=%s, origin=%r, headers=%r",
-        flags.is_enabled("voice_receptionist"),
-        websocket.headers.get("origin"),
-        dict(websocket.headers),
+        "call_stream_endpoint: flag=%s",
+        _voice_receptionist_enabled(),
     )
     # 1. Flag check
-    if not flags.is_enabled("voice_receptionist"):
+    if not _voice_receptionist_enabled():
         logger.warning("call_stream_endpoint: rejected due to flag voice_receptionist being off")
         await websocket.close(code=1001)
         return
@@ -77,18 +86,11 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         await websocket.close(code=4403)
         return
 
-    # 3. Resolve principal
+    # 3. Rate-limit before accepting, then authenticate from the first
+    # application message so bearer tokens never appear in the WebSocket URL.
     auth_req = flags.is_enabled("auth_required")
-    try:
-        user_id, tenant_id, role, _ = _resolve_ws_principal(websocket, required=auth_req)
-    except Exception as exc:
-        logger.warning("call_stream_endpoint: rejected due to auth failed: %s", exc)
-        await websocket.close(code=4401 if auth_req else 4403)
-        return
-
-    # 4. Connection caps
     client_host = websocket.client.host if websocket.client else "unknown"
-    key = user_id or f"anon::{client_host}"
+    key = f"anon::{client_host}"
     if not try_acquire("call", key, per_user_cap=5, global_cap=16):
         await websocket.close(code=1013)
         return
@@ -102,12 +104,31 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         try:
             raw_init = await asyncio.wait_for(websocket.receive_text(), timeout=15.0)
             init_msg = json.loads(raw_init)
+            if not isinstance(init_msg, dict) or init_msg.get("type") != "call_start":
+                raise ValueError("invalid call_start message")
         except Exception:
             await websocket.send_text(
                 json.dumps({"type": "error", "detail": "Missing call_start handshake", "recoverable": False})
             )
             await websocket.close(code=1003)
             return
+
+        try:
+            user_id, tenant_id, role, _ = _resolve_ws_principal(
+                websocket,
+                required=auth_req,
+                token_override=str(init_msg.get("access_token") or ""),
+            )
+        except Exception:
+            await websocket.send_text(json.dumps({"type": "error", "detail": "Authentication required", "recoverable": False}))
+            await websocket.close(code=4401)
+            return
+
+        if user_id:
+            if not rekey_slot("call", key, user_id, per_user_cap=5):
+                await websocket.close(code=1013)
+                return
+            key = user_id
 
         # Both go into the call record and the staff UI: keep them to locales
         # the app knows. (A multilingual call then opens in its default
@@ -118,15 +139,19 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
         preferred_locale = str(init_msg.get("preferred_locale") or locale).strip().lower()
         if preferred_locale not in SUPPORTED_LOCALES:
             preferred_locale = locale
-        consent_accepted = bool(init_msg.get("voice_consent_accepted"))
+        consent_accepted = init_msg.get("voice_consent_accepted") is True
 
         # Consent check
         if flags.is_enabled("voice_consent"):
             if user_id:
-                consent_ok = require_voice_consent(user_id)
+                consent_ok = require_voice_consent(user_id, tenant_id=tenant_id or "default")
             else:
                 consent_ok = consent_accepted
             if not consent_ok:
+                log_voice_event(
+                    user_id=user_id or "", session_id=call_id, event_type="consent_denied",
+                    metadata={"purpose": "voice_recording"}, tenant_id=tenant_id or "default",
+                )
                 await websocket.send_text(
                     json.dumps({
                         "type": "error",
@@ -136,6 +161,18 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 )
                 await websocket.close(code=4403)
                 return
+
+        log_voice_event(
+            user_id=user_id or "", session_id=call_id, event_type="consent_checked",
+            metadata={
+                "purpose": "voice_recording",
+                "granted": consent_accepted or bool(user_id and flags.is_enabled("voice_consent")),
+                "enforced": flags.is_enabled("voice_consent"),
+                "source": "receipt" if user_id else "call_start_acknowledgement",
+                "version": "1.0",
+            },
+            tenant_id=tenant_id or "default",
+        )
 
         # 6. Create room & DB record
         room = await registry.create(
@@ -193,9 +230,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
 
             # Pipecat only *reports* a dropped socket; stopping the pipeline is
             # the app's job. Without this a hung-up call ran on — Gemini
-            # session, per-caller slot and all — until the session timeout
-            # (RECEPTIONIST_MAX_CALL_S, 15 min), and a sixth call in that window
-            # was refused.
+            # session, per-caller slot and all — until the configured transport
+            # session timeout, and a later caller could be refused by the cap.
             @transport.event_handler("on_client_disconnected")
             async def _on_client_disconnected(_transport: Any, _ws: Any) -> None:
                 await task.cancel()
@@ -253,7 +289,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 },
             )
             await registry.remove(call_id)
-        release("call", key)
+        if key:
+            release("call", key)
 
 
 # ---------------------------------------------------------------------------
@@ -268,11 +305,20 @@ async def staff_calls_stream_endpoint(
     """Staff WebSocket (/v1/admin/calls/stream): lobby or per-call live mode."""
     # No phone calls on this deployment: 1001 tells the console to hide its
     # call layer for the session instead of retrying.
-    if not flags.is_enabled("voice_receptionist"):
+    if not _voice_receptionist_enabled():
         await websocket.close(code=1001)
         return
+    if not is_ws_origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept()
     try:
-        user_id, tenant_id, role, _ = _resolve_ws_principal(websocket, required=True)
+        auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
+        if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
+            raise ValueError("missing WebSocket authentication message")
+        user_id, tenant_id, role, _ = _resolve_ws_principal(
+            websocket, required=True, token_override=str(auth_message.get("access_token") or "")
+        )
     except Exception:
         await websocket.close(code=4401)
         return
@@ -280,15 +326,17 @@ async def staff_calls_stream_endpoint(
     if role not in ("ura_staff", "ura_admin", "ura_auditor"):
         await websocket.close(code=4403)
         return
-
-    await websocket.accept()
     loop = asyncio.get_running_loop()
+    tenant_scope = (tenant_id or "default") if tenant_enabled() else None
 
     queue: asyncio.Queue[dict[str, Any]]
     if call_id:
         # Per-call Live mode
+        snapshot = get_call_with_turns(call_id, tenant_id=tenant_scope)
+        if snapshot is None:
+            await websocket.close(code=4404)
+            return
         log_voice_event(user_id=user_id or "", session_id=call_id, event_type="staff_viewed_call", tenant_id=tenant_id or "default")
-        snapshot = get_call_with_turns(call_id) or {}
         await websocket.send_text(
             json.dumps({
                 "type": "snapshot",
@@ -299,7 +347,7 @@ async def staff_calls_stream_endpoint(
         queue = hub.subscribe_call(call_id, loop)
     else:
         # Lobby mode (metadata only)
-        queue = hub.subscribe_lobby(loop)
+        queue = hub.subscribe_lobby(loop, tenant_id=tenant_scope)
 
     try:
         while True:
@@ -327,8 +375,20 @@ async def staff_calls_stream_endpoint(
 
 async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
     """Officer live audio bridge socket (/v1/admin/calls/{call_id}/audio)."""
+    if not _voice_receptionist_enabled():
+        await websocket.close(code=1001)
+        return
+    if not is_ws_origin_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=4403)
+        return
+    await websocket.accept()
     try:
-        user_id, tenant_id, role, _ = _resolve_ws_principal(websocket, required=True)
+        auth_message = json.loads(await asyncio.wait_for(websocket.receive_text(), timeout=5.0))
+        if not isinstance(auth_message, dict) or auth_message.get("type") != "authenticate":
+            raise ValueError("missing WebSocket authentication message")
+        user_id, tenant_id, role, _ = _resolve_ws_principal(
+            websocket, required=True, token_override=str(auth_message.get("access_token") or "")
+        )
     except Exception:
         await websocket.close(code=4401)
         return
@@ -340,10 +400,12 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
             return
         room = registry.get(call_id)
         if not room or room.state.mode != "bridged":
-            await websocket.accept()
             await websocket.close(code=4404 if not room else 4400)
             return
-        await websocket.accept()
+        if tenant_enabled() and room.state.tenant_id != (tenant_id or "default"):
+            await websocket.close(code=4404)
+            return
+        await websocket.send_text(json.dumps({"type": "authenticated"}))
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
         room.add_listener(queue)
         try:
@@ -365,21 +427,19 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
     if not room or room.state.mode not in ("transferring", "ai"):
         await websocket.close(code=4404 if not room else 4400)
         return
+    if tenant_enabled() and room.state.tenant_id != (tenant_id or "default"):
+        await websocket.close(code=4404)
+        return
 
     # Only the officer who claimed the call (POST …/claim), or the officer
     # reconnecting within grace period, may join it.
     is_claimant = (room.state.claimed_by == user_id)
     is_reconnecting = (getattr(room.state, "reconnecting_officer", None) == user_id)
     if room.officer is not None or (not is_claimant and not is_reconnecting):
-        # Accept first: a close before the handshake is an HTTP 403, which a
-        # browser reports as 1006 — the officer would see "could not connect"
-        # instead of "another officer has this call".
-        await websocket.accept()
         await websocket.close(code=4409)
         return
 
-    await websocket.accept()
-
+    await websocket.send_text(json.dumps({"type": "authenticated"}))
     officer_name = room.state.claimed_name or desk.officer_display_name(user_id)
     speech_model = None
     try:
@@ -433,7 +493,7 @@ def list_calls_endpoint(
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
     """List phone calls filtered by status (live, ended, all)."""
-    calls = list_calls(status=status, limit=limit, offset=offset)
+    calls = list_calls(status=status, limit=limit, offset=offset, tenant_id=_tenant_scope(ctx))
     return {
         "calls": calls,
         "count": len(calls),
@@ -449,7 +509,7 @@ def get_call_metrics_endpoint(
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
     """Retrieve aggregate phone receptionist performance metrics."""
-    return get_aggregate_metrics(days=days)
+    return get_aggregate_metrics(days=days, tenant_id=_tenant_scope(ctx))
 
 
 @router.get("/admin/calls/{call_id}")
@@ -461,7 +521,7 @@ def get_call_detail_endpoint(
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
 
-    detail = get_call_with_turns(call_id)
+    detail = get_call_with_turns(call_id, tenant_id=_tenant_scope(ctx))
     if not detail:
         raise HTTPException(status_code=404, detail="Call not found")
     return detail
@@ -480,7 +540,7 @@ def review_call_endpoint(
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
 
-    call = get_call(call_id)
+    call = get_call(call_id, tenant_id=_tenant_scope(ctx))
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
 

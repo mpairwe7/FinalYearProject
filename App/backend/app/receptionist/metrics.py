@@ -96,9 +96,10 @@ def compute_call_metrics(
     abandoned_while_waiting = bool(call.get("needs_callback") and call.get("callback_reason") == "caller_left_waiting")
     callback_created = bool(call.get("needs_callback"))
 
-    # Containment
+    # This is an operational routing outcome, not evidence that the caller's
+    # issue was resolved. Resolution needs an explicit caller/staff signal.
     end_reason = call.get("end_reason", "")
-    contained = bool(ai_answers >= 1 and not transferred and end_reason != "timeout")
+    ai_only_completion = bool(ai_answers >= 1 and not transferred and end_reason not in ("timeout", "error"))
 
     # Latencies
     stt_latencies: list[float] = []
@@ -146,7 +147,7 @@ def compute_call_metrics(
         "wrapup_time_s": wrapup_time_s,
         "abandoned_while_waiting": abandoned_while_waiting,
         "callback_created": callback_created,
-        "contained": contained,
+        "ai_only_completion": ai_only_completion,
         "luganda_turn_latency_ms": luganda_turn_latency_ms,
         "latency": {
             "stt_ms_p50": _percentile(stt_latencies, 50),
@@ -205,20 +206,26 @@ def record_call_end_metrics(call_id: str, state: CallState | None = None) -> dic
     return metrics
 
 
-def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
+def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dict[str, Any]:
     """Compute aggregate call performance across the specified day window."""
     cutoff = time.time() - (max(1, days) * 86400)
-    rows = db.query_all(
-        "SELECT * FROM voice_calls WHERE started_at >= ? ORDER BY started_at DESC",
-        (cutoff,),
-    )
+    if tenant_id is None:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE started_at >= ? ORDER BY started_at DESC",
+            (cutoff,),
+        )
+    else:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE tenant_id = ? AND started_at >= ? ORDER BY started_at DESC",
+            (tenant_id, cutoff),
+        )
 
     total_calls = len(rows)
     if total_calls == 0:
         return {
             "period_days": days,
             "total_calls": 0,
-            "containment_rate": 0.0,
+            "ai_only_completion_rate": 0.0,
             "transfer_rate": 0.0,
             "transfers_by_reason": {},
             "clarification_rate": 0.0,
@@ -229,12 +236,12 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
             "latency_p50_ms": 0.0,
             "latency_p95_ms": 0.0,
             "luganda_total_calls": 0,
-            "luganda_containment_rate": 0.0,
+            "luganda_ai_only_completion_rate": 0.0,
             "luganda_transfer_rate": 0.0,
             "luganda_turn_latency_ms": 0.0,
         }
 
-    contained_count = 0
+    ai_only_count = 0
     transferred_count = 0
     transfers_by_reason: dict[str, int] = {}
     clarify_calls = 0
@@ -246,7 +253,7 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
     ratings: list[int] = []
 
     luganda_calls_count = 0
-    luganda_contained_count = 0
+    luganda_ai_only_count = 0
     luganda_transferred_count = 0
     luganda_turn_latencies: list[float] = []
 
@@ -266,8 +273,8 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
             except Exception:
                 pass
 
-        if m.get("contained"):
-            contained_count += 1
+        if m.get("ai_only_completion"):
+            ai_only_count += 1
         if d.get("transferred"):
             transferred_count += 1
             reason = d.get("transfer_reason") or "unspecified"
@@ -278,8 +285,8 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
         used_langs = (m.get("language") or {}).get("used") or []
         if locale == "lg" or "lg" in used_langs:
             luganda_calls_count += 1
-            if m.get("contained"):
-                luganda_contained_count += 1
+            if m.get("ai_only_completion"):
+                luganda_ai_only_count += 1
             if d.get("transferred"):
                 luganda_transferred_count += 1
             lg_lat = m.get("luganda_turn_latency_ms") or (m.get("latency") or {}).get("turn_to_audio_ms_p50")
@@ -319,7 +326,7 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
         if officer:
             per_officer_counts[officer] = per_officer_counts.get(officer, 0) + 1
 
-    containment_rate = round(contained_count / total_calls, 3)
+    ai_only_completion_rate = round(ai_only_count / total_calls, 3)
     transfer_rate = round(transferred_count / total_calls, 3)
     clarification_rate = round(clarify_calls / total_calls, 3)
     clarification_first_try_rate = (
@@ -329,8 +336,8 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
     avg_duration_s = round(sum(durations) / len(durations), 1) if durations else 0.0
     avg_officer_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
 
-    luganda_containment_rate = (
-        round(luganda_contained_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
+    luganda_ai_only_completion_rate = (
+        round(luganda_ai_only_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
     )
     luganda_transfer_rate = (
         round(luganda_transferred_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
@@ -342,7 +349,7 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
     return {
         "period_days": days,
         "total_calls": total_calls,
-        "containment_rate": containment_rate,
+        "ai_only_completion_rate": ai_only_completion_rate,
         "transfer_rate": transfer_rate,
         "transfers_by_reason": transfers_by_reason,
         "clarification_rate": clarification_rate,
@@ -360,7 +367,7 @@ def get_aggregate_metrics(days: int = 7) -> dict[str, Any]:
         "callbacks_closed": callbacks_closed_count,
         "per_officer_counts": per_officer_counts,
         "luganda_total_calls": luganda_calls_count,
-        "luganda_containment_rate": luganda_containment_rate,
+        "luganda_ai_only_completion_rate": luganda_ai_only_completion_rate,
         "luganda_transfer_rate": luganda_transfer_rate,
         "luganda_turn_latency_ms": luganda_turn_latency_ms,
     }

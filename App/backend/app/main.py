@@ -177,6 +177,13 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
+    if os.getenv("FLAG_VOICE_RECEPTIONIST", "").strip().lower() in ("1", "true", "yes", "on"):
+        errors.append(
+            "FLAG_VOICE_RECEPTIONIST cannot be enabled in production yet: the receptionist uses "
+            "browser WebSockets and process-local call state; deploy a supported WebRTC transport "
+            "and shared call/event registry before enabling it."
+        )
+
     from .production_readiness import gap_gate_errors
 
     errors.extend(gap_gate_errors())
@@ -620,7 +627,10 @@ async def lifespan(app: FastAPI):
         app.state.offline_rag = None
 
     # Simulated voice receptionist (Pipecat demo)
-    if _flags.is_enabled("voice_receptionist"):
+    if (
+        os.getenv("APP_ENV", "development").strip().lower() != "production"
+        and _flags.is_enabled("voice_receptionist")
+    ):
         try:
             from . import receptionist
             if not receptionist.is_available():
@@ -3019,6 +3029,9 @@ def list_calls_endpoint(
 ) -> dict[str, Any]:
     """List phone calls with filtering, search, and pagination."""
     from .receptionist.store import list_calls
+    from .tenancy import tenant_enabled
+    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+
     calls, total = list_calls(
         status=status,
         limit=limit,
@@ -3034,6 +3047,7 @@ def list_calls_endpoint(
         needs_callback=needs_callback,
         sort=sort,
         return_total=True,
+        tenant_id=tenant_scope,
     )
     return {
         "calls": calls,
@@ -3052,7 +3066,9 @@ def get_call_metrics_endpoint(
 ) -> dict[str, Any]:
     """Retrieve aggregate phone receptionist performance metrics."""
     from .receptionist.metrics import get_aggregate_metrics
-    return get_aggregate_metrics(days=days)
+    from .tenancy import tenant_enabled
+    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+    return get_aggregate_metrics(days=days, tenant_id=tenant_scope)
 
 
 @app.get("/v1/admin/calls/{call_id}", tags=["admin"])
@@ -3063,10 +3079,13 @@ def get_call_detail_endpoint(
     """Retrieve full call detail including turns, summary, metrics, and ticket."""
     import re
     from .receptionist.store import get_call_with_turns
+    from .tenancy import tenant_enabled
+
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
 
-    detail = get_call_with_turns(call_id)
+    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+    detail = get_call_with_turns(call_id, tenant_id=tenant_scope)
     if not detail:
         raise HTTPException(status_code=404, detail="Call not found")
     return detail
@@ -3081,13 +3100,16 @@ def review_call_endpoint(
     """Submit an officer rating (1-5) and note for a call."""
     import re
     from .receptionist.store import get_call, save_call_review
+    from .tenancy import tenant_enabled
+
     if ctx.role not in ("ura_staff", "ura_admin"):
         raise HTTPException(status_code=403, detail="Only staff and admins can submit reviews")
 
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
 
-    call = get_call(call_id)
+    tenant_scope = (ctx.tenant_id or "default") if tenant_enabled() else None
+    call = get_call(call_id, tenant_id=tenant_scope)
     if not call:
         raise HTTPException(status_code=404, detail="Call not found")
 
@@ -3112,6 +3134,21 @@ def _desk_call_id(call_id: str) -> str:
     if not re.match(_CALL_ID_RE, call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
     return call_id
+
+
+def _receptionist_tenant_scope(ctx: AuthContext) -> str | None:
+    from .tenancy import tenant_enabled
+
+    return (ctx.tenant_id or "default") if tenant_enabled() else None
+
+
+def _require_receptionist_call(call_id: str, ctx: AuthContext) -> dict[str, Any]:
+    from .receptionist.store import get_call
+
+    call = get_call(call_id, tenant_id=_receptionist_tenant_scope(ctx))
+    if call is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return call
 
 
 def _desk_writer(ctx: AuthContext) -> None:
@@ -3148,12 +3185,9 @@ async def get_call_brief_endpoint(
     from fastapi.responses import JSONResponse
 
     from .receptionist import brief as call_brief
-    from .receptionist.store import get_call
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
-    call = get_call(call_id)
-    if not call:
-        raise HTTPException(status_code=404, detail="Call not found")
+    call = _require_receptionist_call(call_id, ctx)
     log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_brief",
                     tenant_id=ctx.tenant_id or "default")
     if refresh:
@@ -3173,6 +3207,7 @@ async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_a
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
         result = await desk.claim(call_id, ctx.user_id, chat_model=getattr(app.state, "model", None),
@@ -3190,6 +3225,7 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
         result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
@@ -3206,6 +3242,7 @@ async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_adm
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
         result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None),
@@ -3227,6 +3264,7 @@ async def hold_call_endpoint(
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     on = bool(body.get("on", True))
     try:
@@ -3249,6 +3287,7 @@ async def transfer_call_endpoint(
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     team = str(body.get("team") or "").strip()
     target_officer_id = str(body.get("officer_id") or "").strip()
@@ -3273,6 +3312,7 @@ async def wrapup_call_endpoint(
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     outcome = str(body.get("outcome") or "").strip()
     note = str(body.get("note") or "").strip()
@@ -3307,6 +3347,7 @@ async def callback_done_endpoint(
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     note = str(body.get("note") or "").strip()
     try:
@@ -3327,9 +3368,10 @@ def caller_history_endpoint(
     from .receptionist import desk
     from .voice_consent import log_voice_event
     _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
     log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_caller_history",
                     tenant_id=ctx.tenant_id or "default")
-    return desk.caller_history(call_id)
+    return desk.caller_history(call_id, tenant_id=_receptionist_tenant_scope(ctx))
 
 
 @app.put("/v1/admin/officers/me/presence", tags=["admin"])

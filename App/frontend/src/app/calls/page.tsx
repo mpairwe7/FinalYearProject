@@ -196,12 +196,12 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             <>
               <div className="calls-perf-gauges">
                 <SloGaugeCard
-                  label="Containment rate"
-                  value={Math.round((metricsData.containment_rate || 0) * 100)}
+                  label="AI-only calls"
+                  value={Math.round((metricsData.ai_only_completion_rate || 0) * 100)}
                   target={60}
                   unit="%"
-                  note="Calls resolved by AI without requiring officer escalation"
-                  term="Containment"
+                  note="Calls with an AI answer and no officer transfer; not a measure of issue resolution"
+                  term="AI-only completion"
                 />
                 <SloGaugeCard
                   label="Clarification success"
@@ -337,4 +337,3 @@ export default function Page() {
     </StaffGuard>
   );
 }
-

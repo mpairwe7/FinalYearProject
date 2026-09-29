@@ -30,7 +30,7 @@ from .config import (
     get_gemini_vad_prefix_padding_ms,
     get_gemini_vad_silence_ms,
     get_gemini_vad_start_sensitivity,
-    get_max_call_s,
+    get_gemini_session_timeout_s,
     get_transfer_timeout_s,
 )
 from .hub import hub
@@ -746,7 +746,7 @@ def build_gemini_live_pipeline(
         audio_out_enabled=True,
         add_wav_header=False,
         serializer=serializer,
-        session_timeout=get_max_call_s(),
+        session_timeout=get_gemini_session_timeout_s(),
     )
     transport = FastAPIWebsocketTransport(websocket, transport_params)
 
@@ -788,4 +788,3 @@ def build_gemini_live_pipeline(
     )
 
     return task, transport, brain
-

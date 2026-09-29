@@ -66,7 +66,10 @@ describe('officerCallSession', () => {
     expect(active()).toMatchObject({ callId: 'c1', state: 'connecting', officerName: 'Officer Okello' });
     const audio = FakeSocket.find('/admin/calls/c1/audio');
     expect(audio?.binaryType).toBe('arraybuffer');
+    expect(audio?.url).not.toContain('token=');
     audio!.open();
+    expect(JSON.parse(String(audio!.sent[0]))).toMatchObject({ type: 'authenticate' });
+    audio!.emit({ type: 'authenticated' });
     expect(active()?.state).toBe('bridged');
   });
 
@@ -74,19 +77,21 @@ describe('officerCallSession', () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
+    audio.emit({ type: 'authenticated' });
     const chunk = new Int16Array([100, -100, 200, -200]).buffer;
     mic.onChunk!(chunk);
-    expect(audio.sent).toEqual([chunk]);
+    expect(audio.sent[1]).toBe(chunk);
     toggleMute();
     expect(active()?.muted).toBe(true);
     mic.onChunk!(chunk);
-    expect(audio.sent).toHaveLength(1);
+    expect(audio.sent).toHaveLength(2);
   });
 
   it('ends the call and transitions to wrap_up when the server hangs up', async () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
+    audio.emit({ type: 'authenticated' });
     await endCall();
     expect(callsApi.endCall).toHaveBeenCalledWith('c1');
     expect(active()?.state).toBe('ending');
@@ -102,6 +107,7 @@ describe('officerCallSession', () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
+    audio.emit({ type: 'authenticated' });
     await toggleHold(true);
     expect(callsApi.holdCall).toHaveBeenCalledWith('c1', true);
     expect(active()?.onHold).toBe(true);
@@ -117,6 +123,7 @@ describe('officerCallSession', () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
+    audio.emit({ type: 'authenticated' });
     await transferCall({ team: 'disputes', note: 'Escalating' });
     expect(callsApi.transferCall).toHaveBeenCalledWith('c1', { team: 'disputes', note: 'Escalating' });
     expect(active()?.state).toBe('wrap_up');
@@ -128,6 +135,7 @@ describe('officerCallSession', () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
+    audio.emit({ type: 'authenticated' });
     await endCall();
     audio.shut(1000);
     expect(active()?.state).toBe('wrap_up');

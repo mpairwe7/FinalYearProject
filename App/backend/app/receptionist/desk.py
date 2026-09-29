@@ -455,9 +455,9 @@ async def callback_done(call_id: str, officer_id: str, note: str = "", *, is_adm
     return {"ok": True, "call_id": call_id}
 
 
-def caller_history(call_id: str) -> dict[str, Any]:
+def caller_history(call_id: str, *, tenant_id: str | None = None) -> dict[str, Any]:
     """Retrieve previous calls and tickets for the same taxpayer."""
-    return store_caller_history(call_id)
+    return store_caller_history(call_id, tenant_id=tenant_id)
 
 
 def draft_wrapup_note(call_id: str) -> str:

@@ -116,6 +116,29 @@ class TestReceptionistStore(unittest.TestCase):
         self.assertIn(id_ended, ended_ids)
         self.assertNotIn(id_ai, ended_ids)
 
+    def test_call_reads_and_lists_are_tenant_scoped_when_requested(self):
+        tenant_a_call = f"call_ta_{uuid.uuid4().hex[:8]}"
+        tenant_b_call = f"call_tb_{uuid.uuid4().hex[:8]}"
+        create_call(tenant_a_call, tenant_id="tenant-a", status="ai")
+        create_call(tenant_b_call, tenant_id="tenant-b", status="ai")
+        self.assertIsNone(get_call(tenant_b_call, tenant_id="tenant-a"))
+        self.assertIsNone(get_call_with_turns(tenant_b_call, tenant_id="tenant-a"))
+        tenant_a_ids = {c["call_id"] for c in list_calls(status="all", tenant_id="tenant-a")}
+        self.assertIn(tenant_a_call, tenant_a_ids)
+        self.assertNotIn(tenant_b_call, tenant_a_ids)
+
+    def test_tenant_scoped_caller_history_suppresses_unscoped_tickets(self):
+        from unittest.mock import patch
+
+        from app.receptionist.store import get_caller_history
+
+        call_id = f"call_hist_{uuid.uuid4().hex[:8]}"
+        create_call(call_id, user_id="shared-user", tenant_id="tenant-a")
+        with patch("app.receptionist.store.db.list_tickets") as list_tickets:
+            history = get_caller_history(call_id, tenant_id="tenant-a")
+        self.assertEqual(history["tickets"], [])
+        list_tickets.assert_not_called()
+
     def test_retention_cleanup(self):
         old_call_id = f"call_old_{uuid.uuid4().hex[:8]}"
         # Created 100 days ago
@@ -131,3 +154,17 @@ class TestReceptionistStore(unittest.TestCase):
         # Check call is deleted
         self.assertIsNone(get_call(old_call_id))
         self.assertEqual(len(list_turns(old_call_id)), 0)
+
+    def test_voice_transcript_retention_uses_voice_ttl_not_chat_ttl(self):
+        from app.voice_consent import VoiceRetentionPolicy
+        from unittest.mock import patch
+
+        old_call_id = f"call_voice_ttl_{uuid.uuid4().hex[:8]}"
+        old_time = time.time() - (3 * 86400)
+        create_call(old_call_id, started_at=old_time)
+        create_turn(old_call_id, seq=1, speaker="caller", kind="utterance", text="older voice turn", created_at=old_time)
+        policy = VoiceRetentionPolicy(transcript_ttl_days=2)
+        with patch("app.voice_consent.retention_policy", policy):
+            deleted = db.cleanup_expired_data()
+        self.assertGreaterEqual(deleted.get("voice_call_turns", 0), 1)
+        self.assertIsNone(get_call(old_call_id))

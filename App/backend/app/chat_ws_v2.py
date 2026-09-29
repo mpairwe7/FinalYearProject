@@ -151,7 +151,7 @@ def _release_socket_slot(user_key: str) -> None:
 
 
 def _resolve_ws_principal(
-    websocket: WebSocket, *, required: bool = False
+    websocket: WebSocket, *, required: bool = False, token_override: str | None = None
 ) -> tuple[str, str, str, list[str]]:
     """Resolve ``(user_id, tenant_id, user_role, granted_purposes)`` from the socket.
 
@@ -163,10 +163,13 @@ def _resolve_ws_principal(
     """
     auth_header = websocket.headers.get("authorization", "")
     token = ""
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-    if not token:
-        token = websocket.query_params.get("access_token", "") or websocket.query_params.get("token", "")
+    if token_override is not None:
+        token = token_override.strip()
+    else:
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+        if not token:
+            token = websocket.query_params.get("access_token", "") or websocket.query_params.get("token", "")
     if not token:
         if required:
             raise JWTAuthError("authentication required")

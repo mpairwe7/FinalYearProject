@@ -232,6 +232,13 @@ class ProductionHardeningTests(unittest.TestCase):
             "FLAG_NATIVE_VOICE=true requires FLAG_AUTH_REQUIRED", str(raised.exception)
         )
 
+    def test_browser_receptionist_is_not_allowed_in_production(self) -> None:
+        env = {**self.secure_env, "FLAG_VOICE_RECEPTIONIST": "true"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        self.assertIn("browser WebSockets and process-local call state", str(raised.exception))
+
     # ── Cloudflare/Gemini fallback validation (explicit-on flag) ──────────
     _CF_ENV = {
         "FLAG_CLOUDFLARE_FALLBACK": "true",

@@ -33,6 +33,15 @@ def get_max_call_s() -> float:
         return 900.0
 
 
+def get_gemini_session_timeout_s() -> float:
+    """End Gemini Live calls before the provider's documented connection window."""
+    try:
+        configured = float(os.getenv("RECEPTIONIST_MAX_CALL_S", "900"))
+    except ValueError:
+        configured = 900.0
+    return min(max(1.0, configured), 8 * 60.0)
+
+
 def get_filler_after_ms() -> int:
     try:
         return int(os.getenv("RECEPTIONIST_FILLER_AFTER_MS", "450"))
