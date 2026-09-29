@@ -154,6 +154,51 @@ formula are neutralised. Seal first, then record the verification verdict,
 head hash and the seal's Merkle root with the export, so the file can be
 matched to the chain and to the log archive later.
 
+## Verify on the local stack
+
+`scripts/probe_audit_trail.py` is the live canary: it checks the trail refuses
+unauthenticated reads and seals, that `audit_ledger` cannot be switched by API,
+that a chat turn lands on the chain, and it seals twice and verifies in both
+scopes. It changes no row. It runs **inside** the api container, so the
+break-glass operator key is read from that process's environment and never
+leaves it:
+
+```bash
+docker exec -i -w /app ura-app-api python - < scripts/probe_audit_trail.py
+```
+
+`audit_ledger` is protected — the flags API answers 400 to any change — so turn
+it on for the container, not at runtime. With the four-file GPU overlay (see
+`local-gpu-salt-ngrok-stack` in the guided-journey probes runbook), add a
+throwaway override and recreate only the api, from the main checkout:
+
+```yaml
+# /tmp/audit-live.override.yml — do not commit
+services:
+  api:
+    environment:
+      FLAG_AUDIT_LEDGER: "true"
+      AUDIT_SEAL_INTERVAL_SECONDS: "120"   # watch a scheduled seal within minutes
+```
+
+```bash
+cd ~/Mpairwe7/FinalYearProject/App
+GPU_ID=2 VLLM_GPU_ID=5 SUNFLOWER_GPU_ID=5 docker compose \
+  -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+  -f docker-compose.local-sunflower.yml -f docker-compose.gpu-salt.yml \
+  -f /tmp/audit-live.override.yml up -d --no-deps --no-build api
+```
+
+A scheduled seal shows as an `audit seal tenant=… seq=a..b …` log line and as
+`audit_seals_total{trigger="schedule"}` on `/metrics`. Recreate the api
+without the override afterwards to put the stack back.
+
+**Result, 2026-09-29** (branch build on the local GPU stack): 12/12 probe
+checks; a scheduled seal fired on the 120 s interval (`seq=9..10`) with no
+`audit_seal_failed_total` or `audit_chain_breaks_total`; through the ngrok
+tunnel both audit routes answered 401 unauthenticated and the `/admin/audit`
+bundle carried the new seal controls.
+
 ## Backends
 
 The ledger runs on SQLite and on Postgres through the same query helpers.
