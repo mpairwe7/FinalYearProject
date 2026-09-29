@@ -555,7 +555,13 @@ async def staff_calls_stream_endpoint(
         if snapshot is None:
             await websocket.close(code=4404)
             return
-        log_voice_event(user_id=user_id or "", session_id=call_id, event_type="staff_viewed_call", tenant_id=tenant_id or "default")
+        log_voice_event(
+            user_id=user_id or "",
+            session_id=call_id,
+            event_type="staff_viewed_call",
+            metadata={"actor_role": role, "view": "live"},
+            tenant_id=tenant_id or "default",
+        )
         await websocket.send_text(
             json.dumps({
                 "type": "snapshot",
@@ -624,6 +630,15 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         if tenant_enabled() and room.state.tenant_id != (tenant_id or "default"):
             await websocket.close(code=4404)
             return
+        # Listening to a live call is the most sensitive read on the desk:
+        # recorded before any audio flows, on either transport.
+        log_voice_event(
+            user_id=user_id or "",
+            session_id=call_id,
+            event_type="staff_listened_call",
+            metadata={"actor_role": role, "transport": "livekit" if livekit.enabled() else "websocket"},
+            tenant_id=tenant_id or "default",
+        )
         if livekit.enabled():
             observer_identity = livekit.participant_identity(
                 "observer", f"{user_id}:{uuid.uuid4().hex}"
@@ -788,6 +803,7 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
                 user_id=user_id or "",
                 session_id=call_id,
                 event_type="officer_joined",
+                metadata={"actor_role": role, "transport": "livekit"},
                 tenant_id=tenant_id or "default",
             )
             while room.state.mode == "bridged" or (
@@ -829,7 +845,13 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
     except desk.DeskError as exc:
         await _refuse_officer(websocket, exc.detail)
         return
-    log_voice_event(user_id=user_id or "", session_id=call_id, event_type="officer_joined", tenant_id=tenant_id or "default")
+    log_voice_event(
+        user_id=user_id or "",
+        session_id=call_id,
+        event_type="officer_joined",
+        metadata={"actor_role": role},
+        tenant_id=tenant_id or "default",
+    )
 
     officer_leg.start()
 

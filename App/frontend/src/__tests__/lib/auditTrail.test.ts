@@ -4,7 +4,14 @@
  * in a spreadsheet, where an unguarded cell starting with "=" runs as a formula.
  */
 import { describe, expect, it } from "vitest";
-import { auditEventsToCsv, checkCoverage, eventLabel, sealStatus, summarizePayload } from "../../lib/auditTrail";
+import {
+  AUDIT_FILTERS,
+  auditEventsToCsv,
+  checkCoverage,
+  eventLabel,
+  sealStatus,
+  summarizePayload,
+} from "../../lib/auditTrail";
 import type { AuditEvent, AuditVerification } from "../../services/analyticsApi";
 
 const event = (over: Partial<AuditEvent> = {}): AuditEvent => ({
@@ -109,5 +116,32 @@ describe("integrity wording", () => {
       },
     });
     expect(sealStatus(sealed, fmt)).toBe("Sealed through #39 on 1 Sep 2026; 1 event written since.");
+  });
+});
+
+describe("call desk events", () => {
+  it("reads call reads and desk actions as sentences", () => {
+    expect(eventLabel("voice_staff_viewed_call")).toBe("Opened a call and its transcript");
+    expect(eventLabel("voice_staff_listened_call")).toBe("Listened in to a live call");
+    expect(eventLabel("voice_officer_transferred")).toBe("Transferred a call");
+    expect(eventLabel("staff.call_reviewed")).toBe("Rated a call");
+  });
+
+  it("offers call filters", () => {
+    const values = AUDIT_FILTERS.map((f) => f.value);
+    expect(values).toContain("voice_staff");
+    expect(values).toContain("voice_officer");
+  });
+
+  it("keeps ledger plumbing out of the details", () => {
+    const text = summarizePayload({
+      voice_audit_id: "row-1",
+      session_id: "call_abc",
+      user_id: "off-1",
+      audio_hash: "",
+      actor_role: "ura_staff",
+      transport: "livekit",
+    });
+    expect(text).toBe("session id: call_abc · transport: livekit");
   });
 });

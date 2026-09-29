@@ -12,7 +12,9 @@ after a QA audit of the auditor dashboard and a review of the ledger itself
 | --- | --- | --- | --- |
 | Read tickets, transcripts, calls, analytics | yes | yes | yes |
 | Change a ticket, reply to a taxpayer, heartbeat a case | yes | yes | **no (403)** |
-| Take, hold, transfer or end a call | yes | yes | **no (403)** |
+| Take, give back, hold, transfer, wrap up or end a call; set desk presence | yes | yes | **no (403)** |
+| Rate a call (review) | yes | yes | **no (403)** |
+| Listen in to a live call | yes | yes | yes (recorded) |
 | Toggle a flag, edit a staff-written answer | no | yes | **no (403)** |
 | Read and verify the audit trail (`/admin/audit`) | **no (403)** | yes | yes |
 | Seal the audit trail ("Seal now") | **no (403)** | yes | yes |
@@ -27,6 +29,11 @@ resolve a ticket or send a reply to a taxpayer.
 The operator key (`INDEX_API_KEY`, break-glass) passes these checks and is
 recorded as actor `operator-key`.
 
+`tests/test_auditor_controls.py::test_every_admin_write_route_refuses_an_auditor`
+walks every `POST`/`PUT`/`PATCH`/`DELETE` route under `/v1/admin` in the live
+app and requires a 403 for an auditor; the only listed exception is sealing. A
+new staff write that forgets its role check fails that test.
+
 ## What is recorded
 
 With `audit_ledger` on (production refuses to start without it), each of
@@ -40,7 +47,12 @@ these appends one hash-chained row to `audit_events`:
 | `staff.override_saved` / `staff.override_deleted` | A staff-written answer changes | `override_id`, `enabled` |
 | `generate` | The assistant answers (existing) | hashes of question and reply, route, scores |
 | `tool_confirm` | A taxpayer confirms or refuses an action (existing) | tool, decision |
-| `voice_*` | Voice consent and recording events (existing) | voice audit id, audio hash |
+| `staff.call_reviewed` | A call is rated | `call_id`, `rating`, `note_chars` |
+| `voice_staff_viewed_call` | A call and its transcript are opened (call detail, or the live call view) | call id (`session_id`) |
+| `voice_staff_listened_call` | Someone listens in to a live call, before any audio flows | call id, `transport` (`livekit` / `websocket`) |
+| `voice_staff_viewed_brief` / `voice_staff_viewed_caller_history` | A call brief or a caller's history is opened | call id |
+| `voice_officer_*` | Call desk: `claimed`, `released`, `joined`, `hold_on` / `hold_off`, `transferred`, `wrapup_saved`, `callback_done`, `ended_call` | call id |
+| `voice_*` (other) | Voice consent and recording events (existing) | voice audit id, audio hash |
 | `erasure_tombstone` | Personal data erased on request (existing) | hash of the erased user id |
 | `audit.trail_viewed` | Someone searches the trail (first page of each search) | the filters used, rows returned |
 | `audit.chain_verified` | Someone runs the integrity check | scope, verdict, rows and seals checked |
@@ -52,6 +64,10 @@ so a listing never contains its own read; paging back through older results
 is not recorded again.
 
 Every staff row also carries `actor_role`; the row's `user_id` is the actor.
+Call events go to the voice audit log first and are chained into the ledger
+with the same actor. Before 2026-09-29 that chaining left the ledger's actor
+empty — every call-desk action read as done by nobody on `/admin/audit` — and
+a failed chain was only a debug line; it is now counted like any other append.
 **Content is never copied into the ledger**: a reply or a note is recorded as
 its length, so the audit trail adds no second copy of taxpayer data. A failed
 append is logged and counted (`audit_append_failed_total` on `/metrics`) —

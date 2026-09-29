@@ -21,6 +21,19 @@ from app.receptionist.store import create_call, create_turn, init_receptionist_s
 from app.voice_consent import init_voice_consent_schema
 
 
+def _listen_records(call_id: str) -> list[tuple[str, str, str]]:
+    """(listener, role, transport) for each recorded listen-in on *call_id*."""
+    rows = db.query_all(
+        "SELECT user_id, metadata_json FROM voice_audit_log WHERE session_id = ? AND event_type = ?",
+        (call_id, "staff_listened_call"),
+    )
+    out = []
+    for row in rows:
+        meta = json.loads(row["metadata_json"] or "{}")
+        out.append((row["user_id"], meta.get("actor_role", ""), meta.get("transport", "")))
+    return out
+
+
 def _init_schema() -> None:
     """Every table these sockets write to: the voice audit log is created by the
     app lifespan, which TestClient(app) does not run, so without this the tests
@@ -178,6 +191,7 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
                     room.broadcast_audio(chunk)
                     received = ws.receive_bytes()
                     self.assertEqual(received, chunk)
+            self.assertEqual(_listen_records(call_id), [("supervisor_1", "ura_admin", "websocket")])
         finally:
             registry._rooms.pop(call_id, None)
 
@@ -219,6 +233,7 @@ class TestLiveKitListenIn(unittest.TestCase):
                         time.sleep(0.02)
             revoke.assert_awaited_once_with(state.livekit_room, ready["identity"])
             self.assertNotIn(ready["identity"], state.livekit_observer_identities)
+            self.assertEqual(_listen_records(call_id), [("supervisor_1", "ura_admin", "livekit")])
         finally:
             registry._rooms.pop(call_id, None)
 

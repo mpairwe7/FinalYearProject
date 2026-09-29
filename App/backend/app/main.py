@@ -3424,9 +3424,13 @@ def get_call_metrics_endpoint(
 @app.get("/v1/admin/calls/{call_id}", tags=["admin"])
 def get_call_detail_endpoint(
     call_id: str,
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Retrieve full call detail including turns, summary, metrics, and ticket."""
+    """Retrieve full call detail including turns, summary, metrics, and ticket.
+
+    Reading a call's transcript is recorded (``voice_staff_viewed_call``), as
+    opening a ticket's transcript is.
+    """
     import re
     from .receptionist.store import get_call_with_turns
     from .tenancy import tenant_enabled
@@ -3434,10 +3438,11 @@ def get_call_detail_endpoint(
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
 
-    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+    tenant_scope = (ctx.tenant_id or "default") if tenant_enabled() else None
     detail = get_call_with_turns(call_id, tenant_id=tenant_scope)
     if not detail:
         raise HTTPException(status_code=404, detail="Call not found")
+    _staff_call_event(ctx, call_id, "staff_viewed_call")
     return detail
 
 
@@ -3469,6 +3474,12 @@ def review_call_endpoint(
         raise HTTPException(status_code=400, detail="Invalid rating")
     note = str(body.get("note", ""))
     ok = save_call_review(call_id, rating=rating, note=note)
+    if ok:
+        _audit_staff_action(
+            ctx,
+            "staff.call_reviewed",
+            {"call_id": call_id, "rating": rating, "note_chars": len(note)},
+        )
     return {"ok": ok, "call_id": call_id, "rating": rating}
 
 
@@ -3484,6 +3495,24 @@ def _desk_call_id(call_id: str) -> str:
     if not re.match(_CALL_ID_RE, call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
     return call_id
+
+
+def _staff_call_event(ctx: AuthContext, call_id: str, event_type: str, **metadata: Any) -> None:
+    """Record a staff read or action on a call: voice audit log and audit ledger.
+
+    Carries the actor's role like ``_audit_staff_action`` does, so the audit
+    trail shows who acted and in which capacity; the break-glass operator key
+    is recorded as ``operator-key``.
+    """
+    from .voice_consent import log_voice_event
+
+    log_voice_event(
+        user_id=ctx.user_id or "operator-key",
+        session_id=call_id,
+        event_type=event_type,
+        metadata={"actor_role": ctx.role if ctx.user else "operator_key", **metadata},
+        tenant_id=ctx.tenant_id or "default",
+    )
 
 
 def _receptionist_tenant_scope(ctx: AuthContext) -> str | None:
@@ -3535,11 +3564,9 @@ async def get_call_brief_endpoint(
     from fastapi.responses import JSONResponse
 
     from .receptionist import brief as call_brief
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     call = _require_receptionist_call(call_id, ctx)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_brief",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "staff_viewed_brief")
     if refresh:
         brief = await asyncio.to_thread(call_brief.build_brief, call_id, force=True)
         if brief:
@@ -3555,7 +3582,6 @@ async def get_call_brief_endpoint(
 async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
     """Take a waiting call (or one the AI is handling): first officer wins, the rest get 409."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3564,8 +3590,7 @@ async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_a
                                   officer_name=_desk_officer_name(ctx))
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_claimed",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_claimed")
     return result
 
 
@@ -3573,7 +3598,6 @@ async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_a
 async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
     """Give a claimed call back to the waiting queue before joining it."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3581,8 +3605,7 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
         result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_released",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_released")
     return result
 
 
@@ -3590,7 +3613,6 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
 async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
     """The officer ends the call: the caller hears a closing line and is hung up."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3599,8 +3621,7 @@ async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_adm
                                 is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_ended_call",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_ended_call")
     return result
 
 
@@ -3612,7 +3633,6 @@ async def hold_call_endpoint(
 ) -> Any:
     """Put an active call on hold or resume it."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3621,9 +3641,7 @@ async def hold_call_endpoint(
         result = await desk.hold(call_id, ctx.user_id, on=on, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id,
-                    event_type="officer_hold_on" if on else "officer_hold_off",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_hold_on" if on else "officer_hold_off")
     return result
 
 
@@ -3635,7 +3653,6 @@ async def transfer_call_endpoint(
 ) -> Any:
     """Transfer the call to a specialized team or another officer."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3647,8 +3664,7 @@ async def transfer_call_endpoint(
                                      note=note, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_transferred",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_transferred")
     return result
 
 
@@ -3660,7 +3676,6 @@ async def wrapup_call_endpoint(
 ) -> Any:
     """Submit post-call wrap-up note, outcome, and ticket action."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3682,8 +3697,7 @@ async def wrapup_call_endpoint(
         )
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_wrapup_saved",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_wrapup_saved")
     return result
 
 
@@ -3695,7 +3709,6 @@ async def callback_done_endpoint(
 ) -> Any:
     """Mark an open callback as resolved."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3704,8 +3717,7 @@ async def callback_done_endpoint(
         result = await desk.callback_done(call_id, ctx.user_id, note=note, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_callback_done",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_callback_done")
     return result
 
 
@@ -3716,11 +3728,9 @@ def caller_history_endpoint(
 ) -> Any:
     """Retrieve previous calls and tickets for the same caller."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_caller_history",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "staff_viewed_caller_history")
     return desk.caller_history(call_id, tenant_id=_receptionist_tenant_scope(ctx))
 
 

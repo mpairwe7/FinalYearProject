@@ -14,6 +14,20 @@ const EVENT_LABEL: Record<string, string> = {
   "staff.flag_cleared": "Reset a feature switch to its default",
   "staff.override_saved": "Saved a staff-written answer",
   "staff.override_deleted": "Deleted a staff-written answer",
+  "staff.call_reviewed": "Rated a call",
+  voice_staff_viewed_call: "Opened a call and its transcript",
+  voice_staff_listened_call: "Listened in to a live call",
+  voice_staff_viewed_brief: "Opened a call brief",
+  voice_staff_viewed_caller_history: "Opened a caller's history",
+  voice_officer_claimed: "Took a call",
+  voice_officer_released: "Gave a call back to the queue",
+  voice_officer_joined: "Joined a call",
+  voice_officer_ended_call: "Ended a call",
+  voice_officer_hold_on: "Put a call on hold",
+  voice_officer_hold_off: "Took a call off hold",
+  voice_officer_transferred: "Transferred a call",
+  voice_officer_wrapup_saved: "Saved a call wrap-up",
+  voice_officer_callback_done: "Completed a callback",
   "audit.trail_viewed": "Searched the audit trail",
   "audit.chain_verified": "Checked the audit trail is intact",
   "audit.sealed": "Sealed the audit trail",
@@ -30,6 +44,8 @@ export const AUDIT_FILTERS: readonly { value: string; label: string }[] = [
   { value: "staff.ticket_updated", label: "Ticket changes" },
   { value: "staff.flag", label: "Feature switch changes" },
   { value: "staff.override", label: "Staff-written answer changes" },
+  { value: "voice_staff", label: "Calls opened or listened to" },
+  { value: "voice_officer", label: "Call desk actions" },
   { value: "audit.", label: "Audit trail searches, checks and seals" },
   { value: "generate", label: "Assistant answers" },
   { value: "voice_", label: "Voice consent and recordings" },
@@ -42,8 +58,12 @@ export function eventLabel(eventType: string): string {
   return eventType.replaceAll("_", " ").replaceAll(".", " · ");
 }
 
-/** Payload keys that are chain plumbing, not something an auditor reads. */
-const HIDDEN_KEYS = new Set(["actor_role"]);
+/**
+ * Payload keys that are chain plumbing, not something an auditor reads: the
+ * role and actor have their own column, and voice events repeat the actor as
+ * `user_id` alongside internal ids.
+ */
+const HIDDEN_KEYS = new Set(["actor_role", "user_id", "voice_audit_id", "audio_hash"]);
 
 function display(value: unknown): string {
   if (value == null) return "—";
@@ -54,7 +74,7 @@ function display(value: unknown): string {
 /** "status: assigned · officer_reply_chars: 24", at most *max* characters. */
 export function summarizePayload(payload: Record<string, unknown>, max = 140): string {
   const parts = Object.entries(payload ?? {})
-    .filter(([key]) => !HIDDEN_KEYS.has(key))
+    .filter(([key, value]) => !HIDDEN_KEYS.has(key) && value !== "" && value != null)
     .map(([key, value]) => `${key.replaceAll("_", " ")}: ${display(value)}`);
   const text = parts.join(" · ");
   return text.length > max ? `${text.slice(0, max - 1)}…` : text || "—";

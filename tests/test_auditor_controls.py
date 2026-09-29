@@ -290,3 +290,109 @@ def test_one_tenant_failing_to_seal_does_not_leave_the_others_unsealed(tenant, m
     finally:
         flags.set("audit_ledger", before)
     assert ledger.latest_anchor(tenant)["last_seq"] == 1
+
+
+
+# ---------------------------------------------------------------------------
+# QA pass after #515 (call desk): completeness, not just the routes we know of
+# ---------------------------------------------------------------------------
+#: Writes an auditor may make: adding a seal changes no row.
+_AUDITOR_MAY_WRITE = {("POST", "/v1/admin/audit/seal")}
+_WRITE_BODIES = {
+    "/v1/admin/overrides": {"query": "What is VAT?", "reply": "18%."},
+    "/v1/admin/calls/{call_id}/review": {"rating": 4, "note": "fine"},
+    "/v1/admin/calls/{call_id}/hold": {"on": True},
+    "/v1/admin/calls/{call_id}/transfer": {"team": "disputes"},
+    "/v1/admin/calls/{call_id}/wrapup": {"outcome": "resolved", "note": "done"},
+    "/v1/admin/calls/{call_id}/callback-done": {"note": "called back"},
+    "/v1/admin/officers/me/presence": {"status": "available"},
+    "/v1/admin/tickets/{ticket_id}": {"status": "resolved"},
+}
+_WRITE_PARAMS = {"/v1/admin/flags/{name}": {"enabled": "true"}}
+
+
+def _receptionist_call(tenant: str) -> str:
+    from App.backend.app.receptionist.store import create_call, init_receptionist_schema
+    from App.backend.app.voice_consent import init_voice_consent_schema
+
+    init_receptionist_schema()
+    init_voice_consent_schema()
+    call_id = f"call_{uuid.uuid4().hex[:10]}"
+    create_call(call_id, conversation_id=f"conv_{call_id}", status="transferring", tenant_id=tenant)
+    return call_id
+
+
+def test_every_admin_write_route_refuses_an_auditor(client, tenant):
+    """Enumerates the live routes, so a new staff write that forgets its role check fails here."""
+    from fastapi.routing import APIRoute
+
+    ids = {"ticket_id": _ticket(), "call_id": _receptionist_call(tenant), "override_id": "ovr-qa", "name": "hyde"}
+    auditor = _headers("aud-matrix", "ura_auditor", tenant)
+    checked, leaks = [], []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or not route.path.startswith("/v1/admin"):
+            continue
+        for method in sorted(route.methods & {"POST", "PUT", "PATCH", "DELETE"}):
+            if (method, route.path) in _AUDITOR_MAY_WRITE:
+                continue
+            response = client.request(
+                method,
+                route.path.format(**ids),
+                headers=auditor,
+                json=_WRITE_BODIES.get(route.path, {}),
+                params=_WRITE_PARAMS.get(route.path),
+            )
+            checked.append(f"{method} {route.path}")
+            if response.status_code != 403:
+                leaks.append(f"{method} {route.path} -> {response.status_code}")
+    assert leaks == []
+    assert len(checked) >= 15, checked  # 15 on 2026-09-29; the matrix grows with the API
+
+
+def test_call_reads_and_reviews_are_recorded_with_actor_and_role(client, tenant, ledger_on):
+    call_id = _receptionist_call(tenant)
+    auditor = _headers("aud-calls", "ura_auditor", tenant)
+    officer = _headers("off-calls", "ura_staff", tenant)
+    assert client.get(f"/v1/admin/calls/{call_id}", headers=auditor).status_code == 200
+    assert client.post(f"/v1/admin/calls/{call_id}/review", headers=auditor, json={"rating": 1}).status_code == 403
+    note = "Clear and polite, confirmed the TIN."
+    reviewed = client.post(f"/v1/admin/calls/{call_id}/review", headers=officer, json={"rating": 4, "note": note})
+    assert reviewed.status_code == 200
+
+    events = client.get("/v1/admin/audit/events?limit=20", headers=auditor).json()["events"]
+    by_type = {e["event_type"]: e for e in events}
+    viewed = by_type["voice_staff_viewed_call"]
+    assert (viewed["actor"], viewed["payload"]["actor_role"]) == ("aud-calls", "ura_auditor")
+    assert viewed["payload"]["session_id"] == call_id
+    review = by_type["staff.call_reviewed"]
+    assert review["actor"] == "off-calls"
+    assert review["payload"] == {"actor_role": "ura_staff", "call_id": call_id, "rating": 4, "note_chars": len(note)}
+
+
+def test_every_voice_event_the_code_writes_is_a_known_type():
+    """An unknown type still writes, but logs a warning on every call-desk action."""
+    import ast
+
+    from App.backend.app.voice_consent import VOICE_EVENT_TYPES
+
+    def constants(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [node.value]
+        if isinstance(node, ast.IfExp):
+            return constants(node.body) + constants(node.orelse)
+        return []
+
+    used = set()
+    for path in (PROJECT_ROOT / "App" / "backend" / "app").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            if name == "log_voice_event":
+                for kw in node.keywords:
+                    if kw.arg == "event_type":
+                        used.update(constants(kw.value))
+            elif name == "_staff_call_event" and len(node.args) >= 3:
+                used.update(constants(node.args[2]))
+    assert used, "the scan found no voice events at all"
+    assert used - VOICE_EVENT_TYPES == set()
