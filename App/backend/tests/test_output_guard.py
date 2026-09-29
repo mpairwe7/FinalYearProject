@@ -91,6 +91,69 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertIn("2. Filing", sanitized)
         self.assertIn("3. Payments", sanitized)
 
+    def test_a_rate_or_section_number_is_not_a_step(self) -> None:
+        raw = "The VAT rate is 18. File the return under Section 5. The Act also covers exports."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("18. File the return", sanitized)
+        self.assertIn("Section 5. The Act", sanitized)
+        self.assertNotIn("\n18. File", sanitized)
+
+    def test_a_glued_step_splits_but_a_glued_section_does_not(self) -> None:
+        steps = OutputGuard.normalize_structure("Download the template2. Enable macros before upload.")
+        self.assertIn("template.\n\n2. Enable macros", steps)
+        section = OutputGuard.normalize_structure("Read Section5. The Act sets the due date.")
+        self.assertIn("Section5. The Act", section)
+        self.assertNotIn("\n5. The Act", section)
+
+    def test_a_later_section_number_does_not_join_the_step_list(self) -> None:
+        raw = "1. Register online\n\n2. File the return\n\n18. The VAT Act applies to taxable supplies."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. Register online", sanitized)
+        self.assertIn("2. File the return", sanitized)
+        self.assertIn("18. The VAT Act applies", sanitized)
+
+    def test_a_nested_repeated_one_stays_in_its_own_list(self) -> None:
+        raw = "1. Register\n  1. Create a TIN\n  1. Verify the email\n2. File"
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. Register", sanitized)
+        self.assertIn("  1. Create a TIN", sanitized)
+        self.assertIn("  2. Verify the email", sanitized)
+        self.assertIn("2. File", sanitized)
+
+    def test_prose_dashes_stay_a_sentence_and_labels_become_bullets(self) -> None:
+        prose = "PAYE - the tax on employment - is deducted monthly."
+        self.assertEqual(OutputGuard.normalize_structure(prose), prose)
+        labels = OutputGuard.normalize_structure("Services: PAYE - VAT - Customs")
+        self.assertIn("Services:", labels)
+        self.assertIn("- PAYE", labels)
+        self.assertIn("- VAT", labels)
+        self.assertIn("- Customs", labels)
+
+    def test_a_long_answer_is_split_into_paragraphs(self) -> None:
+        raw = (
+            "Register for a TIN before you trade. "
+            "File the return by the fifteenth. "
+            "Pay the assessed tax through the portal. "
+            "Keep the acknowledgement for five years."
+        )
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertEqual(sanitized.count("\n\n"), 1)
+        self.assertTrue(sanitized.startswith("Register for a TIN"))
+        self.assertIn("Keep the acknowledgement", sanitized.split("\n\n")[1])
+
+    def test_a_swahili_procedure_starts_at_kwanza(self) -> None:
+        raw = "Kwanza fungua akaunti. Pili weka TIN. Tatu wasilisha rile."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. **Kwanza**:", sanitized)
+        self.assertIn("2. **Pili**:", sanitized)
+        self.assertIn("3. **Tatu**:", sanitized)
+
+    def test_a_luganda_procedure_starts_at_okusooka(self) -> None:
+        raw = "Okusooka weewandiise. Eky’okubiri osasule."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. **Okusooka**:", sanitized)
+        self.assertIn("2. **Eky'okubiri**:", sanitized)
+
 
 if __name__ == "__main__":
     unittest.main()

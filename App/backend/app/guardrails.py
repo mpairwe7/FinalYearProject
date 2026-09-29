@@ -390,6 +390,105 @@ def contains_pii(text: str) -> bool:
     return False
 
 
+_LISTISH_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|must|should|will|shall|means|applies)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[a-z][.!?])\s+(?=[A-Z])")
+_GLUED_STEP_RE = re.compile(
+    r"(?i)(?<![A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|"
+    r"paragraph|ekitundu|kifungu|ibarra|vat|paye|wht|tin|cit|pit|ugx|efris)\d)"
+    r"([A-Za-z]{3,})((?:[1-9]|1[0-2]))[\.\)][ \t]*(\*{0,2}[A-Za-z])"
+)
+
+
+def _items_are_a_list(parts: list[str], *, word_limit: int) -> bool:
+    """True when every piece is a short label, not a clause."""
+    return all(1 <= len(part.split()) <= word_limit and "." not in part[:-1] for part in parts)
+
+
+def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[str] | None:
+    """Turn a colon-led or short label run into bullets. Leave prose alone."""
+    if line.strip().startswith(("-", "*", "1.", "2.")):
+        return None
+    parts = [part.strip() for part in line.split(separator) if part.strip()]
+    if len(parts) < 3:
+        return None
+    if _LISTISH_VERB_RE.search(line) and ":" not in parts[0]:
+        return None
+    lead, sep, rest = parts[0].partition(":")
+    if sep and lead.strip():
+        items = ([rest.strip()] if rest.strip() else []) + parts[1:]
+        items = [item for item in items if item]
+        if len(items) < 2 or not _items_are_a_list(items, word_limit=word_limit):
+            return None
+        return [f"{lead.strip()}:", *[f"- {item}" for item in items]]
+    if not _items_are_a_list(parts, word_limit=word_limit):
+        return None
+    return [f"- {part}" for part in parts]
+
+
+def _break_long_paragraphs(text: str) -> str:
+    """A wall of four or more sentences becomes paragraphs of at most three.
+
+    List lines, headings, and a period after a digit ("Section 18. The Act")
+    stay as they are.
+    """
+    blocks = re.split(r"\n\s*\n", text)
+    rebuilt: list[str] = []
+    for block in blocks:
+        stripped = block.strip()
+        if not stripped or re.search(r"(?m)^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s)", stripped):
+            rebuilt.append(block.strip())
+            continue
+        sentences = [part.strip() for part in _SENTENCE_BREAK_RE.split(stripped) if part.strip()]
+        if len(sentences) < 4:
+            rebuilt.append(stripped)
+            continue
+        chunks = [" ".join(sentences[i : i + 3]) for i in range(0, len(sentences), 3)]
+        rebuilt.append("\n\n".join(chunks))
+    return "\n\n".join(part for part in rebuilt if part)
+
+
+def _renumber_ordered_lines(lines: list[str]) -> list[str]:
+    """Continue 1, 1, 1 into 1, 2, 3 without absorbing a later section number.
+
+    A jump such as step 2 followed by "18. The Act" ends the list. A deeper
+    indent is its own list, so a nested "1." does not become the parent's 3.
+    """
+    stacks: list[list[int]] = []
+    new_lines: list[str] = []
+    for line in lines:
+        matched = re.match(r"^(\s*)(\d{1,2})([.)])(\s+.*)$", line)
+        if matched is None:
+            if line.strip():
+                stacks.clear()
+            new_lines.append(line)
+            continue
+        indent, num_s, delim, rest = matched.groups()
+        indent_len = len(indent.replace("\t", "    "))
+        raw = int(num_s)
+        while stacks and stacks[-1][0] > indent_len:
+            stacks.pop()
+        if not stacks or stacks[-1][0] != indent_len:
+            stacks.append([indent_len, raw])
+            new_lines.append(line)
+            continue
+        last = stacks[-1][1]
+        if raw == last + 1:
+            nxt = raw
+        elif raw <= last:
+            nxt = last + 1
+        else:
+            stacks.clear()
+            stacks.append([indent_len, raw])
+            new_lines.append(line)
+            continue
+        stacks[-1][1] = nxt
+        new_lines.append(f"{indent}{nxt}{delim}{rest}")
+    return new_lines
+
+
 class OutputGuard:
     """Validate and sanitise model outputs (OWASP LLM02, LLM05, LLM09)."""
 
@@ -475,7 +574,9 @@ class OutputGuard:
 
         Normalizes smashed list numbering (e.g. 'including:1.Foo' -> 'including:\\n\\n1. Foo',
         'laws.2.Bar' -> 'laws.\\n\\n2. Bar'), inline numbered procedures, and tokenization
-        drift such as 'Customary Services' -> 'Customs Services'.
+        drift such as 'Customary Services' -> 'Customs Services'. A rate or a section
+        number ('VAT 18. File', 'Section 5. The Act') is not promoted into a step.
+        A wall of four or more sentences is broken into paragraphs of three.
         """
         if not text:
             return text
@@ -509,6 +610,11 @@ class OutputGuard:
         # Swahili step & ordinal unsmashing: Hatua ya 1 / Kwanza / Pili / Tatu
         text = re.sub(r"(?:^|\n)[ \t]*(?:Hatua\s+ya\s+(\d{1,2})|Hatua\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Hatua\s+ya\s+(\d{1,2})|Hatua\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Kwanza|Hatua\s+ya\s+kwanza)[:\.]?[ \t]*", "\n1. **Kwanza**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Pili|Hatua\s+ya\s+pili)[:\.]?[ \t]*", "\n2. **Pili**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Tatu|Hatua\s+ya\s+tatu)[:\.]?[ \t]*", "\n3. **Tatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Nne|Hatua\s+ya\s+nne)[:\.]?[ \t]*", "\n4. **Nne**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Tano|Hatua\s+ya\s+tano)[:\.]?[ \t]*", "\n5. **Tano**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Kwanza|Hatua\s+ya\s+kwanza)[:\.]?[ \t]*", r"\1\n\n1. **Kwanza**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Pili|Hatua\s+ya\s+pili)[:\.]?[ \t]*", r"\1\n\n2. **Pili**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Tatu|Hatua\s+ya\s+tatu)[:\.]?[ \t]*", r"\1\n\n3. **Tatu**: ", text, flags=re.IGNORECASE)
@@ -518,11 +624,16 @@ class OutputGuard:
         # Luganda step & ordinal unsmashing: Omutendera 1 / Okusooka / Eky'okubiri / Eky'okusatu
         text = re.sub(r"(?:^|\n)[ \t]*(?:Omutendera\s+ogwa\s+(\d{1,2})|Omutendera\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Omutendera\s+ogwa\s+(\d{1,2})|Omutendera\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Okusooka|Omutendera\s+ogusooka)[:\.]?[ \t]*", "\n1. **Okusooka**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okubiri|Omutendera\s+ogw['’]okubiri)[:\.]?[ \t]*", "\n2. **Eky'okubiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okusatu|Omutendera\s+ogw['’]okusatu)[:\.]?[ \t]*", "\n3. **Eky'okusatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okuna|Omutendera\s+ogw['’]okuna)[:\.]?[ \t]*", "\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okutaano|Omutendera\s+ogw['’]okutaano)[:\.]?[ \t]*", "\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Okusooka|Omutendera\s+ogusooka)[:\.]?[ \t]*", r"\1\n\n1. **Okusooka**: ", text, flags=re.IGNORECASE)
-        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okubiri|Omutendera\s+ogw\'okubiri)[:\.]?[ \t]*", r"\1\n\n2. **Eky'okubiri**: ", text, flags=re.IGNORECASE)
-        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okusatu|Omutendera\s+ogw\'okusatu)[:\.]?[ \t]*", r"\1\n\n3. **Eky'okusatu**: ", text, flags=re.IGNORECASE)
-        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okuna|Omutendera\s+ogw\'okuna)[:\.]?[ \t]*", r"\1\n\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
-        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky\'okutaano|Omutendera\s+ogw\'okutaano)[:\.]?[ \t]*", r"\1\n\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okubiri|Omutendera\s+ogw['’]okubiri)[:\.]?[ \t]*", r"\1\n\n2. **Eky'okubiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okusatu|Omutendera\s+ogw['’]okusatu)[:\.]?[ \t]*", r"\1\n\n3. **Eky'okusatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okuna|Omutendera\s+ogw['’]okuna)[:\.]?[ \t]*", r"\1\n\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okutaano|Omutendera\s+ogw['’]okutaano)[:\.]?[ \t]*", r"\1\n\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
 
         # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
@@ -533,52 +644,48 @@ class OutputGuard:
             r"\1\n\n\2. \3",
             text,
         )
-        # Separate subsequent inline numbered items smashed on the same line (e.g. 'section.2.**' or 'template2. Enable' or 'taxes. 2.Bar')
-        text = re.sub(
-            r"([a-zA-Z\)])(\.?)[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
-            r"\1.\n\n\3. \4",
-            text,
-        )
+        # A word glued to a step ('template2. Enable'). A rate or a section
+        # ('VAT 18. File', 'Section5. The Act') does not match.
+        text = _GLUED_STEP_RE.sub(r"\1.\n\n\2. \3", text)
         # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
         text = re.sub(r"(\.(?:ug|go\.ug|com|org|net))([A-Z])", r"\1\n\n\2", text)
 
-        # Convert inline hyphen-separated lists under a colon into vertical bullet points
+        # Hyphen and semicolon runs become bullets only when they are labels.
+        # "PAYE - the tax on employment - is deducted monthly" stays a sentence.
         lines = text.split("\n")
-        formatted_lines = []
+        formatted_lines: list[str] = []
         for line in lines:
-            if " - " in line and not line.strip().startswith("-") and not line.strip().startswith("*"):
-                parts = [p.strip() for p in line.split(" - ") if p.strip()]
-                if len(parts) >= 2:
-                    formatted_lines.extend(f"- {p}" for p in parts)
-                    continue
-            formatted_lines.append(line)
+            split = None
+            if " - " in line:
+                split = _split_marked_list(line, " - ", word_limit=4)
+            formatted_lines.extend(split if split is not None else [line])
         text = "\n".join(formatted_lines)
 
-        # Convert inline arrow navigation chains (e.g. 'e-Services -> TIN Registration -> Instant TIN') into numbered steps
+        # Three or more portal hops are a procedure. "18% -> see the table" is not.
         if " → " in text or " -> " in text:
             arrow = " → " if " → " in text else " -> "
             lines = text.split("\n")
             formatted_lines = []
             for line in lines:
                 if arrow in line and not line.strip().startswith(("-", "*", "1.", "2.")):
-                    parts = [p.strip() for p in line.split(arrow) if p.strip()]
-                    if len(parts) >= 2:
-                        formatted_lines.extend(f"{i}. **{p}**" if i == 1 else f"{i}. {p}" for i, p in enumerate(parts, 1))
+                    parts = [part.strip() for part in line.split(arrow) if part.strip()]
+                    if len(parts) >= 3 and not _LISTISH_VERB_RE.search(line):
+                        formatted_lines.extend(
+                            f"{index}. {part}" for index, part in enumerate(parts, 1)
+                        )
                         continue
                 formatted_lines.append(line)
             text = "\n".join(formatted_lines)
 
-        # Convert inline semicolon-separated lists (e.g. 'Item 1; Item 2; Item 3') into vertical bullet points
         lines = text.split("\n")
         formatted_lines = []
         for line in lines:
-            if ";" in line and not line.strip().startswith(("-", "*", "1.", "2.")):
-                if not any(k in line.lower() for k in ("http", "0800", "whatsapp", "services@")):
-                    parts = [p.strip() for p in line.split(";") if p.strip()]
-                    if len(parts) >= 3:
-                        formatted_lines.extend(f"- {p}" for p in parts)
-                        continue
-            formatted_lines.append(line)
+            split = None
+            if ";" in line and not any(
+                key in line.lower() for key in ("http", "0800", "whatsapp", "services@")
+            ):
+                split = _split_marked_list(line, ";", word_limit=6)
+            formatted_lines.extend(split if split is not None else [line])
         text = "\n".join(formatted_lines)
 
         # Bold affirmative/negative opening statutory verdicts in EN, LG, SW
@@ -625,31 +732,10 @@ class OutputGuard:
         # Ensure blank line before and after markdown headings
         text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
         text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)
-        # Normalize excessive blank lines
+        # Normalize excessive blank lines, then paragraph a remaining wall of text.
         text = re.sub(r"\n{3,}", "\n\n", text)
-        # Ensure ordered list items increment sequentially (fixes repeated 1. or non-ascending numbers)
-        lines = text.split("\n")
-        in_list = False
-        cur_num = 0
-        new_lines: list[str] = []
-        for line in lines:
-            m = re.match(r"^(\s*)(\d{1,2})([.)])(\s+.*)$", line)
-            if m:
-                indent, num, delim, rest = m.groups()
-                if not in_list:
-                    in_list = True
-                    cur_num = 1
-                else:
-                    cur_num += 1
-                new_lines.append(f"{indent}{cur_num}{delim}{rest}")
-            else:
-                if line.strip() == "":
-                    new_lines.append(line)
-                else:
-                    in_list = False
-                    cur_num = 0
-                    new_lines.append(line)
-        return "\n".join(new_lines).strip()
+        text = _break_long_paragraphs(text)
+        return "\n".join(_renumber_ordered_lines(text.split("\n"))).strip()
 
     @staticmethod
     def check_prompt_leakage(text: str) -> GuardResult:

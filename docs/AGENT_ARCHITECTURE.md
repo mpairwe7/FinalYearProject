@@ -66,6 +66,7 @@ per-request in tests via `flags.set("tool_use", True)`.
              ▼
       ┌─────────────────────────────────────────────────┐
       │  OutputGuard — PII, sanitise, prompt leakage   │
+      │  Structure: steps, paragraphs, kept rates      │
       │  Grounding check (RAGAS-lite)                   │
       │  Escalation check                               │
       └──────┬──────────────────────────────────────────┘
