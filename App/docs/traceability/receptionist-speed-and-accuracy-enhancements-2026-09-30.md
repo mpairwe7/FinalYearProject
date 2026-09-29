@@ -126,3 +126,17 @@ Automated end-to-end verification (`scripts/verify_receptionist_ux_control_accur
 1. **Immediate Answer Repetition**: Caller asking to repeat ("could you repeat that please", "kiddemu", "rudia tena") triggers instant playback of the cached last assistant answer without redundant RAG/LLM invocation.
 2. **Adaptive Speech Rate Control**: Caller requesting slower speech ("speak slower", "yogera mpola", "ongea polepole") toggles `speech_rate_slow` state and provides natural voice acknowledgment.
 3. **Voice-Triggered Hangup**: Caller saying "goodbye", "weeraba", or "kwaheri" triggers polite signoff and calls `hang_up_caller("caller_voice_hangup")`.
+
+---
+
+## 6. Live Multilingual Stress Benchmark over Public Ngrok URL
+
+Evaluated against the live public tunnel (`https://struttingly-nongeological-briella.ngrok-free.dev`) on the production GPU stack:
+*Artifact produced: `evals/reports/multilingual_ngrok_stress_report.json` (Overall: PASS)*
+
+| Benchmark Stage | Test Description | Results & Latencies | Target SLA / Outcome |
+| :--- | :--- | :--- | :--- |
+| **Stage 1: Statutory Accuracy** | 9 statutory probes across EN, LG, SW (18% VAT, 2% late payment penalty, TIN registration) | **100.0% accuracy pass rate** (9/9 matched, EN p50=782ms, LG p50=4458ms, SW p50=4585ms) | Zero figure hallucination |
+| **Stage 2: Concurrency Burst** | Parallel spike burst (c=12 concurrency, 24 requests interleaved across EN, LG, SW) | **100.0% success rate** (24/24 status 200 OK); **16.54 req/s throughput** in 1.45s; **p50=590.3 ms**, **p95=860.0 ms** | >10 req/s, <1s p95 |
+| **Stage 3: Voice Audio Pipeline** | End-to-end PCM voice chat (`/api/v1/voice/chat`) with ASR, MT, LLM, and TTS | **100.0% pass rate** (3/3 audio turns); **EN=1,155.6 ms**, **LG=1,714.3 ms**, **SW=1,469.0 ms** | Valid PCM/WAV synthesized |
+| **Stage 4: Hardware Telemetry** | Dedicated RTX A6000 telemetry under load | **GPU 2 (API/ASR/TTS)**: 11,437 MiB, 54°C, 85.1W; **GPU 4 (Orpheus)**: 18,046 MiB, 85°C peak, 271.8W; **GPU 5 (vLLM)**: 25,748 MiB, 63°C, 92.8W | Stable VRAM headroom |

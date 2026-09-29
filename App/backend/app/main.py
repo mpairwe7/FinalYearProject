@@ -1850,47 +1850,23 @@ async def voice_chat(
             "citations": [],
         }
     else:
-        # --- 2. MT (Luganda / Swahili -> English) -----------------------------
+        # --- 2. Query normalisation & Domain Term Mapping -------------------
         mt_latency = 0.0
-        mt_backend = ""
+        mt_backend = "local_norm"
         chat_text = transcript
         if detected_lang == "lg":
             chat_text = normalize_luganda_tax_query(transcript)
-            mt_result = speech.translate(chat_text, source_lang="lg", target_lang="en")
-            mt_latency += mt_result.latency_s
-            mt_backend = mt_result.backend
-            metrics.inc("speech_mt_total")
-            if mt_result.latency_s:
-                metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-            if mt_result.error:
-                metrics.inc("speech_mt_errors_total")
-                stage_errors.append(f"MT(lg->en): {mt_result.error}")
-                logger.warning("Voice chat MT lg->en failed: %s", mt_result.error)
-            else:
-                chat_text = mt_result.text
         elif detected_lang == "sw":
             chat_text = normalize_swahili_tax_query(transcript)
-            mt_result = speech.translate(chat_text, source_lang="sw", target_lang="en")
-            mt_latency += mt_result.latency_s
-            mt_backend = mt_result.backend
-            metrics.inc("speech_mt_total")
-            if mt_result.latency_s:
-                metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-            if mt_result.error:
-                metrics.inc("speech_mt_errors_total")
-                stage_errors.append(f"MT(sw->en): {mt_result.error}")
-                logger.warning("Voice chat MT sw->en failed: %s", mt_result.error)
-            else:
-                chat_text = mt_result.text
 
-        # --- 3. LLM chat ---------------------------------------------------------
+        # --- 3. Local Model Generation & Localization -------------------------
         t_llm = time.perf_counter()
         chat_result = await asyncio.to_thread(
             model.generate,
             message=chat_text,
             conversation_id=conversation_id,
             top_k=top_k,
-            locale="en",
+            locale=detected_lang,
             session_id=session_id,
             request_id=getattr(request.state, "request_id", None),
             user_id=ctx.user_id or None,
@@ -1898,34 +1874,6 @@ async def voice_chat(
         )
         llm_latency = time.perf_counter() - t_llm
         reply_text = chat_result.get("reply", "")
-
-        # --- 4. MT (English -> Luganda / Swahili) -----------------------------
-        if detected_lang == "lg" and reply_text:
-            mt_result = speech.translate(reply_text, source_lang="en", target_lang="lg")
-            mt_latency += mt_result.latency_s
-            mt_backend = mt_backend or mt_result.backend
-            metrics.inc("speech_mt_total")
-            if mt_result.latency_s:
-                metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-            if mt_result.error:
-                metrics.inc("speech_mt_errors_total")
-                stage_errors.append(f"MT(en->lg): {mt_result.error}")
-                logger.warning("Voice chat MT en->lg failed: %s", mt_result.error)
-            else:
-                reply_text = mt_result.text
-        elif detected_lang == "sw" and reply_text:
-            mt_result = speech.translate(reply_text, source_lang="en", target_lang="sw")
-            mt_latency += mt_result.latency_s
-            mt_backend = mt_backend or mt_result.backend
-            metrics.inc("speech_mt_total")
-            if mt_result.latency_s:
-                metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-            if mt_result.error:
-                metrics.inc("speech_mt_errors_total")
-                stage_errors.append(f"MT(en->sw): {mt_result.error}")
-                logger.warning("Voice chat MT en->sw failed: %s", mt_result.error)
-            else:
-                reply_text = mt_result.text
 
     # --- 5. TTS (synthesize reply in user's language) -------------------------
     tts_latency = 0.0
@@ -1945,9 +1893,15 @@ async def voice_chat(
                 VOICE_CHAT_BUDGET_S,
             )
         else:
+            from .receptionist.brain import _split_into_sentences
             from .speech_normalization import clean_text_for_speech
 
             spoken_reply = clean_text_for_speech(reply_text, locale=detected_lang)
+            sentences = _split_into_sentences(spoken_reply)
+            if len(sentences) > 3:
+                spoken_reply = " ".join(sentences[:3])
+            if len(spoken_reply) > 500:
+                spoken_reply = spoken_reply[:500].rsplit(" ", 1)[0] + "."
             tts_result = speech.synthesize(text=spoken_reply, voice=voice, language=detected_lang)
             tts_latency = tts_result.latency_s
             tts_backend = tts_result.backend

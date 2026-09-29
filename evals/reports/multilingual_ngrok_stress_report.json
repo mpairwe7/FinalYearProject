@@ -1,0 +1,207 @@
+{
+  "timestamp": 1790720904.857918,
+  "date": "2026-09-30 07:28:24",
+  "target_url": "https://struttingly-nongeological-briella.ngrok-free.dev",
+  "all_passed": true,
+  "telemetry_initial": {
+    "2": {
+      "name": "NVIDIA RTX A6000",
+      "memory_used_mb": 10777.0,
+      "memory_total_mb": 49140.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 50.0,
+      "power_draw_w": 31.41
+    },
+    "4": {
+      "name": "NVIDIA RTX A6000",
+      "memory_used_mb": 18046.0,
+      "memory_total_mb": 49140.0,
+      "utilization_pct": 100.0,
+      "temperature_c": 84.0,
+      "power_draw_w": 288.8
+    },
+    "5": {
+      "name": "NVIDIA RTX A6000",
+      "memory_used_mb": 25748.0,
+      "memory_total_mb": 49140.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 46.0,
+      "power_draw_w": 36.53
+    }
+  },
+  "telemetry_final": {
+    "2": {
+      "name": "NVIDIA RTX A6000",
+      "memory_used_mb": 11437.0,
+      "memory_total_mb": 49140.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 54.0,
+      "power_draw_w": 85.11
+    },
+    "4": {
+      "name": "NVIDIA RTX A6000",
+      "memory_used_mb": 18046.0,
+      "memory_total_mb": 49140.0,
+      "utilization_pct": 100.0,
+      "temperature_c": 85.0,
+      "power_draw_w": 271.84
+    },
+    "5": {
+      "name": "NVIDIA RTX A6000",
+      "memory_used_mb": 25748.0,
+      "memory_total_mb": 49140.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 63.0,
+      "power_draw_w": 92.85
+    }
+  },
+  "accuracy_benchmarks": {
+    "total_tested": 9,
+    "pass_rate_pct": 100.0,
+    "results": [
+      {
+        "language": "en",
+        "query": "What is the standard VAT rate in Uganda?",
+        "status": 200,
+        "latency_ms": 615.2348443865776,
+        "expected_figure": "18%",
+        "figure_matched": true,
+        "token_coverage": 1.0,
+        "passed": true
+      },
+      {
+        "language": "en",
+        "query": "What is the late tax payment penalty per month?",
+        "status": 200,
+        "latency_ms": 2352.396100759506,
+        "expected_figure": "2%",
+        "figure_matched": true,
+        "token_coverage": 1.0,
+        "passed": true
+      },
+      {
+        "language": "en",
+        "query": "How do I register for an individual TIN?",
+        "status": 200,
+        "latency_ms": 782.5199738144875,
+        "expected_figure": "TIN",
+        "figure_matched": true,
+        "token_coverage": 0.3333333333333333,
+        "passed": true
+      },
+      {
+        "language": "lg",
+        "query": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+        "status": 200,
+        "latency_ms": 826.099768280983,
+        "expected_figure": "18%",
+        "figure_matched": true,
+        "token_coverage": 0.75,
+        "passed": true
+      },
+      {
+        "language": "lg",
+        "query": "Kikondeere kki ku kukeerewa okusasula omusolo?",
+        "status": 200,
+        "latency_ms": 6786.055438220501,
+        "expected_figure": "2%",
+        "figure_matched": true,
+        "token_coverage": 1.0,
+        "passed": true
+      },
+      {
+        "language": "lg",
+        "query": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+        "status": 200,
+        "latency_ms": 4458.601236343384,
+        "expected_figure": "TIN",
+        "figure_matched": true,
+        "token_coverage": 0.5,
+        "passed": true
+      },
+      {
+        "language": "sw",
+        "query": "Kiwango cha kawaida cha VAT nchini Uganda ni kiasi gani?",
+        "status": 200,
+        "latency_ms": 4585.631385445595,
+        "expected_figure": "18%",
+        "figure_matched": true,
+        "token_coverage": 0.6666666666666666,
+        "passed": true
+      },
+      {
+        "language": "sw",
+        "query": "Adhabu ya kisheria ya kuchelewa kulipa kodi ni ipi?",
+        "status": 200,
+        "latency_ms": 15804.161921143532,
+        "expected_figure": "2%",
+        "figure_matched": true,
+        "token_coverage": 0.75,
+        "passed": true
+      },
+      {
+        "language": "sw",
+        "query": "Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+        "status": 200,
+        "latency_ms": 899.3843793869019,
+        "expected_figure": "TIN",
+        "figure_matched": true,
+        "token_coverage": 1.0,
+        "passed": true
+      }
+    ]
+  },
+  "concurrency_stress": {
+    "total_requests": 24,
+    "concurrency": 12,
+    "duration_s": 1.45,
+    "throughput_rps": 16.54,
+    "success_rate_pct": 100.0,
+    "latency_ms_p50": 590.3,
+    "latency_ms_p95": 860.0,
+    "by_language_latency_p50": {
+      "en": 685.0,
+      "lg": 568.3,
+      "sw": 686.7
+    }
+  },
+  "voice_pipeline_benchmarks": {
+    "total_tested": 3,
+    "pass_rate_pct": 100.0,
+    "results": [
+      {
+        "language": "en",
+        "audio_key": "en_vat",
+        "status": 200,
+        "latency_ms": 1155.5632650852203,
+        "transcript": "What is the standard VAT rate in Uganda?",
+        "reply_snippet": "The standard rate of Value Added Tax (VAT) in Uganda is 18% ",
+        "audio_bytes": 513424,
+        "has_audio": true,
+        "passed": true
+      },
+      {
+        "language": "lg",
+        "audio_key": "lg_vat",
+        "status": 200,
+        "latency_ms": 1714.279942214489,
+        "transcript": "Vat yange ntya okugisasula era ebitundu bimeeka?",
+        "reply_snippet": "Omusolo ogw'omuwendo ogwongerwako (VAT / omusolo gwa VAT / u",
+        "audio_bytes": 1086864,
+        "has_audio": true,
+        "passed": true
+      },
+      {
+        "language": "sw",
+        "audio_key": "sw_tin",
+        "status": 200,
+        "latency_ms": 1468.9963087439537,
+        "transcript": "Habari, Ninawezaje kujisajili kupata namba ya TIN kutoka Ura.",
+        "reply_snippet": "Ninafurahi kukusaidia kujisajili kwa ajili ya TIN!\n\nKusajili",
+        "audio_bytes": 1086864,
+        "has_audio": true,
+        "passed": true
+      }
+    ]
+  }
+}
