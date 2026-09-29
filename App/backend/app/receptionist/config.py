@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 import os
+from urllib.parse import urlparse
+
 
 class ReceptionistConfigError(ValueError):
     """A receptionist setting is present but cannot be used."""
@@ -199,6 +201,16 @@ def get_turn_timeout_s() -> float:
     return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
 
 
+def get_fast_turn_timeout_s() -> float:
+    """Silence after a completed question or terminal punctuation before the turn closes."""
+    return _env_float("RECEPTIONIST_FAST_TURN_TIMEOUT_S", 0.35)
+
+
+def get_hesitation_turn_timeout_s() -> float:
+    """Silence allowed when the caller trails off on an incomplete conjunction or preposition."""
+    return _env_float("RECEPTIONIST_HESITATION_TURN_TIMEOUT_S", 1.2)
+
+
 def get_idle_reprompt_s() -> float:
     """Caller silence, after the assistant stops speaking, before it checks they are there.
 
@@ -272,3 +284,33 @@ def get_officer_reconnect_grace_s() -> float:
 def allow_edge_standin_lg() -> bool:
     """Whether a Luganda call may fall back to an English edge voice reading Luganda."""
     return _env_bool("RECEPTIONIST_ALLOW_EDGE_STANDIN_LG", False)
+
+
+def local_engine_errors() -> list[str]:
+    """Why production calls could not run on the local engine; empty when they can.
+
+    Every call language is heard by Whisper-SALT, answered by the local LLM
+    and voiced by the Orpheus sidecar. Without them a call cannot hear or
+    answer at all, or its voice falls to Spark-TTS-SALT (several seconds a
+    sentence) or to edge-tts (a cloud service) — fallbacks, not a primary.
+    """
+    enabled = os.getenv("FLAG_VOICE_RECEPTIONIST", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return []
+    errors: list[str] = []
+    if os.getenv("SPEECH_ENABLED", "true").strip().lower() != "true":
+        errors.append("G36: SPEECH_ENABLED must be true: calls are heard and voiced by the local speech models.")
+    if os.getenv("LLM_ENABLED", "true").strip().lower() != "true":
+        errors.append("G36: LLM_ENABLED must be true: calls are answered by the local LLM.")
+    url = urlparse(os.getenv("ORPHEUS_TTS_URL", "").strip())
+    if url.scheme not in ("http", "https") or not url.hostname or url.username or url.password:
+        errors.append("G36: ORPHEUS_TTS_URL must be the Orpheus voice sidecar's http(s) URL.")
+        return errors
+    from ..orpheus_tts import speaker_for
+
+    unvoiced = [lang for lang in get_languages() if speaker_for(lang) is None]
+    if unvoiced:
+        errors.append(
+            "G36: ORPHEUS_TTS_LANGUAGES must include every call language; missing " + ", ".join(unvoiced) + "."
+        )
+    return errors

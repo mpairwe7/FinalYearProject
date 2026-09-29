@@ -234,3 +234,38 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sum(text in fillers("lg") for text in kinds), 1)
 
+    def test_canonical_tax_response_matches_vat_and_toll_free(self):
+        # English VAT
+        self.state.locale = "en"
+        res_en = self.brain._check_canonical_tax_response("What is the standard VAT rate in Uganda?")
+        self.assertIsNotNone(res_en)
+        self.assertIn("18 percent", res_en["reply"])
+        self.assertEqual(res_en["faithfulness_score"], 1.0)
+
+        # Luganda VAT
+        self.state.locale = "lg"
+        res_lg = self.brain._check_canonical_tax_response("ebitundu bimeka ku musolo gwa VAT?")
+        self.assertIsNotNone(res_lg)
+        self.assertIn("ebitundu 18", res_lg["reply"])
+
+        # Swahili VAT
+        self.state.locale = "sw"
+        res_sw = self.brain._check_canonical_tax_response("Kiwango cha VAT ni kiasi gani nchini?")
+        self.assertIsNotNone(res_sw)
+        self.assertIn("asilimia 18", res_sw["reply"])
+
+        # Calculations must NOT match canonical (preserved for MCP calculator)
+        calc_query = self.brain._check_canonical_tax_response("Calculate VAT on 500,000 UGX")
+        self.assertIsNone(calc_query)
+
+    async def test_pipelined_sentence_playout(self):
+        self.brain.push_frame.reset_mock()
+        await self.brain._say_and_record("Step 1. Visit the portal. Step 2. Submit your form.")
+        text_frames = [
+            getattr(c.args[0], "text", "")
+            for c in self.brain.push_frame.call_args_list
+            if c.args[0].__class__.__name__ == "LLMTextFrame"
+        ]
+        self.assertGreaterEqual(len(text_frames), 2)
+
+

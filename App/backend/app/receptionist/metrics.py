@@ -188,8 +188,6 @@ def _language_metrics(state: CallState | None, call: dict[str, Any]) -> dict[str
         "detection_latency_ms_p50": _percentile(state.lid_latencies_ms, 50),
         "detection_latency_ms_p95": _percentile(state.lid_latencies_ms, 95),
         "detection_confidence_mean": round(sum(confidences) / len(confidences), 3) if confidences else None,
-        "held_ms_p50": _percentile(state.held_ms, 50),
-        "held_ms_p95": _percentile(state.held_ms, 95),
     }
 
 

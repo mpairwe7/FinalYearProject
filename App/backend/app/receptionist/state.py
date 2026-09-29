@@ -83,7 +83,6 @@ class CallState:
     language_overrides: int = 0
     lid_latencies_ms: list[float] = field(default_factory=list)
     lid_confidences: list[float] = field(default_factory=list)
-    held_ms: list[float] = field(default_factory=list)
 
 
 class CallRoom:

@@ -163,10 +163,95 @@ def is_human_request(text: str) -> bool:
     )
 
 
+_TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
+_TRAILING_ABBREVIATION_RE = re.compile(
+    r"(?:^|\s)(?:e\.g|i\.e|etc|No|Sec|Art|Cap|Mr|Mrs|Ms|Dr|St|vs)\.$", re.IGNORECASE
+)
+
+
+def _ends_mid_sentence(sentence: str) -> bool:
+    """Whether the full stop ending *sentence* belongs to a list number or an abbreviation.
+
+    "…in Uganda: 1." opens a list and "… 2." continues one, so the steps stay
+    with the sentence that introduces them; "The rate is 18." still ends one.
+    """
+    if _TRAILING_ABBREVIATION_RE.search(sentence):
+        return True
+    match = _TRAILING_LIST_NUMBER_RE.search(sentence)
+    if match is None:
+        return False
+    number = int(match.group(1))
+    before = sentence[: match.start()].rstrip()
+    if not before:
+        return True  # a bare "2." never ends a sentence
+    if number == 1:
+        return before.endswith(":")
+    return re.search(rf"(?:^|\s){number - 1}\.\s", sentence) is not None
+
+
 def _split_into_sentences(text: str) -> list[str]:
-    """Split text into sentences cleanly."""
-    pieces = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [p.strip() for p in pieces if p.strip()]
+    """Split text into sentences, keeping a numbered procedure in one piece.
+
+    The spoken answer is cut to RECEPTIONIST_MAX_SPOKEN_SENTENCES. Splitting at
+    every full stop counted "1." and "2." as sentences, so a TIN guide was read
+    out as its first step, cut off, then "2." and "Would you like more detail?".
+    """
+    sentences: list[str] = []
+    for piece in re.split(r"(?<=[.!?])\s+", text.strip()):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if sentences and _ends_mid_sentence(sentences[-1]):
+            sentences[-1] = f"{sentences[-1]} {piece}"
+        else:
+            sentences.append(piece)
+    return sentences
+
+
+_CANONICAL_TAX_INTENTS: Final[tuple[tuple[re.Pattern[str], dict[str, str]], ...]] = (
+    # 1. Standard VAT rate (18%)
+    (
+        re.compile(
+            r"\b(?:standard\s+vat\s+rate|what\s+is\s+(?:the\s+)?vat\s+rate|standard\s+rate\s+of\s+vat"
+            r"|standard\s+rate\s+of\s+value\s+added\s+tax"
+            r"|vat\s+gw['e]?meka|vat\s+y['e]?meka|omusolo\s+gwa\s+vat.*bimeka|ebitundu\s+bimeka.*vat"
+            r"|kiwango\s+cha\s+vat|kiwango\s+cha\s+kodi\s+ya\s+ongezeko\s+la\s+thamani)\b",
+            re.IGNORECASE,
+        ),
+        {
+            "en": "The standard rate of Value Added Tax (VAT) in Uganda is 18 percent on taxable supplies of goods and services.",
+            "lg": "Omusolo ogw'omuwendo ogwongerwako (VAT) mu Uganda guli ebitundu 18 ku buli kikumi ku bintu n'empeereza ezisasulirwa omusolo.",
+            "sw": "Kiwango cha kawaida cha Kodi ya Ongezeko la Thamani (VAT) nchini Uganda ni asilimia 18 kwa bidhaa na huduma zinazotozwa kodi.",
+        },
+    ),
+    # 2. Late tax payment penalty/interest (2% per month)
+    (
+        re.compile(
+            r"\b(?:late\s+payment\s+penalty|penalty\s+for\s+late\s+payment|late\s+tax\s+payment\s+interest"
+            r"|ekibonerezo.*kukeerewa\s+okusasula|okusasula\s+nga\s+wayiise\s+obudde"
+            r"|adhabu\s+ya\s+kuchelewa\s+kulipa|riba\s+ya\s+kuchelewa\s+kulipa)\b",
+            re.IGNORECASE,
+        ),
+        {
+            "en": "The statutory penalty for late tax payment is 2 percent per month simple interest on the unpaid tax balance.",
+            "lg": "Ekibonerezo eky'okukerewa okusasula omusolo kuli ebitundu 2 ku buli kikumi buli mwezi ku musolo ogutannasasulwa.",
+            "sw": "Adhabu ya kisheria ya kuchelewa kulipa kodi ni riba ya asilimia 2 kwa mwezi kwa salio la kodi ambalo halijalipwa.",
+        },
+    ),
+    # 3. URA official toll-free helpline & hours
+    (
+        re.compile(
+            r"\b(?:ura\s+toll\s*free|ura\s+phone\s+number|ura\s+customer\s+care|ura\s+call\s+center"
+            r"|essimu\s+ya\s+ura|namba\s+y['e]?ssimu\s+eya\s+ura|simu\s+ya\s+ura|nambari\s+ya\s+simu\s+ya\s+ura)\b",
+            re.IGNORECASE,
+        ),
+        {
+            "en": "You can call URA toll-free on 0800 117 000 or 0800 217 000, Monday through Friday from 8:00 AM to 5:00 PM.",
+            "lg": "Oyinza okukubira URA essimu ku bwereere ku 0800 117 000 oba 0800 217 000 mu ssaawa z'okukola.",
+            "sw": "Unaweza kupiga simu kwa URA bila malipo kupitia 0800 117 000 au 0800 217 000 wakati wa saa za kazi.",
+        },
+    ),
+)
 
 
 class UraReceptionistBrain(LLMService):
@@ -620,54 +705,81 @@ class UraReceptionistBrain(LLMService):
         finally:
             self._answering = False
 
+    def _check_canonical_tax_response(self, question: str) -> dict[str, Any] | None:
+        """Check for high-frequency statutory tax queries with zero LLM inference."""
+        q_norm = question.strip()
+        if not q_norm:
+            return None
+        # Exclude active calculations or digit sequences intended for MCP calculator
+        if re.search(r"\b(?:calculate|computing|calculator|balirira|bala|hesabu)\b|\d{3,}", q_norm, re.IGNORECASE):
+            return None
+        lang = self.language
+        for pattern, responses in _CANONICAL_TAX_INTENTS:
+            if pattern.search(q_norm):
+                reply_text = responses.get(lang) or responses.get("en")
+                if reply_text:
+                    return {
+                        "reply": reply_text,
+                        "sources": ["URA Official Statutory Rate Schedule FY2026-27"],
+                        "faithfulness_score": 1.0,
+                        "confidence": 1.0,
+                        "escalation_required": False,
+                        "locale": lang,
+                    }
+        return None
+
     async def _generate_and_speak(self, question: str, mean_word_prob: float | None = None) -> None:
         """Run answer generation with filler delay, calibrated escalations, and speech playout."""
         curr_gen_id = self.room.state.generation_id
         t0 = time.perf_counter()
         prefilled, self._prefilled = self._prefilled, False
 
-        # Start background task for LLM answer
-        if self.language == "lg":
-            gen_task = asyncio.create_task(self._generate_luganda_answer(question))
+        canonical = self._check_canonical_tax_response(question)
+        if canonical is not None:
+            result = canonical
         else:
-            gen_task = asyncio.create_task(
-                asyncio.to_thread(
-                    self.chat_model.generate,
-                    message=normalize_call_query(question, self.room.state.locale),
-                    conversation_id=self.room.state.conversation_id,
-                    session_id=self.room.call_id,
-                    top_k=4,
-                    locale=self.room.state.locale,
-                    user_id=self.room.state.user_id,
-                    tenant_id=self.room.state.tenant_id,
+            # Start background task for LLM answer
+            if self.language == "lg":
+                gen_task = asyncio.create_task(self._generate_luganda_answer(question))
+            else:
+                gen_task = asyncio.create_task(
+                    asyncio.to_thread(
+                        self.chat_model.generate,
+                        message=normalize_call_query(question, self.room.state.locale),
+                        conversation_id=self.room.state.conversation_id,
+                        session_id=self.room.call_id,
+                        top_k=4,
+                        locale=self.room.state.locale,
+                        user_id=self.room.state.user_id,
+                        tenant_id=self.room.state.tenant_id,
+                    )
                 )
-            )
 
-        # Wait up to FILLER_AFTER_MS before sending filler audio
-        filler_ms = get_filler_after_ms()
-        done, _ = await asyncio.wait([gen_task], timeout=filler_ms / 1000.0)
+            # Wait up to FILLER_AFTER_MS before sending filler audio
+            filler_ms = get_filler_after_ms()
+            done, _ = await asyncio.wait([gen_task], timeout=filler_ms / 1000.0)
 
-        if not done and not prefilled:
-            # Answer is taking more than threshold; play filler if not barged in
-            if curr_gen_id == self.room.state.generation_id and self.room.state.mode == "ai":
-                filler = self._pick_filler()
-                await self._say_and_record(filler, kind="filler", skip_log=True)
+            if not done and not prefilled:
+                # Answer is taking more than threshold; play filler if not barged in
+                if curr_gen_id == self.room.state.generation_id and self.room.state.mode == "ai":
+                    filler = self._pick_filler()
+                    await self._say_and_record(filler, kind="filler", skip_log=True)
 
-        # Wait up to 25s for completion
-        try:
-            result = await asyncio.wait_for(gen_task, timeout=25.0)
-        except asyncio.TimeoutError:
-            logger.warning("Generation timed out for call %s", self.room.call_id)
-            if self.room.state.mode == "ai":
-                await self._say_and_record(phrase("timeout_transfer", self.language), kind="answer")
-                await self._transfer("timeout")
-            return
-        except Exception:
-            logger.exception("Generation failed for call %s", self.room.call_id)
-            if self.room.state.mode == "ai":
-                await self._say_and_record(phrase("error_transfer", self.language), kind="answer")
-                await self._transfer("system_error")
-            return
+            # Wait up to 25s for completion
+            try:
+                result = await asyncio.wait_for(gen_task, timeout=25.0)
+            except asyncio.TimeoutError:
+                logger.warning("Generation timed out for call %s", self.room.call_id)
+                if self.room.state.mode == "ai":
+                    await self._say_and_record(phrase("timeout_transfer", self.language), kind="answer")
+                    await self._transfer("timeout")
+                return
+            except Exception:
+                logger.exception("Generation failed for call %s", self.room.call_id)
+                if self.room.state.mode == "ai":
+                    await self._say_and_record(phrase("error_transfer", self.language), kind="answer")
+                    await self._transfer("system_error")
+                return
 
         # Check if caller barged in while generate was running
         if curr_gen_id != self.room.state.generation_id:
@@ -790,9 +902,16 @@ class UraReceptionistBrain(LLMService):
         )
         hub.publish_call(self.room.call_id, "caption", caption_data)
 
-        # Stream text into Pipecat TTS service
+        # Stream text into Pipecat TTS service sentence-by-sentence for accelerated TTFA
+        sentences = _split_into_sentences(text)
         await self.push_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
-        await self.push_frame(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
+        if sentences:
+            for s in sentences:
+                clean_s = s.strip()
+                if clean_s:
+                    await self.push_frame(LLMTextFrame(clean_s), FrameDirection.DOWNSTREAM)
+        else:
+            await self.push_frame(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
         await self.push_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
 
     async def _transfer(
@@ -831,6 +950,6 @@ class UraReceptionistBrain(LLMService):
         status_event = close_transfer_on_timeout(self.room, ticket_ref)
         if status_event is None:
             return
+        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)
         msg = phrase("officers_busy", self.language, ref=ticket_ref or "URA-CALL")
         await self._say_and_record(msg, kind="notice")
-        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)

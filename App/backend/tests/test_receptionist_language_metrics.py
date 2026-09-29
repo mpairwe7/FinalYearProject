@@ -27,7 +27,6 @@ class LanguageMetricsTests(unittest.TestCase):
         s.language_switches = 1
         s.lid_latencies_ms = [100.0, 300.0]
         s.lid_confidences = [0.9, 0.7]
-        s.held_ms = [120.0]
         return s
 
     def test_the_language_block(self):
@@ -37,7 +36,6 @@ class LanguageMetricsTests(unittest.TestCase):
         self.assertEqual((lang["switches"], lang["overrides"], lang["source"]), (1, 0, "auto"))
         self.assertEqual(lang["detection_latency_ms_p50"], 200.0)
         self.assertEqual(lang["detection_confidence_mean"], 0.8)
-        self.assertEqual(lang["held_ms_p95"], 120.0)
 
     def test_without_state_the_row_locale_is_the_answer(self):
         m = compute_call_metrics(None, {"started_at": 0, "ended_at": 10, "locale": "sw"}, [])

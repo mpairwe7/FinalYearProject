@@ -524,7 +524,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `langgraph` | off | Route agentic requests through the graph orchestrator |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 | `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
-| `receptionist_language_detection` | off | Receptionist follows caller language (en/sw on Gemini Live, lg on the cascaded engine with Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
+| `receptionist_language_detection` | off | Receptionist follows caller language (en, sw and lg all on the local engine: Whisper-SALT, Sunflower, Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
 **51** in total, including the per-phase switches for voice, offline and

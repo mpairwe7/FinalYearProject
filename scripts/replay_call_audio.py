@@ -78,6 +78,9 @@ class Scenario:
     # status to arrive meanwhile.
     linger_s: float = 0.0
     expect_after_linger: str | None = None
+    # The language each turn's answer must be in. A Swahili caller once passed
+    # every check here while being answered in English.
+    reply_languages: list[str] | None = None
     note: str = ""
 
 
@@ -86,36 +89,53 @@ BARGE_STOP_BUDGET_MS = 2000
 
 
 SCENARIOS = [
-    Scenario("1_english_stays_english", ["en_tin", "en_vat"], ["en"],
+    Scenario("1_english_stays_english", ["en_tin", "en_vat"], ["en"], reply_languages=["en", "en"],
              note="English caller: locks English, never leaves it."),
-    Scenario("2_selected_english_speaks_luganda", ["lg_tin"], ["lg"],
+    Scenario("2_selected_english_speaks_luganda", ["lg_tin"], ["lg"], reply_languages=["lg"],
              note="First answer in Luganda, same question, not repeated."),
-    Scenario("3_swahili_local", ["sw_tin"], ["sw"], note="Answered in Swahili on the local engine."),
-    Scenario("4_luganda_then_english", ["lg_vat", "en_tin"], ["lg", "en"],
+    Scenario("3_swahili_local", ["sw_tin"], ["sw"], reply_languages=["sw"], note="Answered in Swahili on the local engine."),
+    Scenario("4_luganda_then_english", ["lg_vat", "en_tin"], ["lg", "en"], reply_languages=["lg", "en"],
              note="Mid-call switch followed within one turn."),
-    Scenario("5_code_switched_luganda_stays", ["lg_tin", "lg_vat"], ["lg"],
+    Scenario("5_code_switched_luganda_stays", ["lg_tin", "lg_vat"], ["lg"], reply_languages=["lg", "lg"],
              note="Luganda with TIN/VAT: no flip-flop."),
-    Scenario("6_explicit_request", ["en_tin", "en_ask_sw"], ["en", "sw"], note="Immediate switch."),
-    Scenario("7_override_luganda_holds", ["en_vat"], ["lg"], override="lg",
+    Scenario("6_explicit_request", ["en_tin", "en_ask_sw"], ["en", "sw"], reply_languages=["en", "sw"], note="Immediate switch."),
+    Scenario("7_override_luganda_holds", ["en_vat"], ["lg"], override="lg", reply_languages=["lg"],
              note="Pinned to Luganda on screen; English speech does not move it."),
     # Opens on lg_vat: the synthetic lg_tin clip is heard as "ttiimu", which
     # the knowledge base cannot answer and escalates on its own — the officer
     # request would then land on a call that is already transferring.
-    Scenario("8_transfer_from_luganda", ["lg_vat", "lg_person"], ["lg"], expect_status="transferring",
+    Scenario("8_transfer_from_luganda", ["lg_vat", "lg_person"], ["lg"], expect_status="transferring", reply_languages=["lg", "lg"],
              expect_status_on="lg_person",
              note="Officer request in Luganda transfers; staff see a Luganda caller."),
-    Scenario("9_barge_in_greeting", ["en_vat"], ["en"], barge_turn=0,
+    Scenario("9_barge_in_greeting", ["en_vat"], ["en"], barge_turn=0, reply_languages=["en"],
              note="Talking over the greeting stops it, and the question is answered."),
-    Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1,
+    Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1, reply_languages=["lg", "lg"],
              note="Talking over a Luganda answer stops it (Orpheus voice)."),
     # The Call Desk's Phase 0 check: RECEPTIONIST_TRANSFER_TIMEOUT_S is 90 by default.
     # The language is not what this checks: an English caller whose vote lands
     # just under the lock threshold rightly stays unlocked, with no event.
-    Scenario("11_officer_request_times_out", ["en_officer"], None, expect_status="transferring",
+    Scenario("11_officer_request_times_out", ["en_officer"], None, expect_status="transferring", reply_languages=["en"],
              expect_status_on="en_officer", linger_s=100.0, expect_after_linger="ai",
              note="The receptionist queues the call with the packet's topic (account) and priority (high); "
                   "nobody answers, so it returns to the AI owing a callback."),
+    # Says nothing after the greeting. RECEPTIONIST_IDLE_REPROMPT_S (12 s) after
+    # the assistant stops, it asks whether the caller is there; another 12 s of
+    # silence and it says goodbye and ends the call, freeing the call slot.
+    Scenario("12_silent_caller", [], None, linger_s=60.0, expect_after_linger="ended",
+             note="A silent caller is checked on once, then the call is ended."),
 ]
+
+
+def reply_language(texts: list[str]) -> str | None:
+    """The language an answer is in, by the receptionist's own word lists; None if unsure."""
+    try:
+        from app.receptionist.language import lexical_hits
+    except ImportError:
+        return None
+    hits = lexical_hits(" ".join(texts))
+    best = max(hits.values())
+    leaders = [lang for lang, n in hits.items() if n == best]
+    return leaders[0] if best >= 2 and len(leaders) == 1 else None
 
 
 def barge_metrics(listener: "Listener", started: float) -> dict[str, Any]:
@@ -236,9 +256,14 @@ async def speak(ws: Any, pcm: bytes, trailing_silence_s: float = 1.5) -> float:
 
 async def keep_silence(ws: Any, stop: asyncio.Event) -> None:
     """A live mic never goes quiet on the wire; neither does this caller."""
+    from websockets.exceptions import ConnectionClosed
+
     silence = b"\x00" * FRAME_BYTES
     while not stop.is_set():
-        await ws.send(silence)
+        try:
+            await ws.send(silence)
+        except ConnectionClosed:
+            return  # the receptionist hung up (a silent caller's call ends)
         await asyncio.sleep(0.02)
 
 
@@ -318,9 +343,17 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
             await asyncio.sleep(sc.linger_s)  # the silence filler keeps the line open
             result["after_linger"] = [m.get("status") for _, m in listener.messages[mark:]
                                       if m.get("type") == "status"]
+            result["said_while_lingering"] = [m["text"] for _, m in listener.messages[mark:]
+                                              if m.get("type") == "caption" and m.get("speaker") == "assistant"
+                                              and m.get("final")]
         stop.set()
         await filler
-        await ws.send(json.dumps({"type": "hangup"}))
+        from websockets.exceptions import ConnectionClosed
+
+        try:
+            await ws.send(json.dumps({"type": "hangup"}))
+        except ConnectionClosed:
+            pass  # already ended by the receptionist
         await asyncio.sleep(0.5)
         reader.cancel()
 
@@ -337,13 +370,19 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
             sc.expect_status in t["status"] for t in before
         )
     barge_ok = all(t["barge"]["stopped"] for t in result["turns"] if "barge" in t)
+    language_ok = True
+    for turn, expected in zip(result["turns"], sc.reply_languages or []):
+        answers = [text for text in turn["assistant"] if text.strip() not in FILLERS]
+        turn["reply_language"] = reply_language(answers)
+        turn["reply_language_expected"] = expected
+        language_ok = language_ok and turn["reply_language"] in (None, expected)
     linger_ok = sc.expect_after_linger is None or sc.expect_after_linger in result.get("after_linger", [])
     result["language_sequence"] = seen
     result["passed"] = (
         bool(result["language_detection"])
         and (sc.expect_languages is None or seen == sc.expect_languages)
         and status_ok and barge_ok
-        and linger_ok
+        and linger_ok and language_ok
     )
     return result
 

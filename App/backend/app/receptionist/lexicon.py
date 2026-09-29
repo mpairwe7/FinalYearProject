@@ -327,6 +327,17 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\b(?:e-fris|efrisi|efurisi)\b", re.IGNORECASE), "EFRIS"),
     # WHT acoustic variants
     (re.compile(r"\b(?:w-h-t|dabulyu\s*ech\s*ti)\b", re.IGNORECASE), "WHT"),
+    # English & telephony number mishears: "ten number" / "10 number" -> "TIN number"
+    (re.compile(r"\b(?:ten\s+number|10\s+number)\b", re.IGNORECASE), "TIN number"),
+    (re.compile(r"\bteam\s+yange\b", re.IGNORECASE), "TIN yange"),
+    # VAT acoustic variants
+    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|vatt|vaat|baati)\b", re.IGNORECASE), "VAT"),
+    # PAYE acoustic variants
+    (re.compile(r"\b(?:peeyi|payee|p-a-y-e)\b", re.IGNORECASE), "PAYE"),
+    # TCC (Tax Clearance Certificate)
+    (re.compile(r"\b(?:t-c-c|ti\s*si\s*si)\b", re.IGNORECASE), "TCC"),
+    # Luganda driving license
+    (re.compile(r"\blayisensi\b", re.IGNORECASE), "driving licence"),
 )
 
 

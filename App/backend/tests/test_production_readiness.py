@@ -74,11 +74,42 @@ def test_production_receptionist_requires_livekit_and_single_replica_attestation
     monkeypatch.setenv("WORKERS", "1")
     monkeypatch.setenv("VOICE_RECEPTIONIST_REPLICAS", "1")
     monkeypatch.setenv("VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK", "true")
+    for key, value in LOCAL_ENGINE.items():
+        monkeypatch.setenv(key, value)
 
     assert not [error for error in gap_gate_errors() if error.startswith("G36:")]
     receptionist = next(row for row in readiness_report()["gaps"] if row["gap"] == "G36")
     assert receptionist["status"] == "ready"
     assert receptionist["blocker"] is False
+
+
+#: What a production call needs from the local engine (all languages voiced by Orpheus).
+LOCAL_ENGINE = {
+    "SPEECH_ENABLED": "true",
+    "LLM_ENABLED": "true",
+    "ORPHEUS_TTS_URL": "http://orpheus-tts:8100",
+    "ORPHEUS_TTS_LANGUAGES": "lg,sw,en",
+    "RECEPTIONIST_LANGUAGES": "en,sw,lg",
+}
+
+
+@pytest.mark.parametrize(
+    ("override", "expected"),
+    [
+        ({"SPEECH_ENABLED": "false"}, "SPEECH_ENABLED must be true"),
+        ({"LLM_ENABLED": "false"}, "LLM_ENABLED must be true"),
+        ({"ORPHEUS_TTS_URL": ""}, "ORPHEUS_TTS_URL must be"),
+        ({"ORPHEUS_TTS_URL": "http://user:pw@orpheus-tts:8100"}, "ORPHEUS_TTS_URL must be"),  # pragma: allowlist secret
+        ({"ORPHEUS_TTS_LANGUAGES": "lg"}, "missing en, sw"),
+    ],
+)
+def test_production_receptionist_runs_on_the_local_engine(
+    monkeypatch: pytest.MonkeyPatch, override: dict[str, str], expected: str
+) -> None:
+    for key, value in {**SECURE, "FLAG_VOICE_RECEPTIONIST": "true", **LOCAL_ENGINE, **override}.items():
+        monkeypatch.setenv(key, value)
+    errors = [error for error in gap_gate_errors() if error.startswith("G36:")]
+    assert any(expected in error for error in errors), errors
 
 
 def test_production_rejects_mock_account_and_fixture_news(

@@ -6,6 +6,12 @@ decision log (§12) and the as-built notes (§13) record what was measured and
 where the build departed from the plan. Operator guide:
 `docs/runbooks/voice-receptionist-demo.md` §6.
 
+> **Superseded in part, 2026-09-30:** the Gemini Live engine this plan put English
+> and Swahili on has been removed. Every call language now runs on the local engine
+> (Whisper-SALT, Sunflower on vLLM against Qdrant, Orpheus), and a language switch
+> re-asks the turn on that same engine — see the decision log. Sections below that
+> describe Gemini, the hold gate, `EngineGate` or the Gemini stall guard are history.
+
 ---
 
 ## 1. Goal
@@ -149,6 +155,7 @@ clarify, Gemini Live, serializer and summary suites. Frontend:
 | 2026-09-24 | 0C Gemini Swahili voice | **Not run** — needs Swahili raters and a live Gemini key | Plan default kept (`sw:gemini_live`); `sw:cascaded` is one env var |
 | 2026-09-24 | ServiceSwitcher spike | Can host a whole `Pipeline`, but its gates filter only frames going *into* a service and *up* out of it: an inactive engine's late reply still flows downstream to the speaker | Custom `EngineGate` at both ends of each branch in a `ParallelPipeline` (§7.4 fallback); `test_receptionist_engine_switch.py` pins the property |
 | 2026-09-24 | Greeting wording | — | Languages named in the greeting |
+| 2026-09-30 | Local-only receptionist | Owner decision: no cloud speech-to-speech on a call. Orpheus (Sunbird multilingual, FP8, own A6000) measured on the stack: first audio 0.27–0.31 s for en/sw/lg; Whisper-SALT round trip WER 0.00 en, 0.18 sw, 0.00 lg | **Gemini Live removed**: en, sw and lg on the local engine; Orpheus voices all three (`salt_eng_0001` added), Spark-TTS-SALT then edge-tts as fallbacks; Sunflower writes brief and summary first. The router claims a switched turn so it is answered once; the sentinel's VAD barge-in now stops the local engine. Swahili answers (no longer on Gemini) exposed G64: replies are now translated paragraph by paragraph. A silent caller is checked on and the call ended (G77) |
 
 ## 13. As built — findings and deviations
 

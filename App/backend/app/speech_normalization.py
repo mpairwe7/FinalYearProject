@@ -28,6 +28,11 @@ _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^\)]+\)")
 _BROKEN_MD_LINK_RE = re.compile(r"([^\s\]]+)\]\((?:https?://|www\.)[^)\s]*\)")
 _DANGLING_URL_TAIL_RE = re.compile(r"\]\((?:https?://|www\.)[^)\s]*\)?")
 _BARE_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
+# "…the URA portal at https://ura.go.ug." -> "…the URA portal." The address is
+# not spoken, and neither is the "at" that introduced it; the full stop stays.
+_URL_WITH_PREPOSITION_RE = re.compile(
+    r"\s+(?:at|via)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]", re.IGNORECASE
+)
 
 # Code blocks and inline code
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
@@ -150,6 +155,7 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _BROKEN_MD_LINK_RE.sub(r"\1", t)
     t = _MD_LINK_RE.sub(r"\1", t)
     t = _DANGLING_URL_TAIL_RE.sub("", t)
+    t = _URL_WITH_PREPOSITION_RE.sub("", t)
     t = _BARE_URL_RE.sub("", t)
 
     # 2. Strip inline citation markers: [1], [1, 2]

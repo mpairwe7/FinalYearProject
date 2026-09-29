@@ -161,9 +161,10 @@ def _seed_errors() -> list[str]:
 
 
 def _receptionist_errors() -> list[str]:
+    from .receptionist.config import local_engine_errors
     from .receptionist.livekit import production_errors
 
-    return production_errors()
+    return [*production_errors(), *local_engine_errors()]
 
 
 def _privacy_governance_errors() -> list[str]:
