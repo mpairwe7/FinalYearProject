@@ -474,10 +474,13 @@ async def test_main_chat_streaming_voice_ws() -> dict[str, Any]:
                 await ws.send(silence)
                 await asyncio.sleep(0.02)
 
-            deadline = time.monotonic() + 15.0
+            # Each sentence is synthesised before its audio is sent, and one
+            # takes seconds: a short per-message timeout ended the wait between
+            # the first reply_text and its audio, reporting Chunks=0.
+            deadline = time.monotonic() + 60.0
             while time.monotonic() < deadline:
                 try:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=2.5)
+                    raw = await asyncio.wait_for(ws.recv(), timeout=max(0.1, deadline - time.monotonic()))
                     if isinstance(raw, bytes):
                         audio_chunks_count += 1
                     else:
