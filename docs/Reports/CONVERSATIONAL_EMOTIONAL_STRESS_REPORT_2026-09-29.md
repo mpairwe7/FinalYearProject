@@ -10,12 +10,16 @@
 
 | Performance Dimension | Target Standard | Measured Benchmark Result | Status |
 |---|:---:|:---:|:---:|
-| **Emotional Distress Recognition** | ≥ 90.0% | **100.0%** | **MET** ✅ |
-| **Human Escalation Precision** | ≥ 95.0% | **70.0%** | **MET** ✅ |
-| **Multi-Turn Context Continuity** | ≥ 95.0% | **100.0%** | **MET** ✅ |
-| **Withholding Disambiguation Rate** | 100.0% | **100.0%** (Services 6% vs Mgmt 15%) | **MET** ✅ |
-| **Spike Surge Availability (c=30)** | ≥ 95.0% | **100.0%** (0 dropped frames) | **MET** ✅ |
+| **Emotional Distress Recognition** | ≥ 90.0% | Not validly measured by this run | **UNVERIFIED** |
+| **Escalation Accuracy** | ≥ 95.0% | **70.0%** (precision 100.0%, recall 50.0%) | **NOT MET** ❌ |
+| **Multi-Turn Context Continuity** | ≥ 95.0% | 100.0% reported; response statuses were not included in the score | **UNVERIFIED** |
+| **Withholding Disambiguation Rate** | 100.0% | Hard-coded as 100.0%; response checks were not included in the score | **UNVERIFIED** |
+| **Spike Surge Availability (c=30)** | ≥ 95.0% | **100.0%** (30/30 HTTP 200 responses) | **MET** ✅ |
 | **Median Response Time (p50)** | < 1,500 ms | **74.9 ms** (c=5) | **MET** ✅ |
+
+### Measurement correction
+
+The original benchmark counted every expected non-escalation as correct without inspecting the observed result, and its 70% figure was accuracy rather than precision. From the scenario table, there are 3 true positives, 3 false negatives, 0 false positives, and 4 true negatives: 70% accuracy, 100% precision, and 50% recall. The original empathy score is invalid because any non-empty `tone_hint` counted as empathy, even for neutral prompts. The disambiguation score was hard-coded, and the report did not retain response bodies or per-request status for its continuity checks. Those measures are therefore unverified. The benchmark script now scores those checks explicitly and generates pass/fail labels from the results.
 
 ---
 
@@ -50,10 +54,9 @@ Evaluated across critical taxpayer distress categories:
 * **Initial Query (EN):** *"Calculate PAYE on gross monthly salary of UGX 4,500,000"* $\to$ **Calculated** (p50: 32.0 ms)
 * **Turn 2 Follow-Up (EN):** *"what about 6,000,000"* $\to$ **Calculated** (PAYE context preserved: ✅)
 
-### C. Statutory Disambiguation
+### C. Statutory Disambiguation (original result unverified)
 * **Query:** *"how much withholding tax on a 3m management consultancy"*
-* **Turn 1 Elicitation:** Correctly prompted taxpayer to disambiguate between standard contracted services (6%) and management fees (15%).
-* **Turn 2 Resolution:** Input *"management"* $\to$ strictly computed 15% rate (**UGX 450,000**).
+* The original script printed these checks but did not include their outcomes in the saved report data. The 100% summary was hard-coded and cannot be verified from this artifact.
 
 ---
 
@@ -75,7 +78,9 @@ Evaluated across critical taxpayer distress categories:
 * **Spike Throughput:** **55.83 req/sec**
 * **Spike Latency p50:** **394.9 ms**
 * **Spike Latency p95:** **515.9 ms**
-* **Availability Under Surge:** **100.0%** (0 socket drops)
+* **Availability Under Surge:** **100.0%** (30/30 HTTP 200 responses)
+
+This was a short fixed-count diagnostic with small samples, no warm-up phase, and a closed-loop concurrency workload. It does not establish sustained capacity or production SLO compliance. Release decisions should use sustained arrival-rate traffic and explicit error and latency thresholds.
 
 ---
 
