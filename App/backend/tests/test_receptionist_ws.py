@@ -68,10 +68,11 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
 
         with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=True):
             # Auditor is refused on audio bridge (code 4403)
-            with self.assertRaises(Exception):
-                with self.client.websocket_connect(f"/v1/admin/calls/{call_id}/audio") as ws:
-                    ws.send_text(json.dumps({"type": "authenticate", "access_token": token}))
-                    ws.receive()
+            with self.client.websocket_connect(f"/v1/admin/calls/{call_id}/audio") as ws:
+                ws.send_text(json.dumps({"type": "authenticate", "access_token": token}))
+                msg = ws.receive()
+                self.assertEqual(msg["type"], "websocket.close")
+                self.assertEqual(msg["code"], 4403)
 
     def test_lobby_event_carries_no_transcript(self):
         token = make_dev_token("staff_1", role="ura_staff")
@@ -135,10 +136,11 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
     def test_staff_socket_requires_auth_message_not_query_token(self):
         token = make_dev_token("staff_1", role="ura_staff")
         with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=True):
-            with self.assertRaises(Exception):
-                with self.client.websocket_connect(f"/v1/admin/calls/stream?token={token}") as ws:
-                    ws.send_text(json.dumps({"type": "ping"}))
-                    ws.receive()
+            with self.client.websocket_connect(f"/v1/admin/calls/stream?token={token}") as ws:
+                ws.send_text(json.dumps({"type": "ping"}))
+                msg = ws.receive()
+                self.assertEqual(msg["type"], "websocket.close")
+                self.assertEqual(msg["code"], 4401)
 
     def test_staff_socket_rejects_disallowed_origin(self):
         with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=False):
@@ -160,6 +162,8 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
             with patch.object(flags, "is_enabled", return_value=True):
                 with self.client.websocket_connect(f"/v1/admin/calls/{call_id}/audio?listen=true") as ws:
                     ws.send_text(json.dumps({"type": "authenticate", "access_token": token}))
+                    ack = ws.receive_json()
+                    self.assertEqual(ack.get("type"), "authenticated")
                     chunk = b"\x00\x01" * 160
                     room.broadcast_audio(chunk)
                     received = ws.receive_bytes()
