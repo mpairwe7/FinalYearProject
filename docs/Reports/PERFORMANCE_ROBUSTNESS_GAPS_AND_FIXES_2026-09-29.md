@@ -77,7 +77,7 @@ The call socket is raw PCM at 16 kHz. There is no server echo cancellation. The 
 | Retrieval figures unchecked | Check percents and UGX amounts against the rate table; score them in replay | Open |
 | Short and mixed-language id | Hold short audio; use the conversation, not one clip | Open |
 | Raw PCM over ngrok, no echo control | Opus, WebRTC, jitter buffer, server echo cancellation | Open |
-| Stale GPU map and a green `/health` | Update the runbook; read speech `status` | Open |
+| Stale GPU map and a green `/health` | Update the runbook; read speech `status` | Closed |
 | Orpheus down reported as ready | `status: degraded`, skip the sidecar while cooling down | Closed |
 | Follow-up amount drops the calculator | Remember the last tool and replay it | Closed |
 | Rates rewritten as steps | Step breaks only at a sentence boundary or a glued step number | Closed |

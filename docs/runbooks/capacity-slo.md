@@ -9,8 +9,9 @@ are none. This is a **two-GPU isolated stack** ceiling.
 
 ## Headroom & Deployment Topology
 
-- **GPU 2 (vLLM Dedicated)**: `ura-app-vllm-sunflower` hosting `Sunbird/Sunflower-14B-FP8` with `--max-num-seqs 32` (~34.7 GB used, ~14.4 GB free).
-- **GPU 4 (Speech & RAG Dedicated)**: `ura-gpu-docker-server` hosting `Whisper-Large-SALT`, `Spark-TTS-SALT`, and dense cross-encoder (17.1 GB – 20.5 GB used, **28+ GB free VRAM headroom**).
+- **GPU 5 (vLLM Dedicated)**: `ura-app-vllm-sunflower` hosting `Sunbird/Sunflower-14B-FP8` with continuous batching and `--max-num-seqs 32` (~25.7 GB used, ~23.4 GB free).
+- **GPU 2 (Speech & RAG Dedicated)**: `ura-app-api` hosting `Whisper-Large-SALT`, `Spark-TTS-SALT`, BGE-M3 dense retriever, and cross-encoder reranker (~15.7 GB used, ~33.4 GB free VRAM headroom).
+- **Health & Operator Verification**: Operators check `GET /v1/speech/health` alongside `/health` and read `status` (`ready` vs `degraded`). When the optional Orpheus-3B FP8 sidecar on GPU 7 is offline or in cooldown, Luganda automatically falls through to local `Spark-TTS-SALT` on GPU 2 without timeout delays.
 - **Reverse Proxy / SSE Settings**: Next.js standalone runs with `compress: false`, and `/v1/chat/stream` emits `Cache-Control: no-cache, no-transform` to prevent ngrok/Cloudflare from gzipping and buffering event streams.
 
 | Workload | Comfortable | Stress | Extreme (measured, 0% crash) |
