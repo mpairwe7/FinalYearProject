@@ -27,6 +27,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from ..guardrails import redact_pii_text
 from ..speech_service import pcm16_to_wav
 from .hub import hub
 from .language import LANGUAGE_NAMES, Decision, LanguagePolicy, LanguageVote
@@ -149,7 +150,7 @@ class LanguageRouter:
         """
         if self.barge_in is None or self._pending is not None or self.room.state.mode != "ai":
             return
-        logger.info("Caller talking over the assistant on call %s: interrupting", self.room.call_id)
+        logger.info("Caller talking over the assistant on call %s: stopping it", self.room.call_id)
         await self.barge_in()
 
     async def on_vote(self, vote: LanguageVote, pcm: bytes | None, decoded: tuple[str, str] | None) -> None:
@@ -160,7 +161,8 @@ class LanguageRouter:
         decision = self.policy.observe(vote)
         logger.info(
             "Language vote %s p=%.2f %.1fs text=%r -> %s %s (%s)",
-            vote.top or "-", vote.confidence, vote.speech_s, vote.text[:60],
+            # What the caller said, with identifiers (TIN, NIN, phone…) masked.
+            vote.top or "-", vote.confidence, vote.speech_s, redact_pii_text(vote.text[:60]),
             decision.action, decision.target, decision.reason,
         )
         await self.apply(decision, pcm=pcm, decoded=decoded)

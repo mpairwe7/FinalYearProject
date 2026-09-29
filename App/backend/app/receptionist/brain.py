@@ -332,7 +332,8 @@ class UraReceptionistBrain(LLMService):
     async def _handle_context_frame(
         self, frame: LLMContextFrame, direction: FrameDirection
     ) -> None:
-        logger.info("UraReceptionistBrain _handle_context_frame invoked with context: %r", getattr(frame, "context", None))
+        # Never the context itself at INFO: it is the caller's conversation.
+        logger.debug("Receptionist turn on call %s", self.room.call_id)
         # Extract user utterance from frame context
         user_text = ""
         context = getattr(frame, "context", None)
@@ -698,21 +699,31 @@ class UraReceptionistBrain(LLMService):
             await self._say_and_record(phrase("idle_check", self.language), kind="notice")
             return
         logger.info("Ending call %s: the caller has been silent", self.room.call_id)
-        await self._end_call_after(phrase("idle_goodbye", self.language), "caller_idle")
+        await self._end_call_after(
+            phrase("idle_goodbye", self.language),
+            "caller_idle",
+            # Speaking during the goodbye (handle_external_question resets the count) keeps the call.
+            still_wanted=lambda: state.idle_prompts > get_idle_reprompts(),
+        )
 
-    async def _end_call_after(self, goodbye: str, reason: str) -> None:
+    async def _end_call_after(self, goodbye: str, reason: str, still_wanted: Any = None) -> None:
         """Say *goodbye*, then end the call once the caller has heard it.
 
         Spoken like an officer's closing line: its length is known, so the call
         ends after the caller has heard it, not when the transport (which sends
         faster than real time) has finished sending it. Shielded: ending the
-        call cancels the pipeline task this may run in.
+        call cancels the pipeline task this may run in. Checked again before
+        hanging up: an officer may have taken the call meanwhile, or (for
+        *still_wanted*) the silent caller may have spoken.
         """
         from .desk import hang_up_caller, say_to_caller
 
         async def _goodbye() -> None:
             duration = await say_to_caller(self.room, goodbye, self.speech_model)
             await asyncio.sleep(duration + 0.3)
+            if self.room.state.mode != "ai" or (still_wanted is not None and not still_wanted()):
+                logger.info("Not ending call %s after all (%s)", self.room.call_id, reason)
+                return
             await hang_up_caller(self.room, reason)
 
         await asyncio.shield(asyncio.ensure_future(_goodbye()))

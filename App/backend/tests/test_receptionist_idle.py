@@ -52,6 +52,29 @@ class CallerIdleTests(unittest.IsolatedAsyncioTestCase):
         self.say_to_caller.assert_awaited_once_with(self.room, phrase("idle_goodbye", "en"), self.speech)
         self.hang_up_caller.assert_awaited_once_with(self.room, "caller_idle")
 
+    async def test_a_caller_who_speaks_during_the_goodbye_keeps_the_call(self):
+        await self.brain.on_caller_idle()
+
+        async def caller_answers(*_args):
+            self.state.idle_prompts = 0  # what handle_external_question does
+            return 0.0
+
+        self.say_to_caller.side_effect = caller_answers
+        await self.brain.on_caller_idle()
+        self.say_to_caller.assert_awaited_once()
+        self.hang_up_caller.assert_not_awaited()
+
+    async def test_an_officer_taking_the_call_during_the_goodbye_keeps_it(self):
+        await self.brain.on_caller_idle()
+
+        async def officer_joins(*_args):
+            self.state.mode = "bridged"
+            return 0.0
+
+        self.say_to_caller.side_effect = officer_joins
+        await self.brain.on_caller_idle()
+        self.hang_up_caller.assert_not_awaited()
+
     async def test_no_check_at_all_ends_the_call_at_the_first_silence(self):
         with patch.dict(os.environ, {"RECEPTIONIST_IDLE_REPROMPTS": "0"}):
             await self.brain.on_caller_idle()
