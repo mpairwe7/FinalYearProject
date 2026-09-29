@@ -58,8 +58,9 @@ A flow owns its conversation until it completes or is cancelled ("cancel",
 - a message that reads as a new question and does not fit the pending slot
   is answered from the corpus, and the flow stays open ("resume" continues it);
 - an explicit request for a **different** flow ("help me file my return"
-  inside the Tax Clearance checklist) closes the current flow as cancelled and
-  starts the requested one (`service._leaves_flow_for_another`).
+  inside the Tax Clearance checklist) starts the requested one. The current
+  flow is marked cancelled only after the new session is created, so a refused
+  start leaves it resumable (`service._flow_switch_target`).
 
 Trigger matching folds "-ing" forms only. Past tense is left alone, so "I
 filed my return yesterday but …" reports a problem instead of starting a new
@@ -72,6 +73,13 @@ Every session start, turn and cancel increments
 `event` one of `started`, `step_entered`, `step_invalid`, `completed`,
 `cancelled`. The fall in `step_entered` between consecutive steps of one flow is
 its drop-off. No slot value is ever a label.
+
+An informational step with `ends_flow: true` is a terminal guidance step: it
+is emitted once and completes the guide without asking for a dummy answer. The
+loader accepts only a YAML boolean, and allows it only on a step with a
+question and no slot or tool. Use this when a prerequisite is missing and later
+steps do not apply yet; tell the taxpayer how to return to the journey after
+they meet it.
 
 ## Adding a journey
 

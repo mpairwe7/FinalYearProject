@@ -496,7 +496,12 @@ GET /v1/analytics/journeys?days=30
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `days` | integer | No | Period in days (1–365, default 30) |
+| `days` | integer | No | Period in days (1–365, default 30), capped by `WORKFLOW_SESSION_TTL_DAYS` |
+
+`period_days` in the response is the covered period after that cap.
+Journey outcomes are retained for `WORKFLOW_SESSION_TTL_DAYS` (365 days by
+default); collected slot answers and the last prompt are cleared after
+`CONVERSATION_TTL_DAYS` (7 days by default).
 
 **Response**
 ```json
@@ -1854,6 +1859,10 @@ class FeedbackRequest(BaseModel):
     session_id: str | None = Field(None, max_length=128)
     user_query: str = Field("", max_length=2000)
     bot_reply: str = Field("", max_length=5000)
+    # Where the rated reply came from; identifiers only, never free text.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
 ```
 
 ### FeedbackResponse

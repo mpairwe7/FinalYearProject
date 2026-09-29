@@ -8,6 +8,7 @@ the journey funnel.
 
 Written 2026-09-29 alongside gaps G60–G65 in
 [`docs/GAPS_AND_AGENTIC_ROADMAP.md`](../GAPS_AND_AGENTIC_ROADMAP.md).
+Retention and subject export/erasure behavior updated 2026-09-30.
 
 ## When to run it
 
@@ -33,6 +34,8 @@ python3 scripts/probe_guided_journeys.py --base https://landwind22-ura-chatbot.h
 
 Each case is a fresh conversation (one to three turns). The JSON record keeps
 what was observed for every case, so a failure can be read without re-running.
+
+The probes reject non-HTTP(S) base URLs and use `httpx` for requests.
 Only `http` and `https` bases are accepted.
 
 **Side effect:** the escalation cases open real tickets in that deployment's
@@ -135,13 +138,23 @@ across restarts, scoped by the period picker. A journey still active but
 untouched for `JOURNEY_ABANDON_AFTER_HOURS` (default 24) counts as abandoned.
 Ratings reach a step because the web client sends `workflow_id` and `step_id`
 with each thumbs up or down (identifiers only; the API refuses anything else).
+`WORKFLOW_SESSION_TTL_DAYS` (365 by default) controls how long outcome rows
+remain available to the funnel, and the API caps `period_days` to that window.
+`slots_json` and `last_prompt` are cleared after `CONVERSATION_TTL_DAYS`
+(7 by default). Authenticated journey rows are available in `/v1/me/export`
+and removed by `/v1/me` erasure.
 
 **For operators: `journey_events_total{workflow, event, step}` on `/metrics`**
 (admin token required; 401 without one), events `started`, `step_entered`,
 `step_invalid`, `completed`, `cancelled`. It is per replica and resets on
 restart, so use it for live debugging, not for the funnel: a high
 `step_invalid` on a step means its question or validator confuses people.
-Neither source carries slot values, so neither needs analytics consent.
+The metrics counter and funnel response contain no slot values. The durable
+journey row can contain collected answers until conversation retention expires;
+it is then reduced to flow, status and step metadata. The applicable lawful
+basis for guided service state and aggregate measurement remains a privacy
+governance decision, documented in
+[`PRIVACY_COMPLIANCE_306.md`](../compliance/PRIVACY_COMPLIANCE_306.md).
 
 ## Crisis lines
 

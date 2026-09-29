@@ -41,6 +41,20 @@ _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
 _FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
 _SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 _TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
+# A guided journey's outcome (flow, status, the step it stopped at) is kept for
+# the journey funnel's longest window; what the taxpayer answered is blanked
+# once their conversation expires (CONVERSATION_TTL_DAYS).
+_WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "365")))
+
+
+def conversation_ttl_seconds() -> float:
+    """How long a conversation (and what a journey collected in it) is kept."""
+    return _CONVERSATION_TTL_DAYS * 86400.0
+
+
+def workflow_session_ttl_days() -> int:
+    """How long journey outcomes are kept for the funnel."""
+    return _WORKFLOW_SESSION_TTL_DAYS
 
 # Thread-local storage for connections with a lock for init safety
 _local = threading.local()
@@ -166,8 +180,8 @@ def _ensure_column(
     table: str,
     column: str,
     ddl: str,
-) -> None:
-    """Add *column* to *table* if it is missing.
+) -> bool:
+    """Add *column* to *table* if it is missing; True when it was added.
 
     SQLite only gained ``ADD COLUMN IF NOT EXISTS`` recently, so we do
     the compatibility check ourselves to support older runtimes.
@@ -175,9 +189,10 @@ def _ensure_column(
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608 - fixed table name
     names = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in rows}
     if column in names:
-        return
+        return False
     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")  # noqa: S608 - fixed identifiers
     logger.info("Added missing column %s.%s", table, column)
+    return True
 
 
 def consent_purposes() -> tuple[str, ...]:
@@ -314,6 +329,7 @@ def init_db() -> None:
                             CHECK(status IN ('active','completed','cancelled'))
                             DEFAULT 'active',
             current_step_idx INTEGER NOT NULL DEFAULT 0,
+            user_id          TEXT NOT NULL DEFAULT '',
             slots_json      TEXT DEFAULT '{}',
             last_prompt     TEXT DEFAULT '',
             created_at      REAL NOT NULL,
@@ -644,6 +660,18 @@ def init_db() -> None:
     # /v1/me export + erasure can reach it.  Empty string for anonymous turns.
     _ensure_column(conn, "conversations", "user_id", "TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
+    # Sessions from before the column existed take their owner from the
+    # conversation, once: new rows are written with it.
+    if _ensure_column(conn, "workflow_sessions", "user_id", "TEXT NOT NULL DEFAULT ''"):
+        conn.execute(
+            """UPDATE workflow_sessions SET user_id = COALESCE(
+                   (SELECT c.user_id FROM conversations c
+                    WHERE c.conversation_id = workflow_sessions.conversation_id
+                      AND c.user_id != ''
+                    ORDER BY c.created_at DESC LIMIT 1), '')
+               WHERE user_id = ''"""
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
     _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
@@ -679,7 +707,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("analytics_events", _ANALYTICS_TTL_DAYS),
         ("feedback", _FEEDBACK_TTL_DAYS),
         ("sessions", _SESSION_TTL_DAYS),
-        ("workflow_sessions", _CONVERSATION_TTL_DAYS),
+        ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS),
         ("conversation_topics", _CONVERSATION_TTL_DAYS),
         ("ticket_presence", 1),
         ("tickets", _TICKET_TTL_DAYS),
@@ -720,6 +748,21 @@ def cleanup_expired_data() -> dict[str, int]:
             logger.exception("TTL cleanup failed for %s", table)
             conn.rollback()
             deleted[table] = 0
+
+    # Journey sessions outlive their conversation only as outcomes: blank the
+    # answers they collected once the conversation itself has expired.
+    try:
+        cur = conn.execute(
+            "UPDATE workflow_sessions SET slots_json = '{}', last_prompt = '' "
+            "WHERE updated_at < ? AND (slots_json != '{}' OR last_prompt != '')",
+            (now - conversation_ttl_seconds(),),
+        )
+        conn.commit()
+        deleted["workflow_session_content"] = cur.rowcount
+    except Exception:
+        logger.exception("TTL cleanup failed for workflow session content")
+        conn.rollback()
+        deleted["workflow_session_content"] = 0
 
     # Voice receptionist tables retention
     try:
@@ -1241,7 +1284,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT conversation_id, workflow_id, status, current_step_idx,
+        """SELECT conversation_id, workflow_id, status, current_step_idx, user_id,
                   slots_json, last_prompt, created_at, updated_at
            FROM workflow_sessions WHERE conversation_id = ?""",
         (conversation_id,),
@@ -1259,6 +1302,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
+        "user_id": row["user_id"] or "",
         "slots": slots,
         "last_prompt": row["last_prompt"] or "",
         "created_at": row["created_at"],
@@ -1274,6 +1318,7 @@ def upsert_workflow_session(
     *,
     status: str = "active",
     last_prompt: str = "",
+    user_id: str = "",
 ) -> None:
     """Create or update a durable workflow session."""
     if not conversation_id or not workflow_id:
@@ -1286,13 +1331,14 @@ def upsert_workflow_session(
     try:
         conn.execute(
             """INSERT INTO workflow_sessions
-               (conversation_id, workflow_id, status, current_step_idx,
+               (conversation_id, workflow_id, status, current_step_idx, user_id,
                 slots_json, last_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(conversation_id) DO UPDATE SET
                  workflow_id = excluded.workflow_id,
                  status = excluded.status,
                  current_step_idx = excluded.current_step_idx,
+                 user_id = CASE WHEN excluded.user_id != '' THEN excluded.user_id ELSE workflow_sessions.user_id END,
                  slots_json = excluded.slots_json,
                  last_prompt = excluded.last_prompt,
                  updated_at = excluded.updated_at""",
@@ -1301,6 +1347,7 @@ def upsert_workflow_session(
                 workflow_id,
                 status,
                 max(0, int(current_step_idx)),
+                user_id or "",
                 slots_json,
                 last_prompt[:2000],
                 now,
@@ -2725,14 +2772,15 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
 
     ``user_id`` is the internal UUID (users/profiles/consents); ``external_id`` is
     the OIDC ``sub`` that chat history is keyed by. Conversations (and their
-    escalation tickets, linked by ``conversation_id``) are returned under it.
-    ``facts`` is filled by the caller from the memory service.
+    escalation tickets, linked by ``conversation_id``), and workflow sessions
+    are returned under it. ``facts`` is filled by the caller from the memory service.
     """
     conversations: list[dict[str, Any]] = []
     tickets: list[dict[str, Any]] = []
     analytics_events: list[dict[str, Any]] = []
     sessions: list[dict[str, Any]] = []
     feedback: list[dict[str, Any]] = []
+    workflow_sessions: list[dict[str, Any]] = []
     if external_id:
         conversations = query_all(
             "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
@@ -2757,6 +2805,16 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
             "SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
             (external_id,),
         )
+        workflow_where = "user_id = ?"
+        workflow_params: tuple[Any, ...] = (external_id,)
+        if conv_ids:
+            placeholders = ",".join("?" * len(conv_ids))
+            workflow_where += f" OR conversation_id IN ({placeholders})"
+            workflow_params += tuple(conv_ids)
+        workflow_sessions = query_all(
+            f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608 — identifiers are fixed; values are bound parameters
+            workflow_params,
+        )
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
@@ -2766,6 +2824,7 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         "analytics_events": analytics_events,
         "sessions": sessions,
         "feedback": feedback,
+        "workflow_sessions": workflow_sessions,
         "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
@@ -2820,6 +2879,20 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
                 )
         except Exception:
             logger.exception("delete_user_cascade: conversation_topics")
+        try:
+            workflow_deleted = execute(
+                "DELETE FROM workflow_sessions WHERE user_id = ?", (external_id,)
+            )
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                workflow_deleted += execute(
+                    f"DELETE FROM workflow_sessions WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
+                    tuple(conv_ids),
+                )
+            counts["workflow_sessions"] = workflow_deleted
+        except Exception:
+            logger.exception("delete_user_cascade: workflow_sessions")
+            counts["workflow_sessions"] = -1
         try:
             counts["conversations"] = execute(
                 "DELETE FROM conversations WHERE user_id = ?", (external_id,)

@@ -42,6 +42,7 @@ _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
 _FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
 _SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 _TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
+_WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "365")))
 
 _pool: Any = None
 
@@ -269,6 +270,7 @@ def init_db() -> None:
         status           TEXT NOT NULL DEFAULT 'active'
                          CHECK(status IN ('active','completed','cancelled')),
         current_step_idx INTEGER NOT NULL DEFAULT 0,
+        user_id          TEXT NOT NULL DEFAULT '',
         slots_json       TEXT DEFAULT '{}',
         last_prompt      TEXT DEFAULT '',
         created_at       DOUBLE PRECISION NOT NULL,
@@ -298,6 +300,25 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contexts TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            # Sessions from before the column existed take their owner from
+            # the conversation, once: new rows are written with it.
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+                "AND table_name = 'workflow_sessions' AND column_name = 'user_id'"
+            )
+            workflow_owner_missing = cur.fetchone() is None
+            cur.execute("ALTER TABLE workflow_sessions ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT ''")
+            if workflow_owner_missing:
+                cur.execute(
+                    """UPDATE workflow_sessions AS ws SET user_id = c.user_id
+                       FROM (
+                         SELECT DISTINCT ON (conversation_id) conversation_id, user_id
+                         FROM conversations WHERE user_id != ''
+                         ORDER BY conversation_id, created_at DESC
+                       ) AS c
+                       WHERE ws.conversation_id = c.conversation_id AND ws.user_id = ''"""
+                )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
@@ -348,6 +369,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
         ("conversation_topics", _CONVERSATION_TTL_DAYS, "updated_at"),
         ("ticket_presence", 1, "updated_at"),
+        ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS, "updated_at"),
     ]
     deleted: dict[str, int] = {}
     with pool.connection() as conn:
@@ -365,6 +387,21 @@ def cleanup_expired_data() -> dict[str, int]:
                 conn.rollback()
                 logger.exception("TTL cleanup failed for %s", table)
                 deleted[table] = 0
+        # As on SQLite: a journey's outcome stays for the funnel, the answers
+        # it collected go when the conversation does.
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE workflow_sessions SET slots_json = '{}', last_prompt = '' "
+                    "WHERE updated_at < %s AND (slots_json != '{}' OR last_prompt != '')",
+                    (now - _CONVERSATION_TTL_DAYS * 86400,),
+                )
+                deleted["workflow_session_content"] = cur.rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("TTL cleanup failed for workflow session content")
+            deleted["workflow_session_content"] = 0
         ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
         try:
             from .voice_consent import retention_policy
@@ -1741,7 +1778,7 @@ _CONSENT_COLUMNS = (
     "receipt_id, user_id, purpose, version, granted_at, withdrawn_at, legal_basis"
 )
 _WORKFLOW_COLUMNS = (
-    "conversation_id, workflow_id, status, current_step_idx, slots_json, "
+    "conversation_id, workflow_id, status, current_step_idx, user_id, slots_json, "
     "last_prompt, created_at, updated_at"
 )
 
@@ -2017,6 +2054,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
+        "user_id": row["user_id"] or "",
         "slots": slots if isinstance(slots, dict) else {},
         "last_prompt": row["last_prompt"] or "",
         "created_at": row["created_at"],
@@ -2032,6 +2070,7 @@ def upsert_workflow_session(
     *,
     status: str = "active",
     last_prompt: str = "",
+    user_id: str = "",
 ) -> None:
     pool = _get_pool()
     if pool is None or not conversation_id or not workflow_id:
@@ -2048,6 +2087,7 @@ def upsert_workflow_session(
                       workflow_id = EXCLUDED.workflow_id,
                       status = EXCLUDED.status,
                       current_step_idx = EXCLUDED.current_step_idx,
+                      user_id = CASE WHEN EXCLUDED.user_id != '' THEN EXCLUDED.user_id ELSE workflow_sessions.user_id END,
                       slots_json = EXCLUDED.slots_json,
                       last_prompt = EXCLUDED.last_prompt,
                       updated_at = EXCLUDED.updated_at""",  # nosec B608 # noqa: S608
@@ -2056,6 +2096,7 @@ def upsert_workflow_session(
                     workflow_id,
                     status,
                     max(0, int(current_step_idx)),
+                    user_id or "",
                     json.dumps(slots or {}, ensure_ascii=True),
                     last_prompt[:2000],
                     now,

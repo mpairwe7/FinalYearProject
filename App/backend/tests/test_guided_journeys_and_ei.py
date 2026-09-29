@@ -12,7 +12,9 @@ from __future__ import annotations
 import os
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
+import pytest
 from app.agents import AgentRoute, supervisor
 from app.service import _EXPLICIT_WORKFLOW_START_RE
 from app.text_signals import (
@@ -48,9 +50,24 @@ def _load_all_flows() -> None:
         WorkflowRegistry.register(load_workflow(path))
 
 
-class TriggerNormalisationTests(unittest.TestCase):
+class WorkflowRegistryTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        super().setUp()
+        self._workflows_before = WorkflowRegistry._workflows.copy()
+        self._flag_workflows_before = os.environ.get("FLAG_WORKFLOWS")
         _load_all_flows()
+
+    def tearDown(self) -> None:
+        WorkflowRegistry._workflows.clear()
+        WorkflowRegistry._workflows.update(self._workflows_before)
+        if self._flag_workflows_before is None:
+            os.environ.pop("FLAG_WORKFLOWS", None)
+        else:
+            os.environ["FLAG_WORKFLOWS"] = self._flag_workflows_before
+        super().tearDown()
+
+
+class TriggerNormalisationTests(WorkflowRegistryTestCase):
 
     def test_task_phrasings_reach_their_flow(self) -> None:
         cases = {
@@ -84,11 +101,8 @@ class TriggerNormalisationTests(unittest.TestCase):
         self.assertTrue(matched is None or not matched.id.startswith("calc_"))
 
 
-class ReviewRegressionTests(unittest.TestCase):
+class ReviewRegressionTests(WorkflowRegistryTestCase):
     """Findings from the 2026-09-29 code review of this branch, one test each."""
-
-    def setUp(self) -> None:
-        _load_all_flows()
 
     def test_a_past_event_does_not_start_a_flow(self) -> None:
         for message in (
@@ -153,7 +167,29 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertEqual(turns_from_history(chat), stored)
 
 
-class FlowShapeTests(unittest.TestCase):
+class FlowShapeTests(WorkflowRegistryTestCase):
+    def test_terminal_information_step_stops_the_vehicle_flow_without_a_tin(self) -> None:
+        session = WorkflowRegistry.create_session("motor_vehicle_registration")
+        turn = WorkflowRegistry.advance(session, "")
+        turn = WorkflowRegistry.advance(session, "already registered")
+        self.assertEqual(turn.step_id, "collect_has_tin")
+        turn = WorkflowRegistry.advance(session, "no")
+        self.assertEqual(turn.step_id, "tin_guidance")
+        self.assertTrue(turn.is_complete)
+        self.assertTrue(session.completed)
+        self.assertIn("ask me to guide you through registering your vehicle again", turn.question)
+
+    def test_ends_flow_requires_a_yaml_boolean(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "invalid.yaml"
+            path.write_text(
+                'id: invalid\nname: Invalid\nsteps:\n'
+                '  - id: terminal\n    question: Get a TIN first\n'
+                '    slot: ""\n    ends_flow: "false"\n'
+            )
+            with pytest.raises(ValueError, match="ends_flow must be a boolean"):
+                load_workflow(path)
+
     def test_no_question_follows_an_information_step(self) -> None:
         # advance() shows an information-only step once and moves on, so a
         # question after one receives the reply meant for the information step.
@@ -168,10 +204,7 @@ class FlowShapeTests(unittest.TestCase):
                         self.assertEqual(info_seen, "", f"{step.id} follows information step {info_seen}")
 
 
-class NewJourneyTests(unittest.TestCase):
-    def setUp(self) -> None:
-        _load_all_flows()
-
+class NewJourneyTests(WorkflowRegistryTestCase):
     def test_every_link_resolves_to_an_official_page(self) -> None:
         for wf_id in ("tax_clearance", "motor_vehicle_registration"):
             wf = WorkflowRegistry.get(wf_id)
@@ -266,6 +299,12 @@ class EmotionSignalTests(unittest.TestCase):
         other = f"{empathy_ack('frustration')}\n\nEarlier answer."
         self.assertEqual(strip_repeated_ack(reply, [other]), reply)
 
+    def test_trajectory_window_one_uses_only_the_current_turn(self) -> None:
+        result = distress_trajectory("", ["This is useless", "Still broken"], window=1)
+        self.assertEqual(result["kinds"], [""])
+        self.assertEqual(result["negative_turns"], 0)
+        self.assertFalse(result["sustained"])
+
     def test_trajectory_needs_the_current_turn_to_be_upset(self) -> None:
         upset = ["This is useless", "It still does not work"]
         self.assertTrue(distress_trajectory("frustration", upset)["sustained"])
@@ -346,13 +385,10 @@ class EmpathyToolHistoryTests(unittest.TestCase):
         self.assertEqual(assess("I am worried, please")["intensity"], "low")
 
 
-class TurnGuidanceTests(unittest.TestCase):
+class TurnGuidanceTests(WorkflowRegistryTestCase):
     def setUp(self) -> None:
-        _load_all_flows()
+        super().setUp()
         os.environ["FLAG_WORKFLOWS"] = "true"
-
-    def tearDown(self) -> None:
-        os.environ.pop("FLAG_WORKFLOWS", None)
 
     def test_how_to_answer_offers_the_matching_flow(self) -> None:
         result = {"reply": "Log in to eTax…", "retrieval_mode": "faq_priority", "next_actions": []}

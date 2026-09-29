@@ -1,6 +1,6 @@
 id: motor_vehicle_registration
 name: Motor Vehicle Registration
-version: "1"
+version: "2"
 description: >
   Guide first-time registration of a vehicle entering Uganda, or the move of
   an already registered vehicle to digital number plates.
@@ -48,10 +48,14 @@ steps:
   - id: tin_guidance
     title: "Get a TIN first"
     question: >
-      Get your TIN before anything else. Say **help me register for a TIN**
-      and I will switch you to the TIN guide; come back to this one
-      afterwards.
+      Get your TIN before anything else: every registration step below needs
+      it. Say **help me register for a TIN** and I will guide you through
+      that; once you have it, ask me to guide you through registering your
+      vehicle again.
     when: "has_tin == False"
+    # Every later step needs a TIN, and a step takes one condition, so the
+    # flow stops here rather than handing out steps the taxpayer cannot do.
+    ends_flow: true
     slot: ""
     validator: text
     resources:

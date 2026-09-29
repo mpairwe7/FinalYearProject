@@ -101,6 +101,38 @@ def test_retention_cleanup_deletes_expired_rows_but_keeps_open_tickets(isolated_
     assert isolated_db.get_ticket(open_ticket["id"]) is not None
 
 
+def test_journey_answers_are_scrubbed_before_outcome_rows_expire(isolated_db, monkeypatch) -> None:
+    monkeypatch.setattr(isolated_db, "_CONVERSATION_TTL_DAYS", 7)
+    monkeypatch.setattr(isolated_db, "_WORKFLOW_SESSION_TTL_DAYS", 30)
+    old = time.time() - 8 * 86400
+    isolated_db.upsert_workflow_session(
+        "journey-retained", "return_filing", 2, {"answer": "private response"},
+        status="active", last_prompt="Question containing collected context",
+    )
+    isolated_db.execute(
+        "UPDATE workflow_sessions SET created_at = ?, updated_at = ? WHERE conversation_id = ?",
+        (old, old, "journey-retained"),
+    )
+
+    deleted = isolated_db.cleanup_expired_data()
+    row = isolated_db.get_workflow_session("journey-retained")
+    assert deleted["workflow_session_content"] == 1
+    assert deleted["workflow_sessions"] == 0
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["slots"] == {}
+    assert row["last_prompt"] == ""
+
+    expired = old - 30 * 86400
+    isolated_db.execute(
+        "UPDATE workflow_sessions SET created_at = ?, updated_at = ? WHERE conversation_id = ?",
+        (expired, expired, "journey-retained"),
+    )
+    deleted = isolated_db.cleanup_expired_data()
+    assert deleted["workflow_sessions"] == 1
+    assert isolated_db.get_workflow_session("journey-retained") is None
+
+
 def test_subject_export_and_erasure_cover_linked_analytics(isolated_db) -> None:
     external_id = "privacy-subject"
     user = isolated_db.upsert_user(external_id=external_id)
@@ -114,7 +146,17 @@ def test_subject_export_and_erasure_cover_linked_analytics(isolated_db) -> None:
     assert len(exported["sessions"]) == 1
     assert len(exported["feedback"]) == 1
 
+    isolated_db.upsert_workflow_session(
+        "workflow-privacy", "return_filing", 2, {"taxpayer_type": "company"},
+        status="active", last_prompt="What type of taxpayer are you?", user_id=external_id,
+    )
+    exported = isolated_db.export_user_data(user["id"], external_id=external_id)
+    assert len(exported["workflow_sessions"]) == 1
+    assert exported["workflow_sessions"][0]["conversation_id"] == "workflow-privacy"
+
     deleted = isolated_db.delete_user_cascade(user["id"], external_id=external_id)
+    assert deleted["workflow_sessions"] == 1
+    assert isolated_db.get_workflow_session("workflow-privacy") is None
     assert deleted["analytics_events"] == 1
     assert deleted["sessions"] == 1
     assert deleted["feedback"] == 1

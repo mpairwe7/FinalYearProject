@@ -6,10 +6,14 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from app import database as db
+from app import main as main_module
 from app.journey_analytics import build_journey_funnel
+from app.main import journey_funnel
 from app.workflows.loader import load_workflow
+from app.workflows.registry import WorkflowRegistry
 
 FLOWS_DIR = Path(__file__).resolve().parents[1] / "app" / "workflows" / "flows"
 
@@ -70,6 +74,18 @@ class BuildJourneyFunnelTests(unittest.TestCase):
 
 
 class JourneyFunnelQueryTests(unittest.TestCase):
+    def test_requested_period_is_capped_to_retained_outcomes(self) -> None:
+        with (
+            patch.object(db, "workflow_session_ttl_days", return_value=14),
+            patch.object(db, "get_journey_funnel", return_value={"sessions": [], "feedback": []}) as query,
+            patch.object(WorkflowRegistry, "list_all", return_value=[]),
+        ):
+            response = journey_funnel(days=30)
+        self.assertEqual(response.period_days, 14)
+        query.assert_called_once_with(
+            14, abandon_after_s=main_module._JOURNEY_ABANDON_AFTER_HOURS * 3600
+        )
+
     @staticmethod
     def _close_connection() -> None:
         conn = getattr(db._local, "conn", None)

@@ -316,7 +316,7 @@ class WorkflowRegistry:
         # extra dummy user turn.
         if step.question and not step.slot and not step.tool:
             session.current_step_idx += 1
-            session.completed = session.current_step_idx >= len(wf.steps)
+            session.completed = step.ends_flow or session.current_step_idx >= len(wf.steps)
             return _make_turn(wf, session, step, question=step.question, is_complete=session.completed)
 
         # First call for this step (no user input yet) — emit the question
@@ -373,7 +373,7 @@ class WorkflowRegistry:
 
             if nxt.question and not nxt.slot and not nxt.tool:
                 session.current_step_idx += 1
-                session.completed = session.current_step_idx >= len(wf.steps)
+                session.completed = nxt.ends_flow or session.current_step_idx >= len(wf.steps)
                 return _make_turn(wf, session, nxt, question=nxt.question, is_complete=session.completed)
 
             if nxt.question:

@@ -5841,6 +5841,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
@@ -5867,10 +5868,10 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
             or self._maybe_handle_tin_clarification(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
             )
             or self._maybe_handle_calculator(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
             )
             or self._maybe_handle_calc_followup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
@@ -6223,6 +6224,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Ask individual-vs-organisation before giving TIN registration steps.
 
@@ -6255,6 +6257,7 @@ class ChatModel:
             session.slots,
             status="active",
             last_prompt=prompt,
+            user_id=user_id or "",
         )
         workflow = self._workflow_view(
             session,
@@ -6329,6 +6332,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Deterministic tax-calculator fast path (REST and streaming parity).
 
@@ -6410,6 +6414,7 @@ class ChatModel:
             session.slots,
             status=status,
             last_prompt=prompt,
+            user_id=user_id or "",
         )
         workflow = self._workflow_view(
             session,
@@ -6686,30 +6691,36 @@ class ChatModel:
         is_valid, _, _ = validate_slot(user_input, step.validator, None)
         return not is_valid
 
-    def _leaves_flow_for_another(
-        self, persisted: dict[str, Any], *, message: str, rewritten: str, thread_id: str
-    ) -> bool:
-        """Close the active flow when the taxpayer explicitly asks for a different one.
+    def _flow_switch_target(
+        self, persisted: dict[str, Any], *, message: str, rewritten: str
+    ) -> Any | None:
+        """The different flow the taxpayer explicitly asks to start, if any.
 
         A flow owns its thread, so without this "help me file my return" typed
         inside the Tax Clearance checklist, which tells the taxpayer to do
         exactly that, was validated as the answer to the pending question and
         the filing guide never started. Only an explicit start ("help me file",
         "guide me", "walk me through", "start") that names another flow counts;
-        a slot answer never does. The closed flow is counted as cancelled at
-        the step it was on.
+        a slot answer never does.
+
+        No side effects: the active flow is closed only once the new one has
+        actually started (see ``_close_flow_left_for``), so a refused start
+        leaves the taxpayer in the flow they were in.
         """
         combined = f"{message or ''} {rewritten or ''}"
         if not _EXPLICIT_WORKFLOW_START_RE.search(combined):
-            return False
+            return None
         target = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
         current = str(persisted.get("workflow_id") or "")
         if target is None or target.id == current:
-            return False
+            return None
+        return target
+
+    def _close_flow_left_for(self, persisted: dict[str, Any], thread_id: str) -> None:
+        """Count the flow the taxpayer left as cancelled, at the step it was on."""
         pending = WorkflowRegistry.pending_step(self._restore_workflow_session(persisted))
         db.complete_workflow_session(thread_id, status="cancelled")
-        self._record_journey(current, "cancelled", pending.id if pending else "")
-        return True
+        self._record_journey(str(persisted.get("workflow_id") or ""), "cancelled", pending.id if pending else "")
 
     def _maybe_handle_workflow(
         self,
@@ -6719,16 +6730,25 @@ class ChatModel:
         thread_id: str,
         locale: str,
         personalization: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Start or continue a durable guided workflow when appropriate."""
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None
 
         persisted = db.get_workflow_session(thread_id)
-        if persisted and persisted.get("status") == "active" and self._leaves_flow_for_another(
-            persisted, message=message, rewritten=rewritten, thread_id=thread_id
-        ):
+        # Past the conversation's retention the session keeps only its outcome
+        # (the answers are blanked), so it is history, not something to resume.
+        updated_at = (persisted or {}).get("updated_at")
+        if updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds():
             persisted = None
+        # A flow the taxpayer asks to leave for another stays active until the
+        # new one has started; if the start is refused below, they keep it.
+        leaving: dict[str, Any] | None = None
+        if persisted and persisted.get("status") == "active" and self._flow_switch_target(
+            persisted, message=message, rewritten=rewritten
+        ) is not None:
+            leaving, persisted = persisted, None
         if persisted and persisted.get("status") == "active":
             session = self._restore_workflow_session(persisted)
             self._apply_personalization_to_workflow(session, personalization)
@@ -6848,6 +6868,7 @@ class ChatModel:
                     session.slots,
                     status="completed",
                     last_prompt=prompt,
+                    user_id=user_id or "",
                 )
             else:
                 db.upsert_workflow_session(
@@ -6857,6 +6878,7 @@ class ChatModel:
                     session.slots,
                     status="active",
                     last_prompt=prompt,
+                    user_id=user_id or "",
                 )
             workflow = self._workflow_view(
                 session,
@@ -6916,6 +6938,8 @@ class ChatModel:
         session = WorkflowRegistry.create_session(matched.id)
         if session is None:
             return None
+        if leaving is not None:
+            self._close_flow_left_for(leaving, thread_id)
         self._record_journey(session.workflow_id, "started")
         self._apply_personalization_to_workflow(session, personalization)
 
@@ -6931,6 +6955,7 @@ class ChatModel:
             session.slots,
             status=status,
             last_prompt=prompt,
+            user_id=user_id or "",
         )
         workflow = self._workflow_view(
             session,
@@ -7243,6 +7268,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         personalization=personalization,
+                        user_id=user_id,
                     )
                 if workflow_result:
                     if distress and workflow_result.get("reply"):
@@ -7274,6 +7300,7 @@ class ChatModel:
                         rewritten=rewritten,
                         thread_id=thread_id,
                         locale=locale,
+                        user_id=user_id,
                     )
                 if not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -7281,6 +7308,7 @@ class ChatModel:
                         rewritten=rewritten,
                         thread_id=thread_id,
                         locale=locale,
+                        user_id=user_id,
                     )
                 if not calc_result:
                     calc_result = self._maybe_handle_fast_paths(
@@ -7288,6 +7316,7 @@ class ChatModel:
                         rewritten=router_rewritten,
                         thread_id=thread_id,
                         locale=locale,
+                        user_id=user_id,
                     )
             if calc_result:
                 if distress and calc_result.get("reply"):
@@ -8745,6 +8774,7 @@ class ChatModel:
             thread_id=thread_id,
             locale=locale,
             personalization=personalization,
+            user_id=user_id,
         )
         if workflow_result:
             if distress and workflow_result.get("reply"):
@@ -8771,6 +8801,7 @@ class ChatModel:
             rewritten=rewritten,
             thread_id=thread_id,
             locale=locale,
+            user_id=user_id,
         )
         if not calc_result and core_msg_s != message:
             calc_result = self._maybe_handle_fast_paths(
@@ -8778,6 +8809,7 @@ class ChatModel:
                 rewritten=rewritten,
                 thread_id=thread_id,
                 locale=locale,
+                user_id=user_id,
             )
         if calc_result:
             if distress and calc_result.get("reply"):

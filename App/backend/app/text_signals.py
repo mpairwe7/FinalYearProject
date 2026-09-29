@@ -538,7 +538,9 @@ def distress_trajectory(
     to be negative too, so a taxpayer who has calmed down is not offered a
     handoff for how they felt two messages ago.
     """
-    earlier = [detect_user_distress(m) for m in list(prior_user_messages)[-(window - 1):]]
+    # window == 1 is the current turn alone; [-0:] would be the whole history.
+    previous = list(prior_user_messages)[-(window - 1):] if window > 1 else []
+    earlier = [detect_user_distress(m) for m in previous]
     kinds = [*earlier, current_kind or ""]
     negative = sum(1 for k in kinds if k in _SUSTAINED_KINDS)
     return {

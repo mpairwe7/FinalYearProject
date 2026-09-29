@@ -2662,6 +2662,9 @@ def journey_funnel(
     """
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    # Journey outcomes are kept WORKFLOW_SESSION_TTL_DAYS (default 365); a
+    # longer period would count only part of it, so report what is covered.
+    days = min(days, db.workflow_session_ttl_days())
     raw = db.get_journey_funnel(days, abandon_after_s=_JOURNEY_ABANDON_AFTER_HOURS * 3600)
     return JourneyFunnelResponse(
         **build_journey_funnel(

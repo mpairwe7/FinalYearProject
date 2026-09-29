@@ -216,12 +216,16 @@ def test_the_streaming_abstention_neither_repeats_the_opener_nor_competes_with_a
             )
         ]
 
-    events = asyncio.run(_run())
+    with mock.patch(
+        "App.backend.app.guardrails.OutputGuard.should_escalate",
+        return_value=(True, "test escalation"),
+    ):
+        events = asyncio.run(_run())
     reply = "".join(payload for kind, payload in events if kind == "token")
     grounding = next(payload for kind, payload in events if kind == "grounding")
     assert not reply.startswith(ack)
-    if grounding["escalation_required"]:
-        assert not any(a.startswith(GUIDE_PREFIX) or a == HANDOFF_ACTION for a in grounding["next_actions"])
+    assert grounding["escalation_required"] is True
+    assert not any(a.startswith(GUIDE_PREFIX) or a == HANDOFF_ACTION for a in grounding["next_actions"])
 
 
 def test_journey_funnel_endpoint(client):
