@@ -79,6 +79,15 @@ _PCT_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
 # Legal citations
 _SEC_RE = re.compile(r"\bSec(?:tion)?\.?\s*(\d+[A-Za-z]?)\b", re.IGNORECASE)
 
+# Asides that read badly and make Orpheus babble. The calculator writes a rate
+# as "18% (18%)" (a digit anchor for translation) and names a tax as "(VAT /
+# omusolo gwa VAT / ushuru wa VAT)"; spoken by the English voice, the VAT
+# answer ran on as "…to gwa gwa, isi isi zo…" until the 17 s cap.
+_REPEATED_FIGURE_RE = re.compile(r"(?<![\w.,])(\d[\d,.]*\s?%?)\s*\(\s*\1\s*\)")
+_FY_ASIDE_RE = re.compile(r"\s*\(\s*FY\s?(\d{4})\s?[-\u2013/]\s?(\d{2,4})\s*\)", re.IGNORECASE)
+_FY_RE = re.compile(r"\bFY\s?(\d{4})\s?[-\u2013/]\s?(\d{2,4})\b", re.IGNORECASE)
+_ALIAS_ASIDE_RE = re.compile(r"\(([^()/]{1,60}(?:/[^()/]{1,60})+)\)")
+
 # Acronyms and institutional terms in Ugandan tax context
 _ACRONYMS = [
     (re.compile(r"\bEFRIS\b"), "E-F-R-I-S"),
@@ -137,6 +146,29 @@ def _format_ugx_amount(amount_str: str, locale: str) -> str:
     return f"{amount_str} Uganda shillings"
 
 
+def _fiscal_year(match: re.Match[str], locale: str) -> str:
+    """ "FY2026-27" -> "2026 to 2027" in English (Orpheus reads "2026-27" as anything
+    from "twenty-six twenty-seven" to "ten thousand and twenty-seven"); the
+    digits alone elsewhere."""
+    first, second = match.group(1), match.group(2)
+    if locale != "en":
+        return f"{first}-{second}"
+    if len(second) < 4:
+        second = f"{first[: 4 - len(second)]}{second}"
+        if int(second) < int(first):
+            second = str(int(second) + 10 ** len(match.group(2)))
+    return f"{first} to {second}"
+
+
+def _first_alias(match: re.Match[str]) -> str:
+    """"(VAT / omusolo gwa VAT / ushuru wa VAT)" -> "(VAT)"; other slashed asides stay."""
+    names = [name.strip() for name in match.group(1).split("/")]
+    head = names[0]
+    if head and all(re.search(rf"\b{re.escape(head)}\b", name, re.IGNORECASE) for name in names[1:]):
+        return f"({head})"
+    return match.group(0)
+
+
 def clean_text_for_speech(text: str, locale: str = "en") -> str:
     """Pre-process text for natural, audible TTS synthesis in the tax domain.
 
@@ -177,6 +209,15 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     # 6. Strip bold / italic markers
     t = _BOLD_RE.sub(lambda m: m.group(1) or m.group(2) or "", t)
     t = _ITALIC_RE.sub(lambda m: m.group(1) or m.group(2) or "", t)
+
+    # 6b. Asides: a figure said once, a tax named once, the fiscal year as words
+    t = _REPEATED_FIGURE_RE.sub(r"\1", t)
+    t = _ALIAS_ASIDE_RE.sub(_first_alias, t)
+    if locale == "en":
+        t = _FY_ASIDE_RE.sub(lambda m: f", for the {_fiscal_year(m, locale)} financial year", t)
+    else:
+        t = _FY_ASIDE_RE.sub("", t)
+    t = _FY_RE.sub(lambda m: _fiscal_year(m, locale), t)
 
     # 7. Normalize 9-digit or 10-digit TINs (spell out digits clearly with pause)
     def _tin_sub(m: re.Match) -> str:

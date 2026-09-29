@@ -123,6 +123,42 @@ def test_a_url_goes_with_the_at_that_introduced_it():
     assert res == "Visit the official U-R-A web portal. Then log in."
 
 
+def test_the_calculator_s_asides_are_spoken_once_and_plainly():
+    # The calculator's VAT line, verbatim: spoken as written, Orpheus ran on
+    # past the answer ("…to gwa gwa, isi isi zo…") until its 17 s cap.
+    raw = (
+        "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is 18% (18%)** "
+        "(FY2026-27). That comes from the official URA FY2026-27 rate table."
+    )
+    assert clean_text_for_speech(raw, locale="en") == (
+        "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. "
+        "That comes from the official U-R-A 2026 to 2027 rate table."
+    )
+    assert clean_text_for_speech(raw, locale="lg") == (
+        "The standard rate of Value Added Tax (V-A-T) is ebitundu 18 ku buli kikumi. "
+        "That comes from the official U-R-A 2026-27 rate table."
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "spoken"),
+    [
+        # a different figure, not a repeat
+        ("It rose from 118% (18%) last year.", "It rose from 118 percent (18 percent) last year."),
+        # a date, not a list of names
+        ("Filed on (12/05/2026) at noon.", "Filed on (12/05/2026) at noon."),
+        # alternatives that are not one name
+        ("Deductions (NSSF / withholding) apply.", "Deductions (N-S-S-F / withholding) apply."),
+    ],
+)
+def test_other_asides_are_left_alone(raw, spoken):
+    assert clean_text_for_speech(raw, locale="en") == spoken
+
+
+def test_a_fiscal_year_rolls_over_the_century():
+    assert clean_text_for_speech("FY2099-00", locale="en") == "2099 to 2100"
+
+
 def test_empty_and_whitespace():
     assert clean_text_for_speech("") == ""
     assert clean_text_for_speech("   ") == ""
