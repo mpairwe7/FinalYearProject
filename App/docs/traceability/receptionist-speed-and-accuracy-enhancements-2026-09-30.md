@@ -104,3 +104,19 @@ Evaluated across all 12 standard end-to-end call scenarios (`scripts/replay_call
 * **GPU Utilization**: 0% idle, peaking at 36% during combined ASR and multi-clause synthesis
 * **Temperature**: 52°C – 55°C
 * **Power Draw**: 69.5 W (rated cap: 300 W)
+
+---
+
+## 5. Enhanced UX, User Control & Multilingual Accuracy Verification Suite
+
+Automated end-to-end verification (`scripts/verify_receptionist_ux_control_accuracy.py`) targeting `ws://127.0.0.1:8083/v1/calls/stream`:
+*Artifact produced: `evals/reports/receptionist_ux_control_accuracy_report.json` (6/6 Passed - 100.0%)*
+
+| Category | Capability Verified | Result | Key Details |
+| :--- | :--- | :---: | :--- |
+| **User Control** | Voice Consent Gate | **PASS** | Refusal (`voice_consent_accepted: false`) rejected with explicit consent requirement before audio processing |
+| **User Control** | Manual Language Override (UI) | **PASS** | Setting `lg` on screen holds against acoustic contrary input (`en_vat`); answers in native Luganda |
+| **Enhanced UX** | Live Partial Captions & Playout | **PASS** | Emits `final: false` live partials while speaking, instant `final: true` caller caption, and pipelined assistant response |
+| **User Control** | Barge-In Interruption Latency | **PASS** | Caller talking over greeting stops assistant audio in **1,140 ms** (SLA < 1,200 ms) with `bot-interrupted` event |
+| **User Control** | Human Officer Transfer Control | **PASS** | Caller request for human officer triggers `status: transferring` and spoken officer handoff notice |
+| **Multilingual Accuracy** | Statutory Rate Fidelity (EN, LG, SW) | **PASS** | **EN**: 18% standard VAT rate verified; **LG**: vernacular statutory accuracy verified ("ebitundu 18 ku buli kikumi"); **SW**: East African tax phrasing verified ("namba ya TIN", "Hatua 1/2") |

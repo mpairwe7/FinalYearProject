@@ -1,0 +1,60 @@
+{
+  "timestamp": 1790717587.6908417,
+  "target_url": "ws://127.0.0.1:8083/v1/calls/stream",
+  "all_passed": true,
+  "total_tests": 6,
+  "passed_tests": 6,
+  "results": [
+    {
+      "test": "voice_consent_enforcement",
+      "passed": true,
+      "detail": "Voice recording consent required before processing call."
+    },
+    {
+      "test": "manual_language_override_ux",
+      "passed": true,
+      "detail": "Override emitted: True; Response: Omusolo ogw'omuwendo ogwongerwako (V-A-T) mu Uganda guli ebitundu 18 k..."
+    },
+    {
+      "test": "live_partial_captions_ux",
+      "passed": true,
+      "interim_count": 3,
+      "final_caller": [
+        "So, how do I register for a tin number with ORA?"
+      ],
+      "final_assistant": [
+        "Happy to help you register for a T-I-N!\n\nTo register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/N-I-N) or an organisation (requires Certificate of Incorporation)?"
+      ]
+    },
+    {
+      "test": "barge_in_user_control",
+      "passed": true,
+      "bot_stop_ms": 1140,
+      "interrupt_seen": true
+    },
+    {
+      "test": "human_officer_transfer_control",
+      "passed": true,
+      "transfer_status_seen": true,
+      "spoken_notice": "I'm connecting you to a URA officer, please hold."
+    },
+    {
+      "test": "multilingual_accuracy_statutory_fidelity",
+      "passed": true,
+      "languages": {
+        "en_vat_accuracy": {
+          "passed": true,
+          "text": "The standard rate of Value Added Tax (V-A-T) in Uganda is 18 percent on taxable supplies of goods and services."
+        },
+        "lg_vat_accuracy": {
+          "passed": true,
+          "text": "Okusasula omusolo gwa takisi, olina okwewandiisa ne U-R-A n'ofuna nnamba ya U-R-A. Oluvannyuma osasula ssente z'okwewandiisa emitwalo 20 n'olukusa lw'omwaka olwa 120,000. Kakasa nti otuukiriza ebisaanyizo bino okwewala engassi. Wandiyagadde okwogera n'omukozi ku nsonga eno?"
+        },
+        "sw_tin_accuracy": {
+          "passed": true,
+          "text": "Ninafurahi kukusaidia kujisajili kwa ajili ya T-I-N! Kusajiliwa kwa T-I-N na U-R-A nchini Uganda:\nHatua 1: Tembelea tovuti rasmi ya U-R-A kwenye 2. Nenda kwenye eServices Usajili wa T-I-N 3. Jaza fomu ya maombi mtandaoni na uwasilishe. Je! Ungependa maelezo zaidi?"
+        }
+      }
+    }
+  ]
+}
