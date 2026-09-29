@@ -241,7 +241,7 @@ _CANONICAL_TAX_INTENTS: Final[tuple[tuple[re.Pattern[str], dict[str, str]], ...]
             re.IGNORECASE,
         ),
         {
-            "en": "The standard rate of Value Added Tax (VAT) in Uganda is 18 percent on taxable supplies of goods and services.",
+            "en": "The standard rate of Value Added Tax (VAT) in Uganda is 18% on taxable supplies of goods and services.",
             "lg": "Omusolo ogw'omuwendo ogwongerwako (VAT) mu Uganda guli ebitundu 18 ku buli kikumi ku bintu n'empeereza ezisasulirwa omusolo.",
             "sw": "Kiwango cha kawaida cha Kodi ya Ongezeko la Thamani (VAT) nchini Uganda ni asilimia 18 kwa bidhaa na huduma zinazotozwa kodi.",
         },

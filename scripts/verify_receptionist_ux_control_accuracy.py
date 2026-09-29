@@ -419,6 +419,91 @@ async def test_multilingual_accuracy_statutory_fidelity() -> dict[str, Any]:
     }
 
 
+async def test_main_chat_streaming_voice_ws() -> dict[str, Any]:
+    """Main Chat UI Voice Flow: Tests /v1/voice/chat/stream for duplex voice streaming."""
+    print("\n[Main Chat Speech Flow] Testing Streaming Duplex Voice WebSocket (/v1/voice/chat/stream)...")
+    chat_ws_url = WS_URL.replace("/v1/calls/stream", "/v1/voice/chat/stream")
+    ready_seen = False
+    vad_seen = False
+    transcription_text = ""
+    reply_text = ""
+    retrieval_mode = ""
+    latency_report = None
+    audio_chunks_count = 0
+
+    try:
+        async with websockets.connect(chat_ws_url, max_size=None) as ws:
+            await ws.send(json.dumps({
+                "type": "session_start",
+                "language": "en",
+                "sample_rate": 16000,
+                "vad_sensitivity": "medium",
+                "tts_enabled": True,
+                "voice_consent_accepted": True,
+            }))
+
+            ready_msg = await asyncio.wait_for(ws.recv(), timeout=5.0)
+            ready_data = json.loads(ready_msg)
+            ready_seen = ready_data.get("type") == "session_ready"
+
+            pcm = pcm_of("en_vat")
+            for i in range(0, len(pcm), 640):
+                await ws.send(pcm[i : i + 640])
+                await asyncio.sleep(0.01)
+
+            silence = b"\x00" * 640
+            for _ in range(35):
+                await ws.send(silence)
+                await asyncio.sleep(0.02)
+
+            deadline = time.monotonic() + 15.0
+            while time.monotonic() < deadline:
+                try:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=2.5)
+                    if isinstance(raw, bytes):
+                        audio_chunks_count += 1
+                    else:
+                        event = json.loads(raw)
+                        etype = event.get("type")
+                        if etype == "vad_state":
+                            vad_seen = True
+                        elif etype == "transcript_final":
+                            transcription_text = event.get("text", "")
+                        elif etype == "reply_text":
+                            reply_text += " " + event.get("text", "")
+                        elif etype == "reply_meta":
+                            retrieval_mode = event.get("retrieval_mode", "")
+                        elif etype == "latency_report":
+                            latency_report = event
+                            break
+                except asyncio.TimeoutError:
+                    break
+
+            await ws.send(json.dumps({"type": "session_end"}))
+    except Exception as exc:
+        print(f" -> Main Chat Voice Stream error: {exc}")
+
+    passed = (
+        ready_seen
+        and vad_seen
+        and bool(transcription_text)
+        and ("18" in reply_text)
+        and audio_chunks_count >= 1
+    )
+    print(f" -> Result: {'PASS' if passed else 'FAIL'} (Ready={ready_seen}, VAD={vad_seen}, Transcript='{transcription_text[:35]}...', Reply='{reply_text.strip()[:45]}...', Chunks={audio_chunks_count})")
+    return {
+        "test": "main_chat_streaming_voice_ws",
+        "passed": passed,
+        "ready": ready_seen,
+        "vad": vad_seen,
+        "transcript": transcription_text,
+        "reply": reply_text.strip(),
+        "retrieval_mode": retrieval_mode,
+        "audio_chunks": audio_chunks_count,
+        "latency_report": latency_report,
+    }
+
+
 async def main() -> int:
     print("=" * 70)
     print("URA Voice Receptionist: UX, User Control & Accuracy Verification Suite")
@@ -432,6 +517,7 @@ async def main() -> int:
         test_barge_in_user_control(),
         test_human_officer_transfer_control(),
         test_multilingual_accuracy_statutory_fidelity(),
+        test_main_chat_streaming_voice_ws(),
     ]
 
     results = []

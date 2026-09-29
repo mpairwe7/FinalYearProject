@@ -262,6 +262,37 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session._audio_buffer), 0)
         self.assertTrue(session._cancelled.is_set())
 
+    async def test_canonical_statutory_cache_in_voice_stream(self):
+        session, speech, chat = self._make_session()
+        from app.speech_service import TranscribeResult
+
+        speech.transcribe.return_value = TranscribeResult(
+            text="What is the standard VAT rate in Uganda?",
+            language="en",
+            duration_s=1.0,
+        )
+
+        events = []
+        async for event in session.process_utterance(b"\x00" * 3200):
+            events.append(event)
+
+        meta_events = [e for e in events if e.type == "reply_meta"]
+        self.assertTrue(meta_events)
+        self.assertEqual(meta_events[0].data.get("retrieval_mode"), "canonical_cache")
+        # Chat model generate should NOT have been called due to canonical hit
+        chat.generate.assert_not_called()
+
+    def test_split_sentences_numbered_steps(self):
+        from app.voice_stream import _split_sentences
+
+        text = "1. Go to the URA web portal. 2. Click eServices and select TIN. 3. Submit your application."
+        sentences = _split_sentences(text)
+        self.assertGreaterEqual(len(sentences), 2)
+        # No sentence should be a bare number like "1." or "2."
+        for s in sentences:
+            self.assertFalse(s.strip() in ("1.", "2.", "3."))
+            self.assertGreater(len(s.strip()), 5)
+
 
 # ---------------------------------------------------------------------------
 # Voice consent tests

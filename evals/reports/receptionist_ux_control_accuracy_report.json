@@ -1,9 +1,9 @@
 {
-  "timestamp": 1790718134.1957502,
+  "timestamp": 1790719704.4899483,
   "target_url": "ws://127.0.0.1:8083/v1/calls/stream",
   "all_passed": true,
-  "total_tests": 6,
-  "passed_tests": 6,
+  "total_tests": 7,
+  "passed_tests": 7,
   "results": [
     {
       "test": "voice_consent_enforcement",
@@ -29,7 +29,7 @@
     {
       "test": "barge_in_user_control",
       "passed": true,
-      "bot_stop_ms": 1149,
+      "bot_stop_ms": 1146,
       "interrupt_seen": true
     },
     {
@@ -48,12 +48,33 @@
         },
         "lg_vat_accuracy": {
           "passed": true,
-          "text": "Okusinziira ku mateeka ga U-R-A ag'omwaka 2025/26, omuntu alina okusasula omusolo gwa ebitundu 30 ku buli kikumi ku magoba ge (net chargeable profits), nga kino kye kimanyiddwa ng\u2019omusolo gw\u2019ekitongole oguteeberezebwa (Corporate Income Tax). Okugeza, singa bizineesi yo ekola amagoba ga bukadde 100, olina okusasula obukadde 30 mu musolo."
+          "text": "Okusinziira ku tteeka lya U-R-A ery'omwaka 2025/26, omuntu alina okusasula omusolo gwa ebitundu 30 ku buli kikumi ku magoba agava mu mirimu gy'okuzimba oba ebitundu 40 ku buli kikumi ku musaala gw'abakugu abaweebwa emirimu egy'enjawulo. Okumanya ebisingawo, weebuuze ku U-R-A ku 0 800, 117, 0 0 0 oba 0 800, 217, 0 0 0."
         },
         "sw_tin_accuracy": {
           "passed": true,
           "text": "Ninafurahi kukusaidia kujisajili kwa ajili ya T-I-N! Kusajiliwa kwa T-I-N na U-R-A nchini Uganda:\nHatua 1: Tembelea tovuti rasmi ya U-R-A kwenye 2. Nenda kwenye eServices Usajili wa T-I-N 3. Jaza fomu ya maombi mtandaoni na uwasilishe. Je! Ungependa maelezo zaidi?"
         }
+      }
+    },
+    {
+      "test": "main_chat_streaming_voice_ws",
+      "passed": true,
+      "ready": true,
+      "vad": true,
+      "transcript": "What is the standard VAT rate in Uganda?",
+      "reply": "The standard rate of Value Added Tax (V-A-T) in Uganda is 18 percent on taxable supplies of goods and services.",
+      "retrieval_mode": "canonical_cache",
+      "audio_chunks": 1,
+      "latency_report": {
+        "type": "latency_report",
+        "asr_ms": 304.6,
+        "mt_ms": 0.0,
+        "llm_ms": 0.5,
+        "tts_first_chunk_ms": 0.9,
+        "total_ms": 306.0,
+        "asr_backend": "whisper_salt",
+        "tts_backend": "speech.tts",
+        "mt_backend": ""
       }
     }
   ]

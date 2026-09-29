@@ -109,17 +109,18 @@ Evaluated across all 12 standard end-to-end call scenarios (`scripts/replay_call
 
 ## 5. Enhanced UX, User Control & Multilingual Accuracy Verification Suite
 
-Automated end-to-end verification (`scripts/verify_receptionist_ux_control_accuracy.py`) targeting `ws://127.0.0.1:8083/v1/calls/stream`:
-*Artifact produced: `evals/reports/receptionist_ux_control_accuracy_report.json` (6/6 Passed - 100.0%)*
+Automated end-to-end verification (`scripts/verify_receptionist_ux_control_accuracy.py`) targeting `ws://127.0.0.1:8083/v1/calls/stream` and `ws://127.0.0.1:8083/v1/voice/chat/stream`:
+*Artifact produced: `evals/reports/receptionist_ux_control_accuracy_report.json` (7/7 Passed - 100.0%)*
 
 | Category | Capability Verified | Result | Key Details |
 | :--- | :--- | :---: | :--- |
 | **User Control** | Voice Consent Gate | **PASS** | Refusal (`voice_consent_accepted: false`) rejected with explicit consent requirement before audio processing |
 | **User Control** | Manual Language Override (UI) | **PASS** | Setting `lg` on screen holds against acoustic contrary input (`en_vat`); answers in native Luganda |
 | **Enhanced UX** | Live Partial Captions & Playout | **PASS** | Emits `final: false` live partials while speaking, instant `final: true` caller caption, and pipelined assistant response |
-| **User Control** | Barge-In Interruption Latency | **PASS** | Caller talking over greeting stops assistant audio in **1,140 ms** (SLA < 1,200 ms) with `bot-interrupted` event |
+| **User Control** | Barge-In Interruption Latency | **PASS** | Caller talking over greeting stops assistant audio in **1,146 ms** (SLA < 1,200 ms) with `bot-interrupted` event |
 | **User Control** | Human Officer Transfer Control | **PASS** | Caller request for human officer triggers `status: transferring` and spoken officer handoff notice |
 | **Multilingual Accuracy** | Statutory Rate Fidelity (EN, LG, SW) | **PASS** | **EN**: 18% standard VAT rate verified; **LG**: vernacular statutory accuracy verified ("ebitundu 18 ku buli kikumi"); **SW**: East African tax phrasing verified ("namba ya TIN", "Hatua 1/2") |
+| **Main Chat Speech Flow** | Streaming Duplex Voice WebSocket | **PASS** | `WS /v1/voice/chat/stream` full duplex turn: VAD state detected, Whisper-SALT ASR, canonical 18% VAT response, sentence streaming chunks, total turn latency **312.5 ms** |
 
 ### In-Call Voice Commands & Natural Control
 1. **Immediate Answer Repetition**: Caller asking to repeat ("could you repeat that please", "kiddemu", "rudia tena") triggers instant playback of the cached last assistant answer without redundant RAG/LLM invocation.

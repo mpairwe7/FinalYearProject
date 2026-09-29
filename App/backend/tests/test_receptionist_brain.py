@@ -239,7 +239,7 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         self.state.locale = "en"
         res_en = self.brain._check_canonical_tax_response("What is the standard VAT rate in Uganda?")
         self.assertIsNotNone(res_en)
-        self.assertIn("18 percent", res_en["reply"])
+        self.assertIn("18%", res_en["reply"])
         self.assertEqual(res_en["faithfulness_score"], 1.0)
 
         # Luganda VAT
