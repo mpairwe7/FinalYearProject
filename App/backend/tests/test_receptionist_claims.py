@@ -134,7 +134,11 @@ class JoinAndEndTests(DeskTestCase):
 
     async def test_joining_quiets_the_ai_and_introduces_the_officer(self):
         self.room.state.locale = "sw"
-        await self.joined()
+        # With no speech backend, the caption is still delivered and synthesis
+        # must not create an unnecessary default-executor worker.
+        with patch.object(desk.asyncio, "to_thread", new_callable=AsyncMock, return_value=b"") as worker:
+            await self.joined()
+        worker.assert_not_awaited()
         self.assertEqual(self.room.state.mode, "bridged")
         self.assertIsNone(self.room.claim_timer)
         self.assertEqual(self.caller.types(), ["interrupt", "caption", "bridged"])
@@ -165,7 +169,13 @@ class JoinAndEndTests(DeskTestCase):
 
     async def test_the_joining_line_is_played_as_pcm(self):
         speech = MagicMock()
-        with patch.object(desk, "synthesize_pcm16", return_value=b"\x01\x00" * 24000):
+        async def run_inline(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with (
+            patch.object(desk, "synthesize_pcm16", return_value=b"\x01\x00" * 24000),
+            patch.object(desk.asyncio, "to_thread", new=run_inline),
+        ):
             await desk.claim(self.call_id, "okello")
             await desk.bridge(self.room, SimpleNamespace(close=AsyncMock()), "okello", speech_model=speech)
         self.assertEqual(sum(len(chunk) for chunk in self.caller.audio), 48000)

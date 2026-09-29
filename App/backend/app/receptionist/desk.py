@@ -616,7 +616,14 @@ async def say_to_caller(room: CallRoom, text: str, speech_model: Any) -> float:
     Recorded as an assistant notice in the transcript, captioned on the
     caller's screen, and published to the call's watchers.
     """
-    pcm = await asyncio.to_thread(synthesize_pcm16, speech_model, text, room.state.locale)
+    # A missing speech backend is a supported degraded mode: the caption still
+    # goes out, but there is no reason to create a default-executor worker for
+    # a synthesis function that will immediately return empty audio.
+    pcm = (
+        await asyncio.to_thread(synthesize_pcm16, speech_model, text, room.state.locale)
+        if speech_model is not None and text
+        else b""
+    )
     room.state.turn_seq += 1
     turn = create_turn(call_id=room.call_id, seq=room.state.turn_seq, speaker="assistant", kind="notice", text=text)
     hub.publish_call(room.call_id, "turn", turn)
