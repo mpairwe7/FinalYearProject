@@ -323,6 +323,13 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, MagicMock
 
+        import pytest
+
+        pytest.importorskip(
+            "pipecat.pipeline.runner",
+            reason="LiveKit control-loop integration requires the receptionist extra",
+        )
+
         from app.receptionist import livekit
         from app.receptionist import ws as ws_mod
 
