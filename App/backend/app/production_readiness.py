@@ -77,6 +77,12 @@ FULL_DELIVERY: dict[str, str] = {
         "decision, and approve each external processor/cross-border transfer. "
         "Environment values are deployment attestations, not legal evidence."
     ),
+    "G36": (
+        "The receptionist is demo-only: browser audio still uses WebSockets and "
+        "call rooms/staff bridges are process-local. Before enabling it, deploy "
+        "a supported WebRTC media path and shared durable call/event state; "
+        "also design reconnect/failover and provider session handling."
+    ),
 }
 
 
@@ -153,6 +159,17 @@ def _seed_errors() -> list[str]:
     return []
 
 
+def _receptionist_errors() -> list[str]:
+    if _truthy("FLAG_VOICE_RECEPTIONIST"):
+        return [
+            "G36: FLAG_VOICE_RECEPTIONIST cannot be enabled in production yet: "
+            "browser audio uses WebSockets and call rooms/staff bridges are "
+            "process-local. Deploy a supported WebRTC transport and shared, "
+            "durable call/event state with reconnect/failover before enabling it."
+        ]
+    return []
+
+
 def _privacy_governance_errors() -> list[str]:
     """Require deployer attestations for controls that code cannot perform."""
     errors: list[str] = []
@@ -222,6 +239,7 @@ def gap_gate_errors() -> list[str]:
     errors.extend(_dpo_errors())
     errors.extend(_tenancy_errors())
     errors.extend(_seed_errors())
+    errors.extend(_receptionist_errors())
     errors.extend(_privacy_governance_errors())
     errors.extend(_cross_border_errors())
     return errors
@@ -238,6 +256,7 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
         "G30": _tenancy_errors,
         "G31": _seed_errors,
         "G35": lambda: _privacy_governance_errors() + _cross_border_errors(),
+        "G36": _receptionist_errors,
     }
     deferred = {"G33", "G34"}
     if gap in deferred:
@@ -250,6 +269,15 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
             "full_delivery": FULL_DELIVERY[gap],
         }
     errors = checkers[gap]()
+    if gap == "G36" and not errors:
+        return {
+            "gap": gap,
+            "ok": True,
+            "blocker": False,
+            "status": "disabled",
+            "errors": [],
+            "full_delivery": FULL_DELIVERY[gap],
+        }
     return {
         "gap": gap,
         "ok": not errors,
@@ -266,7 +294,7 @@ def readiness_report(*, as_production: bool = False) -> dict[str, Any]:
     if as_production:
         os.environ["APP_ENV"] = "production"
     try:
-        gaps = ["G12", "G13", "G14", "G15", "G29", "G30", "G31", "G33", "G34", "G35"]
+        gaps = ["G12", "G13", "G14", "G15", "G29", "G30", "G31", "G33", "G34", "G35", "G36"]
         items = [evaluate_gate(gap) for gap in gaps]
         errors = gap_gate_errors()
         return {

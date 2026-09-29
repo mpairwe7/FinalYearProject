@@ -271,12 +271,14 @@ class ClaimRouteTests(unittest.TestCase):
 
     def test_only_the_claimant_s_audio_may_join(self):
         self.post("claim", "okello")
-        with self.assertRaises(WebSocketDisconnect) as closed:
+        with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=True):
             with self.client.websocket_connect(
-                f"/v1/admin/calls/{self.call_id}/audio?token={self.token('nakato')}"
+                f"/v1/admin/calls/{self.call_id}/audio"
             ) as ws:
-                ws.receive_text()
-        self.assertEqual(closed.exception.code, 4409)
+                ws.send_text(json.dumps({"type": "authenticate", "access_token": self.token("nakato")}))
+                msg = ws.receive()
+                self.assertEqual(msg["type"], "websocket.close")
+                self.assertEqual(msg["code"], 4409)
 
 
 if __name__ == "__main__":

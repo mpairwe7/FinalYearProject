@@ -206,6 +206,30 @@ def record_call_end_metrics(call_id: str, state: CallState | None = None) -> dic
     return metrics
 
 
+def _is_ai_only_completion(metrics: dict[str, Any], call: dict[str, Any]) -> bool:
+    """Read the current outcome metric, or derive it from a legacy snapshot.
+
+    Older calls stored this operational routing outcome as ``contained``.
+    Their snapshots also include ``ai_answers``; derive from those fields so
+    old and new calls use the same stricter timeout/error definition.
+    """
+    if "ai_only_completion" in metrics:
+        return bool(metrics["ai_only_completion"])
+
+    end_reason = call.get("end_reason") or ""
+    transferred = call.get("transferred", metrics.get("transferred", False))
+    ai_answers = metrics.get("ai_answers")
+    if ai_answers is None:
+        # Very early or partially migrated snapshots may only have the old
+        # boolean. Keep it readable, while honoring the current exclusions.
+        ai_answers = 1 if metrics.get("contained") else 0
+    try:
+        answer_count = int(ai_answers)
+    except (TypeError, ValueError):
+        answer_count = 0
+    return bool(answer_count >= 1 and not transferred and end_reason not in ("timeout", "error"))
+
+
 def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dict[str, Any]:
     """Compute aggregate call performance across the specified day window."""
     cutoff = time.time() - (max(1, days) * 86400)
@@ -273,7 +297,8 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
             except Exception:
                 pass
 
-        if m.get("ai_only_completion"):
+        is_ai_only_completion = _is_ai_only_completion(m, d)
+        if is_ai_only_completion:
             ai_only_count += 1
         if d.get("transferred"):
             transferred_count += 1
@@ -285,7 +310,7 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
         used_langs = (m.get("language") or {}).get("used") or []
         if locale == "lg" or "lg" in used_langs:
             luganda_calls_count += 1
-            if m.get("ai_only_completion"):
+            if is_ai_only_completion:
                 luganda_ai_only_count += 1
             if d.get("transferred"):
                 luganda_transferred_count += 1

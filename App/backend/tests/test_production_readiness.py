@@ -13,6 +13,7 @@ from app.tools.ura_account import UraAccountProfileTool, account_api_status
 
 SECURE = {
     "APP_ENV": "production",
+    "FLAG_VOICE_RECEPTIONIST": "false",
     "FLAG_MULTI_TENANT": "true",
     "MULTI_TENANT_RLS_APPLIED": "true",
     "MALWARE_SCAN_REQUIRED": "true",
@@ -43,6 +44,22 @@ def test_production_accepts_fail_closed_baseline(monkeypatch: pytest.MonkeyPatch
     assert report["ok"] is True
     deferred = [row for row in report["gaps"] if row["gap"] in {"G33", "G34"}]
     assert all(row["status"] == "deferred" for row in deferred)
+    receptionist = next(row for row in report["gaps"] if row["gap"] == "G36")
+    assert receptionist["status"] == "disabled"
+    assert receptionist["blocker"] is False
+
+
+def test_production_rejects_enabled_demo_receptionist(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in SECURE.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("FLAG_VOICE_RECEPTIONIST", "true")
+
+    errors = "\n".join(gap_gate_errors())
+    assert "G36" in errors
+    assert "WebSockets" in errors
+    assert "process-local" in errors
+    receptionist = next(row for row in readiness_report()["gaps"] if row["gap"] == "G36")
+    assert receptionist["blocker"] is True
 
 
 def test_production_rejects_mock_account_and_fixture_news(

@@ -44,8 +44,10 @@ This remains a browser simulation, not a production telephone service. The call
 room registry and staff audio bridge are process-local and the browser media
 path is WebSocket PCM. Production startup and socket handlers reject
 `FLAG_VOICE_RECEPTIONIST=true` until a supported WebRTC transport and shared
-call/event registry are deployed. Do not scale this demo across workers; sticky
-routing alone does not make officer takeover or reconnect state durable.
+call/event registry are deployed. `python -m app.production_readiness
+--as-production` reports this as G36; the flag must remain off for production.
+Do not scale this demo across workers; sticky routing alone does not make
+officer takeover or reconnect state durable.
 Browser sockets send credentials in their first application message (never in
 the URL), and staff/audio sockets validate browser `Origin` against
 `CORS_ORIGINS`.
@@ -88,6 +90,12 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_BARGE_IN_MIN_S` | `0.4` | Speech past the VAD onset (itself 0.2 s) that counts as talking over the assistant |
 | `RECEPTIONIST_LIVE_PARTIALS` | `true` | Streams interim transcripts of the caller's own speech back to their screen |
 | `RECEPTIONIST_PARTIAL_INTERVAL_S` | `0.8` | Seconds between interim re-decodes of the utterance in progress |
+| `VOICE_TRANSCRIPT_TTL_DAYS` | `90` | Retention for voice turns and non-ticketed call records |
+| `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes |
+| `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
+| `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
+| `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
+| `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
 
 Gemini Live currently uses an 8-minute session ceiling (or the lower configured
 `RECEPTIONIST_MAX_CALL_S`) so the demo ends cleanly before provider connection
@@ -95,11 +103,9 @@ limits. Session resumption/context compression is not wired in; long calls are
 ended, not transparently resumed. The 15-minute setting remains applicable to
 the cascaded engine. See Google's [Live API session management guidance](https://ai.google.dev/gemini-api/docs/live-api/session-management)
 and Pipecat's [transport selection guide](https://docs.pipecat.ai/client/concepts/choosing-a-transport)
-before designing a production rollout.
-
-`VOICE_TRANSCRIPT_TTL_DAYS` controls retention of voice turns and non-ticketed
-call records (default 90 days); ticket-linked call records continue to use the
-ticket retention window. This is separate from chat's `CONVERSATION_TTL_DAYS`.
+before designing a production rollout. The current browser WebSocket audio path
+is demo-only; Pipecat recommends WebRTC for client-to-server voice, while
+WebSockets are suited to server-to-server or text-only use.
 
 Supervisor “AI-only calls” is an operational routing measure (at least one AI
 answer, no officer transfer, and no timeout/error). It does not assert that the
@@ -107,11 +113,6 @@ taxpayer's issue was resolved; resolution needs a separate explicit outcome.
 With multi-tenancy enabled, historical calls are tenant-filtered. Ticket history
 is omitted because the current ticket table has no tenant key and cannot be
 filtered safely by `user_id` alone.
-| `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes |
-| `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
-| `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
-| `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
-| `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
 
 ---
 
