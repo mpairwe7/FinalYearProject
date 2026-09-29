@@ -3,6 +3,24 @@ import { callsApi, ClaimConflictError } from '@/services/callsApi';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { FakeSocket } from '../helpers/callConsole';
 
+type LiveKitCallbacks = {
+  onMessage: (message: Record<string, unknown>) => void;
+  onDisconnected: () => void;
+  onReconnecting?: () => void;
+  onReconnected?: () => void;
+};
+
+const livekit = vi.hoisted(() => ({ callbacks: null as LiveKitCallbacks | null }));
+
+vi.mock('@/services/liveKitCallSession', () => ({
+  LiveKitCallSession: class {
+    constructor(callbacks: LiveKitCallbacks) { livekit.callbacks = callbacks; }
+    async connect() {}
+    async close() {}
+    async setMuted() {}
+  },
+}));
+
 const mic = vi.hoisted(() => ({
   onChunk: null as ((chunk: ArrayBuffer) => void) | null,
   stop: vi.fn(),
@@ -47,6 +65,7 @@ describe('officerCallSession', () => {
     vi.stubGlobal('WebSocket', FakeSocket);
     mic.fail = false;
     mic.onChunk = null;
+    livekit.callbacks = null;
     vi.spyOn(callsApi, 'claimCall').mockResolvedValue({
       claimed: true, call_id: 'c1', officer_name: 'Officer Okello', claim_expires_at: 0,
     });
@@ -60,7 +79,7 @@ describe('officerCallSession', () => {
     vi.unstubAllGlobals();
   });
 
-  it('claims, asks for the microphone, then bridges', async () => {
+  it('claims and bridges the compatibility media socket after authentication', async () => {
     await takeCall('c1');
     expect(callsApi.claimCall).toHaveBeenCalledWith('c1');
     expect(active()).toMatchObject({ callId: 'c1', state: 'connecting', officerName: 'Officer Okello' });
@@ -73,11 +92,62 @@ describe('officerCallSession', () => {
     expect(active()?.state).toBe('bridged');
   });
 
+  it('keeps a transfer in wrap-up when server revocation closes media during the request', async () => {
+    const transferControl: {
+      resolve?: (value: { transferred: boolean; call_id: string; target_team: string }) => void;
+    } = {};
+    vi.spyOn(callsApi, 'transferCall').mockImplementation(() => new Promise((resolve) => {
+      transferControl.resolve = resolve;
+    }));
+
+    await takeCall('c1');
+    const control = FakeSocket.find('/audio')!;
+    control.open();
+    control.emit({
+      type: 'livekit_ready',
+      url: 'wss://rtc.example.test',
+      room: 'ura-c1',
+      identity: 'officer-1',
+      token: 'room-token',
+    });
+    await vi.waitFor(() => expect(active()?.state).toBe('bridged'));
+
+    const pending = transferCall({ team: 'disputes' });
+    await vi.waitFor(() => expect(callsApi.transferCall).toHaveBeenCalled());
+    livekit.callbacks?.onDisconnected();
+    control.shut(1000);
+    expect(active()?.state).toBe('bridged');
+
+    transferControl.resolve?.({ transferred: true, call_id: 'c1', target_team: 'disputes' });
+    await pending;
+    expect(active()?.state).toBe('wrap_up');
+  });
+
+  it('shows media reconnection and restores the bridged state when LiveKit recovers', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    audio.emit({
+      type: 'livekit_ready',
+      url: 'wss://rtc.example.test',
+      room: 'ura-c1',
+      identity: 'officer-1',
+      token: 'room-token',
+    });
+    await vi.waitFor(() => expect(active()?.state).toBe('bridged'));
+
+    livekit.callbacks?.onReconnecting?.();
+    expect(active()?.state).toBe('reconnecting');
+    livekit.callbacks?.onReconnected?.();
+    expect(active()?.state).toBe('bridged');
+  });
+
   it('sends the microphone unless muted', async () => {
     await takeCall('c1');
     const audio = FakeSocket.find('/audio')!;
     audio.open();
     audio.emit({ type: 'authenticated' });
+    await vi.waitFor(() => expect(mic.onChunk).toBeTypeOf('function'));
     const chunk = new Int16Array([100, -100, 200, -200]).buffer;
     mic.onChunk!(chunk);
     expect(audio.sent[1]).toBe(chunk);
@@ -148,6 +218,10 @@ describe('officerCallSession', () => {
   it('gives the call back when the microphone is refused', async () => {
     mic.fail = true;
     await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    audio.emit({ type: 'authenticated' });
+    await vi.waitFor(() => expect(callsApi.releaseCall).toHaveBeenCalledWith('c1'));
     expect(callsApi.releaseCall).toHaveBeenCalledWith('c1');
     expect(active()).toMatchObject({ state: 'idle' });
     expect(active()?.error).toMatch(/Microphone access was denied/);

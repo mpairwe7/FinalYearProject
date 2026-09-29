@@ -1,27 +1,29 @@
 # Runbook — Simulated AI Phone Receptionist ("Call URA")
 
-Operator and demo runbook for the simulated AI telephone receptionist powered by
-Pipecat 1.11, Whisper-SALT per-word acoustic confidence scoring, ClarifyGate terminology
-disambiguation, and staff browser audio bridge takeover.
+Operator and deployment runbook for the browser voice receptionist powered by
+Pipecat 1.11, self-hosted LiveKit WebRTC media, Whisper-SALT confidence scoring,
+ClarifyGate terminology disambiguation, and staff takeover.
 
 ---
 
 ## 1. Overview & Architecture
 
 The URA receptionist simulates a toll-free customer support line (`0800 117 000`)
-directly within the web platform:
+inside the web platform. In production, LiveKit carries caller, agent and officer
+media; authenticated application WebSockets carry only call setup and control:
 
 ```
-Taxpayer browser (CallScreen)                       Staff browser (/calls)
- mic → AudioWorklet PCM16 16k ─┐                     lobby WS  ← call.started / transfer_requested / ended
- PCM player ← PCM16 16k ───────┤                     live WS   ← snapshot + turn events (per call, opt-in)
-                               │ WS /v1/calls/stream  audio WS  ⇄ officer mic / caller audio (bridged mode)
-                               ▼                                  ▲
-FastAPI (single worker, flag voice_receptionist) ─────────────────┘
-  receptionist/ws.py: auth, consent, caps → CallRoom (in-process registry)
-   Pipecat Pipeline (PipelineWorker):
-     transport.input()  [FastAPIWebsocketTransport + BrowserCallSerializer]
-     → CallerAudioTap        (bridged: forward caller PCM to officer leg)
+Taxpayer browser ─┐                                         ┌─ Staff browser
+ mic + speaker   │      LiveKit WebRTC room (encrypted)    │ mic + speaker
+ call controls ──┼───────────────┬─────────────────────────┼─ call controls
+                 │               │ agent audio/data        │
+                 └───────────────┴─────────────────────────┘
+                                 │
+FastAPI (one worker and one replica; process-local call actor)
+  /v1/calls/stream: auth, consent, rate limits, room token + JSON controls
+  /v1/admin/calls/{id}/audio: staff role/claim checks + short-lived room token
+   Pipecat LiveKitTransport:
+     room audio → CallerAudioTap (only caller reaches AI; officer turns are captioned)
      → VADProcessor          (Silero; broadcasts VADUser{Started,Stopped}SpeakingFrame)
      → LivePartialTranscriptTap (re-decodes the utterance-so-far every 0.8 s → `final:false` captions)
      → UraWhisperSTT         (SegmentedSTTService → SpeechModel.transcribe(with_words=True))
@@ -33,21 +35,36 @@ FastAPI (single worker, flag voice_receptionist) ──────────�
      → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer)
      → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k; Luganda streams
                               from the Orpheus sidecar when ORPHEUS_TTS_URL is set)
-     → transport.output()
+     → LiveKit audio/data output
    Observers: CallMetricsObserver (turn latency, barge-ins)
-   OfficerLeg: officer PCM → caller socket (bypasses pipeline); energy-VAD segments → STT → "officer" turns
    On end: summary.py (always English; Sunflower first for Luganda calls, Gemini first otherwise)
            + metrics.py → store.py (voice_calls / voice_call_turns)
 ```
 
-This remains a browser simulation, not a production telephone service. The call
-room registry and staff audio bridge are process-local and the browser media
-path is WebSocket PCM. Production startup and socket handlers reject
-`FLAG_VOICE_RECEPTIONIST=true` until a supported WebRTC transport and shared
-call/event registry are deployed. `python -m app.production_readiness
---as-production` reports this as G36; the flag must remain off for production.
-Do not scale this demo across workers; sticky routing alone does not make
-officer takeover or reconnect state durable.
+This is still a browser simulation, not a carrier-connected telephone service.
+The LiveKit media path is production-capable, but active call coordination,
+staff ownership and reconnect timers remain process-local. Production therefore
+requires exactly one API worker and replica plus the explicit single-replica
+acknowledgement. A process restart or node loss ends active calls; this is not
+HA and sticky routing does not make it HA. Horizontal scaling stays blocked until
+call actors/events move to shared durable state and failover is exercised.
+
+The backend mints five-minute, room- and identity-scoped LiveKit JWTs only after
+taxpayer authentication/consent or staff role/claim checks. The API secret never
+leaves the backend. Browser media does not traverse the application WebSocket.
+Browser participant grants allow only microphone tracks and no client-published
+data (observers cannot publish); the backend agent alone publishes call events.
+Officer transfer removes the old participant and revokes live media permissions
+before requeueing, and the room is closed during call teardown. Stale or unissued
+identities are removed as soon as the server reports a reconnect. Self-hosted
+LiveKit does not invalidate already issued JWTs: the five-minute TTL is an
+additional exposure bound, not immediate revocation. If the threat model
+requires strict pre-join revocation, use LiveKit Cloud or do not enable the
+receptionist until an equivalent self-hosted token-revocation control is in
+place.
+Production readiness checks for a secure LiveKit URL, credentials, the LiveKit
+transport selection, one worker/replica and the operator acknowledgement.
+`python -m app.production_readiness --as-production` reports those G36 checks.
 Browser sockets send credentials in their first application message (never in
 the URL), and staff/audio sockets validate browser `Origin` against
 `CORS_ORIGINS`.
@@ -66,9 +83,15 @@ All switches and thresholds are configured via environment variables:
 | Variable | Default | Purpose |
 |---|---|---|
 | `FLAG_VOICE_RECEPTIONIST` | `false` | Master feature flag for call socket, audio bridge, and staff Calls page |
+| `RECEPTIONIST_MEDIA_TRANSPORT` | `websocket` | Local/demo default; production requires `livekit` |
+| `LIVEKIT_URL` | unset | Public `wss://` endpoint for the self-hosted LiveKit deployment |
+| `LIVEKIT_API_KEY` | unset | Server-only LiveKit API key; store in the deployment secret manager |
+| `LIVEKIT_API_SECRET` | unset | Server-only LiveKit API secret; never expose to browser/build args |
+| `VOICE_RECEPTIONIST_REPLICAS` | unset | Must be `1` until shared call actor state is implemented |
+| `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK` | `false` | Explicitly acknowledge active calls end if the API process is lost |
 | `FLAG_VOICE_CONSENT` | `true` | Enforces explicit voice consent dialog prior to audio processing |
 | `FLAG_TICKET_QUEUE` | `true` | Enforces human queue oversight; transfers fail safely if disabled |
-| `WORKERS` | `1` | **Required single worker** — call room state and bridge sockets live in-memory |
+| `WORKERS` | `4` in the Docker image | Explicitly set `1` for the receptionist — active call state is process-local |
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
@@ -113,6 +136,58 @@ taxpayer's issue was resolved; resolution needs a separate explicit outcome.
 With multi-tenancy enabled, historical calls are tenant-filtered. Ticket history
 is omitted because the current ticket table has no tenant key and cannot be
 filtered safely by `user_id` alone.
+
+### Production LiveKit rollout
+
+Treat this as a controlled browser-voice deployment, not a telco launch. Before
+enabling the feature:
+
+1. Deploy LiveKit on a supported host/network with a public DNS name and trusted
+   TLS certificate. Put the WebSocket signaling endpoint behind TLS on `443`;
+   permit the documented LiveKit TCP/UDP media ports from client networks. For
+   restrictive networks, configure TURN/TLS and its certificate as well. Use
+   LiveKit's [self-host deployment guide](https://docs.livekit.io/transport/self-hosting/deployment/)
+   and [firewall/port matrix](https://docs.livekit.io/transport/self-hosting/ports-firewall/)
+   as the source of truth for the selected LiveKit release.
+2. Configure LiveKit with Redis on a private network, external-IP discovery that
+   matches the host's routable address, production API credentials, capacity
+   limits, and monitoring. Do not use the development `livekit-server --dev`
+   mode, placeholder keys, or an untrusted/self-signed certificate.
+3. Store `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` in the secret manager and
+   inject them only into the backend runtime. Configure `LIVEKIT_URL=wss://…`,
+   `RECEPTIONIST_MEDIA_TRANSPORT=livekit`, `WORKERS=1`,
+   `VOICE_RECEPTIONIST_REPLICAS=1`, and
+   `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
+   accepts active-call loss on API process failure; it is not a failover control.
+4. Keep `FLAG_AUTH_REQUIRED`, `FLAG_MULTI_TENANT`, `FLAG_AUDIT_LEDGER`, and
+   `FLAG_TICKET_QUEUE` enabled, and satisfy the remaining global production gates
+   in `docs/PRODUCTION_GATES.md`. Confirm tenant RLS and voice consent behavior
+   against the deployed databases and identity provider.
+5. Run the production gate before enabling the feature:
+
+   ```bash
+   APP_ENV=production PYTHONPATH=App/backend python3 -m app.production_readiness
+   PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_receptionist_livekit.py App/backend/tests/test_receptionist_claims.py -q
+   ```
+
+   The gate validates app-side values only. Separately verify TLS trust, DNS,
+   UDP reachability, TURN from a restricted client network, token expiry, caller
+   and officer audio isolation, microphone-only publishing, consent rejection,
+   transfer revocation/hold/end, and officer
+   reconnect in a browser game day before opening access to taxpayers.
+6. Enable the flag only after those checks and monitor LiveKit room/participant
+   counts, ICE/TURN failures, call setup time, media disconnects, Pipecat pipeline
+   errors, API saturation, and transfer queue outcomes. Keep a tested rollback
+   that turns `FLAG_VOICE_RECEPTIONIST` off.
+
+The current application supports one API process for active calls. Do not set
+multiple Kubernetes replicas, multiple ASGI workers, or scale-out autoscaling for
+the receptionist; LiveKit itself can scale independently, but it does not make
+the application's in-memory claims, call state, event hub or timers shared.
+Adding shared actor/event state, restart recovery, and a tested media/session
+reconnect policy is a prerequisite for HA or horizontal API scaling. LiveKit
+tokens are restricted to one room and participant and expire after five minutes;
+they authorize room entry, not an active participant's maximum call duration.
 
 ---
 

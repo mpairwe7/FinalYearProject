@@ -63,6 +63,12 @@ class CallState:
     hold_total_s: float = 0.0
     target_team: str = ""
     reconnecting_officer: str | None = None
+    livekit_room: str = ""
+    livekit_caller_identity: str = ""
+    livekit_officer_identity: str = ""
+    livekit_agent_identity: str = ""
+    livekit_observer_identities: set[str] = field(default_factory=set)
+    livekit_officer_route_active: bool = False
     reconnect_timer: asyncio.Task | None = None
     transfer_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
@@ -92,6 +98,11 @@ class CallRoom:
         self.state = state
         self.caller_ws = caller_ws
         self.officer: Any | None = None
+        self.transport: Any | None = None
+        self.pipeline_task: Any | None = None
+        self.pipeline_runner_task: asyncio.Task[Any] | None = None
+        self.caller_reconnect_task: asyncio.Task[Any] | None = None
+        self.participant_joined: dict[str, asyncio.Event] = {}
         self.worker: Any | None = None
         self.lock = asyncio.Lock()
         # Every officer action on this call (claim, release, join, end) runs
@@ -119,6 +130,20 @@ class CallRoom:
             except asyncio.QueueFull:
                 pass
 
+    def mark_participant_joined(self, identity: str) -> None:
+        self.participant_joined.setdefault(identity, asyncio.Event()).set()
+
+    def mark_participant_left(self, identity: str) -> None:
+        self.participant_joined.pop(identity, None)
+
+    async def wait_for_participant(self, identity: str, timeout_s: float = 20.0) -> bool:
+        event = self.participant_joined.setdefault(identity, asyncio.Event())
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout_s)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
     async def end(self, reason: str = "normal") -> None:
         """End the call room and trigger teardown."""
         async with self.lock:
@@ -131,6 +156,8 @@ class CallRoom:
 
             if self.state.transfer_timer_task and not self.state.transfer_timer_task.done():
                 self.state.transfer_timer_task.cancel()
+            if self.caller_reconnect_task and not self.caller_reconnect_task.done():
+                self.caller_reconnect_task.cancel()
 
         # Update persistence
         try:
@@ -149,6 +176,18 @@ class CallRoom:
                 await self.officer.close(reason=reason)
             except Exception:
                 pass
+
+        if self.state.livekit_room:
+            try:
+                from . import livekit
+
+                await livekit.close_room(self.state.livekit_room)
+            except Exception:
+                logger.warning(
+                    "Failed to close LiveKit room for call %s",
+                    self.call_id,
+                    exc_info=True,
+                )
 
 
 class CallRegistry:

@@ -28,7 +28,7 @@ import time
 from typing import Any
 
 from ..flags import flags
-from . import presence
+from . import livekit, presence
 from .config import get_claim_timeout_s, get_officer_reconnect_grace_s
 from .hub import hub
 from .phrases import phrase
@@ -37,12 +37,16 @@ from .store import (
     claim_call,
     create_turn,
     get_call,
-    get_caller_history as store_caller_history,
     list_turns,
-    mark_callback_done as store_callback_done,
     release_claim,
     save_call_review,
     update_call,
+)
+from .store import (
+    get_caller_history as store_caller_history,
+)
+from .store import (
+    mark_callback_done as store_callback_done,
 )
 from .transfer import open_transfer
 from .tts import synthesize_pcm16
@@ -196,6 +200,8 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
     name = room.state.claimed_name or officer_display_name(officer_id)
     now = time.time()
     async with room.desk_lock:
+        if room.state.mode == "bridged" and room.state.officer_id == officer_id:
+            return room.state.officer_name or name
         _cancel_claim_timer(room)
         _cancel_reconnect_timer(room)
         room.state.reconnecting_officer = None
@@ -300,6 +306,18 @@ async def transfer(
         if room.state.officer_id != officer_id and not is_admin:
             raise DeskError(403, "Another officer is on this call")
         now = time.time()
+        previous_identity = room.state.livekit_officer_identity
+        if room.state.livekit_room and previous_identity:
+            try:
+                await livekit.revoke_participant(room.state.livekit_room, previous_identity)
+            except Exception as exc:
+                logger.exception("Could not revoke LiveKit access for call %s", call_id)
+                raise DeskError(
+                    503,
+                    "Call transfer is temporarily unavailable; media access could not be revoked",
+                ) from exc
+            room.state.livekit_officer_identity = ""
+            room.state.livekit_officer_route_active = False
         if room.officer is not None:
             await room.officer.close()
             room.officer = None
@@ -604,7 +622,19 @@ async def say_to_caller(room: CallRoom, text: str, speech_model: Any) -> float:
     hub.publish_call(room.call_id, "turn", turn)
     await _send_to_caller(room, {"type": "caption", "speaker": "assistant", "text": text, "final": True,
                                  "turn_id": room.state.turn_seq})
-    if pcm and room.caller_ws is not None:
+    if pcm and room.state.livekit_room and room.pipeline_task is not None:
+        try:
+            from pipecat.frames.frames import OutputAudioRawFrame
+
+            for i in range(0, len(pcm), _PCM_CHUNK):
+                await room.transport.send_audio(
+                    OutputAudioRawFrame(
+                        audio=pcm[i : i + _PCM_CHUNK], sample_rate=16000, num_channels=1
+                    )
+                )
+        except Exception:
+            logger.exception("Could not queue a notice into the LiveKit pipeline for %s", room.call_id)
+    elif pcm and room.caller_ws is not None:
         try:
             for i in range(0, len(pcm), _PCM_CHUNK):
                 await room.caller_ws.send_bytes(pcm[i : i + _PCM_CHUNK])

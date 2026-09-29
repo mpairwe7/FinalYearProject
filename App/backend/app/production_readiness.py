@@ -78,10 +78,11 @@ FULL_DELIVERY: dict[str, str] = {
         "Environment values are deployment attestations, not legal evidence."
     ),
     "G36": (
-        "The receptionist is demo-only: browser audio still uses WebSockets and "
-        "call rooms/staff bridges are process-local. Before enabling it, deploy "
-        "a supported WebRTC media path and shared durable call/event state; "
-        "also design reconnect/failover and provider session handling."
+        "Caller and officer media use self-hosted LiveKit WebRTC with short-lived "
+        "room-scoped tokens. Active-call coordination remains process-local: run "
+        "one API worker/replica and explicitly acknowledge that process loss ends "
+        "active calls. Shared actor state and seamless call failover remain required "
+        "before horizontal scaling."
     ),
 }
 
@@ -160,14 +161,9 @@ def _seed_errors() -> list[str]:
 
 
 def _receptionist_errors() -> list[str]:
-    if _truthy("FLAG_VOICE_RECEPTIONIST"):
-        return [
-            "G36: FLAG_VOICE_RECEPTIONIST cannot be enabled in production yet: "
-            "browser audio uses WebSockets and call rooms/staff bridges are "
-            "process-local. Deploy a supported WebRTC transport and shared, "
-            "durable call/event state with reconnect/failover before enabling it."
-        ]
-    return []
+    from .receptionist.livekit import production_errors
+
+    return production_errors()
 
 
 def _privacy_governance_errors() -> list[str]:
@@ -269,7 +265,7 @@ def evaluate_gate(gap: str) -> dict[str, Any]:
             "full_delivery": FULL_DELIVERY[gap],
         }
     errors = checkers[gap]()
-    if gap == "G36" and not errors:
+    if gap == "G36" and not errors and not _truthy("FLAG_VOICE_RECEPTIONIST"):
         return {
             "gap": gap,
             "ok": True,

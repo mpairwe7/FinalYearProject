@@ -16,17 +16,20 @@ from pydantic import BaseModel, Field
 
 from ..auth import AuthContext, require_role
 from ..chat_ws_v2 import _resolve_ws_principal
-
 from ..flags import flags
 from ..query import SUPPORTED_LOCALES
 from ..tenancy import tenant_enabled
 from ..voice_consent import log_voice_event, require_voice_consent
-from ..ws_concurrency import is_ws_origin_allowed, release, rekey_slot, try_acquire
+from ..ws_concurrency import is_ws_origin_allowed, rekey_slot, release, try_acquire
 from . import brief as call_brief
-from . import desk
-from . import risk
+from . import desk, livekit, risk
 from .brain import UraReceptionistBrain
-from .config import get_default_language, get_languages
+from .config import (
+    get_default_language,
+    get_gemini_session_timeout_s,
+    get_languages,
+    get_max_call_s,
+)
 from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
 from .officer import OfficerLeg
@@ -47,10 +50,12 @@ logger = logging.getLogger(__name__)
 
 
 def _voice_receptionist_enabled() -> bool:
-    """Fail closed in production even if a persisted flag override is enabled."""
-    return os.getenv("APP_ENV", "development").strip().lower() != "production" and flags.is_enabled(
-        "voice_receptionist"
-    )
+    """Fail closed unless the configured production media path is ready."""
+    if not flags.is_enabled("voice_receptionist"):
+        return False
+    if os.getenv("APP_ENV", "development").strip().lower() == "production":
+        return not livekit.production_errors(enabled_override=True)
+    return True
 
 
 def _tenant_scope(ctx: AuthContext) -> str | None:
@@ -184,6 +189,15 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             caller_ws=websocket,
         )
         room.state.preferred_locale = preferred_locale
+        caller_token = ""
+        if livekit.enabled():
+            room.state.livekit_room = livekit.room_name(call_id)
+            room.state.livekit_caller_identity = livekit.participant_identity("caller", call_id)
+            caller_token = livekit.mint_token(
+                room_name=room.state.livekit_room,
+                identity=room.state.livekit_caller_identity,
+                name="URA taxpayer",
+            )
         create_call(
             call_id=call_id,
             conversation_id=room.state.conversation_id,
@@ -220,6 +234,15 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 "language_detection": language_detection,
                 "languages": list(get_languages()) if language_detection else [locale],
                 "language": get_default_language() if language_detection else locale,
+                **({
+                    "media": {
+                        "transport": "livekit",
+                        "url": os.environ["LIVEKIT_URL"].strip(),
+                        "room": room.state.livekit_room,
+                        "identity": room.state.livekit_caller_identity,
+                        "token": caller_token,
+                    }
+                } if caller_token else {}),
             })
         )
 
@@ -232,20 +255,164 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             # the app's job. Without this a hung-up call ran on — Gemini
             # session, per-caller slot and all — until the configured transport
             # session timeout, and a later caller could be refused by the cap.
-            @transport.event_handler("on_client_disconnected")
-            async def _on_client_disconnected(_transport: Any, _ws: Any) -> None:
-                await task.cancel()
+            room.transport = transport
+            room.pipeline_task = task
+            if not caller_token:
+                @transport.event_handler("on_client_disconnected")
+                async def _on_client_disconnected(_transport: Any, _ws: Any) -> None:
+                    await task.cancel()
 
-            @transport.event_handler("on_session_timeout")
-            async def _on_session_timeout(_transport: Any, _ws: Any) -> None:
-                await room.end("timeout")
-                await task.cancel()
+                @transport.event_handler("on_session_timeout")
+                async def _on_session_timeout(_transport: Any, _ws: Any) -> None:
+                    await room.end("timeout")
+                    await task.cancel()
 
             runner = PipelineRunner()
-            await brain.say_greeting()
-            await runner.run(task)
+            if caller_token:
+                greeting_sent = False
+
+                @transport.event_handler("on_participant_connected")
+                async def _on_participant_connected(_transport: Any, identity: str) -> None:
+                    nonlocal greeting_sent
+                    if (
+                        room.state.mode == "ended"
+                        or not livekit.is_authorized_participant(room.state, identity)
+                    ):
+                        logger.warning(
+                            "Rejecting stale or unissued LiveKit identity %s in call %s",
+                            identity,
+                            call_id,
+                        )
+                        try:
+                            await livekit.revoke_participant(room.state.livekit_room, identity)
+                        except Exception:
+                            logger.exception(
+                                "Could not revoke unissued LiveKit participant in call %s",
+                                call_id,
+                            )
+                        return
+                    if identity == room.state.livekit_caller_identity:
+                        reconnect_task = room.caller_reconnect_task
+                        room.caller_reconnect_task = None
+                        if reconnect_task and not reconnect_task.done():
+                            reconnect_task.cancel()
+                        if reconnect_task:
+                            try:
+                                await websocket.send_text(json.dumps({
+                                    "type": "status",
+                                    "status": room.state.mode,
+                                    "officer_name": room.state.officer_name or "",
+                                }))
+                            except Exception:
+                                logger.debug("Caller control socket missed media reconnect status", exc_info=True)
+                    room.mark_participant_joined(identity)
+                    if identity == room.state.livekit_caller_identity and not greeting_sent:
+                        greeting_sent = True
+                        await brain.say_greeting()
+                    if (
+                        identity == room.state.livekit_officer_identity
+                        and room.state.reconnecting_officer
+                        and room.state.mode == "transferring"
+                    ):
+                        speech_model = None
+                        try:
+                            from ..main import app
+                            speech_model = getattr(getattr(app, "state", None), "speech", None)
+                        except Exception:
+                            pass
+                        await desk.bridge(room, None, room.state.reconnecting_officer, speech_model)
+
+                @transport.event_handler("on_first_participant_joined")
+                async def _on_first_participant_joined(_transport: Any, identity: str) -> None:
+                    nonlocal greeting_sent
+                    if (
+                        room.state.mode == "ended"
+                        or not livekit.is_authorized_participant(room.state, identity)
+                    ):
+                        return
+                    room.mark_participant_joined(identity)
+                    if identity == room.state.livekit_caller_identity and not greeting_sent:
+                        greeting_sent = True
+                        await brain.say_greeting()
+
+                @transport.event_handler("on_participant_disconnected")
+                async def _on_participant_disconnected(_transport: Any, identity: str) -> None:
+                    room.mark_participant_left(identity)
+                    if identity == room.state.livekit_caller_identity:
+                        try:
+                            await websocket.send_text(json.dumps({"type": "status", "status": "reconnecting"}))
+                        except Exception:
+                            pass
+
+                        async def _expire_caller_reconnect() -> None:
+                            try:
+                                await asyncio.sleep(20.0)
+                            except asyncio.CancelledError:
+                                return
+                            if (
+                                identity not in transport.get_participants()
+                                and room.state.mode != "ended"
+                            ):
+                                await room.end("caller_media_disconnected")
+                                await task.cancel()
+
+                        room.caller_reconnect_task = asyncio.create_task(_expire_caller_reconnect())
+                    elif identity == room.state.livekit_officer_identity and room.state.officer_id:
+                        await desk.handle_officer_disconnect(room, room.state.officer_id, None)
+
+                room.pipeline_runner_task = asyncio.create_task(runner.run(task))
+                from .serializer import RequestOfficerFrame, SetLanguageFrame
+
+                max_call_s = max(1.0, get_max_call_s())
+                if room.state.engine == "gemini_live":
+                    max_call_s = min(max_call_s, get_gemini_session_timeout_s())
+                while room.state.mode != "ended":
+                    if time.time() - room.state.started_at >= max_call_s:
+                        await room.end("max_call_duration")
+                        await task.cancel()
+                        break
+                    try:
+                        raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        if room.pipeline_runner_task.done():
+                            await room.end("media_pipeline_stopped")
+                            break
+                        continue
+                    data = json.loads(raw)
+                    if not isinstance(data, dict):
+                        continue
+                    message_type = data.get("type")
+                    if message_type == "hangup":
+                        await room.end("caller_hangup")
+                        break
+                    if message_type == "request_officer":
+                        await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
+                    elif message_type == "set_language":
+                        language = str(data.get("language") or "").strip().lower()
+                        if language in ("en", "sw", "lg"):
+                            await task.queue_frame(SetLanguageFrame(language=language))
+                if not room.pipeline_runner_task.done():
+                    await task.cancel()
+                try:
+                    await asyncio.wait_for(room.pipeline_runner_task, timeout=5.0)
+                except Exception:
+                    pass
+            else:
+                await brain.say_greeting()
+                await runner.run(task)
         except (ImportError, RuntimeError) as pipeline_err:
             logger.warning("Pipeline fallback active: %s", pipeline_err)
+            if caller_token:
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "detail": "The production call media pipeline could not start.",
+                        "recoverable": False,
+                    }))
+                except Exception:
+                    pass
+                await room.end("media_pipeline_unavailable")
+                return
             from ..main import app
             chat_model = getattr(getattr(app, "state", None), "model", None)
             brain = UraReceptionistBrain(room=room, chat_model=chat_model)
@@ -405,6 +572,44 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         if tenant_enabled() and room.state.tenant_id != (tenant_id or "default"):
             await websocket.close(code=4404)
             return
+        if livekit.enabled():
+            observer_identity = livekit.participant_identity(
+                "observer", f"{user_id}:{uuid.uuid4().hex}"
+            )
+            try:
+                observer_token = livekit.mint_token(
+                    room_name=room.state.livekit_room,
+                    identity=observer_identity,
+                    name=desk.officer_display_name(user_id),
+                    can_publish=False,
+                )
+            except RuntimeError:
+                await websocket.close(code=1011)
+                return
+            room.state.livekit_observer_identities.add(observer_identity)
+            await websocket.send_text(json.dumps({
+                "type": "livekit_ready",
+                "url": os.environ["LIVEKIT_URL"].strip(),
+                "room": room.state.livekit_room,
+                "identity": observer_identity,
+                "token": observer_token,
+                "can_publish": False,
+            }))
+            try:
+                while room.state.mode == "bridged":
+                    try:
+                        await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
+            except Exception:
+                pass
+            finally:
+                room.state.livekit_observer_identities.discard(observer_identity)
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
+            return
         await websocket.send_text(json.dumps({"type": "authenticated"}))
         queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
         room.add_listener(queue)
@@ -432,14 +637,32 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         return
 
     # Only the officer who claimed the call (POST …/claim), or the officer
-    # reconnecting within grace period, may join it.
-    is_claimant = (room.state.claimed_by == user_id)
-    is_reconnecting = (getattr(room.state, "reconnecting_officer", None) == user_id)
-    if room.officer is not None or (not is_claimant and not is_reconnecting):
-        await websocket.close(code=4409)
-        return
+    # reconnecting within grace period, may join it. Reserve one media-control
+    # socket while holding the same lock used by claim/transfer/bridge.
+    use_livekit = livekit.enabled()
+    officer_identity = livekit.participant_identity("officer", user_id) if use_livekit else ""
+    async with room.desk_lock:
+        is_claimant = room.state.claimed_by == user_id
+        is_reconnecting = room.state.reconnecting_officer == user_id
+        if (
+            room.state.mode not in ("transferring", "ai")
+            or room.officer is not None
+            or (not is_claimant and not is_reconnecting)
+        ):
+            await websocket.close(code=4409)
+            return
+        if use_livekit and room.state.livekit_officer_route_active:
+            await websocket.close(code=4409)
+            return
+        if use_livekit and room.state.livekit_officer_identity not in ("", officer_identity):
+            await websocket.close(code=4409)
+            return
+        if use_livekit:
+            room.state.livekit_officer_route_active = True
+            room.state.livekit_officer_identity = officer_identity
 
-    await websocket.send_text(json.dumps({"type": "authenticated"}))
+    if not use_livekit:
+        await websocket.send_text(json.dumps({"type": "authenticated"}))
     officer_name = room.state.claimed_name or desk.officer_display_name(user_id)
     speech_model = None
     try:
@@ -447,6 +670,84 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         speech_model = getattr(getattr(app, "state", None), "speech", None)
     except Exception:
         pass
+
+    if use_livekit:
+        try:
+            token = livekit.mint_token(
+                room_name=room.state.livekit_room,
+                identity=officer_identity,
+                name=officer_name,
+            )
+        except RuntimeError:
+            room.state.livekit_officer_route_active = False
+            room.state.livekit_officer_identity = ""
+            await websocket.close(code=1011)
+            return
+        try:
+            await websocket.send_text(json.dumps({
+                "type": "livekit_ready",
+                "url": os.environ["LIVEKIT_URL"].strip(),
+                "room": room.state.livekit_room,
+                "identity": officer_identity,
+                "token": token,
+            }))
+            joined = await room.wait_for_participant(officer_identity, timeout_s=20.0)
+        except WebSocketDisconnect:
+            room.state.livekit_officer_route_active = False
+            if officer_identity not in room.participant_joined:
+                room.state.livekit_officer_identity = ""
+            return
+        except Exception:
+            room.state.livekit_officer_route_active = False
+            if officer_identity not in room.participant_joined:
+                room.state.livekit_officer_identity = ""
+            return
+        if not joined:
+            room.state.livekit_officer_route_active = False
+            room.state.livekit_officer_identity = ""
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "detail": "Officer media did not join the call in time.",
+            }))
+            await websocket.close(code=4408)
+            return
+
+        # A reconnecting LiveKit Room normally restores the same participant
+        # without opening a second control socket. The transport event handler
+        # re-bridges it; a fresh claimant's first connection is bridged here.
+        try:
+            if room.state.mode != "bridged":
+                await desk.bridge(room, None, user_id, speech_model)
+            log_voice_event(
+                user_id=user_id or "",
+                session_id=call_id,
+                event_type="officer_joined",
+                tenant_id=tenant_id or "default",
+            )
+            while room.state.mode == "bridged" or (
+                room.state.mode == "transferring"
+                and room.state.reconnecting_officer == user_id
+            ):
+                try:
+                    raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+                data = json.loads(raw)
+                if isinstance(data, dict) and data.get("type") == "hangup":
+                    await desk.end(call_id, user_id, speech_model)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.debug("Officer LiveKit control connection closed", exc_info=True)
+        finally:
+            room.state.livekit_officer_route_active = False
+            if room.state.mode == "bridged":
+                await desk.handle_officer_disconnect(room, user_id, speech_model)
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+        return
 
     officer_leg = OfficerLeg(
         ws=websocket,

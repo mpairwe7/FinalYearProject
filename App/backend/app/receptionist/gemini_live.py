@@ -30,19 +30,16 @@ from .config import (
     get_gemini_vad_prefix_padding_ms,
     get_gemini_vad_silence_ms,
     get_gemini_vad_start_sensitivity,
-    get_gemini_session_timeout_s,
     get_transfer_timeout_s,
 )
 from .hub import hub
 from .language import LANGUAGE_NAMES, text_language
 from .phrases import phrase
-from .serializer import BrowserCallSerializer
 from .store import create_turn, update_call
 from .taps import CallerAudioTap
 from .transfer import close_transfer_on_timeout, open_transfer
 
 try:
-    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
     from pipecat.frames.frames import (
         BotStoppedSpeakingFrame,
         Frame,
@@ -53,6 +50,7 @@ try:
         TTSTextFrame,
         UserStartedSpeakingFrame,
     )
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 except ImportError:
     class FrameDirection:  # type: ignore[no-redef]
         DOWNSTREAM = 1
@@ -728,10 +726,6 @@ def build_gemini_live_pipeline(
     try:
         from pipecat.pipeline.pipeline import Pipeline
         from pipecat.pipeline.task import PipelineParams, PipelineTask
-        from pipecat.transports.websocket.fastapi import (
-            FastAPIWebsocketParams,
-            FastAPIWebsocketTransport,
-        )
     except ImportError as exc:
         raise RuntimeError("Pipecat Google Gemini Live dependencies are not installed") from exc
 
@@ -740,15 +734,13 @@ def build_gemini_live_pipeline(
         room, chat_model, languages
     )
 
-    serializer = BrowserCallSerializer(room=room)
-    transport_params = FastAPIWebsocketParams(
-        audio_in_enabled=True,
-        audio_out_enabled=True,
-        add_wav_header=False,
-        serializer=serializer,
-        session_timeout=get_gemini_session_timeout_s(),
-    )
-    transport = FastAPIWebsocketTransport(websocket, transport_params)
+    # Keep engine selection independent from the media boundary: production
+    # calls use the same LiveKit room as caller/officer, while demo calls keep
+    # the browser PCM transport.
+    from .pipeline import build_transport
+
+    transport = build_transport(room, websocket)
+    room.state.engine = "gemini_live"
 
     from .hold_gate import OfficerOutputGate
 

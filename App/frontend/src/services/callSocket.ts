@@ -61,7 +61,7 @@ export class CallSocket {
         } else if (typeof event.data === 'string') {
           try {
             const data = JSON.parse(event.data);
-            this.callbacks.onMessage(data);
+            this.dispatchMessage(data);
           } catch {
             // Non-JSON text message
           }
@@ -82,6 +82,11 @@ export class CallSocket {
     } catch (err: unknown) {
       this.callbacks.onError((err as Error)?.message || 'Failed to open call socket');
     }
+  }
+
+  /** Route LiveKit reliable data messages through the same call event handler. */
+  dispatchMessage(message: Record<string, unknown>): void {
+    this.callbacks.onMessage(message);
   }
 
   sendAudio(pcmChunk: ArrayBuffer): void {

@@ -46,6 +46,8 @@ export function ActiveCallDock({ onBackToCall }: { onBackToCall: (callId: string
       ? `Wrap-up pending · ${formatClock((now - activeCall.since) / 1000)}`
       : activeCall.state === 'bridged'
         ? `${activeCall.onHold ? 'On hold' : 'On call'} ${formatClock((now - activeCall.since) / 1000)}`
+        : activeCall.state === 'reconnecting'
+          ? 'Reconnecting media…'
         : activeCall.state === 'ending'
           ? 'Ending…'
           : 'Connecting…';
