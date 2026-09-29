@@ -74,6 +74,10 @@ def main() -> int:
     ):
         print("AUDIT_PROBE_BASE must be an http(s) URL without embedded credentials", file=sys.stderr)
         return 2
+    # The probe sends INDEX_API_KEY as a bearer token: plain http only to this machine.
+    if parsed_base.scheme == "http" and parsed_base.hostname not in ("localhost", "127.0.0.1", "::1"):
+        print("AUDIT_PROBE_BASE must use https unless it is localhost", file=sys.stderr)
+        return 2
     if not os.getenv("INDEX_API_KEY"):
         print(
             "INDEX_API_KEY is not set in this process; run inside the api container",

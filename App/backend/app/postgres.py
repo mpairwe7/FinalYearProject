@@ -2082,7 +2082,7 @@ def upsert_workflow_session(
         with conn.cursor() as cur:
             cur.execute(
                 f"""INSERT INTO workflow_sessions ({_WORKFLOW_COLUMNS})
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (conversation_id) DO UPDATE SET
                       workflow_id = EXCLUDED.workflow_id,
                       status = EXCLUDED.status,
