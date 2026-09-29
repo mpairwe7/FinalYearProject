@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import time
 import unittest
 import uuid
 from unittest.mock import patch
@@ -216,3 +217,133 @@ class TestSocketTokenResolution(unittest.TestCase):
             socket, required=True, token_override=token
         )
         self.assertEqual((user_id, tenant_id, role), ("staff_frame", "tenant-a", "ura_staff"))
+
+
+class TestControlSocketHelpers(unittest.IsolatedAsyncioTestCase):
+    """Malformed control frames are ignored; teardown always stops the media pipeline."""
+
+    def test_only_json_objects_are_control_messages(self):
+        from app.receptionist.ws import _control_message
+
+        for raw in ("not json", "[1, 2]", '"hangup"', ""):
+            self.assertIsNone(_control_message(raw))
+        self.assertEqual(_control_message('{"type": "hangup"}'), {"type": "hangup"})
+
+    async def test_a_runner_that_ignores_cancel_is_cancelled_after_the_wait(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from app.receptionist import ws as ws_mod
+
+        started = asyncio.Event()
+
+        async def keeps_running() -> None:
+            started.set()
+            await asyncio.sleep(3600)
+
+        runner = asyncio.create_task(keeps_running())
+        await started.wait()
+        task = SimpleNamespace(cancel=AsyncMock())
+        with patch.object(ws_mod, "_PIPELINE_STOP_TIMEOUT_S", 0.05):
+            await ws_mod._stop_pipeline(SimpleNamespace(call_id="call_x", pipeline_runner_task=runner), task)
+        task.cancel.assert_awaited_once()
+        with self.assertRaises(asyncio.CancelledError):
+            await runner
+
+    async def test_a_finished_runner_is_not_cancelled_again(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from app.receptionist.ws import _stop_pipeline
+
+        async def done() -> None:
+            return None
+
+        runner = asyncio.create_task(done())
+        await runner
+        task = SimpleNamespace(cancel=AsyncMock())
+        await _stop_pipeline(SimpleNamespace(call_id="call_x", pipeline_runner_task=runner), task)
+        task.cancel.assert_not_awaited()
+
+
+class TestLiveKitCallControlLoop(unittest.TestCase):
+    """The caller's control socket on a LiveKit call, driven through the real endpoint."""
+
+    @classmethod
+    def setUpClass(cls):
+        db.init_db()
+        init_receptionist_schema()
+        cls.client = TestClient(app)
+
+    def _run_call(self, frames: list[str]):
+        """Start a LiveKit call, send *frames*, drop the socket; return what the pipeline saw."""
+        import threading
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.receptionist import livekit
+        from app.receptionist import ws as ws_mod
+
+        seen = SimpleNamespace(frames=[], cancelled=threading.Event(), running=threading.Event())
+
+        class FakeTask:
+            stop: asyncio.Event | None = None
+
+            async def cancel(self) -> None:
+                seen.cancelled.set()
+                if self.stop is not None:
+                    self.stop.set()
+
+            async def queue_frame(self, frame) -> None:
+                seen.frames.append(frame)
+
+        class FakeRunner:
+            async def run(self, task: FakeTask) -> None:
+                task.stop = asyncio.Event()
+                seen.running.set()
+                await task.stop.wait()
+
+        class FakeTransport:
+            def event_handler(self, _name):
+                return lambda fn: fn
+
+            def get_participants(self):
+                return []
+
+        brain = SimpleNamespace(say_greeting=AsyncMock())
+        with (
+            patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "voice_receptionist"),
+            patch.object(ws_mod, "is_ws_origin_allowed", return_value=True),
+            patch.object(livekit, "enabled", return_value=True),
+            patch.object(livekit, "mint_token", return_value="room-jwt"),
+            patch.object(livekit, "close_room", new=AsyncMock()),
+            patch.dict("os.environ", {"LIVEKIT_URL": "wss://rtc.example.test"}),
+            patch.object(ws_mod, "build_call_pipeline", return_value=(FakeTask(), FakeTransport(), brain)),
+            patch("pipecat.pipeline.runner.PipelineRunner", FakeRunner),
+            patch.object(ws_mod.call_brief, "start"),
+            patch.object(ws_mod.call_brief, "stop"),
+            patch.object(ws_mod.risk, "start"),
+            patch.object(ws_mod.risk, "stop"),
+            patch.object(ws_mod, "generate_call_summary", new=MagicMock()),
+        ):
+            with self.client.websocket_connect("/v1/calls/stream") as sock:
+                sock.send_text(json.dumps({"type": "call_start", "locale": "en", "voice_consent_accepted": True}))
+                ready = sock.receive_json()
+                self.assertEqual(ready["media"]["transport"], "livekit")
+                self.assertTrue(seen.running.wait(5), "the media pipeline never started")
+                for frame in frames:
+                    sock.send_text(frame)
+                deadline = time.monotonic() + 5
+                while len(seen.frames) < sum('"set_language"' in f for f in frames) and time.monotonic() < deadline:
+                    time.sleep(0.02)
+            # Leaving the block drops the control socket without a hangup.
+        return seen
+
+    def test_a_dropped_control_socket_stops_the_media_pipeline(self):
+        seen = self._run_call([])
+        self.assertTrue(seen.cancelled.is_set(), "the Pipecat task outlived the call")
+
+    def test_a_malformed_control_frame_does_not_end_the_call(self):
+        seen = self._run_call(["not json", "[1]", json.dumps({"type": "set_language", "language": "sw"})])
+        self.assertEqual([frame.language for frame in seen.frames], ["sw"])
+        self.assertTrue(seen.cancelled.is_set())

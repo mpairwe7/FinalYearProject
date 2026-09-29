@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
 import sys
 import types
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+import pytest
 
 from app.receptionist import livekit
 from app.receptionist.state import CallRoom, CallState, registry
@@ -231,3 +236,109 @@ def test_shared_room_audio_tap_drops_officer_and_normalizes_caller_audio() -> No
         await registry.remove(room.call_id)
 
     asyncio.run(exercise())
+
+
+# ---------------------------------------------------------------------------
+# Review follow-ups (PR #515)
+# ---------------------------------------------------------------------------
+_G36_READY = {
+    "FLAG_VOICE_RECEPTIONIST": "true",
+    "LIVEKIT_URL": "wss://rtc.example.test",
+    "LIVEKIT_API_KEY": "production-key",  # pragma: allowlist secret
+    "LIVEKIT_API_SECRET": "production-secret-value-that-is-long-enough",  # pragma: allowlist secret
+    "RECEPTIONIST_MEDIA_TRANSPORT": "livekit",
+    "WORKERS": "1",
+    "VOICE_RECEPTIONIST_REPLICAS": "1",
+    "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
+}
+
+
+@pytest.mark.parametrize("raw", ["15m", "0", "-30", "nan", "inf"])
+def test_an_invalid_call_duration_is_a_configuration_error(monkeypatch, raw) -> None:
+    from app.receptionist import config
+
+    monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", raw)
+    for read in (config.get_max_call_s, config.get_gemini_session_timeout_s, config.validate):
+        with pytest.raises(config.ReceptionistConfigError, match="RECEPTIONIST_MAX_CALL_S"):
+            read()
+
+
+def test_call_duration_defaults_and_the_gemini_ceiling(monkeypatch) -> None:
+    from app.receptionist import config
+
+    monkeypatch.delenv("RECEPTIONIST_MAX_CALL_S", raising=False)
+    assert (config.get_max_call_s(), config.get_gemini_session_timeout_s()) == (900.0, 480.0)
+    monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "  ")
+    assert config.get_max_call_s() == 900.0
+    monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "300")
+    assert (config.get_max_call_s(), config.get_gemini_session_timeout_s()) == (300.0, 300.0)
+    monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "1200")
+    assert (config.get_max_call_s(), config.get_gemini_session_timeout_s()) == (1200.0, 480.0)
+
+
+def test_production_gate_reports_an_invalid_call_duration(monkeypatch) -> None:
+    for key, value in _G36_READY.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "15m")
+    errors = livekit.production_errors()
+    assert errors == ["G36: RECEPTIONIST_MAX_CALL_S must be a number of seconds, got '15m'"]
+
+
+def test_agent_identity_in_the_allowlist_is_the_one_its_token_carries(monkeypatch) -> None:
+    minted: dict = {}
+
+    def fake_mint(**kwargs):
+        minted.update(kwargs)
+        return "agent-jwt"
+
+    fake_transport = types.ModuleType("pipecat.transports.livekit.transport")
+    fake_transport.LiveKitParams = lambda **kw: SimpleNamespace(**kw)
+    fake_transport.LiveKitTransport = lambda **kw: SimpleNamespace(**kw)
+    monkeypatch.setitem(sys.modules, "pipecat.transports.livekit.transport", fake_transport)
+    monkeypatch.setattr(livekit, "enabled", lambda: True)
+    monkeypatch.setattr(livekit, "mint_token", fake_mint)
+    monkeypatch.setenv("LIVEKIT_URL", "wss://rtc.example.test")
+
+    from app.receptionist.pipeline import build_transport
+
+    state = CallState(call_id="call odd/id", conversation_id="conv")
+    state.livekit_room = "ura-call_odd_id"
+    transport = build_transport(CallRoom(call_id="call odd/id", state=state))
+
+    assert minted["identity"] == state.livekit_agent_identity == "ura-agent-call_odd_id"
+    assert livekit.is_authorized_participant(state, minted["identity"])
+    assert transport.token == "agent-jwt"
+
+
+def test_log_ref_hides_the_identity_and_any_control_characters() -> None:
+    forged = "caller-1\n2026-09-29 INFO forged line"
+    ref = livekit.log_ref(forged)
+    assert re.fullmatch(r"[0-9a-f]{12}", ref)
+    assert ref == livekit.log_ref(forged)
+    assert ref != livekit.log_ref("caller-1")
+
+
+def test_officer_caption_is_skipped_when_the_caller_socket_is_gone(caplog) -> None:
+    from app import database as db
+    from app.receptionist.store import init_receptionist_schema, list_turns
+
+    db.init_db()
+    init_receptionist_schema()
+    speech = SimpleNamespace(
+        transcribe=lambda wav, rate, lang, with_words=False: SimpleNamespace(text="Hello, it is Okello.", latency_s=0.2)
+    )
+
+    async def exercise() -> list[dict]:
+        room = await registry.create("call_livekit_caption", "conv_livekit_caption")
+        room.caller_ws = None
+        room.state.livekit_room = "ura-call_livekit_caption"
+        tap = CallerAudioTap(room, speech_model=speech)
+        with caplog.at_level(logging.ERROR, logger="app.receptionist.taps"):
+            await tap._transcribe_officer(b"\x00\x00" * 1600)
+        turns = list_turns(room.call_id)
+        await registry.remove(room.call_id)
+        return turns
+
+    turns = asyncio.run(exercise())
+    assert [(t["speaker"], t["text"]) for t in turns][-1] == ("officer", "Hello, it is Okello.")
+    assert "Failed transcribing officer utterance" not in caplog.text

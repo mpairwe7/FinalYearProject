@@ -182,6 +182,41 @@ class JoinAndEndTests(DeskTestCase):
         self.assertTrue(all(len(chunk) <= 16000 for chunk in self.caller.audio))
 
 
+class BridgeRevalidationTests(DeskTestCase):
+    """bridge() re-checks the call under the desk lock: callers wait before bridging."""
+
+    async def test_a_call_that_ended_during_the_media_wait_is_not_bridged(self):
+        await desk.claim(self.call_id, "okello", officer_name="Officer Okello")
+        self.room.state.mode = "ended"  # the caller hung up while officer media joined
+        with self.assertRaises(desk.DeskError) as err:
+            await desk.bridge(self.room, None, "okello", speech_model=None)
+        self.assertEqual(err.exception.status, 409)
+        self.assertEqual(self.room.state.mode, "ended")
+        self.assertNotEqual(get_call(self.call_id)["status"], "bridged")
+        self.assertEqual(self.lobby_events("call.bridged"), [])
+
+    async def test_a_released_claim_is_not_bridged(self):
+        await desk.claim(self.call_id, "okello")
+        await desk.release(self.call_id, "okello")
+        with self.assertRaises(desk.DeskError):
+            await desk.bridge(self.room, None, "okello", speech_model=None)
+        self.assertEqual(self.room.state.mode, "transferring")
+
+    async def test_another_officer_cannot_be_bridged_onto_a_claim(self):
+        await desk.claim(self.call_id, "okello")
+        with self.assertRaises(desk.DeskError):
+            await desk.bridge(self.room, None, "nakato", speech_model=None)
+
+    async def test_the_reconnecting_officer_is_bridged_again(self):
+        await desk.claim(self.call_id, "okello")
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
+        self.assertEqual((self.room.state.mode, self.room.state.reconnecting_officer), ("transferring", "okello"))
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        self.assertEqual((self.room.state.mode, self.room.state.officer_id), ("bridged", "okello"))
+        self.assertIsNone(self.room.state.reconnect_timer)
+
+
 class QuietAITests(unittest.IsolatedAsyncioTestCase):
     """While an officer has the call, the AI neither hears the caller nor speaks."""
 

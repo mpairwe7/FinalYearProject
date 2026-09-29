@@ -59,7 +59,56 @@ def _voice_receptionist_enabled() -> bool:
 
 
 def _tenant_scope(ctx: AuthContext) -> str | None:
+    """The tenant a staff request is limited to, or ``None`` when tenancy is off."""
     return (ctx.tenant_id or "default") if tenant_enabled() else None
+
+
+def _control_message(raw: str) -> dict[str, Any] | None:
+    """Parse a control-socket frame; anything but a JSON object is ignored.
+
+    A stray or malformed frame is not a reason to end a live call.
+    """
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+#: How long teardown waits for the Pipecat runner before cancelling it outright.
+_PIPELINE_STOP_TIMEOUT_S = 5.0
+
+
+async def _stop_pipeline(room: Any, task: Any) -> None:
+    """Cancel the call's Pipecat task and wait briefly for its runner to finish."""
+    runner = room.pipeline_runner_task
+    if runner is None:
+        return
+    if not runner.done():
+        try:
+            await task.cancel()
+        except Exception:
+            logger.debug("Pipeline task for %s did not cancel cleanly", room.call_id, exc_info=True)
+    # Shielded so a slow runner is cancelled without this coroutine waiting on
+    # the cancellation; our own cancellation still propagates.
+    try:
+        await asyncio.wait_for(asyncio.shield(runner), timeout=_PIPELINE_STOP_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        runner.cancel()
+    except asyncio.CancelledError:
+        runner.cancel()
+        raise
+    except Exception:
+        logger.debug("Pipeline runner for %s ended with an error", room.call_id, exc_info=True)
+
+
+async def _refuse_officer(websocket: WebSocket, detail: str) -> None:
+    """Tell an officer's console why joining stopped, then close with 4409."""
+    try:
+        await websocket.send_text(json.dumps({"type": "error", "detail": detail}))
+        await websocket.close(code=4409)
+    except Exception:
+        logger.debug("Officer socket was already closed", exc_info=True)
 
 router = APIRouter()
 class ReviewCallRequest(BaseModel):
@@ -279,8 +328,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                         or not livekit.is_authorized_participant(room.state, identity)
                     ):
                         logger.warning(
-                            "Rejecting stale or unissued LiveKit identity %s in call %s",
-                            identity,
+                            "Refused a stale or unissued LiveKit participant (ref %s) in call %s",
+                            livekit.log_ref(identity),
                             call_id,
                         )
                         try:
@@ -320,7 +369,10 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                             speech_model = getattr(getattr(app, "state", None), "speech", None)
                         except Exception:
                             pass
-                        await desk.bridge(room, None, room.state.reconnecting_officer, speech_model)
+                        try:
+                            await desk.bridge(room, None, room.state.reconnecting_officer, speech_model)
+                        except desk.DeskError as exc:
+                            logger.info("Officer media rejoined call %s too late: %s", call_id, exc.detail)
 
                 @transport.event_handler("on_first_participant_joined")
                 async def _on_first_participant_joined(_transport: Any, identity: str) -> None:
@@ -363,40 +415,40 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 room.pipeline_runner_task = asyncio.create_task(runner.run(task))
                 from .serializer import RequestOfficerFrame, SetLanguageFrame
 
-                max_call_s = max(1.0, get_max_call_s())
+                max_call_s = get_max_call_s()
                 if room.state.engine == "gemini_live":
                     max_call_s = min(max_call_s, get_gemini_session_timeout_s())
-                while room.state.mode != "ended":
-                    if time.time() - room.state.started_at >= max_call_s:
-                        await room.end("max_call_duration")
-                        await task.cancel()
-                        break
-                    try:
-                        raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        if room.pipeline_runner_task.done():
-                            await room.end("media_pipeline_stopped")
-                            break
-                        continue
-                    data = json.loads(raw)
-                    if not isinstance(data, dict):
-                        continue
-                    message_type = data.get("type")
-                    if message_type == "hangup":
-                        await room.end("caller_hangup")
-                        break
-                    if message_type == "request_officer":
-                        await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
-                    elif message_type == "set_language":
-                        language = str(data.get("language") or "").strip().lower()
-                        if language in ("en", "sw", "lg"):
-                            await task.queue_frame(SetLanguageFrame(language=language))
-                if not room.pipeline_runner_task.done():
-                    await task.cancel()
+                # A dropped control socket raises out of receive_text(), and
+                # CallRoom.end() does not own the Pipecat runner: without this
+                # finally the runner and the Gemini session outlived the call.
                 try:
-                    await asyncio.wait_for(room.pipeline_runner_task, timeout=5.0)
-                except Exception:
-                    pass
+                    while room.state.mode != "ended":
+                        if time.time() - room.state.started_at >= max_call_s:
+                            await room.end("max_call_duration")
+                            await task.cancel()
+                            break
+                        try:
+                            raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                        except asyncio.TimeoutError:
+                            if room.pipeline_runner_task.done():
+                                await room.end("media_pipeline_stopped")
+                                break
+                            continue
+                        data = _control_message(raw)
+                        if data is None:
+                            continue
+                        message_type = data.get("type")
+                        if message_type == "hangup":
+                            await room.end("caller_hangup")
+                            break
+                        if message_type == "request_officer":
+                            await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
+                        elif message_type == "set_language":
+                            language = str(data.get("language") or "").strip().lower()
+                            if language in ("en", "sw", "lg"):
+                                await task.queue_frame(SetLanguageFrame(language=language))
+                finally:
+                    await _stop_pipeline(room, task)
             else:
                 await brain.say_greeting()
                 await runner.run(task)
@@ -717,7 +769,11 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
         # re-bridges it; a fresh claimant's first connection is bridged here.
         try:
             if room.state.mode != "bridged":
-                await desk.bridge(room, None, user_id, speech_model)
+                try:
+                    await desk.bridge(room, None, user_id, speech_model)
+                except desk.DeskError as exc:
+                    await _refuse_officer(websocket, exc.detail)
+                    return
             log_voice_event(
                 user_id=user_id or "",
                 session_id=call_id,
@@ -732,8 +788,8 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
                     raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
                 except asyncio.TimeoutError:
                     continue
-                data = json.loads(raw)
-                if isinstance(data, dict) and data.get("type") == "hangup":
+                data = _control_message(raw)
+                if data is not None and data.get("type") == "hangup":
                     await desk.end(call_id, user_id, speech_model)
         except WebSocketDisconnect:
             pass
@@ -758,7 +814,11 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
     )
 
     # The AI goes quiet, the caller hears who joined, then the bridge opens.
-    await desk.bridge(room, officer_leg, user_id, speech_model)
+    try:
+        await desk.bridge(room, officer_leg, user_id, speech_model)
+    except desk.DeskError as exc:
+        await _refuse_officer(websocket, exc.detail)
+        return
     log_voice_event(user_id=user_id or "", session_id=call_id, event_type="officer_joined", tenant_id=tenant_id or "default")
 
     officer_leg.start()

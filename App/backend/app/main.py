@@ -635,7 +635,9 @@ async def lifespan(app: FastAPI):
             from . import receptionist
             if not receptionist.is_available():
                 raise RuntimeError("FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed")
+            from .receptionist.config import validate as validate_receptionist_config
             from .receptionist.store import init_receptionist_schema
+            validate_receptionist_config()
             init_receptionist_schema()
             workers_count = int(os.getenv("WORKERS", "1"))
             if workers_count > 1:

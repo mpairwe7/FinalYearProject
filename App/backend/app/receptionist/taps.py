@@ -166,10 +166,14 @@ class CallerAudioTap(FrameProcessor):
                 latencies={"stt_ms": round((getattr(result, "latency_s", 0) or 0) * 1000, 1)},
             )
             hub.publish_call(self.room.call_id, "turn", turn)
-            await self.room.caller_ws.send_text(json.dumps({
-                "type": "caption", "speaker": "officer", "text": text,
-                "final": True, "turn_id": self.room.state.turn_seq,
-            }))
+            # The transcript turn is already published; a caller whose control
+            # socket is gone just misses the caption.
+            caller_ws = self.room.caller_ws
+            if caller_ws is not None:
+                await caller_ws.send_text(json.dumps({
+                    "type": "caption", "speaker": "officer", "text": text,
+                    "final": True, "turn_id": self.room.state.turn_seq,
+                }))
         except Exception:
             logger.exception("Failed transcribing officer utterance on %s", self.room.call_id)
 

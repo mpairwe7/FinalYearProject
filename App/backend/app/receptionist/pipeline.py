@@ -48,7 +48,9 @@ def build_transport(room: Any, websocket: Any = None) -> Any:
         from .livekit import mint_token
 
         room_name = room.state.livekit_room
-        agent_identity = f"ura-agent-{room.call_id}"
+        # The allowlist must hold the identity the token actually carries, so
+        # it goes through the same sanitiser mint_token applies.
+        agent_identity = livekit.agent_identity(room.call_id)
         token = mint_token(
             room_name=room_name,
             identity=agent_identity,

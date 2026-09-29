@@ -202,6 +202,16 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
     async with room.desk_lock:
         if room.state.mode == "bridged" and room.state.officer_id == officer_id:
             return room.state.officer_name or name
+        # Callers check eligibility, then wait (up to 20 s for LiveKit media)
+        # before bridging. The caller can hang up or the claim lapse in that
+        # window, so re-check under the lock: bridging an ended call would
+        # write `bridged` over `ended` and leave the officer "on" a dead call.
+        if (
+            not officer_id
+            or room.state.mode not in ("transferring", "ai")
+            or officer_id not in (room.state.claimed_by, room.state.reconnecting_officer)
+        ):
+            raise DeskError(409, "The call is no longer waiting for this officer")
         _cancel_claim_timer(room)
         _cancel_reconnect_timer(room)
         room.state.reconnecting_officer = None
@@ -311,7 +321,8 @@ async def transfer(
             try:
                 await livekit.revoke_participant(room.state.livekit_room, previous_identity)
             except Exception as exc:
-                logger.exception("Could not revoke LiveKit access for call %s", call_id)
+                # room.call_id is the id this server issued, not the request path.
+                logger.exception("Could not revoke LiveKit access for call %s", room.call_id)
                 raise DeskError(
                     503,
                     "Call transfer is temporarily unavailable; media access could not be revoked",

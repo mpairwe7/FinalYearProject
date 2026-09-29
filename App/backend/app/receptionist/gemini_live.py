@@ -744,7 +744,7 @@ def build_gemini_live_pipeline(
 
     from .hold_gate import OfficerOutputGate
 
-    caller_tap = CallerAudioTap(room=room)
+    caller_tap = CallerAudioTap(room=room, speech_model=speech_model)
     transcript_tap = GeminiLiveTranscriptTap(room=room)
 
     pipeline_elements = [

@@ -63,6 +63,12 @@ def production_errors(*, enabled_override: bool | None = None) -> list[str]:
         )
     if os.getenv("RECEPTIONIST_MEDIA_TRANSPORT", "").strip().lower() != "livekit":
         errors.append("G36: RECEPTIONIST_MEDIA_TRANSPORT=livekit is required in production.")
+    from .config import ReceptionistConfigError, validate
+
+    try:
+        validate()
+    except ReceptionistConfigError as exc:
+        errors.append(f"G36: {exc}")
     if os.getenv("WORKERS", "").strip() != "1":
         errors.append(
             "G36: explicitly set WORKERS=1 while active call state remains process-local."
@@ -194,12 +200,33 @@ async def close_room(room_name: str) -> None:
 
 
 def room_name(call_id: str) -> str:
+    """The LiveKit room that carries one call's media."""
     return f"ura-{_identity(call_id)}"
 
 
 def participant_identity(role: str, user_id: str) -> str:
+    """An opaque, stable identity for a person in a call room.
+
+    The user id is hashed so a LiveKit dashboard, webhook or log never shows
+    the taxpayer's or officer's account identifier.
+    """
     opaque_id = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:24]
     return _identity(f"{role}-{opaque_id}")
+
+
+def agent_identity(call_id: str) -> str:
+    """The AI receptionist's identity in a call room, sanitised like any other."""
+    return _identity(f"ura-agent-{call_id}")
+
+
+def log_ref(identity: str) -> str:
+    """A short digest that stands in for a participant identity in logs.
+
+    Identities that reach the server from LiveKit events are not trusted
+    input; logging a digest keeps control characters and account-derived
+    values out of the log while still letting two log lines be matched.
+    """
+    return hashlib.sha256(identity.encode("utf-8", "replace")).hexdigest()[:12]
 
 
 def is_authorized_participant(state: object, identity: str) -> bool:
