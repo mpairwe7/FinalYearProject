@@ -656,7 +656,11 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
             except Exception:
                 pass
             finally:
+                # Off the allowlist AND out of the room: the allowlist is only
+                # checked when someone joins, so a listener whose console
+                # closed would otherwise keep hearing the call.
                 room.state.livekit_observer_identities.discard(observer_identity)
+                await desk.revoke_media(room, observer_identity)
                 try:
                     await websocket.close()
                 except Exception:
@@ -772,6 +776,12 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
                 try:
                     await desk.bridge(room, None, user_id, speech_model)
                 except desk.DeskError as exc:
+                    # Their media joined during the wait; it must not stay in
+                    # a room whose call no longer waits for them.
+                    async with room.desk_lock:
+                        if room.state.livekit_officer_identity == officer_identity:
+                            room.state.livekit_officer_identity = ""
+                    await desk.revoke_media(room, officer_identity)
                     await _refuse_officer(websocket, exc.detail)
                     return
             log_voice_event(

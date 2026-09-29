@@ -131,12 +131,15 @@ class CallRoom:
                 pass
 
     def mark_participant_joined(self, identity: str) -> None:
+        """Record that *identity* joined the call's LiveKit room; wakes waiters."""
         self.participant_joined.setdefault(identity, asyncio.Event()).set()
 
     def mark_participant_left(self, identity: str) -> None:
+        """Forget *identity*; a later wait blocks until it joins again."""
         self.participant_joined.pop(identity, None)
 
     async def wait_for_participant(self, identity: str, timeout_s: float = 20.0) -> bool:
+        """Wait until *identity* is in the room; ``False`` after *timeout_s*."""
         event = self.participant_joined.setdefault(identity, asyncio.Event())
         try:
             await asyncio.wait_for(event.wait(), timeout=timeout_s)
@@ -158,6 +161,16 @@ class CallRoom:
                 self.state.transfer_timer_task.cancel()
             if self.caller_reconnect_task and not self.caller_reconnect_task.done():
                 self.caller_reconnect_task.cancel()
+
+        # An ended call must not keep its Pipecat pipeline (and Gemini session)
+        # running until the caller's control loop notices. PipelineTask.cancel()
+        # only queues a CancelFrame, so it is safe from inside the pipeline too.
+        runner = self.pipeline_runner_task
+        if runner is not None and not runner.done() and self.pipeline_task is not None:
+            try:
+                await self.pipeline_task.cancel()
+            except Exception:
+                logger.debug("Could not cancel the pipeline for call %s", self.call_id, exc_info=True)
 
         # Update persistence
         try:

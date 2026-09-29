@@ -173,6 +173,48 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
             registry._rooms.pop(call_id, None)
 
 
+class TestLiveKitListenIn(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        db.init_db()
+        init_receptionist_schema()
+        cls.client = TestClient(app)
+
+    def test_a_listener_is_removed_from_the_room_when_their_console_closes(self):
+        from unittest.mock import AsyncMock
+
+        from app.receptionist import livekit
+
+        call_id = f"call_{uuid.uuid4().hex[:8]}"
+        create_call(call_id, status="bridged")
+        state = CallState(call_id=call_id, conversation_id=call_id, mode="bridged", officer_id="officer_alice")
+        state.livekit_room = f"ura-{call_id}"
+        room = CallRoom(call_id=call_id, state=state)
+        registry._rooms[call_id] = room
+        token = make_dev_token("supervisor_1", role="ura_admin")
+        try:
+            with (
+                patch.object(flags, "is_enabled", return_value=True),
+                patch.object(livekit, "enabled", return_value=True),
+                patch.object(livekit, "mint_token", return_value="listen-jwt"),
+                patch.object(livekit, "revoke_participant", new_callable=AsyncMock) as revoke,
+                patch.dict("os.environ", {"LIVEKIT_URL": "wss://rtc.example.test"}),
+            ):
+                with self.client.websocket_connect(f"/v1/admin/calls/{call_id}/audio?listen=true") as ws:
+                    ws.send_text(json.dumps({"type": "authenticate", "access_token": token}))
+                    ready = ws.receive_json()
+                    self.assertEqual((ready["type"], ready["can_publish"]), ("livekit_ready", False))
+                    self.assertIn(ready["identity"], state.livekit_observer_identities)
+                    state.mode = "ended"  # the call finishes; the listen loop exits
+                    deadline = time.monotonic() + 5
+                    while not revoke.await_count and time.monotonic() < deadline:
+                        time.sleep(0.02)
+            revoke.assert_awaited_once_with(state.livekit_room, ready["identity"])
+            self.assertNotIn(ready["identity"], state.livekit_observer_identities)
+        finally:
+            registry._rooms.pop(call_id, None)
+
+
 class TestLobbyTenantFanout(unittest.IsolatedAsyncioTestCase):
     async def test_call_events_only_reach_matching_tenant(self):
         db.init_db()

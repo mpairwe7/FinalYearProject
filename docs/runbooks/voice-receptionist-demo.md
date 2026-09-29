@@ -56,7 +56,15 @@ Browser participant grants allow only microphone tracks and no client-published
 data (observers cannot publish); the backend agent alone publishes call events.
 Officer transfer removes the old participant and revokes live media permissions
 before requeueing, and the room is closed during call teardown. Stale or unissued
-identities are removed as soon as the server reports a reconnect. Self-hosted
+identities are removed as soon as the server reports a reconnect. The allowlist
+is only consulted when a participant joins, so the backend also removes
+participants whose access ends while they are connected: a supervisor listener
+when their console closes, an officer whose reconnect grace lapses (which also
+frees the call's officer media seat for the next claimant — before this, the
+lapsed identity refused the next officer's audio with 4409), and an officer
+whose claim lapsed or whose caller hung up while their media was still joining.
+Those removals are best effort and logged by a digest of the identity; a
+transfer instead refuses to proceed (503) if removal fails. Self-hosted
 LiveKit does not invalidate already issued JWTs: the five-minute TTL is an
 additional exposure bound, not immediate revocation. If the threat model
 requires strict pre-join revocation, use LiveKit Cloud or do not enable the
@@ -98,7 +106,7 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Gemini model that writes the brief for English/Swahili calls; Luganda calls use Sunflower |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
-| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes) |
+| `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* |
 | `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | Verified East-African English edge-tts speaker |

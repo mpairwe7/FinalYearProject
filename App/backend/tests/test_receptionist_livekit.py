@@ -342,3 +342,26 @@ def test_officer_caption_is_skipped_when_the_caller_socket_is_gone(caplog) -> No
     turns = asyncio.run(exercise())
     assert [(t["speaker"], t["text"]) for t in turns][-1] == ("officer", "Hello, it is Okello.")
     assert "Failed transcribing officer utterance" not in caplog.text
+
+
+def test_ending_a_call_stops_its_media_pipeline() -> None:
+    """A backstop for every end path (officer End, timeouts), not only the caller's loop."""
+
+    async def exercise() -> None:
+        room = await registry.create("call_livekit_end", "conv_livekit_end")
+        stop = asyncio.Event()
+
+        async def run() -> None:
+            await stop.wait()
+
+        room.pipeline_runner_task = asyncio.create_task(run())
+        room.pipeline_task = SimpleNamespace(cancel=AsyncMock(side_effect=lambda: stop.set()))
+        await room.end("officer_ended")
+        room.pipeline_task.cancel.assert_awaited_once()
+        await asyncio.wait_for(room.pipeline_runner_task, timeout=1)
+        # A finished pipeline is left alone on a second end().
+        await room.end("officer_ended")
+        room.pipeline_task.cancel.assert_awaited_once()
+        await registry.remove(room.call_id)
+
+    asyncio.run(exercise())

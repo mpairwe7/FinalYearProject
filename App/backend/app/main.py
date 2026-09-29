@@ -177,13 +177,11 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
-    if os.getenv("FLAG_VOICE_RECEPTIONIST", "").strip().lower() in ("1", "true", "yes", "on"):
-        errors.append(
-            "FLAG_VOICE_RECEPTIONIST cannot be enabled in production yet: the receptionist uses "
-            "browser WebSockets and process-local call state; deploy a supported WebRTC transport "
-            "and shared call/event registry before enabling it."
-        )
-
+    # FLAG_VOICE_RECEPTIONIST is gated by G36 inside gap_gate_errors(): LiveKit
+    # media over wss://, production LiveKit credentials, one worker and one
+    # replica, and the explicit single-replica acknowledgement. The runbook's
+    # rollout (docs/runbooks/voice-receptionist-demo.md) enables the flag once
+    # that gate passes, so no second, stricter check lives here.
     from .production_readiness import gap_gate_errors
 
     errors.extend(gap_gate_errors())
@@ -626,11 +624,9 @@ async def lifespan(app: FastAPI):
     else:
         app.state.offline_rag = None
 
-    # Simulated voice receptionist (Pipecat demo)
-    if (
-        os.getenv("APP_ENV", "development").strip().lower() != "production"
-        and _flags.is_enabled("voice_receptionist")
-    ):
+    # Voice receptionist. In production the flag only gets this far once the
+    # G36 gate in _validate_production_env() has passed.
+    if _flags.is_enabled("voice_receptionist"):
         try:
             from . import receptionist
             if not receptionist.is_available():

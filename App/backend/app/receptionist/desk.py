@@ -589,6 +589,12 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
             return
         logger.info("Reconnect grace period expired for %s on %s; releasing to queue", officer_id, room.call_id)
         room.state.reconnecting_officer = None
+        # The lapsed officer's media identity would otherwise stay on the
+        # allowlist and refuse the next officer's audio (4409): the call sat
+        # in the queue unanswerable.
+        stale_identity = room.state.livekit_officer_identity
+        room.state.livekit_officer_identity = ""
+        room.state.livekit_officer_route_active = False
         await _release_locked(room, "officer_disconnected")
         room.state.turn_seq += 1
         turn = create_turn(
@@ -612,6 +618,28 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
                 "waiting_since": time.time(),
                 "attempt": room.state.transfer_attempts,
             },
+        )
+    # Outside the lock: a slow LiveKit API must not hold up the next claim.
+    await revoke_media(room, stale_identity)
+
+
+async def revoke_media(room: CallRoom, identity: str) -> None:
+    """Best effort: take *identity* out of the call's LiveKit room.
+
+    For clean-up paths that must not fail (a listener leaving, a lapsed
+    officer). Transfers call :func:`livekit.revoke_participant` directly and
+    refuse to proceed if it fails.
+    """
+    if not (room.state.livekit_room and identity):
+        return
+    try:
+        await livekit.revoke_participant(room.state.livekit_room, identity)
+    except Exception:
+        logger.warning(
+            "Could not revoke LiveKit participant (ref %s) on call %s",
+            livekit.log_ref(identity),
+            room.call_id,
+            exc_info=True,
         )
 
 
