@@ -8,7 +8,11 @@ import {
   useCallStore,
 } from '@/store/useCallStore';
 import { CallSocket } from '@/services/callSocket';
-import { LiveKitCallSession, type LiveKitCallCredentials } from '@/services/liveKitCallSession';
+import {
+  LiveKitCallSession,
+  type LiveKitCallCredentials,
+  SPEAKING_LEVEL,
+} from '@/services/liveKitCallSession';
 import { PCMPlayer } from '@/services/pcmPlayer';
 import { AudioRecorder } from '@/services/voiceService';
 import { playDialTone, playHoldTone, playJoinChime } from '@/services/callTones';
@@ -28,6 +32,7 @@ export function useCall() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const statusBeforeReconnectRef = useRef<CallStatus>('ai');
+  const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep a ref of isMuted so the audio callback gets the latest value without recreation
   const isMutedRef = useRef(store.isMuted);
@@ -57,6 +62,10 @@ export function useCall() {
       void liveKitSessionRef.current.close();
       liveKitSessionRef.current = null;
     }
+    if (speakingTimerRef.current) {
+      clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
     if (playerRef.current) {
       playerRef.current.close();
       playerRef.current = null;
@@ -73,8 +82,14 @@ export function useCall() {
       socketRef.current = null;
     }
     cleanupAudio();
+    store.setAudioBlocked(false);
     store.setStatus('ended');
   }, [cleanupAudio, store]);
+
+  /** Start call audio the browser held back; wired to a tap on the call screen. */
+  const resumeAudio = useCallback(() => {
+    void liveKitSessionRef.current?.resumeAudio();
+  }, []);
 
   const requestOfficer = useCallback(() => {
     if (socketRef.current) {
@@ -213,6 +228,21 @@ export function useCall() {
                       if (liveKitSessionRef.current === session) {
                         store.setError('Call media disconnected. Please reconnect.');
                         hangup();
+                      }
+                    },
+                    onAudioBlockedChange: (blocked) => store.setAudioBlocked(blocked),
+                    // The orb and the "you are speaking" state, which the PCM
+                    // path computes from raw samples, come from WebRTC here.
+                    onLevels: ({ input, output }) => {
+                      setInputLevel(input);
+                      setOutputLevel(output);
+                      if (input > SPEAKING_LEVEL) {
+                        store.setUserSpeaking(true);
+                        if (speakingTimerRef.current) clearTimeout(speakingTimerRef.current);
+                        speakingTimerRef.current = setTimeout(() => {
+                          speakingTimerRef.current = null;
+                          store.setUserSpeaking(false);
+                        }, 1400);
                       }
                     },
                   });
@@ -373,5 +403,7 @@ export function useCall() {
     requestOfficer,
     toggleMute,
     setLanguage,
+    audioBlocked: store.audioBlocked,
+    resumeAudio,
   };
 }

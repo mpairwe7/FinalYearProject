@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { callsApi, ClaimConflictError } from '@/services/callsApi';
+import { getAudioLevels } from '@/services/audioLevelBus';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { FakeSocket } from '../helpers/callConsole';
 
@@ -8,15 +9,24 @@ type LiveKitCallbacks = {
   onDisconnected: () => void;
   onReconnecting?: () => void;
   onReconnected?: () => void;
+  onLevels?: (levels: { input: number; output: number }) => void;
 };
 
-const livekit = vi.hoisted(() => ({ callbacks: null as LiveKitCallbacks | null }));
+const livekit = vi.hoisted(() => ({
+  callbacks: null as LiveKitCallbacks | null,
+  closed: [] as number[],
+  created: 0,
+}));
 
 vi.mock('@/services/liveKitCallSession', () => ({
   LiveKitCallSession: class {
-    constructor(callbacks: LiveKitCallbacks) { livekit.callbacks = callbacks; }
+    private readonly index: number;
+    constructor(callbacks: LiveKitCallbacks) {
+      livekit.callbacks = callbacks;
+      this.index = livekit.created++;
+    }
     async connect() {}
-    async close() {}
+    async close() { livekit.closed.push(this.index); }
     async setMuted() {}
   },
 }));
@@ -66,6 +76,8 @@ describe('officerCallSession', () => {
     mic.fail = false;
     mic.onChunk = null;
     livekit.callbacks = null;
+    livekit.closed = [];
+    livekit.created = 0;
     vi.spyOn(callsApi, 'claimCall').mockResolvedValue({
       claimed: true, call_id: 'c1', officer_name: 'Officer Okello', claim_expires_at: 0,
     });
@@ -140,6 +152,33 @@ describe('officerCallSession', () => {
     expect(active()?.state).toBe('reconnecting');
     livekit.callbacks?.onReconnected?.();
     expect(active()?.state).toBe('bridged');
+  });
+
+  it('replaces the media session when the server sends livekit_ready again', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    const ready = { type: 'livekit_ready', url: 'wss://rtc.example.test', room: 'ura-c1', identity: 'officer-1', token: 't' };
+    audio.emit(ready);
+    await vi.waitFor(() => expect(active()?.state).toBe('bridged'));
+    audio.emit({ ...ready, token: 't2' });
+    expect(livekit.created).toBe(2);
+    expect(livekit.closed).toEqual([0]);
+  });
+
+  it('drives the level meters from LiveKit audio, silent while muted', async () => {
+    await takeCall('c1');
+    const audio = FakeSocket.find('/audio')!;
+    audio.open();
+    audio.emit({ type: 'livekit_ready', url: 'wss://rtc.example.test', room: 'ura-c1', identity: 'officer-1', token: 't' });
+    await vi.waitFor(() => expect(active()?.state).toBe('bridged'));
+    livekit.callbacks?.onLevels?.({ input: 0.6, output: 0.4 });
+    // The bus fades a reading from the moment it is written: close, not equal.
+    expect(getAudioLevels().input).toBeCloseTo(0.6, 1);
+    expect(getAudioLevels().output).toBeCloseTo(0.4, 1);
+    toggleMute();
+    livekit.callbacks?.onLevels?.({ input: 0.6, output: 0.4 });
+    expect(getAudioLevels().input).toBe(0);
   });
 
   it('sends the microphone unless muted', async () => {

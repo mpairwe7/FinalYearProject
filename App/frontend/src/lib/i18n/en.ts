@@ -183,6 +183,7 @@ export const en = {
   'call.transferring': 'Connecting you to an officer…',
   'call.onHold': 'On hold',
   'call.reconnecting': 'Reconnecting you to the officer…',
+  'call.tapToHear': 'Tap here to hear the call',
   'call.officerJoined': 'Officer {name} joined',
   'call.officerSpeaking': 'Officer Speaking',
   'call.ended': 'Call ended',

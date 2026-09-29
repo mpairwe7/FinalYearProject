@@ -148,8 +148,16 @@ async function joinCall(callId: string): Promise<void> {
         const message = JSON.parse(event.data);
         if (ws !== socket) return;
         if (message?.type === 'livekit_ready') {
+          // One media session per call leg: a repeated `livekit_ready` replaces
+          // the old room connection instead of leaving it open alongside.
+          if (liveKitSession) void liveKitSession.close();
           const session = new LiveKitCallSession({
             onMessage: () => {},
+            onLevels: ({ input, output }) => {
+              if (liveKitSession !== session) return;
+              setInputLevel(muted || Boolean(current?.onHold) ? 0 : input);
+              setOutputLevel(output);
+            },
             onReconnecting: () => {
               if (!transferInProgress && liveKitSession === session && current?.state === 'bridged') {
                 update({ state: 'reconnecting' });

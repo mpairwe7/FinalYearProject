@@ -114,6 +114,22 @@ describe('CallScreen component', () => {
     expect(useCallStore.getState().isMuted).toBe(false);
   });
 
+  it('offers a tap target while the browser holds call audio back', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('ai');
+    const { rerender } = render(<CallScreen />);
+    expect(screen.queryByRole('button', { name: 'Tap here to hear the call' })).toBeNull();
+
+    useCallStore.getState().setAudioBlocked(true);
+    rerender(<CallScreen />);
+    const unlock = screen.getByRole('button', { name: 'Tap here to hear the call' });
+    fireEvent.click(unlock); // no media session in this test: a harmless no-op
+
+    useCallStore.getState().setStatus('ended');
+    rerender(<CallScreen />);
+    expect(screen.queryByRole('button', { name: 'Tap here to hear the call' })).toBeNull();
+  });
+
   it('displays transferring state when officer requested', () => {
     useCallStore.getState().openCall();
     useCallStore.getState().setStatus('transferring');

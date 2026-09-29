@@ -115,6 +115,8 @@ export function CallScreen() {
     ticketRef,
     captions,
     error,
+    audioBlocked,
+    resumeAudio,
     closeCall,
     startCall,
     hangup,
@@ -325,6 +327,11 @@ export function CallScreen() {
         </div>
 
         {error && <p className="call-error">{error}</p>}
+        {audioBlocked && status !== 'ended' && (
+          <button type="button" className="call-audio-unlock" onClick={resumeAudio}>
+            {t('call.tapToHear')}
+          </button>
+        )}
 
         <footer className="call-dock">
           {status !== 'ended' ? (
