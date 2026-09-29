@@ -38,12 +38,13 @@ services:
       - LLM_ENABLED=true
       - SPEECH_ENABLED=true
       - WORKERS=1
-      - RECEPTIONIST_ENGINE=${RECEPTIONIST_ENGINE:-gemini_live}
-      # Multilingual receptionist (en/sw on Gemini Live, lg on the cascaded
-      # engine). Default on with Gemini Live; brings up the Orpheus voice
-      # below (`--profile multilingual`) with ORPHEUS_TTS_URL pointed at it.
+      # Multilingual receptionist: English, Swahili and Luganda all on the
+      # local engine (Whisper-SALT, Sunflower against Qdrant, Orpheus). Start
+      # the Orpheus voice below with `--profile multilingual`; Spark-TTS-SALT
+      # (and edge-tts for English) remain the fallbacks when it is down.
       - FLAG_RECEPTIONIST_LANGUAGE_DETECTION=${FLAG_RECEPTIONIST_LANGUAGE_DETECTION:-true}
       - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-http://orpheus-tts:8100}
+      - ORPHEUS_TTS_LANGUAGES=${ORPHEUS_TTS_LANGUAGES:-lg,sw,en}
       - FLAG_VOICE_RECEPTIONIST=true
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true
@@ -139,7 +140,7 @@ services:
               device_ids: ["${GPU_ID:-2}"]
               capabilities: [gpu]
 
-  # Orpheus-3B (Sunbird multilingual) — the receptionist's Luganda voice.
+  # Orpheus-3B (Sunbird multilingual) — the receptionist's voice (en, sw, lg).
   # Its own vLLM, so its own image (App/backend/orpheus_sidecar); weight-only
   # FP8 because at bf16 an A6000 only just keeps up with real time
   # (evals/reports/orpheus_tts_2026-09-24_*.json). Needs ~6 GB of weights plus

@@ -17,7 +17,6 @@ from app.receptionist.language import (
     detect_explicit_request,
     fuse,
     lexical_hits,
-    text_language,
 )
 
 
@@ -314,11 +313,6 @@ class TextHelpers(unittest.TestCase):
         self.assertEqual(hits["sw"], 0)
         self.assertGreaterEqual(lexical_hits("Naomba kujua kodi ya VAT ni kiasi gani")["sw"], 3)
 
-    def test_text_language_needs_two_words(self):
-        self.assertEqual(text_language("Asante, what is VAT?", "en", ("en", "sw")), "en")
-        self.assertEqual(text_language("Naomba kujua kodi ya mapato", "en", ("en", "sw")), "sw")
-        self.assertEqual(text_language("", "sw", ("en", "sw")), "sw")
-
     def test_fusion_lets_text_overrule_an_unsure_acoustic_vote(self):
         v = LanguageVote({"en": 0.55, "lg": 0.4, "sw": 0.05}, "en", 2.0, "Nsaba okumanya ku omusolo gwange")
         fused = fuse(v)
@@ -328,33 +322,6 @@ class TextHelpers(unittest.TestCase):
     def test_fusion_leaves_a_confident_vote_alone(self):
         v = LanguageVote({"en": 0.85, "lg": 0.1, "sw": 0.05}, "en", 2.0, "Nsaba okumanya ku omusolo gwange")
         self.assertIs(fuse(v), v)
-
-
-class AnEngineCanReportTheLanguage(unittest.TestCase):
-    """Gemini Live hears Luganda that the language token took for English."""
-
-    def test_a_report_moves_a_call_locked_in_english(self):
-        p = policy()
-        p.observe(vote("en", 0.95))
-        d = p.report("lg", "gemini_live_heard")
-        self.assertEqual((d.action, d.target, d.reason, d.source), ("switch", "lg", "gemini_live_heard", "auto"))
-        self.assertTrue(p.locked)
-
-    def test_a_report_of_the_current_language_changes_nothing(self):
-        p = policy()
-        p.observe(vote("lg", 0.95))
-        self.assertEqual(p.report("lg", "gemini_live_heard").action, "none")
-
-    def test_an_on_screen_choice_beats_a_report(self):
-        p = policy()
-        p.set_override("en")
-        d = p.report("lg", "gemini_live_heard")
-        self.assertEqual((d.action, d.reason), ("none", "override_locked"))
-        self.assertEqual(p.active, "en")
-
-    def test_an_unoffered_language_is_not_reported_in(self):
-        p = policy(languages=("en", "sw"))
-        self.assertEqual(p.report("lg", "gemini_live_heard").reason, "unsupported_language")
 
 
 class ConfigFromEnvironment(unittest.TestCase):
@@ -379,13 +346,6 @@ class ConfigFromEnvironment(unittest.TestCase):
         self.assertEqual(cfg.support_confidence, 0.6)
         self.assertEqual(cfg.lg_mix_threshold, 0.4)
         self.assertEqual(cfg.languages, ("en", "lg"))
-
-    def test_luganda_is_never_routed_to_gemini(self):
-        from app.receptionist.config import get_engine_by_language
-
-        with patch.dict(os.environ, {"RECEPTIONIST_ENGINE_BY_LANGUAGE": "en:cascaded,sw:cascaded,lg:gemini_live,xx:bad"}):
-            table = get_engine_by_language()
-        self.assertEqual(table, {"en": "cascaded", "sw": "cascaded", "lg": "cascaded"})
 
 
 if __name__ == "__main__":

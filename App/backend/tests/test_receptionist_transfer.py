@@ -1,7 +1,6 @@
 """The shared transfer path: what an officer's queue learns when the AI hands a call over.
 
-Both engines (the cascaded brain and Gemini Live) go through
-``receptionist/transfer.py``; these tests pin what reaches the staff lobby
+The brain goes through ``receptionist/transfer.py``; these tests pin what reaches the staff lobby
 and the ``voice_calls`` row, and what a timeout leaves behind.
 """
 
@@ -9,10 +8,8 @@ from __future__ import annotations
 
 import unittest
 import uuid
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from app import database as db
 from app.flags import flags
@@ -149,19 +146,9 @@ class TimeoutTests(TransferTestCase):
         self.assert_owed_a_callback()
         self.assertTrue(any("TICK-XFER-1" in t["text"] for t in list_turns(self.call_id)))  # its own line
 
-    async def test_gemini_times_out_through_it(self):
-        pytest.importorskip("pipecat")
-        from app.receptionist.gemini_live import _gemini_transfer_timeout
 
-        service = SimpleNamespace(push_frame=AsyncMock(), queue_frame=AsyncMock())
-        self.waiting()
-        await _gemini_transfer_timeout(self.room, {"service": service}, 0, "TICK-XFER-1")
-        self.assert_owed_a_callback()
-        self.assertIn("TICK-XFER-1", service.queue_frame.await_args.args[0].text)  # its own line
-
-
-class BothEnginesTests(TransferTestCase):
-    """The cascaded brain and Gemini Live put the same call in the same queue."""
+class BrainTransferTests(TransferTestCase):
+    """What the brain's transfer puts in the officers' queue."""
 
     async def cascaded_transfer(self) -> None:
         from app.receptionist.brain import UraReceptionistBrain
@@ -172,18 +159,6 @@ class BothEnginesTests(TransferTestCase):
         if self.state.transfer_timer_task is not None:
             self.state.transfer_timer_task.cancel()
 
-    async def gemini_transfer(self) -> dict:
-        pytest.importorskip("pipecat")
-        from app.receptionist.gemini_live import build_gemini_tools
-
-        service = SimpleNamespace(push_frame=AsyncMock())
-        handlers = {t.name: t.handler for t in build_gemini_tools(self.room, self.chat_model, {"service": service})}
-        params = SimpleNamespace(arguments={"reason": "caller_requested"}, result_callback=AsyncMock())
-        await handlers["request_human_officer"](params)
-        if self.state.transfer_timer_task is not None:
-            self.state.transfer_timer_task.cancel()
-        return params.result_callback.await_args.args[0]
-
     async def test_the_cascaded_engine_queues_the_packet_s_topic_and_language(self):
         self.state.locale = "sw"
         with patch.object(flags, "is_enabled", side_effect=queue_on):
@@ -191,19 +166,9 @@ class BothEnginesTests(TransferTestCase):
         [event] = self.lobby_events("call.transfer_requested")
         self.assertEqual((event["topic"], event["priority"], event["language"]), ("objection_or_dispute", "high", "sw"))
 
-    async def test_gemini_queues_the_packet_s_topic_and_language(self):
-        self.state.locale = "sw"
-        with patch.object(flags, "is_enabled", side_effect=queue_on):
-            result = await self.gemini_transfer()
-        self.assertTrue(result["transferred"])
-        [event] = self.lobby_events("call.transfer_requested")
-        self.assertEqual((event["topic"], event["priority"], event["language"]), ("objection_or_dispute", "high", "sw"))
-
-    async def test_neither_engine_queues_a_call_without_the_ticket_queue(self):
+    async def test_no_call_is_queued_without_the_ticket_queue(self):
         with patch.object(flags, "is_enabled", return_value=False):
             await self.cascaded_transfer()
-            gemini = await self.gemini_transfer()
-        self.assertFalse(gemini["transferred"])
         self.chat_model._maybe_create_ticket.assert_not_called()
         self.assertEqual(self.lobby_events("call.transfer_requested"), [])
         self.assertNotEqual(get_call(self.call_id)["status"], "transferring")

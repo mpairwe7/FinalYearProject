@@ -73,7 +73,6 @@ class CallState:
     transfer_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
     # the language the call is in *now*; these record how it got there.
-    engine: str = ""  # "gemini_live" | "cascaded"; "" on a single-engine call
     initial_locale: str = "en"
     preferred_locale: str = ""  # what the chat was set to; a hint, never the call's language
     language_source: str = "default"  # "default" | "auto" | "explicit" | "override"
@@ -162,8 +161,7 @@ class CallRoom:
             if self.caller_reconnect_task and not self.caller_reconnect_task.done():
                 self.caller_reconnect_task.cancel()
 
-        # An ended call must not keep its Pipecat pipeline (and Gemini session)
-        # running until the caller's control loop notices. PipelineTask.cancel()
+        # An ended call must not keep its Pipecat pipeline running until the caller's control loop notices. PipelineTask.cancel()
         # only queues a CancelFrame, so it is safe from inside the pipeline too.
         runner = self.pipeline_runner_task
         if runner is not None and not runner.done() and self.pipeline_task is not None:

@@ -5,11 +5,6 @@ from __future__ import annotations
 import math
 import os
 
-#: Gemini Live ends a connection at its documented session window; calls on
-#: that engine stop just before it rather than being cut off mid-sentence.
-GEMINI_LIVE_SESSION_CEILING_S = 8 * 60.0
-
-
 class ReceptionistConfigError(ValueError):
     """A receptionist setting is present but cannot be used."""
 
@@ -71,11 +66,6 @@ def get_max_call_s() -> float:
     return _positive_seconds("RECEPTIONIST_MAX_CALL_S", 900.0)
 
 
-def get_gemini_session_timeout_s() -> float:
-    """End Gemini Live calls before the provider's documented connection window."""
-    return min(get_max_call_s(), GEMINI_LIVE_SESSION_CEILING_S)
-
-
 def get_filler_after_ms() -> int:
     try:
         return int(os.getenv("RECEPTIONIST_FILLER_AFTER_MS", "450"))
@@ -118,69 +108,12 @@ def get_partial_transcript_interval_s() -> float:
         return 0.8
 
 
-def get_receptionist_engine() -> str:
-    """The receptionist conversational engine: 'cascaded' (default) or 'gemini_live'."""
-    return os.getenv("RECEPTIONIST_ENGINE", "cascaded").strip().lower()
-
-
-def get_gemini_live_model() -> str:
-    """The Gemini Live model ID for real-time bidirectional speech."""
-    return (
-        os.getenv("GEMINI_LIVE_MODEL", "models/gemini-2.5-flash-native-audio-latest").strip()
-        or "models/gemini-2.5-flash-native-audio-latest"
-    )
-
-
-def get_gemini_live_voice() -> str:
-    """Gemini Live voice identifier (Aoede, Charon, Fenrir, Kore, Puck)."""
-    return os.getenv("GEMINI_LIVE_VOICE", "Aoede").strip() or "Aoede"
-
-
-def get_gemini_vad_start_sensitivity() -> str:
-    """How readily Gemini hears the caller start talking: ``high`` (default) or ``low``.
-
-    High is what makes barge-in work: at ``low`` a caller talking over the
-    greeting was not heard as speech and the greeting played to the end.
-    """
-    value = os.getenv("GEMINI_LIVE_START_SENSITIVITY", "high").strip().lower()
-    return value if value in ("high", "low") else "high"
-
-
-def get_gemini_vad_end_sensitivity() -> str:
-    """How readily Gemini decides the caller has finished: ``high`` (default) or ``low``."""
-    value = os.getenv("GEMINI_LIVE_END_SENSITIVITY", "high").strip().lower()
-    return value if value in ("high", "low") else "high"
-
-
-def get_gemini_vad_silence_ms() -> int:
-    """Silence after which Gemini's own VAD ends the caller's turn."""
-    return max(0, _env_int("GEMINI_LIVE_SILENCE_MS", 300))
-
-
-def get_gemini_vad_prefix_padding_ms() -> int:
-    """Speech Gemini must hear before it commits to a start of speech."""
-    return max(0, _env_int("GEMINI_LIVE_PREFIX_PADDING_MS", 100))
-
-
-def get_gemini_audio_deadline_s() -> float:
-    """Seconds of silence after a Gemini caller turn before the local cascade answers.
-
-    15s sits above the measured 11–14s first-audio turns on this GPU stack and
-    below the 30s+ hangs. ``0`` disables the fallback. The local answer uses
-    Whisper-SALT, Sunflower on vLLM, Qdrant, and Spark-TTS-SALT (or Orpheus
-    when that sidecar is up).
-    """
-    return max(0.0, _env_float("RECEPTIONIST_GEMINI_AUDIO_DEADLINE_S", 15.0))
-
-
 # ---------------------------------------------------------------------------
 # Multilingual receptionist (en / sw / lg) and language detection
 # ---------------------------------------------------------------------------
 
 #: Languages the receptionist can hold a call in, in the order they are offered.
 KNOWN_LANGUAGES: tuple[str, ...] = ("en", "sw", "lg")
-_ENGINES = ("gemini_live", "cascaded")
-_DEFAULT_ENGINE_BY_LANGUAGE = {"en": "gemini_live", "sw": "gemini_live", "lg": "cascaded"}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -220,23 +153,6 @@ def get_languages() -> tuple[str, ...]:
     return langs
 
 
-def get_engine_by_language() -> dict[str, str]:
-    """``RECEPTIONIST_ENGINE_BY_LANGUAGE`` as ``{lang: engine}``.
-
-    Format ``en:gemini_live,sw:gemini_live,lg:cascaded``. A malformed or
-    unknown pair keeps that language's default rather than failing the call.
-    Luganda is never routed to Gemini Live: Gemini does not speak it.
-    """
-    table = dict(_DEFAULT_ENGINE_BY_LANGUAGE)
-    raw = os.getenv("RECEPTIONIST_ENGINE_BY_LANGUAGE", "")
-    for pair in raw.split(","):
-        lang, _, engine = pair.strip().lower().partition(":")
-        if lang in KNOWN_LANGUAGES and engine in _ENGINES:
-            table[lang] = engine
-    table["lg"] = "cascaded"
-    return table
-
-
 def get_lid_method() -> str:
     """How the sentinel votes: ``salt_token`` (default), ``fusion`` or ``keyword``."""
     method = os.getenv("RECEPTIONIST_LID_METHOD", "salt_token").strip().lower()
@@ -273,11 +189,6 @@ def get_lid_support_confidence() -> float:
     return _env_float("RECEPTIONIST_LID_SUPPORT_CONFIDENCE", 0.50)
 
 
-def get_lid_hold_timeout_ms() -> int:
-    """Longest the first reply is held back while its language is decided."""
-    return max(0, _env_int("RECEPTIONIST_LID_HOLD_TIMEOUT_MS", 600))
-
-
 def get_lg_mix_threshold() -> float:
     """P(lg) above which Luganda function words in the text make the turn Luganda."""
     return _env_float("RECEPTIONIST_LG_MIX_THRESHOLD", 0.35)
@@ -294,7 +205,7 @@ def get_brief_every_turns() -> int:
 
 
 def get_brief_model() -> str:
-    """Gemini model that writes the officer's brief for English and Swahili calls."""
+    """Gemini model behind the officer's brief when local Sunflower cannot write it."""
     return os.getenv("RECEPTIONIST_BRIEF_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
 
 
@@ -304,11 +215,12 @@ def get_claim_timeout_s() -> float:
 
 
 def local_barge_in_enabled() -> bool:
-    """Whether the call's own VAD stops Gemini when the caller talks over it.
+    """Whether the call's own VAD stops the assistant when the caller talks over it.
 
-    Gemini's VAD decides first; this catches the callers it misses. Turn it
-    off on a device whose speaker leaks into the microphone, where the
-    assistant's own voice would read as the caller talking.
+    The sentinel hears the caller before Whisper has transcribed the two words
+    the engine's own barge-in rule waits for. Turn it off on a device whose
+    speaker leaks into the microphone, where the assistant's own voice would
+    read as the caller talking.
     """
     return _env_bool("RECEPTIONIST_LOCAL_BARGE_IN", True)
 

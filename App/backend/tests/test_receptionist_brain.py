@@ -189,8 +189,10 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_human_request("I want to talk to an officer"))
         self.assertFalse(is_human_request("Omusolo gwa VAT guli ki?"))
 
-    async def test_a_turn_closed_after_the_call_moved_to_gemini_is_dropped(self):
-        self.state.engine = "gemini_live"
+    async def test_a_turn_the_language_router_is_re_asking_is_dropped(self):
+        # Answered once, in the new language, by the router's re-ask; the
+        # old-language transcript must not be answered as well.
+        self.brain.turn_claimed = lambda: True
         await self.brain.process_frame(LLMContextFrame(context="Nnyinza ntya okufuna TIN?"))
         self.chat_model.generate.assert_not_called()
         self.assertEqual(list_turns(self.call_id), [])

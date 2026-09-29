@@ -664,19 +664,18 @@ async def lifespan(app: FastAPI):
             raise
 
         # Render the receptionist's own fixed lines (fillers, clarify prompts,
-        # transfer notices) for the languages it voices on the cascaded engine,
-        # so the first Luganda caller hears a cached filler at 450 ms instead
-        # of waiting on a live synthesis. Background thread; never fails boot.
+        # transfer notices) for every language a call can be held in, so the
+        # first caller hears a cached filler at 450 ms instead of waiting on a
+        # live synthesis. Background thread; never fails boot.
         speech_for_calls = getattr(app.state, "speech", None)
         if speech_for_calls is not None and _flags.is_enabled("receptionist_language_detection"):
-            from .receptionist.config import get_engine_by_language, get_languages
+            from .receptionist.config import get_languages
             from .receptionist.tts import prewarm_receptionist_phrases
 
-            engines = get_engine_by_language()
-            cascaded_langs = tuple(lang for lang in get_languages() if engines.get(lang) == "cascaded")
+            call_langs = get_languages()
 
             def _prewarm_calls(speech: SpeechModel = speech_for_calls) -> None:
-                logger.info("Receptionist phrase pre-warm: %s", prewarm_receptionist_phrases(speech, cascaded_langs))
+                logger.info("Receptionist phrase pre-warm: %s", prewarm_receptionist_phrases(speech, call_langs))
 
             threading.Thread(target=_prewarm_calls, name="receptionist-prewarm", daemon=True).start()
 

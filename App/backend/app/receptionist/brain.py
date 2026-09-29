@@ -26,6 +26,7 @@ from .config import (
     get_transfer_timeout_s,
 )
 from .hub import hub
+from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, update_call
 from .transfer import close_transfer_on_timeout, open_transfer
@@ -118,7 +119,7 @@ QUERY_EXTRACT_SYSTEM = (
 
 # Every call opens in the default language, whatever the caller selected in
 # the chat: taxpayers routinely pick English and then speak Luganda, so the
-# first real question decides (see language.py). Both engines speak this line.
+# first real question decides (see language.py).
 GREETING_TEXT = phrase("greeting", get_default_language())
 FILLER_POOL: tuple[str, ...] = fillers("en")
 FILLER_TEXT = FILLER_POOL[-1]
@@ -190,6 +191,9 @@ class UraReceptionistBrain(LLMService):
         # Called once a language-switch interruption has passed this brain
         # (the router waits for it before speaking here — see router.py).
         self.on_switch_interrupt: Any = None
+        # Set by the multilingual builder: True while the language router is
+        # re-asking the current turn in the language the caller switched to.
+        self.turn_claimed: Any = None
 
     @property
     def language(self) -> str:
@@ -232,12 +236,9 @@ class UraReceptionistBrain(LLMService):
                 if self.on_switch_interrupt is not None:
                     self.on_switch_interrupt()
                 return
-            # Caller barged in: invalidate pending LLM generation. On a
-            # multilingual call interruptions reach this branch even while the
-            # other engine is talking; only count the ones that interrupted us.
+            # Caller barged in: invalidate pending LLM generation.
             self.room.state.generation_id += 1
-            if self.room.state.engine in ("", "cascaded"):
-                self.room.state.barge_in_count += 1
+            self.room.state.barge_in_count += 1
             await self.push_frame(frame, direction)
             return
 
@@ -276,10 +277,10 @@ class UraReceptionistBrain(LLMService):
         # Pop turn words stashed by TranscriptTap
         words = list(self.room.state.turn_words)
         self.room.state.turn_words = []
-        if self.room.state.engine not in ("", "cascaded"):
-            # A multilingual call moved to Gemini while this turn was still
-            # being transcribed; the router has already re-asked it there.
-            logger.info("Dropping cascaded turn closed after the call left this engine")
+        if self.turn_claimed is not None and self.turn_claimed():
+            # The router re-asks this turn in the new language; answering the
+            # old-language transcript as well would answer the caller twice.
+            logger.info("Dropping a turn the language router is re-asking on call %s", self.room.call_id)
             return
         await self.handle_external_question(user_text, words)
 
@@ -473,7 +474,7 @@ class UraReceptionistBrain(LLMService):
         return ""
 
     async def _generate_luganda_answer(self, question: str) -> dict[str, Any]:
-        """Fast Cross-Lingual RAG Bridge (Gemini 2.5 Flash Lite + Sunflower Fallback).
+        """Fast cross-lingual RAG bridge: local Sunflower first, Gemini only if it is down.
 
         Replaces the slow 4-hop MT pipeline with direct cross-lingual understanding,
         English URA knowledge base retrieval, and direct Luganda synthesis in a single pass.
@@ -546,7 +547,6 @@ class UraReceptionistBrain(LLMService):
         luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
         if not luganda_reply:
             if english_reply:
-                from ..query import detect_language
 
                 loc_fn = getattr(self.chat_model, "_localize_reply", None)
                 if callable(loc_fn):
@@ -590,7 +590,7 @@ class UraReceptionistBrain(LLMService):
             gen_task = asyncio.create_task(
                 asyncio.to_thread(
                     self.chat_model.generate,
-                    message=question,
+                    message=normalize_call_query(question, self.room.state.locale),
                     conversation_id=self.room.state.conversation_id,
                     session_id=self.room.call_id,
                     top_k=4,

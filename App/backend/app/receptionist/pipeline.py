@@ -8,7 +8,7 @@ from typing import Any
 from ..flags import flags
 from . import livekit
 from .brain import UraReceptionistBrain
-from .config import get_max_call_s, get_receptionist_engine
+from .config import get_max_call_s
 from .serializer import BrowserCallSerializer
 from .stt import UraWhisperSTT
 from .taps import CallerAudioTap, LivePartialTranscriptTap, TranscriptTap
@@ -156,18 +156,6 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
                 "Failed to initialize the multilingual pipeline (%s); falling back to one engine",
                 exc,
                 exc_info=True,
-            )
-
-    if get_receptionist_engine() == "gemini_live":
-        try:
-            from .gemini_live import build_gemini_live_pipeline
-            return build_gemini_live_pipeline(
-                room, websocket, speech_model=speech_model, chat_model=chat_model
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to initialize Gemini Live pipeline (%s); falling back to cascaded pipeline",
-                exc,
             )
 
     from .hold_gate import OfficerOutputGate

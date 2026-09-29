@@ -1,5 +1,4 @@
 pipecat-ai[silero,websocket,livekit]==1.11.0
 jellyfish
 onnxruntime>=1.20.0
-google-genai>=1.68.0
 

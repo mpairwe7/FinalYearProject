@@ -90,7 +90,7 @@ SCENARIOS = [
              note="English caller: locks English, never leaves it."),
     Scenario("2_selected_english_speaks_luganda", ["lg_tin"], ["lg"],
              note="First answer in Luganda, same question, not repeated."),
-    Scenario("3_swahili_on_gemini", ["sw_tin"], ["sw"], note="Answered in Swahili by Gemini Live."),
+    Scenario("3_swahili_local", ["sw_tin"], ["sw"], note="Answered in Swahili on the local engine."),
     Scenario("4_luganda_then_english", ["lg_vat", "en_tin"], ["lg", "en"],
              note="Mid-call switch followed within one turn."),
     Scenario("5_code_switched_luganda_stays", ["lg_tin", "lg_vat"], ["lg"],
@@ -105,15 +105,15 @@ SCENARIOS = [
              expect_status_on="lg_person",
              note="Officer request in Luganda transfers; staff see a Luganda caller."),
     Scenario("9_barge_in_greeting", ["en_vat"], ["en"], barge_turn=0,
-             note="Talking over Gemini's greeting stops it, and the question is answered."),
+             note="Talking over the greeting stops it, and the question is answered."),
     Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1,
-             note="Talking over a Luganda answer stops it (cascaded engine, Orpheus voice)."),
+             note="Talking over a Luganda answer stops it (Orpheus voice)."),
     # The Call Desk's Phase 0 check: RECEPTIONIST_TRANSFER_TIMEOUT_S is 90 by default.
     # The language is not what this checks: an English caller whose vote lands
     # just under the lock threshold rightly stays unlocked, with no event.
     Scenario("11_officer_request_times_out", ["en_officer"], None, expect_status="transferring",
              expect_status_on="en_officer", linger_s=100.0, expect_after_linger="ai",
-             note="Gemini queues the call with the packet's topic (account) and priority (high); "
+             note="The receptionist queues the call with the packet's topic (account) and priority (high); "
                   "nobody answers, so it returns to the AI owing a callback."),
 ]
 
@@ -197,8 +197,8 @@ async def pump(ws: Any, listener: Listener) -> None:
 async def wait_quiet(listener: Listener, since: float, quiet_s: float, timeout_s: float) -> None:
     """Until reply audio that began after *since* has been silent for *quiet_s*.
 
-    Replies pause mid-way — a filler, then the answer once it is generated, or
-    Gemini going quiet while its tool runs — so *quiet_s* has to outlast those.
+    Replies pause mid-way — a filler, then the answer once it is generated —
+    so *quiet_s* has to outlast that.
     """
     start = time.monotonic()
     while time.monotonic() - start < timeout_s:
