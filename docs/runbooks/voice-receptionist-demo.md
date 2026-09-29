@@ -75,7 +75,12 @@ transport selection, one worker/replica and the operator acknowledgement.
 `python -m app.production_readiness --as-production` reports those G36 checks.
 Browser sockets send credentials in their first application message (never in
 the URL), and staff/audio sockets validate browser `Origin` against
-`CORS_ORIGINS`.
+`CORS_ORIGINS`. Neither protects the credential in transit: that is TLS's job,
+so in production the application's own WebSockets must be `wss://` end to end
+as well as LiveKit's (see the rollout checklist below). The browser accepts a
+`ws://` LiveKit URL only when the page itself is plain `http:` (a local demo);
+on an HTTPS page it refuses, and it takes call events over the data channel
+only from the backend agent's identity (`ura-agent-…`).
 
 That is the single-engine cascaded call. `RECEPTIONIST_ENGINE=gemini_live` swaps the
 middle for Gemini Live speech-to-speech, and `FLAG_RECEPTIONIST_LANGUAGE_DETECTION`
@@ -167,11 +172,19 @@ enabling the feature:
    `VOICE_RECEPTIONIST_REPLICAS=1`, and
    `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
    accepts active-call loss on API process failure; it is not a failover control.
-4. Keep `FLAG_AUTH_REQUIRED`, `FLAG_MULTI_TENANT`, `FLAG_AUDIT_LEDGER`, and
+4. Serve the web app and API over HTTPS only, and make the ingress refuse or
+   redirect plain HTTP — including the WebSocket upgrades on
+   `/v1/calls/stream`, `/v1/admin/calls/stream` and
+   `/v1/admin/calls/{call_id}/audio`. Each of those sockets carries the user's
+   bearer token in its first message and returns a LiveKit room token; `Origin`
+   checks stop cross-site use, not eavesdropping. Where TLS terminates at a
+   proxy, keep the proxy-to-API hop on a private network. Verify with the
+   browser devtools that every socket opens as `wss://`.
+5. Keep `FLAG_AUTH_REQUIRED`, `FLAG_MULTI_TENANT`, `FLAG_AUDIT_LEDGER`, and
    `FLAG_TICKET_QUEUE` enabled, and satisfy the remaining global production gates
    in `docs/PRODUCTION_GATES.md`. Confirm tenant RLS and voice consent behavior
    against the deployed databases and identity provider.
-5. Run the production gate before enabling the feature:
+6. Run the production gate before enabling the feature:
 
    ```bash
    APP_ENV=production PYTHONPATH=App/backend python3 -m app.production_readiness
@@ -181,9 +194,12 @@ enabling the feature:
    The gate validates app-side values only. Separately verify TLS trust, DNS,
    UDP reachability, TURN from a restricted client network, token expiry, caller
    and officer audio isolation, microphone-only publishing, consent rejection,
-   transfer revocation/hold/end, and officer
-   reconnect in a browser game day before opening access to taxpayers.
-6. Enable the flag only after those checks and monitor LiveKit room/participant
+   transfer revocation/hold/end, officer reconnect and a lapsed reconnect
+   (the next officer must be able to take the call), a supervisor listener
+   being removed when their console closes, and audio on iOS Safari (the call
+   screen shows "Tap here to hear the call" when the browser holds audio back)
+   in a browser game day before opening access to taxpayers.
+7. Enable the flag only after those checks and monitor LiveKit room/participant
    counts, ICE/TURN failures, call setup time, media disconnects, Pipecat pipeline
    errors, API saturation, and transfer queue outcomes. Keep a tested rollback
    that turns `FLAG_VOICE_RECEPTIONIST` off.
