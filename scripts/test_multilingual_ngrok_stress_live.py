@@ -17,6 +17,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -139,6 +140,18 @@ VOICE_AUDIO_PROBES = [
 ]
 
 
+def figure_in(expected: str, reply: str) -> bool:
+    """Whether *reply* states *expected* ("18%", "TIN"); a number must stand alone.
+
+    "2%" is not found in "12%", "2026", "0.2" or "2,000", which a substring
+    check would all count as the 2% late-payment rate.
+    """
+    figure = expected.lower().replace("%", "")
+    if not figure.isdigit():
+        return figure in reply
+    return re.search(rf"(?<![\d.]){re.escape(figure)}(?![.,]?\d)", reply) is not None
+
+
 def run_benchmark() -> dict[str, Any]:
     log("=" * 70)
     log(f"Starting Multilingual Stress Benchmark over Live Ngrok: {NGROK_URL}")
@@ -157,10 +170,10 @@ def run_benchmark() -> dict[str, Any]:
     for lang, query, expected_fig, expected_tokens in MULTILINGUAL_TAX_PROBES:
         st, data, lat = http_post_json("/api/v1/chat", {"message": query, "locale": lang}, timeout=45.0)
         reply = (data.get("reply") or "").lower()
-        has_fig = expected_fig.lower().replace("%", "") in reply
+        has_fig = figure_in(expected_fig, reply)
         token_hits = sum(1 for tok in expected_tokens if tok.lower() in reply)
         token_coverage = token_hits / len(expected_tokens)
-        passed = (st == 200) and (has_fig or token_coverage >= 0.5)
+        passed = (st == 200) and has_fig and token_coverage >= 0.5
 
         log(f" -> [{lang.upper()}] Status={st} Latency={lat:.1f}ms FigMatch={has_fig} Tokens={token_hits}/{len(expected_tokens)}")
         accuracy_results.append({
