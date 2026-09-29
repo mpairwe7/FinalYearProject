@@ -20,12 +20,12 @@ covers it against the same code.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-import urllib.error
-import urllib.request
 from typing import Any
+from urllib.parse import urlsplit
+
+import httpx
 
 BASE = os.getenv("AUDIT_PROBE_BASE", "http://127.0.0.1:8000")
 
@@ -36,13 +36,19 @@ def _request(
     headers = {"Content-Type": "application/json"}
     if auth:
         headers["Authorization"] = f"Bearer {os.environ['INDEX_API_KEY']}"
-    data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(BASE + path, data=data, method=method, headers=headers)  # noqa: S310 - scheme checked in main
+    response = httpx.request(
+        method,
+        f"{BASE.rstrip('/')}{path}",
+        json=body,
+        headers=headers,
+        timeout=120,
+    )
+    if not response.is_success:
+        return response.status_code, None
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 - BASE is http(s), checked in main
-            return resp.status, json.loads(resp.read() or b"null")
-    except urllib.error.HTTPError as exc:
-        return exc.code, None
+        return response.status_code, response.json()
+    except ValueError:
+        return response.status_code, None
 
 
 class Probe:
@@ -59,8 +65,14 @@ class Probe:
 
 
 def main() -> int:
-    if not BASE.startswith(("http://", "https://")):
-        print("AUDIT_PROBE_BASE must be an http(s) URL", file=sys.stderr)
+    parsed_base = urlsplit(BASE)
+    if (
+        parsed_base.scheme not in ("http", "https")
+        or not parsed_base.netloc
+        or parsed_base.username is not None
+        or parsed_base.password is not None
+    ):
+        print("AUDIT_PROBE_BASE must be an http(s) URL without embedded credentials", file=sys.stderr)
         return 2
     if not os.getenv("INDEX_API_KEY"):
         print(

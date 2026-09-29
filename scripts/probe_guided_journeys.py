@@ -31,11 +31,12 @@ import json
 import sys
 import time
 import urllib.parse
-import urllib.request
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 STRESS_OPENER = "I understand this can feel stressful"
 
@@ -105,16 +106,22 @@ CASES: list[Case] = [
 
 
 def _post(base: str, message: str, conversation_id: str, timeout: float) -> dict[str, Any]:
-    if urllib.parse.urlsplit(base).scheme not in ("http", "https"):
-        raise ValueError(f"--base must be an http(s) URL, got {base!r}")
-    request = urllib.request.Request(  # noqa: S310 - scheme checked above
+    parsed_base = urllib.parse.urlsplit(base)
+    if (
+        parsed_base.scheme not in ("http", "https")
+        or not parsed_base.netloc
+        or parsed_base.username is not None
+        or parsed_base.password is not None
+    ):
+        raise ValueError("--base must be an http(s) URL without embedded credentials")
+    response = httpx.post(
         f"{base.rstrip('/')}/v1/chat",
-        data=json.dumps({"message": message, "conversation_id": conversation_id}).encode(),
-        headers={"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"},
-        method="POST",
+        json={"message": message, "conversation_id": conversation_id},
+        headers={"ngrok-skip-browser-warning": "1"},
+        timeout=timeout,
     )
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - scheme checked above
-        return json.loads(response.read())
+    response.raise_for_status()
+    return response.json()
 
 
 def _check(case: Case, body: dict[str, Any]) -> list[str]:
