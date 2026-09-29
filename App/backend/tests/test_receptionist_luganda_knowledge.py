@@ -85,6 +85,11 @@ class TestLugandaLexiconNormalization(unittest.TestCase):
             normalized = normalize_swahili_tax_query(question)
             self.assertIsNone(re.search(r"\d", normalized), normalized)
 
+    def test_repairs_leave_ordinary_words_alone(self):
+        self.assertEqual(repair_asr_entities("Who is the payee on a PRN?"), "Who is the payee on a PRN?")
+        self.assertEqual(repair_asr_entities("layisensi y'obusuubuzi"), "licence y'obusuubuzi")
+        self.assertEqual(repair_asr_entities("I lost my ten number"), "I lost my TIN number")
+
     def test_call_queries_are_normalised_by_language(self):
         self.assertIn("Withholding Tax", normalize_call_query("Kodi ya zuio ni nini?", "sw"))
         # English keeps its words; only known mishears are repaired.

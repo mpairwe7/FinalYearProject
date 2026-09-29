@@ -333,11 +333,13 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     # VAT acoustic variants
     (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|vatt|vaat|baati)\b", re.IGNORECASE), "VAT"),
     # PAYE acoustic variants
-    (re.compile(r"\b(?:peeyi|payee|p-a-y-e)\b", re.IGNORECASE), "PAYE"),
+    # Not "payee": that is an English word ("who is the payee on a PRN?").
+    (re.compile(r"\b(?:peeyi|p-a-y-e)\b", re.IGNORECASE), "PAYE"),
     # TCC (Tax Clearance Certificate)
     (re.compile(r"\b(?:t-c-c|ti\s*si\s*si)\b", re.IGNORECASE), "TCC"),
-    # Luganda driving license
-    (re.compile(r"\blayisensi\b", re.IGNORECASE), "driving licence"),
+    # Luganda "layisensi" is any licence (trading, driving, …); the words
+    # around it say which, so it becomes "licence", not one kind of it.
+    (re.compile(r"\blayisensi\b", re.IGNORECASE), "licence"),
 )
 
 
