@@ -2,7 +2,44 @@
 
 from __future__ import annotations
 
+import math
 import os
+
+#: Gemini Live ends a connection at its documented session window; calls on
+#: that engine stop just before it rather than being cut off mid-sentence.
+GEMINI_LIVE_SESSION_CEILING_S = 8 * 60.0
+
+
+class ReceptionistConfigError(ValueError):
+    """A receptionist setting is present but cannot be used."""
+
+
+def _positive_seconds(name: str, default: float) -> float:
+    """Read a duration in seconds; unset or blank means *default*.
+
+    A value that is set but not a finite positive number raises instead of
+    quietly becoming the default: ``RECEPTIONIST_MAX_CALL_S=15m`` must not
+    turn into a 15-minute limit, and ``0`` must not end every call at once.
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ReceptionistConfigError(f"{name} must be a number of seconds, got {raw.strip()!r}") from None
+    if not math.isfinite(value) or value <= 0:
+        raise ReceptionistConfigError(f"{name} must be a positive number of seconds, got {raw.strip()!r}")
+    return value
+
+
+def validate() -> None:
+    """Raise :class:`ReceptionistConfigError` for settings that are set but unusable.
+
+    Run at startup (and by the G36 production gate) so a bad value stops the
+    boot instead of failing every call later.
+    """
+    get_max_call_s()
 
 
 def get_clarify_threshold() -> float:
@@ -27,10 +64,16 @@ def get_transfer_timeout_s() -> float:
 
 
 def get_max_call_s() -> float:
-    try:
-        return float(os.getenv("RECEPTIONIST_MAX_CALL_S", "900"))
-    except ValueError:
-        return 900.0
+    """Longest a call may run, ``RECEPTIONIST_MAX_CALL_S`` (default 900 s).
+
+    Raises :class:`ReceptionistConfigError` when the value is set but invalid.
+    """
+    return _positive_seconds("RECEPTIONIST_MAX_CALL_S", 900.0)
+
+
+def get_gemini_session_timeout_s() -> float:
+    """End Gemini Live calls before the provider's documented connection window."""
+    return min(get_max_call_s(), GEMINI_LIVE_SESSION_CEILING_S)
 
 
 def get_filler_after_ms() -> int:

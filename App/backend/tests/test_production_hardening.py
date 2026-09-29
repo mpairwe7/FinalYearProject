@@ -232,6 +232,32 @@ class ProductionHardeningTests(unittest.TestCase):
             "FLAG_NATIVE_VOICE=true requires FLAG_AUTH_REQUIRED", str(raised.exception)
         )
 
+    def test_receptionist_in_production_needs_the_g36_livekit_gate(self) -> None:
+        env = {**self.secure_env, "FLAG_VOICE_RECEPTIONIST": "true"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        message = str(raised.exception)
+        self.assertIn("G36: LIVEKIT_URL must be a secure wss:// URL", message)
+        self.assertIn("G36: RECEPTIONIST_MEDIA_TRANSPORT=livekit is required", message)
+        self.assertIn("G36: VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true is required", message)
+
+    def test_receptionist_in_production_starts_once_g36_passes(self) -> None:
+        """The runbook's rollout enables the flag after the G36 gate passes; startup must agree."""
+        env = {
+            **self.secure_env,
+            "FLAG_VOICE_RECEPTIONIST": "true",
+            "RECEPTIONIST_MEDIA_TRANSPORT": "livekit",
+            "LIVEKIT_URL": "wss://rtc.example.test",
+            "LIVEKIT_API_KEY": "production-key",  # pragma: allowlist secret
+            "LIVEKIT_API_SECRET": "production-secret-value-that-is-long-enough",  # pragma: allowlist secret
+            "WORKERS": "1",
+            "VOICE_RECEPTIONIST_REPLICAS": "1",
+            "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            _validate_production_env()
+
     # ── Cloudflare/Gemini fallback validation (explicit-on flag) ──────────
     _CF_ENV = {
         "FLAG_CLOUDFLARE_FALLBACK": "true",

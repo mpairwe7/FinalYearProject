@@ -13,7 +13,7 @@
  * let in" (feature off, not signed in, not staff) stop it for the session.
  */
 
-import { appendAuthToken } from '@/lib/authSession';
+import { getAuthToken } from '@/lib/authSession';
 import { callsApi } from '@/services/callsApi';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 
@@ -31,7 +31,7 @@ let disabled = false;
 
 function lobbyUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return appendAuthToken(`${protocol}//${window.location.host}/api/v1/admin/calls/stream`);
+  return `${protocol}//${window.location.host}/api/v1/admin/calls/stream`;
 }
 
 async function resync(): Promise<void> {
@@ -56,6 +56,7 @@ function connect(): void {
   }
   socket = ws;
   ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
     backoffMs = 1000;
     useCallConsoleStore.getState().setLobbyStatus('open');
     void resync();

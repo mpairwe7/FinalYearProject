@@ -128,7 +128,7 @@ export class ClaimConflictError extends Error {
 export interface CallAggregates {
   period_days: number;
   total_calls: number;
-  containment_rate: number;
+  ai_only_completion_rate: number;
   transfer_rate: number;
   transfers_by_reason: Record<string, number>;
   clarification_rate: number;

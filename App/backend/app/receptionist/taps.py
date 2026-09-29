@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from ..speech_service import pcm16_to_wav
 from .config import get_partial_transcript_interval_s, live_partial_transcripts_enabled
 from .hub import hub
+from .store import create_turn
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ try:
     from pipecat.frames.frames import (
         Frame,
         InputAudioRawFrame,
+        UserAudioRawFrame,
         InterimTranscriptionFrame,
         OutputTransportMessageFrame,
         OutputTransportMessageUrgentFrame,
@@ -47,6 +50,11 @@ except ImportError:
             self.audio = audio
             self.sample_rate = sample_rate
             self.num_channels = num_channels
+
+    class UserAudioRawFrame(InputAudioRawFrame):  # type: ignore[no-redef]
+        def __init__(self, user_id: str = "", *args: Any, **kwargs: Any):
+            super().__init__(*args, **kwargs)
+            self.user_id = user_id
 
     class OutputTransportMessageFrame(Frame):  # type: ignore[no-redef]
         def __init__(self, message: Any):
@@ -83,13 +91,35 @@ _BYTES_PER_SECOND = 16000 * 2
 
 
 class CallerAudioTap(FrameProcessor):
-    """Taps caller input PCM audio and forwards to the officer browser when bridged."""
+    """Separates caller and officer audio in the shared LiveKit room."""
 
-    def __init__(self, room: Any, **kwargs: Any) -> None:
+    def __init__(self, room: Any, speech_model: Any = None, **kwargs: Any) -> None:
         super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
+        self.speech_model = speech_model
+        self._officer_vad: Any = None
+        if getattr(room.state, "livekit_room", ""):
+            from ..voice_stream import EnergyVAD
+            self._officer_vad = EnergyVAD()
+        self._transcriptions: set[asyncio.Task[Any]] = set()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM) -> None:
+        caller_identity = getattr(self.room.state, "livekit_caller_identity", "")
+        if caller_identity and isinstance(frame, UserAudioRawFrame):
+            identity = getattr(frame, "user_id", "")
+            if identity == getattr(self.room.state, "livekit_officer_identity", ""):
+                if self.room.state.mode == "bridged" and not self.room.state.on_hold:
+                    self._capture_officer_audio(frame.audio)
+                return
+            if identity != caller_identity or self.room.state.mode == "bridged":
+                return
+            # The existing VAD/STT graph is transport-agnostic but expects
+            # InputAudioRawFrame. Normalize Pipecat's LiveKit user frame here.
+            frame = InputAudioRawFrame(
+                audio=frame.audio,
+                sample_rate=frame.sample_rate,
+                num_channels=frame.num_channels,
+            )
         if isinstance(frame, InputAudioRawFrame) and self.room.state.mode == "bridged":
             # The caller is talking to the officer now: their audio goes to the
             # officer only. Passed on, it reached Gemini, which answered the
@@ -101,6 +131,51 @@ class CallerAudioTap(FrameProcessor):
             return
 
         await self.push_frame(frame, direction)
+
+    def _capture_officer_audio(self, pcm: bytes) -> None:
+        if self._officer_vad is None or self.speech_model is None:
+            return
+        _, complete = self._officer_vad.detect(pcm)
+        if not complete or not self._officer_vad.audio_buffer:
+            return
+        audio = bytes(self._officer_vad.audio_buffer)
+        self._officer_vad.reset()
+        task = asyncio.create_task(self._transcribe_officer(audio))
+        self._transcriptions.add(task)
+        task.add_done_callback(self._transcriptions.discard)
+
+    async def _transcribe_officer(self, pcm: bytes) -> None:
+        try:
+            result = await asyncio.to_thread(
+                self.speech_model.transcribe,
+                pcm16_to_wav(pcm, 16000),
+                16000,
+                "en",
+                with_words=False,
+            )
+            text = (getattr(result, "text", "") or "").strip()
+            if not text:
+                return
+            self.room.state.turn_seq += 1
+            turn = create_turn(
+                call_id=self.room.call_id,
+                seq=self.room.state.turn_seq,
+                speaker="officer",
+                kind="utterance",
+                text=text,
+                latencies={"stt_ms": round((getattr(result, "latency_s", 0) or 0) * 1000, 1)},
+            )
+            hub.publish_call(self.room.call_id, "turn", turn)
+            # The transcript turn is already published; a caller whose control
+            # socket is gone just misses the caption.
+            caller_ws = self.room.caller_ws
+            if caller_ws is not None:
+                await caller_ws.send_text(json.dumps({
+                    "type": "caption", "speaker": "officer", "text": text,
+                    "final": True, "turn_id": self.room.state.turn_seq,
+                }))
+        except Exception:
+            logger.exception("Failed transcribing officer utterance on %s", self.room.call_id)
 
 
 class TranscriptTap(FrameProcessor):

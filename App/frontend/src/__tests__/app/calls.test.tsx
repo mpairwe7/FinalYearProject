@@ -56,7 +56,7 @@ describe('The Call Desk (/calls)', () => {
     mockCalls([callRecord()]);
     vi.spyOn(callsApi, 'getBrief').mockResolvedValue(brief());
     vi.spyOn(callsApi, 'getMetrics').mockResolvedValue({
-      period_days: 7, total_calls: 14, containment_rate: 0.65, transfer_rate: 0.28,
+      period_days: 7, total_calls: 14, ai_only_completion_rate: 0.65, transfer_rate: 0.28,
       transfers_by_reason: {}, clarification_rate: 0.22, clarification_first_try_rate: 0.75,
       mean_word_prob: 0.88, avg_duration_s: 145, avg_officer_rating: 4.8, latency_p50_ms: 1200, latency_p95_ms: 2200,
     });
@@ -115,7 +115,7 @@ describe('The Call Desk (/calls)', () => {
   it('keeps the performance overview', async () => {
     renderPage();
     fireEvent.click(screen.getByRole('tab', { name: /Performance/ }));
-    expect(await screen.findByText('Containment rate')).toBeInTheDocument();
+    expect(await screen.findByText('AI-only calls')).toBeInTheDocument();
     expect(screen.getByText('p95 first audio latency')).toBeInTheDocument();
   });
 

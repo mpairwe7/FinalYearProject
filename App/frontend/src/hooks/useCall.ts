@@ -3,10 +3,16 @@ import { useTranslation } from '@/lib/i18n';
 import {
   type CallLanguage,
   type CallLanguageSource,
+  type CallStatus,
   isCallLanguage,
   useCallStore,
 } from '@/store/useCallStore';
 import { CallSocket } from '@/services/callSocket';
+import {
+  LiveKitCallSession,
+  type LiveKitCallCredentials,
+  SPEAKING_LEVEL,
+} from '@/services/liveKitCallSession';
 import { PCMPlayer } from '@/services/pcmPlayer';
 import { AudioRecorder } from '@/services/voiceService';
 import { playDialTone, playHoldTone, playJoinChime } from '@/services/callTones';
@@ -18,12 +24,15 @@ export function useCall() {
   const store = useCallStore();
   const t = useTranslation();
   const socketRef = useRef<CallSocket | null>(null);
+  const liveKitSessionRef = useRef<LiveKitCallSession | null>(null);
   const playerRef = useRef<PCMPlayer | null>(null);
   const micCleanupRef = useRef<(() => void) | null>(null);
   const dialToneCleanupRef = useRef<(() => void) | null>(null);
   const holdToneCleanupRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const statusBeforeReconnectRef = useRef<CallStatus>('ai');
+  const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep a ref of isMuted so the audio callback gets the latest value without recreation
   const isMutedRef = useRef(store.isMuted);
@@ -49,6 +58,14 @@ export function useCall() {
       micCleanupRef.current();
       micCleanupRef.current = null;
     }
+    if (liveKitSessionRef.current) {
+      void liveKitSessionRef.current.close();
+      liveKitSessionRef.current = null;
+    }
+    if (speakingTimerRef.current) {
+      clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
     if (playerRef.current) {
       playerRef.current.close();
       playerRef.current = null;
@@ -65,8 +82,14 @@ export function useCall() {
       socketRef.current = null;
     }
     cleanupAudio();
+    store.setAudioBlocked(false);
     store.setStatus('ended');
   }, [cleanupAudio, store]);
+
+  /** Start call audio the browser held back; wired to a tap on the call screen. */
+  const resumeAudio = useCallback(() => {
+    void liveKitSessionRef.current?.resumeAudio();
+  }, []);
 
   const requestOfficer = useCallback(() => {
     if (socketRef.current) {
@@ -76,7 +99,15 @@ export function useCall() {
   }, [store]);
 
   const toggleMute = useCallback(() => {
-    store.setMuted((prev) => !prev);
+    store.setMuted((prev) => {
+      const next = !prev;
+      if (liveKitSessionRef.current) {
+        void liveKitSessionRef.current.setMuted(next).catch((error: unknown) => {
+          store.setError((error as Error)?.message || 'Could not change microphone state');
+        });
+      }
+      return next;
+    });
   }, [store]);
 
   /** Pin the call to *language* for the rest of the call (the server confirms). */
@@ -103,16 +134,51 @@ export function useCall() {
         dialToneCleanupRef.current = playDialTone(toneCtx);
       } catch {}
 
-      // Create PCM16 player
-      const player = new PCMPlayer(16000);
-      playerRef.current = player;
-      player.onLevel((level) => setOutputLevel(level));
-      player.init().catch(() => {});
+      const startLegacyAudio = async () => {
+        if (playerRef.current || liveKitSessionRef.current) return;
+        const player = new PCMPlayer(16000);
+        playerRef.current = player;
+        player.onLevel((level) => setOutputLevel(level));
+        player.init().catch(() => {});
+        try {
+          const recorder = new AudioRecorder();
+          let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+          const cleanup = await recorder.startStreaming(
+            (pcmChunk) => {
+              if (!isMutedRef.current && socketRef.current) {
+                socketRef.current.sendAudio(pcmChunk);
+                if (pcmChunk.byteLength >= 2) {
+                  const int16 = new Int16Array(pcmChunk);
+                  let sum = 0;
+                  for (let i = 0; i < int16.length; i += 2) sum += int16[i] * int16[i];
+                  const rms = Math.sqrt(sum / (int16.length / 2));
+                  setInputLevel(rms / 6000);
+                  if (rms > 1200) {
+                    store.setUserSpeaking(true);
+                    if (silenceTimer) clearTimeout(silenceTimer);
+                    silenceTimer = setTimeout(() => store.setUserSpeaking(false), 1400);
+                  }
+                }
+              } else if (isMutedRef.current) {
+                setInputLevel(0);
+              }
+            },
+            { echoCancellation: true, noiseSuppression: true },
+          );
+          micCleanupRef.current = () => {
+            if (silenceTimer) clearTimeout(silenceTimer);
+            cleanup();
+          };
+        } catch (err: unknown) {
+          store.setError((err as Error)?.message || 'Microphone access denied');
+          hangup();
+        }
+      };
 
       // Create WebSocket
       const socket = new CallSocket({
         onAudio: (pcmChunk) => {
-          player.push(pcmChunk);
+          playerRef.current?.push(pcmChunk);
         },
         onMessage: (msg) => {
           if (!msg || typeof msg !== 'object') return;
@@ -124,6 +190,7 @@ export function useCall() {
                 dialToneCleanupRef.current();
                 dialToneCleanupRef.current = null;
               }
+              statusBeforeReconnectRef.current = 'ai';
               store.setStatus('ai');
               {
                 const offered = Array.isArray(msg.languages)
@@ -142,10 +209,56 @@ export function useCall() {
                   store.setDuration((d) => d + 1);
                 }, 1000);
               }
+              {
+                const media = msg.media as LiveKitCallCredentials | undefined;
+                if (media?.transport === 'livekit') {
+                  const session: LiveKitCallSession = new LiveKitCallSession({
+                    onMessage: (message) => socket.dispatchMessage(message),
+                    onReconnecting: () => {
+                      const status = useCallStore.getState().status;
+                      if (status !== 'reconnecting') statusBeforeReconnectRef.current = status;
+                      store.setStatus('reconnecting');
+                    },
+                    onReconnected: () => {
+                      if (useCallStore.getState().status === 'reconnecting') {
+                        store.setStatus(statusBeforeReconnectRef.current);
+                      }
+                    },
+                    onDisconnected: () => {
+                      if (liveKitSessionRef.current === session) {
+                        store.setError('Call media disconnected. Please reconnect.');
+                        hangup();
+                      }
+                    },
+                    onAudioBlockedChange: (blocked) => store.setAudioBlocked(blocked),
+                    // The orb and the "you are speaking" state, which the PCM
+                    // path computes from raw samples, come from WebRTC here.
+                    onLevels: ({ input, output }) => {
+                      setInputLevel(input);
+                      setOutputLevel(output);
+                      if (input > SPEAKING_LEVEL) {
+                        store.setUserSpeaking(true);
+                        if (speakingTimerRef.current) clearTimeout(speakingTimerRef.current);
+                        speakingTimerRef.current = setTimeout(() => {
+                          speakingTimerRef.current = null;
+                          store.setUserSpeaking(false);
+                        }, 1400);
+                      }
+                    },
+                  });
+                  liveKitSessionRef.current = session;
+                  void session.connect(media, false).then(() => session.setMuted(isMutedRef.current)).catch((error: unknown) => {
+                    store.setError((error as Error)?.message || 'Could not connect call media');
+                    hangup();
+                  });
+                } else {
+                  void startLegacyAudio();
+                }
+              }
               break;
             }
             case 'interrupt': {
-              player.flush();
+              playerRef.current?.flush();
               store.setUserSpeaking(true);
               break;
             }
@@ -169,6 +282,7 @@ export function useCall() {
                   holdToneCleanupRef.current();
                   holdToneCleanupRef.current = null;
                 }
+                statusBeforeReconnectRef.current = 'transferring';
                 store.setStatus('transferring');
                 if (msg.ticket_ref) store.setTicketRef(String(msg.ticket_ref));
               } else if (msg.status === 'bridged') {
@@ -176,6 +290,7 @@ export function useCall() {
                   holdToneCleanupRef.current();
                   holdToneCleanupRef.current = null;
                 }
+                statusBeforeReconnectRef.current = 'officer';
                 store.setStatus('officer');
                 if (msg.officer_name) store.setOfficerName(String(msg.officer_name));
                 // Play join chime
@@ -183,6 +298,7 @@ export function useCall() {
                   playJoinChime(audioCtxRef.current);
                 }
               } else if (msg.status === 'on_hold') {
+                statusBeforeReconnectRef.current = 'on_hold';
                 store.setStatus('on_hold');
                 if (!holdToneCleanupRef.current && audioCtxRef.current) {
                   holdToneCleanupRef.current = playHoldTone(audioCtxRef.current);
@@ -192,12 +308,15 @@ export function useCall() {
                   holdToneCleanupRef.current();
                   holdToneCleanupRef.current = null;
                 }
+                const status = useCallStore.getState().status;
+                if (status !== 'reconnecting') statusBeforeReconnectRef.current = status;
                 store.setStatus('reconnecting');
               } else if (msg.status === 'ai') {
                 if (holdToneCleanupRef.current) {
                   holdToneCleanupRef.current();
                   holdToneCleanupRef.current = null;
                 }
+                statusBeforeReconnectRef.current = 'ai';
                 store.setStatus('ai');
               } else if (msg.status === 'ended') {
                 hangup();
@@ -248,52 +367,6 @@ export function useCall() {
         voice_consent_accepted: true,
         sample_rate: 16000,
       });
-
-      // Start microphone streaming
-      try {
-        const recorder = new AudioRecorder();
-        let silenceTimer: ReturnType<typeof setTimeout> | null = null;
-        const cleanup = await recorder.startStreaming(
-          (pcmChunk) => {
-            if (!isMutedRef.current && socketRef.current) {
-              socketRef.current.sendAudio(pcmChunk);
-              // Client-side voice energy check to immediately trigger Gemini Live listening state
-              if (pcmChunk.byteLength >= 2) {
-                const int16 = new Int16Array(pcmChunk);
-                let sum = 0;
-                for (let i = 0; i < int16.length; i += 2) {
-                  sum += int16[i] * int16[i];
-                }
-                const rms = Math.sqrt(sum / (int16.length / 2));
-                // The same reading drives the orb. 6000 of 32767 is roughly
-                // conversational speech at a laptop mic, so normal talking
-                // fills the orb without a shout pinning it at 1.
-                setInputLevel(rms / 6000);
-                if (rms > 1200) {
-                  store.setUserSpeaking(true);
-                  if (silenceTimer) clearTimeout(silenceTimer);
-                  silenceTimer = setTimeout(() => {
-                    store.setUserSpeaking(false);
-                  }, 1400);
-                }
-              }
-            } else if (isMutedRef.current) {
-              setInputLevel(0);
-            }
-          },
-          { echoCancellation: true, noiseSuppression: true },
-        );
-        // Both the recorder teardown AND the pending silence timer, or a call
-        // that ends mid-utterance leaves a timer to fire `setUserSpeaking`
-        // against a store the next call has already reset.
-        micCleanupRef.current = () => {
-          if (silenceTimer) clearTimeout(silenceTimer);
-          cleanup();
-        };
-      } catch (err: unknown) {
-        store.setError((err as Error)?.message || 'Microphone access denied');
-        hangup();
-      }
     },
     [cleanupAudio, hangup, store, t],
   );
@@ -330,5 +403,7 @@ export function useCall() {
     requestOfficer,
     toggleMute,
     setLanguage,
+    audioBlocked: store.audioBlocked,
+    resumeAudio,
   };
 }

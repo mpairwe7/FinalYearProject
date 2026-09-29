@@ -160,7 +160,9 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
                 ? `On call ${formatClock((now - (activeCall?.since ?? now)) / 1000)}`
                 : activeCall?.state === 'ending'
                   ? 'Ending the call…'
-                  : 'Connecting…'}{' '}
+                  : activeCall?.state === 'reconnecting'
+                    ? 'Reconnecting media…'
+                    : 'Connecting…'}{' '}
               · {topic}
             </span>
             {activeCall?.state === 'bridged' && (

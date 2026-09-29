@@ -5,14 +5,13 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from app.production_readiness import gap_gate_errors, readiness_report
 from app.publications import ingest_publications
 from app.tools.ura_account import UraAccountProfileTool, account_api_status
 
-
 SECURE = {
     "APP_ENV": "production",
+    "FLAG_VOICE_RECEPTIONIST": "false",
     "FLAG_MULTI_TENANT": "true",
     "MULTI_TENANT_RLS_APPLIED": "true",
     "MALWARE_SCAN_REQUIRED": "true",
@@ -43,6 +42,43 @@ def test_production_accepts_fail_closed_baseline(monkeypatch: pytest.MonkeyPatch
     assert report["ok"] is True
     deferred = [row for row in report["gaps"] if row["gap"] in {"G33", "G34"}]
     assert all(row["status"] == "deferred" for row in deferred)
+    receptionist = next(row for row in report["gaps"] if row["gap"] == "G36")
+    assert receptionist["status"] == "disabled"
+    assert receptionist["blocker"] is False
+
+
+def test_production_rejects_enabled_demo_receptionist(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in SECURE.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("FLAG_VOICE_RECEPTIONIST", "true")
+
+    errors = "\n".join(gap_gate_errors())
+    assert "G36" in errors
+    assert "LIVEKIT_URL" in errors
+    assert "RECEPTIONIST_MEDIA_TRANSPORT=livekit" in errors
+    assert "VOICE_RECEPTIONIST_REPLICAS=1" in errors
+    receptionist = next(row for row in readiness_report()["gaps"] if row["gap"] == "G36")
+    assert receptionist["blocker"] is True
+
+
+def test_production_receptionist_requires_livekit_and_single_replica_attestation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key, value in SECURE.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("FLAG_VOICE_RECEPTIONIST", "true")
+    monkeypatch.setenv("RECEPTIONIST_MEDIA_TRANSPORT", "livekit")
+    monkeypatch.setenv("LIVEKIT_URL", "wss://rtc.example.test")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "production-key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "production-secret-value-that-is-long-enough")
+    monkeypatch.setenv("WORKERS", "1")
+    monkeypatch.setenv("VOICE_RECEPTIONIST_REPLICAS", "1")
+    monkeypatch.setenv("VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK", "true")
+
+    assert not [error for error in gap_gate_errors() if error.startswith("G36:")]
+    receptionist = next(row for row in readiness_report()["gaps"] if row["gap"] == "G36")
+    assert receptionist["status"] == "ready"
+    assert receptionist["blocker"] is False
 
 
 def test_production_rejects_mock_account_and_fixture_news(

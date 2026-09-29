@@ -15,16 +15,20 @@
  * page asks for confirmation.
  */
 
-import { appendAuthToken } from '@/lib/authSession';
+import { getAuthToken } from '@/lib/authSession';
 import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audioLevelBus';
 import { callsApi } from '@/services/callsApi';
 import { PCMPlayer } from '@/services/pcmPlayer';
+import { LiveKitCallSession } from '@/services/liveKitCallSession';
 import { AudioRecorder } from '@/services/voiceService';
 import { type ActiveCall, type SessionState, useCallConsoleStore } from '@/store/useCallConsoleStore';
 
 let ws: WebSocket | null = null;
 let player: PCMPlayer | null = null;
 let stopMic: (() => void) | null = null;
+let liveKitSession: LiveKitCallSession | null = null;
+let transferInProgress = false;
+let mediaDisconnectedDuringTransfer = false;
 let muted = false;
 let current: ActiveCall | null = null;
 
@@ -56,6 +60,10 @@ function syncUnloadGuard(): void {
 }
 
 function teardownAudio(): void {
+  if (liveKitSession) {
+    void liveKitSession.close();
+    liveKitSession = null;
+  }
   if (stopMic) {
     try {
       stopMic();
@@ -123,46 +131,89 @@ export async function takeCall(callId: string): Promise<void> {
 
 async function joinCall(callId: string): Promise<void> {
   update({ state: 'connecting' });
-  const nextPlayer = new PCMPlayer(16000);
-  nextPlayer.onLevel((level) => setOutputLevel(level));
-  await nextPlayer.init().catch(() => {});
-  player = nextPlayer;
-
-  // The microphone before the bridge: the caller should never hear an officer
-  // who cannot speak yet. The claim already holds the call while we ask.
-  try {
-    stopMic = await new AudioRecorder().startStreaming(
-      (chunk: ArrayBuffer) => {
-        const samples = new Int16Array(chunk);
-        let sum = 0;
-        for (let i = 0; i < samples.length; i += 2) sum += samples[i] * samples[i];
-        setInputLevel(muted || Boolean(current?.onHold) ? 0 : Math.sqrt(sum / Math.max(1, samples.length / 2)) / 6000);
-        if (!muted && !current?.onHold && ws && ws.readyState === WebSocket.OPEN) ws.send(chunk);
-      },
-      { echoCancellation: true, noiseSuppression: true },
-    );
-  } catch {
-    await callsApi.releaseCall(callId).catch(() => {});
-    finish('Microphone access was denied — the call went back to the queue.');
-    return;
-  }
-
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const socket = new WebSocket(
-    appendAuthToken(`${protocol}//${window.location.host}/api/v1/admin/calls/${encodeURIComponent(callId)}/audio`),
+    `${protocol}//${window.location.host}/api/v1/admin/calls/${encodeURIComponent(callId)}/audio`,
   );
   socket.binaryType = 'arraybuffer';
   ws = socket;
   socket.onopen = () => {
-    if (ws === socket) update({ state: 'bridged' });
+    socket.send(JSON.stringify({ type: 'authenticate', access_token: getAuthToken() }));
   };
   socket.onmessage = (event: MessageEvent) => {
-    if (event.data instanceof ArrayBuffer) player?.push(event.data);
+    if (event.data instanceof ArrayBuffer) {
+      player?.push(event.data);
+    } else if (typeof event.data === 'string') {
+      try {
+        const message = JSON.parse(event.data);
+        if (ws !== socket) return;
+        if (message?.type === 'livekit_ready') {
+          // One media session per call leg: a repeated `livekit_ready` replaces
+          // the old room connection instead of leaving it open alongside.
+          if (liveKitSession) void liveKitSession.close();
+          const session = new LiveKitCallSession({
+            onMessage: () => {},
+            onLevels: ({ input, output }) => {
+              if (liveKitSession !== session) return;
+              setInputLevel(muted || Boolean(current?.onHold) ? 0 : input);
+              setOutputLevel(output);
+            },
+            onReconnecting: () => {
+              if (!transferInProgress && liveKitSession === session && current?.state === 'bridged') {
+                update({ state: 'reconnecting' });
+              }
+            },
+            onReconnected: () => {
+              if (!transferInProgress && liveKitSession === session && current?.state === 'reconnecting') {
+                update({ state: 'bridged' });
+              }
+            },
+            onDisconnected: () => {
+              if (
+                liveKitSession === session
+                && (current?.state === 'bridged' || current?.state === 'reconnecting')
+              ) {
+                if (transferInProgress) {
+                  mediaDisconnectedDuringTransfer = true;
+                  return;
+                }
+                finish('Call media disconnected.');
+              }
+            },
+          });
+          liveKitSession = session;
+          void session.connect({
+            transport: 'livekit',
+            url: String(message.url || ''),
+            room: String(message.room || ''),
+            identity: String(message.identity || ''),
+            token: String(message.token || ''),
+          }, false).then(async () => {
+            if (liveKitSession === session) {
+              await session.setMuted(muted || Boolean(current?.onHold));
+              update({ state: 'bridged' });
+            }
+          }).catch(async () => {
+            await callsApi.releaseCall(callId).catch(() => {});
+            finish('Call media could not connect. The call went back to the queue.');
+          });
+        } else if (message?.type === 'authenticated' && ws === socket) {
+          // Compatibility transport for local/demo deployments. Production
+          // sends `livekit_ready` next and never streams PCM on this socket.
+          update({ state: 'bridged' });
+          void startLegacyOfficerMedia(callId, socket);
+        }
+      } catch {
+        /* Ignore non-JSON control frames. */
+      }
+    }
   };
   socket.onclose = (event: CloseEvent) => {
     if (ws !== socket) return;
     ws = null;
-    if (current?.state === 'ending') {
+    if (transferInProgress) {
+      mediaDisconnectedDuringTransfer = true;
+    } else if (current?.state === 'ending') {
       teardownAudio();
       update({ state: 'wrap_up' });
     } else if (current?.state === 'wrap_up') {
@@ -177,9 +228,33 @@ async function joinCall(callId: string): Promise<void> {
   };
 }
 
+async function startLegacyOfficerMedia(callId: string, socket: WebSocket): Promise<void> {
+  if (ws !== socket || player || stopMic) return;
+  const nextPlayer = new PCMPlayer(16000);
+  nextPlayer.onLevel((level) => setOutputLevel(level));
+  await nextPlayer.init().catch(() => {});
+  player = nextPlayer;
+  try {
+    stopMic = await new AudioRecorder().startStreaming(
+      (chunk: ArrayBuffer) => {
+        const samples = new Int16Array(chunk);
+        let sum = 0;
+        for (let i = 0; i < samples.length; i += 2) sum += samples[i] * samples[i];
+        setInputLevel(muted || Boolean(current?.onHold) ? 0 : Math.sqrt(sum / Math.max(1, samples.length / 2)) / 6000);
+        if (!muted && !current?.onHold && ws === socket && socket.readyState === WebSocket.OPEN) socket.send(chunk);
+      },
+      { echoCancellation: true, noiseSuppression: true },
+    );
+  } catch {
+    await callsApi.releaseCall(callId).catch(() => {});
+    finish('Microphone access was denied — the call went back to the queue.');
+  }
+}
+
 export function toggleMute(): void {
   if (!current || current.state !== 'bridged') return;
   muted = !muted;
+  if (liveKitSession) void liveKitSession.setMuted(muted || Boolean(current.onHold));
   if (muted) setInputLevel(0);
   update({ muted });
 }
@@ -189,6 +264,7 @@ export async function toggleHold(targetOn?: boolean): Promise<void> {
   const on = targetOn !== undefined ? targetOn : !current.onHold;
   try {
     await callsApi.holdCall(current.callId, on);
+    if (liveKitSession) await liveKitSession.setMuted(on || muted);
     update({ onHold: on });
   } catch (err) {
     update({ error: (err as Error).message || 'Could not change hold status' });
@@ -198,13 +274,22 @@ export async function toggleHold(targetOn?: boolean): Promise<void> {
 export async function transferCall(payload: { team?: string; officer_id?: string; note?: string }): Promise<void> {
   if (!current || current.state !== 'bridged') return;
   const { callId } = current;
+  transferInProgress = true;
+  mediaDisconnectedDuringTransfer = false;
   try {
     await callsApi.transferCall(callId, payload);
     teardownAudio();
     update({ state: 'wrap_up' });
   } catch (err) {
-    update({ error: (err as Error).message || 'Could not transfer the call' });
+    if (mediaDisconnectedDuringTransfer) {
+      finish('Call media disconnected while the transfer failed.');
+    } else {
+      update({ error: (err as Error).message || 'Could not transfer the call' });
+    }
     throw err;
+  } finally {
+    transferInProgress = false;
+    mediaDisconnectedDuringTransfer = false;
   }
 }
 
@@ -256,6 +341,8 @@ export function dismissSessionError(): void {
 /** Tests only. */
 export function resetSessionForTests(): void {
   teardownAudio();
+  transferInProgress = false;
+  mediaDisconnectedDuringTransfer = false;
   muted = false;
   publish(null);
 }

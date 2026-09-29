@@ -41,7 +41,14 @@ export interface LobbyCall {
 export type Availability = 'available' | 'busy' | 'away';
 
 /** The officer's own call, mirrored from `officerCallSession`. */
-export type SessionState = 'idle' | 'claiming' | 'connecting' | 'bridged' | 'wrap_up' | 'ending';
+export type SessionState =
+  | 'idle'
+  | 'claiming'
+  | 'connecting'
+  | 'bridged'
+  | 'reconnecting'
+  | 'wrap_up'
+  | 'ending';
 
 export interface ActiveCall {
   callId: string;

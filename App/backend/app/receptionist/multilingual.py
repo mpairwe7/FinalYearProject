@@ -242,7 +242,7 @@ def build_multilingual_pipeline(
     transport = build_transport(room, websocket)
     pipeline = Pipeline([
         transport.input(),
-        CallerAudioTap(room=room),
+        CallerAudioTap(room=room, speech_model=speech_model),
         sentinel,
         ParallelPipeline(*branches),
         outlet,

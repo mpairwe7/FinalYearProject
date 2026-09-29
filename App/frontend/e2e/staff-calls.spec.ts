@@ -53,7 +53,7 @@ async function signedInAsStaff(page: Page) {
         json: {
           period_days: 7,
           total_calls: 10,
-          containment_rate: 0.7,
+          ai_only_completion_rate: 0.7,
           transfer_rate: 0.3,
           transfers_by_reason: {},
           clarification_rate: 0.1,

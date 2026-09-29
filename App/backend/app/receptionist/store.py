@@ -197,9 +197,15 @@ def create_call(
     return get_call(call_id) or {}
 
 
-def get_call(call_id: str) -> dict[str, Any] | None:
+def get_call(call_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
     """Retrieve a call record by call_id."""
-    rows = db.query_all("SELECT * FROM voice_calls WHERE call_id = ?", (call_id,))
+    if tenant_id is None:
+        rows = db.query_all("SELECT * FROM voice_calls WHERE call_id = ?", (call_id,))
+    else:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE call_id = ? AND tenant_id = ?",
+            (call_id, tenant_id),
+        )
     if not rows:
         return None
     row = dict(rows[0])
@@ -303,10 +309,15 @@ def list_calls(
     needs_callback: bool | None = None,
     sort: str = "started_desc",
     return_total: bool = False,
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
     """List calls with filtering, search and server-side pagination."""
     conditions: list[str] = []
     params: list[Any] = []
+
+    if tenant_id is not None:
+        conditions.append("tenant_id = ?")
+        params.append(tenant_id)
 
     if status and status != "all":
         if status == "live":
@@ -421,19 +432,25 @@ def mark_callback_done(call_id: str, done_by: str, note: str = "") -> bool:
     )
 
 
-def get_caller_history(call_id: str) -> dict[str, Any]:
+def get_caller_history(call_id: str, *, tenant_id: str | None = None) -> dict[str, Any]:
     """Retrieve previous calls and tickets for the same taxpayer (user_id)."""
-    call = get_call(call_id)
+    call = get_call(call_id, tenant_id=tenant_id)
     if not call:
         return {"anonymous": False, "calls": [], "tickets": []}
     user_id = str(call.get("user_id") or "").strip()
     if not user_id or user_id.startswith("anon::"):
         return {"anonymous": True, "calls": [], "tickets": []}
 
-    rows = db.query_all(
-        "SELECT * FROM voice_calls WHERE user_id = ? AND call_id != ? ORDER BY started_at DESC LIMIT 10",
-        (user_id, call_id),
-    )
+    if tenant_id is None:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE user_id = ? AND call_id != ? ORDER BY started_at DESC LIMIT 10",
+            (user_id, call_id),
+        )
+    else:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE user_id = ? AND tenant_id = ? AND call_id != ? ORDER BY started_at DESC LIMIT 10",
+            (user_id, tenant_id, call_id),
+        )
     calls: list[dict[str, Any]] = []
     for r in rows:
         d = dict(r)
@@ -444,7 +461,11 @@ def get_caller_history(call_id: str) -> dict[str, Any]:
                 d["summary"] = None
         calls.append(d)
 
-    tickets = db.list_tickets(user_id=user_id, limit=10)
+    # The ticket table does not yet carry a tenant_id, so matching by user_id
+    # alone is unsafe when identifiers can overlap across tenants. Keep call
+    # history available, but fail closed for ticket history until its schema is
+    # tenant-scoped.
+    tickets = [] if tenant_id is not None else db.list_tickets(user_id=user_id, limit=10)
     return {"anonymous": False, "user_id": user_id, "calls": calls, "tickets": tickets}
 
 
@@ -530,9 +551,9 @@ def save_call_review(call_id: str, rating: int, note: str = "") -> bool:
     )
 
 
-def get_call_with_turns(call_id: str) -> dict[str, Any] | None:
+def get_call_with_turns(call_id: str, *, tenant_id: str | None = None) -> dict[str, Any] | None:
     """Retrieve full call details including turns, summary, metrics, and linked ticket."""
-    call = get_call(call_id)
+    call = get_call(call_id, tenant_id=tenant_id)
     if not call:
         return None
 

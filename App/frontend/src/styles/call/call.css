@@ -461,6 +461,24 @@
   background: var(--cv2-danger-soft, #fee4e2);
 }
 
+.call-audio-unlock {
+  margin: 0 1.25rem;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--cv2-accent-contrast, #ffffff);
+  background: var(--cv2-accent, #003087);
+  cursor: pointer;
+}
+
+.call-audio-unlock:focus-visible {
+  outline: 2px solid var(--cv2-accent, #003087);
+  outline-offset: 2px;
+}
+
 /* --------------------------------------------------------------------- dock */
 
 .call-dock {

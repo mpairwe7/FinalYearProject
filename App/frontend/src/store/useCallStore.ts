@@ -43,6 +43,8 @@ interface CallStoreState {
   isUserSpeaking: boolean;
   activeAiText: string;
   error: string | null;
+  /** The browser is holding call audio back until the caller taps (autoplay policy). */
+  audioBlocked: boolean;
   /**
    * Whether this call follows the caller's language. Only when the server says
    * so (`call_ready.language_detection`) does the call screen offer a choice.
@@ -63,6 +65,7 @@ interface CallStoreState {
   setActiveAiText: (text: string) => void;
   addCaption: (caption: CaptionEntry) => void;
   setError: (error: string | null) => void;
+  setAudioBlocked: (blocked: boolean) => void;
   setLanguageOptions: (detection: boolean, languages: CallLanguage[], language: CallLanguage) => void;
   setLanguage: (language: CallLanguage, source: CallLanguageSource) => void;
   reset: () => void;
@@ -80,6 +83,7 @@ const initialState = {
   isUserSpeaking: false,
   activeAiText: '',
   error: null,
+  audioBlocked: false,
   languageDetection: false,
   languages: ['en'] as CallLanguage[],
   language: 'en' as CallLanguage,
@@ -99,6 +103,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
       currentCaption: null,
       isUserSpeaking: false,
       activeAiText: '',
+      audioBlocked: false,
       languageDetection: false,
       languages: ['en'],
       language: 'en',
@@ -145,6 +150,7 @@ export const useCallStore = create<CallStoreState>((set) => ({
       };
     }),
   setError: (error) => set({ error }),
+  setAudioBlocked: (audioBlocked) => set({ audioBlocked }),
   setLanguageOptions: (languageDetection, languages, language) =>
     set({ languageDetection, languages, language, languageSource: 'default' }),
   setLanguage: (language, languageSource) => set({ language, languageSource }),

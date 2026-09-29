@@ -258,11 +258,11 @@ class TestLugandaTelemetryMetrics(unittest.TestCase):
 
         metrics = compute_call_metrics(state, {"started_at": 100, "ended_at": 115, "locale": "lg"}, turns)
 
-        self.assertTrue(metrics["contained"])
+        self.assertTrue(metrics["ai_only_completion"])
         self.assertFalse(metrics["transferred"])
         self.assertEqual(metrics["luganda_turn_latency_ms"], 1000.0)
 
-    def test_luganda_aggregate_metrics_containment_and_latency(self):
+    def test_luganda_aggregate_metrics_ai_only_and_latency(self):
         call_id_1 = f"call_agg_1_{uuid.uuid4().hex[:8]}"
         call_id_2 = f"call_agg_2_{uuid.uuid4().hex[:8]}"
 
@@ -284,7 +284,7 @@ class TestLugandaTelemetryMetrics(unittest.TestCase):
 
         agg = get_aggregate_metrics(days=1)
         self.assertGreaterEqual(agg["luganda_total_calls"], 2)
-        self.assertGreater(agg["luganda_containment_rate"], 0.0)
+        self.assertGreater(agg["luganda_ai_only_completion_rate"], 0.0)
         self.assertGreater(agg["luganda_transfer_rate"], 0.0)
         self.assertGreater(agg["luganda_turn_latency_ms"], 0.0)
 

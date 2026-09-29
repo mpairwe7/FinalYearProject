@@ -108,6 +108,44 @@ class TestReceptionistGeminiLive(unittest.IsolatedAsyncioTestCase):
             )
             self.assertIsNotNone(brain)
 
+    async def test_officer_speech_is_transcribed_on_gemini_calls_too(self):
+        """The shared-room tap needs the speech model to caption the officer (PR #515 review)."""
+        import sys
+
+        mock_pipecat = MagicMock()
+        mock_modules = {
+            name: mock_pipecat
+            for name in (
+                "pipecat",
+                "pipecat.adapters",
+                "pipecat.adapters.schemas",
+                "pipecat.adapters.schemas.function_schema",
+                "pipecat.pipeline",
+                "pipecat.pipeline.pipeline",
+                "pipecat.pipeline.task",
+                "pipecat.processors",
+                "pipecat.processors.aggregators",
+                "pipecat.processors.aggregators.llm_context",
+                "pipecat.processors.aggregators.llm_response_universal",
+                "pipecat.processors.frame_processor",
+                "pipecat.services",
+                "pipecat.services.google",
+                "pipecat.services.google.gemini_live",
+                "pipecat.services.google.gemini_live.llm",
+                "pipecat.transports",
+                "pipecat.transports.websocket",
+                "pipecat.transports.websocket.fastapi",
+            )
+        }
+        speech = MagicMock(name="speech_model")
+        with (
+            patch.dict(os.environ, {"GEMINI_API_KEY": "AIza-test-mock"}),  # pragma: allowlist secret
+            patch.dict(sys.modules, mock_modules),
+            patch("app.receptionist.gemini_live.CallerAudioTap") as tap,
+        ):
+            build_gemini_live_pipeline(self.room, MagicMock(), speech_model=speech, chat_model=MagicMock())
+        tap.assert_called_once_with(room=self.room, speech_model=speech)
+
     async def test_request_human_officer_ticket_queue_invariant(self):
         # Verify ticket_queue flag invariant
         with patch.object(flags, "is_enabled", return_value=False):

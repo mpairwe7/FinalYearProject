@@ -2021,6 +2021,7 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | **Privacy** | | |
 | `STORE_RAW_PROMPTS` | Store unredacted prompts (false = PII redacted) | `false` |
 | `CONVERSATION_TTL_DAYS` | Days to retain conversation logs | `7` |
+| `VOICE_TRANSCRIPT_TTL_DAYS` | Days to retain voice-call transcripts and non-ticketed call records | `90` |
 | `FEEDBACK_TTL_DAYS` | Days to retain feedback | `90` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |

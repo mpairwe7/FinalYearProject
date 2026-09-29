@@ -523,8 +523,8 @@ All major subsystems are behind feature flags for progressive rollout:
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
 | `langgraph` | off | Route agentic requests through the graph orchestrator |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
-| `voice_receptionist` | off | Simulated phone receptionist: Pipecat call socket, staff Calls page, audio bridge |
-| `receptionist_language_detection` | off | Receptionist follows the caller's language (en/sw on Gemini Live, lg on the cascaded engine with the Orpheus voice); see `docs/runbooks/voice-receptionist-demo.md` |
+| `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
+| `receptionist_language_detection` | off | Receptionist follows caller language (en/sw on Gemini Live, lg on the cascaded engine with Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
 **51** in total, including the per-phase switches for voice, offline and

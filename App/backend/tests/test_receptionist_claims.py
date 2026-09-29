@@ -134,7 +134,11 @@ class JoinAndEndTests(DeskTestCase):
 
     async def test_joining_quiets_the_ai_and_introduces_the_officer(self):
         self.room.state.locale = "sw"
-        await self.joined()
+        # With no speech backend, the caption is still delivered and synthesis
+        # must not create an unnecessary default-executor worker.
+        with patch.object(desk.asyncio, "to_thread", new_callable=AsyncMock, return_value=b"") as worker:
+            await self.joined()
+        worker.assert_not_awaited()
         self.assertEqual(self.room.state.mode, "bridged")
         self.assertIsNone(self.room.claim_timer)
         self.assertEqual(self.caller.types(), ["interrupt", "caption", "bridged"])
@@ -165,11 +169,87 @@ class JoinAndEndTests(DeskTestCase):
 
     async def test_the_joining_line_is_played_as_pcm(self):
         speech = MagicMock()
-        with patch.object(desk, "synthesize_pcm16", return_value=b"\x01\x00" * 24000):
+        async def run_inline(func, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with (
+            patch.object(desk, "synthesize_pcm16", return_value=b"\x01\x00" * 24000),
+            patch.object(desk.asyncio, "to_thread", new=run_inline),
+        ):
             await desk.claim(self.call_id, "okello")
             await desk.bridge(self.room, SimpleNamespace(close=AsyncMock()), "okello", speech_model=speech)
         self.assertEqual(sum(len(chunk) for chunk in self.caller.audio), 48000)
         self.assertTrue(all(len(chunk) <= 16000 for chunk in self.caller.audio))
+
+
+class BridgeRevalidationTests(DeskTestCase):
+    """bridge() re-checks the call under the desk lock: callers wait before bridging."""
+
+    async def test_a_call_that_ended_during_the_media_wait_is_not_bridged(self):
+        await desk.claim(self.call_id, "okello", officer_name="Officer Okello")
+        self.room.state.mode = "ended"  # the caller hung up while officer media joined
+        with self.assertRaises(desk.DeskError) as err:
+            await desk.bridge(self.room, None, "okello", speech_model=None)
+        self.assertEqual(err.exception.status, 409)
+        self.assertEqual(self.room.state.mode, "ended")
+        self.assertNotEqual(get_call(self.call_id)["status"], "bridged")
+        self.assertEqual(self.lobby_events("call.bridged"), [])
+
+    async def test_a_released_claim_is_not_bridged(self):
+        await desk.claim(self.call_id, "okello")
+        await desk.release(self.call_id, "okello")
+        with self.assertRaises(desk.DeskError):
+            await desk.bridge(self.room, None, "okello", speech_model=None)
+        self.assertEqual(self.room.state.mode, "transferring")
+
+    async def test_another_officer_cannot_be_bridged_onto_a_claim(self):
+        await desk.claim(self.call_id, "okello")
+        with self.assertRaises(desk.DeskError):
+            await desk.bridge(self.room, None, "nakato", speech_model=None)
+
+    async def test_the_reconnecting_officer_is_bridged_again(self):
+        await desk.claim(self.call_id, "okello")
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
+        self.assertEqual((self.room.state.mode, self.room.state.reconnecting_officer), ("transferring", "okello"))
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        self.assertEqual((self.room.state.mode, self.room.state.officer_id), ("bridged", "okello"))
+        self.assertIsNone(self.room.state.reconnect_timer)
+
+
+class LapsedOfficerMediaTests(DeskTestCase):
+    """After the reconnect grace, the next officer must be able to take the call."""
+
+    async def test_grace_expiry_frees_the_media_seat_and_revokes_the_old_officer(self):
+        await desk.claim(self.call_id, "okello")
+        self.room.state.livekit_room = f"ura-{self.call_id}"
+        self.room.state.livekit_officer_identity = "officer-okello-opaque"
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        with (
+            patch.object(desk, "get_officer_reconnect_grace_s", return_value=0.05),
+            patch.object(desk.livekit, "revoke_participant", new_callable=AsyncMock) as revoke,
+        ):
+            await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
+            self.assertEqual(self.room.state.livekit_officer_identity, "officer-okello-opaque")  # may reconnect
+            await asyncio.sleep(0.2)
+        self.assertEqual(self.room.state.livekit_officer_identity, "")
+        self.assertFalse(self.room.state.livekit_officer_route_active)
+        revoke.assert_awaited_once_with(f"ura-{self.call_id}", "officer-okello-opaque")
+        self.assertEqual(self.room.state.claimed_by, "")
+
+    async def test_a_failed_revoke_does_not_keep_the_call_locked(self):
+        await desk.claim(self.call_id, "okello")
+        self.room.state.livekit_room = f"ura-{self.call_id}"
+        self.room.state.livekit_officer_identity = "officer-okello-opaque"
+        await desk.bridge(self.room, None, "okello", speech_model=None)
+        with (
+            patch.object(desk, "get_officer_reconnect_grace_s", return_value=0.05),
+            patch.object(desk.livekit, "revoke_participant", new=AsyncMock(side_effect=RuntimeError("down"))),
+        ):
+            await desk.handle_officer_disconnect(self.room, "okello", speech_model=None)
+            await asyncio.sleep(0.2)
+        self.assertEqual(self.room.state.livekit_officer_identity, "")
+        self.assertEqual(self.lobby_events("call.transfer_requested")[-1]["reason"], "officer_disconnected")
 
 
 class QuietAITests(unittest.IsolatedAsyncioTestCase):
@@ -271,12 +351,14 @@ class ClaimRouteTests(unittest.TestCase):
 
     def test_only_the_claimant_s_audio_may_join(self):
         self.post("claim", "okello")
-        with self.assertRaises(WebSocketDisconnect) as closed:
+        with patch.object(flags, "is_enabled", return_value=True), patch("app.receptionist.ws.is_ws_origin_allowed", return_value=True):
             with self.client.websocket_connect(
-                f"/v1/admin/calls/{self.call_id}/audio?token={self.token('nakato')}"
+                f"/v1/admin/calls/{self.call_id}/audio"
             ) as ws:
-                ws.receive_text()
-        self.assertEqual(closed.exception.code, 4409)
+                ws.send_text(json.dumps({"type": "authenticate", "access_token": self.token("nakato")}))
+                msg = ws.receive()
+                self.assertEqual(msg["type"], "websocket.close")
+                self.assertEqual(msg["code"], 4409)
 
 
 if __name__ == "__main__":

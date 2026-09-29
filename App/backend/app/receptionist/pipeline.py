@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from ..flags import flags
+from . import livekit
 from .brain import UraReceptionistBrain
 from .config import get_max_call_s, get_receptionist_engine
 from .serializer import BrowserCallSerializer
@@ -34,8 +35,38 @@ def _get_chat_model() -> Any:
         return None
 
 
-def build_transport(room: Any, websocket: Any) -> Any:
-    """The caller's WebSocket as a Pipecat transport (16 kHz PCM both ways)."""
+def build_transport(room: Any, websocket: Any = None) -> Any:
+    """Choose WebRTC media in configured deployments, WebSocket PCM for demos."""
+    if livekit.enabled():
+        try:
+            from pipecat.transports.livekit.transport import LiveKitParams, LiveKitTransport
+        except ImportError as exc:
+            raise RuntimeError("Pipecat LiveKit extras are required for WebRTC calls") from exc
+
+        import os
+
+        from .livekit import mint_token
+
+        room_name = room.state.livekit_room
+        # The allowlist must hold the identity the token actually carries, so
+        # it goes through the same sanitiser mint_token applies.
+        agent_identity = livekit.agent_identity(room.call_id)
+        token = mint_token(
+            room_name=room_name,
+            identity=agent_identity,
+            name="URA AI receptionist",
+            can_publish_data=True,
+        )
+        room.state.livekit_agent_identity = agent_identity
+        return LiveKitTransport(
+            url=os.environ["LIVEKIT_URL"].strip(),
+            token=token,
+            room_name=room_name,
+            params=LiveKitParams(audio_in_enabled=True, audio_out_enabled=True),
+        )
+
+    if websocket is None:
+        raise RuntimeError("A caller WebSocket is required for the demo transport")
     from pipecat.transports.websocket.fastapi import (
         FastAPIWebsocketParams,
         FastAPIWebsocketTransport,
@@ -145,7 +176,7 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
     processors, assistant_aggregator, brain = build_cascaded_branch(room, speech_model, chat_model)
     pipeline = Pipeline([
         transport.input(),
-        CallerAudioTap(room=room),
+        CallerAudioTap(room=room, speech_model=speech_model),
         *processors,
         OfficerOutputGate(room),
         transport.output(),

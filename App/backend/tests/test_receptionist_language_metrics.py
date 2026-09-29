@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import unittest
 import uuid
+from unittest.mock import patch
 
 from app import database as db
-from app.receptionist.metrics import compute_call_metrics, record_call_end_metrics
+from app.receptionist.metrics import compute_call_metrics, get_aggregate_metrics, record_call_end_metrics
 from app.receptionist.state import CallState
 from app.receptionist.store import create_call, get_call, init_receptionist_schema
 
@@ -50,6 +52,45 @@ class LanguageMetricsTests(unittest.TestCase):
         row = get_call(call_id)
         self.assertEqual(row["locale"], "lg")
         self.assertEqual(row["metrics"]["language"]["final"], metrics["language"]["final"])
+
+    def test_aggregate_reads_legacy_containment_snapshots(self):
+        rows = [
+            {
+                "metrics_json": json.dumps({
+                    "contained": True,
+                    "ai_answers": 1,
+                    "language": {"final": "en", "used": ["en"]},
+                }),
+                "transferred": 0,
+                "end_reason": "caller_hangup",
+                "locale": "en",
+            },
+            {
+                "metrics_json": json.dumps({
+                    "contained": True,
+                    "ai_answers": 2,
+                    "language": {"final": "lg", "used": ["lg"]},
+                }),
+                "transferred": 0,
+                "end_reason": "timeout",
+                "locale": "lg",
+            },
+            {
+                "metrics_json": json.dumps({
+                    "ai_only_completion": True,
+                    "ai_answers": 1,
+                    "language": {"final": "lg", "used": ["lg"]},
+                }),
+                "transferred": 0,
+                "end_reason": "caller_hangup",
+                "locale": "lg",
+            },
+        ]
+        with patch("app.receptionist.metrics.db.query_all", return_value=rows):
+            aggregate = get_aggregate_metrics(days=1)
+
+        self.assertEqual(aggregate["ai_only_completion_rate"], 0.667)
+        self.assertEqual(aggregate["luganda_ai_only_completion_rate"], 0.5)
 
 
 if __name__ == "__main__":

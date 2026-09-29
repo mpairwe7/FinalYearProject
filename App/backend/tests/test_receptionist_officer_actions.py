@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from app import database as db
 from app.auth.jwt_auth import make_dev_token
 from app.main import app
@@ -93,6 +94,36 @@ class TestOfficerActions(unittest.IsolatedAsyncioTestCase):
         call_db = get_call("call_xfer_1")
         self.assertEqual(call_db["status"], "transferring")
         self.assertEqual(call_db["target_team"], "disputes")
+
+    async def test_livekit_transfer_revokes_old_officer_before_requeue(self):
+        room = await self._make_bridged_room("call_livekit_xfer", "officer_nakato")
+        room.state.livekit_room = "ura-call_livekit_xfer"
+        room.state.livekit_officer_identity = "officer-old"
+        revoke = AsyncMock()
+
+        with patch.object(desk.livekit, "revoke_participant", revoke):
+            await desk.transfer("call_livekit_xfer", "officer_nakato", team="disputes")
+
+        revoke.assert_awaited_once_with("ura-call_livekit_xfer", "officer-old")
+        self.assertEqual(room.state.livekit_officer_identity, "")
+        self.assertEqual(room.state.mode, "transferring")
+
+    async def test_livekit_transfer_fails_closed_when_revocation_fails(self):
+        room = await self._make_bridged_room("call_livekit_xfer_fail", "officer_nakato")
+        room.state.livekit_room = "ura-call_livekit_xfer_fail"
+        room.state.livekit_officer_identity = "officer-old"
+        revoke = AsyncMock(side_effect=RuntimeError("API down"))
+
+        with (
+            patch.object(desk.livekit, "revoke_participant", revoke),
+            pytest.raises(desk.DeskError) as raised,
+        ):
+            await desk.transfer("call_livekit_xfer_fail", "officer_nakato", team="disputes")
+
+        self.assertEqual(raised.value.status, 503)
+        self.assertEqual(room.state.mode, "bridged")
+        self.assertEqual(room.state.livekit_officer_identity, "officer-old")
+        self.assertIsNotNone(room.officer)
 
     async def test_wrapup_saves_outcome_updates_ticket_and_restores_presence(self):
         create_call("call_wrap_1", status="ended", user_id="taxpayer_99")

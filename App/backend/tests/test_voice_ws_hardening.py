@@ -56,6 +56,26 @@ class WsConcurrencyCapTest(unittest.TestCase):
         # A different pool has its own budget.
         self.assertTrue(ws_concurrency.try_acquire("chat", "u", per_user_cap=1, global_cap=1))
 
+    def test_rekey_preserves_global_slot_and_enforces_authenticated_cap(self) -> None:
+        from app import ws_concurrency
+
+        self.assertTrue(ws_concurrency.try_acquire("call", "anon::ip", per_user_cap=5, global_cap=2))
+        self.assertTrue(ws_concurrency.rekey_slot("call", "anon::ip", "user-1", per_user_cap=1))
+        self.assertEqual(ws_concurrency.active("call"), 1)
+        self.assertTrue(ws_concurrency.try_acquire("call", "anon::other", per_user_cap=5, global_cap=2))
+        self.assertFalse(ws_concurrency.rekey_slot("call", "anon::other", "user-1", per_user_cap=1))
+
+    def test_production_websocket_requires_origin(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        from app.ws_concurrency import is_ws_origin_allowed
+
+        with patch.dict(os.environ, {"APP_ENV": "production", "CORS_ORIGINS": "https://ura.example"}):
+            self.assertFalse(is_ws_origin_allowed(None))
+            self.assertTrue(is_ws_origin_allowed("https://ura.example"))
+            self.assertFalse(is_ws_origin_allowed("https://evil.example"))
+
 
 class VoiceWsAuthTest(unittest.TestCase):
     def tearDown(self) -> None:

@@ -3,7 +3,7 @@
  * Connects to /api/v1/calls/stream without auto-reconnect (dropped calls end like real phone calls).
  */
 
-import { appendAuthToken } from '@/lib/authSession';
+import { getAuthToken } from '@/lib/authSession';
 
 export interface CallStartPayload {
   locale: string;
@@ -36,16 +36,16 @@ export class CallSocket {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const rawUrl = `${protocol}//${host}/api/v1/calls/stream`;
-    const authenticatedUrl = appendAuthToken(rawUrl);
 
     try {
-      this.ws = new WebSocket(authenticatedUrl);
+      this.ws = new WebSocket(rawUrl);
       this.ws.binaryType = 'arraybuffer';
 
       this.ws.onopen = () => {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           const initMsg = {
             type: 'call_start',
+            access_token: getAuthToken(),
             locale: startPayload.locale,
             preferred_locale: startPayload.preferred_locale ?? startPayload.locale,
             voice_consent_accepted: startPayload.voice_consent_accepted,
@@ -61,7 +61,7 @@ export class CallSocket {
         } else if (typeof event.data === 'string') {
           try {
             const data = JSON.parse(event.data);
-            this.callbacks.onMessage(data);
+            this.dispatchMessage(data);
           } catch {
             // Non-JSON text message
           }
@@ -82,6 +82,11 @@ export class CallSocket {
     } catch (err: unknown) {
       this.callbacks.onError((err as Error)?.message || 'Failed to open call socket');
     }
+  }
+
+  /** Route LiveKit reliable data messages through the same call event handler. */
+  dispatchMessage(message: Record<string, unknown>): void {
+    this.callbacks.onMessage(message);
   }
 
   sendAudio(pcmChunk: ArrayBuffer): void {
