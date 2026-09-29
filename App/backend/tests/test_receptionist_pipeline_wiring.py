@@ -40,7 +40,8 @@ class CascadedBranchTests(unittest.IsolatedAsyncioTestCase):
         # What Pipecat's UserIdleController does when the timer runs out.
         for handler in user_aggregator._event_handlers["on_user_turn_idle"].handlers:
             await handler(user_aggregator)
-        brain.on_caller_idle.assert_awaited_once_with(speech)
+        brain.on_caller_idle.assert_awaited_once_with()
+        self.assertIs(brain.speech_model, speech)  # the goodbye is spoken with it
 
 
 class MultilingualPipelineTests(unittest.IsolatedAsyncioTestCase):

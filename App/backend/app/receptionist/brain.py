@@ -163,6 +163,10 @@ def is_human_request(text: str) -> bool:
     )
 
 
+#: In-call controls are whole requests, not words inside a question: "I said
+#: goodbye to my employer — how do I file PAYE?" must be answered, not hung up.
+_CONTROL_MAX_WORDS = 8
+
 _REPEAT_PATTERNS: Final[re.Pattern[str]] = re.compile(
     r"\b(?:repeat\s+that|say\s+that\s+again|could\s+you\s+repeat|pardon\s+me|what\s+did\s+you\s+say"
     r"|kiddemu|ddamu|nsaba\s+oddemu|kiddemu\s+katono"
@@ -183,6 +187,11 @@ _HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
     r"|kata\s+simu|maliza\s+simu|kwaheri)\b",
     re.IGNORECASE,
 )
+
+
+def _is_control_request(pattern: re.Pattern[str], text: str) -> bool:
+    """*text* is a short in-call request matching *pattern* (see _CONTROL_MAX_WORDS)."""
+    return len(text.split()) <= _CONTROL_MAX_WORDS and pattern.search(text) is not None
 
 
 _TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
@@ -238,11 +247,14 @@ class UraReceptionistBrain(LLMService):
         room: Any,
         chat_model: Any,
         clarify_gate: ClarifyGate | None = None,
+        speech_model: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
         self.chat_model = chat_model
+        # For lines spoken outside the TTS pipeline (a goodbye before hanging up).
+        self.speech_model = speech_model
         self.clarify_gate = clarify_gate or ClarifyGate(
             threshold=get_clarify_threshold(),
             max_attempts=get_max_clarify_attempts(),
@@ -408,7 +420,7 @@ class UraReceptionistBrain(LLMService):
             return
 
         # 1b. In-Call User Control: Repeat Request
-        if _REPEAT_PATTERNS.search(user_text):
+        if _is_control_request(_REPEAT_PATTERNS, user_text):
             last_ans = getattr(self.room.state, "last_assistant_answer", "")
             if last_ans:
                 prefix = {
@@ -419,28 +431,18 @@ class UraReceptionistBrain(LLMService):
                 await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
                 return
 
-        # 1c. In-Call User Control: Speech Rate Adjustment
-        if _SPEED_SLOW_PATTERNS.search(user_text):
+        # 1c. In-Call User Control: Speech Rate Adjustment. The local voices
+        # have no speed control; the call pauses between sentences instead
+        # (UraSpeechTTS, RECEPTIONIST_SLOW_PAUSE_MS), which is what it promises.
+        if _is_control_request(_SPEED_SLOW_PATTERNS, user_text):
             self.room.state.speech_rate_slow = True
-            ack = {
-                "en": "I'll speak more slowly. What is your question?",
-                "lg": "Nja kwogera mpola. Ekibuuzo kyo kiri kki?",
-                "sw": "Nitaongea polepole zaidi. Una swali gani?",
-            }.get(language, "I'll speak more slowly. What is your question?")
-            await self._say_and_record(ack, kind="notice")
+            await self._say_and_record(phrase("slow_ack", language), kind="notice")
             return
 
         # 1d. In-Call User Control: Voice Hangup / Disconnect
-        if _HANGUP_VOICE_PATTERNS.search(user_text):
-            farewell = {
-                "en": "Thank you for calling URA. Goodbye!",
-                "lg": "Webale okukuba essimu eri URA. Weeraba!",
-                "sw": "Asante kwa kupiga simu URA. Kwaheri!",
-            }.get(language, "Thank you for calling URA. Goodbye!")
-            from .desk import hang_up_caller
-
-            await self._say_and_record(farewell, kind="notice")
-            await hang_up_caller(self.room, "caller_voice_hangup")
+        if _is_control_request(_HANGUP_VOICE_PATTERNS, user_text):
+            logger.info("Ending call %s: the caller said goodbye", self.room.call_id)
+            await self._end_call_after(phrase("officer_closing", language), "caller_voice_hangup")
             return
 
         # 2. Pending Clarification
@@ -679,7 +681,7 @@ class UraReceptionistBrain(LLMService):
             "english_query": english_query,
         }
 
-    async def on_caller_idle(self, speech_model: Any) -> None:
+    async def on_caller_idle(self) -> None:
         """The caller has said nothing since the assistant stopped speaking.
 
         Checks they are still there, up to ``RECEPTIONIST_IDLE_REPROMPTS``
@@ -696,16 +698,22 @@ class UraReceptionistBrain(LLMService):
             await self._say_and_record(phrase("idle_check", self.language), kind="notice")
             return
         logger.info("Ending call %s: the caller has been silent", self.room.call_id)
+        await self._end_call_after(phrase("idle_goodbye", self.language), "caller_idle")
+
+    async def _end_call_after(self, goodbye: str, reason: str) -> None:
+        """Say *goodbye*, then end the call once the caller has heard it.
+
+        Spoken like an officer's closing line: its length is known, so the call
+        ends after the caller has heard it, not when the transport (which sends
+        faster than real time) has finished sending it. Shielded: ending the
+        call cancels the pipeline task this may run in.
+        """
         from .desk import hang_up_caller, say_to_caller
 
-        # Spoken like an officer's closing line: its length is known, so the
-        # call ends once the caller has heard it, not when the transport (which
-        # sends faster than real time) has finished sending it. Shielded: ending
-        # the call cancels the pipeline task this handler runs in.
         async def _goodbye() -> None:
-            duration = await say_to_caller(self.room, phrase("idle_goodbye", self.language), speech_model)
+            duration = await say_to_caller(self.room, goodbye, self.speech_model)
             await asyncio.sleep(duration + 0.3)
-            await hang_up_caller(self.room, "caller_idle")
+            await hang_up_caller(self.room, reason)
 
         await asyncio.shield(asyncio.ensure_future(_goodbye()))
 

@@ -201,14 +201,9 @@ def get_turn_timeout_s() -> float:
     return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
 
 
-def get_fast_turn_timeout_s() -> float:
-    """Silence after a completed question or terminal punctuation before the turn closes."""
-    return _env_float("RECEPTIONIST_FAST_TURN_TIMEOUT_S", 0.35)
-
-
-def get_hesitation_turn_timeout_s() -> float:
-    """Silence allowed when the caller trails off on an incomplete conjunction or preposition."""
-    return _env_float("RECEPTIONIST_HESITATION_TURN_TIMEOUT_S", 1.2)
+def get_slow_pause_ms() -> int:
+    """Silence after each sentence once a caller has asked the assistant to slow down."""
+    return max(0, _env_int("RECEPTIONIST_SLOW_PAUSE_MS", 600))
 
 
 def get_idle_reprompt_s() -> float:

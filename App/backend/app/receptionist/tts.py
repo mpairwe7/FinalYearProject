@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 
 from .. import orpheus_tts
-from .config import allow_edge_standin_lg, get_tts_voice
+from .config import allow_edge_standin_lg, get_slow_pause_ms, get_tts_voice
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +115,24 @@ class UraSpeechTTS(TTSService):
         self._language = value
 
     async def run_tts(self, text: str, context_id: str = "", *args: Any, **kwargs: Any) -> AsyncGenerator[Frame, None]:
-        """Synthesize text and stream chunked PCM16 LE frames."""
-        clean_text = text.strip()
-        if not clean_text:
+        """Synthesize one sentence and stream chunked PCM16 LE frames.
+
+        A caller who asked the assistant to slow down hears a pause after every
+        sentence (``RECEPTIONIST_SLOW_PAUSE_MS``): the local voices have no
+        speed control, and a pause is what the assistant told them to expect.
+        """
+        if not text.strip():
             return
+        async for frame in self._voice(text, context_id):
+            yield frame
+        state = getattr(self.room, "state", None)
+        if getattr(state, "speech_rate_slow", False):
+            silence = b"\x00" * 640  # 20 ms at 16 kHz mono PCM16
+            for _ in range(get_slow_pause_ms() // 20):
+                yield TTSAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1)
+
+    async def _voice(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
+        clean_text = text.strip()
         language = self.language
 
         t0 = time.perf_counter()

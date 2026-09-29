@@ -234,31 +234,15 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(sum(text in fillers("lg") for text in kinds), 1)
 
-    def test_canonical_tax_response_matches_vat_and_toll_free(self):
-        # English VAT
-        self.state.locale = "en"
-        res_en = self.brain._check_canonical_tax_response("What is the standard VAT rate in Uganda?")
-        self.assertIsNotNone(res_en)
-        self.assertIn("18%", res_en["reply"])
-        self.assertEqual(res_en["faithfulness_score"], 1.0)
+    async def test_a_statutory_rate_question_is_answered_from_retrieval(self):
+        """No hardcoded rates: the answer (and its figure) comes from the knowledge base."""
+        frame = LLMContextFrame(context="What is the standard VAT rate in Uganda?")
+        await self.brain.process_frame(frame)
+        self.chat_model.generate.assert_called_once()
 
-        # Luganda VAT
-        self.state.locale = "lg"
-        res_lg = self.brain._check_canonical_tax_response("ebitundu bimeka ku musolo gwa VAT?")
-        self.assertIsNotNone(res_lg)
-        self.assertIn("ebitundu 18", res_lg["reply"])
-
-        # Swahili VAT
-        self.state.locale = "sw"
-        res_sw = self.brain._check_canonical_tax_response("Kiwango cha VAT ni kiasi gani nchini?")
-        self.assertIsNotNone(res_sw)
-        self.assertIn("asilimia 18", res_sw["reply"])
-
-        # Calculations must NOT match canonical (preserved for MCP calculator)
-        calc_query = self.brain._check_canonical_tax_response("Calculate VAT on 500,000 UGX")
-        self.assertIsNone(calc_query)
-
-    async def test_pipelined_sentence_playout(self):
+    async def test_the_answer_reaches_tts_as_one_frame_with_its_spacing(self):
+        """The TTS aggregator splits sentences itself; pushing them separately
+        without the space between them merged "portal.Step" into one."""
         self.brain.push_frame.reset_mock()
         await self.brain._say_and_record("Step 1. Visit the portal. Step 2. Submit your form.")
         text_frames = [
@@ -266,7 +250,7 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
             for c in self.brain.push_frame.call_args_list
             if c.args[0].__class__.__name__ == "LLMTextFrame"
         ]
-        self.assertGreaterEqual(len(text_frames), 2)
+        self.assertEqual(text_frames, ["Step 1. Visit the portal. Step 2. Submit your form."])
 
     async def test_in_call_voice_control_repeat(self):
         self.state.locale = "en"
@@ -279,19 +263,37 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         self.assertIn("18 percent", last_turn["text"])
 
     async def test_in_call_voice_control_speed_slower(self):
+        from app.receptionist.phrases import phrase
+
         self.state.locale = "lg"
         self.assertFalse(self.state.speech_rate_slow)
         frame = LLMContextFrame(context="Yogera mpola")
         await self.brain.process_frame(frame)
-        self.assertTrue(self.state.speech_rate_slow)
+        self.assertTrue(self.state.speech_rate_slow)  # UraSpeechTTS now pauses between sentences
         turns = list_turns(self.call_id)
-        self.assertTrue(any("Nja kwogera mpola" in t["text"] for t in turns))
+        self.assertIn(phrase("slow_ack", "lg"), [t["text"] for t in turns])
+        self.chat_model.generate.assert_not_called()
 
-    async def test_in_call_voice_control_hangup(self):
+    async def test_in_call_voice_control_hangup_is_heard_before_the_call_ends(self):
+        from app.receptionist.phrases import phrase
+
         self.state.locale = "en"
-        with patch("app.receptionist.desk.hang_up_caller", new_callable=AsyncMock) as mock_hangup:
-            frame = LLMContextFrame(context="Goodbye, thank you")
-            await self.brain.process_frame(frame)
-            mock_hangup.assert_called_once_with(self.room, "caller_voice_hangup")
+        order: list[str] = []
+        say = AsyncMock(side_effect=lambda *_a: order.append("said") or 0.0)
+        hang_up = AsyncMock(side_effect=lambda *_a: order.append("hung up"))
+        with patch("app.receptionist.desk.say_to_caller", say), patch("app.receptionist.desk.hang_up_caller", hang_up):
+            await self.brain.process_frame(LLMContextFrame(context="Goodbye, thank you"))
+        say.assert_awaited_once_with(self.room, phrase("officer_closing", "en"), self.brain.speech_model)
+        hang_up.assert_awaited_once_with(self.room, "caller_voice_hangup")
+        self.assertEqual(order, ["said", "hung up"])
+
+    async def test_a_question_that_mentions_goodbye_is_answered_not_hung_up(self):
+        hang_up = AsyncMock()
+        with patch("app.receptionist.desk.hang_up_caller", hang_up):
+            await self.brain.process_frame(LLMContextFrame(
+                context="I said goodbye to my old employer last month, so how do I file my PAYE now?"
+            ))
+        hang_up.assert_not_awaited()
+        self.chat_model.generate.assert_called_once()
 
 

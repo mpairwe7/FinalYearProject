@@ -23,9 +23,9 @@ class CallerIdleTests(unittest.IsolatedAsyncioTestCase):
         self.state = CallState(call_id=self.call_id, conversation_id=f"conv_{self.call_id}", mode="ai")
         self.room = CallRoom(call_id=self.call_id, state=self.state)
         self.chat_model = MagicMock()
-        self.brain = UraReceptionistBrain(room=self.room, chat_model=self.chat_model)
-        self.brain.push_frame = AsyncMock()
         self.speech = MagicMock()
+        self.brain = UraReceptionistBrain(room=self.room, chat_model=self.chat_model, speech_model=self.speech)
+        self.brain.push_frame = AsyncMock()
         self.say_to_caller = AsyncMock(return_value=0.0)
         self.hang_up_caller = AsyncMock()
         patches = [
@@ -41,47 +41,47 @@ class CallerIdleTests(unittest.IsolatedAsyncioTestCase):
         return [t["text"] for t in list_turns(self.call_id) if t["speaker"] == "assistant"]
 
     async def test_the_first_silence_checks_on_the_caller(self):
-        await self.brain.on_caller_idle(self.speech)
+        await self.brain.on_caller_idle()
         self.assertEqual(self.said(), [phrase("idle_check", "en")])
         self.assertEqual(self.state.idle_prompts, 1)
         self.hang_up_caller.assert_not_awaited()
 
     async def test_continued_silence_says_goodbye_and_ends_the_call(self):
-        await self.brain.on_caller_idle(self.speech)
-        await self.brain.on_caller_idle(self.speech)
+        await self.brain.on_caller_idle()
+        await self.brain.on_caller_idle()
         self.say_to_caller.assert_awaited_once_with(self.room, phrase("idle_goodbye", "en"), self.speech)
         self.hang_up_caller.assert_awaited_once_with(self.room, "caller_idle")
 
     async def test_no_check_at_all_ends_the_call_at_the_first_silence(self):
         with patch.dict(os.environ, {"RECEPTIONIST_IDLE_REPROMPTS": "0"}):
-            await self.brain.on_caller_idle(self.speech)
+            await self.brain.on_caller_idle()
         self.assertEqual(self.said(), [])
         self.hang_up_caller.assert_awaited_once_with(self.room, "caller_idle")
 
     async def test_the_check_is_in_the_call_s_language(self):
         self.state.locale = "lg"
-        await self.brain.on_caller_idle(self.speech)
+        await self.brain.on_caller_idle()
         self.assertEqual(self.said(), [phrase("idle_check", "lg")])
 
     async def test_a_caller_waiting_for_an_officer_is_left_alone(self):
         for mode in ("transferring", "bridged", "ended"):
             with self.subTest(mode=mode):
                 self.state.mode = mode
-                await self.brain.on_caller_idle(self.speech)
+                await self.brain.on_caller_idle()
         self.assertEqual(self.said(), [])
         self.hang_up_caller.assert_not_awaited()
 
     async def test_silence_while_an_answer_is_worked_out_is_not_the_caller_s(self):
         self.brain._answering = True
-        await self.brain.on_caller_idle(self.speech)
+        await self.brain.on_caller_idle()
         self.assertEqual((self.said(), self.state.idle_prompts), ([], 0))
 
     async def test_speaking_again_starts_the_count_over(self):
-        await self.brain.on_caller_idle(self.speech)
+        await self.brain.on_caller_idle()
         self.chat_model.generate.return_value = {"reply": "Use the URA portal.", "sources": ["Guide"]}
         await self.brain.handle_external_question("How do I register for a TIN?", [])
         self.assertEqual(self.state.idle_prompts, 0)
-        await self.brain.on_caller_idle(self.speech)
+        await self.brain.on_caller_idle()
         self.hang_up_caller.assert_not_awaited()  # a fresh check, not the goodbye
 
     async def test_the_answering_flag_clears_even_when_generation_fails(self):

@@ -122,12 +122,12 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
     # broadcasts) and before the STT, so the caller reads their sentence taking
     # shape instead of waiting for the segmented recognizer to close the turn.
     partial_tap = LivePartialTranscriptTap(room=room, speech_model=speech_model, language=initial)
-    brain = UraReceptionistBrain(room=room, chat_model=chat_model)
+    brain = UraReceptionistBrain(room=room, chat_model=chat_model, speech_model=speech_model)
     tts = UraSpeechTTS(speech_model=speech_model, language=initial, room=room)
 
     @context_aggregator.user().event_handler("on_user_turn_idle")
     async def _caller_idle(_aggregator: Any) -> None:
-        await brain.on_caller_idle(speech_model)
+        await brain.on_caller_idle()
 
     processors = [
         vad_processor,
