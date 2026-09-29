@@ -465,7 +465,8 @@ class VoiceSession:
                 mt_degraded.append("en-sw")
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
         elif detected_lang in ("lg", "sw"):
-            tts_lang = detected_lang
+            # generate() localised the reply itself; it is English if that failed.
+            tts_lang = str(llm_result.get("reply_locale") or detected_lang)
 
         # Clean speech text for natural phonetics and pacing
         try:
@@ -658,6 +659,35 @@ class VoiceSession:
 # ---------------------------------------------------------------------------
 
 
+_LIST_MARKER_RE = re.compile(r"(?:^|(?<=\s))(\d{1,3})\.\s+")
+
+
+def _mark_list_steps(text: str) -> str:
+    """Rewrite numbered-list markers ("1. ", "2. ") as "Step 1:" so each stays with its clause.
+
+    Only markers: a "1." opening a line or following a colon, then the next
+    number of that list. A number that ends a sentence is left alone, so "Your
+    reference number is 123. Keep it safe." is not read as "Step 123".
+    """
+    out: list[str] = []
+    cursor = 0
+    expected: int | None = None
+    for match in _LIST_MARKER_RE.finditer(text):
+        number = int(match.group(1))
+        before = text[: match.start()]
+        opens = number == 1 and (
+            not before.strip() or before.rstrip(" \t").endswith("\n") or before.rstrip().endswith(":")
+        )
+        if not opens and number != expected:
+            continue
+        out.append(text[cursor : match.start()])
+        out.append(f"Step {number}:\x02 ")
+        cursor = match.end()
+        expected = number + 1
+    out.append(text[cursor:])
+    return "".join(out)
+
+
 def _split_sentences(text: str) -> list[str]:
     """Split text into sentences for chunked TTS.
 
@@ -692,11 +722,7 @@ def _split_sentences(text: str) -> list[str]:
     )
 
     # Protect numbered list steps (e.g. "1. ", "2. ") so they remain with their clause
-    protected = re.sub(
-        r"(?:^|\s)(\d+)\.\s+",
-        lambda m: f" Step {m.group(1)}:\x02 ",
-        protected,
-    )
+    protected = _mark_list_steps(protected)
 
     parts = _SENTENCE_RE.split(protected.strip())
 
