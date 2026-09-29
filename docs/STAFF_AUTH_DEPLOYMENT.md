@@ -41,6 +41,13 @@ through leg 3, and the callback then routes by role:
 - `ura_auditor` $\rightarrow$ `/analytics` (Auditor dashboard)
 - Citizen taxpayers $\rightarrow$ `/` (Tax Assistant Chat)
 
+An auditor reads everything staff can read and changes nothing, and the API
+enforces it, not only the console: ticket updates, the ticket presence
+heartbeat, call actions, flag toggles and override edits answer 403 to
+`ura_auditor`. Administrators and auditors (not case officers) read the
+tamper-evident audit trail at `/admin/audit`; see
+[`runbooks/audit-trail.md`](runbooks/audit-trail.md).
+
 Leg 3 is the only browser call that does **not** go through the `/api/*` rewrite.
 A public client holds no secret, so there is nothing for a server-side proxy to
 protect, and the backend issues no tokens of its own. That is why the provider

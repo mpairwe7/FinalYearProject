@@ -123,6 +123,7 @@ export const RETRIEVAL_MODE_LABEL: Record<string, string> = {
   calculator: "Calculated an amount",
   officer_reply: "Delivered an officer's reply",
   answer_override: "Used a staff-written answer",
+  crisis_support: "Gave crisis support lines",
 };
 
 export function retrievalModeLabel(mode: string): string {

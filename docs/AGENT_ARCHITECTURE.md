@@ -179,7 +179,7 @@ The routing is handled in
 |---|---|---|---|
 | 1 | `ESCALATE` | Human-contact phrases (`speak to`, `talk to`, `contact a human/agent/officer`) | None |
 | 1 | `ESCALATE` | Dispute / legal vocab (`dispute`, `objection`, `audit`, `appeal`, `court`, `lawyer`, `fraud`) | None |
-| 1 | `ESCALATE` | Account-specific (`my TIN`, `my filing`, `my return`, `my account`, `my balance`) | None |
+| 1 | `ESCALATE` | Account-specific (`my TIN`, `my filing`, `my return`, `my account`, `my balance`) | Not phrased as a how-to (`HOW_TO_QUESTION_RE` in `agents/patterns/en.py`: "how do I", "how to", "where can I", "guide me", "walk me through", "steps to", "procedure"). "How do I file my return?" is answered; "What is my balance?" and "Please help me, my account is locked" escalate — "help me" is deliberately not a how-to cue. The answer judge applies the same exemption. |
 | 2 | `CLARIFY` | Single-word stop-word-only queries | No conversation history |
 | 3 | `TOOLS` | Calculation intent: `how much X` / `calculate X` for VAT, PAYE, CIT, CGT, customs duty | None |
 | 4 | `TOOLS` | Temporal: `today`, `now`, `current fiscal year`, `next deadline`, `this month` | None |
@@ -590,7 +590,7 @@ integrations haven't been built yet:
 | G1 — Auth | 🟢 **Landed in Phase 14** — OIDC-ready JWT verifier + FastAPI dependencies.  HS256 dev path + RS256/JWKS stubs for Keycloak. |
 | G2 — User profile | 🟢 **Landed in Phase 14** — `users` + `user_profiles` + `consent_receipts` tables + /v1/me/* endpoints. |
 | G5 — Long-term memory | 🟢 **Landed in Phase 16** — three-tier (working + episodic + semantic) with consent-gated retrieval + temporal decay. |
-| G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. |
+| G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. 2026-09-29: envelope hashed (v2), scheduled and on-demand seals checked by `verify_ledger`, auditor view at `/admin/audit` (gaps G66–G72). |
 | G13 — Document uploads | 🟢 **Landed (#222)** — `POST /v1/documents/analyze` + `GET /v1/documents/{id}/report`, backed by `documents.py`, `ocr_service.py` and `vision/`. **2026-08-17:** `pdf_guards.py` fail-closed intake (header, encryption, JS/Launch/embedded files, xref/page caps), Office zip-slip/macro reject, LLM01 scrub + `<untrusted_user_document>` wrap. No ClamAV; no `mcp_document_parser`. |
 | G14 — Notifications | ⚪ Scheduler for deadline reminders via email / SMS / in-app.  Phase 20 (scaffolded). |
 | G16 — Knowledge graph | 🟡 **Graph + RRF fusion code shipped 2026-08-17** — `app/graph/` projects the rate tables; REST/stream fuse it as a third RRF leg. `FLAG_TAX_GRAPH` / `FLAG_GRAPH_FUSION` stay default off until unseen multi-hop ≥ 75%. Fusion is rank-level, not passage-id linked. Golden set: `agents/eval_multihop.py`. |

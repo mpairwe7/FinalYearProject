@@ -121,12 +121,30 @@ export function trackEvent(eventType: string, data: Record<string, unknown> = {}
 /**
  * Submit feedback for a specific bot message.
  */
+/**
+ * Where a rated reply came from. Sent with the rating so the analytics
+ * journey panel can show which journey step taxpayers found least helpful.
+ * Identifiers only; the API rejects anything but lowercase [a-z0-9_].
+ */
+export interface FeedbackContext {
+  retrievalMode?: string;
+  workflowId?: string;
+  stepId?: string;
+}
+
+const CONTEXT_ID = /^[a-z0-9_]{1,64}$/;
+
+function contextField(value: string | undefined): string {
+  return value && CONTEXT_ID.test(value) ? value : '';
+}
+
 export async function submitFeedback(
   messageId: string,
   rating: 'up' | 'down',
   comment: string = '',
   userQuery: string = '',
   botReply: string = '',
+  context: FeedbackContext = {},
 ): Promise<{ id: string } | null> {
   if (!hasAnalyticsConsent()) return null;
   const sessionId = getSessionId();
@@ -141,6 +159,11 @@ export async function submitFeedback(
         session_id: sessionId,
         user_query: userQuery,
         bot_reply: botReply,
+        // A malformed identifier would make the API refuse the whole rating,
+        // so an unexpected value is dropped here rather than sent.
+        retrieval_mode: contextField(context.retrievalMode),
+        workflow_id: contextField(context.workflowId),
+        step_id: contextField(context.stepId),
       }),
     });
     if (!res.ok) return null;

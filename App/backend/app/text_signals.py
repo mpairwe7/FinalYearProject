@@ -16,6 +16,10 @@ create an import cycle.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Superset of claim_verifier's historical stopword list; used to reduce
 # sentences to content tokens so function words cannot dominate overlap.
@@ -139,11 +143,16 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"|still (can't|cannot|no|not)"
         ),
     ),
+    # "help me" and "lost my" used to be anxiety cues. They are how people ask
+    # for things — "help me register for a TIN", "I lost my TIN certificate" —
+    # and on 2026-09-29 every "Help me …" request to the live stack opened with
+    # "I understand this can feel stressful". A request is not distress; a
+    # worried request still carries a worry word, which stays below.
     (
         "anxiety",
         re.compile(
             r"worried|worry|worrying|scared|afraid|anxious|confus|stress"
-            r"|help me|don't know what|don't understand|do not understand|lost my"
+            r"|don't know what|don't understand|do not understand"
         ),
     ),
     (
@@ -483,6 +492,170 @@ def empathy_ack(kind: str) -> str:
     acknowledgment never dilutes faithfulness or claim verification.
     """
     return _EMPATHY_ACKS.get(kind, "")
+
+
+def ack_already_given(kind: str, prior_replies: Sequence[str], lookback: int = 2) -> bool:
+    """Whether the opener for *kind* began one of the last *lookback* replies.
+
+    The openers are fixed sentences, so a taxpayer who stays worried for three
+    turns would read the same line three times — the formulaic empathy that
+    makes an assistant sound scripted. Callers that prepend an opener ask this
+    first; :func:`strip_repeated_ack` covers replies that already carry one.
+    """
+    ack = _EMPATHY_ACKS.get(kind, "")
+    if not ack:
+        return False
+    return any((r or "").lstrip().startswith(ack) for r in list(prior_replies)[-lookback:])
+
+
+def strip_repeated_ack(reply: str, prior_replies: Sequence[str], lookback: int = 2) -> str:
+    """Drop a leading empathy opener already used in the last *lookback* replies.
+
+    The first acknowledgement stays; repeats go, and the answer below them is
+    untouched.
+    """
+    text = reply or ""
+    stripped = text.lstrip()
+    for kind, ack in _EMPATHY_ACKS.items():
+        if stripped.startswith(ack) and ack_already_given(kind, prior_replies, lookback):
+            return stripped[len(ack):].lstrip()
+    return text
+
+
+#: Distress kinds that, repeated across turns, mean the conversation is not
+#: working for the person and a human should be offered.
+_SUSTAINED_KINDS = frozenset({"frustration", "confusion", "anxiety", "hardship"})
+
+
+def distress_trajectory(
+    current_kind: str, prior_user_messages: Sequence[str], window: int = 3
+) -> dict[str, Any]:
+    """Distress across the last *window* user turns, the current one included.
+
+    One upset message is handled by tone. The same upset over consecutive
+    turns means the answers are not landing, which is the moment to offer a
+    person rather than another rephrasing. ``sustained`` needs the current turn
+    to be negative too, so a taxpayer who has calmed down is not offered a
+    handoff for how they felt two messages ago.
+    """
+    # window == 1 is the current turn alone; [-0:] would be the whole history.
+    previous = list(prior_user_messages)[-(window - 1):] if window > 1 else []
+    earlier = [detect_user_distress(m) for m in previous]
+    kinds = [*earlier, current_kind or ""]
+    negative = sum(1 for k in kinds if k in _SUSTAINED_KINDS)
+    return {
+        "kinds": kinds,
+        "negative_turns": negative,
+        "sustained": negative >= 2 and (current_kind or "") in _SUSTAINED_KINDS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Crisis
+#
+# A message about ending one's life is not a tax question and must not be
+# answered as one — least of all by retrieval, which would find a penalty
+# table for "I can't pay, I want to die". It is checked before routing, and the
+# reply points to people who can help now. English plus the Luganda
+# (okwetta) and Kiswahili (kujiua) verbs for killing oneself.
+# ---------------------------------------------------------------------------
+
+_CRISIS_RE = re.compile(
+    r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
+    r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
+    r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
+    r"|okwetta|kujiua)\b"
+)
+
+#: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency
+#: page (upf.go.ug); 0800 21 21 21 as published by Mental Health Uganda. Check
+#: both again before moving this date.
+CRISIS_LINES_VERIFIED_ON = "2026-09-29"
+
+
+def detect_crisis(message: str) -> bool:
+    """True when *message* expresses intent to self-harm."""
+    return bool(_CRISIS_RE.search(_normalise(message)))
+
+
+#: Conversational repair: a turn that is all feeling and no task ("This is
+#: useless", "It still does not work") gives retrieval nothing to search for.
+#: On the local stack (2026-09-29) exactly that turn retrieved a passage about
+#: URA's own funding problems and read it back to the taxpayer. Asking what they
+#: are trying to do is the repair a person at a counter would make.
+REPAIR_QUESTION = (
+    "What are you trying to do: file a return, make a payment, register for a TIN, "
+    "or something else? Tell me where it stops and I'll take it from there."
+)
+REPAIR_REPEAT_REPLY = (
+    "It sounds like this still isn't working for you. An officer can look at it with "
+    "you: tap **Talk to an officer**. Or tell me the task and the step where it stops."
+)
+REPAIR_NEXT_ACTIONS = ("File a return", "Make a payment", "Register for a TIN", "Talk to an officer")
+
+#: Words that carry how the taxpayer feels, not what they are doing. A message
+#: made only of these names no task. "The portal is not working" keeps
+#: "portal" and "I don't understand what chargeable income means" keeps
+#: "chargeable income", so both are still answered.
+_FEELING_WORDS = frozenset(
+    {
+        "useless", "ridiculous", "annoying", "annoyed", "frustrating", "frustrated", "angry",
+        "confused", "confusing", "lost", "understand", "still", "work", "works", "working",
+        "worked", "nothing", "again", "help", "please", "anything", "don", "doesn", "isn",
+        "won", "can", "cannot", "t", "s", "so", "really", "very", "totally", "completely",
+        "fed", "up", "same", "problem", "why", "going", "happening", "wrong", "had", "enough",
+        # Contraction fragments: the tokenizer splits "I'm" into "i" + "m", so
+        # without these "I'm confused" named a task called "m".
+        "i", "m", "ve", "re", "ll", "d",
+    }
+)
+
+
+def is_feeling_only(message: str) -> bool:
+    """True when *message* expresses a feeling but names nothing to act on."""
+    return not (content_tokens(message) - _FEELING_WORDS)
+
+
+#: Small talk that names no task either ("hello", "thanks, ok").
+_SMALL_TALK_WORDS = frozenset(
+    {"hello", "hi", "hey", "thanks", "thank", "good", "morning", "afternoon", "evening", "ok", "okay", "yes", "no"}
+)
+
+
+def names_a_task(message: str) -> bool:
+    """True when *message* carries something beyond feelings and small talk.
+
+    Used on the *previous* user turn: "I don't understand" after a real
+    question wants that answer re-explained, not a fresh "what are you trying
+    to do?"; after a greeting or another outburst it does.
+    """
+    return bool(content_tokens(message) - _FEELING_WORDS - _SMALL_TALK_WORDS)
+
+
+def repair_reply(kind: str, *, repeated: bool) -> str:
+    """Clarifying reply for a distressed turn that names no task.
+
+    Frustration is acknowledged. Confusion is not given its usual opener,
+    "Let me put that a different way.", because a repair has nothing to
+    rephrase — it asks what the taxpayer wants to do.
+    """
+    if repeated:
+        return REPAIR_REPEAT_REPLY
+    ack = empathy_ack(kind) if kind != "confusion" else ""
+    return f"{ack}\n\n{REPAIR_QUESTION}" if ack else REPAIR_QUESTION
+
+
+def crisis_support_reply() -> str:
+    """Supportive reply with Ugandan crisis lines. Never carries tax content."""
+    return (
+        "I'm really sorry you're feeling this way. You don't have to face this alone, "
+        "and your safety matters more than any tax matter.\n\n"
+        "- If you are in danger right now, call **999** or **112**.\n"
+        "- To talk to a trained counsellor for free, call Mental Health Uganda on "
+        "**0800 21 21 21** (Monday to Friday, 8:30am to 5pm).\n\n"
+        "The tax side can wait. When you're ready, a URA officer can talk through "
+        "your options with you, including paying in instalments."
+    )
 
 
 def tone_hint_for(kind: str) -> str:

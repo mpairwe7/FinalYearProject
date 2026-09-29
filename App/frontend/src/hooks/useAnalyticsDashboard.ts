@@ -26,6 +26,16 @@ export function useFeedbackSummary(days = 30) {
   });
 }
 
+export function useJourneyFunnel(days = 30) {
+  return useQuery({
+    queryKey: queryKeys.analytics.journeys(days),
+    queryFn: () => analyticsApi.journeys(days),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 1,
+  });
+}
+
 export function useTicketStats(days = 30) {
   return useQuery({
     queryKey: queryKeys.tickets.stats(days),

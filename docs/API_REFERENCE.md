@@ -399,6 +399,13 @@ POST /v1/feedback
 | `session_id` | string | No | Client session identifier |
 | `user_query` | string | No | Original question (PII-redacted before storage) |
 | `bot_reply` | string | No | Bot response that was rated (PII-redacted before storage) |
+| `retrieval_mode` | string | No | Route that produced the reply (e.g. `workflow`, `hybrid`) |
+| `workflow_id` | string | No | Guided journey the reply belongs to (e.g. `tax_clearance`) |
+| `step_id` | string | No | Journey step the reply asked (e.g. `collect_returns_filed`) |
+
+The three context fields are identifiers only: lowercase letters, digits and
+`_`, at most 64 characters. Anything else is refused with 422. They let
+`GET /v1/analytics/journeys` attribute ratings to journey steps.
 
 **Response**
 ```json
@@ -473,6 +480,172 @@ GET /v1/feedback/summary?days=30
 `recent` carries at most the 20 newest ratings. `user_query` is the
 taxpayer's question as typed, stored PII-redacted at write time — it is
 what `/analytics` renders under "Taxpayer question".
+
+---
+
+### Guided-Journey Funnel
+
+How far taxpayers get through each guided journey in the period. Staff only
+(OIDC staff role or the operator key). Built from the stored journey sessions
+and feedback, so it is the same on every replica and survives restarts; the
+`journey_events_total` counter on `/metrics` is per replica and resets.
+
+```http
+GET /v1/analytics/journeys?days=30
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `days` | integer | No | Period in days (1–365, default 30), capped by `WORKFLOW_SESSION_TTL_DAYS` |
+
+`period_days` in the response is the covered period after that cap.
+Journey outcomes are retained for `WORKFLOW_SESSION_TTL_DAYS` (365 days by
+default); collected slot answers and the last prompt are cleared after
+`CONVERSATION_TTL_DAYS` (7 days by default).
+
+**Response**
+```json
+{
+  "period_days": 30,
+  "abandon_after_hours": 24,
+  "journeys": [
+    {
+      "workflow_id": "tax_clearance",
+      "name": "Tax Clearance Certificate",
+      "started": 10,
+      "completed": 6,
+      "cancelled": 1,
+      "abandoned": 2,
+      "in_progress": 1,
+      "completion_pct": 60.0,
+      "steps": [
+        {"step_id": "collect_returns_filed", "title": "Returns filed",
+         "stopped": 3, "helpful": 1, "not_helpful": 2}
+      ]
+    }
+  ]
+}
+```
+
+A journey still active but untouched for `JOURNEY_ABANDON_AFTER_HOURS`
+(default 24) counts as abandoned. `stopped` is attributed to the step at the
+session's saved position. Every journey a taxpayer can start by name is
+listed, even at zero; calculators appear once used. `/analytics` renders this
+as the "Guided journeys" panel.
+
+---
+
+### Audit Trail Events
+
+The tamper-evident audit trail, newest first. Administrators and auditors
+only (`ura_staff` gets 403). See `docs/runbooks/audit-trail.md` for what is
+recorded.
+
+```http
+GET /v1/admin/audit/events?event_type=staff.&actor=&since=&until=&before_seq=&limit=50
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event_type` | string | No | Event-type prefix, `[a-z_.]` only (`staff.` = every staff action) |
+| `actor` | string | No | Acting user's id |
+| `since` / `until` | number | No | Unix seconds |
+| `before_seq` | integer | No | Page cursor: the previous page's `next_before_seq` |
+| `limit` | integer | No | 1–200, default 50 |
+
+**Response**
+```json
+{
+  "ledger_enabled": true,
+  "events": [
+    {"seq": 42, "event_id": "…", "event_type": "staff.ticket_updated",
+     "actor": "officer-1", "ts": 1790000100.0,
+     "payload": {"actor_role": "ura_staff", "ticket_id": "…", "status": "resolved", "officer_reply_chars": 24},
+     "row_hash": "…"}
+  ],
+  "next_before_seq": 42
+}
+```
+
+`ledger_enabled` false means this deployment is not recording new events;
+what was recorded before is still returned. The first page of each search
+(no `before_seq`) is itself recorded as an `audit.trail_viewed` event with
+the filters used, after the query runs.
+
+---
+
+### Audit Trail Verification
+
+Re-walks the tenant's hash chain and re-checks its seals, and reports whether
+both are intact. Administrators and auditors only. Each call is recorded as
+an `audit.chain_verified` event.
+
+```http
+GET /v1/admin/audit/verify?scope=auto
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | `auto` (default): `full` up to `AUDIT_VERIFY_FULL_MAX_ROWS` rows (default 200 000), `since_seal` above it. `full`: every row and every seal. `since_seal`: the newest seal and the rows after it, resumed from the chain head the seal recorded (falls back to `full` with no seal). Anything else: 422. |
+
+**Response**
+```json
+{
+  "ledger_enabled": true,
+  "valid": false,
+  "scope": "full",
+  "rows_checked": 42,
+  "first_seq": 1,
+  "last_seq": 42,
+  "head_hash": "…",
+  "breaks": [{"seq": 17, "event_id": "…", "reason": "row_hash mismatch"}],
+  "anchors_checked": 1,
+  "anchor_breaks": [
+    {"anchor_id": "…", "first_seq": 1, "last_seq": 40,
+     "reason": "merkle_root mismatch: a sealed row's content changed"}
+  ],
+  "latest_anchor": {"anchor_id": "…", "first_seq": 1, "last_seq": 40,
+                    "merkle_root": "…", "head_hash": "…", "created_at": 1790000000.0},
+  "unsealed_rows": 2,
+  "verified_at": 1790000200.0
+}
+```
+
+Row `breaks` reasons: `payload_hash mismatch`, `prev_hash does not match
+previous row_hash`, `row_hash mismatch` (for v2 rows this includes an edited
+actor, event type or time), `sequence gap: rows a..b are missing`,
+`duplicate sequence number (two writers forked the chain)`, `hash format
+downgraded after a newer row`. Seal `anchor_breaks` reasons: `sealed range
+holds n rows, expected m`, `merkle_root mismatch: …`, `head_hash mismatch: the
+chain was rewritten under the seal`. Each list holds at most the first 20.
+Ticket updates (`PATCH /v1/admin/tickets/{id}`) and the presence heartbeat
+answer 403 to `ura_auditor`, which is read-only.
+
+---
+
+### Seal the Audit Trail
+
+Seals every row written since the newest seal: records the range's Merkle
+root and the chain head, and writes the same values to the log as the
+external witness. Administrators and auditors only (`ura_staff` gets 403).
+The API also seals on a schedule (`AUDIT_SEAL_INTERVAL_SECONDS`, default
+3600). A seal made here is recorded as an `audit.sealed` event.
+
+```http
+POST /v1/admin/audit/seal
+```
+
+**Response**
+```json
+{
+  "sealed": true,
+  "anchor": {"anchor_id": "…", "first_seq": 41, "last_seq": 58,
+             "merkle_root": "…", "head_hash": "…", "created_at": 1790000300.0}
+}
+```
+
+`{"sealed": false, "anchor": null}` when there is nothing new to seal, or
+another replica sealed the same rows first.
 
 ---
 
@@ -1686,6 +1859,10 @@ class FeedbackRequest(BaseModel):
     session_id: str | None = Field(None, max_length=128)
     user_query: str = Field("", max_length=2000)
     bot_reply: str = Field("", max_length=5000)
+    # Where the rated reply came from; identifiers only, never free text.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
 ```
 
 ### FeedbackResponse

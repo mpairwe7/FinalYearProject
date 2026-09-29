@@ -46,9 +46,9 @@ Prototype sample rows live in `Data/eval/prototype_seed.json`. In development th
   - conversation_id (PK), topic_id, label (catalog only), tax_type, confidence, updated_at.
   - Retention: same `CONVERSATION_TTL_DAYS` on `updated_at`. Prompt sees the catalog label, never raw user text.
 
-- **workflow_sessions**: Guided workflow state (Phase 15).
-  - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, slots_json, last_prompt, created_at, updated_at.
-  - Indexes: status, updated_at.
+- **workflow_sessions**: Guided workflow state and durable journey outcome.
+  - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, user_id, slots_json, last_prompt, created_at, updated_at.
+  - Indexes: status, updated_at, user_id. `slots_json` and `last_prompt` are cleared after `CONVERSATION_TTL_DAYS` (default 7); outcome metadata is retained for `WORKFLOW_SESSION_TTL_DAYS` (default 365) for the CX funnel. Authenticated records are included in subject export and erasure.
 
 - **tenants**: Multi-tenant isolation (Phase 14).
   - id (PK), display_name, created_at.

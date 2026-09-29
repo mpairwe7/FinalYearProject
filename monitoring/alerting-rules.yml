@@ -200,3 +200,36 @@ groups:
           summary: "Qdrant restore drill failed or has not completed in 35 days"
           description: "Run the restore drill before relying on the retained snapshots for recovery."
           runbook: "docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"
+
+  - name: ura-audit-trail
+    rules:
+      - alert: AuditChainBreakDetected
+        expr: increase(audit_chain_breaks_total[15m]) > 0
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "The audit trail failed its integrity check"
+          description: "An event or a seal no longer matches its fingerprint. Treat as a security incident: snapshot the database before anything else and do not seal."
+          runbook: "docs/runbooks/audit-trail.md#when-the-check-fails"
+
+      - alert: AuditAppendFailing
+        expr: increase(audit_append_failed_total[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Staff actions are not reaching the audit trail"
+          description: "Appends to the audit ledger are failing; the actions still succeed but leave no record."
+          runbook: "docs/runbooks/audit-trail.md#what-is-recorded"
+
+      - alert: AuditSealFailing
+        expr: increase(audit_seal_failed_total[2h]) > 0
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Scheduled audit sealing is failing"
+          description: "New audit rows are protected only by the chain until a seal succeeds."
+          runbook: "docs/runbooks/audit-trail.md#seals"

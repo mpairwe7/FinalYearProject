@@ -326,3 +326,47 @@
     justify-self: end;
   }
 }
+
+/* ── Audit trail (/admin/audit) ─────────────────────────────────────────── */
+.au-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--ops-space-3);
+  width: 100%;
+}
+
+.au-filters .ops-field {
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+
+.au-when {
+  white-space: nowrap;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.au-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.au-type {
+  display: block;
+  font-family: var(--ops-font-mono, ui-monospace, monospace);
+  font-size: var(--ops-text-2xs);
+}
+
+.au-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--ops-space-3);
+}
+
+.au-seal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}

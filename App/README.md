@@ -113,7 +113,7 @@ for normal chat usage.
 5. **Streaming delivery** — progressive SSE with chunk-aware sanitization, optional `revision` event, and keepalive pings
 6. **Query intelligence** — rewriting (abbreviations, spelling, coreference), semantic cache, optional consented memory, multi-turn continuity
 7. **Response governance** — OWASP LLM Top 10 guards, corrective RAG, `response_judge` (soft citation check + faithfulness gating), claim verification (percentage **and** money-amount contradiction against the cited passage), structured `handoff`, calibrated escalation
-8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use
+8. **Emotional intelligence** — `assess_emotional_tone` classifies frustration / anxiety / urgency / confusion / hardship and returns the acknowledgement, tone hint and handoff signal the reply should use; given the conversation `history` it flags distress sustained across turns. Every turn also passes `app/turn_guidance.py`: a repeated empathy opener is dropped, sustained distress adds a "Talk to an officer" action, and a "How do I…" answer offers the matching guided journey. A turn that is all feeling and no task gets a clarifying question instead of retrieval, and a message about self-harm gets Uganda crisis lines before any router. See [`docs/runbooks/guided-journey-probes.md`](../docs/runbooks/guided-journey-probes.md)
 9. **Context-aware escalation** — an escalated ticket carries the whole conversation (both sides, untruncated), the taxpayer's sentiment at the point of transfer, and whether the officer should be briefed first; queued urgent-first then longest-waiting, de-duplicated per conversation, and announced over a webhook that carries triage metadata but never the transcript. See [`docs/context-aware-escalation.md`](docs/context-aware-escalation.md)
 10. **Taxpayer education** — `explain_tax_concept` teaches a concept instead of only answering about it: fading scaffolding (worked → completion problem → transfer question), a check question whose answer is withheld until asked for, and every figure computed from the effective-dated rate tables
 11. **Observability** — OpenTelemetry per-stage spans, Prometheus metrics, analytics dashboard, live smoke + deploy preflight gates
@@ -318,7 +318,7 @@ see [`docs/mcp-architecture.md`](docs/mcp-architecture.md).
 | `get_current_date` | `calendar.py` | `calendar` | Current date for deadline logic |
 | `get_next_deadlines` | `calendar.py` | `calendar` | Upcoming tax filing deadlines |
 | `search_ura_knowledge_base` | `rag_tool.py` | `rag` | Semantic search (wraps hybrid retriever) |
-| `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance |
+| `assess_emotional_tone` | `empathy.py` | `empathy` | Classify a message as frustration/anxiety/urgency/confusion/hardship and return tone guidance; optional `history` flags distress sustained across turns, and `crisis` short-circuits to crisis lines |
 | `explain_tax_concept` | `education.py` | `education` | Teach a concept: scaffolded explanation, worked example computed from the live rate tables, misconceptions, check question |
 
 | `escalate_to_human` | `escalate.py` | `core` | Create escalation ticket from tool loop |
@@ -696,21 +696,24 @@ Payload construction (no raw PII):
   |
   v
 AuditLedger.append(event_type, payload, tenant_id, user_id):
-  seq = monotonic counter
+  seq = head seq + 1 (unique per tenant; a lost race re-reads and retries)
   payload_hash = sha256(sorted-json(payload))
+  envelope_hash = sha256(sorted-json(event_id, event_type, seq, tenant_id, ts, user_id))
   prev_hash = last row's row_hash (or GENESIS_HASH = "0"*64)
-  row_hash = sha256(prev_hash + payload_hash)
+  row_hash = sha256(prev_hash + payload_hash + envelope_hash)   # hash_version 2
   INSERT INTO audit_events
   |
   v
-Merkle Anchoring (batch):
-  compute_merkle_root(batch of payload_hashes)
+Sealing (every AUDIT_SEAL_INTERVAL_SECONDS, or "Seal now" on /admin/audit):
+  compute_merkle_root(payload_hashes since the last seal)
   Bitcoin-style: pairs of sha256, odd-level duplicates last
-  INSERT INTO audit_anchors(merkle_root, first_seq, last_seq)
+  INSERT INTO audit_anchors(first_seq, last_seq, merkle_root, head_hash)
+  + one "audit seal ..." log line (the witness outside the database)
 
 Verification:
-  verify_chain(tenant_id) --> rewalk all rows, recompute hashes
-  --> VerificationReport {valid, rows_checked, breaks[]}
+  verify_ledger(tenant_id, scope) --> rewalk rows (all, or since the newest
+  seal), recompute hashes, re-check seals
+  --> VerificationReport {valid, scope, rows_checked, breaks[], anchor_breaks[]}
 ```
 
 **Run locally (with full speech pipeline):**
@@ -1908,18 +1911,26 @@ tool — see:
   num_sources, faithfulness_score, escalation_required, model, locale,
   input_tokens, output_tokens, tool_calls, agent_route, ticket_id.
 - **Hash chain:** Each row stores `row_hash = sha256(prev_hash +
-  payload_hash)`. The first row uses `GENESIS_HASH = "0" * 64`.
-  Tampering with any row breaks the chain for all subsequent rows.
-- **Merkle anchoring:** `compute_merkle_root()` in `audit/merkle.py`
-  computes Bitcoin-style Merkle roots over batches of payload hashes.
-  Roots stored in `audit_anchors` table for batch integrity proofs.
-- **Verification:** `verify_chain(tenant_id)` in `audit/verifier.py`
-  rewalks all rows and recomputes every hash. Returns a
-  `VerificationReport` with `valid`, `rows_checked`, `breaks[]`.
+  payload_hash + envelope_hash)` (hash format v2, `hash_version = 2`), so
+  the actor, event type, time and position are as tamper-evident as the
+  payload. Rows written before 2026-09-29 are v1 (`prev_hash +
+  payload_hash`) and verify by that rule. The first row uses
+  `GENESIS_HASH = "0" * 64`. Tampering with any row breaks the chain for
+  all subsequent rows; `(tenant_id, seq)` is unique, so replicas cannot fork it.
+- **Seals (Merkle anchoring):** `AuditLedger.seal_pending()` records the
+  Merkle root of the new rows' payload hashes and the chain head hash in
+  `audit_anchors`, on a schedule (`AUDIT_SEAL_INTERVAL_SECONDS`) and on
+  demand (`POST /v1/admin/audit/seal`), and logs both values.
+- **Verification:** `verify_ledger(tenant_id, scope)` in `audit/verifier.py`
+  rewalks the rows in 5 000-row batches, recomputes every hash, names
+  sequence gaps and forks, and re-checks each seal, which catches a range
+  rewritten with every hash recomputed. `/admin/audit` shows the verdict;
+  see `docs/runbooks/audit-trail.md`.
 - **Schema:** `audit_events` (event_id TEXT PK, event_type, tenant_id,
   user_id, payload JSON, ts REAL, seq INTEGER, prev_hash, payload_hash,
-  row_hash). `audit_anchors` (anchor_id TEXT PK, tenant_id, first_seq,
-  last_seq, merkle_root, created_at).
+  row_hash, hash_version; unique (tenant_id, seq)). `audit_anchors`
+  (anchor_id TEXT PK, tenant_id, first_seq, last_seq, merkle_root,
+  head_hash, created_at; unique (tenant_id, first_seq)).
 - **Feature flag:** `FLAG_AUDIT_LEDGER` (default false) gates all writes.
   Failures are swallowed — a broken audit DB never blocks a user response.
 - **UDPA erasure:** Right-to-erasure writes a tombstone event so the

@@ -35,6 +35,8 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Corpus coverage runbook](runbooks/corpus-coverage.md) | Curated taxpayer question bank, per-domain coverage floors, corpus/api/voice modes, URA sign-off |
 | [SALT speech backends runbook](runbooks/salt-speech-backends.md) | Sunbird SALT ASR (on by default) + TTS (opt-in) — verified language tokens, speaker ids, checkout recipe |
 | [Multilingual figure fidelity runbook](runbooks/multilingual-figure-fidelity.md) | Figure masking before translation, unprotected retry, decoding parameters per path, and what the localization metrics mean |
+| [Audit trail runbook](runbooks/audit-trail.md) | Separation of duties by role, what the tamper-evident trail records, verifying it, exporting evidence |
+| [Guided-journey probes runbook](runbooks/guided-journey-probes.md) | Live canary for journey routing, guided-mode offers, escalation, crisis and repair replies; branch builds on the local GPU stack; reading the journey funnel |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
@@ -97,7 +99,7 @@ FinalYearProject/
 │   └── plots/            # Visualizations
 ├── monitoring/            # Prometheus, Grafana, alerting
 │   ├── prometheus.yml    # Scrape config
-│   ├── alerting-rules.yml # SLO-based alert rules (5 rules)
+│   ├── alerting-rules.yml # SLO, Qdrant and audit-trail alert rules (17 rules)
 │   └── grafana/          # Provisioned dashboards + datasources
 ├── scripts/               # Operational scripts
 │   ├── ai_red_team.py    # NIST AI 600-1 adversarial evaluation (50 prompts)
@@ -161,7 +163,7 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | `App/frontend/playwright.config.ts` | Playwright E2E + a11y audit config |
 | `App/frontend/lighthouserc.json` | Lighthouse CI (accessibility >= 90) |
 | `monitoring/prometheus.yml` | Prometheus scrape targets |
-| `monitoring/alerting-rules.yml` | 5 SLO alerting rules |
+| `monitoring/alerting-rules.yml` | 17 alert rules (SLO, Qdrant index lifecycle, audit trail) |
 | `.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
 
 ### Current runtime toggles

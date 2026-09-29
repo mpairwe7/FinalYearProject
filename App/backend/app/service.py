@@ -49,6 +49,7 @@ from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.en import (
+    HOW_TO_QUESTION_RE,
     _FAREWELL_PHRASES as _EN_FAREWELL_PHRASES,
     _GRATITUDE_PHRASES as _EN_GRATITUDE_PHRASES,
     _GREETING_PHRASES as _EN_GREETING_PHRASES,
@@ -137,9 +138,18 @@ from .text_signals import (
     detect_comparison_jurisdiction,
     detect_foreign_jurisdiction,
     detect_local_government_tax,
+    REPAIR_NEXT_ACTIONS,
+    REPAIR_QUESTION,
+    REPAIR_REPEAT_REPLY,
+    ack_already_given,
+    crisis_support_reply,
+    detect_crisis,
+    repair_reply,
     detect_user_distress,
     empathy_ack,
+    is_feeling_only,
     jurisdiction_scope_caveat,
+    names_a_task,
     local_government_tax_reply,
     out_of_jurisdiction_reply,
     is_courtesy_sentence,
@@ -147,8 +157,9 @@ from .text_signals import (
     split_sentences,
     tone_hint_for,
 )
-from .topics import resolve_topic, topic_retrieval_query
+from .topics import classify_topic, resolve_topic, topic_retrieval_query
 from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
+from .turn_guidance import apply_turn_guidance, finalize_turn_actions, turns_from_history
 from .verified_resources import resources_for_turn
 from .workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from .workflows.slots import validate_slot
@@ -1414,6 +1425,22 @@ def _apply_output_guards(
     }
 
 
+def _recent_turns_for_guidance(result: dict[str, Any], user_id: str | None) -> list[dict[str, str]]:
+    """Earlier turns of this conversation for :func:`apply_turn_guidance`.
+
+    Read before the current turn is logged (``main.py`` logs after the reply
+    is built), so the current reply is never compared against itself.
+    """
+    conversation_id = str(result.get("conversation_id") or "")
+    if not conversation_id:
+        return []
+    try:
+        return db.get_recent_turns(conversation_id=conversation_id, limit=3, user_id=user_id or None)
+    except Exception:
+        logger.debug("recent turns unavailable for turn guidance", exc_info=True)
+        return []
+
+
 async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE generator one-to-one
     model: Any,
     *,
@@ -1532,6 +1559,18 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         result["resources"] = resources_for_turn(
             message, result, rewritten=str(result.get("_rewritten") or "")
         )
+        # Reuse the history generate_retrieval_only already loaded; read the
+        # database only when it loaded none, and off the event loop.
+        history_turns = turns_from_history(result.get("_history") or [])
+        if not history_turns:
+            history_turns = await asyncio.to_thread(_recent_turns_for_guidance, result, user_id)
+        prior_replies = [t["bot_reply"] for t in history_turns]
+        apply_turn_guidance(
+            message,
+            result,
+            rewritten=str(result.get("_rewritten") or ""),
+            recent_turns=history_turns,
+        )
 
         yield (
             "retrieval.completed",
@@ -1594,6 +1633,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         personalization_context = result.get("_personalization_context", "")
         tone_hint = str(result.get("_tone_hint") or "")
         distress = str(result.get("_distress") or "")
+        # Guidance ran before these branches built their reply, so the opener
+        # they prepend is de-duplicated here rather than stripped afterwards.
+        turn_ack = "" if ack_already_given(distress, prior_replies) else empathy_ack(distress)
 
         # ── Phase 2: optional agentic branch ─────────────────────────
         # When tool_use is enabled or forced by routing, run the bounded
@@ -1699,8 +1741,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         # and passages fail the confidence threshold, abstain (parity with REST path).
         if not attachments and not (agentic_used_tools and full_reply) and _output_guard.should_abstain(hits, locale=locale):
             abstained_reply = ABSTENTION_REPLY
-            if distress:
-                abstained_reply = f"{empathy_ack(distress)}\n\n{abstained_reply}"
+            if turn_ack:
+                abstained_reply = f"{turn_ack}\n\n{abstained_reply}"
             escalate, esc_reason = _output_guard.should_escalate(None, hits)
             handoff = None
             response_judge = {
@@ -1735,6 +1777,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
+            finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
             full_reply = localize_reply(abstained_reply, locale)
@@ -1864,8 +1907,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     finalized = model._finalize_reply(full_reply, attachments=attachments)
                     if isinstance(finalized, str):
                         full_reply = finalized
-                if distress and full_reply:
-                    full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+                if turn_ack and full_reply:
+                    full_reply = f"{turn_ack}\n\n{full_reply}"
                 # One frame, so localize before sending rather than revising
                 # after — and localize at all, which this branch did not: an
                 # open breaker or an empty stream answered a Luganda question
@@ -1931,6 +1974,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
+            finalize_turn_actions(result, escalated=escalate)
 
             yield (
                 "grounding",
@@ -1973,8 +2017,8 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         else:
             # No LLM tier at all — extractive reply, same EI parity as above.
             full_reply = result.get("reply", "")
-            if distress and full_reply:
-                full_reply = f"{empathy_ack(distress)}\n\n{full_reply}"
+            if turn_ack and full_reply:
+                full_reply = f"{turn_ack}\n\n{full_reply}"
             # One frame, so localize before sending rather than revising after.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
@@ -5135,7 +5179,11 @@ class ChatModel:
             if escalation_reason:
                 reasons.append(escalation_reason)
 
-        if decision != "escalate" and _ACCOUNT_QUERY_RE.search(message):
+        if (
+            decision != "escalate"
+            and _ACCOUNT_QUERY_RE.search(message)
+            and not HOW_TO_QUESTION_RE.search(message)
+        ):
             decision = "escalate"
             reasons.append("account-specific query needs authenticated lookup or human review")
 
@@ -5297,6 +5345,79 @@ class ChatModel:
         except Exception:
             logger.exception("failed to mark officer reply delivered; it will re-deliver")
         return text
+
+    def _conversation_repair_result(
+        self, *, message: str, thread_id: str, locale: str
+    ) -> dict[str, Any] | None:
+        """A clarifying turn for a message that is all feeling and no task.
+
+        "This is useless" or "It still does not work", with no task named and
+        none bound to the conversation yet, gives retrieval nothing to search
+        for; on the local stack (2026-09-29) it retrieved a passage about URA's
+        own funding problems and read it back. Ask what the taxpayer is trying
+        to do instead, with the common tasks as one-tap actions. Asked twice,
+        the reply leads with the officer rather than repeating the question.
+        Runs after the workflow router, so a flow in progress keeps its turn.
+        """
+        kind = detect_user_distress(message)
+        if kind not in ("frustration", "confusion"):
+            return None
+        if classify_topic(message) is not None or not is_feeling_only(message):
+            return None
+        try:
+            if db.get_conversation_topic(thread_id):
+                return None
+            recent = db.get_recent_turns(conversation_id=thread_id, limit=1)
+        except Exception:
+            logger.debug("conversation state unavailable for repair", exc_info=True)
+            recent = []
+        previous = str(recent[-1].get("bot_reply") or "") if recent else ""
+        repeated = REPAIR_QUESTION in previous or REPAIR_REPEAT_REPLY in previous
+        if recent and not repeated and names_a_task(str(recent[-1].get("user_message") or "")):
+            # "I don't understand" right after a real question wants that
+            # answer re-explained (the pipeline has the history and the
+            # confusion tone hint), not a fresh "what are you trying to do?".
+            return None
+        actions = list(REPAIR_NEXT_ACTIONS)
+        if repeated:
+            actions = [actions[-1], *actions[:-1]]
+        return {
+            "reply": repair_reply(kind, repeated=repeated),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "clarification",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "conversation_repair",
+            "next_actions": actions,
+        }
+
+    def _crisis_support_result(self, *, thread_id: str, locale: str) -> dict[str, Any]:
+        """Turn result for a message expressing intent to self-harm.
+
+        Checked before every router, so no tax content — least of all a
+        penalty table — is ever put in front of it. No ticket is opened
+        automatically: what the message says is sensitive personal data, and
+        the officer is offered, not imposed.
+        """
+        return {
+            "reply": crisis_support_reply(),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "crisis_support",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "safety_guard",
+            "next_actions": ["Talk to an officer"],
+        }
 
     def _maybe_create_ticket(
         self,
@@ -5649,9 +5770,16 @@ class ChatModel:
         session: WorkflowSession,
         user_input: str,
         conversation_id: str = "",
+        *,
+        record: bool = True,
     ) -> tuple[Any, list[str]]:
-        """Advance a workflow and execute any deterministic tool steps inline."""
+        """Advance a workflow and execute any deterministic tool steps inline.
+
+        *record* is False where the turn re-shows a step already counted (a
+        resume), so the funnel counts each step once per journey.
+        """
         tool_messages: list[str] = []
+        before = WorkflowRegistry.pending_step(session)
         turn = WorkflowRegistry.advance(session, user_input, self._resolve_slot_choice)
         while turn.tool_call:
             tool_name = str(turn.tool_call.get("name", ""))
@@ -5679,7 +5807,36 @@ class ChatModel:
             if warning:
                 tool_messages.append(f"_{warning}_")
             turn = WorkflowRegistry.advance(session, "")
+        if record:
+            self._record_journey_turn(session, turn, previous_step=before.id if before else "", answered=bool(user_input))
         return turn, tool_messages
+
+    @staticmethod
+    def _record_journey(workflow_id: str, event: str, step: str = "") -> None:
+        """One guided-journey funnel event, exported on ``/metrics``.
+
+        ``journey_events_total{workflow, event, step}`` with ``event`` one of
+        started, step_entered, step_invalid, completed, cancelled. Where the
+        ``step_entered`` count drops between consecutive steps is the drop-off
+        the CX team fixes first (docs/runbooks/guided-journey-probes.md). Slot
+        values are never labels: the counter carries no personal data, so it
+        needs no analytics consent.
+        """
+        metrics.inc("journey_events_total", labels={"workflow": workflow_id, "event": event, "step": step})
+
+    def _record_journey_turn(
+        self, session: WorkflowSession, turn: Any, *, previous_step: str = "", answered: bool = False
+    ) -> None:
+        step = str(getattr(turn, "step_id", "") or "")
+        if getattr(turn, "validation_error", ""):
+            event = "step_invalid"
+        elif session.completed or getattr(turn, "is_complete", False):
+            event = "completed"
+        elif answered and step == previous_step:
+            return  # the same step asked again after an answer: not a new entry
+        else:
+            event = "step_entered"
+        self._record_journey(session.workflow_id, event, step)
 
     def _maybe_handle_fast_paths(
         self,
@@ -5688,6 +5845,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Deterministic fast paths, in precedence order (both chat paths):
 
@@ -5714,10 +5872,10 @@ class ChatModel:
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
             or self._maybe_handle_tin_clarification(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
             )
             or self._maybe_handle_calculator(
-                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale, user_id=user_id
             )
             or self._maybe_handle_calc_followup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
@@ -6070,6 +6228,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Ask individual-vs-organisation before giving TIN registration steps.
 
@@ -6092,6 +6251,7 @@ class ChatModel:
         session = WorkflowRegistry.create_session(wf.id)
         if session is None:
             return None
+        self._record_journey(session.workflow_id, "started")
         turn, _tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or ""
         db.upsert_workflow_session(
@@ -6101,6 +6261,7 @@ class ChatModel:
             session.slots,
             status="active",
             last_prompt=prompt,
+            user_id=user_id or "",
         )
         workflow = self._workflow_view(
             session,
@@ -6175,6 +6336,7 @@ class ChatModel:
         rewritten: str,
         thread_id: str,
         locale: str,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Deterministic tax-calculator fast path (REST and streaming parity).
 
@@ -6241,6 +6403,7 @@ class ChatModel:
         session = WorkflowRegistry.create_session(plan.workflow_id)
         if session is None:
             return None
+        self._record_journey(session.workflow_id, "started")
         session.slots.update(plan.params)
 
         turn, tool_messages = self._advance_workflow(session, "", thread_id)
@@ -6255,6 +6418,7 @@ class ChatModel:
             session.slots,
             status=status,
             last_prompt=prompt,
+            user_id=user_id or "",
         )
         workflow = self._workflow_view(
             session,
@@ -6531,6 +6695,37 @@ class ChatModel:
         is_valid, _, _ = validate_slot(user_input, step.validator, None)
         return not is_valid
 
+    def _flow_switch_target(
+        self, persisted: dict[str, Any], *, message: str, rewritten: str
+    ) -> Any | None:
+        """The different flow the taxpayer explicitly asks to start, if any.
+
+        A flow owns its thread, so without this "help me file my return" typed
+        inside the Tax Clearance checklist, which tells the taxpayer to do
+        exactly that, was validated as the answer to the pending question and
+        the filing guide never started. Only an explicit start ("help me file",
+        "guide me", "walk me through", "start") that names another flow counts;
+        a slot answer never does.
+
+        No side effects: the active flow is closed only once the new one has
+        actually started (see ``_close_flow_left_for``), so a refused start
+        leaves the taxpayer in the flow they were in.
+        """
+        combined = f"{message or ''} {rewritten or ''}"
+        if not _EXPLICIT_WORKFLOW_START_RE.search(combined):
+            return None
+        target = WorkflowRegistry.match_trigger(message) or WorkflowRegistry.match_trigger(rewritten)
+        current = str(persisted.get("workflow_id") or "")
+        if target is None or target.id == current:
+            return None
+        return target
+
+    def _close_flow_left_for(self, persisted: dict[str, Any], thread_id: str) -> None:
+        """Count the flow the taxpayer left as cancelled, at the step it was on."""
+        pending = WorkflowRegistry.pending_step(self._restore_workflow_session(persisted))
+        db.complete_workflow_session(thread_id, status="cancelled")
+        self._record_journey(str(persisted.get("workflow_id") or ""), "cancelled", pending.id if pending else "")
+
     def _maybe_handle_workflow(
         self,
         *,
@@ -6539,12 +6734,25 @@ class ChatModel:
         thread_id: str,
         locale: str,
         personalization: dict[str, Any] | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Start or continue a durable guided workflow when appropriate."""
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None
 
         persisted = db.get_workflow_session(thread_id)
+        # Past the conversation's retention the session keeps only its outcome
+        # (the answers are blanked), so it is history, not something to resume.
+        updated_at = (persisted or {}).get("updated_at")
+        if updated_at is not None and float(updated_at) < time.time() - db.conversation_ttl_seconds():
+            persisted = None
+        # A flow the taxpayer asks to leave for another stays active until the
+        # new one has started; if the start is refused below, they keep it.
+        leaving: dict[str, Any] | None = None
+        if persisted and persisted.get("status") == "active" and self._flow_switch_target(
+            persisted, message=message, rewritten=rewritten
+        ) is not None:
+            leaving, persisted = persisted, None
         if persisted and persisted.get("status") == "active":
             session = self._restore_workflow_session(persisted)
             self._apply_personalization_to_workflow(session, personalization)
@@ -6555,6 +6763,8 @@ class ChatModel:
             user_input = (message or "").strip()
             if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
                 db.complete_workflow_session(thread_id, status="cancelled")
+                pending = WorkflowRegistry.pending_step(session)
+                self._record_journey(session.workflow_id, "cancelled", pending.id if pending else "")
                 workflow = self._workflow_view(
                     session,
                     name=wf.name,
@@ -6580,7 +6790,7 @@ class ChatModel:
                 }
 
             if user_input.lower() in _WORKFLOW_RESUME_WORDS:
-                turn, _tool_messages = self._advance_workflow(session, "", thread_id)
+                turn, _tool_messages = self._advance_workflow(session, "", thread_id, record=False)
                 prompt = turn.question or ""
                 workflow = self._workflow_view(
                     session,
@@ -6662,6 +6872,7 @@ class ChatModel:
                     session.slots,
                     status="completed",
                     last_prompt=prompt,
+                    user_id=user_id or "",
                 )
             else:
                 db.upsert_workflow_session(
@@ -6671,6 +6882,7 @@ class ChatModel:
                     session.slots,
                     status="active",
                     last_prompt=prompt,
+                    user_id=user_id or "",
                 )
             workflow = self._workflow_view(
                 session,
@@ -6730,6 +6942,9 @@ class ChatModel:
         session = WorkflowRegistry.create_session(matched.id)
         if session is None:
             return None
+        if leaving is not None:
+            self._close_flow_left_for(leaving, thread_id)
+        self._record_journey(session.workflow_id, "started")
         self._apply_personalization_to_workflow(session, personalization)
 
         turn, tool_messages = self._advance_workflow(session, "", thread_id)
@@ -6744,6 +6959,7 @@ class ChatModel:
             session.slots,
             status=status,
             last_prompt=prompt,
+            user_id=user_id or "",
         )
         workflow = self._workflow_view(
             session,
@@ -6822,6 +7038,12 @@ class ChatModel:
         if isinstance(result, dict):
             # Same single decision the streaming path makes in run_chat_turn.
             result["resources"] = resources_for_turn(message, result)
+            apply_turn_guidance(
+                message,
+                result,
+                rewritten=str(result.get("_rewritten") or ""),
+                recent_turns=_recent_turns_for_guidance(result, user_id),
+            )
             if effective not in ("", "en"):
                 result["reply"] = self._localize_reply(str(result.get("reply", "")), effective)
         return result
@@ -7035,6 +7257,13 @@ class ChatModel:
                 )
                 return blocked
 
+            if detect_crisis(message) or detect_crisis(router_message):
+                crisis = self._crisis_support_result(thread_id=thread_id, locale=locale)
+                self._audit_turn(
+                    message=message, result=crisis, session_id=session_id, trace_ctx=trace_ctx
+                )
+                return crisis
+
             if flags.is_enabled("workflows"):
                 with trace_stage("workflow_router", timings=timings):
                     workflow_result = self._maybe_handle_workflow(
@@ -7043,6 +7272,7 @@ class ChatModel:
                         thread_id=thread_id,
                         locale=locale,
                         personalization=personalization,
+                        user_id=user_id,
                     )
                 if workflow_result:
                     if distress and workflow_result.get("reply"):
@@ -7058,6 +7288,11 @@ class ChatModel:
                     )
                     return workflow_result
 
+            repair = self._conversation_repair_result(message=router_message, thread_id=thread_id, locale=locale)
+            if repair is not None:
+                self._audit_turn(message=message, result=repair, session_id=session_id, trace_ctx=trace_ctx)
+                return repair
+
             # 1a1b. Deterministic tax calculator — instant when the message
             #       carries the figures, guided elicitation when it doesn't.
             with trace_stage("calculator_router", timings=timings):
@@ -7069,6 +7304,7 @@ class ChatModel:
                         rewritten=rewritten,
                         thread_id=thread_id,
                         locale=locale,
+                        user_id=user_id,
                     )
                 if not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
@@ -7076,6 +7312,7 @@ class ChatModel:
                         rewritten=rewritten,
                         thread_id=thread_id,
                         locale=locale,
+                        user_id=user_id,
                     )
                 if not calc_result:
                     calc_result = self._maybe_handle_fast_paths(
@@ -7083,6 +7320,7 @@ class ChatModel:
                         rewritten=router_rewritten,
                         thread_id=thread_id,
                         locale=locale,
+                        user_id=user_id,
                     )
             if calc_result:
                 if distress and calc_result.get("reply"):
@@ -8556,12 +8794,21 @@ class ChatModel:
                 "_history": [],
             }
 
+        if detect_crisis(message) or detect_crisis(rewritten):
+            return {
+                **self._crisis_support_result(thread_id=thread_id, locale=locale),
+                "_hits": [],
+                "_history": [],
+                "_short_circuit": True,
+            }
+
         workflow_result = self._maybe_handle_workflow(
             message=message,
             rewritten=rewritten,
             thread_id=thread_id,
             locale=locale,
             personalization=personalization,
+            user_id=user_id,
         )
         if workflow_result:
             if distress and workflow_result.get("reply"):
@@ -8576,6 +8823,10 @@ class ChatModel:
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
             }
 
+        repair = self._conversation_repair_result(message=message, thread_id=thread_id, locale=locale)
+        if repair is not None:
+            return {**repair, "_hits": [], "_history": conversation_history, "_rewritten": rewritten}
+
         # Deterministic tax calculator (parity with generate()) — instant
         # answer or guided elicitation, both as a single bundled payload.
         core_msg_s = strip_conversational_prefix(message) or message
@@ -8584,6 +8835,7 @@ class ChatModel:
             rewritten=rewritten,
             thread_id=thread_id,
             locale=locale,
+            user_id=user_id,
         )
         if not calc_result and core_msg_s != message:
             calc_result = self._maybe_handle_fast_paths(
@@ -8591,6 +8843,7 @@ class ChatModel:
                 rewritten=rewritten,
                 thread_id=thread_id,
                 locale=locale,
+                user_id=user_id,
             )
         if calc_result:
             if distress and calc_result.get("reply"):

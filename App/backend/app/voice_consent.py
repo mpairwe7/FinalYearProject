@@ -57,7 +57,19 @@ VOICE_EVENT_TYPES = frozenset({
     "call_transferred",
     "officer_joined",
     "call_ended",
+    # Staff reads and call-desk actions (docs/runbooks/audit-trail.md).
     "staff_viewed_call",
+    "staff_viewed_brief",
+    "staff_viewed_caller_history",
+    "staff_listened_call",
+    "officer_claimed",
+    "officer_released",
+    "officer_ended_call",
+    "officer_hold_on",
+    "officer_hold_off",
+    "officer_transferred",
+    "officer_wrapup_saved",
+    "officer_callback_done",
 })
 
 
@@ -236,9 +248,16 @@ def log_voice_event(
                     **(metadata or {}),
                 },
                 tenant_id=tenant_id,
+                # The ledger's actor column is what /admin/audit shows and
+                # filters by; without it every call-desk action and call read
+                # appeared as done by nobody.
+                user_id=user_id,
             )
         except Exception:
-            logger.debug("AuditLedger chain failed for voice event", exc_info=True)
+            from .analytics import metrics
+
+            metrics.inc("audit_append_failed_total", labels={"event_type": f"voice_{event_type}"})
+            logger.warning("AuditLedger chain failed for voice event %s", event_type, exc_info=True)
 
     return row_id
 

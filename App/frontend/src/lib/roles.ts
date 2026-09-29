@@ -185,6 +185,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     blurb: "RAG quality metrics against their thresholds",
     roles: ["ura_admin", "ura_auditor"],
   },
+  {
+    href: "/admin/audit",
+    label: "Audit trail",
+    navLabel: "Audit trail",
+    group: "observe",
+    blurb: "Who changed or read what, and proof the record is intact",
+    roles: ["ura_admin", "ura_auditor"],
+  },
 ];
 
 export function staffDestinationsFor(role: string | undefined | null): StaffDestination[] {

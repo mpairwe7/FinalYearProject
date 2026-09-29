@@ -192,6 +192,12 @@ class FeedbackRequest(BaseModel):
     session_id: str | None = Field(None, max_length=128)
     user_query: str = Field("", max_length=2000, description="Original user question")
     bot_reply: str = Field("", max_length=5000, description="Bot response that was rated")
+    # Where the rated reply came from, so a rating can be read against the
+    # journey step or route that produced it (the analytics journey panel).
+    # Identifiers only, never free text, so the pattern is strict.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Route that produced the reply")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Guided journey the reply belongs to")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Journey step the reply asked")
 
 
 class FeedbackResponse(BaseModel):
@@ -203,6 +209,110 @@ class FeedbackResponse(BaseModel):
 
 class FeedbackCommentRequest(BaseModel):
     comment: str = Field(..., min_length=1, max_length=1000, description="Follow-up comment text")
+
+
+# ---------------------------------------------------------------------------
+# Guided-journey funnel (staff analytics)
+# ---------------------------------------------------------------------------
+class JourneyStepStats(BaseModel):
+    step_id: str
+    title: str
+    #: Journeys cancelled or abandoned while waiting on this step.
+    stopped: int = 0
+    helpful: int = 0
+    not_helpful: int = 0
+
+
+class JourneyStats(BaseModel):
+    workflow_id: str
+    name: str
+    started: int = 0
+    completed: int = 0
+    cancelled: int = 0
+    #: Still active but untouched for longer than ``abandon_after_hours``.
+    abandoned: int = 0
+    in_progress: int = 0
+    completion_pct: float = 0.0
+    steps: list[JourneyStepStats] = Field(default_factory=list)
+
+
+class JourneyFunnelResponse(BaseModel):
+    period_days: int
+    abandon_after_hours: int
+    journeys: list[JourneyStats] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Audit trail (administrators and auditors)
+# ---------------------------------------------------------------------------
+class AuditEventOut(BaseModel):
+    seq: int
+    event_id: str
+    event_type: str
+    #: The acting user's id ("operator-key" for the break-glass key).
+    actor: str
+    ts: float
+    payload: dict[str, Any] = Field(default_factory=dict)
+    row_hash: str
+
+
+class AuditEventsResponse(BaseModel):
+    #: Whether this deployment is recording new events (``audit_ledger``).
+    ledger_enabled: bool
+    events: list[AuditEventOut] = Field(default_factory=list)
+    #: Pass as ``before_seq`` for the next (older) page; null when none.
+    next_before_seq: int | None = None
+
+
+class AuditChainBreak(BaseModel):
+    seq: int
+    event_id: str
+    reason: str
+
+
+class AuditAnchorOut(BaseModel):
+    """A seal: the Merkle root of a range of rows and the chain head at its end."""
+
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    merkle_root: str
+    #: ``row_hash`` at ``last_seq``; empty on seals made before it was recorded.
+    head_hash: str = ""
+    created_at: float
+
+
+class AuditAnchorBreak(BaseModel):
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    reason: str
+
+
+class AuditVerifyResponse(BaseModel):
+    ledger_enabled: bool
+    valid: bool
+    #: ``full`` walked every row and every seal; ``since_seal`` re-checked the
+    #: newest seal and the rows after it.
+    scope: Literal["full", "since_seal"]
+    rows_checked: int
+    first_seq: int
+    last_seq: int
+    head_hash: str
+    #: At most the first 20 breaks; ``valid`` is false when there are any.
+    breaks: list[AuditChainBreak] = Field(default_factory=list)
+    anchors_checked: int = 0
+    anchor_breaks: list[AuditAnchorBreak] = Field(default_factory=list)
+    latest_anchor: AuditAnchorOut | None = None
+    #: Rows written after the newest seal.
+    unsealed_rows: int = 0
+    verified_at: float
+
+
+class AuditSealResponse(BaseModel):
+    #: False when every row was already sealed (or another replica sealed first).
+    sealed: bool
+    anchor: AuditAnchorOut | None = None
 
 
 # ---------------------------------------------------------------------------

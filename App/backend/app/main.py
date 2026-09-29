@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -54,9 +54,17 @@ from .auth.models import (
 )
 from .authority import authority_required, get_authority_status
 from .escalation_notify import known_teams
+from .journey_analytics import build_journey_funnel
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
+    AuditAnchorBreak,
+    AuditAnchorOut,
+    AuditChainBreak,
+    AuditEventOut,
+    AuditEventsResponse,
+    AuditSealResponse,
+    AuditVerifyResponse,
     BatchClassifyRequest,
     BatchClassifyResponse,
     CFRelayChatRequest,
@@ -79,6 +87,7 @@ from .models import (
     FeedbackResponse,
     FeedbackSummary,
     HealthResponse,
+    JourneyFunnelResponse,
     OfflineAdminStats,
     OfflineStatusResponse,
     OfflineSyncRequest,
@@ -107,6 +116,7 @@ from .speech_service import (
     SPEECH_TTS_BACKEND,
     SpeechModel,
 )
+from .workflows.registry import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
 _APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
@@ -132,6 +142,12 @@ VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
 _RETENTION_CLEANUP_INTERVAL_SECONDS = max(
     60, int(os.getenv("RETENTION_CLEANUP_INTERVAL_SECONDS", "3600"))
 )
+# How often the audit ledger's new rows are sealed (Merkle root + chain head).
+# 0 turns the schedule off; sealing on demand from /admin/audit still works.
+_AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
+# Above this many rows the auditor's integrity check re-checks the newest seal
+# and the rows after it instead of the whole chain; the full walk runs offline.
+_AUDIT_VERIFY_FULL_MAX_ROWS = max(1, int(os.getenv("AUDIT_VERIFY_FULL_MAX_ROWS", "200000")))
 
 
 def _truthy_env(name: str, default: str = "false") -> bool:
@@ -705,13 +721,33 @@ async def lifespan(app: FastAPI):
                 return
 
     retention_task = asyncio.create_task(_retention_loop(), name="retention-cleanup")
+
+    async def _audit_seal_loop() -> None:
+        """Seal new audit rows on a schedule; every replica may run it at once."""
+        while True:
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=_AUDIT_SEAL_INTERVAL_SECONDS)
+                return
+            except TimeoutError:
+                await asyncio.to_thread(_seal_audit_ledgers)
+            except asyncio.CancelledError:
+                return
+
+    seal_task = (
+        asyncio.create_task(_audit_seal_loop(), name="audit-seal")
+        if _AUDIT_SEAL_INTERVAL_SECONDS > 0
+        else None
+    )
     try:
         yield
     finally:
         retention_stop.set()
-        retention_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await retention_task
+        for task in (retention_task, seal_task):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         app.state.model = None
         try:
             if getattr(app.state, "speech", None) is not None:
@@ -754,6 +790,9 @@ _ESCALATION_QUEUE_OFF_MESSAGE = (
 )
 
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+#: An active guided journey untouched for this long counts as abandoned in the
+#: analytics journey funnel (GET /v1/analytics/journeys).
+_JOURNEY_ABANDON_AFTER_HOURS = max(1, int(os.getenv("JOURNEY_ABANDON_AFTER_HOURS", "24")))
 _EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
 _DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
 _SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
@@ -2112,6 +2151,83 @@ def require_admin_access(
     raise HTTPException(status_code=403, detail="staff role required")
 
 
+def _require_staff_writer(ctx: AuthContext) -> None:
+    """Officers and admins change cases; auditors read them and change nothing.
+
+    ``require_admin_access`` admits every staff role, so this is the
+    separation-of-duties check for write endpoints. The ticket console already
+    hid its controls from auditors, but the API accepted their writes (QA
+    audit, 2026-09-29). The operator key (no user) keeps its break-glass path.
+    """
+    if ctx.user and ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="read-only role")
+
+
+def _seal_audit_ledgers() -> int:
+    """Seal every tenant's unsealed audit rows; returns how many seals were made.
+
+    Scheduled from the lifespan. Housekeeping never takes the service down: a
+    failure is logged and counted, and the next interval tries again.
+    """
+    from .flags import flags as flag_reg
+
+    if not flag_reg.is_enabled("audit_ledger"):
+        return 0
+    try:
+        from .audit import get_ledger
+
+        ledger = get_ledger()
+        tenants = ledger.tenants()
+    except Exception:
+        metrics.inc("audit_seal_failed_total")
+        logger.exception("Scheduled audit seal could not reach the ledger; will retry next interval")
+        return 0
+    made = 0
+    for tenant in tenants:  # one tenant's failure must not leave the others unsealed
+        try:
+            if ledger.seal_pending(tenant) is not None:
+                made += 1
+                metrics.inc("audit_seals_total", labels={"trigger": "schedule"})
+        except Exception:
+            metrics.inc("audit_seal_failed_total")
+            logger.exception("Scheduled audit seal failed for tenant %s; will retry next interval", tenant)
+    return made
+
+
+def _require_audit_reader(ctx: AuthContext) -> None:
+    """The audit trail is for administrators and auditors, not case officers."""
+    if ctx.user and ctx.role not in ("ura_admin", "ura_auditor"):
+        raise HTTPException(status_code=403, detail="administrator or auditor role required")
+
+
+def _audit_staff_action(ctx: AuthContext, event_type: str, payload: dict[str, Any]) -> None:
+    """Append one staff action to the tamper-evident audit ledger.
+
+    Records who did what to which record: the actor, their role and the
+    identifiers and field names changed — never the content (a reply's text is
+    recorded as its length), so the ledger adds no copy of taxpayer data. Runs
+    only when ``audit_ledger`` is on, which production requires at startup. A
+    failed append is logged and counted, never raised: the action has already
+    happened, and ``audit_append_failed_total`` is what an alert should watch.
+    """
+    from .flags import flags as flag_reg
+
+    if not flag_reg.is_enabled("audit_ledger"):
+        return
+    try:
+        from .audit import get_ledger
+
+        get_ledger().append(
+            event_type,
+            {"actor_role": ctx.role if ctx.user else "operator_key", **payload},
+            tenant_id=ctx.tenant_id or "default",
+            user_id=ctx.user_id or "operator-key",
+        )
+    except Exception:
+        metrics.inc("audit_append_failed_total", labels={"event_type": event_type})
+        logger.exception("audit append failed for %s", event_type)
+
+
 @app.post("/v1/index", tags=["knowledge"])
 def trigger_indexing(
     request: Request,
@@ -2256,6 +2372,9 @@ def submit_feedback(
         user_id=ctx.user_id,
         user_query=_CM.redact_for_storage(body.user_query),
         bot_reply=_CM.redact_for_storage(body.bot_reply),
+        retrieval_mode=body.retrieval_mode,
+        workflow_id=body.workflow_id,
+        step_id=body.step_id,
     )
     return FeedbackResponse(**result)
 
@@ -2529,6 +2648,34 @@ def feedback_summary(
     return FeedbackSummary(**db.get_feedback_summary(days))
 
 
+@app.get("/v1/analytics/journeys", response_model=JourneyFunnelResponse, tags=["analytics"])
+def journey_funnel(
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> JourneyFunnelResponse:
+    """Guided-journey funnel for the period: starts, completions, cancellations,
+    abandonment, the step unfinished journeys stopped at, and step ratings.
+
+    Built from the durable ``workflow_sessions`` and ``feedback`` tables, so it
+    is the same on every replica and survives restarts, unlike the in-process
+    ``journey_events_total`` counter on /metrics.
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    # Journey outcomes are kept WORKFLOW_SESSION_TTL_DAYS (default 365); a
+    # longer period would count only part of it, so report what is covered.
+    days = min(days, db.workflow_session_ttl_days())
+    raw = db.get_journey_funnel(days, abandon_after_s=_JOURNEY_ABANDON_AFTER_HOURS * 3600)
+    return JourneyFunnelResponse(
+        **build_journey_funnel(
+            raw,
+            WorkflowRegistry.list_all(),
+            days=days,
+            abandon_after_hours=_JOURNEY_ABANDON_AFTER_HOURS,
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Analytics & metrics endpoints
 # ---------------------------------------------------------------------------
@@ -2741,7 +2888,12 @@ def ticket_presence_endpoint(
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Heartbeat: this officer has the case open (collision lock)."""
+    """Heartbeat: this officer has the case open (collision lock).
+
+    Officers and admins only: an auditor reads a case without claiming it, so
+    the console sends no heartbeat for them and the API refuses one.
+    """
+    _require_staff_writer(ctx)
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -2792,6 +2944,7 @@ def set_flag_endpoint(
     except KeyError:
         raise HTTPException(status_code=404, detail="unknown flag") from None
     db.save_flag_override(name, enabled)
+    _audit_staff_action(ctx, "staff.flag_set", {"flag": name, "enabled": bool(enabled)})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
@@ -2834,6 +2987,7 @@ def clear_flag_endpoint(
     # lost on restart rather than resurrected.)
     db.clear_flag_override(name)
     flag_reg.clear(name)
+    _audit_staff_action(ctx, "staff.flag_cleared", {"flag": name})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
@@ -2868,6 +3022,11 @@ def put_override_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(
+        ctx,
+        "staff.override_saved",
+        {"override_id": str((row or {}).get("id") or ""), "enabled": bool(body.get("enabled", True))},
+    )
     return row
 
 
@@ -2881,6 +3040,7 @@ def delete_override_endpoint(
     ok = db.delete_answer_override(override_id)
     if not ok:
         raise HTTPException(status_code=404, detail="override not found")
+    _audit_staff_action(ctx, "staff.override_deleted", {"override_id": override_id})
     return {"ok": True, "id": override_id}
 
 
@@ -2893,21 +3053,202 @@ def list_outbox_endpoint(
     return {"items": db.list_notification_outbox(limit=limit), "live": False}
 
 
+@app.get("/v1/admin/audit/events", response_model=AuditEventsResponse, tags=["admin"])
+def audit_events_endpoint(
+    event_type: str = Query("", max_length=64, pattern=r"^[a-z_.]*$"),
+    actor: str = Query("", max_length=128),
+    since: float | None = Query(None, ge=0),
+    until: float | None = Query(None, ge=0),
+    before_seq: int | None = Query(None, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditEventsResponse:
+    """The tamper-evident audit trail, newest first, for administrators and auditors.
+
+    ``event_type`` matches a prefix (``staff.`` = every staff action);
+    ``actor`` is a user id; ``since``/``until`` are Unix seconds. Page back
+    with ``next_before_seq``. Reads work even when ``audit_ledger`` is off, so
+    the history stays inspectable; ``ledger_enabled`` says whether new events
+    are being recorded.
+    """
+    from .audit import get_ledger
+    from .flags import flags as flag_reg
+
+    _require_audit_reader(ctx)
+    rows = get_ledger().query(
+        ctx.tenant_id or "default",
+        event_type_prefix=event_type,
+        user_id=actor,
+        since_ts=since,
+        until_ts=until,
+        before_seq=before_seq,
+        limit=limit,
+    )
+    events = [
+        AuditEventOut(
+            seq=int(r["seq"]),
+            event_id=str(r["event_id"]),
+            event_type=str(r["event_type"]),
+            actor=str(r.get("user_id") or ""),
+            ts=float(r["ts"]),
+            payload=r.get("payload") if isinstance(r.get("payload"), dict) else {},
+            row_hash=str(r["row_hash"]),
+        )
+        for r in rows
+    ]
+    next_before = events[-1].seq if len(events) == limit and events[-1].seq > 1 else None
+    if before_seq is None:
+        # Reading the trail is itself recorded (once per search, not per
+        # page), after the query so a listing never contains its own read.
+        _audit_staff_action(
+            ctx,
+            "audit.trail_viewed",
+            {
+                "event_type": event_type,
+                "actor": actor,
+                "since": since,
+                "until": until,
+                "returned": len(events),
+            },
+        )
+    return AuditEventsResponse(
+        ledger_enabled=flag_reg.is_enabled("audit_ledger"),
+        events=events,
+        next_before_seq=next_before,
+    )
+
+
+def _anchor_out(anchor: dict[str, Any] | None) -> AuditAnchorOut | None:
+    if not anchor:
+        return None
+    return AuditAnchorOut(
+        anchor_id=str(anchor["anchor_id"]),
+        first_seq=int(anchor["first_seq"]),
+        last_seq=int(anchor["last_seq"]),
+        merkle_root=str(anchor["merkle_root"]),
+        head_hash=str(anchor.get("head_hash") or ""),
+        created_at=float(anchor["created_at"]),
+    )
+
+
+@app.get("/v1/admin/audit/verify", response_model=AuditVerifyResponse, tags=["admin"])
+def audit_verify_endpoint(
+    scope: str = Query("auto", pattern=r"^(auto|full|since_seal)$"),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditVerifyResponse:
+    """Re-walk this tenant's hash chain and its seals and report whether they are intact.
+
+    Recomputes every row's hashes from its stored payload and envelope, so an
+    edited, deleted, reordered or re-attributed row shows up as a break at its
+    sequence number; re-checks each seal's Merkle root and chain head, which
+    catches a range rewritten consistently. ``scope=auto`` walks everything
+    until the ledger passes ``AUDIT_VERIFY_FULL_MAX_ROWS``, then re-checks the
+    newest seal and the rows after it; ``full`` and ``since_seal`` force one.
+    """
+    from .audit import get_ledger
+    from .audit.verifier import SCOPE_FULL, SCOPE_SINCE_SEAL, verify_ledger
+    from .flags import flags as flag_reg
+
+    _require_audit_reader(ctx)
+    tenant = ctx.tenant_id or "default"
+    ledger = get_ledger()  # creates the tables on first use
+    head = ledger.head_seq(tenant)
+    if scope == "auto":
+        scope = SCOPE_FULL if head <= _AUDIT_VERIFY_FULL_MAX_ROWS else SCOPE_SINCE_SEAL
+    report = verify_ledger(tenant, scope=scope)
+    latest = ledger.latest_anchor(tenant)
+    response = AuditVerifyResponse(
+        ledger_enabled=flag_reg.is_enabled("audit_ledger"),
+        valid=report.valid,
+        scope=report.scope,
+        rows_checked=report.rows_checked,
+        first_seq=report.first_seq,
+        last_seq=report.last_seq,
+        head_hash=report.head_hash,
+        breaks=[
+            AuditChainBreak(seq=b.seq, event_id=b.event_id, reason=b.reason) for b in report.breaks[:20]
+        ],
+        anchors_checked=report.anchors_checked,
+        anchor_breaks=[
+            AuditAnchorBreak(
+                anchor_id=b.anchor_id, first_seq=b.first_seq, last_seq=b.last_seq, reason=b.reason
+            )
+            for b in report.anchor_breaks[:20]
+        ],
+        latest_anchor=_anchor_out(latest),
+        unsealed_rows=max(0, head - int(latest["last_seq"])) if latest else head,
+        verified_at=time.time(),
+    )
+    if not report.valid:
+        metrics.inc("audit_chain_breaks_total", labels={"scope": report.scope})
+        logger.error(
+            "audit chain verification failed tenant=%s breaks=%d seal_breaks=%d",
+            tenant,
+            len(report.breaks),
+            len(report.anchor_breaks),
+        )
+    _audit_staff_action(
+        ctx,
+        "audit.chain_verified",
+        {
+            "scope": report.scope,
+            "valid": report.valid,
+            "rows_checked": report.rows_checked,
+            "seals_checked": report.anchors_checked,
+        },
+    )
+    return response
+
+
+@app.post("/v1/admin/audit/seal", response_model=AuditSealResponse, tags=["admin"])
+def audit_seal_endpoint(
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditSealResponse:
+    """Seal every row written since the last seal, now, for administrators and auditors.
+
+    The same operation the API runs every ``AUDIT_SEAL_INTERVAL_SECONDS``; an
+    auditor uses it to fix the trail before exporting evidence. It adds a seal
+    and never changes a row, so it sits with the audit readers, not the writers.
+    """
+    from .audit import get_ledger
+
+    _require_audit_reader(ctx)
+    tenant = ctx.tenant_id or "default"
+    anchor = get_ledger().seal_pending(tenant)
+    if anchor is None:
+        return AuditSealResponse(sealed=False, anchor=None)
+    metrics.inc("audit_seals_total", labels={"trigger": "manual"})
+    _audit_staff_action(
+        ctx,
+        "audit.sealed",
+        {
+            "first_seq": anchor["first_seq"],
+            "last_seq": anchor["last_seq"],
+            "merkle_root": anchor["merkle_root"],
+        },
+    )
+    return AuditSealResponse(sealed=True, anchor=_anchor_out(anchor))
+
+
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
 def get_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Fetch a single ticket, including the conversation transcript.
 
     The transcript is the snapshot taken when the ticket was raised, so
-    it is still here after ``conversations`` has been purged.
+    it is still here after ``conversations`` has been purged. Opening it is
+    recorded as ``staff.ticket_viewed``: the transcript is taxpayer data, and
+    who read it is part of the audit trail (the call desk already logs its
+    caller-history views the same way).
     """
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
+    _audit_staff_action(ctx, "staff.ticket_viewed", {"ticket_id": ticket_id})
     return ticket
 
 
@@ -2922,7 +3263,7 @@ async def update_ticket_endpoint(
     officer_reply: str | None = None,
     officer_reply_localized: str | None = None,
     locale: str | None = None,
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Update a ticket's status/assignee/note/priority/reply.
 
@@ -2930,7 +3271,11 @@ async def update_ticket_endpoint(
     the conversation; ``staff_note`` stays internal. They are separate
     fields on purpose — an officer's candid note is not something the
     taxpayer should ever read.
+
+    Officers and admins only; every accepted change is recorded as
+    ``staff.ticket_updated`` with the fields changed (a reply as its length).
     """
+    _require_staff_writer(ctx)
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = await request.json()
@@ -2975,6 +3320,16 @@ async def update_ticket_endpoint(
     )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
+    changed = {
+        key: value
+        for key, value in (("status", status), ("assignee", assignee), ("priority", priority), ("locale", locale))
+        if value is not None
+    }
+    if staff_note is not None:
+        changed["staff_note_chars"] = len(staff_note)
+    if officer_reply is not None:
+        changed["officer_reply_chars"] = len(officer_reply)
+    _audit_staff_action(ctx, "staff.ticket_updated", {"ticket_id": ticket_id, **changed})
     return {"status": "ok", "ticket_id": ticket_id}
 
 
@@ -3072,9 +3427,13 @@ def get_call_metrics_endpoint(
 @app.get("/v1/admin/calls/{call_id}", tags=["admin"])
 def get_call_detail_endpoint(
     call_id: str,
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Retrieve full call detail including turns, summary, metrics, and ticket."""
+    """Retrieve full call detail including turns, summary, metrics, and ticket.
+
+    Reading a call's transcript is recorded (``voice_staff_viewed_call``), as
+    opening a ticket's transcript is.
+    """
     import re
     from .receptionist.store import get_call_with_turns
     from .tenancy import tenant_enabled
@@ -3082,10 +3441,11 @@ def get_call_detail_endpoint(
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
 
-    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+    tenant_scope = (ctx.tenant_id or "default") if tenant_enabled() else None
     detail = get_call_with_turns(call_id, tenant_id=tenant_scope)
     if not detail:
         raise HTTPException(status_code=404, detail="Call not found")
+    _staff_call_event(ctx, call_id, "staff_viewed_call")
     return detail
 
 
@@ -3117,6 +3477,12 @@ def review_call_endpoint(
         raise HTTPException(status_code=400, detail="Invalid rating")
     note = str(body.get("note", ""))
     ok = save_call_review(call_id, rating=rating, note=note)
+    if ok:
+        _audit_staff_action(
+            ctx,
+            "staff.call_reviewed",
+            {"call_id": call_id, "rating": rating, "note_chars": len(note)},
+        )
     return {"ok": ok, "call_id": call_id, "rating": rating}
 
 
@@ -3132,6 +3498,24 @@ def _desk_call_id(call_id: str) -> str:
     if not re.match(_CALL_ID_RE, call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
     return call_id
+
+
+def _staff_call_event(ctx: AuthContext, call_id: str, event_type: str, **metadata: Any) -> None:
+    """Record a staff read or action on a call: voice audit log and audit ledger.
+
+    Carries the actor's role like ``_audit_staff_action`` does, so the audit
+    trail shows who acted and in which capacity; the break-glass operator key
+    is recorded as ``operator-key``.
+    """
+    from .voice_consent import log_voice_event
+
+    log_voice_event(
+        user_id=ctx.user_id or "operator-key",
+        session_id=call_id,
+        event_type=event_type,
+        metadata={"actor_role": ctx.role if ctx.user else "operator_key", **metadata},
+        tenant_id=ctx.tenant_id or "default",
+    )
 
 
 def _receptionist_tenant_scope(ctx: AuthContext) -> str | None:
@@ -3183,11 +3567,9 @@ async def get_call_brief_endpoint(
     from fastapi.responses import JSONResponse
 
     from .receptionist import brief as call_brief
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     call = _require_receptionist_call(call_id, ctx)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_brief",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "staff_viewed_brief")
     if refresh:
         brief = await asyncio.to_thread(call_brief.build_brief, call_id, force=True)
         if brief:
@@ -3203,7 +3585,6 @@ async def get_call_brief_endpoint(
 async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
     """Take a waiting call (or one the AI is handling): first officer wins, the rest get 409."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3212,8 +3593,7 @@ async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_a
                                   officer_name=_desk_officer_name(ctx))
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_claimed",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_claimed")
     return result
 
 
@@ -3221,7 +3601,6 @@ async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_a
 async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
     """Give a claimed call back to the waiting queue before joining it."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3229,8 +3608,7 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
         result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_released",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_released")
     return result
 
 
@@ -3238,7 +3616,6 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
 async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
     """The officer ends the call: the caller hears a closing line and is hung up."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3247,8 +3624,7 @@ async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_adm
                                 is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_ended_call",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_ended_call")
     return result
 
 
@@ -3260,7 +3636,6 @@ async def hold_call_endpoint(
 ) -> Any:
     """Put an active call on hold or resume it."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3269,9 +3644,7 @@ async def hold_call_endpoint(
         result = await desk.hold(call_id, ctx.user_id, on=on, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id,
-                    event_type="officer_hold_on" if on else "officer_hold_off",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_hold_on" if on else "officer_hold_off")
     return result
 
 
@@ -3283,7 +3656,6 @@ async def transfer_call_endpoint(
 ) -> Any:
     """Transfer the call to a specialized team or another officer."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3295,8 +3667,7 @@ async def transfer_call_endpoint(
                                      note=note, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_transferred",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_transferred")
     return result
 
 
@@ -3308,7 +3679,6 @@ async def wrapup_call_endpoint(
 ) -> Any:
     """Submit post-call wrap-up note, outcome, and ticket action."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3330,8 +3700,7 @@ async def wrapup_call_endpoint(
         )
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_wrapup_saved",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_wrapup_saved")
     return result
 
 
@@ -3343,7 +3712,6 @@ async def callback_done_endpoint(
 ) -> Any:
     """Mark an open callback as resolved."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
@@ -3352,8 +3720,7 @@ async def callback_done_endpoint(
         result = await desk.callback_done(call_id, ctx.user_id, note=note, is_admin=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="officer_callback_done",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "officer_callback_done")
     return result
 
 
@@ -3364,11 +3731,9 @@ def caller_history_endpoint(
 ) -> Any:
     """Retrieve previous calls and tickets for the same caller."""
     from .receptionist import desk
-    from .voice_consent import log_voice_event
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
-    log_voice_event(user_id=ctx.user_id or "", session_id=call_id, event_type="staff_viewed_caller_history",
-                    tenant_id=ctx.tenant_id or "default")
+    _staff_call_event(ctx, call_id, "staff_viewed_caller_history")
     return desk.caller_history(call_id, tenant_id=_receptionist_tenant_scope(ctx))
 
 

@@ -7,6 +7,11 @@ interface FeedbackButtonsProps {
   messageId: string;
   userQuery: string;
   botReply: string;
+  /** Route that produced the reply being rated (e.g. "workflow"). */
+  retrievalMode?: string;
+  /** Guided journey and step the reply belongs to, when it asked a step. */
+  workflowId?: string;
+  stepId?: string;
 }
 
 const ThumbsUpIcon = ({ filled }: { filled?: boolean }) => (
@@ -31,7 +36,14 @@ const ThumbsDownIcon = ({ filled }: { filled?: boolean }) => (
 
 type FeedbackState = 'idle' | 'submitting' | 'submitted' | 'error';
 
-export default function FeedbackButtons({ messageId, userQuery, botReply }: FeedbackButtonsProps) {
+export default function FeedbackButtons({
+  messageId,
+  userQuery,
+  botReply,
+  retrievalMode,
+  workflowId,
+  stepId,
+}: FeedbackButtonsProps) {
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [feedbackState, setFeedbackState] = useState<FeedbackState>('idle');
   const [showComment, setShowComment] = useState(false);
@@ -56,7 +68,11 @@ export default function FeedbackButtons({ messageId, userQuery, botReply }: Feed
       setFeedbackState('submitting');
       trackFeedbackGiven(value);
 
-      const result = await submitFeedback(messageId, value, '', userQuery, botReply);
+      const result = await submitFeedback(messageId, value, '', userQuery, botReply, {
+        retrievalMode,
+        workflowId,
+        stepId,
+      });
       if (result) {
         setRating(value);
         setFeedbackState('submitted');
@@ -69,7 +85,7 @@ export default function FeedbackButtons({ messageId, userQuery, botReply }: Feed
         setFeedbackState('error');
       }
     });
-  }, [feedbackState, messageId, userQuery, botReply, setOptimisticRating]);
+  }, [feedbackState, messageId, userQuery, botReply, retrievalMode, workflowId, stepId, setOptimisticRating]);
 
   const handleCommentSubmit = useCallback(async () => {
     if (!comment.trim() || !rating) return;

@@ -18,13 +18,35 @@ from app.main import app
 from app.receptionist.hub import CallEventHub, hub
 from app.receptionist.state import CallRoom, CallState, registry
 from app.receptionist.store import create_call, create_turn, init_receptionist_schema, update_call
+from app.voice_consent import init_voice_consent_schema
+
+
+def _listen_records(call_id: str) -> list[tuple[str, str, str]]:
+    """(listener, role, transport) for each recorded listen-in on *call_id*."""
+    rows = db.query_all(
+        "SELECT user_id, metadata_json FROM voice_audit_log WHERE session_id = ? AND event_type = ?",
+        (call_id, "staff_listened_call"),
+    )
+    out = []
+    for row in rows:
+        meta = json.loads(row["metadata_json"] or "{}")
+        out.append((row["user_id"], meta.get("actor_role", ""), meta.get("transport", "")))
+    return out
+
+
+def _init_schema() -> None:
+    """Every table these sockets write to: the voice audit log is created by the
+    app lifespan, which TestClient(app) does not run, so without this the tests
+    depended on an earlier test having started the app against the same DB."""
+    db.init_db()
+    init_receptionist_schema()
+    init_voice_consent_schema()
 
 
 class TestReceptionistWSAndHTTP(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        db.init_db()
-        init_receptionist_schema()
+        _init_schema()
         cls.client = TestClient(app)
 
     def _auth_headers(self, role: str) -> dict[str, str]:
@@ -169,6 +191,7 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
                     room.broadcast_audio(chunk)
                     received = ws.receive_bytes()
                     self.assertEqual(received, chunk)
+            self.assertEqual(_listen_records(call_id), [("supervisor_1", "ura_admin", "websocket")])
         finally:
             registry._rooms.pop(call_id, None)
 
@@ -176,8 +199,7 @@ class TestReceptionistWSAndHTTP(unittest.TestCase):
 class TestLiveKitListenIn(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        db.init_db()
-        init_receptionist_schema()
+        _init_schema()
         cls.client = TestClient(app)
 
     def test_a_listener_is_removed_from_the_room_when_their_console_closes(self):
@@ -211,14 +233,14 @@ class TestLiveKitListenIn(unittest.TestCase):
                         time.sleep(0.02)
             revoke.assert_awaited_once_with(state.livekit_room, ready["identity"])
             self.assertNotIn(ready["identity"], state.livekit_observer_identities)
+            self.assertEqual(_listen_records(call_id), [("supervisor_1", "ura_admin", "livekit")])
         finally:
             registry._rooms.pop(call_id, None)
 
 
 class TestLobbyTenantFanout(unittest.IsolatedAsyncioTestCase):
     async def test_call_events_only_reach_matching_tenant(self):
-        db.init_db()
-        init_receptionist_schema()
+        _init_schema()
         call_id = f"call_fanout_{uuid.uuid4().hex[:8]}"
         create_call(call_id, tenant_id="tenant-a")
         event_hub = CallEventHub()
@@ -313,8 +335,7 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        db.init_db()
-        init_receptionist_schema()
+        _init_schema()
         cls.client = TestClient(app)
 
     def _run_call(self, frames: list[str]):
@@ -385,7 +406,14 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
                 deadline = time.monotonic() + 5
                 while len(seen.frames) < sum('"set_language"' in f for f in frames) and time.monotonic() < deadline:
                     time.sleep(0.02)
-            # Leaving the block drops the control socket without a hangup.
+                # Drop the control socket without a hangup, then wait for the
+                # server's teardown to finish here: leaving the block cancels
+                # the app task, which under load interrupted the teardown this
+                # test exists to check (a flaky CancelledError).
+                sock.close(1000)
+                deadline = time.monotonic() + 10
+                while registry.get(ready["call_id"]) is not None and time.monotonic() < deadline:
+                    time.sleep(0.02)
         return seen
 
     def test_a_dropped_control_socket_stops_the_media_pipeline(self):

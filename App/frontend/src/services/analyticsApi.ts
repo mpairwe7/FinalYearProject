@@ -235,6 +235,96 @@ export interface FeedbackSummary {
   }[];
 }
 
+/** GET /v1/analytics/journeys — one row per guided journey. */
+export interface JourneyStepStats {
+  step_id: string;
+  title: string;
+  /** Journeys cancelled or abandoned while waiting on this step. */
+  stopped: number;
+  helpful: number;
+  not_helpful: number;
+}
+
+export interface JourneyStats {
+  workflow_id: string;
+  name: string;
+  started: number;
+  completed: number;
+  cancelled: number;
+  abandoned: number;
+  in_progress: number;
+  completion_pct: number;
+  steps: JourneyStepStats[];
+}
+
+export interface JourneyFunnel {
+  period_days: number;
+  abandon_after_hours: number;
+  journeys: JourneyStats[];
+}
+
+/** GET /v1/admin/audit/events — one row of the tamper-evident audit trail. */
+export interface AuditEvent {
+  seq: number;
+  event_id: string;
+  event_type: string;
+  /** The acting user's id; "operator-key" for the break-glass key. */
+  actor: string;
+  ts: number;
+  payload: Record<string, unknown>;
+  row_hash: string;
+}
+
+export interface AuditEventsPage {
+  /** Whether this deployment records new events (the audit_ledger flag). */
+  ledger_enabled: boolean;
+  events: AuditEvent[];
+  next_before_seq: number | null;
+}
+
+/** A seal: the Merkle root of a range of events and the chain head at its end. */
+export interface AuditAnchor {
+  anchor_id: string;
+  first_seq: number;
+  last_seq: number;
+  merkle_root: string;
+  /** Empty on seals made before seals recorded the chain head. */
+  head_hash: string;
+  created_at: number;
+}
+
+export interface AuditVerification {
+  ledger_enabled: boolean;
+  valid: boolean;
+  /** "full" walked every event and seal; "since_seal" the newest seal and what follows it. */
+  scope: "full" | "since_seal";
+  rows_checked: number;
+  first_seq: number;
+  last_seq: number;
+  head_hash: string;
+  breaks: { seq: number; event_id: string; reason: string }[];
+  anchors_checked: number;
+  anchor_breaks: { anchor_id: string; first_seq: number; last_seq: number; reason: string }[];
+  latest_anchor: AuditAnchor | null;
+  /** Events written after the newest seal. */
+  unsealed_rows: number;
+  verified_at: number;
+}
+
+export interface AuditSealResult {
+  /** False when there was nothing new to seal. */
+  sealed: boolean;
+  anchor: AuditAnchor | null;
+}
+
+export interface AuditQuery {
+  eventType?: string;
+  actor?: string;
+  since?: number;
+  beforeSeq?: number | null;
+  limit?: number;
+}
+
 export interface FlagRecord {
   name: string;
   default: boolean;
@@ -276,6 +366,7 @@ async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
+  journeys: (days = 30) => fetchJson<JourneyFunnel>(`/v1/analytics/journeys?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
   tickets: (status = "open", limit = 8, priority = "", team = "", q?: string, locale?: string, modality?: string) =>
     fetchJson<TicketQueueResponse>(
@@ -347,6 +438,16 @@ export const analyticsApi = {
     fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
       "/v1/admin/outbox",
     ),
+  auditEvents: ({ eventType = "", actor = "", since, beforeSeq, limit = 50 }: AuditQuery = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (eventType) params.set("event_type", eventType);
+    if (actor) params.set("actor", actor);
+    if (since != null) params.set("since", String(Math.floor(since)));
+    if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
+    return fetchJson<AuditEventsPage>(`/v1/admin/audit/events?${params.toString()}`);
+  },
+  auditVerify: () => fetchJson<AuditVerification>("/v1/admin/audit/verify"),
+  auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(
       `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}`,

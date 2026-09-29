@@ -49,6 +49,10 @@ class WorkflowStep:
     portal_action: dict[str, str] = field(default_factory=dict)
     #: Official-resource payloads, resolved from the ids the YAML names.
     resources: list[dict[str, Any]] = field(default_factory=list)
+    #: An informational step after which the flow stops: the rest does not
+    #: apply to this taxpayer (e.g. no TIN yet). Only valid on a step with a
+    #: question and neither a slot nor a tool.
+    ends_flow: bool = False
 
 
 @dataclass
@@ -105,6 +109,13 @@ def load_workflow(path: Path) -> WorkflowDefinition:
         validator = str(s.get("validator", "text"))
         context = f"{path.name}:{step_id}"
 
+        ends_flow_value = s.get("ends_flow", False)
+        if not isinstance(ends_flow_value, bool):
+            raise ValueError(f"{context}: ends_flow must be a boolean")
+        ends_flow = ends_flow_value
+        if ends_flow and (s.get("slot") or s.get("tool") or not s.get("question")):
+            raise ValueError(f"{context}: ends_flow is only valid on an informational step")
+
         portal_action_id = str(s.get("portal_action") or "")
         portal_action = portal_action_for(portal_action_id, context=context) if portal_action_id else {}
         ui_widget, options = _step_widget(validator, bool(portal_action))
@@ -124,6 +135,7 @@ def load_workflow(path: Path) -> WorkflowDefinition:
                 options=options,
                 portal_action=portal_action,
                 resources=resolve_resource_ids(s.get("resources") or [], context=context),
+                ends_flow=ends_flow,
             )
         )
 
