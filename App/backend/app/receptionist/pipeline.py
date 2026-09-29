@@ -8,7 +8,7 @@ from typing import Any
 from ..flags import flags
 from . import livekit
 from .brain import UraReceptionistBrain
-from .config import get_max_call_s
+from .config import get_idle_reprompt_s, get_max_call_s
 from .serializer import BrowserCallSerializer
 from .stt import UraWhisperSTT
 from .taps import CallerAudioTap, LivePartialTranscriptTap, TranscriptTap
@@ -112,6 +112,8 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
             # seconds after the caller stops on a long Luganda turn. This is
             # only the backstop for a turn no strategy ever closes.
             user_turn_stop_timeout=20.0,
+            # Runs from the end of the assistant's speech; see brain.on_caller_idle.
+            user_idle_timeout=get_idle_reprompt_s(),
         ),
     )
     initial = room.state.locale
@@ -122,6 +124,11 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
     partial_tap = LivePartialTranscriptTap(room=room, speech_model=speech_model, language=initial)
     brain = UraReceptionistBrain(room=room, chat_model=chat_model)
     tts = UraSpeechTTS(speech_model=speech_model, language=initial, room=room)
+
+    @context_aggregator.user().event_handler("on_user_turn_idle")
+    async def _caller_idle(_aggregator: Any) -> None:
+        await brain.on_caller_idle(speech_model)
+
     processors = [
         vad_processor,
         partial_tap,

@@ -42,6 +42,8 @@ class CallState:
     generation_id: int = 0
     barge_in_count: int = 0
     caller_turns_count: int = 0
+    # "Are you still there?" checks since the caller last said anything.
+    idle_prompts: int = 0
     ai_answers_count: int = 0
     clarifications_asked: int = 0
     clarified_first_try: int = 0

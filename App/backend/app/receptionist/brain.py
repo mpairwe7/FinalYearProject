@@ -21,6 +21,7 @@ from .config import (
     get_clarify_threshold_for,
     get_default_language,
     get_filler_after_ms,
+    get_idle_reprompts,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
     get_transfer_timeout_s,
@@ -194,6 +195,9 @@ class UraReceptionistBrain(LLMService):
         # Set by the multilingual builder: True while the language router is
         # re-asking the current turn in the language the caller switched to.
         self.turn_claimed: Any = None
+        # True while an answer is being worked out: the silence is ours then,
+        # not the caller's (see on_caller_idle).
+        self._answering = False
 
     @property
     def language(self) -> str:
@@ -297,6 +301,7 @@ class UraReceptionistBrain(LLMService):
             return
         words = list(words or [])
         language = self.language
+        self.room.state.idle_prompts = 0
 
         # Record caller turn in persistence and pub/sub
         self.room.state.turn_seq += 1
@@ -577,7 +582,45 @@ class UraReceptionistBrain(LLMService):
             "english_query": english_query,
         }
 
+    async def on_caller_idle(self, speech_model: Any) -> None:
+        """The caller has said nothing since the assistant stopped speaking.
+
+        Checks they are still there, up to ``RECEPTIONIST_IDLE_REPROMPTS``
+        times; then says goodbye and ends the call, so an abandoned call stops
+        holding a call slot until ``RECEPTIONIST_MAX_CALL_S``. Never while an
+        officer has, or is being fetched for, the call, and never while an
+        answer is still being worked out.
+        """
+        state = self.room.state
+        if state.mode != "ai" or self._answering:
+            return
+        state.idle_prompts += 1
+        if state.idle_prompts <= get_idle_reprompts():
+            await self._say_and_record(phrase("idle_check", self.language), kind="notice")
+            return
+        logger.info("Ending call %s: the caller has been silent", self.room.call_id)
+        from .desk import hang_up_caller, say_to_caller
+
+        # Spoken like an officer's closing line: its length is known, so the
+        # call ends once the caller has heard it, not when the transport (which
+        # sends faster than real time) has finished sending it. Shielded: ending
+        # the call cancels the pipeline task this handler runs in.
+        async def _goodbye() -> None:
+            duration = await say_to_caller(self.room, phrase("idle_goodbye", self.language), speech_model)
+            await asyncio.sleep(duration + 0.3)
+            await hang_up_caller(self.room, "caller_idle")
+
+        await asyncio.shield(asyncio.ensure_future(_goodbye()))
+
     async def _answer_question(self, question: str, mean_word_prob: float | None = None) -> None:
+        """Answer *question*; until it has been handed to TTS, caller silence is not idleness."""
+        self._answering = True
+        try:
+            await self._generate_and_speak(question, mean_word_prob)
+        finally:
+            self._answering = False
+
+    async def _generate_and_speak(self, question: str, mean_word_prob: float | None = None) -> None:
         """Run answer generation with filler delay, calibrated escalations, and speech playout."""
         curr_gen_id = self.room.state.generation_id
         t0 = time.perf_counter()

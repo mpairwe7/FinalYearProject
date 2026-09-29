@@ -199,6 +199,20 @@ def get_turn_timeout_s() -> float:
     return _env_float("RECEPTIONIST_TURN_TIMEOUT_S", 1.0)
 
 
+def get_idle_reprompt_s() -> float:
+    """Caller silence, after the assistant stops speaking, before it checks they are there.
+
+    ``0`` turns silence handling off. The clock starts only when the assistant
+    has finished speaking, so a slow answer never counts against the caller.
+    """
+    return max(0.0, _env_float("RECEPTIONIST_IDLE_REPROMPT_S", 12.0))
+
+
+def get_idle_reprompts() -> int:
+    """"Are you still there?" checks before a silent call is ended."""
+    return max(0, _env_int("RECEPTIONIST_IDLE_REPROMPTS", 1))
+
+
 def get_brief_every_turns() -> int:
     """Caller turns between rolling rebuilds of the officer's brief."""
     return max(1, _env_int("RECEPTIONIST_BRIEF_EVERY_TURNS", 3))
