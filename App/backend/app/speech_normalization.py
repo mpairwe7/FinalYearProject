@@ -30,8 +30,10 @@ _DANGLING_URL_TAIL_RE = re.compile(r"\]\((?:https?://|www\.)[^)\s]*\)?")
 _BARE_URL_RE = re.compile(r"\b(?:https?://|www\.)\S+", re.IGNORECASE)
 # "…the URA portal at https://ura.go.ug." -> "…the URA portal." The address is
 # not spoken, and neither is the "at" that introduced it; the full stop stays.
+# One leading whitespace character, not a run of them: "\s+at\s+" could be
+# retried from every position of a long run of spaces (polynomial backtracking).
 _URL_WITH_PREPOSITION_RE = re.compile(
-    r"\s+(?:at|via)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]", re.IGNORECASE
+    r"\s(?:at|via)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]", re.IGNORECASE
 )
 
 # Code blocks and inline code
