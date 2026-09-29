@@ -488,16 +488,29 @@ def rrf_fuse_ranked_lists(
     statutory graph is a third leg rather than an unconditional prepend.
     """
     k = RRF_K if k is None else k
+    if isinstance(k, bool) or not isinstance(k, int) or k <= 0:
+        raise ValueError("k must be a positive integer")
+    if top_k is not None and (
+        isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0
+    ):
+        raise ValueError("top_k must be a non-negative integer or None")
+
     scores: dict[str, float] = {}
     kept: dict[str, dict[str, Any]] = {}
     for ranked in lists:
         if not ranked:
             continue
-        for rank, hit in enumerate(ranked):
-            hid = hit_identity(hit)
-            if not hid:
+        seen_in_leg: set[str] = set()
+        rank = 0
+        for hit in ranked:
+            if not isinstance(hit, dict):
                 continue
+            hid = hit_identity(hit)
+            if not hid or hid in seen_in_leg:
+                continue
+            seen_in_leg.add(hid)
             scores[hid] = scores.get(hid, 0.0) + 1.0 / (k + rank)
+            rank += 1
             incoming = dict(hit)
             existing = kept.get(hid)
             if existing is None or incoming.get("doc_type") == "graph":
@@ -506,14 +519,18 @@ def rrf_fuse_ranked_lists(
     for hid, hit in kept.items():
         hit["score_rrf"] = scores[hid]
         fused.append(hit)
-    fused.sort(
-        key=lambda h: (
-            1 if hit_relevance(h) is not None else 0,
-            hit_relevance(h) or 0.0,
-            float(h.get("score_rrf") or 0.0),
-        ),
-        reverse=True,
-    )
+
+    def _sort_key(hit: dict[str, Any]) -> tuple[float, float, str]:
+        relevance = hit_relevance(hit)
+        if relevance is None or not math.isfinite(relevance):
+            relevance = 0.0
+        return (
+            -float(hit.get("score_rrf") or 0.0),
+            -relevance,
+            hit_identity(hit),
+        )
+
+    fused.sort(key=_sort_key)
     if top_k is not None:
         fused = fused[:top_k]
     return fused

@@ -146,6 +146,14 @@ surface that would need to change. Effort estimates are rough:
 | G23 🟢 | **~~No delegation between agents.~~** **SHIPPED 2026-08-17 (one hop).** Typed `handoff_*` fields on `AgentGraphState`. When a specialist/tool plan yields no usable observation, the graph hands off once to `retrieve` instead of synthesising an empty answer. Not free-form multi-agent chat — schema-validated, budgeted at one hop (2026 enterprise pattern). | — | Done (bounded). | Extra hops only with a measured quality gate. | `graphs/state.py`, `graphs/main_graph.py` | Done |
 | G24 🟢 | **~~No per-user prompt tuning.~~** **SHIPPED 2026-08-17** — profile `detail_level` (`beginner` / `intermediate` / `expert`) appends a short instruction fragment via `detail_level_prompt()`. Intermediate adds nothing (base prompt already matches). Unknown values are ignored so a profile field cannot inject prompt text. Still consent-gated. | — | Done. | Optional industry/language fragments later. | `agents/prompts.py`, `service.py` | Done |
 
+Runtime clarification (2026-09-29): the langgraph flag currently selects a
+repository-owned, synchronous, request-scoped dispatcher with LangGraph-style
+nodes; it is not the upstream LangGraph package and does not provide
+checkpointing, durable resume, interrupts, or retries. It runs only when
+`agentic_mode` is enabled, and tool dispatch additionally requires `tool_use`.
+Graph fusion and tax graph remain off by default pending stronger held-out evaluation. See
+RAG_ARCHITECTURE.md for the runtime boundary and fusion details.
+
 ### 2.6 Evaluation & quality
 
 | # | Gap | User impact | Current state | Recommended fix | Code surface | Effort |

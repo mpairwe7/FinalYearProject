@@ -1,4 +1,4 @@
-"""Minimal state-machine runtime — LangGraph-compatible node shape.
+"""Minimal request-scoped state-machine runtime with LangGraph-style nodes.
 
 A graph is just a list of (name, callable) pairs plus a small set
 of edges.  Each node receives the current ``AgentGraphState``,
@@ -6,17 +6,17 @@ may mutate it, and returns a :class:`NodeResult` naming the next
 node (or ``END`` to terminate).  This covers ReAct / Plan-and-
 Execute / Reflexion without pulling in LangGraph.
 
-When Phase 15 full lands, every node becomes a LangGraph
-``@node`` and the runtime is replaced with ``StateGraph.compile()``.
-The public API of a node — ``(state) -> NodeResult`` — is
-intentionally the same so the migration is mechanical.
+This deliberately small dispatcher is not upstream LangGraph: it has no
+checkpoint store, retries, interrupts, or durable resume. It is suitable for
+bounded, single-request turns only. A durable workflow migration must account
+for tool side effects and idempotency before enabling node replay.
 """
 
 from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from .state import AgentGraphState, GraphOutcome
@@ -54,13 +54,21 @@ class GraphRuntime:
 
     def __init__(
         self,
-        nodes: dict[str, GraphNode],
+        nodes: Mapping[str, GraphNode],
         entry: str,
         max_steps: int = 12,
     ) -> None:
-        if entry not in nodes:
+        if not isinstance(nodes, Mapping) or not nodes:
+            raise ValueError("nodes must be a non-empty mapping")
+        if any(not isinstance(name, str) or not name or name == END for name in nodes):
+            raise ValueError("node names must be non-empty strings other than END")
+        if any(not callable(node) for node in nodes.values()):
+            raise ValueError("every graph node must be callable")
+        if not isinstance(entry, str) or entry not in nodes:
             raise ValueError(f"entry node {entry!r} not in {sorted(nodes)}")
-        self._nodes = nodes
+        if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
+            raise ValueError("max_steps must be a positive integer")
+        self._nodes = dict(nodes)
         self._entry = entry
         self._max_steps = max_steps
 
@@ -84,12 +92,36 @@ class GraphRuntime:
             try:
                 result = node(state)
             except Exception as e:  # noqa: BLE001
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                state.record(current, elapsed_ms, status="error", error_type=type(e).__name__)
                 logger.exception("GraphRuntime: node %s raised", current)
                 state.outcome = GraphOutcome.ERRORED
                 state.error = f"{current}: {type(e).__name__}: {e}"
                 break
             elapsed_ms = (time.perf_counter() - t0) * 1000
-            state.record(current, elapsed_ms)
+
+            if not isinstance(result, NodeResult):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidNodeResult")
+                logger.error("GraphRuntime: node %s returned %s, expected NodeResult", current, type(result).__name__)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: node returned {type(result).__name__}, expected NodeResult"
+                break
+            if not isinstance(result.next_node, str) or (
+                result.next_node != END and result.next_node not in self._nodes
+            ):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidTransition")
+                logger.error("GraphRuntime: node %s selected unknown node %r", current, result.next_node)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"unknown node: {result.next_node}"
+                break
+            if result.outcome is not None and not isinstance(result.outcome, GraphOutcome):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidOutcome")
+                logger.error("GraphRuntime: node %s returned invalid outcome %r", current, result.outcome)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: invalid graph outcome"
+                break
+
+            state.record(current, elapsed_ms, status="ok")
 
             if result.outcome is not None:
                 state.outcome = result.outcome
