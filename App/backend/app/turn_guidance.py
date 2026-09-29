@@ -48,14 +48,23 @@ GUIDE_PREFIX = "Guide me step by step through "
 #: reliable answer" with a step-by-step guide under it is a way forward.
 _OFFER_MODES = frozenset(
     {
+        # Retrieval answers, named by the leg that ran (see the frontend's
+        # RETRIEVAL_MODE_LABEL): a CPU-only deployment answers "sparse", so
+        # leaving these out would hide the offer there entirely.
         "hybrid",
         "hybrid_corrected",
-        "keyword",
+        "sparse",
+        "sparse_corrected",
+        "dense",
+        "dense_corrected",
         "vector",
+        "vector_corrected",
+        "keyword",
         "faq_priority",
         "graph",
         "agentic",
         "education",
+        "answer_override",
         "abstained",
     }
 )

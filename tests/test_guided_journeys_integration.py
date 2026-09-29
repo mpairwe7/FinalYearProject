@@ -224,6 +224,58 @@ def test_the_streaming_abstention_neither_repeats_the_opener_nor_competes_with_a
         assert not any(a.startswith(GUIDE_PREFIX) or a == HANDOFF_ACTION for a in grounding["next_actions"])
 
 
+def test_journey_funnel_endpoint(client):
+    from App.backend.app.auth.jwt_auth import make_dev_token  # noqa: PLC0415
+
+    staff = {"Authorization": f"Bearer {make_dev_token('gj-staff', role='ura_staff')}"}
+    user = {"Authorization": f"Bearer {make_dev_token(f'gj-user-{uuid.uuid4().hex[:8]}', role='verified_taxpayer')}"}
+    assert client.get("/v1/analytics/journeys").status_code in (401, 403, 503)
+
+    conversation_id = f"conv-gj-{uuid.uuid4().hex[:12]}"
+    client.post("/v1/chat", json={"message": "Help me file my return", "conversation_id": conversation_id})
+    client.post("/v1/chat", json={"message": "cancel", "conversation_id": conversation_id})
+    assert client.post(
+        "/v1/me/consents/grant", headers=user, json={"purposes": ["analytics"], "version": "2026-08"}
+    ).status_code == 200
+    rated = client.post(
+        "/v1/feedback",
+        headers=user,
+        json={
+            "message_id": f"m-gj-{uuid.uuid4().hex[:8]}",
+            "rating": "down",
+            "retrieval_mode": "workflow",
+            "workflow_id": "return_filing",
+            "step_id": "collect_taxpayer_type",
+        },
+    )
+    assert rated.status_code == 200
+
+    response = client.get("/v1/analytics/journeys?days=1", headers=staff)
+    assert response.status_code == 200
+    body = response.json()
+    journeys = {j["workflow_id"]: j for j in body["journeys"]}
+    filing = journeys["return_filing"]
+    assert filing["started"] >= 1 and filing["cancelled"] >= 1
+    first = filing["steps"][0]
+    assert first["step_id"] == "collect_taxpayer_type"
+    assert first["stopped"] >= 1 and first["not_helpful"] >= 1
+    assert "motor_vehicle_registration" in journeys  # listed even when unused
+    assert client.get("/v1/analytics/journeys?days=0", headers=staff).status_code == 400
+
+
+def test_feedback_context_accepts_identifiers_only(client):
+    from App.backend.app.auth.jwt_auth import make_dev_token  # noqa: PLC0415
+
+    user = {"Authorization": f"Bearer {make_dev_token(f'gj-user-{uuid.uuid4().hex[:8]}', role='verified_taxpayer')}"}
+    client.post("/v1/me/consents/grant", headers=user, json={"purposes": ["analytics"], "version": "2026-08"})
+    refused = client.post(
+        "/v1/feedback",
+        headers=user,
+        json={"message_id": "m-gj-bad", "rating": "up", "workflow_id": "Return Filing <script>"},
+    )
+    assert refused.status_code == 422
+
+
 def test_the_streaming_core_applies_the_same_guidance(client):
     # ``client`` builds the real ChatModel, which loads the workflow flows the
     # guided-mode offer is matched against.

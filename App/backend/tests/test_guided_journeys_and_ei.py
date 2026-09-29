@@ -117,6 +117,15 @@ class ReviewRegressionTests(unittest.TestCase):
                     guided_mode_action("How do I file a return in Kenya?", {"retrieval_mode": mode}), ""
                 )
 
+    def test_cpu_retrieval_modes_carry_the_offer(self) -> None:
+        # A CPU-only deployment reports the leg that ran ("sparse"), not "hybrid".
+        for mode in ("sparse", "dense_corrected", "vector_corrected"):
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    guided_mode_action("How do I file my return?", {"retrieval_mode": mode}),
+                    "Guide me step by step through Return Filing",
+                )
+
     def test_contractions_do_not_hide_a_feeling(self) -> None:
         for message in ("I'm confused", "I'm so frustrated, this is useless", "I've had enough, it's useless"):
             with self.subTest(message=message):

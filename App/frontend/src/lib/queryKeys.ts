@@ -37,6 +37,7 @@ export const queryKeys = {
     all: () => ['analytics'] as const,
     dashboard: (days?: number) => ['analytics', 'dashboard', days] as const,
     feedbackSummary: (days?: number) => ['analytics', 'feedbackSummary', days] as const,
+    journeys: (days?: number) => ['analytics', 'journeys', days] as const,
   },
   speech: {
     all: () => ['speech'] as const,

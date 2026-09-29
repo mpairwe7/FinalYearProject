@@ -123,14 +123,25 @@ until then. A logged "prototype seed skipped" traceback at startup is expected
 
 ## Read the journey funnel
 
-`journey_events_total{workflow, event, step}` on `/metrics` (admin token
-required; 401 without one). Events: `started`, `step_entered`, `step_invalid`,
-`completed`, `cancelled`. For one flow, list `step_entered` by step in YAML
-order: the largest fall between consecutive steps is the drop-off to fix
-first, and a high `step_invalid` on a step means its question or validator is
-confusing people. `cancelled` carries the step the taxpayer left at. Labels
-never carry slot values, so the counter needs no analytics consent.
-Abandonment without a cancel is not counted yet (G65).
+**For the CX team: the "Guided journeys" panel on `/analytics`** (staff sign-in,
+`ura_admin` or `ura_auditor`). One row per journey for the selected period:
+started, finished (with rate), stopped (cancelled + abandoned), the step where
+most journeys stop, and the step taxpayers rated least helpful. Fix the first
+drop-off, reword the least helpful reply, then re-run the probes.
+
+The panel reads `GET /v1/analytics/journeys`, built from the stored
+`workflow_sessions` and `feedback` tables: the same on every replica, kept
+across restarts, scoped by the period picker. A journey still active but
+untouched for `JOURNEY_ABANDON_AFTER_HOURS` (default 24) counts as abandoned.
+Ratings reach a step because the web client sends `workflow_id` and `step_id`
+with each thumbs up or down (identifiers only; the API refuses anything else).
+
+**For operators: `journey_events_total{workflow, event, step}` on `/metrics`**
+(admin token required; 401 without one), events `started`, `step_entered`,
+`step_invalid`, `completed`, `cancelled`. It is per replica and resets on
+restart, so use it for live debugging, not for the funnel: a high
+`step_invalid` on a step means its question or validator confuses people.
+Neither source carries slot values, so neither needs analytics consent.
 
 ## Crisis lines
 

@@ -626,6 +626,11 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "modality", "TEXT DEFAULT 'text'")
     _ensure_column(conn, "tickets", "user_query_en", "TEXT DEFAULT ''")
     _ensure_column(conn, "tickets", "officer_reply_localized", "TEXT DEFAULT ''")
+    # Which route / journey step produced a rated reply (journey analytics).
+    _ensure_column(conn, "feedback", "retrieval_mode", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "workflow_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "step_id", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
@@ -747,8 +752,16 @@ def save_feedback(
     user_query: str = "",
     bot_reply: str = "",
     user_id: str = "",
+    retrieval_mode: str = "",
+    workflow_id: str = "",
+    step_id: str = "",
 ) -> dict[str, Any]:
-    """Persist a feedback entry and return it."""
+    """Persist a feedback entry and return it.
+
+    *retrieval_mode*, *workflow_id* and *step_id* say which route or journey
+    step produced the rated reply; they are identifiers validated at the API
+    boundary (``FeedbackRequest``), never free text.
+    """
     from .guardrails import redact_pii_text
 
     comment = redact_pii_text(comment)
@@ -760,9 +773,12 @@ def save_feedback(
     try:
         conn.execute(
             """INSERT INTO feedback (id, message_id, session_id, user_id, rating, comment,
-               user_query, bot_reply, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now),
+               user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
+                retrieval_mode or "", workflow_id or "", step_id or "",
+            ),
         )
         conn.commit()
     except Exception:
@@ -830,6 +846,38 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
         "satisfaction_pct": satisfaction,
         "recent": [dict(r) for r in recent],
     }
+
+
+def get_journey_funnel(days: int = 30, abandon_after_s: float = 86400.0) -> dict[str, Any]:
+    """Raw guided-journey counts for the last *days*, from durable tables.
+
+    Read from ``workflow_sessions`` rather than the in-process
+    ``journey_events_total`` counter, which is per replica and resets on
+    restart. Aggregated in SQL, so the result is bounded by journeys x
+    statuses x steps however many sessions exist. A session still ``active``
+    whose last update is older than *abandon_after_s* is marked ``stale``
+    (abandoned). ``app.journey_analytics.build_journey_funnel`` turns this
+    into the per-journey view.
+    """
+    conn = _get_connection()
+    now = time.time()
+    cutoff = now - days * 86400
+    stale_before = now - abandon_after_s
+    sessions = conn.execute(
+        """SELECT workflow_id, status, current_step_idx AS step_idx,
+                  CASE WHEN status = 'active' AND updated_at < ? THEN 1 ELSE 0 END AS stale,
+                  COUNT(*) AS n
+           FROM workflow_sessions WHERE created_at >= ?
+           GROUP BY workflow_id, status, current_step_idx, stale""",
+        (stale_before, cutoff),
+    ).fetchall()
+    feedback = conn.execute(
+        """SELECT workflow_id, step_id, rating, COUNT(*) AS n
+           FROM feedback WHERE created_at >= ? AND workflow_id != ''
+           GROUP BY workflow_id, step_id, rating""",
+        (cutoff,),
+    ).fetchall()
+    return {"sessions": [dict(r) for r in sessions], "feedback": [dict(r) for r in feedback]}
 
 
 # ---------------------------------------------------------------------------
@@ -2833,6 +2881,7 @@ if ANALYTICS_BACKEND == "postgres":
         save_feedback = _pg.save_feedback  # type: ignore
         update_feedback_comment = _pg.update_feedback_comment  # type: ignore
         get_feedback_summary = _pg.get_feedback_summary  # type: ignore
+        get_journey_funnel = _pg.get_journey_funnel  # type: ignore
         track_event = _pg.track_event  # type: ignore
         get_event_counts = _pg.get_event_counts  # type: ignore
         upsert_session = _pg.upsert_session  # type: ignore

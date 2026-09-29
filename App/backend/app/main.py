@@ -54,6 +54,7 @@ from .auth.models import (
 )
 from .authority import authority_required, get_authority_status
 from .escalation_notify import known_teams
+from .journey_analytics import build_journey_funnel
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
@@ -79,6 +80,7 @@ from .models import (
     FeedbackResponse,
     FeedbackSummary,
     HealthResponse,
+    JourneyFunnelResponse,
     OfflineAdminStats,
     OfflineStatusResponse,
     OfflineSyncRequest,
@@ -107,6 +109,7 @@ from .speech_service import (
     SPEECH_TTS_BACKEND,
     SpeechModel,
 )
+from .workflows.registry import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
 _APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
@@ -754,6 +757,9 @@ _ESCALATION_QUEUE_OFF_MESSAGE = (
 )
 
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+#: An active guided journey untouched for this long counts as abandoned in the
+#: analytics journey funnel (GET /v1/analytics/journeys).
+_JOURNEY_ABANDON_AFTER_HOURS = max(1, int(os.getenv("JOURNEY_ABANDON_AFTER_HOURS", "24")))
 _EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
 _DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
 _SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
@@ -2256,6 +2262,9 @@ def submit_feedback(
         user_id=ctx.user_id,
         user_query=_CM.redact_for_storage(body.user_query),
         bot_reply=_CM.redact_for_storage(body.bot_reply),
+        retrieval_mode=body.retrieval_mode,
+        workflow_id=body.workflow_id,
+        step_id=body.step_id,
     )
     return FeedbackResponse(**result)
 
@@ -2527,6 +2536,31 @@ def feedback_summary(
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
     return FeedbackSummary(**db.get_feedback_summary(days))
+
+
+@app.get("/v1/analytics/journeys", response_model=JourneyFunnelResponse, tags=["analytics"])
+def journey_funnel(
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> JourneyFunnelResponse:
+    """Guided-journey funnel for the period: starts, completions, cancellations,
+    abandonment, the step unfinished journeys stopped at, and step ratings.
+
+    Built from the durable ``workflow_sessions`` and ``feedback`` tables, so it
+    is the same on every replica and survives restarts, unlike the in-process
+    ``journey_events_total`` counter on /metrics.
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    raw = db.get_journey_funnel(days, abandon_after_s=_JOURNEY_ABANDON_AFTER_HOURS * 3600)
+    return JourneyFunnelResponse(
+        **build_journey_funnel(
+            raw,
+            WorkflowRegistry.list_all(),
+            days=days,
+            abandon_after_hours=_JOURNEY_ABANDON_AFTER_HOURS,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------

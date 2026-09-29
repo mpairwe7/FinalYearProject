@@ -301,6 +301,10 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            # Which route / journey step produced a rated reply (journey analytics).
+            for _col in ("retrieval_mode", "workflow_id", "step_id"):
+                cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} TEXT DEFAULT ''")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
             cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
@@ -407,6 +411,9 @@ def save_feedback(
     user_query: str = "",
     bot_reply: str = "",
     user_id: str = "",
+    retrieval_mode: str = "",
+    workflow_id: str = "",
+    step_id: str = "",
 ) -> dict[str, Any]:
     pool = _get_pool()
     if pool is None:
@@ -422,9 +429,12 @@ def save_feedback(
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO feedback (id, message_id, session_id, user_id, rating,
-                    comment, user_query, bot_reply, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now),
+                    comment, user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
+                    retrieval_mode or "", workflow_id or "", step_id or "",
+                ),
             )
         conn.commit()
     return {"id": fb_id, "message_id": message_id, "rating": rating, "created_at": now}
@@ -450,6 +460,39 @@ def update_feedback_comment(message_id: str, comment: str, user_id: str = "") ->
             rowcount = cur.rowcount
         conn.commit()
     return rowcount > 0
+
+
+def get_journey_funnel(days: int = 30, abandon_after_s: float = 86400.0) -> dict[str, Any]:
+    """Postgres twin of ``database.get_journey_funnel`` (same shape)."""
+    pool = _get_pool()
+    if pool is None:
+        return {"sessions": [], "feedback": []}
+    now = time.time()
+    cutoff = now - days * 86400
+    stale_before = now - abandon_after_s
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT workflow_id, status, current_step_idx,
+                      CASE WHEN status = 'active' AND updated_at < %s THEN 1 ELSE 0 END AS stale,
+                      COUNT(*)
+               FROM workflow_sessions WHERE created_at >= %s
+               GROUP BY workflow_id, status, current_step_idx, stale""",
+            (stale_before, cutoff),
+        )
+        sessions = [
+            {"workflow_id": r[0], "status": r[1], "step_idx": r[2], "stale": r[3], "n": r[4]}
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            """SELECT workflow_id, step_id, rating, COUNT(*)
+               FROM feedback WHERE created_at >= %s AND workflow_id <> ''
+               GROUP BY workflow_id, step_id, rating""",
+            (cutoff,),
+        )
+        feedback = [
+            {"workflow_id": r[0], "step_id": r[1], "rating": r[2], "n": r[3]} for r in cur.fetchall()
+        ]
+    return {"sessions": sessions, "feedback": feedback}
 
 
 def get_feedback_summary(days: int = 30) -> dict[str, Any]:

@@ -235,6 +235,34 @@ export interface FeedbackSummary {
   }[];
 }
 
+/** GET /v1/analytics/journeys — one row per guided journey. */
+export interface JourneyStepStats {
+  step_id: string;
+  title: string;
+  /** Journeys cancelled or abandoned while waiting on this step. */
+  stopped: number;
+  helpful: number;
+  not_helpful: number;
+}
+
+export interface JourneyStats {
+  workflow_id: string;
+  name: string;
+  started: number;
+  completed: number;
+  cancelled: number;
+  abandoned: number;
+  in_progress: number;
+  completion_pct: number;
+  steps: JourneyStepStats[];
+}
+
+export interface JourneyFunnel {
+  period_days: number;
+  abandon_after_hours: number;
+  journeys: JourneyStats[];
+}
+
 export interface FlagRecord {
   name: string;
   default: boolean;
@@ -276,6 +304,7 @@ async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
 export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
+  journeys: (days = 30) => fetchJson<JourneyFunnel>(`/v1/analytics/journeys?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
   tickets: (status = "open", limit = 8, priority = "", team = "", q?: string, locale?: string, modality?: string) =>
     fetchJson<TicketQueueResponse>(

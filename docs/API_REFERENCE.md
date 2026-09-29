@@ -399,6 +399,13 @@ POST /v1/feedback
 | `session_id` | string | No | Client session identifier |
 | `user_query` | string | No | Original question (PII-redacted before storage) |
 | `bot_reply` | string | No | Bot response that was rated (PII-redacted before storage) |
+| `retrieval_mode` | string | No | Route that produced the reply (e.g. `workflow`, `hybrid`) |
+| `workflow_id` | string | No | Guided journey the reply belongs to (e.g. `tax_clearance`) |
+| `step_id` | string | No | Journey step the reply asked (e.g. `collect_returns_filed`) |
+
+The three context fields are identifiers only: lowercase letters, digits and
+`_`, at most 64 characters. Anything else is refused with 422. They let
+`GET /v1/analytics/journeys` attribute ratings to journey steps.
 
 **Response**
 ```json
@@ -473,6 +480,53 @@ GET /v1/feedback/summary?days=30
 `recent` carries at most the 20 newest ratings. `user_query` is the
 taxpayer's question as typed, stored PII-redacted at write time — it is
 what `/analytics` renders under "Taxpayer question".
+
+---
+
+### Guided-Journey Funnel
+
+How far taxpayers get through each guided journey in the period. Staff only
+(OIDC staff role or the operator key). Built from the stored journey sessions
+and feedback, so it is the same on every replica and survives restarts; the
+`journey_events_total` counter on `/metrics` is per replica and resets.
+
+```http
+GET /v1/analytics/journeys?days=30
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `days` | integer | No | Period in days (1–365, default 30) |
+
+**Response**
+```json
+{
+  "period_days": 30,
+  "abandon_after_hours": 24,
+  "journeys": [
+    {
+      "workflow_id": "tax_clearance",
+      "name": "Tax Clearance Certificate",
+      "started": 10,
+      "completed": 6,
+      "cancelled": 1,
+      "abandoned": 2,
+      "in_progress": 1,
+      "completion_pct": 60.0,
+      "steps": [
+        {"step_id": "collect_returns_filed", "title": "Returns filed",
+         "stopped": 3, "helpful": 1, "not_helpful": 2}
+      ]
+    }
+  ]
+}
+```
+
+A journey still active but untouched for `JOURNEY_ABANDON_AFTER_HOURS`
+(default 24) counts as abandoned. `stopped` is attributed to the step at the
+session's saved position. Every journey a taxpayer can start by name is
+listed, even at zero; calculators appear once used. `/analytics` renders this
+as the "Guided journeys" panel.
 
 ---
 

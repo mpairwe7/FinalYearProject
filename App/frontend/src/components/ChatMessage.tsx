@@ -426,7 +426,14 @@ function ChatMessageInner({
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
             <CopyButton text={stripCitationMarkers(turn.content)} />
-            <FeedbackButtons messageId={turn.id} userQuery={userQuery} botReply={turn.content} />
+            <FeedbackButtons
+              messageId={turn.id}
+              userQuery={userQuery}
+              botReply={turn.content}
+              retrievalMode={turn.retrievalMode}
+              workflowId={turn.workflow?.id}
+              stepId={turn.workflow?.step_id}
+            />
           </div>
         )}
         {isAssistant && isGreeting && (

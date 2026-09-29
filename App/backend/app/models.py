@@ -192,6 +192,12 @@ class FeedbackRequest(BaseModel):
     session_id: str | None = Field(None, max_length=128)
     user_query: str = Field("", max_length=2000, description="Original user question")
     bot_reply: str = Field("", max_length=5000, description="Bot response that was rated")
+    # Where the rated reply came from, so a rating can be read against the
+    # journey step or route that produced it (the analytics journey panel).
+    # Identifiers only, never free text, so the pattern is strict.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Route that produced the reply")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Guided journey the reply belongs to")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Journey step the reply asked")
 
 
 class FeedbackResponse(BaseModel):
@@ -203,6 +209,37 @@ class FeedbackResponse(BaseModel):
 
 class FeedbackCommentRequest(BaseModel):
     comment: str = Field(..., min_length=1, max_length=1000, description="Follow-up comment text")
+
+
+# ---------------------------------------------------------------------------
+# Guided-journey funnel (staff analytics)
+# ---------------------------------------------------------------------------
+class JourneyStepStats(BaseModel):
+    step_id: str
+    title: str
+    #: Journeys cancelled or abandoned while waiting on this step.
+    stopped: int = 0
+    helpful: int = 0
+    not_helpful: int = 0
+
+
+class JourneyStats(BaseModel):
+    workflow_id: str
+    name: str
+    started: int = 0
+    completed: int = 0
+    cancelled: int = 0
+    #: Still active but untouched for longer than ``abandon_after_hours``.
+    abandoned: int = 0
+    in_progress: int = 0
+    completion_pct: float = 0.0
+    steps: list[JourneyStepStats] = Field(default_factory=list)
+
+
+class JourneyFunnelResponse(BaseModel):
+    period_days: int
+    abandon_after_hours: int
+    journeys: list[JourneyStats] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
