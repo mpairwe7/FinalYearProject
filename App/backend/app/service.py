@@ -7080,8 +7080,16 @@ class ChatModel:
                 rewritten=str(result.get("_rewritten") or ""),
                 recent_turns=_recent_turns_for_guidance(result, user_id),
             )
+            # reply_locale is the language the reply is actually in: when
+            # translation fails, localize_reply hands back the English, and a
+            # voice endpoint keying TTS off the caller's language would read
+            # that English with the Luganda or Swahili voice.
+            result["reply_locale"] = "en"
             if effective not in ("", "en"):
-                result["reply"] = self._localize_reply(str(result.get("reply", "")), effective)
+                english = str(result.get("reply", ""))
+                result["reply"] = self._localize_reply(english, effective)
+                if result["reply"] != english or _is_already_in_locale(english.strip(), effective):
+                    result["reply_locale"] = effective
         return result
 
     def _generate_en(

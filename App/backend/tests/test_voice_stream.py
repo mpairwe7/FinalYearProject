@@ -149,6 +149,27 @@ class TestSentenceSplitting(unittest.TestCase):
         result = _split_sentences("  ")
         self.assertEqual(len(result), 1)
 
+    def test_a_number_ending_a_sentence_is_not_a_step(self):
+        from app.voice_stream import _split_sentences
+
+        self.assertEqual(
+            _split_sentences("Your reference number is 123. Keep it safe."),
+            ["Your reference number is 123.", "Keep it safe."],
+        )
+
+    def test_list_markers_are_read_as_steps(self):
+        from app.voice_stream import _split_sentences
+
+        self.assertEqual(
+            _split_sentences("To register: 1. Go to the URA web portal. 2. Click eServices and select TIN."),
+            ["To register: Step 1: Go to the URA web portal.", "Step 2: Click eServices and select TIN."],
+        )
+        # The number after a list's last step is an ordinary number again.
+        self.assertEqual(
+            _split_sentences("Steps: 1. Go to the URA web portal. 2. Click eServices. Pay within 30. Days count."),
+            ["Steps: Step 1: Go to the URA web portal.", "Step 2: Click eServices.", "Pay within 30.", "Days count."],
+        )
+
     def test_long_sentence_clause_split(self):
         from app.voice_stream import _split_sentences
 
@@ -275,6 +296,36 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
         async for _event in session.process_utterance(b"\x00" * 3200):
             pass
         chat.generate.assert_called_once()
+
+    async def test_a_reference_number_is_shown_and_spoken_as_written(self):
+        session, speech, chat = self._make_session()
+        chat.generate.return_value = {**chat.generate.return_value, "reply": "Your reference number is 123. Keep it safe."}
+        events = [event async for event in session.process_utterance(struct.pack("<800h", *([5000] * 800)))]
+        shown = " ".join(event.data["text"] for event in events if event.type == "reply_text")
+        spoken = " ".join(call.args[0] for call in speech.synthesize.call_args_list)
+        for text in (shown, spoken):
+            self.assertIn("123", text)
+            self.assertNotIn("Step", text)
+
+    async def test_an_english_fallback_is_spoken_with_the_english_voice(self):
+        """Luganda MT down: generate() localises itself and serves English if that fails too."""
+        from app.speech_service import TranscribeResult
+
+        session, speech, chat = self._make_session()
+        speech.transcribe.return_value = TranscribeResult(
+            text="Omusolo gwa VAT guli ssente mmeka?", language="lg", duration_s=1.0, latency_s=0.2, backend="mock"
+        )
+        speech.translate.side_effect = RuntimeError("MT down")
+        chat.generate.return_value = {
+            **chat.generate.return_value,
+            "reply": "The standard VAT rate is 18%.",
+            "reply_locale": "en",
+        }
+        events = [event async for event in session.process_utterance(struct.pack("<800h", *([5000] * 800)))]
+        self.assertEqual(chat.generate.call_args.kwargs["locale"], "lg")
+        self.assertEqual({call.args[2] for call in speech.synthesize.call_args_list}, {"en"})
+        meta = next(event for event in events if event.type == "reply_meta")
+        self.assertEqual(meta.data["reply_language"], "en")
 
     def test_split_sentences_numbered_steps(self):
         from app.voice_stream import _split_sentences

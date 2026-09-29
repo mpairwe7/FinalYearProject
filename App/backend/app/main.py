@@ -1872,13 +1872,16 @@ async def voice_chat(
             from .receptionist.brain import _split_into_sentences
             from .speech_normalization import clean_text_for_speech
 
-            spoken_reply = clean_text_for_speech(reply_text, locale=detected_lang)
+            # The reply's own language, not the caller's: an English fallback
+            # from a failed translation is spoken with the English voice.
+            tts_lang = str(chat_result.get("reply_locale") or detected_lang)
+            spoken_reply = clean_text_for_speech(reply_text, locale=tts_lang)
             sentences = _split_into_sentences(spoken_reply)
             if len(sentences) > 3:
                 spoken_reply = " ".join(sentences[:3])
             if len(spoken_reply) > 500:
                 spoken_reply = spoken_reply[:500].rsplit(" ", 1)[0] + "."
-            tts_result = speech.synthesize(text=spoken_reply, voice=voice, language=detected_lang)
+            tts_result = speech.synthesize(text=spoken_reply, voice=voice, language=tts_lang)
             tts_latency = tts_result.latency_s
             tts_backend = tts_result.backend
             tts_sample_rate = tts_result.sample_rate
