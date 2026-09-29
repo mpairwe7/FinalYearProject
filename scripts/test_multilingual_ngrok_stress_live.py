@@ -20,11 +20,11 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+import httpx
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,64 +78,40 @@ def get_gpu_telemetry() -> dict[int, dict[str, Any]]:
     return telemetry
 
 
-def http_post_json(path: str, payload: dict[str, Any], timeout: float = 45.0) -> tuple[int, dict[str, Any], float]:
-    url = f"{NGROK_URL}{path}"
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true",
-            "User-Agent": "URA-Stress-Bench/2026",
-        },
-        method="POST",
-    )
+def _checked_url(path: str, params: str = "") -> str:
+    """NGROK_URL + *path*, refusing anything but http(s) (urllib would open file://)."""
+    parsed = urlsplit(NGROK_URL)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.password:
+        raise ValueError("NGROK_URL must be an http(s) URL without embedded credentials")
+    return f"{NGROK_URL.rstrip('/')}{path}" + (f"?{params}" if params else "")
+
+
+def _post(url: str, timeout: float, **kwargs: Any) -> tuple[int, dict[str, Any], float]:
+    headers = {"ngrok-skip-browser-warning": "true", "User-Agent": "URA-Stress-Bench/2026", **kwargs.pop("headers", {})}
     t0 = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            elapsed = (time.perf_counter() - t0) * 1000.0
-            return resp.status, json.loads(resp.read().decode("utf-8")), elapsed
-    except urllib.error.HTTPError as e:
-        elapsed = (time.perf_counter() - t0) * 1000.0
-        try:
-            parsed = json.loads(e.read().decode("utf-8"))
-        except Exception:
-            parsed = {"error": str(e)}
-        return e.code, parsed, elapsed
-    except Exception as exc:
-        elapsed = (time.perf_counter() - t0) * 1000.0
-        return 599, {"error": str(exc)}, elapsed
+        resp = httpx.post(url, headers=headers, timeout=timeout, **kwargs)
+    except httpx.HTTPError as exc:
+        return 599, {"error": str(exc)}, (time.perf_counter() - t0) * 1000.0
+    elapsed = (time.perf_counter() - t0) * 1000.0
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"error": resp.text[:200]}
+    return resp.status_code, body, elapsed
+
+
+def http_post_json(path: str, payload: dict[str, Any], timeout: float = 45.0) -> tuple[int, dict[str, Any], float]:
+    return _post(_checked_url(path), timeout, json=payload)
 
 
 def http_post_pcm(path: str, pcm: bytes, params: str = "", timeout: float = 45.0) -> tuple[int, dict[str, Any], float]:
-    url = f"{NGROK_URL}{path}?{params}" if params else f"{NGROK_URL}{path}"
-    req = urllib.request.Request(
-        url,
-        data=pcm,
-        headers={
-            "Content-Type": "application/octet-stream",
-            "X-Voice-Consent": "true",
-            "ngrok-skip-browser-warning": "true",
-            "User-Agent": "URA-Stress-Bench/2026",
-        },
-        method="POST",
+    return _post(
+        _checked_url(path, params),
+        timeout,
+        content=pcm,
+        headers={"Content-Type": "application/octet-stream", "X-Voice-Consent": "true"},
     )
-    t0 = time.perf_counter()
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            elapsed = (time.perf_counter() - t0) * 1000.0
-            return resp.status, json.loads(resp.read().decode("utf-8")), elapsed
-    except urllib.error.HTTPError as e:
-        elapsed = (time.perf_counter() - t0) * 1000.0
-        try:
-            parsed = json.loads(e.read().decode("utf-8"))
-        except Exception:
-            parsed = {"error": str(e)}
-        return e.code, parsed, elapsed
-    except Exception as exc:
-        elapsed = (time.perf_counter() - t0) * 1000.0
-        return 599, {"error": str(exc)}, elapsed
 
 
 # -----------------------------------------------------------------------------
