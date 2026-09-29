@@ -70,23 +70,29 @@ class BuildJourneyFunnelTests(unittest.TestCase):
 
 
 class JourneyFunnelQueryTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.tmp = TemporaryDirectory(dir="/tmp")
+    @staticmethod
+    def _close_connection() -> None:
         conn = getattr(db._local, "conn", None)
         if conn is not None:
             conn.close()
             delattr(db._local, "conn")
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.tmp = TemporaryDirectory(dir="/tmp")
+        cls._saved_paths = (db._DB_DIR, db._DB_PATH)
+        cls._close_connection()
         db._DB_DIR = Path(cls.tmp.name)
         db._DB_PATH = db._DB_DIR / "analytics.db"
         db.init_db()
 
     @classmethod
     def tearDownClass(cls) -> None:
-        conn = getattr(db._local, "conn", None)
-        if conn is not None:
-            conn.close()
-            delattr(db._local, "conn")
+        # Put the module back where it was: later tests in the same process
+        # read db._DB_PATH, and a path into this deleted directory hands them
+        # an empty database with no tables.
+        cls._close_connection()
+        db._DB_DIR, db._DB_PATH = cls._saved_paths
         cls.tmp.cleanup()
 
     def test_sessions_and_step_feedback_are_grouped(self) -> None:

@@ -256,7 +256,7 @@ screen: Keycloak → Realm settings → Login → *User registration*; Auth0 →
 Authentication → Database → *Disable Sign Ups* must be off.
 
 After the exchange, the callback sends staff to the tool their role can open
-(`ura_staff` → `/agent`, admin/auditor → `/admin`). Everyone else goes to the
+(`ura_staff` → `/agent`, `ura_admin` → `/admin`, `ura_auditor` → `/analytics`). Everyone else goes to the
 `returnTo` the flow recorded, which only `/signup` sets — so a taxpayer who
 registers from the assistant lands back in the assistant, and a non-staff
 sign-in, which records nothing, falls back to `/` rather than a dashboard that

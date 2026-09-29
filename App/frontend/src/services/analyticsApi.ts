@@ -263,6 +263,51 @@ export interface JourneyFunnel {
   journeys: JourneyStats[];
 }
 
+/** GET /v1/admin/audit/events — one row of the tamper-evident audit trail. */
+export interface AuditEvent {
+  seq: number;
+  event_id: string;
+  event_type: string;
+  /** The acting user's id; "operator-key" for the break-glass key. */
+  actor: string;
+  ts: number;
+  payload: Record<string, unknown>;
+  row_hash: string;
+}
+
+export interface AuditEventsPage {
+  /** Whether this deployment records new events (the audit_ledger flag). */
+  ledger_enabled: boolean;
+  events: AuditEvent[];
+  next_before_seq: number | null;
+}
+
+export interface AuditVerification {
+  ledger_enabled: boolean;
+  valid: boolean;
+  rows_checked: number;
+  first_seq: number;
+  last_seq: number;
+  head_hash: string;
+  breaks: { seq: number; event_id: string; reason: string }[];
+  latest_anchor: {
+    anchor_id: string;
+    first_seq: number;
+    last_seq: number;
+    merkle_root: string;
+    created_at: number;
+  } | null;
+  verified_at: number;
+}
+
+export interface AuditQuery {
+  eventType?: string;
+  actor?: string;
+  since?: number;
+  beforeSeq?: number | null;
+  limit?: number;
+}
+
 export interface FlagRecord {
   name: string;
   default: boolean;
@@ -376,6 +421,15 @@ export const analyticsApi = {
     fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
       "/v1/admin/outbox",
     ),
+  auditEvents: ({ eventType = "", actor = "", since, beforeSeq, limit = 50 }: AuditQuery = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (eventType) params.set("event_type", eventType);
+    if (actor) params.set("actor", actor);
+    if (since != null) params.set("since", String(Math.floor(since)));
+    if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
+    return fetchJson<AuditEventsPage>(`/v1/admin/audit/events?${params.toString()}`);
+  },
+  auditVerify: () => fetchJson<AuditVerification>("/v1/admin/audit/verify"),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(
       `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}`,

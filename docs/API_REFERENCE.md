@@ -530,6 +530,73 @@ as the "Guided journeys" panel.
 
 ---
 
+### Audit Trail Events
+
+The tamper-evident audit trail, newest first. Administrators and auditors
+only (`ura_staff` gets 403). See `docs/runbooks/audit-trail.md` for what is
+recorded.
+
+```http
+GET /v1/admin/audit/events?event_type=staff.&actor=&since=&until=&before_seq=&limit=50
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event_type` | string | No | Event-type prefix, `[a-z_.]` only (`staff.` = every staff action) |
+| `actor` | string | No | Acting user's id |
+| `since` / `until` | number | No | Unix seconds |
+| `before_seq` | integer | No | Page cursor: the previous page's `next_before_seq` |
+| `limit` | integer | No | 1–200, default 50 |
+
+**Response**
+```json
+{
+  "ledger_enabled": true,
+  "events": [
+    {"seq": 42, "event_id": "…", "event_type": "staff.ticket_updated",
+     "actor": "officer-1", "ts": 1790000100.0,
+     "payload": {"actor_role": "ura_staff", "ticket_id": "…", "status": "resolved", "officer_reply_chars": 24},
+     "row_hash": "…"}
+  ],
+  "next_before_seq": 42
+}
+```
+
+`ledger_enabled` false means this deployment is not recording new events;
+what was recorded before is still returned.
+
+---
+
+### Audit Trail Verification
+
+Re-walks the tenant's hash chain and reports whether it is intact, with the
+latest Merkle anchor. Administrators and auditors only.
+
+```http
+GET /v1/admin/audit/verify
+```
+
+**Response**
+```json
+{
+  "ledger_enabled": true,
+  "valid": false,
+  "rows_checked": 42,
+  "first_seq": 1,
+  "last_seq": 42,
+  "head_hash": "…",
+  "breaks": [{"seq": 17, "event_id": "…", "reason": "payload_hash mismatch"}],
+  "latest_anchor": null,
+  "verified_at": 1790000200.0
+}
+```
+
+`breaks` lists at most the first 20. Ticket updates
+(`PATCH /v1/admin/tickets/{id}`) and the presence heartbeat answer 403 to
+`ura_auditor`, which is read-only.
+
+---
+
 ### Track Analytics Event
 
 Track a client-side analytics event (e.g., page views, button clicks).

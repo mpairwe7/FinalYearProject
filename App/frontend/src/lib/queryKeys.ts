@@ -21,6 +21,9 @@ export const queryKeys = {
     overrides: () => ['admin', 'overrides'] as const,
     outbox: () => ['admin', 'outbox'] as const,
     evaluation: () => ['admin', 'evaluation'] as const,
+    auditEvents: (eventType: string, actor: string, days: number) =>
+      ['admin', 'audit', 'events', eventType, actor, days] as const,
+    auditVerify: () => ['admin', 'audit', 'verify'] as const,
   },
   tickets: {
     all: () => ['tickets'] as const,

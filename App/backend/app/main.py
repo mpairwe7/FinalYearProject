@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Path, Request, Response, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -58,6 +58,10 @@ from .journey_analytics import build_journey_funnel
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
+    AuditChainBreak,
+    AuditEventOut,
+    AuditEventsResponse,
+    AuditVerifyResponse,
     BatchClassifyRequest,
     BatchClassifyResponse,
     CFRelayChatRequest,
@@ -2118,6 +2122,52 @@ def require_admin_access(
     raise HTTPException(status_code=403, detail="staff role required")
 
 
+def _require_staff_writer(ctx: AuthContext) -> None:
+    """Officers and admins change cases; auditors read them and change nothing.
+
+    ``require_admin_access`` admits every staff role, so this is the
+    separation-of-duties check for write endpoints. The ticket console already
+    hid its controls from auditors, but the API accepted their writes (QA
+    audit, 2026-09-29). The operator key (no user) keeps its break-glass path.
+    """
+    if ctx.user and ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="read-only role")
+
+
+def _require_audit_reader(ctx: AuthContext) -> None:
+    """The audit trail is for administrators and auditors, not case officers."""
+    if ctx.user and ctx.role not in ("ura_admin", "ura_auditor"):
+        raise HTTPException(status_code=403, detail="administrator or auditor role required")
+
+
+def _audit_staff_action(ctx: AuthContext, event_type: str, payload: dict[str, Any]) -> None:
+    """Append one staff action to the tamper-evident audit ledger.
+
+    Records who did what to which record: the actor, their role and the
+    identifiers and field names changed — never the content (a reply's text is
+    recorded as its length), so the ledger adds no copy of taxpayer data. Runs
+    only when ``audit_ledger`` is on, which production requires at startup. A
+    failed append is logged and counted, never raised: the action has already
+    happened, and ``audit_append_failed_total`` is what an alert should watch.
+    """
+    from .flags import flags as flag_reg
+
+    if not flag_reg.is_enabled("audit_ledger"):
+        return
+    try:
+        from .audit import get_ledger
+
+        get_ledger().append(
+            event_type,
+            {"actor_role": ctx.role if ctx.user else "operator_key", **payload},
+            tenant_id=ctx.tenant_id or "default",
+            user_id=ctx.user_id or "operator-key",
+        )
+    except Exception:
+        metrics.inc("audit_append_failed_total", labels={"event_type": event_type})
+        logger.exception("audit append failed for %s", event_type)
+
+
 @app.post("/v1/index", tags=["knowledge"])
 def trigger_indexing(
     request: Request,
@@ -2775,7 +2825,12 @@ def ticket_presence_endpoint(
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Heartbeat: this officer has the case open (collision lock)."""
+    """Heartbeat: this officer has the case open (collision lock).
+
+    Officers and admins only: an auditor reads a case without claiming it, so
+    the console sends no heartbeat for them and the API refuses one.
+    """
+    _require_staff_writer(ctx)
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -2826,6 +2881,7 @@ def set_flag_endpoint(
     except KeyError:
         raise HTTPException(status_code=404, detail="unknown flag") from None
     db.save_flag_override(name, enabled)
+    _audit_staff_action(ctx, "staff.flag_set", {"flag": name, "enabled": bool(enabled)})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
@@ -2868,6 +2924,7 @@ def clear_flag_endpoint(
     # lost on restart rather than resurrected.)
     db.clear_flag_override(name)
     flag_reg.clear(name)
+    _audit_staff_action(ctx, "staff.flag_cleared", {"flag": name})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
@@ -2902,6 +2959,11 @@ def put_override_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(
+        ctx,
+        "staff.override_saved",
+        {"override_id": str((row or {}).get("id") or ""), "enabled": bool(body.get("enabled", True))},
+    )
     return row
 
 
@@ -2915,6 +2977,7 @@ def delete_override_endpoint(
     ok = db.delete_answer_override(override_id)
     if not ok:
         raise HTTPException(status_code=404, detail="override not found")
+    _audit_staff_action(ctx, "staff.override_deleted", {"override_id": override_id})
     return {"ok": True, "id": override_id}
 
 
@@ -2927,21 +2990,111 @@ def list_outbox_endpoint(
     return {"items": db.list_notification_outbox(limit=limit), "live": False}
 
 
+@app.get("/v1/admin/audit/events", response_model=AuditEventsResponse, tags=["admin"])
+def audit_events_endpoint(
+    event_type: str = Query("", max_length=64, pattern=r"^[a-z_.]*$"),
+    actor: str = Query("", max_length=128),
+    since: float | None = Query(None, ge=0),
+    until: float | None = Query(None, ge=0),
+    before_seq: int | None = Query(None, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditEventsResponse:
+    """The tamper-evident audit trail, newest first, for administrators and auditors.
+
+    ``event_type`` matches a prefix (``staff.`` = every staff action);
+    ``actor`` is a user id; ``since``/``until`` are Unix seconds. Page back
+    with ``next_before_seq``. Reads work even when ``audit_ledger`` is off, so
+    the history stays inspectable; ``ledger_enabled`` says whether new events
+    are being recorded.
+    """
+    from .audit import get_ledger
+    from .flags import flags as flag_reg
+
+    _require_audit_reader(ctx)
+    rows = get_ledger().query(
+        ctx.tenant_id or "default",
+        event_type_prefix=event_type,
+        user_id=actor,
+        since_ts=since,
+        until_ts=until,
+        before_seq=before_seq,
+        limit=limit,
+    )
+    events = [
+        AuditEventOut(
+            seq=int(r["seq"]),
+            event_id=str(r["event_id"]),
+            event_type=str(r["event_type"]),
+            actor=str(r.get("user_id") or ""),
+            ts=float(r["ts"]),
+            payload=r.get("payload") if isinstance(r.get("payload"), dict) else {},
+            row_hash=str(r["row_hash"]),
+        )
+        for r in rows
+    ]
+    next_before = events[-1].seq if len(events) == limit and events[-1].seq > 1 else None
+    return AuditEventsResponse(
+        ledger_enabled=flag_reg.is_enabled("audit_ledger"),
+        events=events,
+        next_before_seq=next_before,
+    )
+
+
+@app.get("/v1/admin/audit/verify", response_model=AuditVerifyResponse, tags=["admin"])
+def audit_verify_endpoint(
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditVerifyResponse:
+    """Re-walk this tenant's hash chain and report whether it is intact.
+
+    Recomputes every row's hashes from its stored payload, so an edited,
+    deleted or reordered row shows up as a break at its sequence number. Also
+    returns the latest Merkle anchor, the external checkpoint to compare the
+    head against. Cost grows with the ledger; see
+    docs/runbooks/audit-trail.md for when to verify offline instead.
+    """
+    from .audit import get_ledger
+    from .audit.verifier import verify_chain
+    from .flags import flags as flag_reg
+
+    _require_audit_reader(ctx)
+    tenant = ctx.tenant_id or "default"
+    ledger = get_ledger()  # creates the tables on first use
+    report = verify_chain(tenant)
+    return AuditVerifyResponse(
+        ledger_enabled=flag_reg.is_enabled("audit_ledger"),
+        valid=report.valid,
+        rows_checked=report.rows_checked,
+        first_seq=report.first_seq,
+        last_seq=report.last_seq,
+        head_hash=report.head_hash,
+        breaks=[
+            AuditChainBreak(seq=b.seq, event_id=b.event_id, reason=b.reason) for b in report.breaks[:20]
+        ],
+        latest_anchor=ledger.latest_anchor(tenant),
+        verified_at=time.time(),
+    )
+
+
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
 def get_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Fetch a single ticket, including the conversation transcript.
 
     The transcript is the snapshot taken when the ticket was raised, so
-    it is still here after ``conversations`` has been purged.
+    it is still here after ``conversations`` has been purged. Opening it is
+    recorded as ``staff.ticket_viewed``: the transcript is taxpayer data, and
+    who read it is part of the audit trail (the call desk already logs its
+    caller-history views the same way).
     """
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
+    _audit_staff_action(ctx, "staff.ticket_viewed", {"ticket_id": ticket_id})
     return ticket
 
 
@@ -2956,7 +3109,7 @@ async def update_ticket_endpoint(
     officer_reply: str | None = None,
     officer_reply_localized: str | None = None,
     locale: str | None = None,
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Update a ticket's status/assignee/note/priority/reply.
 
@@ -2964,7 +3117,11 @@ async def update_ticket_endpoint(
     the conversation; ``staff_note`` stays internal. They are separate
     fields on purpose — an officer's candid note is not something the
     taxpayer should ever read.
+
+    Officers and admins only; every accepted change is recorded as
+    ``staff.ticket_updated`` with the fields changed (a reply as its length).
     """
+    _require_staff_writer(ctx)
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = await request.json()
@@ -3009,6 +3166,16 @@ async def update_ticket_endpoint(
     )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
+    changed = {
+        key: value
+        for key, value in (("status", status), ("assignee", assignee), ("priority", priority), ("locale", locale))
+        if value is not None
+    }
+    if staff_note is not None:
+        changed["staff_note_chars"] = len(staff_note)
+    if officer_reply is not None:
+        changed["officer_reply_chars"] = len(officer_reply)
+    _audit_staff_action(ctx, "staff.ticket_updated", {"ticket_id": ticket_id, **changed})
     return {"status": "ok", "ticket_id": ticket_id}
 
 

@@ -127,6 +127,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("PUT", "/v1/admin/overrides"),
     ("DELETE", "/v1/admin/overrides/{override_id}"),
     ("GET", "/v1/admin/outbox"),
+    ("GET", "/v1/admin/audit/events"),
+    ("GET", "/v1/admin/audit/verify"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -254,6 +256,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("PUT", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
     ("DELETE", "/v1/admin/overrides/{override_id}"): "App.backend.tests.test_remaining_gaps",
     ("GET", "/v1/admin/outbox"): "App.backend.tests.test_remaining_gaps",
+    ("GET", "/v1/admin/audit/events"): "test_auditor_controls:test_auditor_reads_the_trail_and_filters_it",
+    ("GET", "/v1/admin/audit/verify"): "test_auditor_controls:test_verify_detects_a_tampered_row",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("PUT", "/v1/me/profile"): "test_me_endpoints",
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -413,10 +417,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (86 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (88 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 86, f"expected 86 HTTP endpoints, found {len(http)}"
+    assert len(http) == 88, f"expected 88 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

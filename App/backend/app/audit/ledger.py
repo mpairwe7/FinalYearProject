@@ -201,6 +201,68 @@ class AuditLedger:
             out.append(d)
         return out
 
+    def query(
+        self,
+        tenant_id: str = "default",
+        *,
+        event_type_prefix: str = "",
+        user_id: str = "",
+        since_ts: float | None = None,
+        until_ts: float | None = None,
+        before_seq: int | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Newest-first page of events for the auditor's audit-trail view.
+
+        Filters are all optional and combine with AND. ``event_type_prefix``
+        matches the start of the type ("staff." selects every staff action).
+        ``before_seq`` pages backwards: pass the smallest ``seq`` of the
+        previous page. ``limit`` is clamped to 1..200 so one request can never
+        pull the whole ledger.
+        """
+        from .. import database as db
+
+        sql = "SELECT * FROM audit_events WHERE tenant_id = ?"
+        params: list[Any] = [tenant_id]
+        if event_type_prefix:
+            sql += " AND event_type LIKE ?"
+            escaped = event_type_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            params.append(escaped + "%")
+            sql += " ESCAPE '\\'"
+        if user_id:
+            sql += " AND user_id = ?"
+            params.append(user_id)
+        if since_ts is not None:
+            sql += " AND ts >= ?"
+            params.append(since_ts)
+        if until_ts is not None:
+            sql += " AND ts < ?"
+            params.append(until_ts)
+        if before_seq is not None:
+            sql += " AND seq < ?"
+            params.append(before_seq)
+        sql += " ORDER BY seq DESC LIMIT ?"
+        params.append(max(1, min(int(limit), 200)))
+        out: list[dict[str, Any]] = []
+        for row in db.query_all(sql, tuple(params)):
+            try:
+                row["payload"] = json.loads(row["payload"])
+            except (TypeError, ValueError):
+                row["payload"] = {}
+            out.append(row)
+        return out
+
+    def latest_anchor(self, tenant_id: str = "default") -> dict[str, Any] | None:
+        """The most recent Merkle anchor for *tenant_id*, if one was recorded."""
+        from .. import database as db
+
+        return db.query_one(
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, created_at
+               FROM audit_anchors WHERE tenant_id = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (tenant_id,),
+        )
+
     def count(self, tenant_id: str = "default") -> int:
         from .. import database as db
 

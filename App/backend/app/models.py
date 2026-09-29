@@ -243,6 +243,47 @@ class JourneyFunnelResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Audit trail (administrators and auditors)
+# ---------------------------------------------------------------------------
+class AuditEventOut(BaseModel):
+    seq: int
+    event_id: str
+    event_type: str
+    #: The acting user's id ("operator-key" for the break-glass key).
+    actor: str
+    ts: float
+    payload: dict[str, Any] = Field(default_factory=dict)
+    row_hash: str
+
+
+class AuditEventsResponse(BaseModel):
+    #: Whether this deployment is recording new events (``audit_ledger``).
+    ledger_enabled: bool
+    events: list[AuditEventOut] = Field(default_factory=list)
+    #: Pass as ``before_seq`` for the next (older) page; null when none.
+    next_before_seq: int | None = None
+
+
+class AuditChainBreak(BaseModel):
+    seq: int
+    event_id: str
+    reason: str
+
+
+class AuditVerifyResponse(BaseModel):
+    ledger_enabled: bool
+    valid: bool
+    rows_checked: int
+    first_seq: int
+    last_seq: int
+    head_hash: str
+    #: At most the first 20 breaks; ``valid`` is false when there are any.
+    breaks: list[AuditChainBreak] = Field(default_factory=list)
+    latest_anchor: dict[str, Any] | None = None
+    verified_at: float
+
+
+# ---------------------------------------------------------------------------
 # Escalation (taxpayer-initiated)
 # ---------------------------------------------------------------------------
 class EscalationRequest(BaseModel):
