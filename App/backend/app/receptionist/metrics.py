@@ -124,6 +124,9 @@ def compute_call_metrics(
     is_lg = (state and state.locale == "lg") or call.get("locale") == "lg" or "lg" in lang_info.get("used", [])
     luganda_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_lg else None
 
+    is_sw = (state and state.locale == "sw") or call.get("locale") == "sw" or "sw" in lang_info.get("used", [])
+    swahili_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_sw else None
+
     metrics_obj = {
         "language": lang_info,
         "duration_s": duration_s,
@@ -149,6 +152,7 @@ def compute_call_metrics(
         "callback_created": callback_created,
         "ai_only_completion": ai_only_completion,
         "luganda_turn_latency_ms": luganda_turn_latency_ms,
+        "swahili_turn_latency_ms": swahili_turn_latency_ms,
         "latency": {
             "stt_ms_p50": _percentile(stt_latencies, 50),
             "stt_ms_p95": _percentile(stt_latencies, 95),
@@ -263,6 +267,10 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
             "luganda_ai_only_completion_rate": 0.0,
             "luganda_transfer_rate": 0.0,
             "luganda_turn_latency_ms": 0.0,
+            "swahili_total_calls": 0,
+            "swahili_ai_only_completion_rate": 0.0,
+            "swahili_transfer_rate": 0.0,
+            "swahili_turn_latency_ms": 0.0,
         }
 
     ai_only_count = 0
@@ -280,6 +288,11 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
     luganda_ai_only_count = 0
     luganda_transferred_count = 0
     luganda_turn_latencies: list[float] = []
+
+    swahili_calls_count = 0
+    swahili_ai_only_count = 0
+    swahili_transferred_count = 0
+    swahili_turn_latencies: list[float] = []
 
     time_to_answers: list[float] = []
     handle_times: list[float] = []
@@ -317,6 +330,17 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
             lg_lat = m.get("luganda_turn_latency_ms") or (m.get("latency") or {}).get("turn_to_audio_ms_p50")
             if lg_lat:
                 luganda_turn_latencies.append(float(lg_lat))
+
+        # Swahili-specific tracking (Pillar 4 Multilingual Parity)
+        if locale == "sw" or "sw" in used_langs:
+            swahili_calls_count += 1
+            if is_ai_only_completion:
+                swahili_ai_only_count += 1
+            if d.get("transferred"):
+                swahili_transferred_count += 1
+            sw_lat = m.get("swahili_turn_latency_ms") or (m.get("latency") or {}).get("turn_to_audio_ms_p50")
+            if sw_lat:
+                swahili_turn_latencies.append(float(sw_lat))
 
         c_asked = m.get("clarifications_asked", 0)
         if c_asked > 0:
@@ -371,6 +395,16 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
         _percentile(luganda_turn_latencies, 50) if luganda_turn_latencies else 0.0
     )
 
+    swahili_ai_only_completion_rate = (
+        round(swahili_ai_only_count / swahili_calls_count, 3) if swahili_calls_count > 0 else 0.0
+    )
+    swahili_transfer_rate = (
+        round(swahili_transferred_count / swahili_calls_count, 3) if swahili_calls_count > 0 else 0.0
+    )
+    swahili_turn_latency_ms = (
+        _percentile(swahili_turn_latencies, 50) if swahili_turn_latencies else 0.0
+    )
+
     return {
         "period_days": days,
         "total_calls": total_calls,
@@ -395,4 +429,8 @@ def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dic
         "luganda_ai_only_completion_rate": luganda_ai_only_completion_rate,
         "luganda_transfer_rate": luganda_transfer_rate,
         "luganda_turn_latency_ms": luganda_turn_latency_ms,
+        "swahili_total_calls": swahili_calls_count,
+        "swahili_ai_only_completion_rate": swahili_ai_only_completion_rate,
+        "swahili_transfer_rate": swahili_transfer_rate,
+        "swahili_turn_latency_ms": swahili_turn_latency_ms,
     }

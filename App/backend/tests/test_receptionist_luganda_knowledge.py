@@ -11,7 +11,7 @@ Validates the implementation of docs/plans/luganda-receptionist-knowledge-parity
 
 from __future__ import annotations
 
-import json
+import re
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,11 +19,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app import database as db
 from app.flags import flags
 from app.receptionist.brain import LLMContextFrame, UraReceptionistBrain
-from app.receptionist.lexicon import LUGANDA_ENGLISH_TAX_TERMS, normalize_luganda_tax_query
+from app.receptionist.lexicon import (
+    LUGANDA_ENGLISH_TAX_TERMS,
+    normalize_call_query,
+    normalize_luganda_tax_query,
+    normalize_swahili_tax_query,
+    repair_asr_entities,
+)
 from app.receptionist.metrics import compute_call_metrics, get_aggregate_metrics, record_call_end_metrics
 from app.receptionist.phrases import phrase
 from app.receptionist.state import CallRoom, CallState
-from app.receptionist.store import create_call, create_turn, get_call, init_receptionist_schema, list_turns
+from app.receptionist.store import create_call, create_turn, init_receptionist_schema, list_turns
 
 
 class TestLugandaLexiconNormalization(unittest.TestCase):
@@ -65,6 +71,31 @@ class TestLugandaLexiconNormalization(unittest.TestCase):
         self.assertIn("okufayiringa return", LUGANDA_ENGLISH_TAX_TERMS)
         self.assertIn("omusolo gwa vat", LUGANDA_ENGLISH_TAX_TERMS)
         self.assertIn("omusolo gw'emmotoka", LUGANDA_ENGLISH_TAX_TERMS)
+
+    def test_swahili_tax_terms_normalization(self):
+        self.assertIn("TIN registration", normalize_swahili_tax_query("Ninataka kujisajili kupata tin kutoka URA"))
+        self.assertIn("VAT Value Added Tax", normalize_swahili_tax_query("Kodi ya ongezeko la thamani ni asilimia ngapi?"))
+        self.assertIn("Rental Income Tax", normalize_swahili_tax_query("Ninalipa vipi kodi ya mapato ya upangishaji?"))
+        self.assertIn("late tax payment penalty interest", normalize_swahili_tax_query("Kuna adhabu gani ya kuchelewa kulipa?"))
+        self.assertIn("customs duty clearance", normalize_swahili_tax_query("Ushuru wa forodha unalipwa vipi?"))
+
+    def test_swahili_normalisation_never_supplies_a_figure(self):
+        # Rates and sections come from the retrieved text, never from the query.
+        for question in ("Kiwango cha VAT ni kiasi gani?", "Nataka kupinga makadirio ya kodi"):
+            normalized = normalize_swahili_tax_query(question)
+            self.assertIsNone(re.search(r"\d", normalized), normalized)
+
+    def test_call_queries_are_normalised_by_language(self):
+        self.assertIn("Withholding Tax", normalize_call_query("Kodi ya zuio ni nini?", "sw"))
+        # English keeps its words; only known mishears are repaired.
+        self.assertEqual(normalize_call_query("What is withholding tax?", "en"), "What is withholding tax?")
+
+    def test_nin_and_prn_acoustic_entity_repairs(self):
+        self.assertEqual(repair_asr_entities("nnamba ya nin yange"), "NIN number yange")
+        self.assertEqual(repair_asr_entities("namba ya prn"), "PRN number")
+        self.assertEqual(repair_asr_entities("peera ya URA"), "PRN ya URA")
+        self.assertEqual(repair_asr_entities("e-fris invoice"), "EFRIS invoice")
+        self.assertEqual(repair_asr_entities("w-h-t tax"), "WHT tax")
 
 
 class TestLugandaCrossLingualKnowledgeReceptionist(unittest.IsolatedAsyncioTestCase):

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-from pathlib import Path
 from typing import Final
 
 try:
@@ -318,6 +317,16 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\bkwa ora\b", re.IGNORECASE), "kwa URA"),
     (re.compile(r"\bkutoka ora\b", re.IGNORECASE), "kutoka URA"),
     (re.compile(r"\bokuva ora\b", re.IGNORECASE), "okuva URA"),
+    # NIN (National Identification Number) acoustic variants & mishears
+    (re.compile(r"\b(?:nnamba\s+ya\s+nin|namba\s+ya\s+nin)\b", re.IGNORECASE), "NIN number"),
+    (re.compile(r"\b(?:neen|niini|n-i-n)\b", re.IGNORECASE), "NIN"),
+    # PRN (Payment Registration Number) acoustic variants
+    (re.compile(r"\b(?:nnamba\s+ya\s+prn|namba\s+ya\s+prn)\b", re.IGNORECASE), "PRN number"),
+    (re.compile(r"\b(?:peera|pier\s*en|pi\s*ar\s*en|p-r-n)\b", re.IGNORECASE), "PRN"),
+    # EFRIS acoustic variants
+    (re.compile(r"\b(?:e-fris|efrisi|efurisi)\b", re.IGNORECASE), "EFRIS"),
+    # WHT acoustic variants
+    (re.compile(r"\b(?:w-h-t|dabulyu\s*ech\s*ti)\b", re.IGNORECASE), "WHT"),
 )
 
 
@@ -353,3 +362,96 @@ def normalize_luganda_tax_query(text: str) -> str:
             normalized = pattern.sub(replacement, normalized)
     return normalized.strip()
 
+
+SWAHILI_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
+    # TIN registration / application
+    "kujisajili namba ya tin": "how to register for TIN",
+    "kujisajili kwa tin": "TIN registration",
+    "kujisajili kupata tin": "TIN registration",
+    "kupata namba ya tin": "TIN registration",
+    "nambari ya tin": "TIN Taxpayer Identification Number",
+    "namba ya tin": "TIN Taxpayer Identification Number",
+    "nambari ya utambulisho wa mlipakodi": "TIN Taxpayer Identification Number",
+    "namba ya mlipakodi": "TIN Taxpayer Identification Number",
+    # VAT
+    "kodi ya ongezeko la thamani": "VAT Value Added Tax",
+    "kiwango cha vat": "VAT rate",
+    "ushuru wa vat": "VAT Value Added Tax rate",
+    "kulipa vat": "pay VAT tax",
+    "kiwango cha asilimia": "what percentage",
+    # Rental income tax
+    "kodi ya mapato ya upangishaji": "Rental Income Tax",
+    "kodi ya nyumba ya kupangisha": "Rental Income Tax",
+    "kodi ya pango": "Rental Income Tax",
+    # Tax return filing
+    "kujaza marejesho ya kodi": "file tax return",
+    "kuwasilisha marejesho": "file tax return",
+    "kuchelewa kuwasilisha marejesho": "late tax return filing penalty",
+    # Penalties and interest
+    "adhabu ya kuchelewa kulipa": "late tax payment penalty interest",
+    "kuchelewa kulipa": "late tax payment penalty interest",
+    "adhabu ya kuchelewa": "late payment penalty interest",
+    "riba ya kuchelewa": "late payment interest",
+    # EFRIS
+    "mfumo wa efris": "EFRIS electronic fiscal receipting system",
+    "stakabadhi ya efris": "EFRIS electronic fiscal receipt invoice",
+    "ankara ya efris": "EFRIS electronic fiscal invoice",
+    # Withholding tax
+    "kodi ya zuio": "Withholding Tax WHT",
+    "kodi ya kuzuia": "Withholding Tax WHT",
+    "ushuru wa zuio": "Withholding Tax WHT",
+    # Corporate tax
+    "kodi ya mapato ya kampuni": "Corporate Income Tax rate",
+    "kodi ya kampuni": "Corporate Income Tax CIT",
+    # Customs & Import
+    "ushuru wa forodha": "customs duty clearance",
+    "kodi ya kuagiza bidhaa": "import duty clearance",
+    "tamko la forodha": "customs declaration",
+    # Motor vehicle
+    "uhamisho wa gari": "motor vehicle transfer ownership tax",
+    "ushuru wa gari": "motor vehicle registration tax",
+    # Dispute & Objection
+    "kupinga makadirio ya kodi": "tax assessment objection",
+    "kukata rufaa ya kodi": "tax assessment dispute objection",
+    "kupinga ushuru": "tax assessment objection dispute",
+    # Tax clearance
+    "cheti cha kufuata kodi": "tax clearance certificate TCC",
+    "cheti cha ushuru": "tax clearance certificate TCC",
+    # Payment & PRN
+    "nambari ya prn": "PRN payment registration number",
+    "namba ya usajili wa malipo": "PRN payment registration number",
+    "kulipa kwa simu": "pay tax using mobile money PRN",
+}
+
+
+# Longest first, so "kodi ya mapato ya kampuni" wins over "kodi ya kampuni".
+_SWAHILI_TERM_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
+    (re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE), SWAHILI_ENGLISH_TAX_TERMS[term])
+    for term in sorted(SWAHILI_ENGLISH_TAX_TERMS, key=len, reverse=True)
+)
+
+
+def normalize_swahili_tax_query(text: str) -> str:
+    """Rewrite common Swahili URA tax phrases as the English terms the corpus uses.
+
+    Swahili questions are answered from the English knowledge base; "kodi ya
+    zuio" retrieves nothing there, "Withholding Tax WHT" does. Figures and
+    section numbers are never added here: they come from the retrieved text.
+    """
+    if not text:
+        return ""
+    normalized = repair_asr_entities(text)
+    for pattern, replacement in _SWAHILI_TERM_PATTERNS:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized.strip()
+
+
+def normalize_call_query(text: str, language: str) -> str:
+    """The question a caller asked, as the knowledge base should be searched for it.
+
+    Luganda has its own path (``normalize_luganda_tax_query`` inside the
+    cross-lingual bridge); English and Swahili questions come through here.
+    """
+    if language == "sw":
+        return normalize_swahili_tax_query(text)
+    return repair_asr_entities(text)

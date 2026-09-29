@@ -92,6 +92,40 @@ class LanguageMetricsTests(unittest.TestCase):
         self.assertEqual(aggregate["ai_only_completion_rate"], 0.667)
         self.assertEqual(aggregate["luganda_ai_only_completion_rate"], 0.5)
 
+    def test_swahili_aggregate_metrics(self):
+        rows = [
+            {
+                "metrics_json": json.dumps({
+                    "ai_only_completion": True,
+                    "ai_answers": 1,
+                    "language": {"final": "sw", "used": ["sw"]},
+                    "swahili_turn_latency_ms": 1450.0,
+                }),
+                "transferred": 0,
+                "end_reason": "caller_hangup",
+                "locale": "sw",
+            },
+            {
+                "metrics_json": json.dumps({
+                    "ai_only_completion": False,
+                    "ai_answers": 1,
+                    "language": {"final": "sw", "used": ["sw"]},
+                    "swahili_turn_latency_ms": 2200.0,
+                }),
+                "transferred": 1,
+                "transfer_reason": "caller_requested",
+                "end_reason": "officer_joined",
+                "locale": "sw",
+            },
+        ]
+        with patch("app.receptionist.metrics.db.query_all", return_value=rows):
+            aggregate = get_aggregate_metrics(days=1)
+
+        self.assertEqual(aggregate["swahili_total_calls"], 2)
+        self.assertEqual(aggregate["swahili_ai_only_completion_rate"], 0.5)
+        self.assertEqual(aggregate["swahili_transfer_rate"], 0.5)
+        self.assertAlmostEqual(aggregate["swahili_turn_latency_ms"], 1825.0, delta=50.0)
+
 
 if __name__ == "__main__":
     unittest.main()
