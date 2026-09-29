@@ -282,22 +282,39 @@ export interface AuditEventsPage {
   next_before_seq: number | null;
 }
 
+/** A seal: the Merkle root of a range of events and the chain head at its end. */
+export interface AuditAnchor {
+  anchor_id: string;
+  first_seq: number;
+  last_seq: number;
+  merkle_root: string;
+  /** Empty on seals made before seals recorded the chain head. */
+  head_hash: string;
+  created_at: number;
+}
+
 export interface AuditVerification {
   ledger_enabled: boolean;
   valid: boolean;
+  /** "full" walked every event and seal; "since_seal" the newest seal and what follows it. */
+  scope: "full" | "since_seal";
   rows_checked: number;
   first_seq: number;
   last_seq: number;
   head_hash: string;
   breaks: { seq: number; event_id: string; reason: string }[];
-  latest_anchor: {
-    anchor_id: string;
-    first_seq: number;
-    last_seq: number;
-    merkle_root: string;
-    created_at: number;
-  } | null;
+  anchors_checked: number;
+  anchor_breaks: { anchor_id: string; first_seq: number; last_seq: number; reason: string }[];
+  latest_anchor: AuditAnchor | null;
+  /** Events written after the newest seal. */
+  unsealed_rows: number;
   verified_at: number;
+}
+
+export interface AuditSealResult {
+  /** False when there was nothing new to seal. */
+  sealed: boolean;
+  anchor: AuditAnchor | null;
 }
 
 export interface AuditQuery {
@@ -430,6 +447,7 @@ export const analyticsApi = {
     return fetchJson<AuditEventsPage>(`/v1/admin/audit/events?${params.toString()}`);
   },
   auditVerify: () => fetchJson<AuditVerification>("/v1/admin/audit/verify"),
+  auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(
       `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}`,

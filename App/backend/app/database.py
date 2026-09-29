@@ -567,7 +567,8 @@ def init_db() -> None:
             seq          INTEGER NOT NULL,
             prev_hash    TEXT NOT NULL,
             payload_hash TEXT NOT NULL,
-            row_hash     TEXT NOT NULL
+            row_hash     TEXT NOT NULL,
+            hash_version INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts);
@@ -581,8 +582,13 @@ def init_db() -> None:
             first_seq    INTEGER NOT NULL,
             last_seq     INTEGER NOT NULL,
             merkle_root  TEXT NOT NULL,
-            created_at   REAL NOT NULL
+            created_at   REAL NOT NULL,
+            head_hash    TEXT NOT NULL DEFAULT ''
         );
+        -- The unique (tenant_id, seq) and (tenant_id, first_seq) indexes are
+        -- created by audit/ledger.py, guarded: an older ledger may already
+        -- hold a fork, and that must be reported by the verifier, not stop
+        -- the service from starting.
 
         CREATE INDEX IF NOT EXISTS idx_audit_anchors_created
             ON audit_anchors(created_at);

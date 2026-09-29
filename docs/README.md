@@ -99,7 +99,7 @@ FinalYearProject/
 │   └── plots/            # Visualizations
 ├── monitoring/            # Prometheus, Grafana, alerting
 │   ├── prometheus.yml    # Scrape config
-│   ├── alerting-rules.yml # SLO-based alert rules (5 rules)
+│   ├── alerting-rules.yml # SLO, Qdrant and audit-trail alert rules (17 rules)
 │   └── grafana/          # Provisioned dashboards + datasources
 ├── scripts/               # Operational scripts
 │   ├── ai_red_team.py    # NIST AI 600-1 adversarial evaluation (50 prompts)
@@ -163,7 +163,7 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 | `App/frontend/playwright.config.ts` | Playwright E2E + a11y audit config |
 | `App/frontend/lighthouserc.json` | Lighthouse CI (accessibility >= 90) |
 | `monitoring/prometheus.yml` | Prometheus scrape targets |
-| `monitoring/alerting-rules.yml` | 5 SLO alerting rules |
+| `monitoring/alerting-rules.yml` | 17 alert rules (SLO, Qdrant index lifecycle, audit trail) |
 | `.zap-rules.tsv` | OWASP ZAP DAST rule configuration |
 
 ### Current runtime toggles

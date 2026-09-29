@@ -21,6 +21,8 @@ export const queryKeys = {
     overrides: () => ['admin', 'overrides'] as const,
     outbox: () => ['admin', 'outbox'] as const,
     evaluation: () => ['admin', 'evaluation'] as const,
+    /** Prefix of every audit-trail query: invalidates events and the integrity check together. */
+    audit: () => ['admin', 'audit'] as const,
     auditEvents: (eventType: string, actor: string, days: number) =>
       ['admin', 'audit', 'events', eventType, actor, days] as const,
     auditVerify: () => ['admin', 'audit', 'verify'] as const,

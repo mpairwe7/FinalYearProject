@@ -363,3 +363,10 @@
   justify-content: center;
   padding: var(--ops-space-3);
 }
+
+.au-seal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}

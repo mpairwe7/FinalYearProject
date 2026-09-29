@@ -2,7 +2,8 @@
 
 What the audit trail records, who can read it, how to prove it has not been
 altered, and how to hand evidence to an external auditor. Written 2026-09-29
-after a QA audit of the auditor dashboard (gaps G66–G69 in
+after a QA audit of the auditor dashboard and a review of the ledger itself
+(gaps G66–G72 in
 [`docs/GAPS_AND_AGENTIC_ROADMAP.md`](../GAPS_AND_AGENTIC_ROADMAP.md)).
 
 ## Separation of duties
@@ -14,10 +15,12 @@ after a QA audit of the auditor dashboard (gaps G66–G69 in
 | Take, hold, transfer or end a call | yes | yes | **no (403)** |
 | Toggle a flag, edit a staff-written answer | no | yes | **no (403)** |
 | Read and verify the audit trail (`/admin/audit`) | **no (403)** | yes | yes |
+| Seal the audit trail ("Seal now") | **no (403)** | yes | yes |
 
 Every "no" is enforced by the API (`_require_staff_writer`,
 `_require_audit_reader`, `_desk_writer`, the admin checks on flags and
-overrides), not only hidden in the console. Before 2026-09-29 the ticket
+overrides), not only hidden in the console. Sealing sits with the audit
+readers because it adds a seal and never changes a row. Before 2026-09-29 the ticket
 endpoints relied on the console alone: an auditor's direct API call could
 resolve a ticket or send a reply to a taxpayer.
 
@@ -39,6 +42,14 @@ these appends one hash-chained row to `audit_events`:
 | `tool_confirm` | A taxpayer confirms or refuses an action (existing) | tool, decision |
 | `voice_*` | Voice consent and recording events (existing) | voice audit id, audio hash |
 | `erasure_tombstone` | Personal data erased on request (existing) | hash of the erased user id |
+| `audit.trail_viewed` | Someone searches the trail (first page of each search) | the filters used, rows returned |
+| `audit.chain_verified` | Someone runs the integrity check | scope, verdict, rows and seals checked |
+| `audit.sealed` | Someone seals the trail from the page | sealed range, Merkle root |
+
+Reads and checks of the trail are recorded too, so "who looked at the
+audit record, and when" has an answer. The row is written after the read,
+so a listing never contains its own read; paging back through older results
+is not recorded again.
 
 Every staff row also carries `actor_role`; the row's `user_id` is the actor.
 **Content is never copied into the ledger**: a reply or a note is recorded as
@@ -51,32 +62,102 @@ alert on any increase.
 `/admin/audit` (nav: Observe → Audit trail). The integrity check runs first
 and states whether the record is intact; filters choose the event type, the
 person and the period; "Show older events" pages back. APIs:
-`GET /v1/admin/audit/events` and `GET /v1/admin/audit/verify`
+`GET /v1/admin/audit/events`, `GET /v1/admin/audit/verify` and
+`POST /v1/admin/audit/seal`
 ([`API_REFERENCE.md`](../API_REFERENCE.md)).
 
 ## Prove it has not been altered
 
-The page's verdict comes from `verify_chain`, which recomputes every row's
-fingerprint from its stored payload and checks each row points at the one
-before. An edited, deleted or reordered row appears as a break at its
-sequence number, and everything after it stops being evidence until the
-cause is found. Treat a break as a security incident.
+Each row's fingerprint (`row_hash`) covers the previous row's fingerprint,
+the payload **and the envelope**: who acted (`user_id`), the event type, the
+time, the tenant and the sequence number. That is hash format v2
+(`hash_version = 2`). Rows written before 2026-09-29 are v1 and cover only the
+payload, so the actor on those rows is not tamper-evident; they still verify
+by their own rule, and a v1 row after a v2 row is itself a break.
 
-For a large ledger, or for an external auditor who should not rely on this
-server's answer, verify offline against a database copy:
+The page's verdict comes from `verify_ledger`, which:
+
+1. recomputes every row's fingerprint and checks each row points at the one
+   before and that sequence numbers neither skip ("sequence gap: rows 3..3
+   are missing") nor repeat ("duplicate sequence number", two writers forked
+   the chain);
+2. re-checks every **seal** against the rows it covers: their count, the
+   Merkle root of their payloads, and the chain head recorded at the seal.
+
+Step 1 alone cannot catch someone with database access who edits a row and
+recomputes every fingerprint after it: the chain agrees with itself. Step 2
+does, because the seal fixed the old values. The page names that case:
+"Events #a to #b no longer match their seal".
+
+**Scope.** Up to `AUDIT_VERIFY_FULL_MAX_ROWS` rows (default 200 000) the page
+walks everything (`scope: full`, about 8 µs per row, so 1.6 s at the
+default). Above that it re-checks the newest seal and walks only the rows
+written after it, starting from the chain head that seal recorded
+(`scope: since_seal`); the page says which it did. Run the full walk offline
+on a schedule for a large ledger, and for an external auditor who should not
+rely on this server's answer:
 
 ```bash
-PYTHONPATH=App/backend python3 -m app.audit.verifier --tenant default
+PYTHONPATH=App/backend python3 -m app.audit.verifier --tenant default            # full
+PYTHONPATH=App/backend python3 -m app.audit.verifier --tenant default --scope since_seal
 ```
 
-Compare the head hash with the latest Merkle anchor (`audit_anchors`, shown on
-the page): an anchor published outside the system is what makes a rewrite of
-the whole chain detectable too. No job anchors automatically yet; run
-`AuditLedger.anchor_range` on a schedule and publish the root.
+It exits 1 on any break and writes the report to `audit_report.json`.
+
+## Seals
+
+A seal records, for a range of rows, the Merkle root of their payload hashes
+and the `row_hash` of the last row (which commits to everything before it).
+
+- **On a schedule.** Every API replica seals each tenant's new rows every
+  `AUDIT_SEAL_INTERVAL_SECONDS` (default 3600; `0` turns the schedule off)
+  while `audit_ledger` is on. Seals are unique by their first sequence
+  number, so replicas that race produce one seal, not several. Counters:
+  `audit_seals_total{trigger="schedule"|"manual"}`, `audit_seal_failed_total`.
+- **On demand.** "Seal now" on `/admin/audit` (`POST /v1/admin/audit/seal`).
+  Seal before exporting evidence, so the export ends inside a sealed range.
+  The seal and the check that follows are themselves recorded, so the page
+  shows two events written since, straight after a seal.
+- **The witness.** Each seal also writes one log line:
+  `audit seal tenant=… seq=a..b merkle_root=… head_hash=…`. Shipped with the
+  logs, it puts the seal outside this database, so rewriting the ledger *and*
+  its seal table together still disagrees with the log archive. Keep that log
+  stream on write-once retention.
+
+Rows written after the newest seal are protected only by the chain: deleting
+the newest rows from the end leaves no break until the next seal. The seal
+interval bounds that window.
+
+## When the check fails
+
+Treat any break as a security incident. The page pauses sealing while the
+record fails its check, because a new seal would fix the altered record in
+place.
+
+1. Do not seal and do not "repair" rows. Snapshot the database (`analytics.db`
+   or the Postgres `audit_events` and `audit_anchors` tables) first.
+2. Run the offline verifier on the snapshot and keep `audit_report.json`.
+3. Compare the seals in `audit_anchors` with the `audit seal` lines in the log
+   archive: a seal that disagrees with its log line was rewritten too.
+4. `audit_chain_breaks_total{scope}` counts failed checks on `/metrics`, and
+   the API logs `audit chain verification failed` at error level.
+
+A ledger written before the unique `(tenant_id, seq)` index existed may
+already hold a fork. The index is then not created (logged at error level on
+first use), and the verifier reports the duplicate sequence numbers.
 
 ## Hand evidence over
 
 "Export … as CSV" saves the events loaded on the page (all filters applied)
 with their sequence numbers and row hashes. Cells a spreadsheet would run as a
-formula are neutralised. Record the verification verdict and head hash with
-the export, so the file can be matched to the chain later.
+formula are neutralised. Seal first, then record the verification verdict,
+head hash and the seal's Merkle root with the export, so the file can be
+matched to the chain and to the log archive later.
+
+## Backends
+
+The ledger runs on SQLite and on Postgres through the same query helpers.
+The Postgres path (column upgrade by `ALTER TABLE`, unique-violation retry on
+SQLSTATE 23505, the seal race, both verify scopes) was checked against a
+Postgres 16 server on 2026-09-29; `tests/agents/test_backend_shim.py` runs the
+Postgres cases when `POSTGRES_DSN` is set.

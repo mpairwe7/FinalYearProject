@@ -242,3 +242,285 @@ class TestAnchoring:
         # Anchor beyond the range of rows
         anchor = ledger.anchor_range(99, 100, tenant_id="t1")
         assert anchor["merkle_root"] == ""
+
+
+# ---------------------------------------------------------------------------
+# QA audit 2026-09-29: envelope hashing, forks, seals, scoped verification
+# ---------------------------------------------------------------------------
+def _rewrite_consistently(tmp_db, tenant: str, seq: int, **changes) -> None:
+    """What an attacker with write access does: edit one row, then recompute
+    every hash from it to the head, so the chain on its own still verifies."""
+    from app.audit.ledger import chain_hash, envelope_hash
+
+    conn = tmp_db._get_connection()
+    rows = [
+        dict(r)
+        for r in conn.execute("SELECT * FROM audit_events WHERE tenant_id = ? ORDER BY seq", (tenant,))
+    ]
+    prev = GENESIS_HASH
+    for row in rows:
+        if row["seq"] < seq:
+            prev = row["row_hash"]
+            continue
+        if row["seq"] == seq:
+            row.update(changes)
+        payload_hash = sha256_hex(json.dumps(json.loads(row["payload"]), sort_keys=True))
+        envelope = envelope_hash(
+            event_id=row["event_id"],
+            event_type=row["event_type"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
+            ts=row["ts"],
+            seq=row["seq"],
+        )
+        row_hash = chain_hash(prev, payload_hash, envelope, row["hash_version"])
+        conn.execute(
+            """UPDATE audit_events SET user_id = ?, payload = ?, prev_hash = ?,
+               payload_hash = ?, row_hash = ? WHERE event_id = ?""",
+            (row["user_id"], row["payload"], prev, payload_hash, row_hash, row["event_id"]),
+        )
+        prev = row_hash
+    conn.commit()
+
+
+class TestEnvelopeIsHashed:
+    """Before hash format v2 only the payload was hashed: the actor, event
+    type and time of a row could be edited and the chain still verified."""
+
+    def test_new_rows_use_the_current_format(self, tmp_db):
+        from app.audit.ledger import CURRENT_HASH_VERSION, HASH_V2
+
+        reset_ledger()
+        event = AuditLedger().append("staff.ticket_updated", {"status": "resolved"}, tenant_id="t1")
+        assert event.hash_version == CURRENT_HASH_VERSION == HASH_V2
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [("user_id", "someone-else"), ("event_type", "generate"), ("ts", 1.0)],
+    )
+    def test_editing_the_envelope_breaks_the_chain(self, tmp_db, column, value):
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(3):
+            ledger.append("staff.ticket_updated", {"n": i}, tenant_id="t1", user_id="officer-1")
+        tmp_db.execute(f"UPDATE audit_events SET {column} = ? WHERE seq = 2", (value,))  # noqa: S608
+        report = verify_chain("t1")
+        assert report.valid is False
+        assert (report.breaks[0].seq, report.breaks[0].reason) == (2, "row_hash mismatch")
+
+    def test_legacy_rows_still_verify_and_chain_into_new_ones(self, tmp_db):
+        reset_ledger()
+        ledger = AuditLedger()
+        # A v1 row as the ledger wrote it before the envelope was hashed.
+        payload = json.dumps({"q": "legacy"}, sort_keys=True)
+        payload_hash = sha256_hex(payload)
+        legacy_hash = sha256_hex(GENESIS_HASH + payload_hash)
+        tmp_db.execute(
+            """INSERT INTO audit_events (event_id, event_type, tenant_id, user_id, payload, ts,
+               seq, prev_hash, payload_hash, row_hash, hash_version)
+               VALUES ('legacy-1', 'generate', 't1', 'u1', ?, 1.5, 1, ?, ?, ?, 1)""",
+            (payload, GENESIS_HASH, payload_hash, legacy_hash),
+        )
+        newer = ledger.append("generate", {"q": "new"}, tenant_id="t1", user_id="u1")
+        assert newer.prev_hash == legacy_hash
+        assert verify_chain("t1").valid is True
+
+    def test_a_downgraded_row_is_a_break(self, tmp_db):
+        reset_ledger()
+        ledger = AuditLedger()
+        first = ledger.append("generate", {"n": 1}, tenant_id="t1")
+        second = ledger.append("generate", {"n": 2}, tenant_id="t1")
+        # Re-hash row 2 as v1 so its own hash is self-consistent.
+        v1_hash = sha256_hex(first.row_hash + second.payload_hash)
+        tmp_db.execute(
+            "UPDATE audit_events SET hash_version = 1, row_hash = ? WHERE seq = 2", (v1_hash,)
+        )
+        report = verify_chain("t1")
+        assert report.breaks[0].reason == "hash format downgraded after a newer row"
+
+
+class TestSequenceIntegrity:
+    def test_a_deleted_row_is_named_as_a_gap(self, tmp_db):
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(5):
+            ledger.append("generate", {"n": i}, tenant_id="t1")
+        tmp_db.execute("DELETE FROM audit_events WHERE seq = 3")
+        report = verify_chain("t1")
+        assert report.breaks[0].seq == 4
+        assert report.breaks[0].reason == "sequence gap: rows 3..3 are missing"
+
+    def test_the_database_refuses_a_second_row_with_the_same_seq(self, tmp_db):
+        import sqlite3
+
+        reset_ledger()
+        AuditLedger().append("generate", {"n": 1}, tenant_id="t1")
+        with pytest.raises(sqlite3.IntegrityError):
+            tmp_db.execute(
+                """INSERT INTO audit_events (event_id, event_type, tenant_id, user_id, payload, ts,
+                   seq, prev_hash, payload_hash, row_hash, hash_version)
+                   VALUES ('dup', 'generate', 't1', '', '{}', 1.0, 1, ?, 'x', 'y', 2)""",
+                (GENESIS_HASH,),
+            )
+
+    def test_an_append_that_loses_its_seq_to_another_writer_retries(self, tmp_db, monkeypatch):
+        reset_ledger()
+        ledger = AuditLedger()
+        first = ledger.append("generate", {"n": 1}, tenant_id="t1")
+        second = ledger.append("generate", {"n": 2}, tenant_id="t1")
+        real_query_one = tmp_db.query_one
+        calls = {"n": 0}
+
+        def stale_head(sql, params=()):
+            calls["n"] += 1
+            if calls["n"] == 1:  # another replica appended after this read
+                return {"seq": first.seq, "row_hash": first.row_hash}
+            return real_query_one(sql, params)
+
+        monkeypatch.setattr(tmp_db, "query_one", stale_head)
+        third = ledger.append("generate", {"n": 3}, tenant_id="t1")
+        assert (third.seq, third.prev_hash) == (3, second.row_hash)
+        assert verify_chain("t1").valid is True
+
+    def test_a_fork_split_across_batches_is_still_reported(self, tmp_db, monkeypatch):
+        from app.audit import verifier
+
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(3):
+            ledger.append("generate", {"n": i}, tenant_id="t1")
+        # A ledger written before the unique index could hold a fork.
+        tmp_db.execute("DROP INDEX idx_audit_tenant_seq")
+        tmp_db.execute(
+            """INSERT INTO audit_events (event_id, event_type, tenant_id, user_id, payload, ts,
+               seq, prev_hash, payload_hash, row_hash, hash_version)
+               SELECT 'zz-fork', event_type, tenant_id, user_id, payload, ts, seq,
+                      prev_hash, payload_hash, row_hash, hash_version
+               FROM audit_events WHERE tenant_id = 't1' AND seq = 2"""
+        )
+        monkeypatch.setattr(verifier, "_BATCH_ROWS", 2)
+        report = verify_chain("t1")
+        assert report.rows_checked == 4
+        assert any("duplicate sequence number" in b.reason for b in report.breaks)
+
+
+class TestSeals:
+    def test_seal_pending_covers_new_rows_once(self, tmp_db):
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(3):
+            last = ledger.append("generate", {"n": i}, tenant_id="t1")
+        seal = ledger.seal_pending("t1")
+        assert (seal["first_seq"], seal["last_seq"], seal["head_hash"]) == (1, 3, last.row_hash)
+        assert ledger.seal_pending("t1") is None
+        ledger.append("generate", {"n": 9}, tenant_id="t1")
+        assert (ledger.seal_pending("t1")["first_seq"], ledger.latest_anchor("t1")["last_seq"]) == (4, 4)
+
+    def test_a_replica_that_loses_the_seal_race_gets_none(self, tmp_db, monkeypatch):
+        reset_ledger()
+        ledger = AuditLedger()
+        ledger.append("generate", {"n": 1}, tenant_id="t1")
+        ledger.seal_pending("t1")
+        ledger.append("generate", {"n": 2}, tenant_id="t1")
+        # This replica read the seal table before the other replica's seal landed.
+        monkeypatch.setattr(ledger, "latest_anchor", lambda tenant_id="default": None)
+        assert ledger.seal_pending("t1") is None
+
+    def test_a_consistent_rewrite_passes_the_chain_but_not_the_seal(self, tmp_db):
+        from app.audit import verify_ledger
+
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(4):
+            ledger.append("staff.ticket_updated", {"status": f"s{i}"}, tenant_id="t1", user_id="off-1")
+        ledger.seal_pending("t1")
+        _rewrite_consistently(tmp_db, "t1", 2, payload=json.dumps({"status": "edited"}))
+        assert verify_chain("t1").valid is True  # why seals exist
+        report = verify_ledger("t1")
+        assert report.valid is False
+        assert report.anchor_breaks[0].reason.startswith("merkle_root mismatch")
+
+    def test_a_consistent_reattribution_is_caught_by_the_head_hash(self, tmp_db):
+        from app.audit import verify_ledger
+
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(4):
+            ledger.append("staff.ticket_updated", {"n": i}, tenant_id="t1", user_id="off-1")
+        ledger.seal_pending("t1")
+        _rewrite_consistently(tmp_db, "t1", 2, user_id="someone-else")
+        report = verify_ledger("t1")
+        assert report.valid is False
+        assert report.anchor_breaks[0].reason.startswith("head_hash mismatch")
+
+    def test_since_seal_walks_only_the_rows_after_the_newest_seal(self, tmp_db):
+        from app.audit import verify_ledger
+        from app.audit.verifier import SCOPE_SINCE_SEAL
+
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(5):
+            ledger.append("generate", {"n": i}, tenant_id="t1")
+        ledger.seal_pending("t1")
+        for i in range(2):
+            ledger.append("generate", {"n": 10 + i}, tenant_id="t1")
+        report = verify_ledger("t1", scope=SCOPE_SINCE_SEAL)
+        assert report.valid is True
+        assert (report.scope, report.rows_checked, report.anchors_checked) == (SCOPE_SINCE_SEAL, 2, 1)
+        assert report.first_seq == 6
+
+    def test_since_seal_without_a_seal_walks_everything(self, tmp_db):
+        from app.audit import verify_ledger
+
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(3):
+            ledger.append("generate", {"n": i}, tenant_id="t1")
+        report = verify_ledger("t1", scope="since_seal")
+        assert (report.scope, report.rows_checked) == ("full", 3)
+
+    def test_a_row_deleted_from_a_sealed_range_is_reported(self, tmp_db):
+        from app.audit import verify_ledger
+
+        reset_ledger()
+        ledger = AuditLedger()
+        for i in range(3):
+            ledger.append("generate", {"n": i}, tenant_id="t1")
+        ledger.seal_pending("t1")
+        tmp_db.execute("DELETE FROM audit_events WHERE seq = 3")
+        report = verify_ledger("t1")
+        assert report.anchor_breaks[0].reason == "sealed range holds 2 rows, expected 3"
+
+
+class TestSchemaUpgrade:
+    def test_a_ledger_created_before_v2_gains_the_new_columns(self, tmp_db):
+        conn = tmp_db._get_connection()
+        conn.executescript(
+            """
+            DROP TABLE audit_events;
+            DROP TABLE audit_anchors;
+            CREATE TABLE audit_events (
+                event_id TEXT PRIMARY KEY, event_type TEXT NOT NULL,
+                tenant_id TEXT NOT NULL DEFAULT 'default', user_id TEXT DEFAULT '',
+                payload TEXT NOT NULL, ts DOUBLE PRECISION NOT NULL, seq INTEGER NOT NULL,
+                prev_hash TEXT NOT NULL, payload_hash TEXT NOT NULL, row_hash TEXT NOT NULL);
+            CREATE TABLE audit_anchors (
+                anchor_id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL DEFAULT 'default',
+                first_seq INTEGER NOT NULL, last_seq INTEGER NOT NULL,
+                merkle_root TEXT NOT NULL, created_at DOUBLE PRECISION NOT NULL);
+            """
+        )
+        payload = json.dumps({"q": "old"}, sort_keys=True)
+        payload_hash = sha256_hex(payload)
+        conn.execute(
+            """INSERT INTO audit_events VALUES ('old-1', 'generate', 't1', '', ?, 1.0, 1, ?, ?, ?)""",
+            (payload, GENESIS_HASH, payload_hash, sha256_hex(GENESIS_HASH + payload_hash)),
+        )
+        conn.commit()
+        reset_ledger()
+        ledger = AuditLedger()
+        ledger.append("generate", {"q": "new"}, tenant_id="t1")
+        assert ledger.seal_pending("t1")["head_hash"]
+        versions = [r["hash_version"] for r in conn.execute("SELECT hash_version FROM audit_events ORDER BY seq")]
+        assert versions == [1, 2]
+        assert verify_chain("t1").valid is True

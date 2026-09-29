@@ -4,8 +4,8 @@
  * in a spreadsheet, where an unguarded cell starting with "=" runs as a formula.
  */
 import { describe, expect, it } from "vitest";
-import { auditEventsToCsv, eventLabel, summarizePayload } from "../../lib/auditTrail";
-import type { AuditEvent } from "../../services/analyticsApi";
+import { auditEventsToCsv, checkCoverage, eventLabel, sealStatus, summarizePayload } from "../../lib/auditTrail";
+import type { AuditEvent, AuditVerification } from "../../services/analyticsApi";
 
 const event = (over: Partial<AuditEvent> = {}): AuditEvent => ({
   seq: 7,
@@ -54,5 +54,60 @@ describe("auditEventsToCsv", () => {
     const csv = auditEventsToCsv([event({ actor: '=HYPERLINK("http://x","click")' })]);
     expect(csv).toContain(`"'=HYPERLINK(""http://x"",""click"")"`);
     expect(csv).not.toContain(',"=HYPERLINK');
+  });
+});
+
+const check = (over: Partial<AuditVerification> = {}): AuditVerification => ({
+  ledger_enabled: true,
+  valid: true,
+  scope: "full",
+  rows_checked: 40,
+  first_seq: 1,
+  last_seq: 40,
+  head_hash: "f".repeat(64),
+  breaks: [],
+  anchors_checked: 2,
+  anchor_breaks: [],
+  latest_anchor: null,
+  unsealed_rows: 40,
+  verified_at: 1_790_000_000,
+  ...over,
+});
+
+describe("integrity wording", () => {
+  it("names reads, checks and seals of the trail itself", () => {
+    expect(eventLabel("audit.trail_viewed")).toBe("Searched the audit trail");
+    expect(eventLabel("audit.chain_verified")).toBe("Checked the audit trail is intact");
+    expect(eventLabel("audit.sealed")).toBe("Sealed the audit trail");
+  });
+
+  it("says what a full check covered", () => {
+    expect(checkCoverage(check())).toBe("40 events (#1 to #40) and 2 seals checked");
+    expect(checkCoverage(check({ rows_checked: 1, first_seq: 1, last_seq: 1, anchors_checked: 0 }))).toBe(
+      "1 event (#1 to #1) checked",
+    );
+    expect(checkCoverage(check({ rows_checked: 0, anchors_checked: 0 }))).toBe("No events recorded yet");
+  });
+
+  it("says a large ledger was checked from its newest seal", () => {
+    const text = checkCoverage(check({ scope: "since_seal", rows_checked: 3, first_seq: 41, last_seq: 43 }));
+    expect(text).toBe("Newest seal re-checked, plus 3 events after it (#41 to #43)");
+  });
+
+  it("states the seal and what has been written since", () => {
+    const fmt = () => "1 Sep 2026";
+    expect(sealStatus(check(), fmt)).toMatch(/^Not sealed yet/);
+    const sealed = check({
+      unsealed_rows: 1,
+      latest_anchor: {
+        anchor_id: "a",
+        first_seq: 1,
+        last_seq: 39,
+        merkle_root: "c".repeat(64),
+        head_hash: "f".repeat(64),
+        created_at: 1,
+      },
+    });
+    expect(sealStatus(sealed, fmt)).toBe("Sealed through #39 on 1 Sep 2026; 1 event written since.");
   });
 });

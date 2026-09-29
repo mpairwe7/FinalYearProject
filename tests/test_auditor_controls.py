@@ -10,6 +10,13 @@ Found by the QA audit of the auditor dashboard on 2026-09-29:
 * the tamper-evident audit ledger existed with a verifier, but no endpoint
   let an auditor read it or check it.
 
+and by the follow-up review of the ledger itself:
+
+* only the payload was hashed, so a row's actor could be swapped unnoticed;
+* nothing ever sealed the chain, and verify ignored seals, so a range
+  rewritten with every hash recomputed still verified;
+* reading or checking the trail left no trace of who did it.
+
 Each test uses its own tenant, so its hash chain is its own and a deliberate
 tamper never leaves the shared analytics database broken for the next run.
 """
@@ -39,6 +46,8 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from App.backend.app import database as db  # noqa: E402
+from App.backend.app import main as main_module  # noqa: E402
+from App.backend.app.audit.ledger import get_ledger  # noqa: E402
 from App.backend.app.auth.jwt_auth import make_dev_token  # noqa: E402
 from App.backend.app.flags import flags  # noqa: E402
 from App.backend.app.main import app  # noqa: E402
@@ -143,7 +152,10 @@ def test_auditor_reads_the_trail_and_filters_it(client, tenant, ledger_on):
     assert all(e["seq"] < page["events"][-1]["seq"] for e in older["events"])
 
     mine = client.get("/v1/admin/audit/events?actor=aud-3", headers=auditor).json()["events"]
-    assert [e["actor"] for e in mine] == ["aud-3"]
+    assert {e["actor"] for e in mine} == {"aud-3"}
+    # The ticket aud-3 opened, and aud-3's first-page read of the trail; the
+    # read of an older page is not recorded again.
+    assert [e["event_type"] for e in mine] == ["audit.trail_viewed", "staff.ticket_viewed"]
     assert client.get("/v1/admin/audit/events?event_type=DROP%20TABLE", headers=auditor).status_code == 422
 
 
@@ -153,7 +165,7 @@ def test_verify_detects_a_tampered_row(client, tenant, ledger_on):
         client.get(f"/v1/admin/tickets/{_ticket()}", headers=auditor)
     clean = client.get("/v1/admin/audit/verify", headers=auditor).json()
     assert clean["valid"] is True
-    assert clean["rows_checked"] == 3
+    assert (clean["scope"], clean["rows_checked"], clean["unsealed_rows"]) == ("full", 3, 3)
 
     middle = client.get("/v1/admin/audit/events?limit=3", headers=auditor).json()["events"][1]
     db.execute(
@@ -164,3 +176,117 @@ def test_verify_detects_a_tampered_row(client, tenant, ledger_on):
     assert broken["valid"] is False
     assert broken["breaks"][0]["seq"] == middle["seq"]
     assert broken["breaks"][0]["reason"] == "payload_hash mismatch"
+
+
+def test_reattributing_a_row_is_detected(client, tenant, ledger_on):
+    auditor = _headers("aud-5", "ura_auditor", tenant)
+    officer = _headers("off-5", "ura_staff", tenant)
+    client.patch(f"/v1/admin/tickets/{_ticket()}", headers=officer, json={"status": "assigned"})
+    row = client.get("/v1/admin/audit/events?event_type=staff.ticket_updated", headers=auditor).json()["events"][0]
+    db.execute("UPDATE audit_events SET user_id = ? WHERE event_id = ?", ("someone-else", row["event_id"]))
+    report = client.get("/v1/admin/audit/verify", headers=auditor).json()
+    assert report["valid"] is False
+    assert report["breaks"][0] == {"seq": row["seq"], "event_id": row["event_id"], "reason": "row_hash mismatch"}
+
+
+def test_reading_and_checking_the_trail_is_recorded(client, tenant, ledger_on):
+    auditor = _headers("aud-6", "ura_auditor", tenant)
+    client.get("/v1/admin/audit/events?event_type=staff.&actor=off-9", headers=auditor)
+    client.get("/v1/admin/audit/verify", headers=auditor)
+    events = client.get("/v1/admin/audit/events?event_type=audit.", headers=auditor).json()["events"]
+    verified, viewed = events[0], events[1]
+    assert (verified["event_type"], verified["actor"]) == ("audit.chain_verified", "aud-6")
+    assert verified["payload"]["valid"] is True
+    assert (viewed["event_type"], viewed["actor"]) == ("audit.trail_viewed", "aud-6")
+    assert viewed["payload"]["event_type"] == "staff."
+    assert viewed["payload"]["actor"] == "off-9"
+
+
+def test_sealing_is_for_audit_readers_and_catches_a_rewrite(client, tenant):
+    auditor = _headers("aud-7", "ura_auditor", tenant)
+    officer = _headers("off-7", "ura_staff", tenant)
+    ledger = get_ledger()
+    for i in range(4):
+        ledger.append("staff.ticket_updated", {"status": f"s{i}"}, tenant_id=tenant, user_id="off-7")
+    assert client.post("/v1/admin/audit/seal", headers=officer).status_code == 403
+    sealed = client.post("/v1/admin/audit/seal", headers=auditor).json()
+    assert sealed["sealed"] is True
+    assert (sealed["anchor"]["first_seq"], sealed["anchor"]["last_seq"]) == (1, 4)
+    assert sealed["anchor"]["head_hash"]
+    assert client.post("/v1/admin/audit/seal", headers=auditor).json() == {"sealed": False, "anchor": None}
+
+    # Rewrite row 2 and recompute every hash after it: the chain alone agrees.
+    rows = db.query_all("SELECT * FROM audit_events WHERE tenant_id = ? ORDER BY seq", (tenant,))
+    from App.backend.app.audit.ledger import chain_hash, envelope_hash
+    from App.backend.app.audit.merkle import sha256_hex
+
+    prev = rows[0]["row_hash"]
+    for row in rows[1:]:
+        payload = '{"status": "rewritten"}' if row["seq"] == 2 else row["payload"]
+        payload_hash = sha256_hex(payload)
+        envelope = envelope_hash(
+            event_id=row["event_id"], event_type=row["event_type"], tenant_id=tenant,
+            user_id=row["user_id"], ts=row["ts"], seq=row["seq"],
+        )
+        row_hash = chain_hash(prev, payload_hash, envelope, row["hash_version"])
+        db.execute(
+            "UPDATE audit_events SET payload = ?, prev_hash = ?, payload_hash = ?, row_hash = ? WHERE event_id = ?",
+            (payload, prev, payload_hash, row_hash, row["event_id"]),
+        )
+        prev = row_hash
+    report = client.get("/v1/admin/audit/verify", headers=auditor).json()
+    assert report["breaks"] == []
+    assert report["valid"] is False
+    assert report["anchor_breaks"][0]["reason"].startswith("merkle_root mismatch")
+
+
+def test_a_large_ledger_is_checked_from_its_newest_seal(client, tenant, monkeypatch):
+    auditor = _headers("aud-8", "ura_auditor", tenant)
+    ledger = get_ledger()
+    for i in range(3):
+        ledger.append("generate", {"n": i}, tenant_id=tenant)
+    ledger.seal_pending(tenant)
+    ledger.append("generate", {"n": 3}, tenant_id=tenant)
+    monkeypatch.setattr(main_module, "_AUDIT_VERIFY_FULL_MAX_ROWS", 2)
+    auto = client.get("/v1/admin/audit/verify", headers=auditor).json()
+    assert (auto["scope"], auto["rows_checked"], auto["anchors_checked"]) == ("since_seal", 1, 1)
+    assert auto["unsealed_rows"] == 1
+    forced = client.get("/v1/admin/audit/verify?scope=full", headers=auditor).json()
+    assert (forced["scope"], forced["rows_checked"]) == ("full", 4)
+    assert client.get("/v1/admin/audit/verify?scope=everything", headers=auditor).status_code == 422
+
+
+def test_the_schedule_seals_every_tenant_only_while_the_ledger_is_on(tenant):
+    ledger = get_ledger()
+    ledger.append("generate", {"n": 1}, tenant_id=tenant)
+    before = flags.is_enabled("audit_ledger")
+    try:
+        flags.set("audit_ledger", False)
+        assert main_module._seal_audit_ledgers() == 0
+        assert ledger.latest_anchor(tenant) is None
+        flags.set("audit_ledger", True)
+        assert main_module._seal_audit_ledgers() >= 1
+        assert ledger.latest_anchor(tenant)["last_seq"] == 1
+    finally:
+        flags.set("audit_ledger", before)
+
+
+def test_one_tenant_failing_to_seal_does_not_leave_the_others_unsealed(tenant, monkeypatch):
+    ledger = get_ledger()
+    ledger.append("generate", {"n": 1}, tenant_id=tenant)
+    real = ledger.seal_pending
+
+    def flaky(tenant_id="default"):
+        if tenant_id != tenant:
+            raise RuntimeError("simulated failure for another tenant")
+        return real(tenant_id)
+
+    monkeypatch.setattr(ledger, "tenants", lambda: ["broken-tenant", tenant])
+    monkeypatch.setattr(ledger, "seal_pending", flaky)
+    before = flags.is_enabled("audit_ledger")
+    try:
+        flags.set("audit_ledger", True)
+        assert main_module._seal_audit_ledgers() == 1
+    finally:
+        flags.set("audit_ledger", before)
+    assert ledger.latest_anchor(tenant)["last_seq"] == 1

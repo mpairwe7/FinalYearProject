@@ -5,7 +5,7 @@
  * auditor reads sentences. These keep that translation, the one-line payload
  * summary and the CSV evidence export in one tested place, apart from the page.
  */
-import type { AuditEvent } from "../services/analyticsApi";
+import type { AuditEvent, AuditVerification } from "../services/analyticsApi";
 
 const EVENT_LABEL: Record<string, string> = {
   "staff.ticket_updated": "Changed a ticket",
@@ -14,6 +14,9 @@ const EVENT_LABEL: Record<string, string> = {
   "staff.flag_cleared": "Reset a feature switch to its default",
   "staff.override_saved": "Saved a staff-written answer",
   "staff.override_deleted": "Deleted a staff-written answer",
+  "audit.trail_viewed": "Searched the audit trail",
+  "audit.chain_verified": "Checked the audit trail is intact",
+  "audit.sealed": "Sealed the audit trail",
   generate: "Assistant answered a question",
   tool_confirm: "Taxpayer confirmed or refused an action",
   erasure_tombstone: "Personal data erased on request",
@@ -27,6 +30,7 @@ export const AUDIT_FILTERS: readonly { value: string; label: string }[] = [
   { value: "staff.ticket_updated", label: "Ticket changes" },
   { value: "staff.flag", label: "Feature switch changes" },
   { value: "staff.override", label: "Staff-written answer changes" },
+  { value: "audit.", label: "Audit trail searches, checks and seals" },
   { value: "generate", label: "Assistant answers" },
   { value: "voice_", label: "Voice consent and recordings" },
   { value: "erasure", label: "Erasures" },
@@ -81,4 +85,30 @@ export function auditEventsToCsv(events: AuditEvent[]): string {
     e.row_hash,
   ]);
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** What the integrity check covered, as the headline beside its verdict. */
+export function checkCoverage(v: AuditVerification): string {
+  if (v.rows_checked === 0 && v.anchors_checked === 0) return "No events recorded yet";
+  const range = v.rows_checked > 0 ? ` (#${v.first_seq} to #${v.last_seq})` : "";
+  if (v.scope === "since_seal") {
+    return `Newest seal re-checked, plus ${plural(v.rows_checked, "event")} after it${range}`;
+  }
+  const seals = v.anchors_checked > 0 ? ` and ${plural(v.anchors_checked, "seal")}` : "";
+  return `${plural(v.rows_checked, "event")}${range}${seals} checked`;
+}
+
+/** When the record was last sealed and how much has been written since. */
+export function sealStatus(v: AuditVerification, formatWhen: (ts: number) => string): string {
+  const latest = v.latest_anchor;
+  if (!latest) {
+    return "Not sealed yet, so nothing fixes this record against someone rewriting the whole chain.";
+  }
+  const since =
+    v.unsealed_rows === 0 ? "nothing written since" : `${plural(v.unsealed_rows, "event")} written since`;
+  return `Sealed through #${latest.last_seq} on ${formatWhen(latest.created_at)}; ${since}.`;
 }

@@ -16,7 +16,11 @@ docker compose --profile monitoring up -d
 ```
 
 Dashboards and datasources are auto-provisioned from `monitoring/grafana/provisioning/`.
-Alert rules are loaded from `monitoring/alerting-rules.yml` (5 SLO-based rules).
+Alert rules are loaded from `monitoring/alerting-rules.yml` (17 rules: 5 SLO,
+9 Qdrant index lifecycle, and 3 audit-trail rules — a failed integrity check,
+failing appends and failing scheduled seals; see
+[`runbooks/audit-trail.md`](runbooks/audit-trail.md)). Check them with
+`promtool check rules monitoring/alerting-rules.yml`.
 
 ---
 

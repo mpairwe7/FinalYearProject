@@ -4,8 +4,17 @@ Every agentic turn in :mod:`service` writes one :class:`AuditEvent`
 via :meth:`AuditLedger.append`.  The ledger guarantees:
 
 - ``prev_hash`` on every row points at the previous row's
-  ``payload_hash`` — tampering is detectable by rewalking.
+  ``row_hash`` — tampering is detectable by rewalking.
 - The first row anchors to ``GENESIS_HASH``.
+- The row hash commits to the envelope as well as the payload (hash
+  format v2): who acted, what kind of event, when, and where in the
+  chain. Before v2 only the payload was hashed, so a row's actor could
+  be swapped without breaking the chain.
+- One row per ``(tenant_id, seq)``: a unique index turns two replicas
+  appending at once into a retry instead of a forked chain.
+- Seals (Merkle anchors) record the range's Merkle root *and* the chain
+  head hash, so rewriting a sealed range consistently — every hash
+  recomputed — still shows up against the seal.
 - Erasures (UDPA right-to-erasure) write a tombstone event
   whose payload references the erased user — the original rows
   remain intact so the chain stays verifiable.
@@ -19,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import threading
 import time
 import uuid
@@ -30,6 +40,47 @@ from .merkle import compute_merkle_root, sha256_hex
 logger = logging.getLogger(__name__)
 
 GENESIS_HASH = "0" * 64
+
+#: Row-hash formats. v1 hashed ``prev_hash + payload_hash`` only; v2 adds
+#: the envelope hash. Rows keep the format they were written with.
+HASH_V1 = 1
+HASH_V2 = 2
+CURRENT_HASH_VERSION = HASH_V2
+
+#: How many times an append re-reads the chain head after losing its
+#: sequence number to another writer.
+_APPEND_ATTEMPTS = 5
+
+
+def envelope_hash(
+    *, event_id: str, event_type: str, tenant_id: str, user_id: str, ts: float, seq: int
+) -> str:
+    """Hash of everything about a row except its payload."""
+    return sha256_hex(
+        json.dumps(
+            {
+                "event_id": event_id,
+                "event_type": event_type,
+                "seq": int(seq),
+                "tenant_id": tenant_id,
+                "ts": float(ts),
+                "user_id": user_id or "",
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def chain_hash(prev_hash: str, payload_hash: str, envelope: str, version: int) -> str:
+    """The row hash for *version*; v1 ignores the envelope."""
+    if version <= HASH_V1:
+        return sha256_hex(prev_hash + payload_hash)
+    return sha256_hex(prev_hash + payload_hash + envelope)
+
+
+def is_duplicate_key(exc: BaseException) -> bool:
+    """Whether *exc* is a unique-constraint violation on either backend."""
+    return isinstance(exc, sqlite3.IntegrityError) or getattr(exc, "sqlstate", None) == "23505"
 
 
 @dataclass
@@ -53,7 +104,21 @@ class AuditEvent:
     seq: int = 0  # monotonic sequence within the ledger
     prev_hash: str = ""
     payload_hash: str = ""
-    row_hash: str = ""  # sha256(prev_hash + payload_hash)
+    row_hash: str = ""  # chain_hash(prev_hash, payload_hash, envelope, hash_version)
+    hash_version: int = CURRENT_HASH_VERSION
+
+    def compute_hashes(self) -> None:
+        """Fill ``payload_hash`` and ``row_hash`` from the other fields."""
+        self.payload_hash = sha256_hex(json.dumps(self.payload, sort_keys=True, default=str))
+        envelope = envelope_hash(
+            event_id=self.event_id,
+            event_type=self.event_type,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            ts=self.ts,
+            seq=self.seq,
+        )
+        self.row_hash = chain_hash(self.prev_hash, self.payload_hash, envelope, self.hash_version)
 
     def to_row(self) -> tuple[Any, ...]:
         return (
@@ -67,16 +132,17 @@ class AuditEvent:
             self.prev_hash,
             self.payload_hash,
             self.row_hash,
+            self.hash_version,
         )
 
 
 class AuditLedger:
     """SQLite-backed append-only hash-chained audit log.
 
-    Thread-safe via a single mutex around append/rewalk — the
-    critical section is short (one INSERT).  Multi-process
-    coordination relies on SQLite's own WAL locking; for Postgres
-    the same pattern works with advisory locks.
+    Thread-safe via a single mutex around append — the critical
+    section is short (one INSERT).  Across processes and replicas the
+    unique ``(tenant_id, seq)`` index is the arbiter: the writer that
+    loses a sequence number re-reads the head and chains onto it.
     """
 
     def __init__(self) -> None:
@@ -98,7 +164,8 @@ class AuditLedger:
                 seq          INTEGER NOT NULL,
                 prev_hash    TEXT NOT NULL,
                 payload_hash TEXT NOT NULL,
-                row_hash     TEXT NOT NULL
+                row_hash     TEXT NOT NULL,
+                hash_version INTEGER NOT NULL DEFAULT 1
             );
             CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts);
             CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_events(user_id);
@@ -111,12 +178,48 @@ class AuditLedger:
                 first_seq    INTEGER NOT NULL,
                 last_seq     INTEGER NOT NULL,
                 merkle_root  TEXT NOT NULL,
-                created_at   DOUBLE PRECISION NOT NULL
+                created_at   DOUBLE PRECISION NOT NULL,
+                head_hash    TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX IF NOT EXISTS idx_audit_anchors_created
                 ON audit_anchors(created_at);
             """
         )
+        self._add_column("audit_events", "hash_version", "INTEGER NOT NULL DEFAULT 1")
+        self._add_column("audit_anchors", "head_hash", "TEXT NOT NULL DEFAULT ''")
+        # Created separately: a ledger written before these existed may
+        # already hold a forked chain (two rows with one seq). That must not
+        # stop the service; the verifier reports the fork instead.
+        for name, table, columns in (
+            ("idx_audit_tenant_seq", "audit_events", "tenant_id, seq"),
+            ("idx_audit_anchor_start", "audit_anchors", "tenant_id, first_seq"),
+        ):
+            try:
+                db.execute_script(f"CREATE UNIQUE INDEX IF NOT EXISTS {name} ON {table}({columns})")
+            except Exception:
+                logger.exception("audit ledger: cannot create unique index %s; run the verifier", name)
+
+    @staticmethod
+    def _has_column(table: str, column: str) -> bool:
+        from .. import database as db
+
+        try:
+            db.query_all(f"SELECT {column} FROM {table} LIMIT 1")  # noqa: S608 - fixed identifiers
+        except Exception:
+            return False
+        return True
+
+    def _add_column(self, table: str, column: str, ddl: str) -> None:
+        """Add *column* to a table created before it existed; safe to race."""
+        from .. import database as db
+
+        if self._has_column(table, column):
+            return
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        except Exception:
+            if not self._has_column(table, column):  # not a lost race: a real failure
+                raise
 
     # -- Append --------------------------------------------------------
     def append(
@@ -135,44 +238,43 @@ class AuditLedger:
         from .. import database as db
 
         with self._lock:
-            # Last row for this tenant (or global if tenant-scoped chains
-            # aren't used yet).  We chain per-tenant so tenants can be
-            # verified independently.
-            row = db.query_one(
-                """SELECT seq, row_hash FROM audit_events
-                   WHERE tenant_id = ?
-                   ORDER BY seq DESC LIMIT 1""",
-                (tenant_id,),
-            )
-
-            prev_hash = row["row_hash"] if row else GENESIS_HASH
-            seq = (row["seq"] + 1) if row else 1
-
-            event = AuditEvent(
-                event_id=str(uuid.uuid4()),
-                event_type=event_type,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                payload=payload,
-                ts=time.time(),
-                seq=seq,
-                prev_hash=prev_hash,
-            )
-            event.payload_hash = sha256_hex(json.dumps(event.payload, sort_keys=True, default=str))
-            event.row_hash = sha256_hex(prev_hash + event.payload_hash)
-
-            try:
-                db.execute(
-                    """INSERT INTO audit_events
-                       (event_id, event_type, tenant_id, user_id, payload,
-                        ts, seq, prev_hash, payload_hash, row_hash)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    tuple(event.to_row()),
+            attempt = 0
+            while True:
+                attempt += 1
+                # Chains are per tenant, so tenants verify independently.
+                row = db.query_one(
+                    """SELECT seq, row_hash FROM audit_events
+                       WHERE tenant_id = ?
+                       ORDER BY seq DESC LIMIT 1""",
+                    (tenant_id,),
                 )
-            except Exception:
-                logger.exception("audit append failed")
-                raise
-            return event
+                event = AuditEvent(
+                    event_id=str(uuid.uuid4()),
+                    event_type=event_type,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    payload=payload,
+                    ts=time.time(),
+                    seq=(int(row["seq"]) + 1) if row else 1,
+                    prev_hash=str(row["row_hash"]) if row else GENESIS_HASH,
+                )
+                event.compute_hashes()
+                try:
+                    db.execute(
+                        """INSERT INTO audit_events
+                           (event_id, event_type, tenant_id, user_id, payload,
+                            ts, seq, prev_hash, payload_hash, row_hash, hash_version)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        event.to_row(),
+                    )
+                except Exception as exc:
+                    if attempt < _APPEND_ATTEMPTS and is_duplicate_key(exc):
+                        # Another replica took this seq first: chain onto its row.
+                        logger.warning("audit append lost seq %d to another writer; retrying", event.seq)
+                        continue
+                    logger.exception("audit append failed")
+                    raise
+                return event
 
     # -- Reads ---------------------------------------------------------
     def read(
@@ -253,15 +355,39 @@ class AuditLedger:
         return out
 
     def latest_anchor(self, tenant_id: str = "default") -> dict[str, Any] | None:
-        """The most recent Merkle anchor for *tenant_id*, if one was recorded."""
+        """The seal covering the newest rows for *tenant_id*, if any."""
         from .. import database as db
 
         return db.query_one(
-            """SELECT anchor_id, first_seq, last_seq, merkle_root, created_at
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at
                FROM audit_anchors WHERE tenant_id = ?
-               ORDER BY created_at DESC LIMIT 1""",
+               ORDER BY last_seq DESC LIMIT 1""",
             (tenant_id,),
         )
+
+    def anchors(self, tenant_id: str = "default") -> list[dict[str, Any]]:
+        """Every seal for *tenant_id*, oldest range first."""
+        from .. import database as db
+
+        return db.query_all(
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at
+               FROM audit_anchors WHERE tenant_id = ?
+               ORDER BY first_seq ASC""",
+            (tenant_id,),
+        )
+
+    def head_seq(self, tenant_id: str = "default") -> int:
+        """The newest sequence number for *tenant_id*; 0 when it has no rows."""
+        from .. import database as db
+
+        row = db.query_one("SELECT MAX(seq) AS n FROM audit_events WHERE tenant_id = ?", (tenant_id,))
+        return int(row["n"] or 0) if row else 0
+
+    def tenants(self) -> list[str]:
+        """Every tenant with at least one event."""
+        from .. import database as db
+
+        return [str(r["tenant_id"]) for r in db.query_all("SELECT DISTINCT tenant_id FROM audit_events")]
 
     def count(self, tenant_id: str = "default") -> int:
         from .. import database as db
@@ -306,53 +432,87 @@ class AuditLedger:
             tenant_id=tenant_id,
         )
 
-    # -- Anchoring -----------------------------------------------------
+    # -- Anchoring (seals) ---------------------------------------------
     def anchor_range(
         self,
         first_seq: int,
         last_seq: int,
         tenant_id: str = "default",
     ) -> dict[str, Any]:
-        """Compute a Merkle root over [first_seq, last_seq] and record it.
+        """Seal [first_seq, last_seq]: record its Merkle root and chain head.
 
-        Called from a nightly worker; returns the anchor row.
+        The Merkle root covers the payload hashes in the range; the head hash
+        is the stored ``row_hash`` at ``last_seq``, which commits to every row
+        up to it. Raises a unique-constraint error when another writer already
+        sealed a range starting at ``first_seq`` (see :meth:`seal_pending`).
         """
         from .. import database as db
 
         rows = db.query_all(
-            """SELECT payload_hash FROM audit_events
+            """SELECT seq, payload_hash, row_hash FROM audit_events
                WHERE tenant_id = ? AND seq BETWEEN ? AND ?
                ORDER BY seq ASC""",
             (tenant_id, first_seq, last_seq),
         )
-        leaves = [r["payload_hash"] for r in rows]
-        root = compute_merkle_root(leaves)
+        head = rows[-1] if rows and int(rows[-1]["seq"]) == last_seq else None
         anchor = {
             "anchor_id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "first_seq": first_seq,
             "last_seq": last_seq,
-            "merkle_root": root,
+            "merkle_root": compute_merkle_root(r["payload_hash"] for r in rows),
+            "head_hash": str(head["row_hash"]) if head else "",
             "created_at": time.time(),
         }
         try:
             db.execute(
                 """INSERT INTO audit_anchors
-                   (anchor_id, tenant_id, first_seq, last_seq, merkle_root, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                   (anchor_id, tenant_id, first_seq, last_seq, merkle_root, head_hash, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     anchor["anchor_id"],
                     anchor["tenant_id"],
                     anchor["first_seq"],
                     anchor["last_seq"],
                     anchor["merkle_root"],
+                    anchor["head_hash"],
                     anchor["created_at"],
                 ),
             )
-        except Exception:
-            logger.exception("anchor_range failed")
+        except Exception as exc:
+            if not is_duplicate_key(exc):
+                logger.exception("anchor_range failed")
             raise
+        # The witness line: shipped with the logs, it puts the seal outside
+        # this database, so rewriting the ledger and its seal table together
+        # still disagrees with what the log pipeline recorded.
+        logger.info(
+            "audit seal tenant=%s seq=%d..%d merkle_root=%s head_hash=%s",
+            tenant_id,
+            first_seq,
+            last_seq,
+            anchor["merkle_root"],
+            anchor["head_hash"],
+        )
         return anchor
+
+    def seal_pending(self, tenant_id: str = "default") -> dict[str, Any] | None:
+        """Seal every row after the last seal; ``None`` when nothing is new.
+
+        Safe to run on every replica at once: seals are unique by their first
+        sequence number, so the replicas that lose the race get ``None``.
+        """
+        latest = self.latest_anchor(tenant_id)
+        first = int(latest["last_seq"]) + 1 if latest else 1
+        last = self.head_seq(tenant_id)
+        if last < first:
+            return None
+        try:
+            return self.anchor_range(first, last, tenant_id)
+        except Exception as exc:
+            if is_duplicate_key(exc):
+                return None
+            raise
 
 
 # ---------------------------------------------------------------------------

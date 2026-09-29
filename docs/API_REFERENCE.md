@@ -563,37 +563,84 @@ GET /v1/admin/audit/events?event_type=staff.&actor=&since=&until=&before_seq=&li
 ```
 
 `ledger_enabled` false means this deployment is not recording new events;
-what was recorded before is still returned.
+what was recorded before is still returned. The first page of each search
+(no `before_seq`) is itself recorded as an `audit.trail_viewed` event with
+the filters used, after the query runs.
 
 ---
 
 ### Audit Trail Verification
 
-Re-walks the tenant's hash chain and reports whether it is intact, with the
-latest Merkle anchor. Administrators and auditors only.
+Re-walks the tenant's hash chain and re-checks its seals, and reports whether
+both are intact. Administrators and auditors only. Each call is recorded as
+an `audit.chain_verified` event.
 
 ```http
-GET /v1/admin/audit/verify
+GET /v1/admin/audit/verify?scope=auto
 ```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | `auto` (default): `full` up to `AUDIT_VERIFY_FULL_MAX_ROWS` rows (default 200 000), `since_seal` above it. `full`: every row and every seal. `since_seal`: the newest seal and the rows after it, resumed from the chain head the seal recorded (falls back to `full` with no seal). Anything else: 422. |
 
 **Response**
 ```json
 {
   "ledger_enabled": true,
   "valid": false,
+  "scope": "full",
   "rows_checked": 42,
   "first_seq": 1,
   "last_seq": 42,
   "head_hash": "…",
-  "breaks": [{"seq": 17, "event_id": "…", "reason": "payload_hash mismatch"}],
-  "latest_anchor": null,
+  "breaks": [{"seq": 17, "event_id": "…", "reason": "row_hash mismatch"}],
+  "anchors_checked": 1,
+  "anchor_breaks": [
+    {"anchor_id": "…", "first_seq": 1, "last_seq": 40,
+     "reason": "merkle_root mismatch: a sealed row's content changed"}
+  ],
+  "latest_anchor": {"anchor_id": "…", "first_seq": 1, "last_seq": 40,
+                    "merkle_root": "…", "head_hash": "…", "created_at": 1790000000.0},
+  "unsealed_rows": 2,
   "verified_at": 1790000200.0
 }
 ```
 
-`breaks` lists at most the first 20. Ticket updates
-(`PATCH /v1/admin/tickets/{id}`) and the presence heartbeat answer 403 to
-`ura_auditor`, which is read-only.
+Row `breaks` reasons: `payload_hash mismatch`, `prev_hash does not match
+previous row_hash`, `row_hash mismatch` (for v2 rows this includes an edited
+actor, event type or time), `sequence gap: rows a..b are missing`,
+`duplicate sequence number (two writers forked the chain)`, `hash format
+downgraded after a newer row`. Seal `anchor_breaks` reasons: `sealed range
+holds n rows, expected m`, `merkle_root mismatch: …`, `head_hash mismatch: the
+chain was rewritten under the seal`. Each list holds at most the first 20.
+Ticket updates (`PATCH /v1/admin/tickets/{id}`) and the presence heartbeat
+answer 403 to `ura_auditor`, which is read-only.
+
+---
+
+### Seal the Audit Trail
+
+Seals every row written since the newest seal: records the range's Merkle
+root and the chain head, and writes the same values to the log as the
+external witness. Administrators and auditors only (`ura_staff` gets 403).
+The API also seals on a schedule (`AUDIT_SEAL_INTERVAL_SECONDS`, default
+3600). A seal made here is recorded as an `audit.sealed` event.
+
+```http
+POST /v1/admin/audit/seal
+```
+
+**Response**
+```json
+{
+  "sealed": true,
+  "anchor": {"anchor_id": "…", "first_seq": 41, "last_seq": 58,
+             "merkle_root": "…", "head_hash": "…", "created_at": 1790000300.0}
+}
+```
+
+`{"sealed": false, "anchor": null}` when there is nothing new to seal, or
+another replica sealed the same rows first.
 
 ---
 

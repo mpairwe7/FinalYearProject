@@ -270,17 +270,49 @@ class AuditChainBreak(BaseModel):
     reason: str
 
 
+class AuditAnchorOut(BaseModel):
+    """A seal: the Merkle root of a range of rows and the chain head at its end."""
+
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    merkle_root: str
+    #: ``row_hash`` at ``last_seq``; empty on seals made before it was recorded.
+    head_hash: str = ""
+    created_at: float
+
+
+class AuditAnchorBreak(BaseModel):
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    reason: str
+
+
 class AuditVerifyResponse(BaseModel):
     ledger_enabled: bool
     valid: bool
+    #: ``full`` walked every row and every seal; ``since_seal`` re-checked the
+    #: newest seal and the rows after it.
+    scope: Literal["full", "since_seal"]
     rows_checked: int
     first_seq: int
     last_seq: int
     head_hash: str
     #: At most the first 20 breaks; ``valid`` is false when there are any.
     breaks: list[AuditChainBreak] = Field(default_factory=list)
-    latest_anchor: dict[str, Any] | None = None
+    anchors_checked: int = 0
+    anchor_breaks: list[AuditAnchorBreak] = Field(default_factory=list)
+    latest_anchor: AuditAnchorOut | None = None
+    #: Rows written after the newest seal.
+    unsealed_rows: int = 0
     verified_at: float
+
+
+class AuditSealResponse(BaseModel):
+    #: False when every row was already sealed (or another replica sealed first).
+    sealed: bool
+    anchor: AuditAnchorOut | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -58,9 +58,12 @@ from .journey_analytics import build_journey_funnel
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
+    AuditAnchorBreak,
+    AuditAnchorOut,
     AuditChainBreak,
     AuditEventOut,
     AuditEventsResponse,
+    AuditSealResponse,
     AuditVerifyResponse,
     BatchClassifyRequest,
     BatchClassifyResponse,
@@ -139,6 +142,12 @@ VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
 _RETENTION_CLEANUP_INTERVAL_SECONDS = max(
     60, int(os.getenv("RETENTION_CLEANUP_INTERVAL_SECONDS", "3600"))
 )
+# How often the audit ledger's new rows are sealed (Merkle root + chain head).
+# 0 turns the schedule off; sealing on demand from /admin/audit still works.
+_AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
+# Above this many rows the auditor's integrity check re-checks the newest seal
+# and the rows after it instead of the whole chain; the full walk runs offline.
+_AUDIT_VERIFY_FULL_MAX_ROWS = max(1, int(os.getenv("AUDIT_VERIFY_FULL_MAX_ROWS", "200000")))
 
 
 def _truthy_env(name: str, default: str = "false") -> bool:
@@ -712,13 +721,33 @@ async def lifespan(app: FastAPI):
                 return
 
     retention_task = asyncio.create_task(_retention_loop(), name="retention-cleanup")
+
+    async def _audit_seal_loop() -> None:
+        """Seal new audit rows on a schedule; every replica may run it at once."""
+        while True:
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=_AUDIT_SEAL_INTERVAL_SECONDS)
+                return
+            except TimeoutError:
+                await asyncio.to_thread(_seal_audit_ledgers)
+            except asyncio.CancelledError:
+                return
+
+    seal_task = (
+        asyncio.create_task(_audit_seal_loop(), name="audit-seal")
+        if _AUDIT_SEAL_INTERVAL_SECONDS > 0
+        else None
+    )
     try:
         yield
     finally:
         retention_stop.set()
-        retention_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await retention_task
+        for task in (retention_task, seal_task):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         app.state.model = None
         try:
             if getattr(app.state, "speech", None) is not None:
@@ -2134,6 +2163,37 @@ def _require_staff_writer(ctx: AuthContext) -> None:
         raise HTTPException(status_code=403, detail="read-only role")
 
 
+def _seal_audit_ledgers() -> int:
+    """Seal every tenant's unsealed audit rows; returns how many seals were made.
+
+    Scheduled from the lifespan. Housekeeping never takes the service down: a
+    failure is logged and counted, and the next interval tries again.
+    """
+    from .flags import flags as flag_reg
+
+    if not flag_reg.is_enabled("audit_ledger"):
+        return 0
+    try:
+        from .audit import get_ledger
+
+        ledger = get_ledger()
+        tenants = ledger.tenants()
+    except Exception:
+        metrics.inc("audit_seal_failed_total")
+        logger.exception("Scheduled audit seal could not reach the ledger; will retry next interval")
+        return 0
+    made = 0
+    for tenant in tenants:  # one tenant's failure must not leave the others unsealed
+        try:
+            if ledger.seal_pending(tenant) is not None:
+                made += 1
+                metrics.inc("audit_seals_total", labels={"trigger": "schedule"})
+        except Exception:
+            metrics.inc("audit_seal_failed_total")
+            logger.exception("Scheduled audit seal failed for tenant %s; will retry next interval", tenant)
+    return made
+
+
 def _require_audit_reader(ctx: AuthContext) -> None:
     """The audit trail is for administrators and auditors, not case officers."""
     if ctx.user and ctx.role not in ("ura_admin", "ura_auditor"):
@@ -3034,6 +3094,20 @@ def audit_events_endpoint(
         for r in rows
     ]
     next_before = events[-1].seq if len(events) == limit and events[-1].seq > 1 else None
+    if before_seq is None:
+        # Reading the trail is itself recorded (once per search, not per
+        # page), after the query so a listing never contains its own read.
+        _audit_staff_action(
+            ctx,
+            "audit.trail_viewed",
+            {
+                "event_type": event_type,
+                "actor": actor,
+                "since": since,
+                "until": until,
+                "returned": len(events),
+            },
+        )
     return AuditEventsResponse(
         ledger_enabled=flag_reg.is_enabled("audit_ledger"),
         events=events,
@@ -3041,29 +3115,49 @@ def audit_events_endpoint(
     )
 
 
+def _anchor_out(anchor: dict[str, Any] | None) -> AuditAnchorOut | None:
+    if not anchor:
+        return None
+    return AuditAnchorOut(
+        anchor_id=str(anchor["anchor_id"]),
+        first_seq=int(anchor["first_seq"]),
+        last_seq=int(anchor["last_seq"]),
+        merkle_root=str(anchor["merkle_root"]),
+        head_hash=str(anchor.get("head_hash") or ""),
+        created_at=float(anchor["created_at"]),
+    )
+
+
 @app.get("/v1/admin/audit/verify", response_model=AuditVerifyResponse, tags=["admin"])
 def audit_verify_endpoint(
+    scope: str = Query("auto", pattern=r"^(auto|full|since_seal)$"),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> AuditVerifyResponse:
-    """Re-walk this tenant's hash chain and report whether it is intact.
+    """Re-walk this tenant's hash chain and its seals and report whether they are intact.
 
-    Recomputes every row's hashes from its stored payload, so an edited,
-    deleted or reordered row shows up as a break at its sequence number. Also
-    returns the latest Merkle anchor, the external checkpoint to compare the
-    head against. Cost grows with the ledger; see
-    docs/runbooks/audit-trail.md for when to verify offline instead.
+    Recomputes every row's hashes from its stored payload and envelope, so an
+    edited, deleted, reordered or re-attributed row shows up as a break at its
+    sequence number; re-checks each seal's Merkle root and chain head, which
+    catches a range rewritten consistently. ``scope=auto`` walks everything
+    until the ledger passes ``AUDIT_VERIFY_FULL_MAX_ROWS``, then re-checks the
+    newest seal and the rows after it; ``full`` and ``since_seal`` force one.
     """
     from .audit import get_ledger
-    from .audit.verifier import verify_chain
+    from .audit.verifier import SCOPE_FULL, SCOPE_SINCE_SEAL, verify_ledger
     from .flags import flags as flag_reg
 
     _require_audit_reader(ctx)
     tenant = ctx.tenant_id or "default"
     ledger = get_ledger()  # creates the tables on first use
-    report = verify_chain(tenant)
-    return AuditVerifyResponse(
+    head = ledger.head_seq(tenant)
+    if scope == "auto":
+        scope = SCOPE_FULL if head <= _AUDIT_VERIFY_FULL_MAX_ROWS else SCOPE_SINCE_SEAL
+    report = verify_ledger(tenant, scope=scope)
+    latest = ledger.latest_anchor(tenant)
+    response = AuditVerifyResponse(
         ledger_enabled=flag_reg.is_enabled("audit_ledger"),
         valid=report.valid,
+        scope=report.scope,
         rows_checked=report.rows_checked,
         first_seq=report.first_seq,
         last_seq=report.last_seq,
@@ -3071,9 +3165,66 @@ def audit_verify_endpoint(
         breaks=[
             AuditChainBreak(seq=b.seq, event_id=b.event_id, reason=b.reason) for b in report.breaks[:20]
         ],
-        latest_anchor=ledger.latest_anchor(tenant),
+        anchors_checked=report.anchors_checked,
+        anchor_breaks=[
+            AuditAnchorBreak(
+                anchor_id=b.anchor_id, first_seq=b.first_seq, last_seq=b.last_seq, reason=b.reason
+            )
+            for b in report.anchor_breaks[:20]
+        ],
+        latest_anchor=_anchor_out(latest),
+        unsealed_rows=max(0, head - int(latest["last_seq"])) if latest else head,
         verified_at=time.time(),
     )
+    if not report.valid:
+        metrics.inc("audit_chain_breaks_total", labels={"scope": report.scope})
+        logger.error(
+            "audit chain verification failed tenant=%s breaks=%d seal_breaks=%d",
+            tenant,
+            len(report.breaks),
+            len(report.anchor_breaks),
+        )
+    _audit_staff_action(
+        ctx,
+        "audit.chain_verified",
+        {
+            "scope": report.scope,
+            "valid": report.valid,
+            "rows_checked": report.rows_checked,
+            "seals_checked": report.anchors_checked,
+        },
+    )
+    return response
+
+
+@app.post("/v1/admin/audit/seal", response_model=AuditSealResponse, tags=["admin"])
+def audit_seal_endpoint(
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditSealResponse:
+    """Seal every row written since the last seal, now, for administrators and auditors.
+
+    The same operation the API runs every ``AUDIT_SEAL_INTERVAL_SECONDS``; an
+    auditor uses it to fix the trail before exporting evidence. It adds a seal
+    and never changes a row, so it sits with the audit readers, not the writers.
+    """
+    from .audit import get_ledger
+
+    _require_audit_reader(ctx)
+    tenant = ctx.tenant_id or "default"
+    anchor = get_ledger().seal_pending(tenant)
+    if anchor is None:
+        return AuditSealResponse(sealed=False, anchor=None)
+    metrics.inc("audit_seals_total", labels={"trigger": "manual"})
+    _audit_staff_action(
+        ctx,
+        "audit.sealed",
+        {
+            "first_seq": anchor["first_seq"],
+            "last_seq": anchor["last_seq"],
+            "merkle_root": anchor["merkle_root"],
+        },
+    )
+    return AuditSealResponse(sealed=True, anchor=_anchor_out(anchor))
 
 
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
