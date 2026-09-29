@@ -45,6 +45,19 @@ from app.receptionist.phrases import fillers as _fillers
 FILLERS = {f for lang in ("en", "lg", "sw") for f in _fillers(lang)}
 
 
+def language_of(text: str) -> str | None:
+    """The language an answer is in, by the receptionist's own word lists; None if unsure.
+
+    Keyword checks ("omusolo", "18") let an English answer pass as Luganda.
+    """
+    from app.receptionist.language import lexical_hits
+
+    hits = lexical_hits(text)
+    best = max(hits.values())
+    leaders = [lang for lang, n in hits.items() if n == best]
+    return leaders[0] if best >= 2 and len(leaders) == 1 else None
+
+
 def pcm_of(key: str) -> bytes:
     path = AUDIO_DIR / f"{key}.wav"
     with wave.open(str(path), "rb") as w:
@@ -196,7 +209,7 @@ async def test_manual_language_override_ux() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
 
-    is_luganda = any(k in answer_text.lower() for k in ("omusolo", "ebitundu", "18", "kikumi", "vat"))
+    is_luganda = language_of(answer_text) == "lg" and "18" in answer_text
     passed = override_event_seen and is_luganda
     print(f" -> Result: {'PASS' if passed else 'FAIL'} (Override event: {override_event_seen}, Luganda answer verified)")
     return {
@@ -244,7 +257,8 @@ async def test_live_partial_captions_ux() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
 
-    passed = len(final_caller_captions) >= 1 and len(final_assistant_captions) >= 1
+    # An interim (final: false) caption is the feature under test; finals alone do not show it.
+    passed = len(interim_captions) >= 1 and len(final_caller_captions) >= 1 and len(final_assistant_captions) >= 1
     print(f" -> Result: {'PASS' if passed else 'FAIL'} (Interim={len(interim_captions)}, Final caller={len(final_caller_captions)}, Assistant={len(final_assistant_captions)})")
     return {
         "test": "live_partial_captions_ux",
@@ -271,13 +285,16 @@ async def test_barge_in_user_control() -> dict[str, Any]:
         }))
         pump_task = asyncio.create_task(pump(ws, listener))
 
-        # Wait until bot begins speaking greeting
-        while not listener.audio_times:
-            await asyncio.sleep(0.1)
+        # Wait (bounded) until the bot begins speaking the greeting.
+        greeting_started = await first_audio_after(listener, time.monotonic() - 1.0, 20.0)
 
         # Talk over the greeting 1.5s in
         await asyncio.sleep(1.5)
         started_talking = time.monotonic()
+        # Only a barge-in over audio that is still playing measures anything.
+        talking_at_barge = greeting_started is not None and any(
+            started_talking - 0.3 <= t <= started_talking for t in listener.audio_times
+        )
         pcm = pcm_of("en_vat")
         ended = await feed_audio(ws, pcm)
         await wait_quiet(listener, ended, quiet_s=2.0, timeout_s=15.0)
@@ -296,12 +313,13 @@ async def test_barge_in_user_control() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
 
-    passed = stop_ms <= 1200
-    print(f" -> Result: {'PASS' if passed else 'FAIL'} (Bot stopped in {stop_ms} ms, interrupt event={interrupt_seen})")
+    passed = talking_at_barge and stop_ms <= 1200
+    print(f" -> Result: {'PASS' if passed else 'FAIL'} (Bot stopped in {stop_ms} ms, playing at barge={talking_at_barge}, interrupt event={interrupt_seen})")
     return {
         "test": "barge_in_user_control",
         "passed": passed,
         "bot_stop_ms": stop_ms,
+        "talking_at_barge": talking_at_barge,
         "interrupt_seen": interrupt_seen,
     }
 
@@ -388,7 +406,7 @@ async def test_multilingual_accuracy_statutory_fidelity() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
     vat_lg = " ".join(answers)
-    lg_ok = any(tok in vat_lg.lower() for tok in ("18", "omusolo", "ebitundu", "vat", "v-a-t"))
+    lg_ok = language_of(vat_lg) == "lg" and "18" in vat_lg
     results["lg_vat_accuracy"] = {"passed": lg_ok, "text": vat_lg}
     print(f" -> Luganda: {'PASS' if lg_ok else 'FAIL'} (Vernacular accuracy: {vat_lg[:60]}...)")
 
@@ -407,7 +425,7 @@ async def test_multilingual_accuracy_statutory_fidelity() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
     tin_sw = " ".join(answers)
-    sw_ok = any(tok in tin_sw.lower() for tok in ("tin", "t-i-n", "kujisajili", "kodi", "hatua", "ura", "u-r-a"))
+    sw_ok = language_of(tin_sw) == "sw" and any(tok in tin_sw.lower() for tok in ("tin", "t-i-n"))
     results["sw_tin_accuracy"] = {"passed": sw_ok, "text": tin_sw}
     print(f" -> Swahili: {'PASS' if sw_ok else 'FAIL'} (Swahili TIN guidance: {tin_sw[:60]}...)")
 

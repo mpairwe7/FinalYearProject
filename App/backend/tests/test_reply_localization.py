@@ -210,7 +210,8 @@ class ParagraphLocalizationTest(unittest.TestCase):
 
         with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
             out = service.localize_reply(self.TIN_REPLY, "sw")
-        self.assertEqual(seen, self.TIN_REPLY.split("\n\n"))
+        # Paragraphs are translated concurrently: which runs first is not fixed.
+        self.assertCountEqual(seen, self.TIN_REPLY.split("\n\n"))
         self.assertTrue(out.startswith("SW Happy to help"))
         self.assertIn("\n\nSW To register", out)
 

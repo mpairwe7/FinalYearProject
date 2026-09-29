@@ -84,6 +84,9 @@ class Scenario:
     note: str = ""
 
 
+#: An answer this short may carry too few words to place its language.
+SHORT_PROMPT_WORDS = 8
+
 #: A barge-in passes when the assistant's audio stops within this long.
 BARGE_STOP_BUDGET_MS = 2000
 
@@ -375,7 +378,11 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
         answers = [text for text in turn["assistant"] if text.strip() not in FILLERS]
         turn["reply_language"] = reply_language(answers)
         turn["reply_language_expected"] = expected
-        language_ok = language_ok and turn["reply_language"] in (None, expected)
+        # Unclassifiable passes only for a short prompt ("Nsonyiwa, ogambye TIN?"):
+        # an empty turn, or a long answer the word lists cannot place, fails.
+        words = len(" ".join(answers).split())
+        unsure_ok = turn["reply_language"] is None and 0 < words <= SHORT_PROMPT_WORDS
+        language_ok = language_ok and (turn["reply_language"] == expected or unsure_ok)
     linger_ok = sc.expect_after_linger is None or sc.expect_after_linger in result.get("after_linger", [])
     result["language_sequence"] = seen
     result["passed"] = (
