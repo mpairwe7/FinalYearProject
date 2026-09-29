@@ -573,6 +573,14 @@ Qwen.  Live-LLM integration tests belong in a separate
 
 ## 12. What this branch does NOT include
 
+Runtime clarification (2026-09-29): the langgraph flag currently selects a
+repository-owned, synchronous, request-scoped dispatcher with LangGraph-style
+nodes; it is not the upstream LangGraph package and does not provide
+checkpointing, durable resume, interrupts, or retries. It runs only when
+`agentic_mode` is enabled, and tool dispatch additionally requires `tool_use`.
+Graph fusion and tax graph remain off by default pending stronger held-out evaluation. See
+RAG_ARCHITECTURE.md for the runtime boundary and fusion details.
+
 These items from `docs/GAPS_AND_AGENTIC_ROADMAP.md` are **still
 gaps**.  The agent runtime is capable of handling them, but the
 integrations haven't been built yet:

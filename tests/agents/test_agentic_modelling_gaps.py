@@ -342,6 +342,31 @@ class TestLangGraphFeatureFlag:
         assert result["retrieval_mode"].startswith("graph_")
         assert result["agent_role"] in ("tool_specialist", "customs_specialist", "tax_specialist")
 
+    def test_streaming_graph_error_falls_back_without_repeating_tool_work(
+        self, clean_flags, monkeypatch, tmp_db
+    ):
+        from unittest.mock import MagicMock
+
+        clean_flags.set("langgraph", True)
+        clean_flags.set("tool_use", True)
+        mock_graph = MagicMock()
+        mock_state = AgentGraphState(query="What is VAT?")
+        mock_state.outcome = GraphOutcome.ERRORED
+        mock_state.reply = ""
+        # The graph may have crossed the tool boundary before failing.
+        mock_state.plan = ["calculate_vat"]
+        mock_graph.run.return_value = mock_state
+        monkeypatch.setattr("app.agents.graphs.main_graph.build_main_graph", lambda: mock_graph)
+
+        model = ChatModel()
+        monkeypatch.setattr(model._retriever, "initialize", lambda: False)
+        result = model.generate_retrieval_only("What is VAT in Uganda?")
+
+        assert result["retrieval_mode"] != "graph_error"
+        assert result.get("reply")
+        assert not result.get("_short_circuit")
+        assert result["_suppress_agentic"] is True
+
 
 # ---------------------------------------------------------------------------
 # 6. Streaming Parity with force_agentic
@@ -538,4 +563,3 @@ class TestWorkflowResumptionNextActions:
         result = model.generate("What is VAT in Uganda?")  # nosemgrep: ura-llm01-raw-user-input-to-llm
         assert result["retrieval_mode"] != "graph_error"
         assert result.get("reply")
-

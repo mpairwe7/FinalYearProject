@@ -15,6 +15,8 @@ import os
 import unittest
 from unittest import mock
 
+import pytest
+
 from app.graph import reset_graph
 from app.graph.build import (
     build_graph,
@@ -33,6 +35,9 @@ from app.graph.query import (
 )
 from app.graph.schema import Edge, EdgeKind, Node, NodeKind
 from app.graph.store import MAX_HOPS, MAX_NODES, InMemoryGraphStore
+from app.agents.graphs import AgentGraphState, GraphOutcome, GraphRuntime, NodeResult
+from app.agents.graphs.main_graph import node_retrieve
+from app.agents.graphs.runtime import END
 
 
 class KeyParsingTests(unittest.TestCase):
@@ -64,6 +69,60 @@ class KeyParsingTests(unittest.TestCase):
 
     def test_an_unmapped_key_still_reads_as_words(self) -> None:
         self.assertEqual(display_name("some_new_rate"), "some new rate")
+
+
+class GraphRuntimeSafetyTests(unittest.TestCase):
+    def test_runtime_rejects_invalid_step_limit_and_node(self) -> None:
+        with pytest.raises(ValueError, match="max_steps"):
+            GraphRuntime(nodes={"start": lambda state: NodeResult(END)}, entry="start", max_steps=0)
+        with pytest.raises(ValueError, match="callable"):
+            GraphRuntime(nodes={"start": None}, entry="start")
+
+    def test_malformed_node_result_fails_closed_and_is_traced(self) -> None:
+        runtime = GraphRuntime(nodes={"start": lambda state: None}, entry="start")
+
+        final = runtime.run(AgentGraphState())
+
+        self.assertEqual(final.outcome, GraphOutcome.ERRORED)
+        self.assertIn("expected NodeResult", final.error)
+        self.assertEqual(final.trace[0]["status"], "error")
+
+    def test_graph_retrieval_can_serve_the_statutory_leg_without_an_index(self) -> None:
+        graph_hit = {
+            "id": "graph:statutory",
+            "text": "VAT standard rate is 18%.",
+            "answer": "VAT standard rate is 18%.",
+            "source": "URA rate tables",
+            "doc_type": "graph",
+            "score_norm": 0.84,
+        }
+
+        class OfflineRetriever:
+            def initialize(self) -> bool:
+                return False
+
+            @staticmethod
+            def build_citations(hits: list[dict[str, object]]) -> list[dict[str, str]]:
+                return [{"ref": "[1]", "source": str(hits[0]["source"])}]
+
+        with (
+            mock.patch("app.retriever.HybridRetriever", OfflineRetriever),
+            mock.patch(
+                "app.flags.flags.is_enabled",
+                side_effect=lambda name, **kwargs: name in {"graph_fusion", "tax_graph"},
+            ),
+            mock.patch("app.graph.shadow.graph_hit_for", return_value=graph_hit),
+            mock.patch(
+                "app.agents.graphs.main_graph._apply_faq_gates",
+                side_effect=lambda query, hits: hits,
+            ),
+        ):
+            state = AgentGraphState(query="What is the VAT rate in Uganda?")
+            node_retrieve(state)
+
+        self.assertEqual(state.hits[0]["id"], "graph:statutory")
+        self.assertEqual(state.retrieval_mode, "graph")
+        self.assertTrue(state.citations)
 
 
 class ProjectionFidelityTests(unittest.TestCase):

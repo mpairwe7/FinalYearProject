@@ -14,10 +14,13 @@ from app.agents.graphs.main_graph import (
     build_main_graph,
     node_act,
     node_reflect,
+    node_retrieve,
+    node_route,
     node_synthesize,
 )
 from app.agents.graphs.runtime import END
 from app.agents.loop_control import ToolCallBudget
+from app.agents.state import AgentRoute
 
 
 # ---------------------------------------------------------------------------
@@ -131,18 +134,107 @@ class TestGraphRuntime:
         assert len(final.trace) == 1
         assert "duration_ms" in final.trace[0]
         assert final.trace[0]["duration_ms"] >= 0
+        assert final.trace[0]["status"] == "ok"
+
+    def test_failed_node_is_traced_with_error_status(self):
+        def exploding(s: AgentGraphState) -> NodeResult:
+            raise RuntimeError("boom")
+
+        runtime = GraphRuntime(nodes={"exploding": exploding}, entry="exploding")
+        final = runtime.run(AgentGraphState())
+
+        assert final.outcome == GraphOutcome.ERRORED
+        assert final.trace[0]["status"] == "error"
+        assert final.trace[0]["error_type"] == "RuntimeError"
+
+    def test_invalid_max_steps_is_rejected(self):
+        with pytest.raises(ValueError, match="max_steps"):
+            GraphRuntime(nodes={"step": lambda s: NodeResult(END)}, entry="step", max_steps=0)
 
 
 # ---------------------------------------------------------------------------
 # Main graph (integration)
 # ---------------------------------------------------------------------------
 class TestMainGraph:
+    def test_agentic_mode_off_bypasses_supervisor_routing(self, monkeypatch):
+        from app.flags import flags
+        from app.agents.supervisor import supervisor
+
+        monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: False)
+        monkeypatch.setattr(
+            supervisor,
+            "classify",
+            lambda *args, **kwargs: pytest.fail("supervisor should stay off"),
+        )
+
+        result = node_route(AgentGraphState(query="What is the VAT rate?"))
+
+        assert result.next_node == "retrieve"
+
+    def test_tool_route_does_not_bypass_tool_use_flag(self, monkeypatch):
+        from types import SimpleNamespace
+
+        from app.flags import flags
+
+        monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: name == "agentic_mode")
+        from app.agents.supervisor import supervisor
+
+        monkeypatch.setattr(
+            supervisor,
+            "classify",
+            lambda *args, **kwargs: SimpleNamespace(
+                route=AgentRoute.TOOLS,
+                suggested_tools=["get_current_date"],
+                reason="date lookup",
+                clarification_question="",
+            ),
+        )
+
+        state = AgentGraphState(query="What is today's date?")
+        result = node_route(state)
+
+        assert result.next_node == "retrieve"
+        assert state.plan == []
+
+    def test_statutory_graph_survives_empty_retrieval_index(self, monkeypatch):
+        from app.flags import flags
+
+        graph_hit = {
+            "id": "graph:statutory",
+            "text": "VAT standard rate is 18%.",
+            "answer": "VAT standard rate is 18%.",
+            "source": "URA rate tables",
+            "doc_type": "graph",
+            "score_norm": 0.84,
+        }
+
+        class OfflineRetriever:
+            def initialize(self):
+                return False
+
+            @staticmethod
+            def build_citations(hits):
+                return [{"ref": "[1]", "source": hits[0]["source"]}]
+
+        monkeypatch.setattr("app.retriever.HybridRetriever", OfflineRetriever)
+        monkeypatch.setattr(flags, "is_enabled", lambda name, **kwargs: name in {"graph_fusion", "tax_graph"})
+        monkeypatch.setattr("app.graph.shadow.graph_hit_for", lambda query: graph_hit)
+        monkeypatch.setattr("app.agents.graphs.main_graph._apply_faq_gates", lambda query, hits: hits)
+
+        state = AgentGraphState(query="What is the VAT rate in Uganda?")
+        node_retrieve(state)
+
+        assert state.hits[0]["id"] == "graph:statutory"
+        assert state.retrieval_mode == "graph"
+        assert state.citations
+
     def test_clarify_for_stop_word(self, fresh_registry):
         graph = build_main_graph()
         state = AgentGraphState(query="help", rewritten_query="help")
         final = graph.run(state)
         assert final.outcome == GraphOutcome.CLARIFY
         assert final.clarification_question
+        assert final.reply.strip()
 
     def test_escalate_for_dispute_query(self, fresh_registry):
         graph = build_main_graph()
@@ -153,6 +245,8 @@ class TestMainGraph:
         final = graph.run(state)
         assert final.outcome == GraphOutcome.ESCALATED
         assert final.escalation_reason
+        assert final.reply.strip()
+        assert "flagged it for a URA officer" not in final.reply
 
     def test_escalate_for_human_request(self, fresh_registry):
         graph = build_main_graph()
@@ -162,6 +256,7 @@ class TestMainGraph:
         )
         final = graph.run(state)
         assert final.outcome == GraphOutcome.ESCALATED
+        assert final.reply.strip()
 
     def test_trace_captures_visited_nodes(self, fresh_registry):
         graph = build_main_graph()

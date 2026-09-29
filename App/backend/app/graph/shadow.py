@@ -20,10 +20,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-#: Fiscal year assumed when a question does not name one. Matches what
-#: the rate tables treat as current.
-DEFAULT_FY = "FY2026-27"
-
 #: Accuracy the graph must reach before ``FLAG_GRAPH_FUSION`` may open.
 #: Set in docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md §7.2.
 FUSION_GATE = 0.75
@@ -109,7 +105,11 @@ def graph_hit_for(question: str) -> dict[str, Any] | None:
     from .query import resolve
 
     try:
-        answer = resolve(question, default_fiscal_year=DEFAULT_FY)
+        # Resolve at request time: a module-level FY freezes the graph leg
+        # across tax-year rollover and ignores CURRENT_FISCAL_YEAR overrides.
+        from ..query import current_fiscal_year
+
+        answer = resolve(question, default_fiscal_year=current_fiscal_year())
     except Exception as exc:
         logger.warning("graph shadow: %s", exc)
         return None

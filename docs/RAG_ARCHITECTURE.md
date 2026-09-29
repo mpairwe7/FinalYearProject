@@ -559,7 +559,7 @@ A subject the rollout does not target falls through to the flag's **default**,
 not to off — otherwise adding a 5% rollout would silently disable the flag for
 the other 95%. `variant_for()` labels each resolution for per-variant reporting.
 
-## Retrieval serving path (2026-08-17)
+## Retrieval serving path (updated 2026-09-29)
 
 Shared entry: `HybridRetriever.search_planned()` — used by REST `generate()`,
 SSE/stream, `search_ura_knowledge_base`, corrective RAG, LangGraph
@@ -569,6 +569,26 @@ applies the unbound-FAQ filter + exact-FAQ promote, and observes after
 tools: one retrieve hop when tools produce no evidence, then one
 reflect retry on low faithfulness or a reasoning miss. Soft “this fiscal
 year” boost follows `current_fiscal_year()`.
+
+The graph hit uses the same `rrf_fuse_ranked_lists()` combiner: fused RRF
+score determines order, calibrated relevance breaks ties, and duplicate IDs
+contribute at most once per retrieval leg. Its default fiscal year is resolved
+at request time through `current_fiscal_year()`, so year rollover and an
+explicit `CURRENT_FISCAL_YEAR` override are honored. Keep `tax_graph` and
+`graph_fusion` off until the unseen-question gate is expanded and passes; the
+authored/held-out shadow results are not sufficient production evidence.
+
+The `langgraph` flag selects the small synchronous, request-scoped
+LangGraph-shaped dispatcher only when `agentic_mode` is also enabled. It is not
+the upstream LangGraph runtime. Tool dispatch additionally requires
+`tool_use`; orchestration does not implicitly enable tools. The dispatcher
+enforces a step cap and records per-node outcomes, but has no checkpointer,
+durable resume, interrupts, or retry policy. It is appropriate only for a
+single chat turn; do not use it for long-running workflows. If replaced with
+durable LangGraph execution, tool side effects need idempotency before node
+replay is enabled. See the official [Graph API guidance](https://docs.langchain.com/oss/python/langgraph/graph-api)
+for bounded execution and replay semantics, and [Persistence guidance](https://docs.langchain.com/oss/python/langgraph/persistence)
+for checkpoint-backed recovery and state retention.
 
 The corpus is English. Non-English questions take a merged English
 translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on). Generation is

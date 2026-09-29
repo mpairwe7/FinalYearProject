@@ -8,9 +8,11 @@ Structure:
       ├─ clarify    → respond (early return)
       └─ escalate   → respond (early return + ticket)
 
-Every node is a pure function of ``AgentGraphState`` — this is
-required for LangGraph migration compatibility and makes replay
-from the audit ledger trivial.
+Nodes mutate a request-scoped ``AgentGraphState``. Retrieval and synthesis
+are bounded; ``node_act`` may invoke external tools and is therefore a side
+effect boundary. This runtime does not replay/checkpoint nodes. A future
+durable LangGraph migration must make those tool effects idempotent before
+enabling retries or resume.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import Any
 
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
-from ...text_signals import ABSTENTION_REPLY
+from ...text_signals import ABSTENTION_REPLY, CLARIFICATION_PROMPT, NO_HITS_REPLY
 from ..state import AgentRoute
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
@@ -38,7 +40,11 @@ REFLECT_FAITHFULNESS_FLOOR = 0.50
 # ---------------------------------------------------------------------------
 def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
+    from ...flags import flags
     from ..supervisor import supervisor as _supervisor
+
+    if not flags.is_enabled("agentic_mode"):
+        return NodeResult(next_node="retrieve")
 
     has_history = bool(state.conversation_history)
     decision = _supervisor.classify(
@@ -62,15 +68,19 @@ def node_route(state: AgentGraphState) -> NodeResult:
         AgentRoute.TAX_SPECIALIST,
         AgentRoute.CUSTOMS_SPECIALIST,
     ):
-        # The supervisor already picked a whitelist — seed the plan
-        state.plan = list(decision.suggested_tools)
-        state.plan_reason = decision.reason
         role_map = {
             AgentRoute.TOOLS: "tool_specialist",
             AgentRoute.TAX_SPECIALIST: "tax_specialist",
             AgentRoute.CUSTOMS_SPECIALIST: "customs_specialist",
         }
         state.agent_role = role_map.get(decision.route, "graph_agent")
+        state.plan_reason = decision.reason
+        # The graph flag selects orchestration; it must not implicitly turn on
+        # registered-tool execution. Keep the independent side-effect gate.
+        if not flags.is_enabled("tool_use"):
+            return NodeResult(next_node="retrieve")
+        # The supervisor already picked a whitelist — seed the plan
+        state.plan = list(decision.suggested_tools)
         return NodeResult(next_node="tool_rag_select")
 
     # Default: factual retrieval
@@ -124,6 +134,8 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
 
     retriever = HybridRetriever()
     query = state.rewritten_query or state.query
+    hits: list[dict[str, Any]] = []
+    was_corrected = False
     if retriever.initialize():
         search = getattr(retriever, "search_planned", retriever.search)
         subject = state.user_id or None
@@ -138,12 +150,22 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
             hits, was_corrected = corrective_retrieve(
                 query, retriever, hits, top_k=state.top_k, subject=subject
             )
-            hits = _fuse_graph_leg(query, hits)
-            hits = _apply_faq_gates(query, hits)
-            state.hits = hits
-            state.retrieval_mode = "hybrid_corrected" if was_corrected else "hybrid"
-            state.sources = list({h.get("source", "") for h in hits if h.get("source")})
-            state.citations = HybridRetriever.build_citations(hits)
+
+    # The statutory leg can answer a rate query even when dense/keyword
+    # retrieval is down or empty, so always consult it while its flags are on.
+    hits = _fuse_graph_leg(query, hits)
+    graph_fused = any(hit.get("doc_type") == "graph" for hit in hits)
+    if hits:
+        hits = _apply_faq_gates(query, hits)
+        state.hits = hits
+        state.retrieval_mode = (
+            "graph_corrected" if graph_fused and was_corrected
+            else "graph" if graph_fused
+            else "hybrid_corrected" if was_corrected
+            else "hybrid"
+        )
+        state.sources = list(dict.fromkeys(h.get("source", "") for h in hits if h.get("source")))
+        state.citations = HybridRetriever.build_citations(hits)
     return NodeResult(next_node="synthesize")
 
 
@@ -449,9 +471,21 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
 
 
 def node_respond(state: AgentGraphState) -> NodeResult:
-    """Terminal node — marks the outcome and ends the graph."""
-    if state.outcome == GraphOutcome.ANSWERED and not state.reply:
+    """Ensure every controlled terminal route has a safe, non-empty reply."""
+    if state.reply and state.reply.strip():
+        return NodeResult(next_node=END, outcome=state.outcome)
+
+    if state.outcome == GraphOutcome.CLARIFY:
+        state.reply = state.clarification_question.strip() or CLARIFICATION_PROMPT
+    elif state.outcome == GraphOutcome.ESCALATED:
+        # Do not imply that a human handoff happened. The service boundary
+        # may create a ticket, subject to the ticket_queue feature flag.
+        state.reply = NO_HITS_REPLY
+    elif state.outcome == GraphOutcome.ANSWERED:
         state.outcome = GraphOutcome.ABSTAINED
+        state.reply = ABSTENTION_REPLY
+    else:
+        state.reply = ABSTENTION_REPLY
     return NodeResult(next_node=END, outcome=state.outcome)
 
 
@@ -459,12 +493,11 @@ def node_respond(state: AgentGraphState) -> NodeResult:
 # Factory
 # ---------------------------------------------------------------------------
 def build_main_graph() -> GraphRuntime:
-    """Return the compiled main agent graph.
+    """Construct the bounded main agent graph.
 
-    LangGraph migration note: every node above maps 1:1 to a
-    ``StateGraph.add_node(name, callable)``; the conditional
-    edges in NodeResult.next_node become
-    ``graph.add_conditional_edges(...)``.
+    Upstream LangGraph adoption needs an explicit state adapter, conditional
+    edge mapping, checkpointer configuration, and idempotent side effects; the
+    current mutable-state nodes are not directly replay-safe.
     """
     nodes: dict[str, GraphNode] = {
         "route": node_route,
