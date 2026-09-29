@@ -262,7 +262,8 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session._audio_buffer), 0)
         self.assertTrue(session._cancelled.is_set())
 
-    async def test_canonical_statutory_cache_in_voice_stream(self):
+    async def test_a_statutory_rate_question_goes_to_the_knowledge_base(self):
+        """No hardcoded rates in voice mode: the figure comes from retrieval."""
         session, speech, chat = self._make_session()
         from app.speech_service import TranscribeResult
 
@@ -271,16 +272,9 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
             language="en",
             duration_s=1.0,
         )
-
-        events = []
-        async for event in session.process_utterance(b"\x00" * 3200):
-            events.append(event)
-
-        meta_events = [e for e in events if e.type == "reply_meta"]
-        self.assertTrue(meta_events)
-        self.assertEqual(meta_events[0].data.get("retrieval_mode"), "canonical_cache")
-        # Chat model generate should NOT have been called due to canonical hit
-        chat.generate.assert_not_called()
+        async for _event in session.process_utterance(b"\x00" * 3200):
+            pass
+        chat.generate.assert_called_once()
 
     def test_split_sentences_numbered_steps(self):
         from app.voice_stream import _split_sentences

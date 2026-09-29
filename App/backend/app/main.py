@@ -1824,56 +1824,32 @@ async def voice_chat(
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
 
-    # Fast check for canonical statutory tax responses (zero LLM inference)
-    canonical_reply = None
-    if not re.search(r"\b(?:calculate|computing|calculator|balirira|bala|hesabu)\b|\d{3,}", transcript, re.IGNORECASE):
-        try:
-            from .receptionist.brain import _CANONICAL_TAX_INTENTS
+    # --- 2. Query normalisation & Domain Term Mapping -------------------
+    # generate() translates for retrieval and localises the reply itself (the
+    # same single place text chat uses), so there is no separate MT leg here.
+    mt_latency = 0.0
+    mt_backend = ""
+    chat_text = transcript
+    if detected_lang == "lg":
+        chat_text = normalize_luganda_tax_query(transcript)
+    elif detected_lang == "sw":
+        chat_text = normalize_swahili_tax_query(transcript)
 
-            for pattern, responses in _CANONICAL_TAX_INTENTS:
-                if pattern.search(transcript):
-                    canonical_reply = responses.get(detected_lang) or responses.get("en")
-                    break
-        except Exception:
-            pass
-
-    if canonical_reply is not None:
-        reply_text = canonical_reply
-        chat_text = transcript
-        mt_latency = 0.0
-        mt_backend = ""
-        llm_latency = 0.001
-        chat_result = {
-            "reply": canonical_reply,
-            "sources": ["URA Official Statutory Rate Schedule FY2026-27"],
-            "faithfulness_score": 1.0,
-            "citations": [],
-        }
-    else:
-        # --- 2. Query normalisation & Domain Term Mapping -------------------
-        mt_latency = 0.0
-        mt_backend = "local_norm"
-        chat_text = transcript
-        if detected_lang == "lg":
-            chat_text = normalize_luganda_tax_query(transcript)
-        elif detected_lang == "sw":
-            chat_text = normalize_swahili_tax_query(transcript)
-
-        # --- 3. Local Model Generation & Localization -------------------------
-        t_llm = time.perf_counter()
-        chat_result = await asyncio.to_thread(
-            model.generate,
-            message=chat_text,
-            conversation_id=conversation_id,
-            top_k=top_k,
-            locale=detected_lang,
-            session_id=session_id,
-            request_id=getattr(request.state, "request_id", None),
-            user_id=ctx.user_id or None,
-            tenant_id=ctx.tenant_id,
-        )
-        llm_latency = time.perf_counter() - t_llm
-        reply_text = chat_result.get("reply", "")
+    # --- 3. Local Model Generation & Localization -------------------------
+    t_llm = time.perf_counter()
+    chat_result = await asyncio.to_thread(
+        model.generate,
+        message=chat_text,
+        conversation_id=conversation_id,
+        top_k=top_k,
+        locale=detected_lang,
+        session_id=session_id,
+        request_id=getattr(request.state, "request_id", None),
+        user_id=ctx.user_id or None,
+        tenant_id=ctx.tenant_id,
+    )
+    llm_latency = time.perf_counter() - t_llm
+    reply_text = chat_result.get("reply", "")
 
     # --- 5. TTS (synthesize reply in user's language) -------------------------
     tts_latency = 0.0
