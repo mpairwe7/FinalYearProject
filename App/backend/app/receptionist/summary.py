@@ -183,10 +183,8 @@ def generate_call_summary(call_id: str) -> dict[str, Any]:
 
     parsed_summary: dict[str, Any] | None = None
 
-    # Sunflower reads Luganda far better than Gemini does, so a Luganda call
-    # is summarised there first; English and Swahili calls go to Gemini first.
-    generators = (_summarise_local, _summarise_gemini) if language == "lg" else (_summarise_gemini, _summarise_local)
-    for generate in generators:
+    # Local Sunflower first for every call; Gemini only if vLLM is down.
+    for generate in (_summarise_local, _summarise_gemini):
         parsed_summary = generate(prompt)
         if parsed_summary:
             break

@@ -13,9 +13,10 @@ the previous brief plus the turns since. So when the AI transfers, the brief
 is usually already there; :func:`build_now` forces a rebuild (on transfer,
 and when an officer asks for a refresh).
 
-Models: English and Swahili calls go to Gemini (``RECEPTIONIST_BRIEF_MODEL``),
-Luganda calls to Sunflower, which reads Luganda far better — both write
-English. If neither answers, a deterministic brief is built from the
+Models: every call goes to the local Sunflower first (it reads Luganda far
+better than Gemini, and English and Swahili as well); Gemini
+(``RECEPTIONIST_BRIEF_MODEL``) is only the fallback when vLLM is down. Both
+write English. If neither answers, a deterministic brief is built from the
 transcript (``fallback: true``). Transcript text is redacted when it is
 written; the brief never re-introduces an identifier — details are labels
 and "given (redacted)".
@@ -195,8 +196,8 @@ def fallback_brief(call: dict[str, Any], turns: list[dict[str, Any]]) -> dict[st
     }
 
 
-def _generate(prompt: str, language: str) -> tuple[dict[str, Any] | None, str]:
-    """Ask the models in the order that suits *language*: (raw brief, model name)."""
+def _generate(prompt: str) -> tuple[dict[str, Any] | None, str]:
+    """Ask local Sunflower, then Gemini if it is down: (raw brief, model name)."""
 
     def gemini() -> tuple[str, str]:
         from ..providers.gateway import gemini_generate
@@ -211,7 +212,7 @@ def _generate(prompt: str, language: str) -> tuple[dict[str, Any] | None, str]:
         messages = [{"role": "system", "content": BRIEF_SYSTEM}, {"role": "user", "content": prompt}]
         return _vllm_generate(messages, max_tokens=1200, temperature=0.0), "sunflower"
 
-    for generate in (sunflower, gemini) if language == "lg" else (gemini, sunflower):
+    for generate in (sunflower, gemini):
         try:
             raw, model = generate()
         except Exception:
@@ -260,7 +261,7 @@ def build_brief(call_id: str, *, force: bool = False) -> dict[str, Any] | None:
         )
 
     started = time.perf_counter()
-    reply, model = _generate(prompt, language)
+    reply, model = _generate(prompt)
     brief = parse_brief(reply["raw"], valid) if reply else None
     fallback = brief is None
     if fallback:

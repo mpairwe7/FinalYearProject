@@ -69,7 +69,7 @@ class BuildBriefTests(unittest.TestCase):
         create_turn(self.call_id, 3, "caller", "utterance", "It has been 45 days, I need a person")
 
     def reply(self, calls: list[str], raw: str = json.dumps(MODEL_BRIEF)):
-        def generate(prompt: str, language: str):
+        def generate(prompt: str):
             calls.append(prompt)
             return {"raw": raw}, "gemini-2.5-flash-lite"
         return generate
@@ -114,7 +114,7 @@ class BuildBriefTests(unittest.TestCase):
         self.assertEqual(brief["why_officer"]["turn_seqs"], [3])
         self.assertEqual((brief["topic"], brief["priority"]), ("General tax support", "high"))
 
-    def test_luganda_goes_to_sunflower_first_and_the_rest_to_gemini(self):
+    def test_every_language_goes_to_sunflower_first(self):
         order: list[str] = []
 
         def gemini(*_a, **_kw):
@@ -127,20 +127,18 @@ class BuildBriefTests(unittest.TestCase):
             return json.dumps(MODEL_BRIEF)
 
         with patch("app.providers.gateway.gemini_generate", gemini), patch("app.llm._vllm_generate", sunflower):
-            _, model = call_brief._generate("prompt", "lg")
-            self.assertEqual((order, model), (["sunflower"], "sunflower"))
-            order.clear()
-            _, model = call_brief._generate("prompt", "sw")
-            self.assertEqual((order, model), (["gemini"], "gemini-2.5-flash-lite"))
+            _, model = call_brief._generate("prompt")
+        # Every language: the local model first, and only that when it answers.
+        self.assertEqual((order, model), (["sunflower"], "sunflower"))
 
-    def test_a_failing_first_model_falls_to_the_second(self):
-        def gemini(*_a, **_kw):
-            raise RuntimeError("gateway down")
+    def test_gemini_is_only_the_fallback_when_sunflower_is_down(self):
+        def sunflower(*_a, **_kw):
+            raise RuntimeError("vLLM down")
 
-        with patch("app.providers.gateway.gemini_generate", gemini), \
-                patch("app.llm._vllm_generate", return_value=json.dumps(MODEL_BRIEF)):
-            reply, model = call_brief._generate("prompt", "en")
-        self.assertEqual(model, "sunflower")
+        with patch("app.providers.gateway.gemini_generate", return_value=json.dumps(MODEL_BRIEF)), \
+                patch("app.llm._vllm_generate", sunflower):
+            reply, model = call_brief._generate("prompt")
+        self.assertEqual(model, "gemini-2.5-flash-lite")
         self.assertIn("caller_goal", reply["raw"])
 
 
