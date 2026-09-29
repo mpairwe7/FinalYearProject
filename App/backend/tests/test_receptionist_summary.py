@@ -108,13 +108,21 @@ class TestSummaryLanguages(unittest.TestCase):
         self.assertEqual((result["language"], result["languages_used"]), ("lg", ["en", "lg"]))
         self.assertIn("Luganda", loc.call_args.args[0])
 
-    def test_english_calls_try_gemini_first(self):
+    def test_english_calls_try_sunflower_first_too(self):
         parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
         turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
-        result, loc, gem = self._summarise({"locale": "en"}, turns, [None], [dict(parsed)])
-        gem.assert_called_once()
-        loc.assert_not_called()
+        result, loc, gem = self._summarise({"locale": "en"}, turns, [dict(parsed)], [None])
+        loc.assert_called_once()
+        gem.assert_not_called()
         self.assertEqual(result["language"], "en")
+
+    def test_gemini_summarises_only_when_sunflower_cannot(self):
+        parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
+        turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
+        result, loc, gem = self._summarise({"locale": "sw"}, turns, [None], [dict(parsed)])
+        loc.assert_called_once()
+        gem.assert_called_once()
+        self.assertEqual(result["summary"], parsed["summary"])
 
     def test_the_prompt_demands_english(self):
         self.assertIn("write every field in English", summary_mod.SUMMARY_SYSTEM)

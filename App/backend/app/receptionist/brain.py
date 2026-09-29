@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from functools import lru_cache
-from typing import Any
+from typing import Any, Final
 
 from .. import database as db
 from ..flags import flags
@@ -21,11 +21,13 @@ from .config import (
     get_clarify_threshold_for,
     get_default_language,
     get_filler_after_ms,
+    get_idle_reprompts,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
     get_transfer_timeout_s,
 )
 from .hub import hub
+from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, update_call
 from .transfer import close_transfer_on_timeout, open_transfer
@@ -118,7 +120,7 @@ QUERY_EXTRACT_SYSTEM = (
 
 # Every call opens in the default language, whatever the caller selected in
 # the chat: taxpayers routinely pick English and then speak Luganda, so the
-# first real question decides (see language.py). Both engines speak this line.
+# first real question decides (see language.py).
 GREETING_TEXT = phrase("greeting", get_default_language())
 FILLER_POOL: tuple[str, ...] = fillers("en")
 FILLER_TEXT = FILLER_POOL[-1]
@@ -161,10 +163,80 @@ def is_human_request(text: str) -> bool:
     )
 
 
+#: In-call controls are whole requests, not words inside a question: "I said
+#: goodbye to my employer — how do I file PAYE?" must be answered, not hung up.
+_CONTROL_MAX_WORDS = 8
+
+_REPEAT_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:repeat\s+that|say\s+that\s+again|could\s+you\s+repeat|pardon\s+me|what\s+did\s+you\s+say"
+    r"|kiddemu|ddamu|nsaba\s+oddemu|kiddemu\s+katono"
+    r"|rudia\s+tena|rudia|sema\s+tena|rudia\s+uliyosema)\b",
+    re.IGNORECASE,
+)
+
+_SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:speak\s+slower|more\s+slowly|talk\s+slower|slow\s+down"
+    r"|yogera\s+mpola|kiddemu\s+mpola|oyogere\s+mpola"
+    r"|ongea\s+polepole|ongea\s+taratibu|sema\s+polepole)\b",
+    re.IGNORECASE,
+)
+
+_HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:hang\s+up|end\s+(?:the\s+)?call|disconnect|goodbye"
+    r"|komya\s+essimu|katikoma\s+wano|weeraba"
+    r"|kata\s+simu|maliza\s+simu|kwaheri)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_control_request(pattern: re.Pattern[str], text: str) -> bool:
+    """*text* is a short in-call request matching *pattern* (see _CONTROL_MAX_WORDS)."""
+    return len(text.split()) <= _CONTROL_MAX_WORDS and pattern.search(text) is not None
+
+
+_TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
+_TRAILING_ABBREVIATION_RE = re.compile(
+    r"(?:^|\s)(?:e\.g|i\.e|etc|No|Sec|Art|Cap|Mr|Mrs|Ms|Dr|St|vs)\.$", re.IGNORECASE
+)
+
+
+def _ends_mid_sentence(sentence: str) -> bool:
+    """Whether the full stop ending *sentence* belongs to a list number or an abbreviation.
+
+    "…in Uganda: 1." opens a list and "… 2." continues one, so the steps stay
+    with the sentence that introduces them; "The rate is 18." still ends one.
+    """
+    if _TRAILING_ABBREVIATION_RE.search(sentence):
+        return True
+    match = _TRAILING_LIST_NUMBER_RE.search(sentence)
+    if match is None:
+        return False
+    number = int(match.group(1))
+    before = sentence[: match.start()].rstrip()
+    if not before:
+        return True  # a bare "2." never ends a sentence
+    if number == 1:
+        return before.endswith(":")
+    return re.search(rf"(?:^|\s){number - 1}\.\s", sentence) is not None
+
+
 def _split_into_sentences(text: str) -> list[str]:
-    """Split text into sentences cleanly."""
-    pieces = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [p.strip() for p in pieces if p.strip()]
+    """Split text into sentences, keeping a numbered procedure in one piece.
+
+    The spoken answer is cut to RECEPTIONIST_MAX_SPOKEN_SENTENCES. Splitting at
+    every full stop counted "1." and "2." as sentences, so a TIN guide was read
+    out as its first step, cut off, then "2." and "Would you like more detail?".
+    """
+    sentences: list[str] = []
+    for piece in re.split(r"(?<=[.!?])\s+", text.strip()):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if sentences and _ends_mid_sentence(sentences[-1]):
+            sentences[-1] = f"{sentences[-1]} {piece}"
+        else:
+            sentences.append(piece)
+    return sentences
 
 
 class UraReceptionistBrain(LLMService):
@@ -175,11 +247,14 @@ class UraReceptionistBrain(LLMService):
         room: Any,
         chat_model: Any,
         clarify_gate: ClarifyGate | None = None,
+        speech_model: Any = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(enable_direct_mode=True, **kwargs)
         self.room = room
         self.chat_model = chat_model
+        # For lines spoken outside the TTS pipeline (a goodbye before hanging up).
+        self.speech_model = speech_model
         self.clarify_gate = clarify_gate or ClarifyGate(
             threshold=get_clarify_threshold(),
             max_attempts=get_max_clarify_attempts(),
@@ -190,6 +265,12 @@ class UraReceptionistBrain(LLMService):
         # Called once a language-switch interruption has passed this brain
         # (the router waits for it before speaking here — see router.py).
         self.on_switch_interrupt: Any = None
+        # Set by the multilingual builder: True while the language router is
+        # re-asking the current turn in the language the caller switched to.
+        self.turn_claimed: Any = None
+        # True while an answer is being worked out: the silence is ours then,
+        # not the caller's (see on_caller_idle).
+        self._answering = False
 
     @property
     def language(self) -> str:
@@ -232,12 +313,9 @@ class UraReceptionistBrain(LLMService):
                 if self.on_switch_interrupt is not None:
                     self.on_switch_interrupt()
                 return
-            # Caller barged in: invalidate pending LLM generation. On a
-            # multilingual call interruptions reach this branch even while the
-            # other engine is talking; only count the ones that interrupted us.
+            # Caller barged in: invalidate pending LLM generation.
             self.room.state.generation_id += 1
-            if self.room.state.engine in ("", "cascaded"):
-                self.room.state.barge_in_count += 1
+            self.room.state.barge_in_count += 1
             await self.push_frame(frame, direction)
             return
 
@@ -254,7 +332,8 @@ class UraReceptionistBrain(LLMService):
     async def _handle_context_frame(
         self, frame: LLMContextFrame, direction: FrameDirection
     ) -> None:
-        logger.info("UraReceptionistBrain _handle_context_frame invoked with context: %r", getattr(frame, "context", None))
+        # Never the context itself at INFO: it is the caller's conversation.
+        logger.debug("Receptionist turn on call %s", self.room.call_id)
         # Extract user utterance from frame context
         user_text = ""
         context = getattr(frame, "context", None)
@@ -276,10 +355,10 @@ class UraReceptionistBrain(LLMService):
         # Pop turn words stashed by TranscriptTap
         words = list(self.room.state.turn_words)
         self.room.state.turn_words = []
-        if self.room.state.engine not in ("", "cascaded"):
-            # A multilingual call moved to Gemini while this turn was still
-            # being transcribed; the router has already re-asked it there.
-            logger.info("Dropping cascaded turn closed after the call left this engine")
+        if self.turn_claimed is not None and self.turn_claimed():
+            # The router re-asks this turn in the new language; answering the
+            # old-language transcript as well would answer the caller twice.
+            logger.info("Dropping a turn the language router is re-asking on call %s", self.room.call_id)
             return
         await self.handle_external_question(user_text, words)
 
@@ -296,6 +375,7 @@ class UraReceptionistBrain(LLMService):
             return
         words = list(words or [])
         language = self.language
+        self.room.state.idle_prompts = 0
 
         # Record caller turn in persistence and pub/sub
         self.room.state.turn_seq += 1
@@ -338,6 +418,32 @@ class UraReceptionistBrain(LLMService):
         # 1. Explicit Human Request
         if is_human_request(user_text):
             await self._transfer("caller_requested")
+            return
+
+        # 1b. In-Call User Control: Repeat Request
+        if _is_control_request(_REPEAT_PATTERNS, user_text):
+            last_ans = getattr(self.room.state, "last_assistant_answer", "")
+            if last_ans:
+                prefix = {
+                    "en": "Sure, let me repeat that: ",
+                    "lg": "Kale, ka nkiddemu: ",
+                    "sw": "Sawa, ngoja nirudie: ",
+                }.get(language, "Sure, let me repeat that: ")
+                await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
+                return
+
+        # 1c. In-Call User Control: Speech Rate Adjustment. The local voices
+        # have no speed control; the call pauses between sentences instead
+        # (UraSpeechTTS, RECEPTIONIST_SLOW_PAUSE_MS), which is what it promises.
+        if _is_control_request(_SPEED_SLOW_PATTERNS, user_text):
+            self.room.state.speech_rate_slow = True
+            await self._say_and_record(phrase("slow_ack", language), kind="notice")
+            return
+
+        # 1d. In-Call User Control: Voice Hangup / Disconnect
+        if _is_control_request(_HANGUP_VOICE_PATTERNS, user_text):
+            logger.info("Ending call %s: the caller said goodbye", self.room.call_id)
+            await self._end_call_after(phrase("officer_closing", language), "caller_voice_hangup")
             return
 
         # 2. Pending Clarification
@@ -404,7 +510,7 @@ class UraReceptionistBrain(LLMService):
         def _sunflower_query() -> str:
             from ..llm import _vllm_generate
 
-            prompt = f"Luganda question: {repaired}\nEnglish search query:"
+            prompt = f"Luganda question: {normalized}\nEnglish search query:"
             messages = [
                 {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
                 {"role": "user", "content": prompt},
@@ -415,7 +521,7 @@ class UraReceptionistBrain(LLMService):
             from ..providers.gateway import gemini_generate
 
             model = get_brief_model()
-            prompt = f"Luganda question: {repaired}\nEnglish search query:"
+            prompt = f"Luganda question: {normalized}\nEnglish search query:"
             return gemini_generate(
                 prompt,
                 system=QUERY_EXTRACT_SYSTEM,
@@ -473,7 +579,7 @@ class UraReceptionistBrain(LLMService):
         return ""
 
     async def _generate_luganda_answer(self, question: str) -> dict[str, Any]:
-        """Fast Cross-Lingual RAG Bridge (Gemini 2.5 Flash Lite + Sunflower Fallback).
+        """Fast cross-lingual RAG bridge: local Sunflower first, Gemini only if it is down.
 
         Replaces the slow 4-hop MT pipeline with direct cross-lingual understanding,
         English URA knowledge base retrieval, and direct Luganda synthesis in a single pass.
@@ -546,7 +652,6 @@ class UraReceptionistBrain(LLMService):
         luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
         if not luganda_reply:
             if english_reply:
-                from ..query import detect_language
 
                 loc_fn = getattr(self.chat_model, "_localize_reply", None)
                 if callable(loc_fn):
@@ -577,7 +682,61 @@ class UraReceptionistBrain(LLMService):
             "english_query": english_query,
         }
 
+    async def on_caller_idle(self) -> None:
+        """The caller has said nothing since the assistant stopped speaking.
+
+        Checks they are still there, up to ``RECEPTIONIST_IDLE_REPROMPTS``
+        times; then says goodbye and ends the call, so an abandoned call stops
+        holding a call slot until ``RECEPTIONIST_MAX_CALL_S``. Never while an
+        officer has, or is being fetched for, the call, and never while an
+        answer is still being worked out.
+        """
+        state = self.room.state
+        if state.mode != "ai" or self._answering:
+            return
+        state.idle_prompts += 1
+        if state.idle_prompts <= get_idle_reprompts():
+            await self._say_and_record(phrase("idle_check", self.language), kind="notice")
+            return
+        logger.info("Ending call %s: the caller has been silent", self.room.call_id)
+        await self._end_call_after(
+            phrase("idle_goodbye", self.language),
+            "caller_idle",
+            # Speaking during the goodbye (handle_external_question resets the count) keeps the call.
+            still_wanted=lambda: state.idle_prompts > get_idle_reprompts(),
+        )
+
+    async def _end_call_after(self, goodbye: str, reason: str, still_wanted: Any = None) -> None:
+        """Say *goodbye*, then end the call once the caller has heard it.
+
+        Spoken like an officer's closing line: its length is known, so the call
+        ends after the caller has heard it, not when the transport (which sends
+        faster than real time) has finished sending it. Shielded: ending the
+        call cancels the pipeline task this may run in. Checked again before
+        hanging up: an officer may have taken the call meanwhile, or (for
+        *still_wanted*) the silent caller may have spoken.
+        """
+        from .desk import hang_up_caller, say_to_caller
+
+        async def _goodbye() -> None:
+            duration = await say_to_caller(self.room, goodbye, self.speech_model)
+            await asyncio.sleep(duration + 0.3)
+            if self.room.state.mode != "ai" or (still_wanted is not None and not still_wanted()):
+                logger.info("Not ending call %s after all (%s)", self.room.call_id, reason)
+                return
+            await hang_up_caller(self.room, reason)
+
+        await asyncio.shield(asyncio.ensure_future(_goodbye()))
+
     async def _answer_question(self, question: str, mean_word_prob: float | None = None) -> None:
+        """Answer *question*; until it has been handed to TTS, caller silence is not idleness."""
+        self._answering = True
+        try:
+            await self._generate_and_speak(question, mean_word_prob)
+        finally:
+            self._answering = False
+
+    async def _generate_and_speak(self, question: str, mean_word_prob: float | None = None) -> None:
         """Run answer generation with filler delay, calibrated escalations, and speech playout."""
         curr_gen_id = self.room.state.generation_id
         t0 = time.perf_counter()
@@ -590,7 +749,7 @@ class UraReceptionistBrain(LLMService):
             gen_task = asyncio.create_task(
                 asyncio.to_thread(
                     self.chat_model.generate,
-                    message=question,
+                    message=normalize_call_query(question, self.room.state.locale),
                     conversation_id=self.room.state.conversation_id,
                     session_id=self.room.call_id,
                     top_k=4,
@@ -721,6 +880,8 @@ class UraReceptionistBrain(LLMService):
         """Output text via Pipecat TTS pipeline, save turn, and send caption."""
         self.room.state.turn_seq += 1
         turn_seq = self.room.state.turn_seq
+        if kind == "answer":
+            self.room.state.last_assistant_answer = text
 
         if not skip_log:
             turn = create_turn(
@@ -747,7 +908,10 @@ class UraReceptionistBrain(LLMService):
         )
         hub.publish_call(self.room.call_id, "caption", caption_data)
 
-        # Stream text into Pipecat TTS service
+        # One text frame: the TTS service's aggregator splits it into sentences
+        # and voices the first while the rest wait, so nothing is gained by
+        # pushing sentences separately (and without the space between them the
+        # aggregator saw "…you.To register" as one sentence).
         await self.push_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
         await self.push_frame(LLMTextFrame(text), FrameDirection.DOWNSTREAM)
         await self.push_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
@@ -788,6 +952,6 @@ class UraReceptionistBrain(LLMService):
         status_event = close_transfer_on_timeout(self.room, ticket_ref)
         if status_event is None:
             return
+        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)
         msg = phrase("officers_busy", self.language, ref=ticket_ref or "URA-CALL")
         await self._say_and_record(msg, kind="notice")
-        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)

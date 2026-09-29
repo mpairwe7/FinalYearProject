@@ -262,6 +262,31 @@ class TestVoiceSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(session._audio_buffer), 0)
         self.assertTrue(session._cancelled.is_set())
 
+    async def test_a_statutory_rate_question_goes_to_the_knowledge_base(self):
+        """No hardcoded rates in voice mode: the figure comes from retrieval."""
+        session, speech, chat = self._make_session()
+        from app.speech_service import TranscribeResult
+
+        speech.transcribe.return_value = TranscribeResult(
+            text="What is the standard VAT rate in Uganda?",
+            language="en",
+            duration_s=1.0,
+        )
+        async for _event in session.process_utterance(b"\x00" * 3200):
+            pass
+        chat.generate.assert_called_once()
+
+    def test_split_sentences_numbered_steps(self):
+        from app.voice_stream import _split_sentences
+
+        text = "1. Go to the URA web portal. 2. Click eServices and select TIN. 3. Submit your application."
+        sentences = _split_sentences(text)
+        self.assertGreaterEqual(len(sentences), 2)
+        # No sentence should be a bare number like "1." or "2."
+        for s in sentences:
+            self.assertFalse(s.strip() in ("1.", "2.", "3."))
+            self.assertGreater(len(s.strip()), 5)
+
 
 # ---------------------------------------------------------------------------
 # Voice consent tests

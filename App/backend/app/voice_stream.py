@@ -340,10 +340,14 @@ class VoiceSession:
             return
 
         detected_lang = asr_result.language or self.language
+        from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
+
+        clean_asr_text = repair_asr_entities(asr_result.text)
+
         yield VoiceStreamEvent(
             type="transcript_final",
             data={
-                "text": asr_result.text,
+                "text": clean_asr_text,
                 "language": detected_lang,
                 "latency_s": timings["asr_ms"] / 1000,
                 "backend": asr_result.backend,
@@ -354,29 +358,38 @@ class VoiceSession:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 2: MT (lg->en) ─────────────────────────────────────
-        query_text = asr_result.text
+        query_text = clean_asr_text
         llm_locale = "en"
         timings["mt_ms"] = 0.0
         mt_backend = ""
         mt_degraded: list[str] = []
 
+        # ── Stage 2: MT (lg/sw -> en) ─────────────────────────────────
         if detected_lang == "lg":
+            query_text = normalize_luganda_tax_query(clean_asr_text)
             t0 = time.perf_counter()
-            mt_result = await _translate_with_retry(self._speech, asr_result.text, "lg", "en")
+            mt_result = await _translate_with_retry(self._speech, query_text, "lg", "en")
             if mt_result is not None:
                 query_text = mt_result.text
                 mt_backend = mt_result.backend
             else:
-                # Degraded: send the original Luganda to the LLM and tell it
-                # so (multilingual prompt rule) rather than mislabel it as
-                # English; surface the degradation to the client.
                 llm_locale = detected_lang
                 mt_degraded.append("lg-en")
                 yield VoiceStreamEvent(
                     type="mt_degraded",
                     data={"direction": "lg-en", "detail": "translation unavailable"},
                 )
+            timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang == "sw":
+            query_text = normalize_swahili_tax_query(clean_asr_text)
+            t0 = time.perf_counter()
+            mt_result = await _translate_with_retry(self._speech, query_text, "sw", "en")
+            if mt_result is not None:
+                query_text = mt_result.text
+                mt_backend = mt_result.backend
+            else:
+                llm_locale = detected_lang
+                mt_degraded.append("sw-en")
             timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if self._cancelled.is_set():
@@ -424,7 +437,7 @@ class VoiceSession:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 4: MT (en->lg) ─────────────────────────────────────
+        # ── Stage 4: MT (en -> lg / sw) ───────────────────────────────
         reply_for_tts = reply_text
         tts_lang = detected_lang
         if detected_lang == "lg" and "lg-en" not in mt_degraded:
@@ -434,8 +447,6 @@ class VoiceSession:
                 reply_for_tts = mt_back.text
                 mt_backend = mt_back.backend
             else:
-                # Degraded: speak the English reply with an English voice —
-                # intelligible English beats a Luganda voice mangling it.
                 tts_lang = "en"
                 mt_degraded.append("en-lg")
                 yield VoiceStreamEvent(
@@ -443,11 +454,26 @@ class VoiceSession:
                     data={"direction": "en-lg", "detail": "translation unavailable"},
                 )
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
-        elif detected_lang == "lg":
-            # Inbound MT already degraded — the reply is whatever language
-            # the LLM answered in; keep the detected voice only if the reply
-            # was generated for that locale.
+        elif detected_lang == "sw" and "sw-en" not in mt_degraded:
+            t0 = time.perf_counter()
+            mt_back = await _translate_with_retry(self._speech, reply_text, "en", "sw")
+            if mt_back is not None:
+                reply_for_tts = mt_back.text
+                mt_backend = mt_back.backend
+            else:
+                tts_lang = "en"
+                mt_degraded.append("en-sw")
+            timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang in ("lg", "sw"):
             tts_lang = detected_lang
+
+        # Clean speech text for natural phonetics and pacing
+        try:
+            from .speech_normalization import clean_text_for_speech
+
+            reply_for_tts = clean_text_for_speech(reply_for_tts, locale=tts_lang)
+        except Exception:
+            pass
 
         if self._cancelled.is_set():
             return
@@ -665,6 +691,13 @@ def _split_sentences(text: str) -> list[str]:
         protected,
     )
 
+    # Protect numbered list steps (e.g. "1. ", "2. ") so they remain with their clause
+    protected = re.sub(
+        r"(?:^|\s)(\d+)\.\s+",
+        lambda m: f" Step {m.group(1)}:\x02 ",
+        protected,
+    )
+
     parts = _SENTENCE_RE.split(protected.strip())
 
     # Maximum character limit to respect Spark-TTS-SALT ~8s training limit
@@ -674,7 +707,7 @@ def _split_sentences(text: str) -> list[str]:
     # Restore protected tokens and split oversized sentences on clause boundaries
     result: list[str] = []
     for part in parts:
-        part = part.replace("\x00", ".").replace("\x01", ".").strip()
+        part = part.replace("\x00", ".").replace("\x01", ".").replace("\x02", "").strip()
         if not part:
             continue
 

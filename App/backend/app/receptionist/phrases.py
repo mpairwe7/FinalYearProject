@@ -54,6 +54,12 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_reconnecting": "Please hold, I'm reconnecting you.",
         "on_hold": "Please hold.",
         "officer_closing": "Thank you for calling URA. Goodbye.",
+        # A caller who has gone quiet: checked on, then the call is ended.
+        "idle_check": "Are you still there? I'm here whenever you're ready to ask your question.",
+        # "Speak slower": the local voices have no speed control, so the call
+        # pauses between sentences — say so rather than promise a new speed.
+        "slow_ack": "Of course. I'll slow down, with a pause between points. What is your question?",
+        "idle_goodbye": "I haven't heard anything, so I'll end the call now. Thank you for calling URA. Goodbye.",
     },
     "lg": {
         "greeting": (
@@ -90,6 +96,9 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_reconnecting": "Nsaba olindeko, nkyakukwataganya n'omukozi.",
         "on_hold": "Nsaba olindeko.",
         "officer_closing": "Webale okukuba essimu eri URA. Weeraba.",
+        "idle_check": "Okyaliwo? Ndi wano, buuza ekibuuzo kyo bw'oba weetegese.",
+        "slow_ack": "Kale. Nja kwogera mpola, nga nnyimiriramu wakati. Ekibuuzo kyo kiri kki?",
+        "idle_goodbye": "Siwulidde kintu kyonna, kale nkomya essimu kati. Webale okukuba essimu eri URA. Weeraba.",
     },
     "sw": {
         "greeting": (
@@ -126,6 +135,9 @@ _PHRASES: dict[str, dict[str, str]] = {
         "officer_reconnecting": "Tafadhali subiri, ninaendelea kukuunganisha na afisa.",
         "on_hold": "Tafadhali subiri.",
         "officer_closing": "Asante kwa kupiga simu URA. Kwaheri.",
+        "idle_check": "Bado uko kwenye simu? Niko hapa, uliza swali lako ukiwa tayari.",
+        "slow_ack": "Sawa. Nitaongea polepole, nikipumzika kati ya hoja. Una swali gani?",
+        "idle_goodbye": "Sijasikia chochote, kwa hiyo nitakata simu sasa. Asante kwa kupiga simu URA. Kwaheri.",
     },
 }
 

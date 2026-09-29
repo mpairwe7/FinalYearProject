@@ -30,6 +30,8 @@ class CallState:
     turn_seq: int = 0
     turn_words: list[Any] = field(default_factory=list)
     last_caller_text: str = ""
+    last_assistant_answer: str = ""
+    speech_rate_slow: bool = False
     clarify: ClarifyState | None = None
     ticket_id: str | None = None
     transfer_reason: str | None = None
@@ -42,6 +44,8 @@ class CallState:
     generation_id: int = 0
     barge_in_count: int = 0
     caller_turns_count: int = 0
+    # "Are you still there?" checks since the caller last said anything.
+    idle_prompts: int = 0
     ai_answers_count: int = 0
     clarifications_asked: int = 0
     clarified_first_try: int = 0
@@ -73,7 +77,6 @@ class CallState:
     transfer_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
     # the language the call is in *now*; these record how it got there.
-    engine: str = ""  # "gemini_live" | "cascaded"; "" on a single-engine call
     initial_locale: str = "en"
     preferred_locale: str = ""  # what the chat was set to; a hint, never the call's language
     language_source: str = "default"  # "default" | "auto" | "explicit" | "override"
@@ -82,7 +85,6 @@ class CallState:
     language_overrides: int = 0
     lid_latencies_ms: list[float] = field(default_factory=list)
     lid_confidences: list[float] = field(default_factory=list)
-    held_ms: list[float] = field(default_factory=list)
 
 
 class CallRoom:
@@ -162,8 +164,7 @@ class CallRoom:
             if self.caller_reconnect_task and not self.caller_reconnect_task.done():
                 self.caller_reconnect_task.cancel()
 
-        # An ended call must not keep its Pipecat pipeline (and Gemini session)
-        # running until the caller's control loop notices. PipelineTask.cancel()
+        # An ended call must not keep its Pipecat pipeline running until the caller's control loop notices. PipelineTask.cancel()
         # only queues a CancelFrame, so it is safe from inside the pipeline too.
         runner = self.pipeline_runner_task
         if runner is not None and not runner.done() and self.pipeline_task is not None:

@@ -254,8 +254,26 @@ class ProductionHardeningTests(unittest.TestCase):
             "WORKERS": "1",
             "VOICE_RECEPTIONIST_REPLICAS": "1",
             "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
+            # Every call runs on the local engine: the Orpheus voice for all languages.
+            "ORPHEUS_TTS_URL": "http://orpheus-tts:8100",
+            "ORPHEUS_TTS_LANGUAGES": "lg,sw,en",
         }
         with patch.dict(os.environ, env, clear=True):
+            _validate_production_env()
+
+    def test_receptionist_in_production_refuses_to_start_without_the_local_voice(self) -> None:
+        env = {
+            **self.secure_env,
+            "FLAG_VOICE_RECEPTIONIST": "true",
+            "RECEPTIONIST_MEDIA_TRANSPORT": "livekit",
+            "LIVEKIT_URL": "wss://rtc.example.test",
+            "LIVEKIT_API_KEY": "production-key",  # pragma: allowlist secret
+            "LIVEKIT_API_SECRET": "production-secret-value-that-is-long-enough",  # pragma: allowlist secret
+            "WORKERS": "1",
+            "VOICE_RECEPTIONIST_REPLICAS": "1",
+            "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
+        }
+        with patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
             _validate_production_env()
 
     # ── Cloudflare/Gemini fallback validation (explicit-on flag) ──────────

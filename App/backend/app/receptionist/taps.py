@@ -122,8 +122,8 @@ class CallerAudioTap(FrameProcessor):
             )
         if isinstance(frame, InputAudioRawFrame) and self.room.state.mode == "bridged":
             # The caller is talking to the officer now: their audio goes to the
-            # officer only. Passed on, it reached Gemini, which answered the
-            # caller over the officer.
+            # officer only. Passed on, it would reach the brain, which would
+            # answer the caller over the officer.
             if self.room.officer is not None:
                 self.room.officer.send_caller_audio(frame.audio)
             if hasattr(self.room, "broadcast_audio"):

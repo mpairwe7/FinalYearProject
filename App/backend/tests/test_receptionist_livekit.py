@@ -258,22 +258,21 @@ def test_an_invalid_call_duration_is_a_configuration_error(monkeypatch, raw) -> 
     from app.receptionist import config
 
     monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", raw)
-    for read in (config.get_max_call_s, config.get_gemini_session_timeout_s, config.validate):
+    for read in (config.get_max_call_s, config.validate):
         with pytest.raises(config.ReceptionistConfigError, match="RECEPTIONIST_MAX_CALL_S"):
             read()
 
 
-def test_call_duration_defaults_and_the_gemini_ceiling(monkeypatch) -> None:
+def test_call_duration_defaults(monkeypatch) -> None:
     from app.receptionist import config
 
     monkeypatch.delenv("RECEPTIONIST_MAX_CALL_S", raising=False)
-    assert (config.get_max_call_s(), config.get_gemini_session_timeout_s()) == (900.0, 480.0)
+    assert config.get_max_call_s() == 900.0
     monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "  ")
     assert config.get_max_call_s() == 900.0
-    monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "300")
-    assert (config.get_max_call_s(), config.get_gemini_session_timeout_s()) == (300.0, 300.0)
+    # No provider session window caps a call any more: the engine is local.
     monkeypatch.setenv("RECEPTIONIST_MAX_CALL_S", "1200")
-    assert (config.get_max_call_s(), config.get_gemini_session_timeout_s()) == (1200.0, 480.0)
+    assert config.get_max_call_s() == 1200.0
 
 
 def test_production_gate_reports_an_invalid_call_duration(monkeypatch) -> None:

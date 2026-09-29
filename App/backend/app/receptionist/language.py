@@ -9,8 +9,7 @@ The call always opens in the default language (English). The first *content*
 utterance that votes with some confidence decides — greetings and one-word
 replies are too short to vote on — and after that the language is *locked*: a
 single confident vote, or two supporting votes among the last three, is needed
-to move it. Gemini Live, which hears the caller too, can also report Luganda
-(:meth:`LanguagePolicy.report`). That asymmetry is deliberate. Code-switched Luganda is full of English tax terms ("TIN", "VAT",
+to move it. That asymmetry is deliberate. Code-switched Luganda is full of English tax terms ("TIN", "VAT",
 "PAYE"), and an English caller with a strong Ugandan accent is the likeliest
 false Luganda vote; both would make a call flip-flop without hysteresis.
 """
@@ -156,25 +155,6 @@ def lexical_hits(text: str) -> dict[str, int]:
     return {"en": en, "lg": lg, "sw": sw}
 
 
-def text_language(text: str, current: str, allowed: tuple[str, ...]) -> str:
-    """The language a transcript is in, from word lists alone; *current* if unclear.
-
-    Used where only text exists (Gemini's own input transcription on a
-    single-engine call). Moving off *current* needs two words of the other
-    language and more of them than of any language in *allowed* — one
-    borrowed word ("asante", "webale") is not a switch.
-    """
-    hits = lexical_hits(text)
-    ranked = sorted(((hits.get(lang, 0), lang) for lang in allowed), reverse=True)
-    if not ranked:
-        return current
-    best_n, best = ranked[0]
-    runner_up = ranked[1][0] if len(ranked) > 1 else 0
-    if best != current and best_n >= 2 and best_n > runner_up:
-        return best
-    return current
-
-
 # Ordered longest-first within a language so "twogere oluganda" is reported
 # as itself rather than as the bare "oluganda" it contains. Bare language
 # names are deliberately absent for English ("do you have the form in
@@ -263,22 +243,6 @@ class LanguagePolicy:
         self.override = language
         self.pending.clear()
         return self._move(language, "ui_override", 1.0, "override")
-
-    def report(self, language: str, reason: str) -> Decision:
-        """An engine recognised the caller's language itself.
-
-        Gemini Live hears every word the caller says and knows Luganda when it
-        hears it — including the Luganda that Whisper-SALT's language token
-        called English on a real caller's phone. It cannot answer in Luganda,
-        so it says so; this moves the call instead. An on-screen choice still
-        wins.
-        """
-        if self.override is not None:
-            return Decision("none", self.active, "override_locked", source="override")
-        if language not in self.config.languages:
-            return Decision("none", self.active, "unsupported_language")
-        self.pending.clear()
-        return self._move(language, reason, 1.0, "auto")
 
     def observe(self, vote: LanguageVote) -> Decision:
         cfg = self.config

@@ -33,11 +33,11 @@ FastAPI (one worker and one replica; process-local call actor)
                               RECEPTIONIST_TURN_TIMEOUT_S after VAD's 0.5 s stop — Smart Turn v3
                               covers neither Luganda nor Swahili)
      → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer)
-     → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k; Luganda streams
-                              from the Orpheus sidecar when ORPHEUS_TTS_URL is set)
+     → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k; streams from the
+                              local Orpheus sidecar for the languages in ORPHEUS_TTS_LANGUAGES)
      → LiveKit audio/data output
    Observers: CallMetricsObserver (turn latency, barge-ins)
-   On end: summary.py (always English; Sunflower first for Luganda calls, Gemini first otherwise)
+   On end: summary.py (always English; local Sunflower first, Gemini only if vLLM is down)
            + metrics.py → store.py (voice_calls / voice_call_turns)
 ```
 
@@ -71,7 +71,10 @@ requires strict pre-join revocation, use LiveKit Cloud or do not enable the
 receptionist until an equivalent self-hosted token-revocation control is in
 place.
 Production readiness checks for a secure LiveKit URL, credentials, the LiveKit
-transport selection, one worker/replica and the operator acknowledgement.
+transport selection, one worker/replica and the operator acknowledgement — and,
+since every call now runs on the local engine, that it can: `SPEECH_ENABLED` and
+`LLM_ENABLED` on, `ORPHEUS_TTS_URL` set, and every language in
+`RECEPTIONIST_LANGUAGES` voiced by Orpheus (`ORPHEUS_TTS_LANGUAGES`).
 `python -m app.production_readiness --as-production` reports those G36 checks.
 Browser sockets send credentials in their first application message (never in
 the URL), and staff/audio sockets validate browser `Origin` against
@@ -82,10 +85,13 @@ as well as LiveKit's (see the rollout checklist below). The browser accepts a
 on an HTTPS page it refuses, and it takes call events over the data channel
 only from the backend agent's identity (`ura-agent-…`).
 
-That is the single-engine cascaded call. `RECEPTIONIST_ENGINE=gemini_live` swaps the
-middle for Gemini Live speech-to-speech, and `FLAG_RECEPTIONIST_LANGUAGE_DETECTION`
-runs both engines side by side and moves the call between them by language — see
-**§6 Multilingual calls**.
+That is the whole engine, and every call language runs on it: Whisper-SALT,
+Sunflower on vLLM against Qdrant, and the Orpheus voice, all from locally cached
+Hugging Face weights on the GPU stack. `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` adds a
+language sentinel that moves a call between English, Luganda and Swahili on this same
+engine — see **§6 Multilingual calls**. The Gemini Live speech-to-speech engine was
+removed on 2026-09-30; Gemini is now only a text fallback when the local vLLM is down
+(the officer brief, the call summary, the Luganda query bridge).
 
 ---
 
@@ -109,36 +115,32 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
-| `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Gemini model that writes the brief for English/Swahili calls; Luganda calls use Sunflower |
+| `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Fallback model for the officer brief; local Sunflower writes it first for every call |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* |
-| `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | Verified East-African English edge-tts speaker |
-| `RECEPTIONIST_ENGINE` | `cascaded` | Conversational engine: `cascaded` (Silero+Whisper+RAG+EdgeTTS) or `gemini_live` |
-| `GEMINI_LIVE_MODEL` | `models/gemini-2.5-flash-native-audio-latest` | Multimodal speech-to-speech model used when `RECEPTIONIST_ENGINE=gemini_live` |
-| `GEMINI_LIVE_VOICE` | `Aoede` | Gemini voice ID (`Aoede`, `Charon`, `Fenrir`, `Kore`, `Puck`) |
-| `GEMINI_LIVE_START_SENSITIVITY` | `high` | How readily Gemini's VAD hears the caller start talking — what lets a caller talk over it. `low` missed callers talking over the greeting |
-| `GEMINI_LIVE_END_SENSITIVITY` | `high` | How readily Gemini decides the caller has finished |
-| `GEMINI_LIVE_SILENCE_MS` | `300` | Silence that ends the caller's turn for Gemini |
-| `GEMINI_LIVE_PREFIX_PADDING_MS` | `100` | Speech Gemini needs before committing to a start of speech |
-| `RECEPTIONIST_LOCAL_BARGE_IN` | `true` | The call's own VAD also stops Gemini when the caller talks over it (turn off on a device whose speaker leaks into the mic) |
+| `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | edge-tts speaker for English when Orpheus does not voice it (a fallback) |
+| `ORPHEUS_TTS_URL` | unset (`http://orpheus-tts:8100` in compose) | The local Orpheus voice sidecar |
+| `ORPHEUS_TTS_LANGUAGES` | `lg` (`lg,sw,en` in the GPU overlay) | Languages Orpheus voices; the rest fall to Spark-TTS-SALT (sw, lg), then edge-tts |
+| `RECEPTIONIST_LOCAL_BARGE_IN` | `true` | The sentinel's VAD stops the assistant when the caller talks over it, before Whisper has transcribed the two words the engine's own rule waits for (turn off on a device whose speaker leaks into the mic) |
 | `RECEPTIONIST_BARGE_IN_MIN_S` | `0.4` | Speech past the VAD onset (itself 0.2 s) that counts as talking over the assistant |
 | `RECEPTIONIST_LIVE_PARTIALS` | `true` | Streams interim transcripts of the caller's own speech back to their screen |
 | `RECEPTIONIST_PARTIAL_INTERVAL_S` | `0.8` | Seconds between interim re-decodes of the utterance in progress |
 | `VOICE_TRANSCRIPT_TTL_DAYS` | `90` | Retention for voice turns and non-ticketed call records |
-| `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes |
+| `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes (standard fallback) |
+| `RECEPTIONIST_FAST_TURN_TIMEOUT_S` | `0.35` | Adaptive fast turn-close after completed question punctuation (`?`, `!`, `.`) or interrogative prefixes |
+| `RECEPTIONIST_HESITATION_TURN_TIMEOUT_S` | `1.2` | Adaptive pause buffer when trailing on hesitation particles (`and`, `era`, `oba`, `na`, `au`) |
+| `RECEPTIONIST_IDLE_REPROMPT_S` | `12` | Caller silence, counted from the end of the assistant's speech, before it asks "Are you still there?"; `0` turns silence handling off |
+| `RECEPTIONIST_IDLE_REPROMPTS` | `1` | How many such checks before a still-silent call is ended (end reason `caller_idle`) and its call slot freed |
 | `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
 | `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
 | `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
 | `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
 
-Gemini Live currently uses an 8-minute session ceiling (or the lower configured
-`RECEPTIONIST_MAX_CALL_S`) so the demo ends cleanly before provider connection
-limits. Session resumption/context compression is not wired in; long calls are
-ended, not transparently resumed. The 15-minute setting remains applicable to
-the cascaded engine. See Google's [Live API session management guidance](https://ai.google.dev/gemini-api/docs/live-api/session-management)
-and Pipecat's [transport selection guide](https://docs.pipecat.ai/client/concepts/choosing-a-transport)
+Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
+provider session window any more. See Pipecat's
+[transport selection guide](https://docs.pipecat.ai/client/concepts/choosing-a-transport)
 before designing a production rollout. The current browser WebSocket audio path
 is demo-only; Pipecat recommends WebRTC for client-to-server voice, while
 WebSockets are suited to server-to-server or text-only use.
@@ -172,6 +174,10 @@ enabling the feature:
    `VOICE_RECEPTIONIST_REPLICAS=1`, and
    `VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true`. The acknowledgement explicitly
    accepts active-call loss on API process failure; it is not a failover control.
+   Run the Orpheus voice sidecar beside the API on its own GPU and set
+   `ORPHEUS_TTS_URL` and `ORPHEUS_TTS_LANGUAGES=lg,sw,en`; the gate refuses a
+   production receptionist without them, because the only other local voice
+   (Spark-TTS-SALT) takes several seconds a sentence.
 4. Serve the web app and API over HTTPS only, and make the ingress refuse or
    redirect plain HTTP — including the WebSocket upgrades on
    `/v1/calls/stream`, `/v1/admin/calls/stream` and
@@ -230,11 +236,12 @@ they authorize room entry, not an active participant's maximum call duration.
 ## 4. Starting the Stack on GPU Host
 
 ```bash
-cd App && GPU_ID=2 docker compose \
+cd App && GPU_ID=2 VLLM_GPU_ID=5 ORPHEUS_GPU_ID=4 docker compose \
   -f docker-compose.yml \
   -f docker-compose.local-retrieval.yml \
   -f docker-compose.local-sunflower.yml \
-  -f docker-compose.gpu-salt.yml up -d --build
+  -f docker-compose.gpu-salt.yml \
+  --profile multilingual up -d --build
 ```
 
 Verify startup in container logs:
@@ -294,7 +301,7 @@ ngrok http 8000
 3. Status changes to **Transferring** with a ticket reference generated via `_maybe_create_ticket`.
 4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill: the
    topic and priority come from the handoff packet ("My account balance" → *Account
-   question*, high), and the queue row shows **Waiting for officer**. Both engines go
+   question*, high), and the queue row shows **Waiting for officer**. The brain goes
    through `receptionist/transfer.py`, which also stores `topic`, `priority` and
    `transfer_requested_at` on the call.
 5. If nobody takes it within `RECEPTIONIST_TRANSFER_TIMEOUT_S` (90 s), the caller hears
@@ -338,27 +345,40 @@ ngrok http 8000
 
 ## 6. Multilingual calls (English, Luganda, Swahili)
 
-Behind `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` (needs `FLAG_VOICE_RECEPTIONIST`, a
-`GEMINI_API_KEY`, Whisper-SALT, and — for a native Luganda voice — the Orpheus sidecar).
+Behind `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` (needs `FLAG_VOICE_RECEPTIONIST`,
+Whisper-SALT, Sunflower on vLLM, and — for a fast native voice in all three languages —
+the Orpheus sidecar). No cloud API key is needed.
 Taxpayers routinely select English in the chat and then speak Luganda, so a call does
 not trust the selection: it opens in English and follows what the caller *says*.
 
 ```
- transport.input() → CallerAudioTap → LanguageSentinel ─► ParallelPipeline ─► ClientEventOutlet → transport.output()
-                                        │ (own Silero VAD,   ├─ gemini_live: EngineGate → user agg → OfficerRequestBridge
-                                        │  SALT language id, │    → GeminiLiveLLMService → transcript tap → OutputHoldGate
-                                        │  never adds audio  │    → assistant agg → EngineGate          (English, Swahili)
-                                        │  latency)          └─ cascaded: EngineGate → VAD → partials → Whisper-SALT
-                                        ▼                         → user agg → brain → UraSpeechTTS/Orpheus
-                              LanguagePolicy → LanguageRouter        → assistant agg → EngineGate          (Luganda)
-                              (lock / switch / hold / re-ask / events)
+ transport.input() → CallerAudioTap → LanguageSentinel → VAD → partials → Whisper-SALT → user agg
+                                        │ (own Silero VAD,     → UraReceptionistBrain → UraSpeechTTS/Orpheus
+                                        │  SALT language id,   → assistant agg → ClientEventOutlet → transport.output()
+                                        │  never adds audio latency)
+                                        ▼
+                              LanguagePolicy → LanguageRouter
+                              (lock / switch / claim + re-ask the turn / barge-in / events)
 ```
 
-| Language | Engine | Hears with | Answers with | Voice |
-|---|---|---|---|---|
-| English | Gemini Live | Gemini | RAG tool (`query_ura_tax_knowledge`, retrieval in English) | Gemini (`GEMINI_LIVE_VOICE`) |
-| Swahili | Gemini Live | Gemini | same tool — Gemini translates the question in and the answer out | Gemini |
-| Luganda | cascaded | Whisper-SALT (`lg` token) | `ChatModel.generate(locale="lg")` → Sunflower | Orpheus-3B `salt_lug_0001` |
+| Language | Hears with | Answers with | Voice (fallbacks) |
+|---|---|---|---|
+| English | Whisper-SALT (`en`) | `ChatModel.generate(locale="en")` → Sunflower on vLLM, Qdrant | Orpheus `salt_eng_0001` (edge-tts) |
+| Swahili | Whisper-SALT (`sw`) | `ChatModel.generate(locale="sw")`, question through `normalize_swahili_tax_query` | Orpheus `waxal_swa_0006` (Spark-TTS-SALT 246, edge-tts) |
+| Luganda | Whisper-SALT (`lg`) | cross-lingual bridge → Sunflower | Orpheus `salt_lug_0001` (Spark-TTS-SALT 248) |
+
+Measured on the GPU stack on 2026-09-30, Orpheus FP8 on its own A6000: first audio
+0.27–0.31 s in all three languages, faster than real time; played back through
+Whisper-SALT the same lines came back with WER 0.00 (en), 0.18 (sw), 0.00 (lg).
+Orpheus reads English acronyms as words ("TIN" was heard as "our team"), which is the
+next thing to fix in the text sent to it.
+
+**Spark-TTS-SALT speakers** (Sunbird's model card and SALT docs): 241 Acholi (F),
+242 Ateso (F), 243 Runyankore (F), 245 Lugbara (F), 246 Swahili (M), 248 Luganda (F);
+prompt `"{speaker_id}: {text}"`, temperature 0.8, top-k 50, top-p 1.0, float32. English
+(Ugandan accent) is in its training data but has no documented speaker id, which is
+why English falls back to edge-tts rather than Spark. `SPARK_TTS_SPEAKER_<LANG>`
+overrides a mapping; keep one utterance under about 8 s, the length it was trained on.
 
 **How the language is decided** (`receptionist/language.py`, all unit-tested):
 
@@ -378,31 +398,24 @@ not trust the selection: it opens in English and follows what the caller *says*.
   ≥ `RECEPTIONIST_LID_SUPPORT_CONFIDENCE` (0.50) — not "in a row": on a real caller's
   phone audio every third Luganda utterance came back English, and a strict run
   never formed.
-- **Gemini is a second listener.** It hears the same audio and knows Luganda when it
-  hears it — including Luganda the language token called English. Instead of
-  telling the caller it only speaks English and Swahili, it calls
-  `hand_over_to_luganda`, and the router moves the call (after the caller's turn
-  ends) and re-asks what they said in Luganda. An on-screen choice still wins.
 - Code-switched Luganda ("Nsaba okumanya ku TIN yange") counts as Luganda when the
   text has two Luganda words (more than Swahili ones) and the acoustics lean Bantu —
   P(lg) ≥ 0.35, or P(lg)+P(sw) ≥ 0.5 (SALT often hears mixed Luganda as Swahili), or
-  the call is already in Luganda. Sunflower handles mixed speech; Gemini does not know
-  Luganda.
+  the call is already in Luganda. Sunflower handles mixed speech.
 - Explicit requests switch at once: "Can we speak Luganda?", "Tuyinza okwogera
   Oluganda?", "Naomba tuongee Kiswahili", "speak English".
 - The caller can pin the language from the chip on the call screen; after that only a
   spoken request moves it.
 
-**What the caller experiences:** before the language is locked, Gemini's reply to the
-first question is held (`OutputHoldGate`, at most `RECEPTIONIST_LID_HOLD_TIMEOUT_MS`,
-600 ms) until the vote lands. English: released, usually before Gemini has produced
-any audio. Luganda: the switch waits for the end of the caller's turn
-(`RECEPTIONIST_TURN_TIMEOUT_S` of silence — votes are cast on every 0.4 s VAD segment,
-and a long question is several), Gemini's reply stays pinned meanwhile, then it is
-discarded, the call moves to the cascaded engine and the *whole* turn is transcribed
-in Luganda and answered after a Luganda filler — the caller never repeats it. After
-the lock nothing is held; a switch interrupts whatever is playing (the browser flushes
-its player on `{"type":"interrupt"}`).
+**What the caller experiences:** nothing is held — one engine answers, in the call's
+current language. When a vote moves the call, the switch waits for the end of the
+caller's turn (`RECEPTIONIST_TURN_TIMEOUT_S` of silence — votes are cast on every 0.4 s
+VAD segment, and a long question is several). The router *claims* that turn, so the
+brain drops the transcript it got in the old language instead of answering it; then
+whatever is playing stops, the *whole* turn is transcribed in the new language and
+answered after a filler in that language — the caller never repeats it, and hears one
+answer. A switch interrupts whatever is playing (the browser flushes its player on
+`{"type":"interrupt"}`).
 
 In a Luganda or Swahili call the clarification gate only ever confirms URA acronyms
 ("Nsonyiwa, ogambye VAT?"), never the language's own words, and reads a loanword the
@@ -421,7 +434,8 @@ Staff see a language badge on the queue row and the case header, "Luganda caller
 the handoff brief, the switch as a `Language: Luganda (detected, 93%)` note in the
 transcript, and language tiles on the metrics card. Summaries are always English.
 
-**Bring-up** (GPU 4 for the stack, GPU 7 for the voice — check `nvidia-smi` first):
+**Bring-up** (a free card for the stack, another for the voice — check `nvidia-smi`
+first; the GPU overlay already sets `ORPHEUS_TTS_LANGUAGES=lg,sw,en`):
 
 ```bash
 cd App && GPU_ID=4 ORPHEUS_GPU_ID=7 ORPHEUS_TTS_URL=http://orpheus-tts:8100 \
@@ -430,12 +444,21 @@ cd App && GPU_ID=4 ORPHEUS_GPU_ID=7 ORPHEUS_TTS_URL=http://orpheus-tts:8100 \
   -f docker-compose.local-sunflower.yml -f docker-compose.gpu-salt.yml \
   --profile multilingual up -d --build
 docker logs ura-app-orpheus-tts 2>&1 | grep "sidecar ready"
-docker logs <api> 2>&1 | grep "Receptionist phrase pre-warm"   # {'lg': {'cached': N, 'failed': 0}}
+docker logs <api> 2>&1 | grep "Receptionist phrase pre-warm"   # {'en': {...}, 'sw': {...}, 'lg': {'cached': N, 'failed': 0}}
 ```
 
 Orpheus runs weight-only FP8 (`ORPHEUS_QUANTIZATION=fp8`): at bf16 an RTX A6000
 generates at only ~0.96× real time, which leaves no headroom; FP8 measured 234 ms to
 first audio at 0.63× real time (`evals/reports/orpheus_tts_2026-09-24_*.json`).
+
+**Replay check** (`scripts/replay_call_audio.py`, twelve scenarios): besides the
+language events, each turn declares the language its answer must be in and fails if
+the receptionist's own word lists place it in another — a Swahili caller answered in
+English passed every other check. `12_silent_caller` says nothing after the greeting
+and expects the call to end. The harness receives audio at the demo socket's pace,
+twice real time, so it can start talking during a pause *between* greeting sentences;
+that shows up as one barge-in on a first turn and is an artefact of the harness, not
+something a caller listening at normal speed triggers.
 
 **Before any demo:** the Luganda and Swahili lines in `receptionist/phrases.py` and the
 call-screen strings in `lib/i18n/{lg,sw}.ts` are drafts. Have a native speaker of each
@@ -449,9 +472,12 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | Luganda answers in an English accent, or silent | `ORPHEUS_TTS_URL` unset or sidecar down (`Orpheus TTS unreachable` in api logs); `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG=false` drops the English stand-in on purpose. `GET /v1/speech/health` reports `status: degraded` and `orpheus: cooldown` while the sidecar is down; Luganda then uses Spark-TTS-SALT and does not wait out the Orpheus timeout |
 | Luganda TIN question comes back as VAT, or “ttiimu” / “mu ora” never hits the TIN passages | Whisper-SALT can be confident and still wrong (`ttiimu`, `timu`, `okuva mu ora` on `lg_tin.wav`). ClarifyGate asks before answering. Before Qdrant, `repair_asr_entities` rewrites those to `TIN` and `mu URA`. Bare “era” stays “and” |
 | Luganda “how much VAT / vati” is answered from a passage instead of the calculator | The call tries the chat calculator on the repaired transcript before retrieval. `vati` and `okwewandiisa` open `check_vat_registration` / `calculate_vat`. A later “what about 2 million?” stays on that tool |
-| English or Kiswahili caller hears nothing for a long time | Gemini produced no audio. After `RECEPTIONIST_GEMINI_AUDIO_DEADLINE_S` (15s) the turn is answered on the local cascade (Whisper-SALT, Sunflower, Qdrant, Spark or Orpheus). The api log says `answering locally`. Needs the cascaded branch, which language detection builds |
+| English answer read by an American voice | Orpheus is not voicing English: `ORPHEUS_TTS_LANGUAGES` lacks `en`, or the sidecar is down (`GET /v1/speech/health` → `orpheus: cooldown`), so edge-tts took the line |
+| Caller heard two answers to one question after a language switch | api log should show `Dropping a turn the language router is re-asking`; if not, the router's turn claim did not reach the brain (`brain.turn_claimed` is wired in `multilingual.py`) |
 | English caller moved to Luganda | api log `Language vote lg p=…` lines; raise `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` or `RECEPTIONIST_LID_MIN_SPEECH_S` |
-| First English answer feels late | `language.held_ms_p95` in the call metrics; lower `RECEPTIONIST_LID_HOLD_TIMEOUT_MS` |
-| Call never leaves English | `SpeechModel.identify_language` returning `whisper_salt_unavailable` — Whisper-SALT not loaded; `gemini_live heard lg` lines show whether Gemini reported Luganda |
-| Caller cannot talk over the assistant | api log `Gemini VAD: interrupted signal received` (Gemini stopped itself) or `Caller talking over Gemini` (the call's own VAD did); neither — the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
-| Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or `GEMINI_LIVE_START_SENSITIVITY=low` |
+| First answer feels late | `latency.turn_to_audio_ms_p50` in the call metrics; Sunflower's time on the vLLM card; the filler plays after `RECEPTIONIST_FILLER_AFTER_MS` |
+| Call never leaves English | `SpeechModel.identify_language` returning `whisper_salt_unavailable` — Whisper-SALT not loaded; `Language vote` lines show what each utterance voted |
+| Call ended on its own after the caller went quiet | Silence handling: `RECEPTIONIST_IDLE_REPROMPT_S` after the assistant stopped it asked "Are you still there?", and after another such silence ended the call (`end_reason=caller_idle`, api log `Ending call … the caller has been silent`). Raise it, or `0` turns it off |
+| A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
+| Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
+| Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |

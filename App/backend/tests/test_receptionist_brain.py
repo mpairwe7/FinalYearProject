@@ -189,8 +189,10 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(is_human_request("I want to talk to an officer"))
         self.assertFalse(is_human_request("Omusolo gwa VAT guli ki?"))
 
-    async def test_a_turn_closed_after_the_call_moved_to_gemini_is_dropped(self):
-        self.state.engine = "gemini_live"
+    async def test_a_turn_the_language_router_is_re_asking_is_dropped(self):
+        # Answered once, in the new language, by the router's re-ask; the
+        # old-language transcript must not be answered as well.
+        self.brain.turn_claimed = lambda: True
         await self.brain.process_frame(LLMContextFrame(context="Nnyinza ntya okufuna TIN?"))
         self.chat_model.generate.assert_not_called()
         self.assertEqual(list_turns(self.call_id), [])
@@ -231,4 +233,67 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         from app.receptionist.phrases import fillers
 
         self.assertEqual(sum(text in fillers("lg") for text in kinds), 1)
+
+    async def test_a_statutory_rate_question_is_answered_from_retrieval(self):
+        """No hardcoded rates: the answer (and its figure) comes from the knowledge base."""
+        frame = LLMContextFrame(context="What is the standard VAT rate in Uganda?")
+        await self.brain.process_frame(frame)
+        self.chat_model.generate.assert_called_once()
+
+    async def test_the_answer_reaches_tts_as_one_frame_with_its_spacing(self):
+        """The TTS aggregator splits sentences itself; pushing them separately
+        without the space between them merged "portal.Step" into one."""
+        self.brain.push_frame.reset_mock()
+        await self.brain._say_and_record("Step 1. Visit the portal. Step 2. Submit your form.")
+        text_frames = [
+            getattr(c.args[0], "text", "")
+            for c in self.brain.push_frame.call_args_list
+            if c.args[0].__class__.__name__ == "LLMTextFrame"
+        ]
+        self.assertEqual(text_frames, ["Step 1. Visit the portal. Step 2. Submit your form."])
+
+    async def test_in_call_voice_control_repeat(self):
+        self.state.locale = "en"
+        self.state.last_assistant_answer = "The standard VAT rate is 18 percent."
+        frame = LLMContextFrame(context="Could you repeat that please?")
+        await self.brain.process_frame(frame)
+        turns = list_turns(self.call_id)
+        last_turn = turns[-1]
+        self.assertEqual(last_turn["speaker"], "assistant")
+        self.assertIn("18 percent", last_turn["text"])
+
+    async def test_in_call_voice_control_speed_slower(self):
+        from app.receptionist.phrases import phrase
+
+        self.state.locale = "lg"
+        self.assertFalse(self.state.speech_rate_slow)
+        frame = LLMContextFrame(context="Yogera mpola")
+        await self.brain.process_frame(frame)
+        self.assertTrue(self.state.speech_rate_slow)  # UraSpeechTTS now pauses between sentences
+        turns = list_turns(self.call_id)
+        self.assertIn(phrase("slow_ack", "lg"), [t["text"] for t in turns])
+        self.chat_model.generate.assert_not_called()
+
+    async def test_in_call_voice_control_hangup_is_heard_before_the_call_ends(self):
+        from app.receptionist.phrases import phrase
+
+        self.state.locale = "en"
+        order: list[str] = []
+        say = AsyncMock(side_effect=lambda *_a: order.append("said") or 0.0)
+        hang_up = AsyncMock(side_effect=lambda *_a: order.append("hung up"))
+        with patch("app.receptionist.desk.say_to_caller", say), patch("app.receptionist.desk.hang_up_caller", hang_up):
+            await self.brain.process_frame(LLMContextFrame(context="Goodbye, thank you"))
+        say.assert_awaited_once_with(self.room, phrase("officer_closing", "en"), self.brain.speech_model)
+        hang_up.assert_awaited_once_with(self.room, "caller_voice_hangup")
+        self.assertEqual(order, ["said", "hung up"])
+
+    async def test_a_question_that_mentions_goodbye_is_answered_not_hung_up(self):
+        hang_up = AsyncMock()
+        with patch("app.receptionist.desk.hang_up_caller", hang_up):
+            await self.brain.process_frame(LLMContextFrame(
+                context="I said goodbye to my old employer last month, so how do I file my PAYE now?"
+            ))
+        hang_up.assert_not_awaited()
+        self.chat_model.generate.assert_called_once()
+
 

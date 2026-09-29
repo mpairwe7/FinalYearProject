@@ -1,13 +1,12 @@
-"""Opening and timing out a transfer to a human officer — the part both engines share.
+"""Opening and timing out a transfer to a human officer.
 
-The cascaded brain speaks its own transfer line; Gemini Live speaks whatever
-its tool result tells it to. Everything else about a transfer is the same and
+The brain speaks the transfer line; everything else about a transfer
 lives here: the ticket (through ``ChatModel._maybe_create_ticket``, so one
 conversation gets one officer), the call state, the ``voice_calls`` row, and
 the staff lobby event that makes the call appear on the officers' screen.
 When nobody answers in time, :func:`close_transfer_on_timeout` hands the call
-back to the AI and records that the caller is owed a callback; each engine
-still speaks its own "officers are busy" line.
+back to the AI and records that the caller is owed a callback; the brain
+speaks the "officers are busy" line.
 
 Callers must check the ``ticket_queue`` flag first and not come here when it
 is off — :func:`open_transfer` assumes a handoff may be promised.

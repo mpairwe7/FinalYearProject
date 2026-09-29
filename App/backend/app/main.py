@@ -664,19 +664,18 @@ async def lifespan(app: FastAPI):
             raise
 
         # Render the receptionist's own fixed lines (fillers, clarify prompts,
-        # transfer notices) for the languages it voices on the cascaded engine,
-        # so the first Luganda caller hears a cached filler at 450 ms instead
-        # of waiting on a live synthesis. Background thread; never fails boot.
+        # transfer notices) for every language a call can be held in, so the
+        # first caller hears a cached filler at 450 ms instead of waiting on a
+        # live synthesis. Background thread; never fails boot.
         speech_for_calls = getattr(app.state, "speech", None)
         if speech_for_calls is not None and _flags.is_enabled("receptionist_language_detection"):
-            from .receptionist.config import get_engine_by_language, get_languages
+            from .receptionist.config import get_languages
             from .receptionist.tts import prewarm_receptionist_phrases
 
-            engines = get_engine_by_language()
-            cascaded_langs = tuple(lang for lang in get_languages() if engines.get(lang) == "cascaded")
+            call_langs = get_languages()
 
             def _prewarm_calls(speech: SpeechModel = speech_for_calls) -> None:
-                logger.info("Receptionist phrase pre-warm: %s", prewarm_receptionist_phrases(speech, cascaded_langs))
+                logger.info("Receptionist phrase pre-warm: %s", prewarm_receptionist_phrases(speech, call_langs))
 
             threading.Thread(target=_prewarm_calls, name="receptionist-prewarm", daemon=True).start()
 
@@ -1809,7 +1808,9 @@ async def voice_chat(
             asr_backend=asr_result.backend,
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
-    transcript = asr_result.text
+    from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
+
+    transcript = repair_asr_entities(asr_result.text)
     detected_lang = asr_result.language or language
 
     # Guard: empty transcript (user said nothing / noise)
@@ -1823,32 +1824,25 @@ async def voice_chat(
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
 
-    # --- 2. MT (Luganda -> English) if user speaks Luganda --------------------
+    # --- 2. Query normalisation & Domain Term Mapping -------------------
+    # generate() translates for retrieval and localises the reply itself (the
+    # same single place text chat uses), so there is no separate MT leg here.
     mt_latency = 0.0
     mt_backend = ""
     chat_text = transcript
     if detected_lang == "lg":
-        mt_result = speech.translate(transcript, source_lang="lg", target_lang="en")
-        mt_latency += mt_result.latency_s
-        mt_backend = mt_result.backend
-        metrics.inc("speech_mt_total")
-        if mt_result.latency_s:
-            metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-        if mt_result.error:
-            metrics.inc("speech_mt_errors_total")
-            stage_errors.append(f"MT(lg->en): {mt_result.error}")
-            logger.warning("Voice chat MT lg->en failed: %s", mt_result.error)
-        else:
-            chat_text = mt_result.text
+        chat_text = normalize_luganda_tax_query(transcript)
+    elif detected_lang == "sw":
+        chat_text = normalize_swahili_tax_query(transcript)
 
-    # --- 3. LLM chat ---------------------------------------------------------
+    # --- 3. Local Model Generation & Localization -------------------------
     t_llm = time.perf_counter()
     chat_result = await asyncio.to_thread(
         model.generate,
         message=chat_text,
         conversation_id=conversation_id,
         top_k=top_k,
-        locale="en",
+        locale=detected_lang,
         session_id=session_id,
         request_id=getattr(request.state, "request_id", None),
         user_id=ctx.user_id or None,
@@ -1857,28 +1851,7 @@ async def voice_chat(
     llm_latency = time.perf_counter() - t_llm
     reply_text = chat_result.get("reply", "")
 
-    # --- 4. MT (English -> Luganda) if user language is Luganda ---------------
-    if detected_lang == "lg" and reply_text:
-        mt_result = speech.translate(reply_text, source_lang="en", target_lang="lg")
-        mt_latency += mt_result.latency_s
-        mt_backend = mt_backend or mt_result.backend
-        metrics.inc("speech_mt_total")
-        if mt_result.latency_s:
-            metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-        if mt_result.error:
-            metrics.inc("speech_mt_errors_total")
-            stage_errors.append(f"MT(en->lg): {mt_result.error}")
-            logger.warning("Voice chat MT en->lg failed: %s", mt_result.error)
-        else:
-            reply_text = mt_result.text
-
     # --- 5. TTS (synthesize reply in user's language) -------------------------
-    # Budget guard: on slow speech tiers (cloud Sunbird can take 30s+ per
-    # call) the four-stage pipeline can outlive the deployment's gateway
-    # timeout and the client receives a 504 with NOTHING — worse than a
-    # text-only reply. When the request has already burned the budget,
-    # return the text now (tts_skipped=True) and let the client fetch the
-    # narration as a separate single-leg /v1/tts request.
     tts_latency = 0.0
     tts_backend = ""
     audio_b64 = ""
@@ -1896,7 +1869,16 @@ async def voice_chat(
                 VOICE_CHAT_BUDGET_S,
             )
         else:
-            tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
+            from .receptionist.brain import _split_into_sentences
+            from .speech_normalization import clean_text_for_speech
+
+            spoken_reply = clean_text_for_speech(reply_text, locale=detected_lang)
+            sentences = _split_into_sentences(spoken_reply)
+            if len(sentences) > 3:
+                spoken_reply = " ".join(sentences[:3])
+            if len(spoken_reply) > 500:
+                spoken_reply = spoken_reply[:500].rsplit(" ", 1)[0] + "."
+            tts_result = speech.synthesize(text=spoken_reply, voice=voice, language=detected_lang)
             tts_latency = tts_result.latency_s
             tts_backend = tts_result.backend
             tts_sample_rate = tts_result.sample_rate

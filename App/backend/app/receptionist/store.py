@@ -140,8 +140,8 @@ def init_receptionist_schema() -> None:
 
 
 # Who wants to hear about a call's new turns (the officer brief's scheduler).
-# Turns are written from several places — the brain, the Gemini transcript
-# taps, the router, the officer leg — and all of them come through
+# Turns are written from several places — the brain, the transcript taps,
+# the router, the officer leg — and all of them come through
 # create_turn, so observing it here needs no change at any call site.
 TurnObserver = Callable[[dict[str, Any]], None]
 _turn_observers: dict[str, list[TurnObserver]] = {}

@@ -1,4 +1,4 @@
-"""Client for the Orpheus-3B Sunbird TTS sidecar — the receptionist's Luganda voice.
+"""Client for the Orpheus-3B Sunbird TTS sidecar — the receptionist's local voice.
 
 Sibling to :mod:`app.spark_tts_salt` (a local batch voice) and
 :mod:`app.sunbird` (a cloud one), but a *streaming* voice: the sidecar
@@ -16,6 +16,7 @@ Opt-in by URL: with ``ORPHEUS_TTS_URL`` unset nothing here is ever called and
 | ``ORPHEUS_TTS_LANGUAGES``  | ``lg``           | languages Orpheus speaks, comma-separated|
 | ``ORPHEUS_TTS_SPEAKER_LG`` | ``salt_lug_0001``| Luganda speaker id (model card table)    |
 | ``ORPHEUS_TTS_SPEAKER_SW`` | ``waxal_swa_0006``| Swahili speaker id                      |
+| ``ORPHEUS_TTS_SPEAKER_EN`` | ``salt_eng_0001``| English (Ugandan) speaker id             |
 | ``ORPHEUS_TTS_TIMEOUT_S``  | ``20``           | per-request ceiling                      |
 
 A connection failure opens a short cooldown (:data:`COOLDOWN_S`) so a dead
@@ -52,7 +53,7 @@ def _timeout_s() -> float:
         return 20.0
 
 
-_DEFAULT_SPEAKERS = {"lg": "salt_lug_0001", "sw": "waxal_swa_0006"}
+_DEFAULT_SPEAKERS = {"lg": "salt_lug_0001", "sw": "waxal_swa_0006", "en": "salt_eng_0001"}
 
 _lock = threading.Lock()
 _down_until = 0.0

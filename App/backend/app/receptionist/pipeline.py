@@ -8,7 +8,7 @@ from typing import Any
 from ..flags import flags
 from . import livekit
 from .brain import UraReceptionistBrain
-from .config import get_max_call_s, get_receptionist_engine
+from .config import get_idle_reprompt_s, get_max_call_s
 from .serializer import BrowserCallSerializer
 from .stt import UraWhisperSTT
 from .taps import CallerAudioTap, LivePartialTranscriptTap, TranscriptTap
@@ -112,6 +112,8 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
             # seconds after the caller stops on a long Luganda turn. This is
             # only the backstop for a turn no strategy ever closes.
             user_turn_stop_timeout=20.0,
+            # Runs from the end of the assistant's speech; see brain.on_caller_idle.
+            user_idle_timeout=get_idle_reprompt_s(),
         ),
     )
     initial = room.state.locale
@@ -120,8 +122,13 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
     # broadcasts) and before the STT, so the caller reads their sentence taking
     # shape instead of waiting for the segmented recognizer to close the turn.
     partial_tap = LivePartialTranscriptTap(room=room, speech_model=speech_model, language=initial)
-    brain = UraReceptionistBrain(room=room, chat_model=chat_model)
+    brain = UraReceptionistBrain(room=room, chat_model=chat_model, speech_model=speech_model)
     tts = UraSpeechTTS(speech_model=speech_model, language=initial, room=room)
+
+    @context_aggregator.user().event_handler("on_user_turn_idle")
+    async def _caller_idle(_aggregator: Any) -> None:
+        await brain.on_caller_idle()
+
     processors = [
         vad_processor,
         partial_tap,
@@ -156,18 +163,6 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
                 "Failed to initialize the multilingual pipeline (%s); falling back to one engine",
                 exc,
                 exc_info=True,
-            )
-
-    if get_receptionist_engine() == "gemini_live":
-        try:
-            from .gemini_live import build_gemini_live_pipeline
-            return build_gemini_live_pipeline(
-                room, websocket, speech_model=speech_model, chat_model=chat_model
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to initialize Gemini Live pipeline (%s); falling back to cascaded pipeline",
-                exc,
             )
 
     from .hold_gate import OfficerOutputGate

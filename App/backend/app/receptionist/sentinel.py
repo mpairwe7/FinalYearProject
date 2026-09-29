@@ -1,14 +1,14 @@
 """The language sentinel: hears every caller utterance and votes on its language.
 
-It sits on the shared input path, after ``CallerAudioTap`` and before the
-engine switch, and passes every frame straight through (direct mode) — it adds
+It sits on the input path, after ``CallerAudioTap`` and before the engine's
+own VAD, and passes every frame straight through (direct mode) — it adds
 nothing to the audio path. What it does happens off to the side:
 
 1. Caller audio is copied into its *own* Silero VAD, run as a bare analyzer.
-   Nothing it detects is pushed downstream: VAD frames reaching the Gemini
-   branch's aggregator would read as the caller interrupting.
-2. When an utterance starts and the call's language is not yet locked, the
-   router is told (``on_speech_started``), which holds Gemini's reply back.
+   Nothing it detects is pushed downstream: the engine runs its own VAD, and
+   a second set of VAD frames would read as the caller interrupting.
+2. When an utterance starts the router is told (``on_speech_started``): a
+   new caller turn, unless a language switch is waiting on this one.
 3. When it ends, :meth:`app.speech_service.SpeechModel.identify_language`
    scores it (one encoder pass), and a short or unsure utterance is also
    decoded as text in the language it most likely is — explicit requests
@@ -21,8 +21,8 @@ call is with an officer.
 
 Its VAD is also the call's second ear for barge-in: when the caller keeps
 talking over the assistant (``RECEPTIONIST_BARGE_IN_MIN_S`` past the onset),
-the router is told (``on_barge_in``), which stops Gemini if its own VAD has
-not.
+the router is told (``on_barge_in``), which stops the assistant before the
+engine's own rule (two transcribed words) would.
 """
 
 from __future__ import annotations
@@ -153,9 +153,8 @@ class LanguageSentinel(FrameProcessor):  # type: ignore[misc,valid-type]
     async def interrupt_for_barge_in(self) -> None:
         """Interrupt the assistant because the caller is talking over it.
 
-        Marked ``metadata["local_barge_in"]``: Gemini did not stop by itself,
-        so the rest of the reply it is still streaming must be dropped
-        (``InterruptedReplyMute``).
+        Marked ``metadata["local_barge_in"]`` so logs and metrics can tell it
+        from the engine's own two-word barge-in.
         """
         await self._interrupt("local_barge_in")
 

@@ -26,7 +26,6 @@ from . import desk, livekit, risk
 from .brain import UraReceptionistBrain
 from .config import (
     get_default_language,
-    get_gemini_session_timeout_s,
     get_languages,
     get_max_call_s,
 )
@@ -301,8 +300,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             from pipecat.pipeline.runner import PipelineRunner
 
             # Pipecat only *reports* a dropped socket; stopping the pipeline is
-            # the app's job. Without this a hung-up call ran on — Gemini
-            # session, per-caller slot and all — until the configured transport
+            # the app's job. Without this a hung-up call ran on — pipeline,
+            # per-caller slot and all — until the configured transport
             # session timeout, and a later caller could be refused by the cap.
             room.transport = transport
             room.pipeline_task = task
@@ -416,11 +415,9 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                 from .serializer import RequestOfficerFrame, SetLanguageFrame
 
                 max_call_s = get_max_call_s()
-                if room.state.engine == "gemini_live":
-                    max_call_s = min(max_call_s, get_gemini_session_timeout_s())
                 # A dropped control socket raises out of receive_text(), and
                 # CallRoom.end() does not own the Pipecat runner: without this
-                # finally the runner and the Gemini session outlived the call.
+                # finally the runner outlived the call.
                 try:
                     while room.state.mode != "ended":
                         if time.time() - room.state.started_at >= max_call_s:

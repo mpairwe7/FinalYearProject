@@ -185,5 +185,71 @@ class GenerationLanguageTest(unittest.TestCase):
             self.assertFalse(llm.can_generate_in_locale("nyn"))
 
 
+
+class ParagraphLocalizationTest(unittest.TestCase):
+    """Long replies are translated one paragraph at a time (measured 2026-09-30)."""
+
+    # The guided TIN reply a Swahili caller got back in English: Sunflower
+    # translated its opening line and stopped.
+    TIN_REPLY = (
+        "Happy to help you register for a TIN!\n\n"
+        "To register for a TIN with URA in Uganda: 1. Visit the official URA web portal "
+        "2. Navigate to **eServices** > **TIN Registration** 3. Complete the online "
+        "application form and submit."
+    )
+
+    def setUp(self) -> None:
+        mt.cache.clear()
+
+    def test_each_paragraph_is_translated_separately(self) -> None:
+        seen: list[str] = []
+
+        def sunflower(text: str, _locale: str) -> str:
+            seen.append(text)
+            return f"SW {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
+            out = service.localize_reply(self.TIN_REPLY, "sw")
+        # Paragraphs are translated concurrently: which runs first is not fixed.
+        self.assertCountEqual(seen, self.TIN_REPLY.split("\n\n"))
+        self.assertTrue(out.startswith("SW Happy to help"))
+        self.assertIn("\n\nSW To register", out)
+
+    def test_a_model_that_stops_after_the_first_paragraph_no_longer_loses_the_rest(self) -> None:
+        opening = "Ninafurahi kukusaidia kujisajili kwa ajili ya TIN!"
+
+        def sunflower(text: str, _locale: str) -> str:
+            # Whole reply: the opening line only. One paragraph: all of it.
+            return opening if "\n\n" in text else f"[sw] {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
+            out = service.localize_reply(self.TIN_REPLY, "sw")
+        self.assertIn("[sw] To register for a TIN", out)
+
+    def test_a_truncated_paragraph_serves_the_english_answer(self) -> None:
+        def truncating(text: str, _locale: str) -> str:
+            return "Ndiyo." if text.startswith("To register") else f"[sw] {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=truncating):
+            self.assertEqual(service.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
+
+    def test_one_failed_paragraph_fails_the_whole_reply(self) -> None:
+        def failing(text: str, _locale: str) -> str | None:
+            return None if text.startswith("To register") else f"[sw] {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=failing):
+            self.assertEqual(service.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
+
+
+class PromptedTranslationInputTest(unittest.TestCase):
+    def test_nothing_to_translate_never_reaches_the_model(self) -> None:
+        """Given empty text, Sunflower translated its own instructions instead."""
+        from app import llm
+
+        with mock.patch.object(llm, "LLM_BACKEND", "vllm"), mock.patch.object(llm, "_vllm_generate") as generate:
+            for blank in ("", "   ", "\n\n"):
+                self.assertEqual(llm.translate_text(blank, source_lang="en", target_lang="sw"), "")
+        generate.assert_not_called()
+
 if __name__ == "__main__":
     unittest.main()

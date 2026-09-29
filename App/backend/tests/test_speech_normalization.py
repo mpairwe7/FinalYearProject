@@ -118,6 +118,11 @@ def test_broken_and_bare_urls_are_not_spoken():
     assert "Genda ku" in res
 
 
+def test_a_url_goes_with_the_at_that_introduced_it():
+    res = clean_text_for_speech("Visit the official URA web portal at https://ura.go.ug. Then log in.", locale="en")
+    assert res == "Visit the official U-R-A web portal. Then log in."
+
+
 def test_empty_and_whitespace():
     assert clean_text_for_speech("") == ""
     assert clean_text_for_speech("   ") == ""

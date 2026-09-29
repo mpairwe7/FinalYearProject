@@ -25,6 +25,7 @@ class TestReceptionistHistory(unittest.TestCase):
         init_receptionist_schema()
         db.execute("DELETE FROM voice_calls")
         db.execute("DELETE FROM voice_call_turns")
+        db.execute("DELETE FROM tickets")
 
     def test_filter_by_outcome_language_topic(self):
         t0 = time.time()
