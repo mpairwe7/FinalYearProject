@@ -8,8 +8,11 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder - Install dependencies
 # -----------------------------------------------------------------------------
-ARG PYTHON_IMAGE=python:3.11.11-slim-bookworm
-FROM ${PYTHON_IMAGE} AS builder
+# Literal, patch-pinned base image: Dependabot's docker updater bumps FROM
+# lines but cannot see an ARG default, which is how this sat on 3.11.11
+# (Debian 12.10, OpenSSL 3.0.15) with 4 critical and 42 high fixable OS
+# findings in the Trivy image scan.
+FROM python:3.11.16-slim-bookworm AS builder
 
 # Install uv for fast dependency resolution
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
@@ -44,7 +47,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
 # -----------------------------------------------------------------------------
-FROM ${PYTHON_IMAGE} AS runtime
+FROM python:3.11.16-slim-bookworm AS runtime
+
+# The base image's own packaging tools are never used here (the app runs from
+# /opt/venv) and were its only remaining HIGH findings (wheel 0.45.1, the
+# jaraco.context that setuptools vendors).
+RUN python -m pip uninstall -y setuptools wheel
 
 # Labels for container registry
 LABEL org.opencontainers.image.title="URA Chatbot API" \
