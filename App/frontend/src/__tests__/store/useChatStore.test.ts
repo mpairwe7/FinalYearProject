@@ -132,4 +132,10 @@ describe("normalizeAssistantResponse", () => {
     expect(result).toContain("1. Open the portal");
     expect(result).toContain("2. Enter your details.\n\nNote: Keep your NIN nearby.");
   });
+
+  it("does not turn a VAT rate into a numbered step", () => {
+    const result = normalizeAssistantResponse("The VAT rate is 18. File the return next.");
+    expect(result).toContain("18. File the return");
+    expect(result).not.toContain("\n18. File");
+  });
 });

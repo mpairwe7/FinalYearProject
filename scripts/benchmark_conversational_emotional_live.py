@@ -20,9 +20,9 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import math
 import os
 import re
-import statistics
 import subprocess
 import time
 import urllib.error
@@ -87,19 +87,28 @@ def post_chat(
     t0 = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            elapsed = (time.perf_counter() - t0) * 1000.0
             body = json.loads(resp.read().decode("utf-8"))
+            elapsed = (time.perf_counter() - t0) * 1000.0
             return resp.status, body, elapsed
     except urllib.error.HTTPError as e:
-        elapsed = (time.perf_counter() - t0) * 1000.0
         try:
             body = json.loads(e.read().decode("utf-8"))
         except Exception:
             body = {"error": str(e)}
+        elapsed = (time.perf_counter() - t0) * 1000.0
         return e.code, body, elapsed
     except Exception as e:
         elapsed = (time.perf_counter() - t0) * 1000.0
         return 599, {"error": str(e)}, elapsed
+
+
+def nearest_rank(values: list[float], percentile: float) -> float:
+    """Return a nearest-rank percentile; callers should report the sample size."""
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    rank = max(1, min(len(ordered), math.ceil(percentile * len(ordered) / 100)))
+    return ordered[rank - 1]
 
 
 # =============================================================================
@@ -205,60 +214,78 @@ def run_emotional_suite(base_url: str) -> dict[str, Any]:
     print("=" * 80)
 
     results = []
-    correct_escalations = 0
-    correct_empathy = 0
+    escalation_counts = {"tp": 0, "fp": 0, "tn": 0, "fn": 0}
+    empathy_counts = {"tp": 0, "fp": 0, "tn": 0, "fn": 0}
 
     for sc in EMOTIONAL_SCENARIOS:
         sess = f"bench-emo-{sc['id'].lower()}-{int(time.time())}"
         status, body, elapsed = post_chat(base_url, sc["message"], sess, locale=sc["locale"])
 
         reply = body.get("reply", "")
-        esc_req = body.get("escalation_required", False)
+        esc_req = bool(body.get("escalation_required", False))
         ticket_id = body.get("ticket_id", "")
         has_ticket = bool(ticket_id)
+        escalation_observed = esc_req or has_ticket
 
         # Check for empathetic markers or de-escalation tone
         empathy_markers = [
             "sorry", "understand", "options", "relief", "assist", "help", "stressful",
             "pole", "samahani", "tusaasidde", "nsonyiwa", "kakasa", "dismay"
         ]
-        has_empathy = any(m in reply.lower() for m in empathy_markers) or body.get("tone_hint") is not None
+        tone_hint = str(body.get("tone_hint") or "").strip().lower()
+        empathetic_tones = {"empathy", "empathetic", "supportive", "compassionate", "reassuring"}
+        has_empathy = any(m in reply.lower() for m in empathy_markers) or tone_hint in empathetic_tones
 
-        esc_ok = (esc_req or has_ticket) if sc["expected_escalation"] else True
-        if sc["expected_escalation"]:
-            if esc_req or has_ticket:
-                correct_escalations += 1
+        status_ok = 200 <= status < 300
+        expected_escalation = bool(sc["expected_escalation"])
+        expected_empathy = bool(sc["expected_empathy"])
+        if expected_escalation and escalation_observed and status_ok:
+            escalation_counts["tp"] += 1
+        elif expected_escalation:
+            escalation_counts["fn"] += 1
+        elif escalation_observed or not status_ok:
+            escalation_counts["fp"] += 1
         else:
-            correct_escalations += 1
-
-        if sc["expected_empathy"]:
-            if has_empathy:
-                correct_empathy += 1
+            escalation_counts["tn"] += 1
+        if expected_empathy and has_empathy and status_ok:
+            empathy_counts["tp"] += 1
+        elif expected_empathy:
+            empathy_counts["fn"] += 1
+        elif has_empathy or not status_ok:
+            empathy_counts["fp"] += 1
         else:
-            correct_empathy += 1
+            empathy_counts["tn"] += 1
 
         item = {
             "id": sc["id"],
             "category": sc["category"],
             "locale": sc["locale"],
             "status_code": status,
+            "request_ok": status_ok,
             "latency_ms": round(elapsed, 1),
+            "escalation_expected": expected_escalation,
+            "escalation_observed": escalation_observed,
             "escalation_required": esc_req,
             "ticket_created": has_ticket,
+            "empathy_expected": expected_empathy,
             "empathy_detected": has_empathy,
             "reply_preview": reply[:100] + ("..." if len(reply) > 100 else ""),
         }
         results.append(item)
         print(f"  [{sc['id']}] {sc['category']:18} | Status: {status} | Latency: {elapsed:6.1f}ms | Esc: {esc_req} (Ticket: {has_ticket}) | Empathy: {has_empathy}")
 
-    esc_acc = (correct_escalations / len(EMOTIONAL_SCENARIOS)) * 100
-    emp_acc = (correct_empathy / len(EMOTIONAL_SCENARIOS)) * 100
+    scored = sum(escalation_counts.values())
+    esc_acc = (100 * (escalation_counts["tp"] + escalation_counts["tn"]) / scored) if scored else 0.0
+    emp_acc = (100 * (empathy_counts["tp"] + empathy_counts["tn"]) / scored) if scored else 0.0
+    esc_precision = (100 * escalation_counts["tp"] / (escalation_counts["tp"] + escalation_counts["fp"])) if escalation_counts["tp"] + escalation_counts["fp"] else 0.0
+    esc_recall = (100 * escalation_counts["tp"] / (escalation_counts["tp"] + escalation_counts["fn"])) if escalation_counts["tp"] + escalation_counts["fn"] else 0.0
+    emp_recall = (100 * empathy_counts["tp"] / (empathy_counts["tp"] + empathy_counts["fn"])) if empathy_counts["tp"] + empathy_counts["fn"] else 0.0
 
-    print(f"\n--> Emotional Intelligence Score: {emp_acc:.1f}% | Escalation Accuracy: {esc_acc:.1f}%")
+    print(f"\n--> Empathy Accuracy: {emp_acc:.1f}% (recall {emp_recall:.1f}%) | Escalation Accuracy: {esc_acc:.1f}% (precision {esc_precision:.1f}%, recall {esc_recall:.1f}%)")
     return {
         "tests": results,
-        "empathy_accuracy_pct": round(emp_acc, 2),
-        "escalation_accuracy_pct": round(esc_acc, 2),
+        "empathy": {"accuracy_pct": round(emp_acc, 2), "recall_pct": round(emp_recall, 2), "confusion": empathy_counts},
+        "escalation": {"accuracy_pct": round(esc_acc, 2), "precision_pct": round(esc_precision, 2), "recall_pct": round(esc_recall, 2), "confusion": escalation_counts},
     }
 
 
@@ -286,7 +313,7 @@ def run_conversational_suite(base_url: str) -> dict[str, Any]:
         reply = body.get("reply", "")
         mode = body.get("retrieval_mode", "")
         kw_ok = vt["expected_kw"] in reply
-        context_retained = "calculator" in mode or kw_ok
+        context_retained = 200 <= status < 300 and kw_ok
         vat_results.append({
             "turn": vt["turn"],
             "input": vt["msg"],
@@ -314,7 +341,7 @@ def run_conversational_suite(base_url: str) -> dict[str, Any]:
         reply = body.get("reply", "")
         mode = body.get("retrieval_mode", "")
         has_paye = "paye" in reply.lower()
-        context_retained = "calculator" in mode or has_paye
+        context_retained = 200 <= status < 300 and has_paye
         paye_results.append({
             "turn": pt["turn"],
             "input": pt["msg"],
@@ -332,24 +359,26 @@ def run_conversational_suite(base_url: str) -> dict[str, Any]:
     status1, body1, elapsed1 = post_chat(base_url, "how much withholding tax on a 3m management consultancy", session_wht, locale="en")
     reply1 = body1.get("reply", "")
     mode1 = body1.get("retrieval_mode", "")
-    asked_disambiguation = "services" in reply1.lower() or "management" in reply1.lower() or "which" in reply1.lower()
+    asked_disambiguation = 200 <= status1 < 300 and ("6%" in reply1 and "15%" in reply1 or "which" in reply1.lower())
     print(f"    Turn 1: Elicitation question asked: {asked_disambiguation} | Lat: {elapsed1:6.1f}ms")
 
     status2, body2, elapsed2 = post_chat(base_url, "management", session_wht, locale="en")
     reply2 = body2.get("reply", "")
     mode2 = body2.get("retrieval_mode", "")
-    asked_amount = "gross" in reply2.lower() or "amount" in reply2.lower() or "450,000" in reply2
+    asked_amount = 200 <= status2 < 300 and ("15%" in reply2 or "450,000" in reply2)
     print(f"    Turn 2: Category accepted ('management'): {asked_amount} | Lat: {elapsed2:6.1f}ms")
 
     status3, body3, elapsed3 = post_chat(base_url, "3m", session_wht, locale="en")
     reply3 = body3.get("reply", "")
     mode3 = body3.get("retrieval_mode", "")
-    calc_ok = "450,000" in reply3 or "15%" in reply3
+    calc_ok = 200 <= status3 < 300 and "450,000" in reply3
     print(f"    Turn 3: Management rate 15% applied (450,000): {calc_ok} | Lat: {elapsed3:6.1f}ms")
 
     all_turns = vat_results + paye_results
     passed_turns = sum(1 for t in all_turns if t["context_retained"])
     conv_accuracy = (passed_turns / len(all_turns)) * 100
+    disambiguation_checks = [asked_disambiguation, asked_amount, calc_ok]
+    disambiguation_accuracy = (100 * sum(disambiguation_checks) / len(disambiguation_checks))
 
     print(f"\n--> Conversational Continuity Score: {conv_accuracy:.1f}% ({passed_turns}/{len(all_turns)} turns)")
     return {
@@ -361,6 +390,7 @@ def run_conversational_suite(base_url: str) -> dict[str, Any]:
             "turn3_calculated_correctly": calc_ok,
             "latency_ms": [round(elapsed1, 1), round(elapsed2, 1), round(elapsed3, 1)],
         },
+        "disambiguation_accuracy_pct": round(disambiguation_accuracy, 2),
         "conversational_accuracy_pct": round(conv_accuracy, 2),
     }
 
@@ -368,7 +398,7 @@ def run_conversational_suite(base_url: str) -> dict[str, Any]:
 # =============================================================================
 # SUITE 3: Concurrency Scaling Stress (c = 5, 10, 20, 30)
 # =============================================================================
-def run_concurrency_scaling(base_url: str) -> dict[str, Any]:
+def run_concurrency_scaling(base_url: str, requests_per_worker: int = 10) -> dict[str, Any]:
     print("\n" + "=" * 80)
     print("SUITE 3: CONCURRENCY SCALING STRESS (c = 5, 10, 20, 30)")
     print("=" * 80)
@@ -388,7 +418,7 @@ def run_concurrency_scaling(base_url: str) -> dict[str, Any]:
     ]
 
     for c in scaling_tiers:
-        num_requests = c * 2
+        num_requests = c * requests_per_worker
         latencies = []
         status_counts = {}
         t_start = time.perf_counter()
@@ -413,15 +443,17 @@ def run_concurrency_scaling(base_url: str) -> dict[str, Any]:
         total_dur = time.perf_counter() - t_start
         latencies.sort()
         qps = num_requests / total_dur if total_dur > 0 else 0
-        p50 = statistics.median(latencies) if latencies else 0
-        p90 = latencies[int(len(latencies) * 0.90)] if latencies else 0
-        p95 = latencies[int(len(latencies) * 0.95)] if latencies else 0
-        p99 = latencies[int(len(latencies) * 0.99)] if latencies else 0
+        p50 = nearest_rank(latencies, 50)
+        p90 = nearest_rank(latencies, 90)
+        p95 = nearest_rank(latencies, 95)
+        p99 = nearest_rank(latencies, 99)
         success_rate = (status_counts.get(200, 0) / num_requests) * 100
 
         tier_res = {
             "concurrency": c,
             "total_requests": num_requests,
+            "requests_per_worker": requests_per_worker,
+            "latency_sample_count": len(latencies),
             "duration_s": round(total_dur, 2),
             "throughput_qps": round(qps, 2),
             "success_rate_pct": round(success_rate, 2),
@@ -477,8 +509,8 @@ def run_spike_surge(base_url: str, burst_size: int = 30) -> dict[str, Any]:
     dur = time.perf_counter() - t0
     latencies.sort()
     qps = burst_size / dur if dur > 0 else 0
-    p50 = statistics.median(latencies) if latencies else 0
-    p95 = latencies[int(len(latencies) * 0.95)] if latencies else 0
+    p50 = nearest_rank(latencies, 50)
+    p95 = nearest_rank(latencies, 95)
     success = (status_counts.get(200, 0) / burst_size) * 100
 
     print(f"  Burst {burst_size} parallel requests completed in {dur:5.2f}s")
@@ -487,6 +519,7 @@ def run_spike_surge(base_url: str, burst_size: int = 30) -> dict[str, Any]:
 
     return {
         "burst_size": burst_size,
+        "latency_sample_count": len(latencies),
         "duration_s": round(dur, 2),
         "throughput_qps": round(qps, 2),
         "success_rate_pct": round(success, 2),
@@ -499,9 +532,12 @@ def run_spike_surge(base_url: str, burst_size: int = 30) -> dict[str, Any]:
 def main():
     parser = argparse.ArgumentParser(description="Conversational & Emotional Stress Benchmark")
     parser.add_argument("--target", default=DEFAULT_ENDPOINT, help="Target gateway URL (default: http://localhost:8083)")
+    parser.add_argument("--requests-per-worker", type=int, default=10, help="Requests per worker in each concurrency tier (default: 10)")
     parser.add_argument("--out-md", default="docs/Reports/CONVERSATIONAL_EMOTIONAL_STRESS_REPORT_2026-09-29.md", help="Markdown report path")
     parser.add_argument("--out-json", default="Results/metrics/conversational_emotional_stress_report.json", help="JSON report path")
     args = parser.parse_args()
+    if args.requests_per_worker < 1:
+        parser.error("--requests-per-worker must be at least 1")
 
     print("=" * 80)
     print("CONVERSATIONAL & EMOTIONAL INTELLIGENCE STRESS BENCHMARK (LIVE GPU STACK)")
@@ -518,7 +554,7 @@ def main():
     conv_report = run_conversational_suite(args.target)
 
     # 3. Concurrency Scaling Stress Suite
-    scaling_report = run_concurrency_scaling(args.target)
+    scaling_report = run_concurrency_scaling(args.target, args.requests_per_worker)
 
     # 4. Spike Surge Suite
     spike_report = run_spike_surge(args.target)
@@ -531,6 +567,8 @@ def main():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "target": args.target,
             "total_benchmark_time_s": round(total_time, 2),
+            "workload_note": "Short diagnostic run with fixed request counts; not a sustained capacity or SLO test.",
+            "requests_per_worker": args.requests_per_worker,
         },
         "emotional_intelligence": emo_report,
         "conversational_continuity": conv_report,
@@ -562,12 +600,12 @@ def main():
 
 | Performance Dimension | Target Standard | Measured Benchmark Result | Status |
 |---|:---:|:---:|:---:|
-| **Emotional Distress Recognition** | ≥ 90.0% | **{emo_report['empathy_accuracy_pct']}%** | **MET** ✅ |
-| **Human Escalation Precision** | ≥ 95.0% | **{emo_report['escalation_accuracy_pct']}%** | **MET** ✅ |
-| **Multi-Turn Context Continuity** | ≥ 95.0% | **{conv_report['conversational_accuracy_pct']}%** | **MET** ✅ |
-| **Withholding Disambiguation Rate** | 100.0% | **100.0%** (Services 6% vs Mgmt 15%) | **MET** ✅ |
-| **Spike Surge Availability (c=30)** | ≥ 95.0% | **{spike_report['success_rate_pct']}%** (0 dropped frames) | **MET** ✅ |
-| **Median Response Time (p50)** | < 1,500 ms | **{scaling_report['tiers'][0]['p50_ms']} ms** (c=5) | **MET** ✅ |
+| **Empathy Signal Accuracy** | ≥ 90.0% | **{emo_report['empathy']['accuracy_pct']}%** | **{'MET ✅' if emo_report['empathy']['accuracy_pct'] >= 90 else 'NOT MET ❌'}** |
+| **Escalation Accuracy** | ≥ 95.0% | **{emo_report['escalation']['accuracy_pct']}%** (precision {emo_report['escalation']['precision_pct']}%, recall {emo_report['escalation']['recall_pct']}%) | **{'MET ✅' if emo_report['escalation']['accuracy_pct'] >= 95 else 'NOT MET ❌'}** |
+| **Multi-Turn Context Continuity** | ≥ 95.0% | **{conv_report['conversational_accuracy_pct']}%** | **{'MET ✅' if conv_report['conversational_accuracy_pct'] >= 95 else 'NOT MET ❌'}** |
+| **Withholding Disambiguation Checks** | 100.0% | **{conv_report['disambiguation_accuracy_pct']}%** | **{'MET ✅' if conv_report['disambiguation_accuracy_pct'] >= 100 else 'NOT MET ❌'}** |
+| **Spike Surge Availability (c=30)** | ≥ 95.0% | **{spike_report['success_rate_pct']}%** ({spike_report['latency_sample_count']}/{spike_report['burst_size']} responses received) | **{'MET ✅' if spike_report['success_rate_pct'] >= 95 else 'NOT MET ❌'}** |
+| **Median Response Time (p50)** | < 1,500 ms | **{scaling_report['tiers'][0]['p50_ms']} ms** (c=5) | **{'MET ✅' if scaling_report['tiers'][0]['p50_ms'] < 1500 else 'NOT MET ❌'}** |
 
 ---
 
@@ -596,10 +634,11 @@ Evaluated across critical taxpayer distress categories:
 * **Initial Query (EN):** *"Calculate PAYE on gross monthly salary of UGX 4,500,000"* $\\to$ **Calculated** (p50: {conv_report['paye_session'][0]['latency_ms']} ms)
 * **Turn 2 Follow-Up (EN):** *"what about 6,000,000"* $\\to$ **Calculated** (PAYE context preserved: ✅)
 
-### C. Statutory Disambiguation
+### C. Statutory Disambiguation ({conv_report['disambiguation_accuracy_pct']}% of 3 checks passed)
 * **Query:** *"how much withholding tax on a 3m management consultancy"*
-* **Turn 1 Elicitation:** Correctly prompted taxpayer to disambiguate between standard contracted services (6%) and management fees (15%).
-* **Turn 2 Resolution:** Input *"management"* $\\to$ strictly computed 15% rate (**UGX 450,000**).
+* **Turn 1 Elicitation:** 6% and 15% rates or a clarifying question detected: {'Yes' if conv_report['disambiguation_session']['turn1_elicitation'] else 'No'}.
+* **Turn 2 Resolution:** 15% or UGX 450,000 detected after *"management"*: {'Yes' if conv_report['disambiguation_session']['turn2_category_accepted'] else 'No'}.
+* **Turn 3 Calculation:** UGX 450,000 detected for the 3m amount: {'Yes' if conv_report['disambiguation_session']['turn3_calculated_correctly'] else 'No'}.
 
 ---
 
@@ -621,7 +660,9 @@ Evaluated across critical taxpayer distress categories:
 * **Spike Throughput:** **{spike_report['throughput_qps']} req/sec**
 * **Spike Latency p50:** **{spike_report['p50_ms']} ms**
 * **Spike Latency p95:** **{spike_report['p95_ms']} ms**
-* **Availability Under Surge:** **{spike_report['success_rate_pct']}%** (0 socket drops)
+* **Availability Under Surge:** **{spike_report['success_rate_pct']}%** ({spike_report['latency_sample_count']}/{spike_report['burst_size']} responses received)
+
+This short fixed-count run is diagnostic. Its small samples, lack of a warm-up phase, and closed-loop concurrency workload do not establish sustained capacity or production SLO compliance. Use a sustained arrival-rate workload and explicit error/latency thresholds for release decisions.
 
 ---
 
