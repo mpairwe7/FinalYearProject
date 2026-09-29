@@ -6,6 +6,7 @@ are measured by scripts/bench_orpheus_tts.py (evals/reports/orpheus_tts_*).
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import threading
@@ -100,10 +101,42 @@ class SynthesizeClient(unittest.TestCase):
                 orpheus_tts.synthesize("Hello", "en")
         post.assert_not_called()
 
+    def test_long_text_is_voiced_in_pieces_joined_in_order(self):
+        # One request stops at 16.98 s of audio; a long answer must not.
+        sentences = [f"Sentence number {i} of a long Luganda answer that runs on." for i in range(6)]
+        text = " ".join(sentences)
+
+        def answer(url, **kwargs):
+            return httpx.Response(200, content=kwargs["json"]["input"].encode()[:8])
+
+        with patch.dict(os.environ, ON), patch("httpx.post", side_effect=answer) as post:
+            pcm = orpheus_tts.synthesize(text, "lg")
+        sent = [call.kwargs["json"]["input"] for call in post.call_args_list]
+        self.assertGreater(len(sent), 1)
+        self.assertTrue(all(len(piece) <= 120 for piece in sent))
+        self.assertEqual(" ".join(sorted(sent, key=text.index)), text)
+        self.assertEqual(pcm, b"".join(piece.encode()[:8] for piece in orpheus_tts.split_for_voice(text)))
+
     def test_wav_wrapping(self):
         wav = orpheus_tts.pcm16_to_wav(b"\x00\x00" * 240)
         self.assertEqual(wav[:4], b"RIFF")
         self.assertEqual(int.from_bytes(wav[24:28], "little"), 24000)
+
+
+class SplitForVoice(unittest.TestCase):
+    def test_short_text_is_one_piece_unchanged(self):
+        self.assertEqual(orpheus_tts.split_for_voice("Oli otya?\n"), ["Oli otya?\n"])
+
+    def test_cut_at_sentences_then_clauses_then_words(self):
+        text = "A short one. " + "clause after clause, " * 8 + "and " + "word " * 40
+        pieces = orpheus_tts.split_for_voice(text, limit=60)
+        self.assertTrue(all(len(piece) <= 60 for piece in pieces))
+        self.assertEqual(" ".join(pieces), " ".join(text.split()))
+        self.assertTrue(pieces[0].startswith("A short one. clause after clause,"))
+
+    def test_the_limit_comes_from_env(self):
+        with patch.dict(os.environ, {"ORPHEUS_TTS_MAX_CHARS": "50"}):
+            self.assertTrue(all(len(p) <= 50 for p in orpheus_tts.split_for_voice("word " * 60)))
 
 
 class StreamClient(unittest.IsolatedAsyncioTestCase):
@@ -124,6 +157,24 @@ class StreamClient(unittest.IsolatedAsyncioTestCase):
             chunks = [c async for c in orpheus_tts.stream("Oli otya?", "lg")]
         self.assertTrue(all(len(c) % 2 == 0 for c in chunks))
         self.assertEqual(b"".join(chunks), b"\x01\x00\x02\x00\x03\x00")
+
+    async def test_long_text_streams_piece_after_piece(self):
+        text = "Okwewandiisa ku TIN, genda ku mukutu gwa URA, londa eServices, jjuzaamu ebikwata ku ggwe, " * 3
+        seen: list[str] = []
+        real_client = httpx.AsyncClient
+
+        def reply(req):
+            piece = json.loads(req.content)["input"]
+            seen.append(piece)
+            return httpx.Response(200, content=b"\x01\x00" * len(seen))
+
+        with patch.dict(os.environ, ON), patch(
+            "httpx.AsyncClient", side_effect=lambda timeout: real_client(transport=httpx.MockTransport(reply), timeout=timeout)
+        ):
+            chunks = [c async for c in orpheus_tts.stream(text, "lg")]
+        self.assertEqual(seen, orpheus_tts.split_for_voice(text))
+        self.assertGreater(len(seen), 1)
+        self.assertEqual(b"".join(chunks), b"".join(b"\x01\x00" * n for n in range(1, len(seen) + 1)))
 
     async def test_unreachable_before_audio_raises(self):
         real_client = httpx.AsyncClient
