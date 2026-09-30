@@ -207,3 +207,38 @@ class GroundingWarningLocaleTests(unittest.TestCase):
                 )
                 self.assertEqual(result.sanitized_text, grounded)
                 self.assertEqual(result.flags, [])
+
+
+class ThoughtSuppressionTests(unittest.TestCase):
+    def test_sanitize_strips_thinking_and_scratchpad_tags(self) -> None:
+        raw = (
+            "<think>1. Analyze user query.\n2. Check VAT threshold in passage 1.</think>\n"
+            "<thought>Calculation: 18% of 1,000,000.</thought>\n"
+            "<reasoning>Present in structured bullet points.</reasoning>\n"
+            "The standard VAT rate in Uganda is 18%."
+        )
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertEqual(sanitized, "The standard VAT rate in Uganda is 18%.")
+        self.assertNotIn("<think>", sanitized)
+        self.assertNotIn("<thought>", sanitized)
+        self.assertNotIn("<reasoning>", sanitized)
+
+    def test_sanitize_strips_unclosed_thinking_blocks(self) -> None:
+        raw = "<think>The model ran out of tokens before closing this reasoning block"
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertEqual(sanitized, "")
+
+    def test_filter_thought_stream_suppresses_thinking_tokens(self) -> None:
+        from app.llm import filter_thought_stream
+
+        def _mock_stream():
+            yield "<th"
+            yield "ink>"
+            yield "Internal reasoning step 1."
+            yield "</th"
+            yield "ink>\n\n"
+            yield "VAT is "
+            yield "18%."
+
+        filtered = "".join(filter_thought_stream(_mock_stream()))
+        self.assertEqual(filtered, "VAT is 18%.")

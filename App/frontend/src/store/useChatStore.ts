@@ -407,10 +407,14 @@ function looksLikeThinking(block: string): boolean {
   return THINKING_SIGNALS.some((rx) => rx.test(trimmed));
 }
 
-/** Strip internal telemetry/metadata/agent trace JSON blobs that leak into prose. */
+/** Strip internal telemetry/metadata/agent trace JSON blobs and thinking blocks that leak into prose. */
 export function stripTelemetryJson(text: string): string {
   if (!text) return '';
   return text
+    // Strip thinking and scratchpad tags (<think>...</think>, <thought>...</thought>, etc.), including unclosed
+    .replace(/<(?:think|thought|reasoning|scratchpad)[^>]*>[\s\S]*?(?:<\/(?:think|thought|reasoning|scratchpad)>|$)/gi, '')
+    // Strip ```thought / ```thinking code blocks
+    .replace(/```(?:thought|thinking)[\s\S]*?```/gi, '')
     .replace(/\b(?:translation|retrieval|generation|iteration|tool_call)\.(?:started|completed)\b\s*/g, '')
     .replace(/\{[^{}]*"(?:sources|workflow|retrieval_mode)"[^{}]*\{[^{}]*\}[^{}]*\}/g, '')
     .replace(/\{[^{}]*"(?:sources|retrieval_mode|faithfulness_score)"[^{}]*\}/g, '')

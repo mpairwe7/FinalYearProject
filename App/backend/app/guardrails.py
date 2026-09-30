@@ -116,6 +116,10 @@ _REASONING_PREFIX_REGEX = re.compile(
     r"|the\s+key\s+detail\s+here\s+is"
     r"|i\s+should\s+(?:combine|answer|respond|cite|use)"
     r"|the\s+passages?\s+(?:say|show|mention|indicate)"
+    r"|first,\s+(?:i\s+need|let's|i\s+will|let\s+me|understand)"
+    r"|planning\s+(?:the\s+)?response"
+    r"|intent\s+analysis"
+    r"|scratchpad"
     r")\b",
     re.IGNORECASE,
 )
@@ -522,8 +526,14 @@ class OutputGuard:
     @staticmethod
     def sanitize(text: str) -> str:
         """Strip potentially dangerous output content (LLM05)."""
-        # Remove explicit hidden reasoning blocks first.
-        text = re.sub(r"<think[^>]*>.*?</think\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        # Remove explicit hidden reasoning and scratchpad blocks (closed or unclosed)
+        text = re.sub(
+            r"<(?:think|thought|reasoning|scratchpad)[^>]*>.*?(?:</(?:think|thought|reasoning|scratchpad)\s*>|$)",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        text = re.sub(r"```(?:thought|thinking).*?```", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove script tags
         text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags

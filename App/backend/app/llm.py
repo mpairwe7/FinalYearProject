@@ -171,12 +171,13 @@ is to provide accurate, helpful, and friendly answers about URA services, \
 tax obligations, customs, and procedures.
 
 ## Rules
-1. **OUTPUT THE ANSWER DIRECTLY.** Do NOT include your reasoning, thinking, \
-   analysis of passages, or internal monologue. Do NOT write sentences like \
+1. **OUTPUT THE FINAL ANSWER DIRECTLY.** Do NOT include your reasoning, thinking, \
+   analysis of passages, chain-of-thought, or internal monologue. Never output `<think>`, \
+   `<thought>`, `<reasoning>`, or scratchpad tags. Do NOT write meta-commentary sentences like \
    "Okay, the user is asking...", "Let me check...", "Looking at passage...", \
    "Since the context...", etc. You may begin with a brief, natural \
    acknowledgment (e.g., "Great question!" or "Here's what you need to know:") \
-   followed immediately by the answer.
+   followed immediately by the structured answer.
 2. Answer ONLY from the provided context passages. Do NOT use prior knowledge.
 3. If the context does not contain enough information, say so clearly and \
    direct the user to https://ura.go.ug or the URA Contact Centre.
@@ -829,6 +830,90 @@ def _vllm_build_request(url: str, body: bytes, accept_stream: bool = False) -> A
 
 
 # ---------------------------------------------------------------------------
+# Thought & Reasoning Scratchpad Filters (Hide Internal CoT)
+# ---------------------------------------------------------------------------
+_THOUGHT_TAG_OPEN_RE = re.compile(r"<(?:think|thought|reasoning|scratchpad)[^>]*>", re.IGNORECASE)
+_THOUGHT_TAG_CLOSE_RE = re.compile(r"</(?:think|thought|reasoning|scratchpad)\s*>", re.IGNORECASE)
+_THOUGHT_BLOCK_RE = re.compile(
+    r"<(?:think|thought|reasoning|scratchpad)[^>]*>.*?(?:</(?:think|thought|reasoning|scratchpad)\s*>|$)",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+_THOUGHT_FENCE_RE = re.compile(r"```(?:thought|thinking).*?```", flags=re.DOTALL | re.IGNORECASE)
+
+
+def strip_thought(text: str) -> str:
+    """Extract and hide internal thinking tags and fences, returning only the clean structured response."""
+    if not text:
+        return ""
+    # Strip <think>...</think>, <thought>...</thought>, etc., including unclosed tags
+    cleaned = _THOUGHT_BLOCK_RE.sub("", text)
+    cleaned = _THOUGHT_FENCE_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def filter_thought_stream(token_stream: Generator[str, None, None]) -> Generator[str, None, None]:
+    """Capture and hide thinking tokens server-side, yielding only clean final structured answer tokens."""
+    in_thought = False
+    just_exited_thought = False
+    thought_buffer: list[str] = []
+    prefix_buffer = ""
+
+    for token in token_stream:
+        if not in_thought and not thought_buffer:
+            if just_exited_thought:
+                stripped = token.lstrip("\n ")
+                if not stripped:
+                    continue
+                just_exited_thought = False
+                token = stripped
+
+            prefix_buffer += token
+            # Check if prefix starts with opening tag
+            m = _THOUGHT_TAG_OPEN_RE.match(prefix_buffer.lstrip())
+            if m:
+                in_thought = True
+                thought_buffer.append(prefix_buffer)
+                prefix_buffer = ""
+                continue
+            # If it could be the start of a tag e.g. '<th'
+            stripped_p = prefix_buffer.lstrip()
+            if any(tag.startswith(stripped_p) for tag in ("<think>", "<thought>", "<reasoning>", "<scratchpad>")) and len(stripped_p) < 15:
+                continue
+            else:
+                yield prefix_buffer
+                prefix_buffer = ""
+                continue
+        elif in_thought:
+            thought_buffer.append(token)
+            accumulated = "".join(thought_buffer)
+            m_close = _THOUGHT_TAG_CLOSE_RE.search(accumulated)
+            if m_close:
+                thought_content = accumulated[: m_close.start()]
+                logger.debug("Internal model thinking trace suppressed: %s", thought_content.strip()[:300])
+                remainder = accumulated[m_close.end() :].lstrip("\n ")
+                in_thought = False
+                thought_buffer = []
+                just_exited_thought = True
+                if remainder:
+                    just_exited_thought = False
+                    yield remainder
+            continue
+        else:
+            if just_exited_thought:
+                stripped = token.lstrip("\n ")
+                if not stripped:
+                    continue
+                just_exited_thought = False
+                token = stripped
+            yield token
+
+    if prefix_buffer and not _THOUGHT_TAG_OPEN_RE.match(prefix_buffer.lstrip()):
+        yield prefix_buffer
+    if thought_buffer and in_thought:
+        logger.debug("Unclosed thinking trace suppressed: %s", "".join(thought_buffer).strip()[:300])
+
+
+# ---------------------------------------------------------------------------
 # vLLM HTTP dispatch (LLM_BACKEND=vllm)
 # ---------------------------------------------------------------------------
 def _vllm_generate(
@@ -892,7 +977,7 @@ def _vllm_generate(
         choices = payload.get("choices", [])
         if not choices:
             return ""
-        return str(choices[0].get("message", {}).get("content", "")).strip()
+        return strip_thought(str(choices[0].get("message", {}).get("content", "")))
     except Exception:
         logger.exception("vLLM HTTP generate failed")
         return ""
@@ -994,7 +1079,7 @@ def _vllm_chat_completion(
                     "arguments": xc.get("arguments", {}),
                 })
 
-        return {"content": content, "tool_calls": parsed_calls}
+        return {"content": strip_thought(content), "tool_calls": parsed_calls}
     except urllib.error.HTTPError as http_err:
         err_body = ""
         with contextlib.suppress(Exception):
@@ -1135,7 +1220,7 @@ def generate(
         # Decode only the new tokens (exclude the prompt)
         generated_ids = output_ids[0][inputs["input_ids"].shape[1] :]
         response = _tokenizer.decode(generated_ids, skip_special_tokens=True)
-        return response.strip()
+        return strip_thought(response.strip())
 
     except Exception:
         logger.exception("LLM generation failed")
@@ -1463,7 +1548,7 @@ def generate_stream(
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
-        yield from _vllm_generate_stream(messages)
+        yield from filter_thought_stream(_vllm_generate_stream(messages))
         return
 
     if not _load_model() or _tokenizer is None or _model is None:
@@ -1523,9 +1608,12 @@ def generate_stream(
             )
             thread.start()
 
-            for token_text in streamer:
-                if token_text:
-                    yield token_text
+            def _raw_hf_stream() -> Generator[str, None, None]:
+                for token_text in streamer:
+                    if token_text:
+                        yield token_text
+
+            yield from filter_thought_stream(_raw_hf_stream())
 
             thread.join(timeout=120)
 

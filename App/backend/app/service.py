@@ -806,6 +806,8 @@ def _stream_cloud_fallback(
     )
     if not text:
         return
+    from .llm import strip_thought
+    text = strip_thought(text)
     for chunk in re.findall(r"\S+\s*", text):
         yield chunk
 
@@ -883,6 +885,7 @@ def _call_llm_with_deadline(
     runs first with the local Qwen3-8B as the fallback; otherwise the resilient
     local-first path runs with the cloud chain as its fallback.
     """
+    from .llm import strip_thought
     if _prefer_cloud_primary(locale):
         text = _llm_cloud_fallback(
             query,
@@ -894,9 +897,9 @@ def _call_llm_with_deadline(
             deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
         )
         if text and text.strip():
-            return text
+            return strip_thought(text)
         logger.warning("Cloud-primary LLM unavailable/empty — falling back to local Qwen3-8B")
-        return _local_llm_then_cloud(
+        return strip_thought(_local_llm_then_cloud(
             query,
             passages,
             conversation_history,
@@ -906,8 +909,8 @@ def _call_llm_with_deadline(
             allow_cloud_fallback=False,  # cloud already attempted above
             tone_hint=tone_hint,
             context_summary=context_summary,
-        )
-    return _local_llm_then_cloud(
+        ))
+    return strip_thought(_local_llm_then_cloud(
         query,
         passages,
         conversation_history,
@@ -917,7 +920,7 @@ def _call_llm_with_deadline(
         allow_cloud_fallback=True,
         tone_hint=tone_hint,
         context_summary=context_summary,
-    )
+    ))
 
 
 def _local_llm_then_cloud(
@@ -1035,18 +1038,33 @@ def stream_llm_tokens(
     answer first (chunked) with the local model as fallback; everyone else
     streams locally with the cloud chain as fallback.
     """
-    if _prefer_cloud_primary(locale):
-        saw_cloud = False
-        for chunk in _stream_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context, tone_hint
-        ):
-            if cancel_event is not None and cancel_event.is_set():
+    from .llm import filter_thought_stream
+
+    def _raw_stream():
+        if _prefer_cloud_primary(locale):
+            saw_cloud = False
+            for chunk in _stream_cloud_fallback(
+                query, passages, conversation_history, locale, personalization_context, tone_hint
+            ):
+                if cancel_event is not None and cancel_event.is_set():
+                    return
+                saw_cloud = True
+                yield chunk
+            if saw_cloud:
                 return
-            saw_cloud = True
-            yield chunk
-        if saw_cloud:
+            logger.warning("Cloud-primary stream unavailable — falling back to local Qwen3-8B")
+            yield from _stream_local_then_cloud(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                personalization_context,
+                cancel_event,
+                allow_cloud_fallback=False,  # cloud already attempted above
+                tone_hint=tone_hint,
+                context_summary=context_summary,
+            )
             return
-        logger.warning("Cloud-primary stream unavailable — falling back to local Qwen3-8B")
         yield from _stream_local_then_cloud(
             query,
             passages,
@@ -1054,22 +1072,12 @@ def stream_llm_tokens(
             locale,
             personalization_context,
             cancel_event,
-            allow_cloud_fallback=False,  # cloud already attempted above
+            allow_cloud_fallback=True,
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
-        return
-    yield from _stream_local_then_cloud(
-        query,
-        passages,
-        conversation_history,
-        locale,
-        personalization_context,
-        cancel_event,
-        allow_cloud_fallback=True,
-        tone_hint=tone_hint,
-        context_summary=context_summary,
-    )
+
+    yield from filter_thought_stream(_raw_stream())
 
 
 def _stream_local_then_cloud(
