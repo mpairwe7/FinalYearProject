@@ -876,15 +876,16 @@ Content-Type: audio/wav
 <WAV: 16-bit PCM, mono>
 ```
 
-The body may also be raw PCM16 little-endian (mono, at `sample_rate`), WebM/Ogg
-Opus or MP3. Send WAV where you can: the format of a headerless body is guessed
-from its first bytes.
+The body may also be WebM/Ogg Opus, MP3, or raw mono PCM at `sample_rate`. Send
+WAV where you can, and name a raw body's format with `encoding`; otherwise the
+format of a headerless body is inferred from its bytes.
 
 | Query Param | Type | Default | Validation |
 |---|---|---|---|
 | `sample_rate` | int | 16000 | 8000-48000 |
 | `language` | string | (auto-detect) | ISO 639-1, e.g. `en`, `lg` |
 | `domain` | string | (none) | `tax`: repair Whisper's TIN/URA mishears ("namba ya timu" → "namba ya TIN"), as the chat's dictation does |
+| `encoding` | string | (inferred) | Raw PCM only: `pcm_s16le` or `pcm_f32le`. Anything else is 400 |
 
 **Limits:** Max 16 MiB audio body (~2 min at 16 kHz int16).
 
@@ -1049,7 +1050,7 @@ POST /v1/voice/chat?language=en&sample_rate=16000&tts_enabled=true&top_k=4
 Content-Type: audio/wav
 X-Session-ID: <session-id>
 
-<WAV: 16-bit PCM, mono (raw PCM16 is also accepted; see Transcribe Audio)>
+<WAV: 16-bit PCM, mono (raw PCM with `encoding` is also accepted; see Transcribe Audio)>
 ```
 
 | Query Param | Type | Default | Validation |

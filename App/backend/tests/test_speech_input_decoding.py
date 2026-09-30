@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
-from app.speech_service import SpeechModel, _looks_like_mp3
+from app.speech_service import SpeechModel, _looks_like_mp3, raw_pcm_to_wav
 
 
 def _tone(first_sample: int | None = None, peak: float = 0.25, offset: int = 0) -> np.ndarray:
@@ -64,6 +64,34 @@ class Int16IsNotMistakenForFloat32(unittest.TestCase):
     def test_real_float32_audio_is_still_float32(self):
         audio = (_tone() / 32768.0).astype(np.float32)
         np.testing.assert_allclose(_decode(audio.tobytes()), audio, atol=1e-7)
+
+    def test_float32_speech_with_a_long_near_silent_stretch_is_still_float32(self):
+        # CodeRabbit on #523: noise suppression leaves stretches far below
+        # 1e-7, and an amplitude rule read the whole recording as int16.
+        audio = (_tone() / 32768.0).astype(np.float32)
+        audio[5000:11000] = np.random.default_rng(0).normal(0, 1e-9, 6000).astype(np.float32)  # 37%
+        np.testing.assert_allclose(_decode(audio.tobytes()), audio, atol=1e-7)
+
+
+class DeclaredEncoding(unittest.TestCase):
+    """A caller that names its raw format (/v1/asr?encoding=...) is never guessed."""
+
+    def test_each_encoding_becomes_wav_of_the_same_samples(self):
+        pcm = _tone()
+        for encoding, raw in (("pcm_s16le", pcm.tobytes()), ("pcm_f32le", (pcm / 32768.0).astype("<f4").tobytes())):
+            with self.subTest(encoding=encoding):
+                wav = raw_pcm_to_wav(raw, encoding, 16000)
+                self.assertEqual((wav[:4], wav[8:12]), (b"RIFF", b"WAVE"))
+                np.testing.assert_allclose(_decode(wav), pcm / 32768.0, atol=2e-4)
+
+    def test_a_wav_file_is_left_as_it_came(self):
+        wav = raw_pcm_to_wav(_tone().tobytes(), "pcm_s16le", 16000)
+        self.assertEqual(raw_pcm_to_wav(wav, "pcm_f32le", 16000), wav)
+
+    def test_what_cannot_be_that_encoding_is_refused(self):
+        for data, encoding in ((b"\x00\x01\x02", "pcm_s16le"), (b"\x00" * 6, "pcm_f32le"), (b"\x00" * 8, "mulaw")):
+            with self.subTest(encoding=encoding), self.assertRaises(ValueError):
+                raw_pcm_to_wav(data, encoding, 16000)
 
 
 if __name__ == "__main__":

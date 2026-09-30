@@ -553,7 +553,15 @@ def test_asr_repairs_tax_terms_when_the_chat_dictates():
     assert repaired.json()["text"] == "namba ya TIN kutoka mu URA"
 
 
-def test_tts_synthesizes_audio():
+def test_asr_takes_a_declared_raw_format_as_wav():
+    """encoding=pcm_f32le: the recogniser gets WAV, not bytes to guess about."""
+    c = _client(speech=True)
+    r = c.post("/v1/asr?sample_rate=16000&language=en&encoding=pcm_f32le", content=b"\x00\x00\x00\x00" * 16)
+    assert r.status_code == 200
+    assert c.app.state.speech.transcribe.call_args.args[0][:4] == b"RIFF"
+    assert c.post("/v1/asr?sample_rate=16000&encoding=mulaw", content=_AUDIO).status_code == 400
+
+
     c = _client(speech=True)
     r = c.post("/v1/tts", json={"text": "the vat rate is eighteen percent"})
     assert r.status_code == 200

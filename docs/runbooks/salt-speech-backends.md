@@ -577,9 +577,12 @@ that starts `FF Ex` passes for an MPEG frame sync, and a quiet sample of −1 is
 `FF FF`. On the language-id set 7% of real clips start that way. libsndfile used
 to "decode" MP3 garbage out of such speech. The sniffer now calls it MP3 only
 with an ID3 tag, or with a second frame header exactly one frame after the first
-(`_looks_like_mp3`, G93). Raw PCM is also read as float32 only when every value
-is finite and audible (int16 read as float32 comes out below 1e-7). Sending a
-header is still the rule: the receptionist's STT, live partials, the language
+(`_looks_like_mp3`, G93). A headerless body that could be float32 or int16 is
+read the way that sounds like audio: speech changes little from one sample to
+the next, and bytes read in the wrong format come out as noise (`_roughness`).
+Amplitude is not the test, since float32 speech can have long near-silent
+stretches. A caller that knows its raw format names it (`/v1/asr?encoding=
+pcm_s16le|pcm_f32le`) and is not guessed. Sending a header is still the rule: the receptionist's STT, live partials, the language
 sentinel and the officer leg wrap raw PCM with `speech_service.pcm16_to_wav`, and
 the chat uploads WAV (`pcm16ToWav` in `voiceService.ts`). `identify_language`
 itself reads raw PCM16 directly.
