@@ -319,24 +319,31 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\bokuva ora\b", re.IGNORECASE), "okuva URA"),
     # NIN (National Identification Number) acoustic variants & mishears
     (re.compile(r"\b(?:nnamba\s+ya\s+nin|namba\s+ya\s+nin)\b", re.IGNORECASE), "NIN number"),
-    (re.compile(r"\b(?:neen|niini|n-i-n)\b", re.IGNORECASE), "NIN"),
+    (re.compile(r"\b(?:neen|niini|n-i-n|n\.i\.n\.)\b", re.IGNORECASE), "NIN"),
     # PRN (Payment Registration Number) acoustic variants
     (re.compile(r"\b(?:nnamba\s+ya\s+prn|namba\s+ya\s+prn)\b", re.IGNORECASE), "PRN number"),
-    (re.compile(r"\b(?:peera|pier\s*en|pi\s*ar\s*en|p-r-n)\b", re.IGNORECASE), "PRN"),
-    # EFRIS acoustic variants
-    (re.compile(r"\b(?:e-fris|efrisi|efurisi)\b", re.IGNORECASE), "EFRIS"),
+    (re.compile(r"\b(?:peera|pier\s*en|pi\s*ar\s*en|p-r-n|p\.r\.n\.)\b", re.IGNORECASE), "PRN"),
+    # EFRIS acoustic variants & telephony mishears (e-freeze, effris, afris, etc.)
+    (re.compile(r"\b(?:e-?freeze|efreeze|e\s+freeze|effris|efrisi|efurisi|afris|e-fris|e\s+fris)\b", re.IGNORECASE), "EFRIS"),
     # WHT acoustic variants
-    (re.compile(r"\b(?:w-h-t|dabulyu\s*ech\s*ti)\b", re.IGNORECASE), "WHT"),
+    (re.compile(r"\b(?:w-h-t|w\.h\.t\.|dabulyu\s*ech\s*ti)\b", re.IGNORECASE), "WHT"),
     # English & telephony number mishears: "ten number" / "10 number" -> "TIN number"
-    (re.compile(r"\b(?:ten\s+number|10\s+number)\b", re.IGNORECASE), "TIN number"),
+    (re.compile(r"\b(?:ten\s+number|10\s+number|teen\s+number)\b", re.IGNORECASE), "TIN number"),
     (re.compile(r"\bteam\s+yange\b", re.IGNORECASE), "TIN yange"),
     # VAT acoustic variants
-    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|vatt|vaat|baati)\b", re.IGNORECASE), "VAT"),
+    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|baati|bbaati)\b", re.IGNORECASE), "VAT"),
     # PAYE acoustic variants
     # Not "payee": that is an English word ("who is the payee on a PRN?").
-    (re.compile(r"\b(?:peeyi|p-a-y-e)\b", re.IGNORECASE), "PAYE"),
+    (re.compile(r"\b(?:peeyi|p-a-y-e|p\.a\.y\.e\.)\b", re.IGNORECASE), "PAYE"),
     # TCC (Tax Clearance Certificate)
-    (re.compile(r"\b(?:t-c-c|ti\s*si\s*si)\b", re.IGNORECASE), "TCC"),
+    (re.compile(r"\b(?:tc\s+certificate|t-c\s+certificate|t\.c\.\s+certificate)\b", re.IGNORECASE), "TCC certificate"),
+    (re.compile(r"\b(?:t-c-c|t\.c\.c\.|ti\s*si\s*si)\b", re.IGNORECASE), "TCC"),
+    # DTS (Digital Tax Stamps)
+    (re.compile(r"\b(?:d-t-s|d\.t\.s\.|di\s*ti\s*es)\b", re.IGNORECASE), "DTS"),
+    # ASYCUDA
+    (re.compile(r"\b(?:asikuda|asi\s*kuda|asi\s*cuda)\b", re.IGNORECASE), "ASYCUDA"),
+    # URA acoustic variants
+    (re.compile(r"\b(?:you\s+are\s+a|u-r-a|u\.r\.a\.)\b", re.IGNORECASE), "URA"),
     # Luganda "layisensi" is any licence (trading, driving, …); the words
     # around it say which, so it becomes "licence", not one kind of it.
     (re.compile(r"\blayisensi\b", re.IGNORECASE), "licence"),

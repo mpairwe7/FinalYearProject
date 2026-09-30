@@ -495,18 +495,21 @@ SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
 # Luganda or Kiswahili clip posted to /v1/asr without ?language= was biased
 # toward English tax prose. No detected language gets the neutral line.
 _SALT_PROMPT_EN = (
-    "URA, EFRIS, VAT, TIN, PAYE, PRN, customs duty, withholding tax, "
-    "presumptive tax, taxpayer, Uganda Revenue Authority."
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, customs duty, "
+    "withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
 )
 _SALT_PROMPT_LG = (
-    "URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, "
-    "forodha, okwewandiisa, Uganda Revenue Authority."
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, omusolo, "
+    "omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
 )
 _SALT_PROMPT_SW = (
-    "URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, "
-    "risiti, usajili, Mamlaka ya Mapato ya Uganda."
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, kodi, ushuru, "
+    "forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
 )
-_SALT_PROMPT_NEUTRAL = "URA, EFRIS, VAT, TIN, PAYE, PRN, Uganda Revenue Authority."
+_SALT_PROMPT_NEUTRAL = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, "
+    "Uganda Revenue Authority."
+)
 
 
 def salt_domain_prompt(language: str | None) -> str:

@@ -105,10 +105,28 @@ def test_step_pacing():
 def test_tax_acronym_expansion():
     raw = "Register on EFRIS with URA for PAYE and WHT compliance."
     res = clean_text_for_speech(raw, locale="en")
-    assert "E-F-R-I-S" in res
+    assert "Efris" in res
     assert "U-R-A" in res
     assert "P-A-Y-E" in res
     assert "Withholding Tax" in res
+
+
+def test_ura_specific_terms_and_dotted_acronyms():
+    raw = "Provide your N.I.N. and T.I.N. for V.A.T. and TCC clearance under ASYCUDA and e-Tax on E-F-R-I-S."
+    res = clean_text_for_speech(raw, locale="en")
+    assert "N-I-N" in res
+    assert "T-I-N" in res
+    assert "V-A-T" in res
+    assert "T-C-C" in res
+    assert "Asycuda" in res
+    assert "E-Tax" in res
+    assert "Efris" in res
+
+
+def test_ugandan_nin_digit_expansion():
+    raw = "Your National ID NIN is CM89012345ABCD."
+    res = clean_text_for_speech(raw, locale="en")
+    assert "N-I-N C M 8 9 0 1 2 3 4 5 A B C D" in res
 
 
 def test_legal_section_expansion():
