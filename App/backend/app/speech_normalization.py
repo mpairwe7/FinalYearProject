@@ -74,7 +74,7 @@ _GENERAL_TOLLFREE_RE = re.compile(r"\b0800\s*(\d{3})\s*(\d{3})\b")
 _NUMBERED_STEP_RE = re.compile(r"^\s*(\d+)\.\s+", re.MULTILINE)
 
 # Currency amounts
-_UGX_RE = re.compile(r"\bUGX\s*(\d+(?:,\d{3})*(?:\.\d+)?)\b", re.IGNORECASE)
+_UGX_RE = re.compile(r"\bUGX\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\b", re.IGNORECASE)
 _USD_RE = re.compile(r"\bUSD\s*(\d+(?:,\d{3})*(?:\.\d+)?)\b", re.IGNORECASE)
 
 # Percentages
@@ -107,23 +107,24 @@ _FY_ASIDE_RE = re.compile(r"[ \t]?\([ \t]?FY[ \t]?(\d{4})[ \t]?[-\u2013/][ \t]?(
 _FY_RE = re.compile(r"\bFY\s?(\d{4})\s?[-\u2013/]\s?(\d{2,4})\b", re.IGNORECASE)
 # "2026-27" with no "FY": a year range only when the second year follows the
 # first within ten years, so an ISO date ("2026-09-30") is not one.
-_YEAR_RANGE_RE = re.compile(r"(?<![\d-])((?:19|20)\d{2})[-\u2013/](\d{2}|(?:19|20)\d{2})(?![\d-])")
+_YEAR_RANGE_RE = re.compile(r"(?<![0-9-])((?:19|20)[0-9]{2})[-\u2013/]([0-9]{2}|(?:19|20)[0-9]{2})(?![0-9-])")
 _ALIAS_ASIDE_RE = re.compile(r"\(([^()/]{1,60}(?:/[^()/]{1,60})+)\)")
 # "Withholding Tax (WHT)" once the acronym is expanded: a name said twice.
 _ECHO_ASIDE_RE = re.compile(r"[ \t]?\(([^()]{2,60})\)")
 
 # A range, "UGX 335,000 – UGX 410,000", read as a pause without its "to".
-_RANGE_RE = re.compile(r"(\d[\d,.]{0,24}[ \t]?%?)[ \t]+[\u2013\u2014-][ \t]+(?=(?:UGX|USD)?[ \t]?\d)")
+_RANGE_RE = re.compile(r"([0-9][0-9,.]{0,24}[ \t]?%?)[ \t]+[\u2013\u2014-][ \t]+(?=(?:UGX|USD)?[ \t]?[0-9])")
 _RANGE_WORD = {"en": "to", "lg": "okutuuka ku", "sw": "hadi"}
 
 # Percentages, keeping a word the text already has: "ku bitundu 18%" is not
 # "ku bitundu ebitundu 18 ku buli kikumi", nor "asilimia 18%" "asilimia asilimia".
-_LG_PCT_RE = re.compile(r"\b(e?bitundu[ \t]+)?(\d+(?:\.\d+)?)[ \t]?%(?:[ \t]+ku[ \t]+buli[ \t]+kikumi\b)?", re.IGNORECASE)
-_SW_PCT_RE = re.compile(r"\b(?:asilimia[ \t]+)?(\d+(?:\.\d+)?)[ \t]?%", re.IGNORECASE)
+_LG_PCT_RE = re.compile(r"\b(e?bitundu[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+ku[ \t]+buli[ \t]+kikumi\b)?", re.IGNORECASE)
+_SW_PCT_RE = re.compile(r"\b(?:asilimia[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%", re.IGNORECASE)
 
 # A number standing on its own: not part of a word (118A, 30th), a date, a
-# time, a decimal or a range written without spaces.
-_BARE_NUMBER_RE = re.compile(r"(?<![\w.])(?<!\d[,/:-])(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?!\w)(?![,/:.-]\d)")
+# time, a decimal or a range written without spaces. ASCII digits only here
+# and in the figure patterns: `\d` also matches other scripts' digits.
+_BARE_NUMBER_RE = re.compile(r"(?<![\w.])(?<![0-9][,/:-])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(\.[0-9]+)?(?!\w)(?![,/:.-][0-9])")
 
 # Acronyms and institutional terms in Ugandan tax context
 _ACRONYMS = [
