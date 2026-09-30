@@ -1260,6 +1260,24 @@ def _log_stream_conversation(
 # Audio in/out uses raw bytes to avoid the base64 tax on the fast path.
 # JSON responses carry a base64-encoded audio payload so the same route
 # can be consumed from a simple JavaScript fetch().
+def _declared_raw_pcm(request: Request, audio_bytes: bytes, sample_rate: int) -> bytes:
+    """The body as WAV when the caller named its raw sample format (`encoding`), else as sent.
+
+    Without it a headerless body's format is inferred from the bytes
+    (``SpeechModel._pcm_bytes_to_float``); a caller that knows its format
+    should say so rather than rely on the guess.
+    """
+    encoding = request.query_params.get("encoding")
+    if not encoding:
+        return audio_bytes
+    from .speech_service import raw_pcm_to_wav
+
+    try:
+        return raw_pcm_to_wav(audio_bytes, encoding, sample_rate)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+
 @app.post("/v1/asr", response_model=TranscribeResponse, tags=["speech"])
 @limiter.limit(_RATE_LIMIT)
 async def transcribe_audio(
@@ -1267,10 +1285,12 @@ async def transcribe_audio(
     speech: SpeechModel = Depends(get_speech_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> TranscribeResponse:
-    """Transcribe raw PCM audio posted as the request body.
+    """Transcribe audio posted as the request body.
 
-    Pass ``sample_rate`` and optional ``language`` as query parameters. The
-    request body must be raw PCM (int16 little-endian or float32, 1 channel).
+    WAV is preferred; WebM/Ogg Opus and MP3 are read too. Raw mono PCM
+    should name its format with ``encoding`` (``pcm_s16le`` or ``pcm_f32le``),
+    at ``sample_rate``; without it the format is inferred. ``language`` and
+    ``domain=tax`` (repair TIN/URA mishears) are optional query parameters.
     """
     sample_rate_raw = request.query_params.get("sample_rate", "16000")
     try:
@@ -1294,6 +1314,7 @@ async def transcribe_audio(
     if len(audio_bytes) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
     _require_voice_processing_consent(request, ctx)
+    audio_bytes = _declared_raw_pcm(request, audio_bytes, sample_rate)
 
     # Audio format auto-detected: WAV, WebM/Opus, OGG, MP3, or raw PCM.
     # Content-Type header is advisory; the decoder sniffs the magic bytes.
@@ -1310,8 +1331,16 @@ async def transcribe_audio(
         metrics.observe("speech_asr_latency_s", result.latency_s)
     if result.error:
         metrics.inc("speech_asr_errors_total")
+    text = result.text
+    # The chat composer's dictation (domain=tax) gets the same repair of
+    # Whisper's TIN/URA mishears as the voice chat and the call: "namba ya
+    # timu kutoka Ura" becomes "namba ya TIN kutoka Ura".
+    if text and request.query_params.get("domain") == "tax":
+        from .receptionist.lexicon import repair_asr_entities
+
+        text = repair_asr_entities(text)
     return TranscribeResponse(
-        text=result.text,
+        text=text,
         language=result.language,
         duration_s=result.duration_s,
         latency_s=result.latency_s,
@@ -1788,6 +1817,7 @@ async def voice_chat(
     if len(audio_bytes) > 16 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
     _require_voice_processing_consent(request, ctx)
+    audio_bytes = _declared_raw_pcm(request, audio_bytes, sample_rate)
 
     # Collect per-stage errors so they surface in the response
     stage_errors: list[str] = []

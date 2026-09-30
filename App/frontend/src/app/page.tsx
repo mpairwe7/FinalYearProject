@@ -665,14 +665,27 @@ export default function Page() {
       recognitionRef.current.abort();
       recognitionRef.current = null;
     }
+    // A recording made for the previous language is dropped. Luganda and
+    // Swahili dictation record, and switching to English would otherwise
+    // leave the mic open under a browser recogniser that the next tap goes to.
+    const recording = recorderRef.current;
+    if (recording?.isRecording) {
+      recorderRef.current = null;
+      recording.cancel();
+      setIsRecording(false);
+      setSpeechState('idle');
+    }
     const win = typeof window !== 'undefined' ? window as Window & { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition } : null;
-    const Impl = win && (win.SpeechRecognition || win.webkitSpeechRecognition);
+    // Luganda and Swahili are dictated by the local SALT model (the recorder
+    // path below), never the browser engine: see LocaleOption.dictation.
+    const option = LOCALE_OPTIONS.find((l) => l.value === locale);
+    const Impl = option?.dictation === 'browser' && win ? win.SpeechRecognition || win.webkitSpeechRecognition : undefined;
     if (!Impl) {
       if (!hasMediaRecorder) setSpeechState('unavailable');
       return;
     }
     const recog: SpeechRecognition = new Impl();
-    recog.lang = LOCALE_OPTIONS.find((l) => l.value === locale)?.speechLang ?? 'en-US';
+    recog.lang = option?.speechLang ?? 'en-US';
     recog.continuous = true;
     recog.interimResults = true;
     recog.onstart = () => {
@@ -1440,7 +1453,7 @@ export default function Page() {
         if (pcm16.byteLength === 0) return;
         setSpeechState('processing');
         try {
-          const r = await transcribe(pcm16, locale);
+          const r = await transcribe(pcm16, locale, undefined, { domain: 'tax' });
           // Append rather than replace: dictation is a way to fill the
           // composer, and someone who typed half a question then tapped the
           // mic means to finish it, not to lose it. Read from the store, not

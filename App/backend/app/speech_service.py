@@ -176,6 +176,84 @@ def _mp3_metadata(data: bytes) -> tuple[int, float] | None:
     return None
 
 
+def _mpeg_frame_length(header: bytes) -> int | None:
+    """Byte length of the MPEG Layer III frame that *header* (4 bytes) opens, or None."""
+    if len(header) < 4 or header[0] != 0xFF or (header[1] & 0xE0) != 0xE0:
+        return None
+    version = (header[1] >> 3) & 0x03  # 3=MPEG1, 2=MPEG2, 0=MPEG2.5, 1=reserved
+    layer = (header[1] >> 1) & 0x03  # 1=Layer III
+    br_idx = (header[2] >> 4) & 0x0F
+    sr_idx = (header[2] >> 2) & 0x03
+    if version == 1 or layer != 1 or br_idx in (0, 15) or sr_idx == 3:
+        return None
+    table = _MPEG_BITRATES_V1_L3 if version == 3 else _MPEG_BITRATES_V2_L3
+    bitrate = table[br_idx] * 1000
+    rate = _MPEG_RATES[version][sr_idx]
+    padding = (header[2] >> 1) & 0x01
+    return (144 if version == 3 else 72) * bitrate // rate + padding
+
+
+def _roughness(samples: Any) -> float:
+    """Energy of the sample-to-sample change over the signal's energy.
+
+    Speech sits well below 1: it changes little between samples. White
+    noise is about 2, and so are bytes decoded in the wrong format.
+    """
+    import numpy as np
+
+    x = np.asarray(samples, dtype=np.float64)
+    energy = float(np.dot(x, x))
+    if energy <= 0.0:
+        return float("inf")
+    step = np.diff(x)
+    return float(np.dot(step, step)) / energy
+
+
+#: Raw sample formats a caller can name instead of leaving them to be guessed.
+RAW_PCM_ENCODINGS = ("pcm_s16le", "pcm_f32le")
+
+
+def raw_pcm_to_wav(data: bytes, encoding: str, sample_rate: int) -> bytes:
+    """Raw mono PCM in a named *encoding*, as 16-bit WAV, so nothing is guessed.
+
+    ``pcm_s16le`` is 16-bit little-endian, ``pcm_f32le`` 32-bit float in
+    [-1, 1]. The declaration is trusted: nothing is sniffed, except that a
+    body that is plainly a WAV, Ogg or WebM file is returned as it came.
+    Raises ``ValueError`` for an unknown encoding or a body that is not a
+    whole number of samples.
+    """
+    import numpy as np
+
+    if encoding not in RAW_PCM_ENCODINGS:
+        raise ValueError(f"encoding must be one of {', '.join(RAW_PCM_ENCODINGS)}")
+    if (data[:4] == b"RIFF" and data[8:12] == b"WAVE") or data[:4] in (b"OggS", b"\x1a\x45\xdf\xa3"):
+        return data
+    width = 2 if encoding == "pcm_s16le" else 4
+    if len(data) % width:
+        raise ValueError(f"{encoding} audio must be a whole number of {width}-byte samples")
+    if encoding == "pcm_f32le":
+        floats = np.frombuffer(data, dtype="<f4")
+        data = (np.clip(np.nan_to_num(floats), -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    return pcm16_to_wav(data, sample_rate)
+
+
+def _looks_like_mp3(data: bytes) -> bool:
+    """An ID3 tag, or two MPEG Layer III frame headers exactly one frame apart.
+
+    A frame-sync pair alone is not enough: raw 16-bit PCM whose first sample
+    is -1 starts FF FF, which passes it. libsndfile then "decoded" the
+    speech as MP3 noise, and Whisper heard "e e e e…" for a Luganda
+    question on the chat's voice path. A real stream has its next header one
+    frame later; PCM almost never does.
+    """
+    if data[:3] == b"ID3":
+        return True
+    length = _mpeg_frame_length(data[:4])
+    if not length or len(data) < length + 2:
+        return False
+    return data[length] == 0xFF and (data[length + 1] & 0xE0) == 0xE0
+
+
 def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
     """(sample_rate, num_samples, duration_s) read from *data*'s own header.
 
@@ -199,7 +277,7 @@ def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
                 rate = w.getframerate()
                 frames = w.getnframes()
             return rate, frames, round(frames / rate, 3) if rate else 0.0
-        if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        if _looks_like_mp3(data):
             mp3 = _mp3_metadata(data)
             if mp3:
                 rate, duration = mp3
@@ -2218,8 +2296,8 @@ class SpeechModel:
         if audio_bytes[:4] in (b"\x1a\x45\xdf\xa3", b"OggS"):
             return self._decode_container(audio_bytes, target_sr)
 
-        # --- MP3 detection (ID3 header or sync word 0xFFE0+) ---
-        if audio_bytes[:3] == b"ID3" or (audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0):
+        # --- MP3: an ID3 tag, or two consecutive frame headers (see _looks_like_mp3) ---
+        if _looks_like_mp3(audio_bytes):
             return self._decode_container(audio_bytes, target_sr)
 
         # --- Fallback: assume raw PCM ---
@@ -2331,17 +2409,27 @@ class SpeechModel:
         """Decode raw PCM bytes into a float32 numpy array in [-1, 1]."""
         import numpy as np
 
-        # Assume 16-bit little-endian PCM unless bytes count suggests float32.
+        # 16-bit little-endian PCM unless the bytes also read as float32 audio
+        # and that reading is the one that sounds like audio. Speech changes
+        # smoothly from sample to sample; bytes read in the wrong format come
+        # out as noise (roughness near 2). Amplitude decides nothing: float32
+        # speech can have long quiet stretches, and quiet int16 with a DC
+        # offset reads as tiny floats. A caller that knows its format says so
+        # with /v1/asr's `encoding` (raw_pcm_to_wav) and is never guessed.
+        as_int16 = np.frombuffer(audio_bytes[: len(audio_bytes) // 2 * 2], dtype=np.int16).astype("float32") / 32768.0
         if len(audio_bytes) % 4 == 0:
-            # Try float32; fall back to int16 if values look wildly scaled.
             try:
-                arr = np.frombuffer(audio_bytes, dtype=np.float32)
-                if arr.size and -1.5 <= float(arr.max()) <= 1.5:
-                    return arr.copy()
+                as_float = np.frombuffer(audio_bytes, dtype=np.float32)
+                if (
+                    as_float.size
+                    and np.isfinite(as_float).all()
+                    and float(np.abs(as_float).max()) <= 1.5
+                    and _roughness(as_float) <= _roughness(as_int16)
+                ):
+                    return as_float.copy()
             except Exception:
                 pass
-        arr = np.frombuffer(audio_bytes, dtype=np.int16).astype("float32") / 32768.0
-        return arr
+        return as_int16
 
     @staticmethod
     def _resample(audio, orig_sr: int, target_sr: int):

@@ -10,9 +10,11 @@
  *
  * So these assert the outgoing contract per locale rather than any transcript:
  *   - narration POSTs /v1/tts with that locale and the voice chosen for it
- *   - dictation POSTs /v1/asr with that locale
+ *   - dictation in Luganda and Swahili POSTs /v1/asr with that locale and
+ *     domain=tax, even where the browser has a Speech API (G94)
+ *   - English dictation configures the browser recognizer with en-US, and
+ *     falls back to /v1/asr where there is no Speech API
  *   - the voice round-trip carries the locale and voice as query params
- *   - the recognizer is configured with that locale's BCP-47 speechLang
  *   - the UI names the language, so the control says what it will do
  *
  * A scripted SpeechRecognition stands in for the engine: no browser recognises
@@ -24,7 +26,7 @@
  * /voice.*\.spec\.ts$/ because those need Chromium's fake capture device, and
  * all but one of these do not. Gecko is the only engine available in some
  * environments, and a language regression should not be invisible there.
- * The one test that does capture audio is chromium-gated on browserName.
+ * The tests that capture audio are chromium-gated on browserName.
  */
 import { expect, test, type Page } from "@playwright/test";
 
@@ -32,9 +34,9 @@ import { clearChatStore, mockBackend, openSettings, seedConsent, sendMessage } f
 
 /** Mirrors src/lib/locales.ts — kept here so a silent edit there fails a test. */
 const LOCALES = [
-  { value: "en", label: "English", native: "English", speechLang: "en-US" },
-  { value: "lg", label: "Luganda", native: "Oluganda", speechLang: "lg-UG" },
-  { value: "sw", label: "Swahili", native: "Kiswahili", speechLang: "sw-KE" },
+  { value: "en", label: "English", native: "English", speechLang: "en-US", dictation: "browser" },
+  { value: "lg", label: "Luganda", native: "Oluganda", speechLang: "lg-UG", dictation: "server" },
+  { value: "sw", label: "Swahili", native: "Kiswahili", speechLang: "sw-KE", dictation: "server" },
 ] as const;
 
 /** The catalogue shape /v1/speech/voices returns, trimmed to two per locale. */
@@ -154,8 +156,9 @@ test.describe("Every configured language, through the UI", () => {
     });
 
     // Named for what it asserts: this is the browser-Speech-API path, which
-    // transcribes in-process and never calls /v1/asr. The server path is
-    // covered once below, and per-language by scripts/probe_deploy.py.
+    // transcribes in-process and never calls /v1/asr. Only English uses it;
+    // Luganda and Swahili are dictated by the local model (tested below).
+    if (locale.dictation !== "browser") continue;
     test(`${locale.label}: the recognizer is asked for ${locale.speechLang}`, async ({ page }) => {
       await mockBackend(page);
       await mockVoiceCatalogue(page);
@@ -249,11 +252,52 @@ test.describe("Voice round-trip carries the language", () => {
     "the voice round-trip needs the Chromium fake capture device",
   );
 
-  test("server-side dictation POSTs /v1/asr with the chosen language", async ({ page }) => {
+  /** Record a short dictation through the composer and return the /v1/asr request URLs. */
+  async function dictate(page: Page, language: string, transcript: string): Promise<URL[]> {
+    const urls: URL[] = [];
+    await page.route("**/api/v1/asr**", async (route) => {
+      urls.push(new URL(route.request().url()));
+      await route.fulfill({
+        json: { text: transcript, language, duration_s: 0.05,
+                latency_s: 0.1, rtf: 2.0, backend: "stub", error: null },
+      });
+    });
+    await page.locator('[data-testid="composer-mic"]').click();
+    const stop = page.locator('[data-testid="composer-rec-confirm"]');
+    await expect(stop).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(1200);
+    await stop.click();
+    await expect.poll(() => urls.length, { timeout: 20_000 }).toBeGreaterThan(0);
+    return urls;
+  }
+
+  for (const locale of LOCALES.filter((l) => l.dictation === "server")) {
+    test(`${locale.label}: dictation uses the local model, not the browser engine`, async ({ page }) => {
+      test.slow();
+      await seedConsent(page);
+      await clearChatStore(page);
+      await mockBackend(page);
+      await mockVoiceCatalogue(page);
+      // The browser has a Speech API here, and it must not be used: in Chrome
+      // it sends the audio to Google, and it has no Luganda (G94).
+      await scriptedRecognizer(page, "sample utterance");
+
+      await page.goto("/");
+      await chooseLanguage(page, locale.label);
+      const [url] = await dictate(page, locale.value, "sample utterance");
+
+      expect(url.searchParams.get("language")).toBe(locale.value);
+      expect(url.searchParams.get("domain")).toBe("tax");
+      expect(await page.evaluate(() => (window as unknown as Record<string, unknown>).__recogLang)).toBeUndefined();
+      await expect(page.locator("#composer-input")).toHaveValue(/sample utterance/);
+    });
+  }
+
+  test("English dictation falls back to /v1/asr where there is no Speech API", async ({ page }) => {
     test.slow();
     await seedConsent(page);
     await clearChatStore(page);
-    await mockBackend(page, { transcript: "emisolo gy'eggwanga" });
+    await mockBackend(page);
     await mockVoiceCatalogue(page);
     // No Speech API → the recording + /v1/asr fallback. defineProperty, not
     // delete: Chromium defines webkitSpeechRecognition on the Window prototype.
@@ -263,26 +307,13 @@ test.describe("Voice round-trip carries the language", () => {
       }
     });
 
-    const urls: string[] = [];
-    await page.route("**/api/v1/asr**", async (route) => {
-      urls.push(route.request().url());
-      await route.fulfill({
-        json: { text: "emisolo gy'eggwanga", language: "lg", duration_s: 0.05,
-                latency_s: 0.1, rtf: 2.0, backend: "stub", error: null },
-      });
-    });
-
     await page.goto("/");
-    await chooseLanguage(page, "Luganda");
-    await page.locator('[data-testid="composer-mic"]').click();
-    const stop = page.locator('[data-testid="composer-rec-confirm"]');
-    await expect(stop).toBeVisible({ timeout: 10_000 });
-    await page.waitForTimeout(1200);
-    await stop.click();
+    await chooseLanguage(page, "English");
+    const [url] = await dictate(page, "en", "what is the vat rate");
 
-    await expect.poll(() => urls.length, { timeout: 20_000 }).toBeGreaterThan(0);
-    expect(urls[0]).toContain("language=lg");
-    await expect(page.locator("#composer-input")).toHaveValue(/emisolo/);
+    expect(url.searchParams.get("language")).toBe("en");
+    expect(url.searchParams.get("domain")).toBe("tax");
+    await expect(page.locator("#composer-input")).toHaveValue(/vat rate/);
   });
 
   test("voice mode POSTs /v1/voice/chat with the chosen language", async ({ page }) => {
