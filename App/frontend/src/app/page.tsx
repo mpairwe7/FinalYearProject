@@ -665,6 +665,16 @@ export default function Page() {
       recognitionRef.current.abort();
       recognitionRef.current = null;
     }
+    // A recording made for the previous language is dropped. Luganda and
+    // Swahili dictation record, and switching to English would otherwise
+    // leave the mic open under a browser recogniser that the next tap goes to.
+    const recording = recorderRef.current;
+    if (recording?.isRecording) {
+      recorderRef.current = null;
+      recording.cancel();
+      setIsRecording(false);
+      setSpeechState('idle');
+    }
     const win = typeof window !== 'undefined' ? window as Window & { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition } : null;
     // Luganda and Swahili are dictated by the local SALT model (the recorder
     // path below), never the browser engine: see LocaleOption.dictation.
