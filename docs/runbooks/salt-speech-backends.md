@@ -613,6 +613,51 @@ that needs Luganda listeners (`evals/orpheus_tts/listening_sheet.csv`).
 A connection failure puts the client in a 30 s cooldown, so a dead sidecar costs
 one timeout rather than one per sentence.
 
+## Figures in Luganda and Swahili speech (G98)
+
+Orpheus reads English digits well and Luganda and Swahili digits badly. A
+round trip through Whisper-SALT heard "ebitundu 18 ku buli kikumi" as
+"ebitundu e tini", "shilingi obukadde 10" as "kiringi obukadde" (the ten was
+dropped), and "asilimia 18" as "asilimia aching". Written as words, the same
+figures came back intact. So `clean_text_for_speech` now gives Luganda and
+Swahili figures as words (`app/number_words.py`):
+
+| Figure | Luganda | Swahili |
+|---|---|---|
+| 18% | ebitundu kkumi na munaana ku buli kikumi | asilimia kumi na nane |
+| 2% | ebitundu bibiri ku buli kikumi | asilimia mbili |
+| UGX 10,000,000 | shilingi obukadde kkumi | shilingi milioni kumi za Uganda |
+| UGX 335,000 | shilingi three hundred and thirty-five thousand | shilingi elfu mia tatu thelathini na tano za Uganda |
+| FY2026-27 | twenty twenty-six okutuuka ku twenty twenty-seven | elfu mbili ishirini na sita hadi elfu mbili ishirini na saba |
+
+* Swahili says every number in the standard forms.
+* Luganda says 0–100 and round millions in Luganda, with the units agreeing
+  with *ebitundu* and *obukadde* (bibiri, bubiri). Larger amounts and years
+  are said in English words, as Luganda speakers commonly say money. The
+  large Luganda numbers are not guessed: Sunflower-14B confirmed the small
+  ones and got the large ones wrong. The agreement forms need a native
+  speaker's review, like the rest of the Luganda text.
+* A figure the text already names is not named twice ("ku bitundu 18%", not
+  "ku bitundu ebitundu…"). The translated digit anchor "(eza 18%)" is not read,
+  a band's dash is read as "to" / "okutuuka ku" / "hadi", and "Withholding Tax
+  (WHT)" is not said as "Withholding Tax (Withholding Tax)".
+* Left as they are: TINs, PRNs and the toll-free number read digit by digit
+  (G84), numbers with a leading zero (phone numbers), times, dates, and form
+  names ("D-T 2027"). A section number is read in English ("Section fifteen").
+
+Measured on the GPU stack, 2026-09-30, by voicing each figure and
+transcribing it back (`scripts/bench_spoken_figures.py`,
+`evals/reports/spoken_figures_before_after_2026-09-30.json`):
+
+| Figures heard back | before | after |
+|---|---|---|
+| Luganda percentages | 1/9 | 8/9 |
+| Luganda amounts | 3/7 | 7/7 |
+| Swahili percentages | 6/9 | 9/9 |
+| Swahili amounts | 4/7 | 7/7 |
+
+The one miss is Luganda 10%: "kkumi" came back as "okukomye".
+
 ## Streamed reply speech — the chat's read-aloud (G95)
 
 The chat speaks a reply through `POST /v1/tts/stream` (API reference, "Stream
