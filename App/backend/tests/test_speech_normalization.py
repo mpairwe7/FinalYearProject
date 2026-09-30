@@ -32,19 +32,28 @@ def test_ugx_currency_formatting():
     res_en_k = clean_text_for_speech("Fee of UGX 50,000.", locale="en")
     assert "50 thousand Uganda shillings" in res_en_k
 
-    # Luganda millions
-    res_lg = clean_text_for_speech("Omusolo gwa UGX 5,000,000.", locale="lg")
-    assert "shilingi obukadde 5" in res_lg
-
-    # Swahili millions
-    res_sw = clean_text_for_speech("Kodi ya UGX 10,000,000.", locale="sw")
-    assert "shilingi milioni 10 za Uganda" in res_sw
+    # Luganda and Swahili amounts in words: Orpheus dropped the "10" of
+    # "obukadde 10" and read "milioni 10" as "milioni ten".
+    assert "shilingi obukadde butaano" in clean_text_for_speech("Omusolo gwa UGX 5,000,000.", locale="lg")
+    assert "shilingi akakadde kamu" in clean_text_for_speech("Omusolo gwa UGX 1,000,000.", locale="lg")
+    assert "shilingi milioni kumi za Uganda" in clean_text_for_speech("Kodi ya UGX 10,000,000.", locale="sw")
+    # Beyond Luganda's round millions, English words, as money is commonly said
+    res_lg = clean_text_for_speech("Omusaala gwa UGX 335,000.", locale="lg")
+    assert "shilingi three hundred and thirty-five thousand" in res_lg
 
 
 def test_percentage_formatting():
     assert clean_text_for_speech("The rate is 18%.", locale="en") == "The rate is 18 percent."
-    assert "ebitundu 18 ku buli kikumi" in clean_text_for_speech("Omusolo gwa 18%.", locale="lg")
-    assert "asilimia 18" in clean_text_for_speech("Kodi ya 18%.", locale="sw")
+    assert "ebitundu kkumi na munaana ku buli kikumi" in clean_text_for_speech("Omusolo gwa 18%.", locale="lg")
+    assert "asilimia kumi na nane" in clean_text_for_speech("Kodi ya 18%.", locale="sw")
+
+
+def test_a_percent_the_text_already_names_is_not_named_twice():
+    # "ku bitundu 18%" was "ku bitundu ebitundu 18 ku buli kikumi"
+    assert clean_text_for_speech("Guwoozebwa ku bitundu 18% ku buli kikumi.", locale="lg") == (
+        "Guwoozebwa ku bitundu kkumi na munaana ku buli kikumi."
+    )
+    assert clean_text_for_speech("Ni asilimia 18%.", locale="sw") == "Ni asilimia kumi na nane."
 
 
 def test_tin_digit_expansion():
@@ -90,7 +99,7 @@ def test_step_pacing():
 
     raw_lg = "1. Genda ku mukutu.\n2. Sasula omusolo."
     res_lg = clean_text_for_speech(raw_lg, locale="lg")
-    assert "Odaala 1: Genda ku mukutu." in res_lg
+    assert "Odaala emu: Genda ku mukutu." in res_lg
 
 
 def test_tax_acronym_expansion():
@@ -135,8 +144,8 @@ def test_the_calculator_s_asides_are_spoken_once_and_plainly():
         "That comes from the official U-R-A 2026 to 2027 rate table."
     )
     assert clean_text_for_speech(raw, locale="lg") == (
-        "The standard rate of Value Added Tax (V-A-T) is ebitundu 18 ku buli kikumi. "
-        "That comes from the official U-R-A 2026-27 rate table."
+        "The standard rate of Value Added Tax (V-A-T) is ebitundu kkumi na munaana ku buli kikumi. "
+        "That comes from the official U-R-A twenty twenty-six okutuuka ku twenty twenty-seven rate table."
     )
 
 
@@ -181,6 +190,100 @@ def test_the_aside_rules_run_in_linear_time():
         _FY_ASIDE_RE.sub("", text)
         _REPEATED_FIGURE_RE.sub(r"\1", text)
         assert time.perf_counter() - start < 0.2
+
+
+def test_the_luganda_answer_s_figures_are_said_once_and_in_words():
+    # The live Luganda VAT answer: the translated anchor "(eza 18%)" was read
+    # aloud, "ebitundu" doubled, and Orpheus said "18" as "e tini".
+    raw = (
+        "Omusolo ogw'omuwendo ogwongerwako (VAT / omusolo gwa VAT / ushuru wa VAT) guli ebitundu 18% (eza 18%) "
+        "(FY2026-27). Guwoozebwa ku bitundu 18% ku bintu."
+    )
+    assert clean_text_for_speech(raw, locale="lg") == (
+        "Omusolo ogw'omuwendo ogwongerwako (V-A-T) guli ebitundu kkumi na munaana ku buli kikumi. "
+        "Guwoozebwa ku bitundu kkumi na munaana ku buli kikumi ku bintu."
+    )
+
+
+@pytest.mark.parametrize(
+    ("locale", "spoken"),
+    [
+        ("en", "335,000 Uganda shillings to 410,000 Uganda shillings: 20 percent"),
+        ("lg", "shilingi three hundred and thirty-five thousand okutuuka ku shilingi four hundred and ten thousand: "
+               "ebitundu amakumi abiri ku buli kikumi"),
+        ("sw", "shilingi elfu mia tatu thelathini na tano za Uganda hadi shilingi elfu mia nne na kumi za Uganda: "
+               "asilimia ishirini"),
+    ],
+)
+def test_a_band_is_read_from_one_amount_to_the_other(locale, spoken):
+    # The PAYE table's dash was read as a pause: "…335,000 Uganda shillings – 410,000…"
+    assert clean_text_for_speech("UGX 335,000 – UGX 410,000: **20%**", locale=locale) == spoken
+
+
+def test_an_expanded_name_is_not_said_twice():
+    raw = "Heads include Withholding Tax (**WHT**) and Value Added Tax (**VAT**)."
+    assert clean_text_for_speech(raw, locale="en") == "Heads include Withholding Tax and Value Added Tax (V-A-T)."
+
+
+@pytest.mark.parametrize(
+    ("raw", "spoken"),
+    [
+        ("Ennaku 30 okuva leero.", "Ennaku amakumi asatu okuva leero."),
+        ("Mu mwaka 2026-27.", "Mu mwaka twenty twenty-six okutuuka ku twenty twenty-seven."),
+        ("Ekiwandiiko DT-2027.", "Ekiwandiiko D-T 2027."),
+        ("Section 15 y'etteeka.", "Section fifteen y'etteeka."),
+    ],
+)
+def test_luganda_numbers_in_running_text(raw, spoken):
+    assert clean_text_for_speech(raw, locale="lg") == spoken
+
+
+@pytest.mark.parametrize(
+    ("raw", "spoken"),
+    [
+        ("Siku 30 kuanzia leo.", "Siku thelathini kuanzia leo."),
+        ("Mwaka wa fedha 2026-27.", "Mwaka wa fedha elfu mbili ishirini na sita hadi elfu mbili ishirini na saba."),
+        ("Kiwango ni 2.5%.", "Kiwango ni asilimia mbili nukta tano."),
+    ],
+)
+def test_swahili_numbers_in_running_text(raw, spoken):
+    assert clean_text_for_speech(raw, locale="sw") == spoken
+
+
+@pytest.mark.parametrize("locale", ["lg", "sw"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "TIN 1000123456",  # read digit by digit, as before
+        "Piga 0772 123 456.",  # a phone number: its leading zero matters
+        "Saa 08:30 asubuhi.",  # a time
+        "Tarehe 30/06/2026.",  # a date
+        "Tarehe 2026-09-30.",  # an ISO date is not a year range
+    ],
+)
+def test_digit_strings_that_are_not_amounts_are_left_alone(locale, raw):
+    spoken = clean_text_for_speech(raw, locale=locale)
+    digits = [d for d in raw if d.isdigit()]
+    assert [d for d in spoken if d.isdigit()] == digits
+
+
+def test_the_number_rules_run_in_linear_time():
+    import time
+
+    from app.speech_normalization import (
+        _BARE_NUMBER_RE,
+        _ECHO_ASIDE_RE,
+        _LG_PCT_RE,
+        _RANGE_RE,
+        _REPEATED_FIGURE_RE,
+        _YEAR_RANGE_RE,
+    )
+
+    for text in ("1" * 20000 + " -", "1," * 10000, "(" + "a" * 20000, "bitundu " * 3000 + "1", "2026-" * 5000):
+        start = time.perf_counter()
+        for rule in (_BARE_NUMBER_RE, _ECHO_ASIDE_RE, _LG_PCT_RE, _RANGE_RE, _REPEATED_FIGURE_RE, _YEAR_RANGE_RE):
+            rule.sub("", text)
+        assert time.perf_counter() - start < 0.5
 
 
 def test_a_fiscal_year_rolls_over_the_century():
