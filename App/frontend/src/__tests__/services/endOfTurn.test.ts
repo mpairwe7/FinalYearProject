@@ -57,6 +57,14 @@ describe('EndOfTurnDetector', () => {
     expect(events[1].at).toBeGreaterThanOrEqual(1000 + 1200 + 900 + 1200 + 1200 - FRAME_MS);
   });
 
+  it('does not end a long, even turn while the speaker is still talking', () => {
+    // 8 s of steady voice with no dips fills the floor's 4 s window. Were the
+    // floor still learning, it would rise to the voice and end the turn early.
+    const { events } = run([[1000, ROOM], [8000, -45], [3000, ROOM]]);
+    expect(events.map((e) => e.event)).toEqual(['speech', 'end']);
+    expect(events[1].at).toBeGreaterThanOrEqual(1000 + 8000 + 1200 - FRAME_MS);
+  });
+
   it('does not start a turn on a click or a cough', () => {
     const { events } = run([[1000, ROOM], [150, -20], [2000, ROOM]]);
     expect(events).toEqual([]);

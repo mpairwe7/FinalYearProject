@@ -8,7 +8,8 @@
  *
  * Speech is sound well above the room's own level. The floor is the quiet end
  * of the last few seconds, so it follows the room: a fan or a busy street does
- * not count as talking. A turn starts after `minSpeechMs` of speech, so a
+ * not count as talking. Once a turn starts the floor holds still, so a long,
+ * even voice is never taken for the room. A turn starts after `minSpeechMs` of speech, so a
  * click or a cough does not start one. This is a level detector, not a speech
  * model: a loud noise that lasts can still pass for speech. Tapping to send
  * works as before.
@@ -79,6 +80,8 @@ export class EndOfTurnDetector {
   private soundRunMs = 0;
   private heard = false;
   private speaking = false;
+  /** The room's level when the turn started: speech must not become its own floor. */
+  private speechFloor = SILENT_DBFS;
   private finished = false;
 
   constructor(opts: EndOfTurnOptions) {
@@ -104,7 +107,11 @@ export class EndOfTurnDetector {
     const frameMs = Math.min(MAX_FRAME_MS, now - (this.lastAt ?? now));
     this.lastAt = now;
     const level = Math.max(SILENT_DBFS, db);
-    const onset = Math.max(this.floor(now, level) + ONSET_DB, MIN_SPEECH_DBFS);
+    // While someone speaks the floor holds still. Were it to go on learning, a
+    // steady voice that fills the whole window would become the floor, fall
+    // below the hold level, and the turn would end mid-sentence.
+    const floor = this.speaking ? this.speechFloor : this.floor(now, level);
+    const onset = Math.max(floor + ONSET_DB, MIN_SPEECH_DBFS);
     const sounding = level >= onset - HOLD_DB;
 
     if (now - this.startedAt >= this.maxTurnMs) return this.finish('too-long');
@@ -130,6 +137,7 @@ export class EndOfTurnDetector {
     }
     if (this.burstStart !== null && this.burstMs >= this.minSpeechMs) {
       this.speaking = true;
+      this.speechFloor = floor;
       return 'speech';
     }
     // Only a room where nothing was heard is closed: clicks and beeps do not

@@ -1604,6 +1604,17 @@ export default function Page() {
     };
   }, [handleCancelRecording, handleMicClick, t, voiceMode, silenceTimeout, isRecording]);
 
+  // Leaving the page stops playback. That must not read as a reply that
+  // ended: listen-again would then open the mic with no page to show it.
+  useEffect(
+    () => () => {
+      listenRequestRef.current += 1;
+      listenAgainRef.current = () => {};
+      onTurnEventRef.current = () => {};
+    },
+    [],
+  );
+
   const handleStarterPrompt = useCallback((prompt: string) => {
     trackStarterPromptUsed(prompt);
     sendMessage(prompt);
