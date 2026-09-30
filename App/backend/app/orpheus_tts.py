@@ -45,6 +45,15 @@ class OrpheusUnavailable(RuntimeError):
     """The sidecar is not configured, not reachable, or refused the request."""
 
 
+class OrpheusIncomplete(RuntimeError):
+    """A stream stopped after its first audio: the caller heard only part of it.
+
+    Deliberately not an :class:`OrpheusUnavailable`: that one sends a sentence
+    to the next voice, which would repeat the part already heard. The caller
+    keeps what it has but must not cache it as the whole sentence.
+    """
+
+
 def _url() -> str:
     return os.getenv("ORPHEUS_TTS_URL", "").strip().rstrip("/")
 
@@ -238,11 +247,12 @@ async def stream(text: str, language: str) -> AsyncIterator[bytes]:
     """24 kHz PCM16 chunks as the sidecar decodes them.
 
     Raises :class:`OrpheusUnavailable` before the first chunk if the sidecar
-    cannot be used; a failure after audio has started ends the stream early
-    (the caller has already heard part of the sentence — falling back to a
-    different voice mid-sentence would be worse). Longer text is voiced as
-    :func:`split_for_voice` pieces, one after another: each streams faster
-    than it plays, so the next piece is ready before the last one ends.
+    cannot be used. A failure after audio has started raises
+    :class:`OrpheusIncomplete` instead: the caller has already heard part of
+    the sentence, and falling back to a different voice mid-sentence would be
+    worse. Longer text is voiced as :func:`split_for_voice` pieces, one after
+    another: each streams faster than it plays, so the next piece is ready
+    before the last one ends.
     """
     import httpx
 
@@ -255,7 +265,7 @@ async def stream(text: str, language: str) -> AsyncIterator[bytes]:
                     if resp.status_code != 200:
                         if started:
                             logger.warning("Orpheus refused the rest of an utterance: HTTP %d", resp.status_code)
-                            return
+                            raise OrpheusIncomplete(f"HTTP {resp.status_code}")
                         raise OrpheusUnavailable(f"HTTP {resp.status_code}")
                     carry = b""
                     async for chunk in resp.aiter_bytes():
@@ -272,3 +282,4 @@ async def stream(text: str, language: str) -> AsyncIterator[bytes]:
             _mark_down(exc)
             raise OrpheusUnavailable(str(exc)) from exc
         logger.warning("Orpheus stream broke mid-utterance: %s", exc)
+        raise OrpheusIncomplete(str(exc)) from exc

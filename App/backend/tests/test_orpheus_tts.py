@@ -176,6 +176,25 @@ class StreamClient(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(len(seen), 1)
         self.assertEqual(b"".join(chunks), b"".join(b"\x01\x00" * n for n in range(1, len(seen) + 1)))
 
+    async def test_a_later_piece_refused_ends_the_stream_as_incomplete(self):
+        text = "Okwewandiisa ku TIN, genda ku mukutu gwa URA, londa eServices, jjuzaamu ebikwata ku ggwe, " * 3
+        real_client = httpx.AsyncClient
+        answered = []
+
+        def reply(req):
+            answered.append(req)
+            return httpx.Response(200 if len(answered) == 1 else 503, content=b"\x01\x00" * 4)
+
+        chunks: list[bytes] = []
+        with patch.dict(os.environ, ON), patch(
+            "httpx.AsyncClient", side_effect=lambda timeout: real_client(transport=httpx.MockTransport(reply), timeout=timeout)
+        ):
+            with self.assertRaises(orpheus_tts.OrpheusIncomplete):
+                async for chunk in orpheus_tts.stream(text, "lg"):
+                    chunks.append(chunk)
+        self.assertEqual(b"".join(chunks), b"\x01\x00" * 4)  # the first piece was still played
+        self.assertFalse(orpheus_tts.in_cooldown())  # the sidecar answered; it is not down
+
     async def test_unreachable_before_audio_raises(self):
         real_client = httpx.AsyncClient
 
@@ -333,6 +352,20 @@ class ReceptionistTTS(unittest.IsolatedAsyncioTestCase):
         speech.synthesize.assert_not_called()
         speech.tts_cache_put.assert_called_once()
         self.assertEqual(speech.tts_cache_put.call_args.args[3].backend, "orpheus_salt")
+
+    async def test_a_sentence_cut_short_is_played_but_not_cached(self):
+        speech = MagicMock()
+        speech.tts_cache_get.return_value = None
+
+        async def cut_short(text, language):
+            yield b"\x00\x10" * 2400
+            raise orpheus_tts.OrpheusIncomplete("HTTP 503")
+
+        with patch.dict(os.environ, ON), patch.object(orpheus_tts, "stream", cut_short):
+            frames = [f async for f in self.tts(speech).run_tts("Lindako katono.", "ctx")]
+        self.assertTrue(frames)  # the part already streamed is played
+        speech.synthesize.assert_not_called()  # and not repeated by another voice
+        speech.tts_cache_put.assert_not_called()
 
     async def test_a_cached_line_is_not_streamed_again(self):
         speech = MagicMock()

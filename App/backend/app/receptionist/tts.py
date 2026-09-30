@@ -195,13 +195,20 @@ class UraSpeechTTS(TTSService):
         self, text: str, language: str, context_id: str, t0: float
     ) -> AsyncGenerator[Frame, None]:
         pieces: list[bytes] = []
+        complete = True
 
         async def source() -> AsyncIterator[bytes]:
-            async for pcm in orpheus_tts.stream(text, language):
-                if not pieces:
-                    self.last_first_chunk_ms = round((time.perf_counter() - t0) * 1000, 1)
-                pieces.append(pcm)
-                yield pcm
+            nonlocal complete
+            try:
+                async for pcm in orpheus_tts.stream(text, language):
+                    if not pieces:
+                        self.last_first_chunk_ms = round((time.perf_counter() - t0) * 1000, 1)
+                    pieces.append(pcm)
+                    yield pcm
+            except orpheus_tts.OrpheusIncomplete:
+                # The caller keeps what they heard; the cache must not keep it
+                # as the whole sentence.
+                complete = False
 
         self.last_backend = "orpheus_salt"
         async for frame in self._stream_audio_frames_from_iterator(
@@ -210,7 +217,7 @@ class UraSpeechTTS(TTSService):
             yield frame
 
         cache_put = getattr(self.speech_model, "tts_cache_put", None)
-        if pieces and callable(cache_put):
+        if complete and pieces and callable(cache_put):
             self._remember(cache_put, text, language, b"".join(pieces))
 
     def _remember(self, cache_put: Any, text: str, language: str, pcm: bytes) -> None:
