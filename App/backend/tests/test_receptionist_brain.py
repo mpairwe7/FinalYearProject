@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -16,7 +17,13 @@ from app.receptionist.serializer import (
     RequestOfficerFrame,
 )
 from app.receptionist.state import CallRoom, CallState
-from app.receptionist.store import init_receptionist_schema, list_turns
+from app.receptionist.store import (
+    create_call,
+    get_call,
+    init_receptionist_schema,
+    list_turns,
+    update_call,
+)
 
 
 class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
@@ -84,6 +91,8 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
             self.assertNotEqual(self.room.state.mode, "transferring")
             turns = list_turns(self.call_id)
             self.assertTrue(any("0800 117 000" in t["text"] for t in turns))
+            # On screen: the local voice cannot read a phone number out.
+            self.assertFalse(any("0800" in v for v in self._voiced()))
 
     async def test_interruption_drops_late_generation(self):
         # Caller asks question
@@ -136,6 +145,233 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
             language="en",
         )
 
+    async def test_a_request_for_a_person_is_heard_however_it_is_put(self):
+        from app.receptionist.brain import is_human_request
+
+        for text in (
+            "Yes, connect me to an officer.",
+            "Put me through to someone, please.",
+            "Can I speak with an agent?",
+            "Transfer me to a person.",
+            "Get me a human.",
+            # The one-word zero-out the greeting invites, in any call language.
+            "Officer.",
+            "An agent, please.",
+            "Yes, a real person.",
+            "Customer care!",
+            "Omukozi, nsaba.",
+            "Afisa tafadhali",
+        ):
+            self.assertTrue(is_human_request(text), text)
+        for text in (
+            "I talked to my accountant about PAYE.",
+            "What is the penalty for filing late?",
+            "How do I transfer my TIN to a new business?",
+            "What does a tax officer do?",
+            "Is the customs agent responsible for the duty?",
+        ):
+            self.assertFalse(is_human_request(text), text)
+
+    def _offer_officer(self):
+        """An answer the AI is unsure of ends with the officer offer."""
+        self.chat_model.generate.return_value = {**self.chat_model.generate.return_value, "confidence": 0.4}
+        return patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue")
+
+    async def test_yes_to_the_officer_offer_transfers_the_call(self):
+        from app.receptionist.phrases import phrase
+
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            self.assertTrue(list_turns(self.call_id)[-1]["text"].endswith(phrase("officer_offer", "en")))
+            await self.brain.process_frame(LLMContextFrame(context="Yes, please."))
+        self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "offer_accepted"))
+        self.assertEqual(self.chat_model.generate.call_count, 1)  # "Yes, please." is not a new question
+
+    async def test_no_to_the_officer_offer_keeps_the_ai_on_the_call(self):
+        from app.receptionist.phrases import phrase
+
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            await self.brain.process_frame(LLMContextFrame(context="No, thank you."))
+        self.assertEqual(self.state.mode, "ai")
+        self.assertEqual(self.state.pending_offer, "")
+        self.assertEqual(list_turns(self.call_id)[-1]["text"], phrase("offer_declined", "en"))
+        self.assertEqual(self.chat_model.generate.call_count, 1)
+
+    async def test_a_question_after_the_offer_is_answered_and_the_offer_lapses(self):
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            self.chat_model.generate.return_value = {**self.chat_model.generate.return_value, "confidence": 0.9}
+            await self.brain.process_frame(LLMContextFrame(context="Yes, and what is the VAT rate?"))
+            self.assertEqual(self.state.pending_offer, "")
+            await self.brain.process_frame(LLMContextFrame(context="Yes."))
+        self.assertEqual(self.state.mode, "ai")  # the offer lapsed: "Yes." is not an acceptance now
+        self.assertEqual(self.chat_model.generate.call_count, 3)
+
+    async def test_an_at_risk_call_is_offered_an_officer_once(self):
+        from app.receptionist.phrases import phrase
+
+        create_call(self.call_id, conversation_id=self.state.conversation_id)
+        update_call(self.call_id, risk_json=json.dumps({"level": "at_risk", "signals": ["distress"]}))
+        offer = phrase("officer_offer", "en")
+        await self.brain.process_frame(LLMContextFrame(context="I'm so stressed. How do I register for a TIN?"))
+        self.assertTrue(list_turns(self.call_id)[-1]["text"].endswith(offer))
+        self.assertEqual(self.state.pending_offer, "officer")
+        await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        self.assertFalse(list_turns(self.call_id)[-1]["text"].endswith(offer))
+        self.assertEqual(self.state.mode, "ai")
+
+    def _long_answer(self, **extra):
+        """An answer longer than RECEPTIONIST_MAX_SPOKEN_SENTENCES (3)."""
+        reply = " ".join(f"Step {n} of the return is done online." for n in ("one", "two", "three", "four", "five"))
+        self.chat_model.generate.return_value = {**self.chat_model.generate.return_value, "reply": reply, **extra}
+
+    def _voiced(self) -> list[str]:
+        return [
+            getattr(c.args[0], "text", "")
+            for c in self.brain.push_frame.call_args_list
+            if c.args[0].__class__.__name__ == "LLMTextFrame"
+        ]
+
+    async def test_an_officer_offer_is_the_only_question_a_long_answer_ends_on(self):
+        from app.receptionist.phrases import phrase
+
+        self._long_answer(confidence=0.4)
+        with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+            await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        spoken = list_turns(self.call_id)[-1]["text"]
+        self.assertTrue(spoken.endswith(phrase("officer_offer", "en")))
+        self.assertNotIn(phrase("more_detail", "en"), spoken)  # "yes" can only mean one thing
+        self.assertEqual(self.state.pending_offer, "officer")
+
+    async def test_yes_to_more_detail_reads_the_rest_of_the_answer(self):
+        from app.receptionist.phrases import phrase
+
+        self._long_answer()
+        await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        self.assertTrue(list_turns(self.call_id)[-1]["text"].endswith(phrase("more_detail", "en")))
+        self.assertEqual(self.state.pending_offer, "more")
+        await self.brain.process_frame(LLMContextFrame(context="Yes, please."))
+        rest = list_turns(self.call_id)[-1]["text"]
+        self.assertIn("Step four", rest)
+        self.assertIn("Step five", rest)
+        self.assertNotIn("Step one", rest)
+        self.assertEqual(self.chat_model.generate.call_count, 1)  # read on, not looked up again
+        self.assertEqual((self.state.mode, self.state.pending_offer), ("ai", ""))
+
+    async def test_tell_me_more_answers_more_detail_but_not_an_officer_offer(self):
+        self._long_answer()
+        await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        await self.brain.process_frame(LLMContextFrame(context="Tell me more."))
+        self.assertIn("Step four", list_turns(self.call_id)[-1]["text"])
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            await self.brain.process_frame(LLMContextFrame(context="Tell me more."))
+        self.assertEqual(self.state.mode, "ai")  # a new question, not a transfer
+        self.assertEqual(self.chat_model.generate.call_count, 3)
+
+    async def test_no_to_more_detail_ends_the_answer(self):
+        from app.receptionist.phrases import phrase
+
+        self._long_answer()
+        await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        await self.brain.process_frame(LLMContextFrame(context="No, that's all."))
+        self.assertEqual(list_turns(self.call_id)[-1]["text"], phrase("offer_declined", "en"))
+        self.assertEqual(self.state.pending_offer, "")
+
+    async def test_a_repeated_answer_asks_its_question_again(self):
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            for _ in range(2):
+                await self.brain.process_frame(LLMContextFrame(context="Could you repeat that please?"))
+            self.assertEqual(list_turns(self.call_id)[-1]["text"].count("let me repeat"), 1)
+            self.assertEqual(self.state.pending_offer, "officer")
+            await self.brain.process_frame(LLMContextFrame(context="Yes."))
+        self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "offer_accepted"))
+
+    async def test_okay_said_over_an_answer_does_not_take_the_caller_to_an_officer(self):
+        from app.receptionist.phrases import phrase
+
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            await self.brain.process_frame(InterruptionFrame())  # talked over it, before the question
+            await self.brain.process_frame(LLMContextFrame(context="Okay."))
+            self.assertEqual(self.state.mode, "ai")
+            self.assertEqual(list_turns(self.call_id)[-1]["text"], phrase("officer_offer", "en"))  # asked again
+            await self.brain.process_frame(LLMContextFrame(context="Yes."))
+        self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "offer_accepted"))
+        self.assertEqual(self.chat_model.generate.call_count, 1)
+
+    async def test_are_you_still_there_replaces_an_unanswered_offer(self):
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            await self.brain.on_caller_idle()
+            await self.brain.process_frame(LLMContextFrame(context="Yes."))  # "yes, I'm here"
+        self.assertEqual(self.state.mode, "ai")
+
+    async def test_a_caller_in_crisis_hears_where_to_get_help_and_is_offered_a_person(self):
+        from app.receptionist.phrases import phrase
+
+        create_call(self.call_id, conversation_id=self.state.conversation_id)
+        with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+            await self.brain.process_frame(
+                LLMContextFrame(context="I can't pay these taxes, I just want to end my life.")
+            )
+            spoken, screen = list_turns(self.call_id)[-2:]
+            self.assertEqual(
+                spoken["text"], f"{phrase('crisis_support', 'en')} {phrase('crisis_offer', 'en')}"
+            )
+            self.assertEqual(screen["text"], phrase("crisis_screen", "en"))
+            self.assertNotIn(screen["text"], self._voiced())  # the numbers are shown, not read
+            self.chat_model.generate.assert_not_called()  # never a tax answer
+            self.assertEqual(self.state.mode, "ai")  # a person is offered, not imposed
+            await self.brain.process_frame(LLMContextFrame(context="Yes, please."))
+        self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "safety_concern"))
+        self.assertEqual(get_call(self.call_id)["priority"], "urgent")
+
+    async def test_a_caller_in_crisis_who_asks_for_a_person_is_put_through_at_once(self):
+        from app.receptionist.phrases import phrase
+
+        create_call(self.call_id, conversation_id=self.state.conversation_id)
+        with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+            await self.brain.process_frame(
+                LLMContextFrame(context="I want to kill myself. Let me talk to an officer.")
+            )
+        self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "safety_concern"))
+        self.assertEqual(get_call(self.call_id)["priority"], "urgent")
+        self.assertIn(phrase("crisis_support", "en"), [t["text"] for t in list_turns(self.call_id)])
+
+    async def test_no_to_an_officer_after_the_crisis_lines_leaves_them_the_numbers(self):
+        from app.receptionist.phrases import phrase
+
+        await self.brain.process_frame(LLMContextFrame(context="I want to end it all."))
+        await self.brain.process_frame(LLMContextFrame(context="No, thank you."))
+        self.assertEqual(list_turns(self.call_id)[-1]["text"], phrase("crisis_declined", "en"))
+        self.assertEqual((self.state.mode, self.state.pending_offer), ("ai", ""))
+
+    async def test_a_transfer_settles_the_question_the_ai_last_asked(self):
+        self._long_answer()
+        await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        self.assertEqual(self.state.pending_offer, "more")
+        with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: name == "ticket_queue"):
+            await self.brain.process_frame(RequestOfficerFrame())  # the Talk to an officer button
+        self.assertEqual((self.state.mode, self.state.pending_offer), ("transferring", ""))
+
+    async def test_a_crisis_is_never_taken_for_a_goodbye(self):
+        await self.brain.process_frame(LLMContextFrame(context="I want to end it all. Goodbye."))
+        self.assertEqual((self.state.mode, self.state.pending_offer), ("ai", "officer"))
+
+    async def test_the_chat_pipelines_own_crisis_check_is_honoured(self):
+        from app.receptionist.phrases import phrase
+
+        # A Luganda turn is only read for a crisis once it is in English.
+        self.chat_model.generate.return_value = {
+            "reply": "I'm really sorry you're feeling this way.", "sources": [], "retrieval_mode": "crisis_support",
+        }
+        await self.brain.process_frame(LLMContextFrame(context="Ekibuuzo kyange ku musolo"))
+        self.assertEqual(list_turns(self.call_id)[-1]["text"], phrase("crisis_screen", "en"))
+        self.assertEqual(self.state.pending_offer, "officer")
+
 
 class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
     """The brain speaks the call's current language and hears officer requests in any."""
@@ -166,6 +402,24 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
         self.state.locale = "sw"
         await self.brain.process_frame(LLMContextFrame(context="Ninawezaje kupata TIN?"))
         self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "sw")
+
+    async def test_a_crisis_found_only_in_english_gets_the_luganda_crisis_lines(self):
+        from app.receptionist.phrases import phrase
+
+        # "Njagala kufa" is not one of the crisis verbs; the chat finds it in the English query.
+        self.chat_model.generate.return_value = {
+            "reply": "I'm really sorry you're feeling this way.", "sources": [], "retrieval_mode": "crisis_support",
+        }
+        with (
+            patch.object(self.brain, "_extract_english_tax_query", return_value="I want to die"),
+            patch.object(self.brain, "_synthesize_luganda_reply") as synthesize,
+        ):
+            await self.brain.process_frame(LLMContextFrame(context="Njagala kufa, omusolo gunnemye"))
+        texts = [t["text"] for t in list_turns(self.call_id)]
+        self.assertIn(f"{phrase('crisis_support', 'lg')} {phrase('crisis_offer', 'lg')}", texts)
+        self.assertEqual(texts[-1], phrase("crisis_screen", "lg"))
+        synthesize.assert_not_called()  # never a Luganda paraphrase of the chat's reply
+        self.assertEqual(self.state.pending_offer, "officer")
 
     async def test_luganda_answers_use_cross_lingual_knowledge_bridge(self):
         await self.brain.process_frame(LLMContextFrame(context="Nnyinza ntya okufuna TIN?"))

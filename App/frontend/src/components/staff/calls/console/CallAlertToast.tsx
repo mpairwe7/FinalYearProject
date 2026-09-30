@@ -9,10 +9,16 @@ import { WaitRing } from './WaitRing';
 /** Why the AI handed the caller over, in an officer's words. */
 export function transferReasonLabel(reason: string): string {
   if (!reason) return 'Asked for an officer';
-  if (/caller_requested|human|officer|person/i.test(reason)) return 'Asked for a person';
+  // Before the pattern below, which "officer_takeover" would also match.
   if (reason === 'officer_takeover') return 'Taken over from the AI';
+  if (reason === 'offer_accepted') return 'Said yes when the AI offered an officer';
+  if (reason === 'safety_concern') return 'Safety concern: crisis lines given';
+  if (/caller_requested|human|officer|person/i.test(reason)) return 'Asked for a person';
   if (reason === 'clarification_failed') return 'The AI could not understand them';
-  if (reason === 'timeout' || reason === 'system_error') return 'The AI could not answer';
+  if (reason === 'no_knowledge_match' || reason === 'timeout' || reason === 'system_error') {
+    return 'The AI could not answer';
+  }
+  if (reason === 'tax_dispute') return 'A tax dispute';
   return reason.replace(/_/g, ' ');
 }
 

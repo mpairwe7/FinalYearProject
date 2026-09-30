@@ -33,6 +33,15 @@ DEFAULT_TOPIC = "general_tax_support"
 PRIORITIES = ("low", "normal", "high", "urgent")
 
 
+def case_reference(ticket_id: str) -> str:
+    """The reference a taxpayer is given for *ticket_id*: ``TIC-`` and its first 8 characters.
+
+    The chat's support cases show the same form (``lib/ticketUi.ticketRef``),
+    and the staff ticket search finds a ticket by it.
+    """
+    return f"TIC-{ticket_id[:8].upper()}"
+
+
 def _topic_and_priority(packet: dict[str, Any] | None) -> tuple[str, str]:
     """The call's topic and priority, from the handoff packet when there is one."""
     packet = packet if isinstance(packet, dict) else {}
@@ -50,8 +59,13 @@ def open_transfer(
     handoff: dict[str, Any] | None = None,
     question: str | None = None,
     target_team: str = "",
+    priority: str = "",
 ) -> tuple[str, dict[str, Any]]:
     """Create (or reuse) the ticket and move the call to ``transferring``.
+
+    *priority*, when given, overrides the handoff packet's priority, for a
+    caller who needs a person sooner than their topic suggests (a safety
+    concern is urgent whatever it is about).
 
     Returns ``(ticket_id, status_event)``; the caller sends the status event
     to the caller's socket through its own pipeline.
@@ -68,6 +82,8 @@ def open_transfer(
             if isinstance(built, dict):
                 # Officers see "Luganda caller" before they pick the call up.
                 packet = {**built, "language": state.locale}
+                if priority in PRIORITIES:
+                    packet["priority"] = priority
             tid = chat_model._maybe_create_ticket(
                 reason=reason,
                 user_query=last_q,
@@ -83,7 +99,9 @@ def open_transfer(
         except Exception:
             logger.exception("Failed creating ticket during transfer for call %s", room.call_id)
 
-    topic, priority = _topic_and_priority(packet)
+    topic, packet_priority = _topic_and_priority(packet)
+    # A reused ticket has no packet to carry the override.
+    priority = priority if priority in PRIORITIES else packet_priority
     waiting_since = time.time()
     state.mode = "transferring"
     state.ticket_id = tid or None

@@ -13,6 +13,7 @@ from typing import Any, Final
 from .. import database as db
 from ..flags import flags
 from ..speech_normalization import clean_text_for_speech
+from ..text_signals import detect_crisis
 from .clarify import ClarifyGate, ClarifyState
 from .config import (
     KNOWN_LANGUAGES,
@@ -21,6 +22,7 @@ from .config import (
     get_clarify_threshold_for,
     get_default_language,
     get_filler_after_ms,
+    get_hold_update_s,
     get_idle_reprompts,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
@@ -29,8 +31,8 @@ from .config import (
 from .hub import hub
 from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
-from .store import create_turn, update_call
-from .transfer import close_transfer_on_timeout, open_transfer
+from .store import create_turn, get_call, update_call
+from .transfer import case_reference, close_transfer_on_timeout, open_transfer
 
 logger = logging.getLogger(__name__)
 
@@ -77,11 +79,28 @@ except ImportError:
         pass
 
 
+#: A request for a person goes straight to an officer ("zero-out"), however it
+#: is put: "connect me to an officer", "put me through to someone", "speak
+#: with an agent". Article then name, never two optional runs of spaces side
+#: by side, so a long pause in a transcript cannot make it slow.
 _HUMAN_REQUEST_RE = re.compile(
-    r"\b(speak\s+to|talk\s+to|connect\s+to|transfer\s+to|contact|call)\s+(?:a|an|the)?\s*"
-    r"(?:human|person|officer|agent|someone|operator|real person)\b|"
-    r"\b(?:i\s+want|can\s+i|need\s+to)\s+(?:talk\s+to|speak\s+with|see)\s+(?:an?\s+)?officer\b|"
-    r"\btalk\s+to\s+an\s+officer\b",
+    r"\b(?:(?:speak|talk)\s+(?:to|with)|(?:connect|transfer|put)\s+(?:me\s+)?(?:through\s+)?to|get\s+me|contact|call)"
+    r"\s+(?:(?:a|an|the)\s+)?(?:human|person|officer|agent|representative|someone|somebody|operator|real\s+person)\b|"
+    r"\b(?:i\s+want|can\s+i|need\s+to)\s+(?:talk\s+to|speak\s+(?:to|with)|see)\s+(?:an?\s+)?officer\b",
+    re.IGNORECASE,
+)
+
+#: The one-word zero-out: a whole turn that only names a person ("Officer.",
+#: "An agent, please", "Yes, a real person"), the way callers get past any
+#: automated line. The greeting tells them they can. Inside a question the
+#: word is just a word ("What does a tax officer do?"). Luganda omukozi /
+#: omuntu, Swahili afisa / mtu / binadamu / mhudumu.
+_HUMAN_WORD_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:(?:yes|yeah|ok(?:ay)?|please)\W+)?"
+    r"(?:(?:i\s+(?:want|need)|give\s+me|can\s+i\s+(?:have|get))\s+)?(?:(?:a|an|the)\s+)?(?:real\s+)?"
+    r"(?:officer|agent|human|person|representative|operator|customer\s+(?:care|service)"
+    r"|omukozi|omuntu|afisa|mtu|binadamu|mhudumu)"
+    r"(?:\W+(?:please|now|nsaba|tafadhali))*\W*$",
     re.IGNORECASE,
 )
 
@@ -158,10 +177,42 @@ def is_human_request(text: str) -> bool:
     Checked in all of them rather than the call's current one: the request
     that matters most is the one made right after a mis-detected switch.
     """
-    return bool(_HUMAN_REQUEST_RE.search(text)) or any(
+    return bool(_HUMAN_REQUEST_RE.search(text) or _HUMAN_WORD_RE.search(text)) or any(
         p.search(text) for p in _local_human_request_patterns()
     )
 
+
+#: The caller's answer to the yes/no question the AI's last turn ended on
+#: ("Would you like to speak to an officer?", "Would you like more detail?"):
+#: the whole turn, never a word inside a new question ("Yes, and what is the
+#: VAT rate?" is a question). English, Luganda, Swahili.
+_OFFER_ACCEPT_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:yes|yeah|yep|sure|ok(?:ay)?|alright|please|go\s+ahead|connect\s+me|please\s+do"
+    r"|yee|kale|weewaawo|nsaba|ndiyo|ndio|sawa|naam|tafadhali)"
+    r"(?:\W+(?:yes|please|sure|thanks|thank\s+you|go\s+ahead|connect\s+me|do|nsaba|webale|tafadhali|asante))*\W*$",
+    re.IGNORECASE,
+)
+_OFFER_DECLINE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:no|nope|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)|nedda|hapana)"
+    r"(?:\W+(?:thanks|thank\s+you|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)"
+    r"|webale|asante))*\W*$",
+    re.IGNORECASE,
+)
+#: "Tell me more" answers "Would you like more detail?" — and only that: said
+#: to an officer offer it is not a yes. Luganda weeyongere, Swahili endelea / zaidi.
+_MORE_ACCEPT_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:(?:yes|yeah|sure|ok(?:ay)?|please)\W+)?"
+    r"(?:tell\s+me\s+more|go\s+on|carry\s+on|continue|more(?:\s+detail)?|weeyongere|endelea|zaidi)"
+    r"(?:\W+please)?\W*$",
+    re.IGNORECASE,
+)
+
+
+def _offer_question(offer: str, reason: str) -> str:
+    """The phrase key of the question a pending offer asked, to ask it again."""
+    if offer == "more":
+        return "more_detail"
+    return "crisis_offer" if reason == "safety_concern" else "officer_offer"
 
 #: In-call controls are whole requests, not words inside a question: "I said
 #: goodbye to my employer — how do I file PAYE?" must be answered, not hung up.
@@ -316,6 +367,8 @@ class UraReceptionistBrain(LLMService):
             # Caller barged in: invalidate pending LLM generation.
             self.room.state.generation_id += 1
             self.room.state.barge_in_count += 1
+            if self.room.state.pending_offer:
+                self.room.state.offer_interrupted = True
             await self.push_frame(frame, direction)
             return
 
@@ -415,6 +468,40 @@ class UraReceptionistBrain(LLMService):
             return
 
         # Mode is "ai"
+        # 0. A caller who speaks of ending their life hears where to get help
+        # now, in full and before anything else: never a tax answer, never cut
+        # short, never taken for a goodbye.
+        if detect_crisis(user_text):
+            self._take_offer()
+            await self._support_crisis(asked_for_person=is_human_request(user_text))
+            return
+
+        # 0b. The answer to the yes/no question the AI's last turn ended on.
+        # Anything else is a new question, and the offer lapses.
+        unheard = self.room.state.offer_interrupted
+        offer, offer_reason, more = self._take_offer()
+        replied = offer and (
+            _OFFER_DECLINE_RE.search(user_text)
+            or _OFFER_ACCEPT_RE.search(user_text)
+            or (offer == "more" and _MORE_ACCEPT_RE.search(user_text))
+        )
+        if replied and unheard:
+            # Said over the answer, before its question: ask it again rather
+            # than transfer a caller who only said "okay" while listening.
+            self._offer(offer, reason=offer_reason, more=more)
+            await self._say_and_record(phrase(_offer_question(offer, offer_reason), language), kind="notice")
+            return
+        if offer and _OFFER_DECLINE_RE.search(user_text):
+            declined = "crisis_declined" if offer_reason == "safety_concern" else "offer_declined"
+            await self._say_and_record(phrase(declined, language), kind="notice")
+            return
+        if offer == "officer" and _OFFER_ACCEPT_RE.search(user_text):
+            await self._transfer(offer_reason or "offer_accepted")
+            return
+        if offer == "more" and (_OFFER_ACCEPT_RE.search(user_text) or _MORE_ACCEPT_RE.search(user_text)):
+            await self._say_more(more)
+            return
+
         # 1. Explicit Human Request
         if is_human_request(user_text):
             await self._transfer("caller_requested")
@@ -430,6 +517,11 @@ class UraReceptionistBrain(LLMService):
                     "sw": "Sawa, ngoja nirudie: ",
                 }.get(language, "Sure, let me repeat that: ")
                 await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
+                # A repeat is still the last answer (not "Sure, let me repeat
+                # that: Sure, let me repeat that: …" the next time), and it ends
+                # on the same question, which is open again.
+                self.room.state.last_assistant_answer = last_ans
+                self._offer(offer, reason=offer_reason, more=more)
                 return
 
         # 1c. In-Call User Control: Speech Rate Adjustment. The local voices
@@ -622,6 +714,11 @@ class UraReceptionistBrain(LLMService):
             tenant_id=self.room.state.tenant_id,
         )
 
+        # Read for a crisis only now that it is in English: the call's crisis
+        # lines answer it, never a Luganda paraphrase of the chat's.
+        if rag_result.get("retrieval_mode") == "crisis_support":
+            return {**rag_result, "locale": "lg"}
+
         english_reply = (rag_result.get("reply", "") or rag_result.get("text", "")).strip()
         sources = rag_result.get("sources", [])
 
@@ -696,6 +793,9 @@ class UraReceptionistBrain(LLMService):
             return
         state.idle_prompts += 1
         if state.idle_prompts <= get_idle_reprompts():
+            # "Are you still there?" is the question now: a "yes" to it is
+            # not a yes to an officer offer left unanswered.
+            self._take_offer()
             await self._say_and_record(phrase("idle_check", self.language), kind="notice")
             return
         logger.info("Ending call %s: the caller has been silent", self.room.call_id)
@@ -790,6 +890,12 @@ class UraReceptionistBrain(LLMService):
             logger.info("Dropping late generation for call %s after barge-in", self.room.call_id)
             return
 
+        # The chat's own crisis check caught what the call's did not (a
+        # Luganda turn is read for it only once it has been put into English).
+        if result.get("retrieval_mode") == "crisis_support":
+            await self._support_crisis(asked_for_person=False)
+            return
+
         bot_reply = (result.get("reply", "") or result.get("text", "")).strip()
         faithfulness = result.get("faithfulness_score")
         if faithfulness is not None:
@@ -844,22 +950,13 @@ class UraReceptionistBrain(LLMService):
             )
             return
 
-        # 4. Moderate retrieval confidence (0.35–0.50) or soft abstain:
-        # Deliver best statutory answer with confirmation prompt rather than hard transfer.
-        offer_officer = escalation_required or (0.35 <= confidence < 0.50)
-
-        # Trim reply for spoken output
-        sentences = _split_into_sentences(bot_reply)
-        max_sentences = get_max_spoken_sentences()
-        if len(sentences) > max_sentences:
-            spoken_text = " ".join(sentences[:max_sentences]) + " " + phrase("more_detail", self.language)
-        else:
-            spoken_text = bot_reply
-
-        if offer_officer:
-            spoken_text = f"{spoken_text} {phrase('officer_offer', self.language)}"
-
-        spoken_text = clean_text_for_speech(spoken_text, locale=self.language)
+        # 4. Moderate retrieval confidence (0.35–0.50), a soft abstain, or a
+        # call going badly: the best statutory answer, and an officer offered
+        # rather than imposed.
+        offer_officer = escalation_required or (0.35 <= confidence < 0.50) or self._call_at_risk()
+        spoken_text = clean_text_for_speech(
+            self._spoken_answer(bot_reply, offer_officer=offer_officer), locale=self.language
+        )
 
         self.room.state.ai_answers_count += 1
         await self._say_and_record(
@@ -869,6 +966,81 @@ class UraReceptionistBrain(LLMService):
             latencies={"brain_ms": gen_latency_ms},
         )
 
+    def _call_at_risk(self) -> bool:
+        """True once per call, when the risk monitor has marked it ``at_risk``.
+
+        On an AI-first line the assistant offers a person when a call is going
+        badly (distress, a repeated question, clarifications, no answers)
+        rather than waiting for an officer to notice it on the desk: officers
+        only take calls the AI hands over.
+        """
+        if self.room.state.risk_offer_made:
+            return False
+        try:
+            risk = json.loads((get_call(self.room.call_id) or {}).get("risk_json") or "{}")
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(risk, dict) or risk.get("level") != "at_risk":
+            return False
+        self.room.state.risk_offer_made = True
+        return True
+
+    def _spoken_answer(self, reply: str, *, offer_officer: bool) -> str:
+        """*reply* cut for speech, ending on at most one yes/no question.
+
+        One question a turn, so that "yes" can only mean one thing: an officer
+        offer takes the place of "Would you like more detail?". Whichever is
+        asked becomes the pending offer the caller's next turn may answer.
+        """
+        sentences = _split_into_sentences(reply)
+        max_sentences = get_max_spoken_sentences()
+        rest = sentences[max_sentences:]
+        spoken = " ".join(sentences[:max_sentences]) if rest else reply
+        if offer_officer:
+            self._offer("officer", reason="offer_accepted")
+            return f"{spoken} {phrase('officer_offer', self.language)}"
+        if rest:
+            self._offer("more", more=" ".join(rest))
+            return f"{spoken} {phrase('more_detail', self.language)}"
+        return spoken
+
+    async def _say_more(self, rest: str) -> None:
+        """The next part of an answer the caller said yes to hearing more of."""
+        spoken = self._spoken_answer(rest, offer_officer=False)
+        await self._say_and_record(clean_text_for_speech(spoken, locale=self.language), kind="answer")
+
+    def _offer(self, kind: str, *, reason: str = "", more: str = "") -> None:
+        """Record the yes/no question this turn ends on (see ``CallState.pending_offer``)."""
+        state = self.room.state
+        state.pending_offer, state.offer_reason, state.more_detail = kind, reason, more
+        state.offer_interrupted = False
+
+    def _take_offer(self) -> tuple[str, str, str]:
+        """The pending offer as ``(kind, transfer reason, rest of the answer)``, now cleared."""
+        state = self.room.state
+        taken = (state.pending_offer, state.offer_reason, state.more_detail)
+        self._offer("")
+        return taken
+
+    async def _support_crisis(self, *, asked_for_person: bool) -> None:
+        """Where to get help now, spoken in full, with the numbers on screen; then a person.
+
+        The call's version of the chat's ``_crisis_support_result``: no tax
+        content, and an officer offered rather than imposed, unless the
+        caller asked for one, when the transfer goes at once. Either way it
+        goes as ``safety_concern``, at the front of the queue.
+        """
+        language = self.language
+        spoken = phrase("crisis_support", language)
+        if not asked_for_person:
+            spoken = f"{spoken} {phrase('crisis_offer', language)}"
+        await self._say_and_record(spoken, kind="answer")
+        await self._say_and_record(phrase("crisis_screen", language), kind="notice", speak=False)
+        if asked_for_person:
+            await self._transfer("safety_concern")
+        else:
+            self._offer("officer", reason="safety_concern")
+
     async def _say_and_record(
         self,
         text: str,
@@ -876,8 +1048,13 @@ class UraReceptionistBrain(LLMService):
         faithfulness: float | None = None,
         latencies: dict[str, Any] | None = None,
         skip_log: bool = False,
+        speak: bool = True,
     ) -> None:
-        """Output text via Pipecat TTS pipeline, save turn, and send caption."""
+        """Output text via Pipecat TTS pipeline, save turn, and send caption.
+
+        With *speak* false the line is only captioned and recorded: for what
+        the caller needs to keep and the voice reads badly (``phrases.UNSPOKEN``).
+        """
         self.room.state.turn_seq += 1
         turn_seq = self.room.state.turn_seq
         if kind == "answer":
@@ -907,6 +1084,8 @@ class UraReceptionistBrain(LLMService):
             OutputTransportMessageFrame(caption_data), FrameDirection.DOWNSTREAM
         )
         hub.publish_call(self.room.call_id, "caption", caption_data)
+        if not speak:
+            return
 
         # One text frame: the TTS service's aggregator splits it into sentences
         # and voices the first while the rest wait, so nothing is gained by
@@ -923,15 +1102,25 @@ class UraReceptionistBrain(LLMService):
         handoff: dict[str, Any] | None = None,
     ) -> None:
         """Transfer caller to human officer, enforcing ticket_queue invariant."""
+        # Whatever the AI last asked is settled by the transfer: after a
+        # timeout, a "yes" must not answer a question from before it.
+        self._take_offer()
         # 1. Human oversight uses ticket_queue: if disabled, do NOT promise a handoff
         if not flags.is_enabled("ticket_queue"):
             await self._say_and_record(phrase("queue_disabled", self.language), kind="notice")
+            await self._say_and_record(phrase("tollfree_screen", self.language), kind="notice", speak=False)
             update_call(self.room.call_id, transfer_reason=f"{reason}_queue_disabled")
             return
 
-        # 2-3. Ticket, call state, voice_calls row, staff lobby event
+        # 2-3. Ticket, call state, voice_calls row, staff lobby event. A caller
+        # at risk goes to the front of the queue, whatever they called about.
         tid, status_event = open_transfer(
-            self.room, self.chat_model, reason, ticket_id=ticket_id, handoff=handoff
+            self.room,
+            self.chat_model,
+            reason,
+            ticket_id=ticket_id,
+            handoff=handoff,
+            priority="urgent" if reason == "safety_concern" else "",
         )
 
         # 4. Spoken notice & status event to caller
@@ -947,11 +1136,33 @@ class UraReceptionistBrain(LLMService):
         )
 
     async def _transfer_timeout_countdown(self, timeout_s: float, ticket_ref: str) -> None:
-        """Handle officer wait timeout when no officer joins within the window."""
-        await asyncio.sleep(timeout_s)
+        """Keep a waiting caller told; hand the call back when no officer joins in time.
+
+        Every ``RECEPTIONIST_HOLD_UPDATE_S`` a "thank you for holding" line,
+        so silence never reads as a dropped call, except over an officer who
+        has taken the call and is joining. An officer who takes it at the
+        last moment is waited for: their claim connects or lapses within
+        ``RECEPTIONIST_CLAIM_TIMEOUT_S``, and "all our officers are busy" is
+        never said to a caller an officer is about to greet. Then the
+        callback: the reference goes on the caller's screen, short and in the
+        form the chat's support cases use, never read out as a ticket UUID.
+        """
+        state = self.room.state
+        every = get_hold_update_s()
+        waited = 0.0
+        while every and waited + every < timeout_s:
+            await asyncio.sleep(every)
+            waited += every
+            if state.mode == "transferring" and not state.claimed_by and not state.reconnecting_officer:
+                await self._say_and_record(phrase("still_holding", self.language), kind="notice")
+        await asyncio.sleep(timeout_s - waited)
+        while state.mode == "transferring" and state.claimed_by:
+            await asyncio.sleep(0.5)
         status_event = close_transfer_on_timeout(self.room, ticket_ref)
         if status_event is None:
             return
         await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)
-        msg = phrase("officers_busy", self.language, ref=ticket_ref or "URA-CALL")
-        await self._say_and_record(msg, kind="notice")
+        await self._say_and_record(phrase("officers_busy", self.language), kind="notice")
+        if ticket_ref:
+            reference = phrase("reference_screen", self.language, ref=case_reference(ticket_ref))
+            await self._say_and_record(reference, kind="notice", speak=False)

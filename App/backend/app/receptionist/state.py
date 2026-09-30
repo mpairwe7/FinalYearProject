@@ -32,6 +32,20 @@ class CallState:
     last_caller_text: str = ""
     last_assistant_answer: str = ""
     speech_rate_slow: bool = False
+    # The AI's last turn ended on a yes/no question, so the caller's next turn
+    # may be the answer; anything else is a new question and the offer lapses.
+    #   "officer": "Would you like to speak to an officer?" Yes transfers the
+    #              call as ``offer_reason``.
+    #   "more":    "Would you like more detail?" Yes speaks ``more_detail``,
+    #              the rest of an answer cut short for speech.
+    pending_offer: str = ""
+    offer_reason: str = ""
+    more_detail: str = ""
+    # The caller talked over the turn that asked it, so the question at its
+    # end may not have been heard: "okay" then is a backchannel, not a yes.
+    offer_interrupted: bool = False
+    # An at-risk call is offered an officer once.
+    risk_offer_made: bool = False
     clarify: ClarifyState | None = None
     ticket_id: str | None = None
     transfer_reason: str | None = None

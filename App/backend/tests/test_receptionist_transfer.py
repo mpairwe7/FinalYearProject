@@ -6,6 +6,8 @@ and the ``voice_calls`` row, and what a timeout leaves behind.
 
 from __future__ import annotations
 
+import asyncio
+import os
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,7 +25,7 @@ from app.receptionist.store import (
     init_receptionist_schema,
     list_turns,
 )
-from app.receptionist.transfer import close_transfer_on_timeout, open_transfer
+from app.receptionist.transfer import case_reference, close_transfer_on_timeout, open_transfer
 
 #: Everything the lobby may carry about a waiting call — metadata, never content.
 LOBBY_KEYS = {
@@ -109,6 +111,23 @@ class OpenTransferTests(TransferTestCase):
         self.assertEqual(attempts, [(1, ""), (2, "customs")])
         self.assertEqual(get_call(self.call_id)["target_team"], "customs")
 
+    async def test_a_caller_at_risk_goes_to_the_front_of_the_queue(self):
+        open_transfer(self.room, self.chat_model, "safety_concern", priority="urgent")
+        [event] = self.lobby_events("call.transfer_requested")
+        self.assertEqual(event["priority"], "urgent")
+        self.assertEqual(get_call(self.call_id)["priority"], "urgent")
+        self.assertEqual(self.chat_model._maybe_create_ticket.call_args.kwargs["priority"], "urgent")
+
+    async def test_urgent_holds_for_a_call_that_already_has_a_ticket(self):
+        # A ticket reused from an earlier transfer comes without a packet.
+        self.state.ticket_id = "TICK-EARLIER"
+        open_transfer(self.room, self.chat_model, "safety_concern", priority="urgent")
+        self.chat_model._maybe_create_ticket.assert_not_called()
+        self.assertEqual(get_call(self.call_id)["priority"], "urgent")
+
+    def test_the_caller_s_reference_is_the_short_form_the_chat_uses(self):
+        self.assertEqual(case_reference("1458bc4d-2b9f-4ed8-8ffb-18fee33ed5c9"), "TIC-1458BC4D")
+
 
 class TimeoutTests(TransferTestCase):
     def waiting(self) -> None:
@@ -144,7 +163,69 @@ class TimeoutTests(TransferTestCase):
         self.waiting()
         await brain._transfer_timeout_countdown(0, "TICK-XFER-1")
         self.assert_owed_a_callback()
-        self.assertTrue(any("TICK-XFER-1" in t["text"] for t in list_turns(self.call_id)))  # its own line
+        texts = [t["text"] for t in list_turns(self.call_id)]
+        # The reference goes on screen in its short form; the ticket id is never read out.
+        self.assertEqual(texts[-1], f"Your reference: {case_reference('TICK-XFER-1')}")
+        voiced = [getattr(c.args[0], "text", "") for c in brain.push_frame.call_args_list
+                  if c.args[0].__class__.__name__ == "LLMTextFrame"]
+        self.assertFalse(any("TICK-XFER-1" in v or "TIC-" in v for v in voiced))
+
+    async def hold(self, *, timeout_s: str, every_s: str, claimed_by: str = "") -> list[str]:
+        """Wait out a transfer on the brain's timer; returns what the caller was told."""
+        from app.receptionist.brain import UraReceptionistBrain
+
+        brain = UraReceptionistBrain(room=self.room, chat_model=self.chat_model)
+        brain.push_frame = AsyncMock()
+        self.waiting()
+        self.state.claimed_by = claimed_by
+        env = {"RECEPTIONIST_HOLD_UPDATE_S": every_s}
+        with patch.dict(os.environ, env):
+            await brain._transfer_timeout_countdown(float(timeout_s), "TICK-XFER-1")
+        return [t["text"] for t in list_turns(self.call_id)]
+
+    async def test_a_waiting_caller_hears_they_are_still_holding(self):
+        from app.receptionist.phrases import phrase
+
+        texts = await self.hold(timeout_s="0.35", every_s="0.1")
+        # At 0.1, 0.2 and 0.3 s, then the callback at 0.35 s.
+        self.assertEqual(texts.count(phrase("still_holding", "en")), 3)
+        self.assertEqual(texts[-2], phrase("officers_busy", "en"))
+        self.assert_owed_a_callback()
+
+    async def test_no_holding_line_over_an_officer_who_is_joining(self):
+        from app.receptionist.phrases import phrase
+
+        async def claim_lapses() -> None:
+            await asyncio.sleep(0.4)
+            self.state.claimed_by = ""  # their audio never joined
+
+        lapse = asyncio.create_task(claim_lapses())
+        texts = await self.hold(timeout_s="0.25", every_s="0.1", claimed_by="okello")
+        await lapse
+        self.assertNotIn(phrase("still_holding", "en"), texts)
+        self.assertEqual(texts[-2], phrase("officers_busy", "en"))  # told once the claim lapsed
+
+    async def test_a_caller_an_officer_is_about_to_greet_is_not_told_they_are_all_busy(self):
+        from app.receptionist.brain import UraReceptionistBrain
+        from app.receptionist.phrases import phrase
+
+        brain = UraReceptionistBrain(room=self.room, chat_model=self.chat_model)
+        brain.push_frame = AsyncMock()
+        self.waiting()
+        self.state.claimed_by = "okello"  # took the call just before the timeout
+        countdown = asyncio.create_task(brain._transfer_timeout_countdown(0.05, "TICK-XFER-1"))
+        await asyncio.sleep(0.3)
+        self.assertFalse(countdown.done())
+        self.state.mode = "bridged"  # their audio joined
+        await asyncio.wait_for(countdown, 2)
+        self.assertEqual(get_call(self.call_id)["needs_callback"], 0)
+        self.assertNotIn(phrase("officers_busy", "en"), [t["text"] for t in list_turns(self.call_id)])
+
+    async def test_holding_lines_can_be_turned_off(self):
+        from app.receptionist.phrases import phrase
+
+        texts = await self.hold(timeout_s="0.15", every_s="0")
+        self.assertNotIn(phrase("still_holding", "en"), texts)
 
 
 class BrainTransferTests(TransferTestCase):
