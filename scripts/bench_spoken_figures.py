@@ -71,14 +71,21 @@ def main() -> None:
             cases += [(amount_frame.format(a), a.replace(",", "")) for a in AMOUNTS]
             for raw, figure in cases:
                 spoken = clean_text_for_speech(raw, locale=lang)
-                tts = client.post(f"{args.api}/v1/tts", json={"text": spoken, "language": lang}).json()
+                # A rate-limited or failed call stops the run: counted as "not
+                # heard", it would quietly lower the published result.
+                resp = client.post(f"{args.api}/v1/tts", json={"text": spoken, "language": lang})
+                resp.raise_for_status()
+                tts = resp.json()
                 audio = base64.b64decode(tts.get("audio_base64") or "")
-                heard = ""
-                if audio:
-                    heard = client.post(f"{args.api}/v1/asr", params={"language": lang}, content=audio,
-                                        headers={"Content-Type": "audio/wav", "X-Voice-Consent": "true"}).json().get("text", "")
+                if not audio:
+                    raise SystemExit(f"/v1/tts gave no audio for {spoken!r}: {tts.get('error')}")
+                resp = client.post(f"{args.api}/v1/asr", params={"language": lang}, content=audio,
+                                   headers={"Content-Type": "audio/wav", "X-Voice-Consent": "true"})
+                resp.raise_for_status()
+                heard = resp.json().get("text", "")
                 rows.append({"lang": lang, "raw": raw, "spoken": spoken, "heard": heard,
-                             "backend": tts.get("backend"), "recovered": _recovered(heard, figure, spoken)})
+                             "backend": tts.get("backend"), "tts_error": tts.get("error"),
+                             "recovered": _recovered(heard, figure, spoken)})
                 print(json.dumps(rows[-1], ensure_ascii=False), flush=True)
 
     summary = {}
@@ -88,6 +95,7 @@ def main() -> None:
             summary[f"{lang}/{kind}"] = f"{sum(r['recovered'] for r in sel)}/{len(sel)}"
     report = {"date": dt.date.today().isoformat(), "api": args.api, "summary": summary, "rows": rows}
     out = Path(args.out_dir) / f"spoken_figures_{report['date']}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
     print(json.dumps(summary), f"wrote {out}")
 
