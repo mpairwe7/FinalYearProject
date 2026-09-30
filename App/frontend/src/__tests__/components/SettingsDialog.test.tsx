@@ -152,6 +152,24 @@ describe("SettingsDialog", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false");
   });
 
+  it("sets how long a pause ends a voice-mode turn", () => {
+    useVoiceStore.setState({ silenceTimeout: 1200 });
+    renderDialog({ tab: "voice" });
+    const pause = screen.getByRole("radiogroup", { name: "Send after a pause" });
+    expect(within(pause).getByRole("radio", { name: "1.2 s" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/after 1.2 s of quiet/)).toBeInTheDocument();
+
+    fireEvent.click(within(pause).getByRole("radio", { name: "2 s" }));
+    expect(useVoiceStore.getState().silenceTimeout).toBe(2000);
+
+    // Off keeps the tap: the hint says so rather than promising a pause.
+    fireEvent.click(within(pause).getByRole("radio", { name: "Off" }));
+    expect(useVoiceStore.getState().silenceTimeout).toBe(0);
+    expect(
+      screen.getByText("Sends only when you tap the checkmark, and listens only when you tap the mic."),
+    ).toBeInTheDocument();
+  });
+
   it("hands narration changes back to the page that owns the state", () => {
     const { onAutoNarrateChange } = renderDialog({ tab: "voice" });
     fireEvent.click(screen.getByRole("switch", { name: "Narrate replies aloud" }));

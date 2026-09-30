@@ -3006,8 +3006,11 @@ summary {
     box-shadow: var(--shadow-lg);
     pointer-events: auto;
   }
-  .chat-dock .composer-hint,
-  .landing-composer .composer-hint {
+  /* The standing disclaimer is dropped for room on a phone. A notice about
+     what the mic just did, and the hint while recording, stay: without them
+     a mic that closed itself, or a turn that sent itself, says nothing. */
+  .chat-dock .composer-hint:not(.composer-hint-notice):not(.composer-hint-rec),
+  .landing-composer .composer-hint:not(.composer-hint-notice):not(.composer-hint-rec) {
     display: none;
   }
   .landing-composer .composer {

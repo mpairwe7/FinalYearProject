@@ -58,6 +58,8 @@ interface ChatInputProps {
   onStop?: () => void;
   /** Live audio frequency levels [0..1] for responsive waveform */
   audioLevels?: number[];
+  /** Voice mode sends the turn by itself when the speaker pauses (Settings → Voice). */
+  autoSend?: boolean;
 }
 
 /** Inline waveform — 5 bars responsive to live microphone levels when available */
@@ -108,6 +110,7 @@ function ChatInputInner({
   dictationNotice,
   onStop,
   audioLevels,
+  autoSend = false,
 }: ChatInputProps) {
   const t = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
@@ -230,9 +233,9 @@ function ChatInputInner({
             </button>
           </div>
         </div>
-        <p className="composer-hint">
+        <p className="composer-hint composer-hint-rec">
           {voiceMode
-            ? t('composer.recHintVoice')
+            ? t(autoSend ? 'composer.recHintVoiceAuto' : 'composer.recHintVoice')
             : t('composer.recHintDictation')}
         </p>
       </>

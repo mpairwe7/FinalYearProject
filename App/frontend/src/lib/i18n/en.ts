@@ -51,6 +51,8 @@ export const en = {
   'composer.dictate': 'Dictate',
   'composer.stopAndInsert': 'Stop and insert text',
   'composer.recHintVoice': 'Tap checkmark to send, or X to cancel.',
+  'composer.recHintVoiceAuto': 'Sends when you pause. Tap checkmark to send now, or X to cancel.',
+  'composer.noSpeechHeard': 'I didn’t hear anything, so the microphone is off. Tap it to try again.',
   'composer.recHintDictation':
     'Tap checkmark to add what you said to the message, or X to discard.',
   'composer.stop': 'Stop',

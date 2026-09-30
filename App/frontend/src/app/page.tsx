@@ -26,6 +26,7 @@ import {
   transcribe,
   voiceChat,
 } from '../services/voiceService';
+import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -341,8 +342,16 @@ export default function Page() {
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
+  // Voice mode sends a turn by itself after this much quiet (0: only a tap does).
+  const silenceTimeout = useVoiceStore((s) => s.silenceTimeout);
+  // What the end-of-turn watcher does with an event; set below, once the
+  // handlers it calls exist, so it never calls a stale one.
+  const onTurnEventRef = useRef<(event: TurnEvent) => void>(() => {});
+  // Hands-free voice mode opens the mic again once a reply has been read.
+  const listenAgainRef = useRef<() => void>(() => {});
 
-  // Live microphone frequency analyser for responsive composer waveform
+  // Live microphone frequency analyser for responsive composer waveform, and
+  // in voice mode the end-of-turn watcher, on the same audio graph.
   useEffect(() => {
     if (!isRecording) {
       if (animFrameRef.current !== null) {
@@ -360,6 +369,7 @@ export default function Page() {
     const stream = recorderRef.current?.getStream();
     if (!stream) return;
 
+    let stopWatching: (() => void) | null = null;
     try {
       const AudioCtx =
         window.AudioContext ||
@@ -371,6 +381,12 @@ export default function Page() {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 64;
       source.connect(analyser);
+      if (voiceMode && silenceTimeout > 0) {
+        stopWatching = watchEndOfTurn(ctx, source, {
+          silenceMs: silenceTimeout,
+          onEvent: (event) => onTurnEventRef.current(event),
+        });
+      }
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const update = () => {
@@ -392,6 +408,7 @@ export default function Page() {
     }
 
     return () => {
+      stopWatching?.();
       if (animFrameRef.current !== null) {
         cancelAnimationFrame(animFrameRef.current);
         animFrameRef.current = null;
@@ -401,7 +418,7 @@ export default function Page() {
         audioContextRef.current = null;
       }
     };
-  }, [isRecording]);
+  }, [isRecording, voiceMode, silenceTimeout]);
 
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
@@ -762,14 +779,19 @@ export default function Page() {
   // The current read-aloud request. A stop, or a newer request, makes an older
   // one stale: its whole-reply fallback must not start playing when it lands.
   const listenRequestRef = useRef(0);
-  const handleListenToReply = useCallback(async (turnId: string, text: string) => {
+  /** Silence the reply being read aloud, and cancel one still loading. */
+  const stopReading = useCallback(() => {
+    listenRequestRef.current += 1;
+    stopPlayback();
+    setPlayingTurnId(null);
+    setTtsLoading(null);
+  }, []);
+  /** Read a reply aloud. Resolves when it has ended, or was stopped. */
+  const handleListenToReply = useCallback(async (turnId: string, text: string): Promise<'ended' | 'stopped'> => {
     // A second tap stops it, whether it is playing or still fetching its first piece.
     if (playingTurnId === turnId || ttsLoading === turnId) {
-      listenRequestRef.current += 1;
-      stopPlayback();
-      setPlayingTurnId(null);
-      setTtsLoading(null);
-      return;
+      stopReading();
+      return 'stopped';
     }
     const request = ++listenRequestRef.current;
     stopPlayback();
@@ -778,7 +800,7 @@ export default function Page() {
       const speechText = cleanMarkdownForSpeech(text);
       if (!speechText) {
         setTtsLoading(null);
-        return;
+        return 'ended';
       }
       const voice = useVoiceStore.getState().voiceByLocale[locale] || undefined;
       try {
@@ -793,29 +815,31 @@ export default function Page() {
           },
         });
         if (outcome.failed) trackErrorOccurred('tts_failed');
-        return;
+        return outcome.stopped ? 'stopped' : 'ended';
       } catch {
         // Nothing of the stream could be played: ask for the whole reply once.
       }
-      if (request !== listenRequestRef.current) return;
+      if (request !== listenRequestRef.current) return 'stopped';
       const result = await ttsMutation.mutateAsync({ text: speechText, language: locale, voice });
-      if (request !== listenRequestRef.current) return;
+      if (request !== listenRequestRef.current) return 'stopped';
       setTtsLoading(null);
       if (result.error || !result.audio_base64) {
         if (result.error) trackErrorOccurred('tts_failed');
-        return;
+        return 'ended';
       }
       setPlayingTurnId(turnId);
       await playAudioBase64(result.audio_base64);
+      return request === listenRequestRef.current ? 'ended' : 'stopped';
     } catch {
       // TTS unavailable — degrade to text, but record it
       trackErrorOccurred('tts_failed');
+      return 'ended';
     } finally {
       // A stale request leaves the loading state to the one that replaced it.
       if (request === listenRequestRef.current) setTtsLoading(null);
       setPlayingTurnId((prev) => (prev === turnId ? null : prev));
     }
-  }, [playingTurnId, ttsLoading, locale, ttsMutation]);
+  }, [playingTurnId, ttsLoading, locale, ttsMutation, stopReading]);
 
   useEffect(() => {
     if (!autoNarrate || chat.length <= lastChatLength.current) {
@@ -1331,6 +1355,9 @@ export default function Page() {
     // read as a failure. The button is disabled in this state, so this only
     // catches the keyboard shortcut and a synthetic event.
     if (speechState === 'starting') return;
+    // Opening the mic silences the reply: it would talk over the speaker and
+    // be recorded along with them.
+    if (!isRecording && speechState !== 'listening') stopReading();
     if (voiceMode && hasMediaRecorder) {
       setIsTransitioning(true);
       try {
@@ -1368,7 +1395,11 @@ export default function Page() {
               addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);
               trackChatReceived(Date.now() - t0, (r.sources?.length ?? 0) > 0);
               const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
-              if (autoNarrate && tid) void handleListenToReply(tid, r.reply);
+              if (autoNarrate && tid) {
+                void handleListenToReply(tid, r.reply).then((how) => {
+                  if (how === 'ended') listenAgainRef.current();
+                });
+              }
             }
           } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
         } else {
@@ -1537,7 +1568,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, stopReading, armMic, disarmMic]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
@@ -1549,6 +1580,40 @@ export default function Page() {
     setSpeechState('idle');
     setIsTransitioning(false);
   }, [disarmMic, setSpeechState]);
+
+  // Voice mode's end of turn. A pause after speech, or a turn that reached
+  // its limit, is sent as the checkmark sends it. A mic that heard nothing
+  // closes and says so: left open, it would listen to the room indefinitely.
+  useEffect(() => {
+    onTurnEventRef.current = (event) => {
+      if (event === 'speech' || !recorderRef.current?.isRecording) return;
+      if (event === 'no-speech') {
+        handleCancelRecording();
+        audioSignifiers.playMicStop();
+        setDictationNotice(t('composer.noSpeechHeard'));
+        return;
+      }
+      void handleMicClick();
+    };
+    // Only when the turn also ends by itself: a mic that opens on its own but
+    // needs a tap to send is half a conversation. The silent-mic rule closes
+    // it again if nobody speaks.
+    listenAgainRef.current = () => {
+      if (!voiceMode || silenceTimeout <= 0 || isRecording || recorderRef.current) return;
+      void handleMicClick();
+    };
+  }, [handleCancelRecording, handleMicClick, t, voiceMode, silenceTimeout, isRecording]);
+
+  // Leaving the page stops playback. That must not read as a reply that
+  // ended: listen-again would then open the mic with no page to show it.
+  useEffect(
+    () => () => {
+      listenRequestRef.current += 1;
+      listenAgainRef.current = () => {};
+      onTurnEventRef.current = () => {};
+    },
+    [],
+  );
 
   const handleStarterPrompt = useCallback((prompt: string) => {
     trackStarterPromptUsed(prompt);
@@ -1656,6 +1721,7 @@ export default function Page() {
     speechUnavailable: speechState === 'unavailable' && !hasMediaRecorder,
     speechState,
     voiceMode,
+    autoSend: silenceTimeout > 0,
     onMessageChange: setMessage,
     onSend: sendMessage,
     onMicClick: handleMicClick,

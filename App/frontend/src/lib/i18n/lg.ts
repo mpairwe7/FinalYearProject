@@ -50,6 +50,8 @@ export const lg: Partial<Dictionary> = {
   'composer.dictate': 'Yogera owandiike',
   'composer.stopAndInsert': 'Yimirira oteeke ebigambo',
   'composer.recHintVoice': 'Nyiga akakwe osindike, oba X osazeemu.',
+  'composer.recHintVoiceAuto': 'Kisindikibwa bw’osirika. Nyiga akakwe okisindike kati, oba X osazeemu.',
+  'composer.noSpeechHeard': 'Sirina kye mpulidde, maykolofoni ngiggaddewo. Ginyige ogezeeko nate.',
   'composer.recHintDictation':
     'Nyiga akakwe oteeke by’oyogedde mu bubaka, oba X obisuule.',
   'composer.stop': 'Yimirira',
