@@ -27,7 +27,7 @@ The frontend inspects `navigator.connection` (`NetworkInformation` API) to detec
 ### 2.2 Data Saver & High-Latency Adaptations (`page.tsx` & `OfflineBanner.tsx`)
 When `isLowBandwidth` is active (`saveData === true` or `effectiveType` is `2g` or `slow-2g`):
 * **Extended Gateway Timeout:** The SSE and REST request timeout expands from 120s to 180s to prevent premature client-side aborts on high-latency roundtrips.
-* **Conserved Voice & Media Prefetching:** Automatic background audio synthesis narration (`autoNarrate`) is guarded to prevent consuming metered cellular megabytes.
+* **Spoken replies stay light:** Narration (`autoNarrate`, off by default) streams each reply as Ogg/Opus pieces (`/v1/tts/stream`), about 4.5 KB per second of speech, a tenth of the WAV it replaced, so voice mode keeps speaking under Data Saver. Before 2026-09-30, voice mode with narration on received the whole reply as inline WAV (1.1–1.6 MB for a typical answer), whatever the connection.
 * **Data Saver UI Banner:** A subtle amber banner (`Low Bandwidth: Connection bandwidth is limited. Data Saver mode active.`) informs the user of data preservation.
 
 ### 2.3 Backend Compression (`GZipMiddleware` in `main.py`)

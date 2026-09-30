@@ -613,6 +613,58 @@ that needs Luganda listeners (`evals/orpheus_tts/listening_sheet.csv`).
 A connection failure puts the client in a 30 s cooldown, so a dead sidecar costs
 one timeout rather than one per sentence.
 
+## Streamed reply speech — the chat's read-aloud (G95)
+
+The chat speaks a reply through `POST /v1/tts/stream` (API reference, "Stream
+Reply Speech"): NDJSON, one line per piece as soon as it is voiced. Before, the
+whole answer was synthesised into one WAV, and nothing was heard until all of
+it arrived. Voice mode now asks `/v1/voice/chat` for text only
+(`tts_enabled=false`), shows the answer, and speaks it through the stream when
+narration is on.
+
+* **Pieces grow.** Cut at sentence, clause, then word breaks: at most
+  `SPEECH_STREAM_FIRST_PIECE_CHARS` (60) characters for the first, 90 for the
+  second, then Orpheus's 120. A short first piece starts speech soonest; the
+  longer ones after it keep up with playback.
+* **Lookahead.** The first piece is voiced alone, then two pieces are always in
+  flight. The Orpheus sidecar batches concurrent requests, but not for free:
+  with two in flight from the start the first piece took 0.3–1.6 s longer, and
+  one at a time left pauses of up to 0.4 s.
+* **Opus.** `format: "opus"` encodes each WAV piece as Ogg/Opus with libsndfile
+  (already a dependency): about a tenth of the size, for ~5% of the audio's
+  length in CPU time. The client asks for it only where
+  `canPlayType('audio/ogg; codecs="opus"')` says it plays; any other browser
+  gets WAV. At the 24 kHz Orpheus rate Opus is about 4.5 KB per second of
+  speech, so voice mode keeps speaking under Data Saver.
+* **Client** (`speakStreamed` in `voiceService.ts`). Web Audio schedules each
+  piece to start where the one before ends, so there is no gap between pieces
+  that arrive in time. A tap on the speaker, or `stopPlayback()`, aborts the
+  request and silences what is queued. A piece that fails is skipped. If nothing
+  arrives for 20 s, speech ends after the audio already queued. Only when no
+  piece at all could be played does the chat fall back to one `/v1/tts` request.
+
+Measured on the GPU stack, 2026-09-30, with `scripts/bench_chat_speech.py` on a
+freshly started api (no piece from the cache), for the TIN question in each
+language (`evals/reports/chat_speech_2026-09-30.json`):
+
+| | en | lg | sw |
+|---|---|---|---|
+| Answer text (voice chat, `tts_enabled=false`) | 0.5 s | 4.6 s | 4.8 s |
+| First audio, whole WAV (before) | 10.3 s | 16.0 s | 19.4 s |
+| **First audio, streamed** | **5.3 s** | **7.4 s** | **7.9 s** |
+| Size, whole WAV → streamed Opus | 1624 → 147 KB | 1516 → 151 KB | 1952 → 182 KB |
+| Silences between pieces | none | none | one of 0.21 s |
+
+The first piece took 2.7–4.9 s on its own. What remains of the Luganda and
+Swahili wait is mostly the answer's text (4.6–4.8 s), not speech.
+
+**Speech work runs off the event loop (G96).** The speech routes call
+`SpeechModel`, which is synchronous, through `asyncio.to_thread`. Called inline,
+one synthesis or transcription held up every other request for its duration:
+`/health` took 5.8 s during a 6.2 s `/v1/tts`. With the calls in threads it
+answered in 58 ms or less during a 7.5 s synthesis.
+`test_speech_work_does_not_hold_up_the_rest_of_the_api` fails on the old code.
+
 ## Multilingual Speech & Translation Enhancements (September 2026)
 
 Verified against Sunbird AI's Sunflower v2 research release (September 2026):
