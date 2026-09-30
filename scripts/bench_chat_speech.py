@@ -111,16 +111,24 @@ def _streamed(api: str, lang: str, text: str) -> dict[str, Any]:
 
 
 def _whole(api: str, lang: str, text: str) -> dict[str, Any]:
+    """One WAV for the whole answer; ``{"error": ...}`` and no timings when none came back."""
     conn = _connect(api)
     started = time.perf_counter()
     conn.request("POST", "/v1/tts", body=json.dumps({"text": text, "language": lang}),
                  headers={"Content-Type": "application/json"})
-    data = json.loads(conn.getresponse().read())
+    resp = conn.getresponse()
+    raw = resp.read()
     elapsed = time.perf_counter() - started
     conn.close()
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = {}
     audio = base64.b64decode(data.get("audio_base64") or "")
+    if resp.status != 200 or data.get("error") or not audio:
+        return {"error": data.get("error") or f"HTTP {resp.status}, {len(audio)} bytes of audio"}
     return {"total_s": round(elapsed, 2), "kb": round(len(audio) / 1024, 1),
-            "duration_s": data.get("duration_s"), "backend": data.get("backend"), "error": data.get("error")}
+            "duration_s": data.get("duration_s"), "backend": data.get("backend")}
 
 
 def main() -> None:
@@ -140,7 +148,8 @@ def main() -> None:
             run["streamed"]["first_audio_s"] = round(text_s + run["streamed"]["first_piece_s"], 2)
             if not args.no_whole:
                 run["whole"] = _whole(args.api, lang, _fresh(reply))
-                run["whole"]["first_audio_s"] = round(text_s + run["whole"]["total_s"], 2)
+                if "total_s" in run["whole"]:
+                    run["whole"]["first_audio_s"] = round(text_s + run["whole"]["total_s"], 2)
             runs.setdefault(lang, []).append(run)
             print(lang, json.dumps(run))
 
