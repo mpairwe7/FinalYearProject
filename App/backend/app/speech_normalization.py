@@ -136,30 +136,33 @@ _ACRONYMS = [
     # EFRIS is an acronym pronounced as a natural, fluent word (/ˈɛfrɪs/ "Eh-fris")
     # in Ugandan tax administration, rather than spelled letter-by-letter.
     (re.compile(r"\bE-?F-?R-?I-?S\b", re.IGNORECASE), "Efris"),
-    # Core tax administration initialisms (spelled with hyphens for crisp neural TTS cadence)
-    (re.compile(r"\bU\.?R\.?A\.?\b"), "U-R-A"),
-    (re.compile(r"\bP\.?A\.?Y\.?E\.?\b"), "P-A-Y-E"),
+    # URA is an institutional initialism pronounced letter-by-letter as "U R A" (/juː ɑːr eɪ/), never as word "ura".
+    (re.compile(r"(?:\bU\.R\.A\.?|\bU-R-A\b|\bURA\b)"), "U R A"),
+    # TIN, NIN, VAT are acronyms naturally pronounced as words ("tin"/"teen", "nin", "vat")
+    # in everyday Ugandan tax speech, rather than reading each as a separate letter.
+    (re.compile(r"(?:\bT\.I\.N\.?|\bT-I-N\b)"), "TIN"),
+    (re.compile(r"(?:\bN\.I\.N\.?|\bN-I-N\b)"), "NIN"),
+    (re.compile(r"(?:\bV\.A\.T\.?|\bV-A-T\b)"), "VAT"),
+    (re.compile(r"\bV-?A-?T-?A\b"), "VAT Act"),
+    # Initialisms that must be read as separate letters or expanded phrases
+    (re.compile(r"(?:\bP\.A\.Y\.E\.?|\bP-A-Y-E\b|\bPAYE\b)"), "P-A-Y-E"),
     (re.compile(r"\bWHT\b|\bW\.H\.T\.?\b"), "Withholding Tax"),
-    (re.compile(r"\bV\.?A\.?T\.?\b"), "V-A-T"),
-    (re.compile(r"\bC\.?I\.?T\.?\b"), "C-I-T"),
-    (re.compile(r"\bP\.?I\.?T\.?\b"), "P-I-T"),
+    (re.compile(r"(?:\bC\.I\.T\.?|\bC-I-T\b|\bCIT\b)"), "C-I-T"),
+    (re.compile(r"(?:\bP\.I\.T\.?|\bP-I-T\b|\bPIT\b)"), "P-I-T"),
     (re.compile(r"\bLED\b|\bL\.E\.D\.?\b"), "Local Excise Duty"),
     (re.compile(r"\bDTS\b|\bD\.T\.S\.?\b"), "Digital Tax Stamps"),
-    (re.compile(r"\bN\.?S\.?S\.?F\.?\b"), "N-S-S-F"),
+    (re.compile(r"(?:\bN\.S\.S\.F\.?|\bN-S-S-F\b|\bNSSF\b)"), "N-S-S-F"),
     (re.compile(r"\bLST\b|\bL\.S\.T\.?\b"), "Local Service Tax"),
-    (re.compile(r"\bU\.?R\.?S\.?B\.?\b"), "U-R-S-B"),
+    (re.compile(r"(?:\bU\.R\.S\.B\.?|\bU-R-S-B\b|\bURSB\b)"), "U-R-S-B"),
     (re.compile(r"\bBOU\b|\bB\.O\.U\.?\b"), "Bank of Uganda"),
     (re.compile(r"\bTAT\b|\bT\.A\.T\.?\b"), "Tax Appeals Tribunal"),
     (re.compile(r"\bTPCA\b"), "Tax Procedures Code Act"),
     (re.compile(r"\bITA\b"), "Income Tax Act"),
-    (re.compile(r"\bVATA\b"), "V-A-T Act"),
-    (re.compile(r"\bP\.?R\.?N\.?\b"), "P-R-N"),
-    (re.compile(r"\bT\.?I\.?N\.?\b"), "T-I-N"),
-    (re.compile(r"\bN\.?I\.?N\.?\b"), "N-I-N"),
-    (re.compile(r"\bB\.?R\.?N\.?\b"), "B-R-N"),
-    (re.compile(r"\bT\.?C\.?C\.?\b"), "T-C-C"),
-    (re.compile(r"\bA\.?E\.?O\.?\b"), "A-E-O"),
-    (re.compile(r"\bC\.?E\.?T\.?\b"), "C-E-T"),
+    (re.compile(r"(?:\bP\.R\.N\.?|\bP-R-N\b|\bPRN\b)"), "P-R-N"),
+    (re.compile(r"(?:\bB\.R\.N\.?|\bB-R-N\b|\bBRN\b)"), "B-R-N"),
+    (re.compile(r"(?:\bT\.C\.C\.?|\bT-C-C\b|\bTCC\b)"), "T-C-C"),
+    (re.compile(r"(?:\bA\.E\.O\.?|\bA-E-O\b|\bAEO\b)"), "A-E-O"),
+    (re.compile(r"(?:\bC\.E\.T\.?|\bC-E-T\b|\bCET\b)"), "C-E-T"),
     (re.compile(r"\bASYCUDA(?:\+\+)?\b", re.IGNORECASE), "Asycuda"),
     (re.compile(r"\bTREP\b"), "Trep"),
     (re.compile(r"\be-?Receipt\b", re.IGNORECASE), "E-Receipt"),
@@ -336,10 +339,10 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _FY_RE.sub(lambda m: _fiscal_year(m, locale), t)
     t = _YEAR_RANGE_RE.sub(lambda m: _year_range(m, locale), t)
 
-    # 7. Normalize 9-digit or 10-digit TINs (spell out digits clearly with pause)
+    # 7. Normalize 9-digit or 10-digit TINs (pronounce TIN as word, digits with clear cadence)
     def _tin_sub(m: re.Match) -> str:
         digits = " ".join(list(m.group(1)))
-        return f"T I N {digits}"
+        return f"TIN {digits}"
 
     t = _TIN_EXPLICIT_RE.sub(_tin_sub, t)
 
@@ -350,10 +353,10 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
 
     t = _PRN_EXPLICIT_RE.sub(_prn_sub, t)
 
-    # 7c. Normalize 14-character NINs (spell out characters clearly with pause)
+    # 7c. Normalize 14-character NINs (pronounce NIN as word, characters clearly with pause)
     def _nin_sub(m: re.Match) -> str:
         chars = " ".join(list(m.group(1).upper()))
-        return f"N-I-N {chars}"
+        return f"NIN {chars}"
 
     t = _NIN_EXPLICIT_RE.sub(_nin_sub, t)
 

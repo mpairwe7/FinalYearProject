@@ -9,7 +9,7 @@ def test_strip_citations():
     res = clean_text_for_speech(raw, locale="en")
     assert "[1]" not in res
     assert "[2, 3]" not in res
-    assert "Section 15 of the V-A-T Act, the standard rate is 18 percent." in res
+    assert "Section 15 of the VAT Act, the standard rate is 18 percent." in res
 
 
 def test_markdown_stripping():
@@ -59,15 +59,15 @@ def test_a_percent_the_text_already_names_is_not_named_twice():
 def test_tin_digit_expansion():
     raw = "Your TIN is 1001234567 for filing."
     res = clean_text_for_speech(raw, locale="en")
-    assert "T I N 1 0 0 1 2 3 4 5 6 7" in res
+    assert "TIN 1 0 0 1 2 3 4 5 6 7" in res
 
 
 def test_standalone_tin_and_prn_and_nin():
     raw = "You must obtain a valid TIN and PRN before paying, or show your NIN."
     res = clean_text_for_speech(raw, locale="en")
-    assert "T-I-N" in res
+    assert "TIN" in res
     assert "P-R-N" in res
-    assert "N-I-N" in res
+    assert "NIN" in res
 
 
 def test_prn_digit_expansion():
@@ -106,7 +106,7 @@ def test_tax_acronym_expansion():
     raw = "Register on EFRIS with URA for PAYE and WHT compliance."
     res = clean_text_for_speech(raw, locale="en")
     assert "Efris" in res
-    assert "U-R-A" in res
+    assert "U R A" in res
     assert "P-A-Y-E" in res
     assert "Withholding Tax" in res
 
@@ -114,9 +114,9 @@ def test_tax_acronym_expansion():
 def test_ura_specific_terms_and_dotted_acronyms():
     raw = "Provide your N.I.N. and T.I.N. for V.A.T. and TCC clearance under ASYCUDA and e-Tax on E-F-R-I-S."
     res = clean_text_for_speech(raw, locale="en")
-    assert "N-I-N" in res
-    assert "T-I-N" in res
-    assert "V-A-T" in res
+    assert "NIN" in res
+    assert "TIN" in res
+    assert "VAT" in res
     assert "T-C-C" in res
     assert "Asycuda" in res
     assert "E-Tax" in res
@@ -126,7 +126,7 @@ def test_ura_specific_terms_and_dotted_acronyms():
 def test_ugandan_nin_digit_expansion():
     raw = "Your National ID NIN is CM89012345ABCD."
     res = clean_text_for_speech(raw, locale="en")
-    assert "N-I-N C M 8 9 0 1 2 3 4 5 A B C D" in res
+    assert "NIN C M 8 9 0 1 2 3 4 5 A B C D" in res
 
 
 def test_legal_section_expansion():
@@ -147,7 +147,7 @@ def test_broken_and_bare_urls_are_not_spoken():
 
 def test_a_url_goes_with_the_at_that_introduced_it():
     res = clean_text_for_speech("Visit the official URA web portal at https://ura.go.ug. Then log in.", locale="en")
-    assert res == "Visit the official U-R-A web portal. Then log in."
+    assert res == "Visit the official U R A web portal. Then log in."
 
 
 def test_the_calculator_s_asides_are_spoken_once_and_plainly():
@@ -158,12 +158,12 @@ def test_the_calculator_s_asides_are_spoken_once_and_plainly():
         "(FY2026-27). That comes from the official URA FY2026-27 rate table."
     )
     assert clean_text_for_speech(raw, locale="en") == (
-        "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. "
-        "That comes from the official U-R-A 2026 to 2027 rate table."
+        "The standard rate of Value Added Tax (VAT) is 18 percent, for the 2026 to 2027 financial year. "
+        "That comes from the official U R A 2026 to 2027 rate table."
     )
     assert clean_text_for_speech(raw, locale="lg") == (
-        "The standard rate of Value Added Tax (V-A-T) is ebitundu kkumi na munaana ku buli kikumi. "
-        "That comes from the official U-R-A twenty twenty-six okutuuka ku twenty twenty-seven rate table."
+        "The standard rate of Value Added Tax (VAT) is ebitundu kkumi na munaana ku buli kikumi. "
+        "That comes from the official U R A twenty twenty-six okutuuka ku twenty twenty-seven rate table."
     )
 
 
@@ -193,7 +193,7 @@ def test_the_contact_footer_is_not_spoken_in_any_language():
 
 def test_a_number_the_caller_asked_for_is_still_spoken():
     res = clean_text_for_speech("URA's toll-free line is 0800 117 000.", locale="en")
-    assert res == "U-R-A's toll-free line is 0 800, 117, 0 0 0."
+    assert res == "U R A's toll-free line is 0 800, 117, 0 0 0."
 
 
 def test_the_aside_rules_run_in_linear_time():
@@ -218,7 +218,7 @@ def test_the_luganda_answer_s_figures_are_said_once_and_in_words():
         "(FY2026-27). Guwoozebwa ku bitundu 18% ku bintu."
     )
     assert clean_text_for_speech(raw, locale="lg") == (
-        "Omusolo ogw'omuwendo ogwongerwako (V-A-T) guli ebitundu kkumi na munaana ku buli kikumi. "
+        "Omusolo ogw'omuwendo ogwongerwako (VAT) guli ebitundu kkumi na munaana ku buli kikumi. "
         "Guwoozebwa ku bitundu kkumi na munaana ku buli kikumi ku bintu."
     )
 
@@ -240,7 +240,7 @@ def test_a_band_is_read_from_one_amount_to_the_other(locale, spoken):
 
 def test_an_expanded_name_is_not_said_twice():
     raw = "Heads include Withholding Tax (**WHT**) and Value Added Tax (**VAT**)."
-    assert clean_text_for_speech(raw, locale="en") == "Heads include Withholding Tax and Value Added Tax (V-A-T)."
+    assert clean_text_for_speech(raw, locale="en") == "Heads include Withholding Tax and Value Added Tax (VAT)."
 
 
 @pytest.mark.parametrize(
