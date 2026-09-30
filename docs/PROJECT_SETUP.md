@@ -480,7 +480,8 @@ of the 0.8–1.2 s that voice agents use, with 0.8 s, 2 s and Off (tap only) in
 Settings → Voice. The checkmark still sends at once. The decision is made in
 the browser from the microphone's level (`services/endOfTurn.ts`): speech is
 sound 12 dB above the room's own level in the 250–3800 Hz band, the floor is the
-quiet end of the last 4 s, so it follows a noisy room, and a turn needs 300 ms
+quiet end of the last 4 s, so it follows a noisy room (and holds still once a
+turn starts, so a long, even voice is never taken for the room), and a turn needs 300 ms
 of speech before a pause can end it, so a click or a cough does not start one. A
 mic that heard nothing for 8 s closes and says so, rather than listening to the
 room indefinitely. Sound that never passed for speech keeps the mic open for a
