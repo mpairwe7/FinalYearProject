@@ -1,0 +1,217 @@
+{
+ "date": "2026-09-30",
+ "ws": "ws://127.0.0.1:8083/v1/calls/stream",
+ "passed": 4,
+ "scenarios": 4,
+ "first_audio_ms_p50": 2330.5,
+ "results": [
+  {
+   "name": "2_selected_english_speaks_luganda",
+   "note": "First answer in Luganda, same question, not repeated.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 3616,
+     "filler_caption_ms": 3351,
+     "answer_caption_ms": 3264,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Excuse me, did you say tin?",
+      "Akaseera katono.",
+      "Osobola okwewandiisa okufuna T-I-N ku mutimbagano ku mukutu gwa U-R-A ogwa wansi wa eServices T-I-N Registration. Jjuza foomu eyo ku mutimbagano era oteekemu obubaka bwonna obwetaagibwa, oluvannyuma ogisindike. Bw’oba weewandiisa ng’omuntu kinnoomu, weetaaga N-I-N yo; ate bw’oba weewandiisa ng’ekitongole, weetaaga satifikeeti ya kampuni yo."
+     ],
+     "caller": [
+      "Nyinza ndyo kwewandiisa okufuna timu yange okuva neera?",
+      "Ekiriza ntya okwewandiisa okufuna ttiimu yange okuva n'era?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_893b5e3d5fcb",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "2_selected_english_speaks_luganda",
+   "note": "First answer in Luganda, same question, not repeated.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 3665,
+     "filler_caption_ms": 3398,
+     "answer_caption_ms": 3310,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Excuse me, did you say tin?",
+      "Ka ndabe.",
+      "Osobola okwewandiisa okufuna T-I-N ku mutimbagano ku mukutu gwa U-R-A ogwa wansi wa eServices T-I-N Registration. Jjuza foomu eyo ku mutimbagano era oteekemu obubaka bwo bwonna obwetaagibwa. Bw’oba weewandiisa ng’omuntu kinnoomu, weetaaga N-I-N yo; ate bw’oba weewandiisa nga bizinensi, weetaaga satifiketi ya bizinensi yo."
+     ],
+     "caller": [
+      "Nyinza ndyo kwewandiisa okufuna timu yange okuva neera?",
+      "Ekiriza ntya okwewandiisa okufuna ttiimu yange okuva n'era?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_892b284c5253",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "5_code_switched_luganda_stays",
+   "note": "Luganda with TIN/VAT: no flip-flop.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 2776,
+     "filler_caption_ms": 2496,
+     "answer_caption_ms": 5529,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka nkebere.",
+      "Osobola okwewandiisa okufuna T-I-N ku mukutu gwa U-R-A ogwa wansi wa eServices T-I-N Registration, ng’ojjuza foomu eyo ku mutimbagano era ng’osindika. Bw’oba weewandiisa nga omuntu kinnoomu, weetaaga N-I-N yo ate bw’oba weewandiisa nga ekibiina, weetaaga satifikeeti ya kampuni yo."
+     ],
+     "caller": [
+      "Ekiriza ntya okwewandiisa okufuna ttiimu yange okuva n'era?",
+      "Nyinza ndyo kwewandiisa okufuna timu yange okuva neera?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1885,
+     "filler_caption_ms": 1882,
+     "answer_caption_ms": 3514,
+     "languages": [],
+     "assistant": [
+      "Ka ndabe.",
+      "Omusolo gwa V-A-T ogw'ebintu ebisinga obungi guli ebitundu 18 ku buli kikumi. Bizineesi eziri ku musolo guno zisasula omusolo guno eri U-R-A nga ziggya ssente ku bakasitoma baazo."
+     ],
+     "caller": [
+      "Vat yange ntya okugisasula?",
+      "Era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_ca157c6a5e14",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "5_code_switched_luganda_stays",
+   "note": "Luganda with TIN/VAT: no flip-flop.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 1674,
+     "filler_caption_ms": 1673,
+     "answer_caption_ms": 3991,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka nkebere.",
+      "Osobola okwewandiisa okufuna T-I-N ku mutimbagano ku mukutu gwa U-R-A ogwa wansi wa eServices T-I-N Registration. Jjuza foomu eyo ku mutimbagano era oteekemu ebikukwatako ng’omuntu oba ekibiina kyo."
+     ],
+     "caller": [
+      "Ekiriza ntya okwewandiisa okufuna ttiimu yange okuva n'era?",
+      "Nyinza ndyo kwewandiisa okufuna timu yange okuva neera?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1851,
+     "filler_caption_ms": 1847,
+     "answer_caption_ms": 3381,
+     "languages": [],
+     "assistant": [
+      "Lindako katono.",
+      "Omusolo gwa V-A-T ogw'ebintu ebisinga obungi guli ebitundu 18 ku buli kikumi. Bizineesi ezisasula V-A-T zirina okukungaanya ssente ku bintu bye ziguze ne zibizzaayo mu U-R-A."
+     ],
+     "caller": [
+      "Vat yange ntya okugisasula?",
+      "Era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_3bfce4899c68",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  }
+ ]
+}
