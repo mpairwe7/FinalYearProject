@@ -241,6 +241,22 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         await self.brain.process_frame(LLMContextFrame(context="What is the VAT rate?"))
         self.assertFalse(list_turns(self.call_id)[-1]["text"].endswith(offer))  # heard this time: once is enough
 
+    async def test_an_at_risk_offer_repeated_after_being_talked_over_is_still_made_once(self):
+        from app.receptionist.phrases import phrase
+
+        create_call(self.call_id, conversation_id=self.state.conversation_id)
+        update_call(self.call_id, risk_json=json.dumps({"level": "at_risk", "signals": ["distress"]}))
+        offer = phrase("officer_offer", "en")
+        await self.brain.process_frame(LLMContextFrame(context="I'm so stressed. How do I register for a TIN?"))
+        await self.brain.process_frame(BotStartedSpeakingFrame())
+        await self.brain.process_frame(InterruptionFrame())  # talked over it, before the offer
+        await self.brain.process_frame(BotStoppedSpeakingFrame())
+        await self.brain.process_frame(LLMContextFrame(context="Could you repeat that please?"))
+        self.assertTrue(list_turns(self.call_id)[-1]["text"].endswith(offer))  # heard this time
+        await self.brain.process_frame(LLMContextFrame(context="No, thank you."))
+        await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
+        self.assertFalse(list_turns(self.call_id)[-1]["text"].endswith(offer))  # declined: not offered again
+
     def _long_answer(self, **extra):
         """An answer longer than RECEPTIONIST_MAX_SPOKEN_SENTENCES (3)."""
         reply = " ".join(f"Step {n} of the return is done online." for n in ("one", "two", "three", "four", "five"))

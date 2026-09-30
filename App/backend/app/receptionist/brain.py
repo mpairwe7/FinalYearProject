@@ -545,6 +545,9 @@ class UraReceptionistBrain(LLMService):
                 # on the same question, which is open again.
                 self.room.state.last_assistant_answer = last_ans
                 self._offer(offer, reason=offer_reason, more=more, at_risk=offer_at_risk)
+                if offer_at_risk:
+                    # Heard now: the at-risk offer has been made, once.
+                    self.room.state.risk_offer_made = True
                 return
 
         # 1c. In-Call User Control: Speech Rate Adjustment. The local voices
