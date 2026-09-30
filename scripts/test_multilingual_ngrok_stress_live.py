@@ -122,7 +122,7 @@ MULTILINGUAL_TAX_PROBES = [
     # English (en)
     ("en", "What is the standard VAT rate in Uganda?", "18%", ["18", "vat"]),
     ("en", "What is the late tax payment penalty per month?", "2%", ["2", "penalty", "month"]),
-    ("en", "How do I register for an individual TIN?", "TIN", ["tin", "portal", "national id"]),
+    ("en", "How do I register for an individual TIN?", "TIN", ["tin", "portal|ura.go.ug", "national id|nin"]),
     # Luganda (lg)
     ("lg", "VAT yange ntya okugisasula, era ebitundu bimeka?", "18%", ["18", "omusolo", "ebitundu", "kikumi"]),
     ("lg", "Kikondeere kki ku kukeerewa okusasula omusolo?", "2%", ["2", "omusolo", "mwezi"]),
@@ -152,6 +152,20 @@ def figure_in(expected: str, reply: str) -> bool:
     return re.search(rf"(?<![\d.]){re.escape(figure)}(?![.,]?\d)", reply) is not None
 
 
+def token_coverage(tokens: list[str], reply: str) -> tuple[int, float]:
+    """(hits, share) of *tokens* found in *reply*, each at the start of a word.
+
+    A token may list synonyms, "national id|nin": the TIN guide says "Enter
+    your NIN", and a correct answer must not fail on wording.
+    """
+    hits = sum(
+        1
+        for token in tokens
+        if any(re.search(rf"(?<![a-z0-9]){re.escape(alt)}", reply) for alt in token.lower().split("|"))
+    )
+    return hits, hits / len(tokens)
+
+
 def run_benchmark() -> dict[str, Any]:
     log("=" * 70)
     log(f"Starting Multilingual Stress Benchmark over Live Ngrok: {NGROK_URL}")
@@ -171,9 +185,8 @@ def run_benchmark() -> dict[str, Any]:
         st, data, lat = http_post_json("/api/v1/chat", {"message": query, "locale": lang}, timeout=45.0)
         reply = (data.get("reply") or "").lower()
         has_fig = figure_in(expected_fig, reply)
-        token_hits = sum(1 for tok in expected_tokens if tok.lower() in reply)
-        token_coverage = token_hits / len(expected_tokens)
-        passed = (st == 200) and has_fig and token_coverage >= 0.5
+        token_hits, coverage = token_coverage(expected_tokens, reply)
+        passed = (st == 200) and has_fig and coverage >= 0.5
 
         log(f" -> [{lang.upper()}] Status={st} Latency={lat:.1f}ms FigMatch={has_fig} Tokens={token_hits}/{len(expected_tokens)}")
         accuracy_results.append({
@@ -183,7 +196,7 @@ def run_benchmark() -> dict[str, Any]:
             "latency_ms": lat,
             "expected_figure": expected_fig,
             "figure_matched": has_fig,
-            "token_coverage": token_coverage,
+            "token_coverage": coverage,
             "passed": passed,
         })
 
@@ -234,8 +247,10 @@ def run_benchmark() -> dict[str, Any]:
         reply = data.get("reply", "")
         has_audio = bool(data.get("reply_audio_base64"))
         audio_len = len(data.get("reply_audio_base64") or "")
-        keyword_hits = sum(1 for kw in keywords if kw.lower() in reply.lower())
-        passed = (st == 200) and has_audio and (keyword_hits >= 1 or bool(reply))
+        # Any non-empty reply used to pass ("or bool(reply)"), so a wrong answer
+        # with audio counted as a working voice pipeline.
+        keyword_hits, keyword_share = token_coverage(keywords, reply.lower())
+        passed = (st == 200) and has_audio and keyword_share >= 0.5
 
         log(f" -> [{lang.upper()} Audio] Status={st} Latency={lat:.1f}ms AudioBytes={audio_len} KeywordHits={keyword_hits}/{len(keywords)}")
         voice_results.append({
@@ -247,6 +262,7 @@ def run_benchmark() -> dict[str, Any]:
             "reply_snippet": reply[:60],
             "audio_bytes": audio_len,
             "has_audio": has_audio,
+            "keyword_coverage": keyword_share,
             "passed": passed,
         })
 
