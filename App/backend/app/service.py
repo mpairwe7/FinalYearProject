@@ -3180,6 +3180,8 @@ def localize_reply(reply: str, locale: str) -> str:
             return None, "figures_changed"
         if not mt.length_plausible(source_to_translate, candidate):
             return None, "collapsed"
+        if mt.looped(source_to_translate, candidate):
+            return None, "looped"
         if not mt.units_survived(source_to_translate, candidate):
             candidate = mt.restore_missing_units(source_to_translate, candidate)
             if not mt.units_survived(source_to_translate, candidate):
