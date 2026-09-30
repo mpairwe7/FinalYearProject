@@ -63,6 +63,29 @@ class DeskTestCase(unittest.IsolatedAsyncioTestCase):
         return [c.args[1] for c in self.lobby.call_args_list if c.args[0] == event]
 
 
+class ClaimRouteRoleTests(unittest.TestCase):
+    """The route decides who is a supervisor: the role on the token, nothing the client sends."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from app.main import app
+
+        db.init_db()
+        init_receptionist_schema()
+        cls.client = TestClient(app)
+
+    def test_only_an_admin_may_step_into_a_call_the_ai_is_handling(self):
+        call_id = f"call_role_{uuid.uuid4().hex[:8]}"
+        create_call(call_id, conversation_id=f"conv_{call_id}")
+        claim = AsyncMock(return_value={"claimed": True})
+        with patch.object(desk, "claim", claim):
+            for role, supervisor in (("ura_staff", False), ("ura_admin", True)):
+                token = make_dev_token(f"{role}_claim", role=role)
+                r = self.client.post(f"/v1/admin/calls/{call_id}/claim", headers={"Authorization": f"Bearer {token}"})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertIs(claim.call_args.kwargs["is_supervisor"], supervisor)
+
+
 class ClaimTests(DeskTestCase):
     async def test_two_officers_at_once_one_wins(self):
         results = await asyncio.gather(
@@ -100,10 +123,20 @@ class ClaimTests(DeskTestCase):
         await desk.release(self.call_id, "okello")
         self.assertEqual(self.lobby_events("call.unclaimed"), [{"call_id": self.call_id, "reason": "released"}])
 
+    async def test_an_officer_cannot_take_a_call_the_ai_is_handling(self):
+        """Officers take the calls the AI hands over; stepping in is a supervisor's call."""
+        self.room.state.mode = "ai"
+        with patch.object(flags, "is_enabled", side_effect=queue_on), self.assertRaises(desk.DeskError) as err:
+            await desk.claim(self.call_id, "okello")
+        self.assertEqual(err.exception.status, 403)
+        self.assertEqual(self.room.state.mode, "ai")
+        self.assertEqual(self.lobby_events("call.transfer_requested"), [])
+        self.assertEqual(get_call(self.call_id)["claimed_by"] or "", "")
+
     async def test_taking_over_from_the_ai_goes_through_the_queue_and_back(self):
         self.room.state.mode = "ai"
         with patch.object(flags, "is_enabled", side_effect=queue_on):
-            await desk.claim(self.call_id, "okello")
+            await desk.claim(self.call_id, "okello", is_supervisor=True)
         self.assertEqual((self.room.state.mode, self.room.state.transfer_reason), ("transferring", "officer_takeover"))
         self.assertEqual(len(self.lobby_events("call.transfer_requested")), 1)
         await desk.release(self.call_id, "okello")
@@ -114,7 +147,7 @@ class ClaimTests(DeskTestCase):
     async def test_no_take_over_without_the_ticket_queue(self):
         self.room.state.mode = "ai"
         with patch.object(flags, "is_enabled", return_value=False), self.assertRaises(desk.DeskError) as err:
-            await desk.claim(self.call_id, "okello")
+            await desk.claim(self.call_id, "okello", is_supervisor=True)
         self.assertEqual(err.exception.status, 409)
         self.assertEqual(self.room.state.mode, "ai")
 
