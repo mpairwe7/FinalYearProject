@@ -4,7 +4,8 @@
  * Exercises the browser side of the STT/TTS surface against a fully stubbed
  * `/api/*` (see helpers.ts): the real getUserMedia → MediaRecorder → AudioContext
  * capture pipeline runs against Chromium's fake media device, and the captured
- * audio is POSTed to the stubbed `/v1/voice/chat` and `/v1/tts`. We assert the UI
+ * audio is POSTed to the stubbed `/v1/voice/chat`, and replies are read from the
+ * stubbed `/v1/tts/stream` (or `/v1/tts`, its fallback). We assert the UI
  * state machine and the *request contract* (raw-audio body, consent header,
  * sample-rate query) rather than transcription accuracy (the fake mic is silent).
  *
@@ -129,8 +130,29 @@ test.describe("Voice STT/TTS (mocked)", () => {
     });
   });
 
-  test("listening to a reply calls /v1/tts with the reply text", async ({ page }) => {
+  test("listening to a reply streams its speech from /v1/tts/stream", async ({ page }) => {
     await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+
+    const streamReq = page.waitForRequest("**/api/v1/tts/stream");
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    const req = await streamReq;
+    expect(req.method()).toBe("POST");
+    const body = req.postDataJSON();
+    expect(body.language).toBe("en");
+    expect(typeof body.text).toBe("string");
+    expect(body.text.length).toBeGreaterThan(0);
+    // Opus where the browser plays it, else WAV.
+    expect(["opus", "wav"]).toContain(body.format);
+  });
+
+  test("listening falls back to /v1/tts when the stream is unavailable", async ({ page }) => {
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.route("**/api/v1/tts/stream", (route) => route.fulfill({ status: 503, body: "down" }));
     await page.goto("/");
     await sendMessage(page, "What is the VAT rate?");
     await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
@@ -139,11 +161,8 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
     const ttsReq = page.waitForRequest("**/api/v1/tts");
     await page.getByRole("button", { name: /Listen in English/ }).last().click();
-    const req = await ttsReq;
-    expect(req.method()).toBe("POST");
-    const body = req.postDataJSON();
+    const body = (await ttsReq).postDataJSON();
     expect(body.language).toBe("en");
-    expect(typeof body.text).toBe("string");
     expect(body.text.length).toBeGreaterThan(0);
   });
 
