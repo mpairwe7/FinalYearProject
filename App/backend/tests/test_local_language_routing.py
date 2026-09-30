@@ -112,6 +112,29 @@ class EffectiveLocaleTest(unittest.TestCase):
             out = service.ChatModel.generate(model, message="What is the VAT rate?")
         localize.assert_not_called()
         self.assertEqual(out["reply"], "The VAT rate is 18%.")
+        self.assertEqual(out["reply_locale"], "en")
+
+    def test_reply_locale_is_the_language_the_reply_is_in(self) -> None:
+        """Voice reads reply_locale: English served after failed MT gets the English voice."""
+        from app import service
+
+        model = service.ChatModel.__new__(service.ChatModel)
+        english = "The VAT rate is 18%."
+        luganda = "Buli kampuni esasula omusolo era esindika alipoota."
+        cases = (
+            ("translated", english, "Omusolo gwa VAT...", "lg"),
+            ("translation failed", english, english, "en"),
+            ("answered in Luganda already", luganda, luganda, "lg"),
+        )
+        for label, reply, localized, expected in cases:
+            with self.subTest(label), \
+                    mock.patch.object(
+                        service.ChatModel, "_generate_en", return_value={"reply": reply, "locale": "lg"}
+                    ), \
+                    mock.patch.object(service, "localize_reply", return_value=localized):
+                # nosemgrep: ura-llm01-raw-user-input-to-llm  # _generate_en mocked; no model call.
+                out = service.ChatModel.generate(model, message="Omusolo gwa VAT guli gwa bbeeyi ki?")
+                self.assertEqual(out["reply_locale"], expected)
 
 
 if __name__ == "__main__":

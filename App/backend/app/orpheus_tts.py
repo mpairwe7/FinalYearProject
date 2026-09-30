@@ -18,6 +18,7 @@ Opt-in by URL: with ``ORPHEUS_TTS_URL`` unset nothing here is ever called and
 | ``ORPHEUS_TTS_SPEAKER_SW`` | ``waxal_swa_0006``| Swahili speaker id                      |
 | ``ORPHEUS_TTS_SPEAKER_EN`` | ``salt_eng_0001``| English (Ugandan) speaker id             |
 | ``ORPHEUS_TTS_TIMEOUT_S``  | ``20``           | per-request ceiling                      |
+| ``ORPHEUS_TTS_MAX_CHARS``  | ``120``          | longest text sent in one request         |
 
 A connection failure opens a short cooldown (:data:`COOLDOWN_S`) so a dead
 sidecar costs one timeout, not one per sentence; callers fall through to the
@@ -26,8 +27,10 @@ next voice on :class:`OrpheusUnavailable`.
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import AsyncIterator
@@ -42,6 +45,15 @@ class OrpheusUnavailable(RuntimeError):
     """The sidecar is not configured, not reachable, or refused the request."""
 
 
+class OrpheusIncomplete(RuntimeError):
+    """A stream stopped after its first audio: the caller heard only part of it.
+
+    Deliberately not an :class:`OrpheusUnavailable`: that one sends a sentence
+    to the next voice, which would repeat the part already heard. The caller
+    keeps what it has but must not cache it as the whole sentence.
+    """
+
+
 def _url() -> str:
     return os.getenv("ORPHEUS_TTS_URL", "").strip().rstrip("/")
 
@@ -53,7 +65,16 @@ def _timeout_s() -> float:
         return 20.0
 
 
+def _max_chars() -> int:
+    try:
+        return max(40, int(os.getenv("ORPHEUS_TTS_MAX_CHARS", "120")))
+    except ValueError:
+        return 120
+
+
 _DEFAULT_SPEAKERS = {"lg": "salt_lug_0001", "sw": "waxal_swa_0006", "en": "salt_eng_0001"}
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
+_CLAUSE_BREAK_RE = re.compile(r"(?<=[,;:\u2014\u2013])\s+")
 
 _lock = threading.Lock()
 _down_until = 0.0
@@ -152,6 +173,39 @@ def _request(text: str, language: str, response_format: str) -> tuple[str, dict[
     return f"{_url()}/v1/audio/speech", body
 
 
+def split_for_voice(text: str, limit: int | None = None) -> list[str]:
+    """*text* in pieces of at most *limit* characters, cut at sentence, clause, then word breaks.
+
+    The sidecar stops at ``ORPHEUS_MAX_TOKENS`` (1400 tokens, 16.98 s of audio)
+    whatever it was asked to say. Sent whole, a 335-character Luganda sentence
+    was cut off mid-word on a call, and every /v1/voice/chat reply ended at
+    exactly 16.98 s. Speech runs up to ~0.12 s a character when digits are read
+    one by one, so the default 120 characters stays inside the cap.
+    """
+    limit = limit or _max_chars()
+    if len(text) <= limit:
+        return [text]
+    units: list[str] = []
+    for sentence in _SENTENCE_BREAK_RE.split(" ".join(text.split())):
+        if len(sentence) <= limit:
+            units.append(sentence)
+            continue
+        for clause in _CLAUSE_BREAK_RE.split(sentence):
+            units.extend([clause] if len(clause) <= limit else _pack(clause.split(" "), limit))
+    return _pack(units, limit)
+
+
+def _pack(units: list[str], limit: int) -> list[str]:
+    """Consecutive *units* joined by spaces into as few pieces of at most *limit* as fit."""
+    pieces: list[str] = []
+    for unit in units:
+        if pieces and len(pieces[-1]) + 1 + len(unit) <= limit:
+            pieces[-1] = f"{pieces[-1]} {unit}"
+        else:
+            pieces.append(unit)
+    return pieces
+
+
 def pcm16_to_wav(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
     """Orpheus's 24 kHz PCM as a WAV (the phrase cache stores WAVs)."""
     from .speech_service import pcm16_to_wav as wrap
@@ -160,10 +214,24 @@ def pcm16_to_wav(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
 
 
 def synthesize(text: str, language: str) -> bytes:
-    """Whole utterance as 24 kHz PCM16. Raises :class:`OrpheusUnavailable`."""
+    """Whole utterance as 24 kHz PCM16. Raises :class:`OrpheusUnavailable`.
+
+    Longer text is voiced as :func:`split_for_voice` pieces, concurrently (the
+    sidecar batches them), and joined in order.
+    """
+    url, body = _request(text, language, "pcm")
+    pieces = split_for_voice(text)
+    if len(pieces) == 1:
+        return _post(url, body)
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(3, len(pieces)), thread_name_prefix="orpheus"
+    ) as pool:
+        return b"".join(pool.map(lambda piece: _post(url, {**body, "input": piece}), pieces))
+
+
+def _post(url: str, body: dict[str, object]) -> bytes:
     import httpx
 
-    url, body = _request(text, language, "pcm")
     try:
         resp = httpx.post(url, json=body, timeout=_timeout_s())
     except httpx.HTTPError as exc:
@@ -171,16 +239,20 @@ def synthesize(text: str, language: str) -> bytes:
         raise OrpheusUnavailable(str(exc)) from exc
     if resp.status_code != 200 or not resp.content:
         raise OrpheusUnavailable(f"HTTP {resp.status_code}")
-    return resp.content
+    # Whole samples only: an odd byte would shift the next piece's samples.
+    return resp.content[: len(resp.content) - len(resp.content) % 2]
 
 
 async def stream(text: str, language: str) -> AsyncIterator[bytes]:
     """24 kHz PCM16 chunks as the sidecar decodes them.
 
     Raises :class:`OrpheusUnavailable` before the first chunk if the sidecar
-    cannot be used; a failure after audio has started ends the stream early
-    (the caller has already heard part of the sentence — falling back to a
-    different voice mid-sentence would be worse).
+    cannot be used. A failure after audio has started raises
+    :class:`OrpheusIncomplete` instead: the caller has already heard part of
+    the sentence, and falling back to a different voice mid-sentence would be
+    worse. Longer text is voiced as :func:`split_for_voice` pieces, one after
+    another: each streams faster than it plays, so the next piece is ready
+    before the last one ends.
     """
     import httpx
 
@@ -188,21 +260,26 @@ async def stream(text: str, language: str) -> AsyncIterator[bytes]:
     started = False
     try:
         async with httpx.AsyncClient(timeout=_timeout_s()) as client:
-            async with client.stream("POST", url, json=body) as resp:
-                if resp.status_code != 200:
-                    raise OrpheusUnavailable(f"HTTP {resp.status_code}")
-                carry = b""
-                async for chunk in resp.aiter_bytes():
-                    data = carry + chunk
-                    # Keep whole 16-bit samples: an odd split byte would
-                    # shift every later sample by one byte (loud noise).
-                    cut = len(data) - (len(data) % 2)
-                    carry = data[cut:]
-                    if cut:
-                        started = True
-                        yield data[:cut]
+            for piece in split_for_voice(text):
+                async with client.stream("POST", url, json={**body, "input": piece}) as resp:
+                    if resp.status_code != 200:
+                        if started:
+                            logger.warning("Orpheus refused the rest of an utterance: HTTP %d", resp.status_code)
+                            raise OrpheusIncomplete(f"HTTP {resp.status_code}")
+                        raise OrpheusUnavailable(f"HTTP {resp.status_code}")
+                    carry = b""
+                    async for chunk in resp.aiter_bytes():
+                        data = carry + chunk
+                        # Keep whole 16-bit samples: an odd split byte would
+                        # shift every later sample by one byte (loud noise).
+                        cut = len(data) - (len(data) % 2)
+                        carry = data[cut:]
+                        if cut:
+                            started = True
+                            yield data[:cut]
     except httpx.HTTPError as exc:
         if not started:
             _mark_down(exc)
             raise OrpheusUnavailable(str(exc)) from exc
         logger.warning("Orpheus stream broke mid-utterance: %s", exc)
+        raise OrpheusIncomplete(str(exc)) from exc

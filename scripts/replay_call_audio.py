@@ -25,6 +25,7 @@ import argparse
 import asyncio
 import datetime as dt
 import json
+import re
 import time
 import wave
 from dataclasses import dataclass, field
@@ -86,6 +87,13 @@ class Scenario:
 
 #: An answer this short may carry too few words to place its language.
 SHORT_PROMPT_WORDS = 8
+
+#: An answer that ran into a decoding loop: one mark eight times over, or a run
+#: of brackets. "...oba 0[[[[((((..." (328 characters) passed a Luganda TIN
+#: turn on 2026-09-30 because only the answer's language was checked. Kept
+#: separate from the service's own guard (mt.looped), so a gap in that guard
+#: fails the replay instead of hiding in it.
+RUNAWAY_RE = re.compile(r"([^\w\s])\1{7,}|[\[\](){}]{8,}")
 
 #: A barge-in passes when the assistant's audio stops within this long.
 BARGE_STOP_BUDGET_MS = 2000
@@ -383,13 +391,16 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
         words = len(" ".join(answers).split())
         unsure_ok = turn["reply_language"] is None and 0 < words <= SHORT_PROMPT_WORDS
         language_ok = language_ok and (turn["reply_language"] == expected or unsure_ok)
+    for turn in result["turns"]:
+        turn["runaway"] = any(RUNAWAY_RE.search(text) for text in turn["assistant"])
+    runaway_ok = not any(turn["runaway"] for turn in result["turns"])
     linger_ok = sc.expect_after_linger is None or sc.expect_after_linger in result.get("after_linger", [])
     result["language_sequence"] = seen
     result["passed"] = (
         bool(result["language_detection"])
         and (sc.expect_languages is None or seen == sc.expect_languages)
         and status_ok and barge_ok
-        and linger_ok and language_ok
+        and linger_ok and language_ok and runaway_ok
     )
     return result
 

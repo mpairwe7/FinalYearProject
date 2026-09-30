@@ -123,14 +123,14 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | edge-tts speaker for English when Orpheus does not voice it (a fallback) |
 | `ORPHEUS_TTS_URL` | unset (`http://orpheus-tts:8100` in compose) | The local Orpheus voice sidecar |
 | `ORPHEUS_TTS_LANGUAGES` | `lg` (`lg,sw,en` in the GPU overlay) | Languages Orpheus voices; the rest fall to Spark-TTS-SALT (sw, lg), then edge-tts |
+| `ORPHEUS_TTS_MAX_CHARS` | `120` | Longest text sent to Orpheus in one request; longer text is voiced in pieces cut at sentence, clause, then word breaks. The sidecar stops at 16.98 s of audio (`ORPHEUS_MAX_TOKENS` 1400) and spoken digits run to ~0.12 s a character |
 | `RECEPTIONIST_LOCAL_BARGE_IN` | `true` | The sentinel's VAD stops the assistant when the caller talks over it, before Whisper has transcribed the two words the engine's own rule waits for (turn off on a device whose speaker leaks into the mic) |
 | `RECEPTIONIST_BARGE_IN_MIN_S` | `0.4` | Speech past the VAD onset (itself 0.2 s) that counts as talking over the assistant |
 | `RECEPTIONIST_LIVE_PARTIALS` | `true` | Streams interim transcripts of the caller's own speech back to their screen |
 | `RECEPTIONIST_PARTIAL_INTERVAL_S` | `0.8` | Seconds between interim re-decodes of the utterance in progress |
 | `VOICE_TRANSCRIPT_TTL_DAYS` | `90` | Retention for voice turns and non-ticketed call records |
 | `RECEPTIONIST_TURN_TIMEOUT_S` | `1.0` | Silence after VAD's 0.5 s stop window before the cascaded turn closes (standard fallback) |
-| `RECEPTIONIST_FAST_TURN_TIMEOUT_S` | `0.35` | Adaptive fast turn-close after completed question punctuation (`?`, `!`, `.`) or interrogative prefixes |
-| `RECEPTIONIST_HESITATION_TURN_TIMEOUT_S` | `1.2` | Adaptive pause buffer when trailing on hesitation particles (`and`, `era`, `oba`, `na`, `au`) |
+| `RECEPTIONIST_SLOW_PAUSE_MS` | `600` | Silence after each sentence once the caller has asked the assistant to slow down (the local voices have no speed control) |
 | `RECEPTIONIST_IDLE_REPROMPT_S` | `12` | Caller silence, counted from the end of the assistant's speech, before it asks "Are you still there?"; `0` turns silence handling off |
 | `RECEPTIONIST_IDLE_REPROMPTS` | `1` | How many such checks before a still-silent call is ended (end reason `caller_idle`) and its call slot freed |
 | `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
@@ -294,6 +294,18 @@ ngrok http 8000
 6. AI confirms: *"So if I got it right, you're asking about **group import** — is that right?"*
 7. Caller says: *"Yes."*
 8. AI answers the corrected query directly from the knowledge base.
+
+### In-call requests the assistant handles itself
+
+Short requests — eight words or fewer, so a question that merely contains one
+of these words is answered, not obeyed — in English, Luganda or Swahili:
+
+| The caller says | The assistant |
+|---|---|
+| "Could you repeat that?", "Kiddemu", "Rudia tena" | repeats its last answer |
+| "Speak slower", "Yogera mpola", "Ongea polepole" | says it will slow down; every later sentence is followed by `RECEPTIONIST_SLOW_PAUSE_MS` of silence |
+| "Goodbye", "End the call", "Weeraba", "Kwaheri" | says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`) |
+| nothing, for `RECEPTIONIST_IDLE_REPROMPT_S` | asks "Are you still there?"; after `RECEPTIONIST_IDLE_REPROMPTS` such checks, says goodbye and ends the call (`caller_idle`) |
 
 ### Step 4: Transfer to Human Officer
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
@@ -472,6 +484,7 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | Luganda answers in an English accent, or silent | `ORPHEUS_TTS_URL` unset or sidecar down (`Orpheus TTS unreachable` in api logs); `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG=false` drops the English stand-in on purpose. `GET /v1/speech/health` reports `status: degraded` and `orpheus: cooldown` while the sidecar is down; Luganda then uses Spark-TTS-SALT and does not wait out the Orpheus timeout |
 | Luganda TIN question comes back as VAT, or “ttiimu” / “mu ora” never hits the TIN passages | Whisper-SALT can be confident and still wrong (`ttiimu`, `timu`, `okuva mu ora` on `lg_tin.wav`). ClarifyGate asks before answering. Before Qdrant, `repair_asr_entities` rewrites those to `TIN` and `mu URA`. Bare “era” stays “and” |
 | Luganda “how much VAT / vati” is answered from a passage instead of the calculator | The call tries the chat calculator on the repaired transcript before retrieval. `vati` and `okwewandiisa` open `check_vat_registration` / `calculate_vat`. A later “what about 2 million?” stays on that tool |
+| An answer stops mid-word, or runs on as babble | `docker logs ura-app-orpheus-tts`: a `synth … audio_s=16.98` line is a request that hit the sidecar's cap. Text longer than `ORPHEUS_TTS_MAX_CHARS` is already split, so lower that value. Babble on short text usually comes from digit strings, which Orpheus cannot read (G84; the contact footer is no longer spoken for this reason) or from asides such as "(18%)" or "(FY2026-27)" that `clean_text_for_speech` does not yet rewrite |
 | English answer read by an American voice | Orpheus is not voicing English: `ORPHEUS_TTS_LANGUAGES` lacks `en`, or the sidecar is down (`GET /v1/speech/health` → `orpheus: cooldown`), so edge-tts took the line |
 | Caller heard two answers to one question after a language switch | api log should show `Dropping a turn the language router is re-asking`; if not, the router's turn claim did not reach the brain (`brain.turn_claimed` is wired in `multilingual.py`) |
 | English caller moved to Luganda | api log `Language vote lg p=…` lines; raise `RECEPTIONIST_LID_HYSTERESIS_CONFIDENCE` or `RECEPTIONIST_LID_MIN_SPEECH_S` |

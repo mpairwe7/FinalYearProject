@@ -1,5 +1,5 @@
 {
-  "timestamp": 1790719704.4899483,
+  "timestamp": 1790727977.3851798,
   "target_url": "ws://127.0.0.1:8083/v1/calls/stream",
   "all_passed": true,
   "total_tests": 7,
@@ -13,7 +13,7 @@
     {
       "test": "manual_language_override_ux",
       "passed": true,
-      "detail": "Override emitted: True; Response: Omusolo ogw'omuwendo ogwongerwako (V-A-T) mu Uganda guli ebitundu 18 k..."
+      "detail": "Override emitted: True; Response: Omusolo ogw'omuwendo ogwongerwako (V-A-T) guli ebitundu ebitundu 18 ku..."
     },
     {
       "test": "live_partial_captions_ux",
@@ -29,7 +29,8 @@
     {
       "test": "barge_in_user_control",
       "passed": true,
-      "bot_stop_ms": 1146,
+      "bot_stop_ms": 1140,
+      "talking_at_barge": true,
       "interrupt_seen": true
     },
     {
@@ -44,11 +45,11 @@
       "languages": {
         "en_vat_accuracy": {
           "passed": true,
-          "text": "The standard rate of Value Added Tax (V-A-T) in Uganda is 18 percent on taxable supplies of goods and services."
+          "text": "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; V-A-T-registered businesses collect it from customers and remit it to U-R-A. - Statutory Basis: Value Added Tax Act\n\nThat comes from the official U-R-A 2026 to 2027 rate table. Would you like more detail?"
         },
         "lg_vat_accuracy": {
           "passed": true,
-          "text": "Okusinziira ku tteeka lya U-R-A ery'omwaka 2025/26, omuntu alina okusasula omusolo gwa ebitundu 30 ku buli kikumi ku magoba agava mu mirimu gy'okuzimba oba ebitundu 40 ku buli kikumi ku musaala gw'abakugu abaweebwa emirimu egy'enjawulo. Okumanya ebisingawo, weebuuze ku U-R-A ku 0 800, 117, 0 0 0 oba 0 800, 217, 0 0 0."
+          "text": "Okusinziira ku biwandiiko bya U-R-A, omusolo ogw'ebitundu ebitundu 18 ku buli kikumi gussibwa ku nsimbi zonna ezikung'aanyiziddwa mu kusuza abagenyi mu wooteeri oba ebifo ebisulwamu. Wandiyagadde okwogera n'omukozi ku nsonga eno?"
         },
         "sw_tin_accuracy": {
           "passed": true,
@@ -62,16 +63,16 @@
       "ready": true,
       "vad": true,
       "transcript": "What is the standard VAT rate in Uganda?",
-      "reply": "The standard rate of Value Added Tax (V-A-T) in Uganda is 18 percent on taxable supplies of goods and services.",
-      "retrieval_mode": "canonical_cache",
-      "audio_chunks": 1,
+      "reply": "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; V-A-T-registered businesses collect it from customers and remit it to U-R-A. Statutory Basis: Value Added Tax Act\n\nThat comes from the official U-R-A 2026 to 2027 rate table.",
+      "retrieval_mode": "calculator",
+      "audio_chunks": 4,
       "latency_report": {
         "type": "latency_report",
-        "asr_ms": 304.6,
+        "asr_ms": 337.0,
         "mt_ms": 0.0,
-        "llm_ms": 0.5,
-        "tts_first_chunk_ms": 0.9,
-        "total_ms": 306.0,
+        "llm_ms": 43.6,
+        "tts_first_chunk_ms": 5351.9,
+        "total_ms": 5732.5,
         "asr_backend": "whisper_salt",
         "tts_backend": "speech.tts",
         "mt_backend": ""

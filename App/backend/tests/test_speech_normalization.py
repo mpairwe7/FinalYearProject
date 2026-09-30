@@ -123,6 +123,70 @@ def test_a_url_goes_with_the_at_that_introduced_it():
     assert res == "Visit the official U-R-A web portal. Then log in."
 
 
+def test_the_calculator_s_asides_are_spoken_once_and_plainly():
+    # The calculator's VAT line, verbatim: spoken as written, Orpheus ran on
+    # past the answer ("…to gwa gwa, isi isi zo…") until its 17 s cap.
+    raw = (
+        "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is 18% (18%)** "
+        "(FY2026-27). That comes from the official URA FY2026-27 rate table."
+    )
+    assert clean_text_for_speech(raw, locale="en") == (
+        "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. "
+        "That comes from the official U-R-A 2026 to 2027 rate table."
+    )
+    assert clean_text_for_speech(raw, locale="lg") == (
+        "The standard rate of Value Added Tax (V-A-T) is ebitundu 18 ku buli kikumi. "
+        "That comes from the official U-R-A 2026-27 rate table."
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "spoken"),
+    [
+        # a different figure, not a repeat
+        ("It rose from 118% (18%) last year.", "It rose from 118 percent (18 percent) last year."),
+        # a date, not a list of names
+        ("Filed on (12/05/2026) at noon.", "Filed on (12/05/2026) at noon."),
+        # alternatives that are not one name
+        ("Deductions (NSSF / withholding) apply.", "Deductions (N-S-S-F / withholding) apply."),
+    ],
+)
+def test_other_asides_are_left_alone(raw, spoken):
+    assert clean_text_for_speech(raw, locale="en") == spoken
+
+
+def test_the_contact_footer_is_not_spoken_in_any_language():
+    from app.text_signals import CONTACT_FOOTER, LOCALIZED_CONTACT_FOOTERS
+
+    for locale, footer in {"en": CONTACT_FOOTER, **LOCALIZED_CONTACT_FOOTERS}.items():
+        res = clean_text_for_speech(f"Register on the portal.\n\n{footer}\n\nYou might also want to know: X", locale)
+        assert "0800" not in res and "0772" not in res
+        assert res.startswith("Register on the portal.") and res.endswith("You might also want to know: X")
+
+
+def test_a_number_the_caller_asked_for_is_still_spoken():
+    res = clean_text_for_speech("URA's toll-free line is 0800 117 000.", locale="en")
+    assert res == "U-R-A's toll-free line is 0 800, 117, 0 0 0."
+
+
+def test_the_aside_rules_run_in_linear_time():
+    # CodeQL py/polynomial-redos: a leading \s* before "(" was retried from
+    # every position in a run of spaces (20k spaces took ~1 s).
+    import time
+
+    from app.speech_normalization import _FY_ASIDE_RE, _REPEATED_FIGURE_RE
+
+    for text in (" " * 20000 + "(FY", "0" * 20000 + " (0"):
+        start = time.perf_counter()
+        _FY_ASIDE_RE.sub("", text)
+        _REPEATED_FIGURE_RE.sub(r"\1", text)
+        assert time.perf_counter() - start < 0.2
+
+
+def test_a_fiscal_year_rolls_over_the_century():
+    assert clean_text_for_speech("FY2099-00", locale="en") == "2099 to 2100"
+
+
 def test_empty_and_whitespace():
     assert clean_text_for_speech("") == ""
     assert clean_text_for_speech("   ") == ""

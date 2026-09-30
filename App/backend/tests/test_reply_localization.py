@@ -62,6 +62,24 @@ class LocalizeReplyTest(unittest.TestCase):
         with mock.patch("app.sunbird.translate_from_english", return_value="Yee"):
             self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
+    def test_a_translation_that_loops_serves_english(self) -> None:
+        """Sunflower rendered a phone number as "0[[[[((((…" on a call (2026-09-30)."""
+        english = "Contact URA on 0800 117 000 or 0800 217 000 about VAT at 18%."
+        whole = "Tuukirira URA ku 0800 117 000 oba 0800 217 000 ku VAT ebitundu 18 ku buli kikumi."
+        looping = "Tuukirira URA ku 0800 117 000 oba 0" + "[" * 16 + "(" * 312 + " ku VAT ebitundu 18 ku buli kikumi."
+        with mock.patch("app.sunbird.translate_from_english", return_value=whole):
+            self.assertEqual(service.localize_reply(english, "lg"), whole)  # every other guard passes it
+        mt.cache.clear()
+        with mock.patch("app.sunbird.translate_from_english", return_value=looping):
+            self.assertEqual(service.localize_reply(english, "lg"), english)
+
+    def test_only_a_loop_the_english_lacks_counts(self) -> None:
+        table = "| Tax | Rate |\n|----------|------|\n| VAT | 18% |"
+        self.assertFalse(mt.looped(table, "| Omusolo | Ebitundu |\n|----------|------|\n| VAT | 18% |"))
+        self.assertTrue(mt.looped("EFRIS is required.", "EFRIS kye ki kati kozesa kozesa kozesa kozesa kozesa kozesa."))
+        self.assertTrue(mt.looped("Call 0800 217 000.", "Kuba 0" + "(" * 20))
+        self.assertFalse(mt.looped("Call 0800 217 000.", "Kuba ku 0800 217 000."))
+
     def test_blank_reply_is_not_sent_for_translation(self) -> None:
         with mock.patch("app.sunbird.translate_from_english") as translate:
             self.assertEqual(service.localize_reply("", "lg"), "")

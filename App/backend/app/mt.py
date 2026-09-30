@@ -423,6 +423,23 @@ def length_plausible(source: str, translated: str) -> bool:
     return len((translated or "").strip()) >= source_length * MT_MIN_LENGTH_RATIO
 
 
+#: A decoding loop: one punctuation mark eight times over, a run of brackets,
+#: or one word six times in a row. Greedy decoding falls into these ("kozesa
+#: kozesa kozesa…"; a phone number rendered "0[[[[((((…", 328 characters, on a
+#: call on 2026-09-30), and no other guard sees them: ``figures`` ignores phone
+#: numbers, and a loop only makes the text longer.
+_LOOP_RE = re.compile(r"([^\w\s])\1{7,}|[\[\](){}]{8,}|\b(\w{1,30})(?:\s+\2\b){5,}")
+
+
+def looped(source: str, translated: str) -> bool:
+    """True when *translated* runs into a loop that *source* does not have.
+
+    Compared with the source because a markdown table's ``|----------|`` is
+    a run of one mark too, and translating it faithfully is not a failure.
+    """
+    return any(match.group(0) not in (source or "") for match in _LOOP_RE.finditer(translated or ""))
+
+
 #: A citation marker as the answer carries it. Same shape ``claim_verifier``
 #: reads, and deliberately so: the two must agree on what a citation is or the
 #: verification report describes a different text than the one shipped.
