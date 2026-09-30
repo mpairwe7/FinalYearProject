@@ -114,12 +114,13 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
+| `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer; `0` turns them off |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Fallback model for the officer brief; local Sunflower writes it first for every call |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
-| `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* |
+| `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn) |
 | `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | edge-tts speaker for English when Orpheus does not voice it (a fallback) |
 | `ORPHEUS_TTS_URL` | unset (`http://orpheus-tts:8100` in compose) | The local Orpheus voice sidecar |
 | `ORPHEUS_TTS_LANGUAGES` | `lg` (`lg,sw,en` in the GPU overlay) | Languages Orpheus voices; the rest fall to Spark-TTS-SALT (sw, lg), then edge-tts |
@@ -266,7 +267,8 @@ ngrok http 8000
 3. Click **Accept & Call**.
 4. The synthesizer plays two PBX dialing ring pulses.
 5. The AI answers (always in English, whatever the chat language is — §6):
-   *"Hi, thanks for contacting URA. I'm your assistant today. Ask your question in your preferred language — English, Luganda or Swahili — and I'll give you the answer in that language. How can I help you today?"*
+   *"Hi, thanks for contacting URA. I'm your AI assistant today. Ask your question in your preferred language — English, Luganda or Swahili — and I'll give you the answer in that language. You can ask for an officer at any time. How can I help you today?"*
+   It says it is an AI, and that a person is one request away, before anything else.
    The recording notice is the consent dialog in step 3; the greeting no longer repeats it.
 
 ### Step 2: Knowledge Retrieval (Happy Path)
@@ -306,21 +308,54 @@ of these words is answered, not obeyed — in English, Luganda or Swahili:
 | "Speak slower", "Yogera mpola", "Ongea polepole" | says it will slow down; every later sentence is followed by `RECEPTIONIST_SLOW_PAUSE_MS` of silence |
 | "Goodbye", "End the call", "Weeraba", "Kwaheri" | says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`) |
 | nothing, for `RECEPTIONIST_IDLE_REPROMPT_S` | asks "Are you still there?"; after `RECEPTIONIST_IDLE_REPROMPTS` such checks, says goodbye and ends the call (`caller_idle`) |
+| "Yes", "Tell me more", "Weeyongere", "Endelea" after *"Would you like more detail?"* | reads the rest of the answer, three sentences at a time |
+| "No", "That's all" after either question | *"No problem. What else can I help you with?"* |
+
+### When a call reaches an officer
+
+The AI answers every call; officers get only the calls it hands over. On
+LiveKit (production) the AI joins the call's room as the agent participant; on
+the local stack the same pipeline runs over the call socket. Either way the
+caller hears the AI first.
+
+| Trigger | What happens | `transfer_reason` |
+|---|---|---|
+| The caller asks for a person, however it is put: "Can I speak with an agent?", "Put me through to someone", or just "Officer" / "Agent, please" (Luganda *omukozi*, Swahili *afisa*); or taps **Talk to an officer** | Transferred at once | `caller_requested` |
+| A dispute, objection, appeal or legal question | Transferred at once | `tax_dispute` (or the chat's reason) |
+| Nothing in the knowledge base, or the lookup fails or takes over 25 s | Transferred at once | `no_knowledge_match`, `system_error`, `timeout` |
+| Clarification fails `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` times | Transferred | `clarification_failed` |
+| An uncertain answer (confidence 0.35–0.50), a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
+| The caller speaks of ending their life (English, *okwetta*, *kujiua*) | Before anything else, and never read as a goodbye: the crisis lines in full, with the emergency numbers in words, the counselling line on screen (0800 21 21 21), then *"Would you like me to connect you to a URA officer as well?"*. On yes, or at once if they also asked for a person, an **urgent** transfer; on no, the numbers stay on screen and the AI stays with them. The ticket carries no crisis text | `safety_concern` |
+
+Officers (`ura_staff`) cannot take a call the AI is still handling: the claim
+API answers 403 and the console hides **Take over**. A supervisor
+(`ura_admin`) can step in (`officer_takeover`). Every AI question is the only
+question in its turn, so "yes" can only mean one thing. A "yes" or "okay" said
+over an answer, before its question was heard, is a backchannel: the question
+is asked again, and nothing is acted on.
 
 ### Step 4: Transfer to Human Officer
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
 2. AI announces: *"I'm connecting you to a URA officer, please hold."*
-3. Status changes to **Transferring** with a ticket reference generated via `_maybe_create_ticket`.
+3. Status changes to **Transferring**, with the reference (`TIC-` and the ticket's first 8 characters) on the caller's screen.
 4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill: the
    topic and priority come from the handoff packet ("My account balance" → *Account
    question*, high), and the queue row shows **Waiting for officer**. The brain goes
    through `receptionist/transfer.py`, which also stores `topic`, `priority` and
    `transfer_requested_at` on the call.
-5. If nobody takes it within `RECEPTIONIST_TRANSFER_TIMEOUT_S` (90 s), the caller hears
-   their ticket reference, the call returns to the AI, and it is marked as owed a
-   callback (`needs_callback`, reason `no_officer_available`; lobby
-   `call.transfer_timed_out`) — a **Callback** chip on its row. Replay check:
-   `scripts/replay_call_audio.py --only 11_officer` (about 2 minutes).
+5. Every `RECEPTIONIST_HOLD_UPDATE_S` (30 s) the caller hears *"Thank you for holding. An
+   officer will be with you shortly."*, unless an officer has taken the call and is joining.
+   If nobody takes it within `RECEPTIONIST_TRANSFER_TIMEOUT_S` (90 s), the caller hears
+   *"All our officers are busy, so an officer will call you back. Meanwhile, I can still
+   help with other questions."*, their reference appears on screen as `TIC-XXXXXXXX` (never
+   read out: the voice cannot say a ticket id), the call returns to the AI, and it is
+   marked as owed a callback (`needs_callback`, reason `no_officer_available`; lobby
+   `call.transfer_timed_out`) — a **Callback** chip on its row. An officer who takes the
+   call at the last moment is waited for; the caller is not told everyone is busy while
+   an officer is joining. Replay check: `scripts/replay_call_audio.py --only 11_officer`
+   (about 2 minutes).
+6. With `FLAG_TICKET_QUEUE` off nothing is promised: the caller is told to call the
+   toll-free line, and the number appears on screen.
 
 ### Step 5: Officer Takeover & Live Audio Bridge (the Call Desk)
 1. On **any** staff page the officer gets a transfer alert (bottom right): wait ring,
@@ -335,7 +370,8 @@ of these words is answered, not obeyed — in English, Luganda or Swahili:
    …"*. The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
    asked for, then the audio joins: the caller's player is cleared and they hear *"You're
    now connected to Officer {Name}."* in the call's language. **Take over** does the same
-   for a call the AI is still handling.
+   for a call the AI is still handling; it is a supervisor's (`ura_admin`) action only —
+   officers take the calls the AI hands over.
 4. The AI goes silent: caller audio goes to the officer only, and anything the AI was
    still saying is dropped. Officer audio streams directly to the caller socket.
 5. `EnergyVAD` segments officer speech, transcribes turns, and records them in the live transcript.
@@ -463,11 +499,15 @@ Orpheus runs weight-only FP8 (`ORPHEUS_QUANTIZATION=fp8`): at bf16 an RTX A6000
 generates at only ~0.96× real time, which leaves no headroom; FP8 measured 234 ms to
 first audio at 0.63× real time (`evals/reports/orpheus_tts_2026-09-24_*.json`).
 
-**Replay check** (`scripts/replay_call_audio.py`, twelve scenarios): besides the
+**Replay check** (`scripts/replay_call_audio.py`, sixteen scenarios): besides the
 language events, each turn declares the language its answer must be in and fails if
 the receptionist's own word lists place it in another — a Swahili caller answered in
 English passed every other check. `12_silent_caller` says nothing after the greeting
-and expects the call to end. The harness receives audio at the demo socket's pace,
+and expects the call to end. `13`–`16` check escalation: a worried caller is offered
+an officer and says yes (transferred) or no (stays with the AI); "Officer, please"
+alone transfers; a caller in crisis hears the crisis lines, emergency numbers in
+words, and is transferred on yes. A scenario can require text in a reply
+(`expect_reply`), text said while lingering, and a status that must never come. The harness receives audio at the demo socket's pace,
 twice real time, so it can start talking during a pause *between* greeting sentences;
 that shows up as one barge-in on a first turn and is an artefact of the harness, not
 something a caller listening at normal speed triggers.

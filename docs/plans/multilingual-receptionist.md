@@ -23,10 +23,11 @@ they selected in the UI. Taxpayers routinely select English and then speak Lugan
 ### Required behaviour
 
 1. **Every call starts in English**, with the greeting: *"Hi, thanks for
-   contacting URA. I'm your assistant today. Ask your question in your preferred
+   contacting URA. I'm your AI assistant today. Ask your question in your preferred
    language — English, Luganda or Swahili — and I'll give you the answer in that
-   language. How can I help you today?"* (the plan left naming the languages
-   optional; they are named — §12).
+   language. You can ask for an officer at any time. How can I help you today?"*
+   (the plan left naming the languages optional; they are named — §12. "AI" and
+   the officer sentence were added on 2026-09-30 — §12.)
 2. **The first real question decides the language**, and that same question is
    answered in it — the caller never repeats it.
 3. **Mid-call switches are followed**, without flip-flopping on code-switched
@@ -156,6 +157,7 @@ clarify, Gemini Live, serializer and summary suites. Frontend:
 | 2026-09-24 | ServiceSwitcher spike | Can host a whole `Pipeline`, but its gates filter only frames going *into* a service and *up* out of it: an inactive engine's late reply still flows downstream to the speaker | Custom `EngineGate` at both ends of each branch in a `ParallelPipeline` (§7.4 fallback); `test_receptionist_engine_switch.py` pins the property |
 | 2026-09-24 | Greeting wording | — | Languages named in the greeting |
 | 2026-09-30 | Local-only receptionist | Owner decision: no cloud speech-to-speech on a call. Orpheus (Sunbird multilingual, FP8, own A6000) measured on the stack: first audio 0.27–0.31 s for en/sw/lg; Whisper-SALT round trip WER 0.00 en, 0.18 sw, 0.00 lg | **Gemini Live removed**: en, sw and lg on the local engine; Orpheus voices all three (`salt_eng_0001` added), Spark-TTS-SALT then edge-tts as fallbacks; Sunflower writes brief and summary first. The router claims a switched turn so it is answered once; the sentinel's VAD barge-in now stops the local engine. Swahili answers (no longer on Gemini) exposed G64: replies are now translated paragraph by paragraph. A silent caller is checked on and the call ended (G77) |
+| 2026-09-30 | Greeting on an AI-first line | Round trip through Whisper-SALT: "I am your AI assistant" came back as "A I assistant"; "virtual assistant" came back as "vital assistant" | The agreed greeting gains two things contact-centre practice puts first on an AI-answered line: "I'm your **AI** assistant today" and "You can ask for an officer at any time" (Luganda and Swahili drafts likewise). Everything else in the line is unchanged. Revert in `receptionist/phrases.py` if the owner prefers the original |
 
 ## 13. As built — findings and deviations
 
