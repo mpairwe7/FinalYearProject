@@ -144,12 +144,17 @@ def figure_in(expected: str, reply: str) -> bool:
     """Whether *reply* states *expected* ("18%", "TIN"); a number must stand alone.
 
     "2%" is not found in "12%", "2026", "0.2" or "2,000", which a substring
-    check would all count as the 2% late-payment rate.
+    check would all count as the 2% late-payment rate, nor in "step 2": a
+    rate needs its percent, marked the way the language marks it ("2%",
+    "2 percent", "asilimia 2", "ebitundu 2 ku buli kikumi").
     """
     figure = expected.lower().replace("%", "")
     if not figure.isdigit():
         return figure in reply
-    return re.search(rf"(?<![\d.]){re.escape(figure)}(?![.,]?\d)", reply) is not None
+    number = rf"(?<![\d.]){re.escape(figure)}(?![.,]?\d)"
+    if "%" not in expected:
+        return re.search(number, reply) is not None
+    return re.search(rf"{number}\s*(?:%|percent|per\s+cent)|(?:asilimia|ebitundu)\s+{number}", reply) is not None
 
 
 def token_coverage(tokens: list[str], reply: str) -> tuple[int, float]:
