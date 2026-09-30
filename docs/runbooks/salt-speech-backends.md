@@ -573,12 +573,16 @@ Accuracy is measured, not assumed — `scripts/eval_language_id.py` over
 ## Raw PCM and the format sniffer
 
 `_decode_audio_bytes` guesses the container from the first bytes. Raw 16-bit PCM
-that starts `FF Ex` — and a quiet sample of −1 is `FF FF` — passes for an MPEG
-frame sync, and libsndfile then "decodes" MP3 garbage out of speech. On the
-language-id set 7% of real clips start that way. Code that holds raw PCM (the
-receptionist's STT, live partials, the language sentinel, the officer leg) wraps
-it with `speech_service.pcm16_to_wav` before calling `transcribe`; a RIFF header
-is unambiguous. `identify_language` itself reads raw PCM16 directly.
+that starts `FF Ex` passes for an MPEG frame sync, and a quiet sample of −1 is
+`FF FF`. On the language-id set 7% of real clips start that way. libsndfile used
+to "decode" MP3 garbage out of such speech. The sniffer now calls it MP3 only
+with an ID3 tag, or with a second frame header exactly one frame after the first
+(`_looks_like_mp3`, G93). Raw PCM is also read as float32 only when every value
+is finite and audible (int16 read as float32 comes out below 1e-7). Sending a
+header is still the rule: the receptionist's STT, live partials, the language
+sentinel and the officer leg wrap raw PCM with `speech_service.pcm16_to_wav`, and
+the chat uploads WAV (`pcm16ToWav` in `voiceService.ts`). `identify_language`
+itself reads raw PCM16 directly.
 
 ## TTS — Orpheus-3B (`Sunbird/orpheus-3b-tts-multilingual`)
 

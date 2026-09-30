@@ -870,16 +870,21 @@ Always returns 200. `status` is `ready`, `degraded`, or `unavailable`.
 ### Transcribe Audio (ASR)
 
 ```http
-POST /v1/asr?sample_rate=16000&language=en
-Content-Type: application/octet-stream
+POST /v1/asr?sample_rate=16000&language=en&domain=tax
+Content-Type: audio/wav
 
-<raw PCM16 little-endian bytes, mono channel>
+<WAV: 16-bit PCM, mono>
 ```
+
+The body may also be raw PCM16 little-endian (mono, at `sample_rate`), WebM/Ogg
+Opus or MP3. Send WAV where you can: the format of a headerless body is guessed
+from its first bytes.
 
 | Query Param | Type | Default | Validation |
 |---|---|---|---|
 | `sample_rate` | int | 16000 | 8000-48000 |
 | `language` | string | (auto-detect) | ISO 639-1, e.g. `en`, `lg` |
+| `domain` | string | (none) | `tax`: repair Whisper's TIN/URA mishears ("namba ya timu" → "namba ya TIN"), as the chat's dictation does |
 
 **Limits:** Max 16 MiB audio body (~2 min at 16 kHz int16).
 
@@ -1041,10 +1046,10 @@ This is the primary endpoint for voice mode in the web client.
 
 ```http
 POST /v1/voice/chat?language=en&sample_rate=16000&tts_enabled=true&top_k=4
-Content-Type: application/octet-stream
+Content-Type: audio/wav
 X-Session-ID: <session-id>
 
-<raw PCM16 little-endian bytes, mono channel>
+<WAV: 16-bit PCM, mono (raw PCM16 is also accepted; see Transcribe Audio)>
 ```
 
 | Query Param | Type | Default | Validation |
