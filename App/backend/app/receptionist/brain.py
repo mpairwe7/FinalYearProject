@@ -497,6 +497,7 @@ class UraReceptionistBrain(LLMService):
         # 0b. The answer to the yes/no question the AI's last turn ended on.
         # Anything else is a new question, and the offer lapses.
         unheard = self.room.state.offer_interrupted
+        offer_at_risk = self.room.state.offer_at_risk
         offer, offer_reason, more = self._take_offer()
         replied = offer and (
             _OFFER_DECLINE_RE.search(user_text)
@@ -506,7 +507,7 @@ class UraReceptionistBrain(LLMService):
         if replied and unheard:
             # Said over the answer, before its question: ask it again rather
             # than transfer a caller who only said "okay" while listening.
-            self._offer(offer, reason=offer_reason, more=more)
+            self._offer(offer, reason=offer_reason, more=more, at_risk=offer_at_risk)
             await self._say_and_record(phrase(_offer_question(offer, offer_reason), language), kind="notice")
             return
         if offer and _OFFER_DECLINE_RE.search(user_text):
@@ -519,6 +520,10 @@ class UraReceptionistBrain(LLMService):
         if offer == "more" and (_OFFER_ACCEPT_RE.search(user_text) or _MORE_ACCEPT_RE.search(user_text)):
             await self._say_more(more)
             return
+        if offer_at_risk and unheard:
+            # Talked over before it was heard, then a new question: the offer
+            # to an at-risk caller was never made, so it comes with this answer.
+            self.room.state.risk_offer_made = False
 
         # 1. Explicit Human Request
         if is_human_request(user_text):
@@ -539,7 +544,7 @@ class UraReceptionistBrain(LLMService):
                 # that: Sure, let me repeat that: …" the next time), and it ends
                 # on the same question, which is open again.
                 self.room.state.last_assistant_answer = last_ans
-                self._offer(offer, reason=offer_reason, more=more)
+                self._offer(offer, reason=offer_reason, more=more, at_risk=offer_at_risk)
                 return
 
         # 1c. In-Call User Control: Speech Rate Adjustment. The local voices
@@ -971,9 +976,11 @@ class UraReceptionistBrain(LLMService):
         # 4. Moderate retrieval confidence (0.35–0.50), a soft abstain, or a
         # call going badly: the best statutory answer, and an officer offered
         # rather than imposed.
-        offer_officer = escalation_required or (0.35 <= confidence < 0.50) or self._call_at_risk()
+        uncertain = escalation_required or (0.35 <= confidence < 0.50)
+        at_risk = not uncertain and self._call_at_risk()
         spoken_text = clean_text_for_speech(
-            self._spoken_answer(bot_reply, offer_officer=offer_officer), locale=self.language
+            self._spoken_answer(bot_reply, offer_officer=uncertain or at_risk, at_risk=at_risk),
+            locale=self.language,
         )
 
         self.room.state.ai_answers_count += 1
@@ -1003,7 +1010,7 @@ class UraReceptionistBrain(LLMService):
         self.room.state.risk_offer_made = True
         return True
 
-    def _spoken_answer(self, reply: str, *, offer_officer: bool) -> str:
+    def _spoken_answer(self, reply: str, *, offer_officer: bool, at_risk: bool = False) -> str:
         """*reply* cut for speech, ending on at most one yes/no question.
 
         One question a turn, so that "yes" can only mean one thing: an officer
@@ -1015,7 +1022,7 @@ class UraReceptionistBrain(LLMService):
         rest = sentences[max_sentences:]
         spoken = " ".join(sentences[:max_sentences]) if rest else reply
         if offer_officer:
-            self._offer("officer", reason="offer_accepted")
+            self._offer("officer", reason="offer_accepted", at_risk=at_risk)
             return f"{spoken} {phrase('officer_offer', self.language)}"
         if rest:
             self._offer("more", more=" ".join(rest))
@@ -1027,10 +1034,11 @@ class UraReceptionistBrain(LLMService):
         spoken = self._spoken_answer(rest, offer_officer=False)
         await self._say_and_record(clean_text_for_speech(spoken, locale=self.language), kind="answer")
 
-    def _offer(self, kind: str, *, reason: str = "", more: str = "") -> None:
+    def _offer(self, kind: str, *, reason: str = "", more: str = "", at_risk: bool = False) -> None:
         """Record the yes/no question this turn ends on (see ``CallState.pending_offer``)."""
         state = self.room.state
         state.pending_offer, state.offer_reason, state.more_detail = kind, reason, more
+        state.offer_at_risk = at_risk
         state.offer_interrupted = False
 
     def _take_offer(self) -> tuple[str, str, str]:

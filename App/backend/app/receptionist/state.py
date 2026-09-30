@@ -44,6 +44,9 @@ class CallState:
     # The caller talked over the turn that asked it, so the question at its
     # end may not have been heard: "okay" then is a backchannel, not a yes.
     offer_interrupted: bool = False
+    # The pending officer offer is the one-time offer to an at-risk call.
+    # Talked over and never answered, it was never made: it is made again.
+    offer_at_risk: bool = False
     # An at-risk call is offered an officer once.
     risk_offer_made: bool = False
     clarify: ClarifyState | None = None
