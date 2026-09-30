@@ -20,16 +20,22 @@ export interface LocaleOption {
   label: string;
   /** The language's own name for itself, shown under the label in the picker. */
   native: string;
-  /** BCP-47 tag for the browser SpeechRecognition API (best-effort — most
-   *  browser speech engines only recognise en/sw; lg/nyn/ach fail over
-   *  gracefully to the existing "speech unavailable" state). */
+  /** BCP-47 tag for the browser SpeechRecognition API, where it is used. */
   speechLang: string;
+  /** Who transcribes dictation into the composer. `browser`: the Web Speech
+   *  API, which types words as they are spoken but, in Chrome and Safari,
+   *  sends the audio to the vendor's cloud. `server`: the local Sunbird
+   *  Whisper-SALT model through /v1/asr. Chrome's engine has no Luganda (it
+   *  fails with "language-not-supported", which read as "speech recognition
+   *  is unavailable"), and SALT is the more accurate for Luganda and Swahili,
+   *  so both use it and their audio stays on URA's servers. */
+  dictation: 'browser' | 'server';
 }
 
 export const LOCALE_OPTIONS: readonly LocaleOption[] = [
-  { value: 'en', label: 'English', native: 'English', speechLang: 'en-US' },
-  { value: 'lg', label: 'Luganda', native: 'Oluganda', speechLang: 'lg-UG' },
-  { value: 'sw', label: 'Swahili', native: 'Kiswahili', speechLang: 'sw-KE' },
+  { value: 'en', label: 'English', native: 'English', speechLang: 'en-US', dictation: 'browser' },
+  { value: 'lg', label: 'Luganda', native: 'Oluganda', speechLang: 'lg-UG', dictation: 'server' },
+  { value: 'sw', label: 'Swahili', native: 'Kiswahili', speechLang: 'sw-KE', dictation: 'server' },
 ];
 
 /* Runyankole (nyn) and Acholi (ach) were here and were removed: the assistant

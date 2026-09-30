@@ -124,6 +124,37 @@ function downsampleToPCM16(
   return result.buffer;
 }
 
+/**
+ * Wrap 16-bit mono PCM in a 44-byte WAV header for upload.
+ *
+ * The server sniffs a headerless body to guess its format, and a recording
+ * whose first sample is -1 starts FF FF, which is an MP3 frame sync: a
+ * Luganda question was decoded as MP3 noise that way and heard as "e e e e".
+ * With a RIFF header there is nothing to guess.
+ */
+export function pcm16ToWav(pcm16: ArrayBuffer, sampleRate: number): ArrayBuffer {
+  const out = new ArrayBuffer(44 + pcm16.byteLength);
+  const view = new DataView(out);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + pcm16.byteLength, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  ascii(36, 'data');
+  view.setUint32(40, pcm16.byteLength, true);
+  new Uint8Array(out, 44).set(new Uint8Array(pcm16));
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Audio recorder (MediaRecorder → PCM16 at 16 kHz)
 // ---------------------------------------------------------------------------
@@ -391,22 +422,29 @@ export async function checkSpeechHealth(): Promise<SpeechHealthStatus> {
   }
 }
 
-/** Send raw PCM16 audio to /v1/asr for server-side transcription. */
+/**
+ * Send PCM16 audio to /v1/asr for server-side transcription, as WAV.
+ *
+ * `domain: 'tax'` asks for Whisper's TIN/URA mishears to be repaired
+ * ("namba ya timu" → "namba ya TIN"), as the voice chat already does.
+ */
 export async function transcribe(
   pcm16: ArrayBuffer,
   language?: string,
-  sampleRate = TARGET_SAMPLE_RATE
+  sampleRate = TARGET_SAMPLE_RATE,
+  opts: { domain?: 'tax' } = {},
 ): Promise<TranscribeResult> {
   const params = new URLSearchParams({ sample_rate: String(sampleRate) });
   if (language) params.set('language', language);
+  if (opts.domain) params.set('domain', opts.domain);
 
   const res = await fetch(`${API_URL}/v1/asr?${params}`, {
     method: 'POST',
     headers: authHeaders({
-      'Content-Type': 'application/octet-stream',
+      'Content-Type': 'audio/wav',
       'X-Voice-Consent': 'true',
     }),
-    body: pcm16,
+    body: pcm16ToWav(pcm16, sampleRate),
     signal: withTimeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
@@ -484,7 +522,7 @@ export async function voiceChat(
   if (opts.conversationId) params.set('conversation_id', opts.conversationId);
 
   const headers: Record<string, string> = authHeaders({
-    'Content-Type': 'application/octet-stream',
+    'Content-Type': 'audio/wav',
     'X-Voice-Consent': 'true',
   });
   if (opts.sessionId) headers['X-Session-ID'] = opts.sessionId;
@@ -492,7 +530,7 @@ export async function voiceChat(
   const res = await fetch(`${API_URL}/v1/voice/chat?${params}`, {
     method: 'POST',
     headers,
-    body: pcm16,
+    body: pcm16ToWav(pcm16, opts.sampleRate ?? TARGET_SAMPLE_RATE),
     signal: withTimeout(60_000), // voice chat is multi-stage, allow 60s
   });
   if (!res.ok) {
