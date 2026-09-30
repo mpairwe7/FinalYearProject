@@ -759,14 +759,19 @@ export default function Page() {
 
   // Auto-narrate new assistant messages
   const lastChatLength = useRef(chat.length);
+  // The current read-aloud request. A stop, or a newer request, makes an older
+  // one stale: its whole-reply fallback must not start playing when it lands.
+  const listenRequestRef = useRef(0);
   const handleListenToReply = useCallback(async (turnId: string, text: string) => {
     // A second tap stops it, whether it is playing or still fetching its first piece.
     if (playingTurnId === turnId || ttsLoading === turnId) {
+      listenRequestRef.current += 1;
       stopPlayback();
       setPlayingTurnId(null);
       setTtsLoading(null);
       return;
     }
+    const request = ++listenRequestRef.current;
     stopPlayback();
     setTtsLoading(turnId);
     try {
@@ -792,7 +797,9 @@ export default function Page() {
       } catch {
         // Nothing of the stream could be played: ask for the whole reply once.
       }
+      if (request !== listenRequestRef.current) return;
       const result = await ttsMutation.mutateAsync({ text: speechText, language: locale, voice });
+      if (request !== listenRequestRef.current) return;
       setTtsLoading(null);
       if (result.error || !result.audio_base64) {
         if (result.error) trackErrorOccurred('tts_failed');
@@ -804,7 +811,8 @@ export default function Page() {
       // TTS unavailable — degrade to text, but record it
       trackErrorOccurred('tts_failed');
     } finally {
-      setTtsLoading(null);
+      // A stale request leaves the loading state to the one that replaced it.
+      if (request === listenRequestRef.current) setTtsLoading(null);
       setPlayingTurnId((prev) => (prev === turnId ? null : prev));
     }
   }, [playingTurnId, ttsLoading, locale, ttsMutation]);

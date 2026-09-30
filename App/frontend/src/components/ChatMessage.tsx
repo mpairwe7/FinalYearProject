@@ -417,11 +417,17 @@ function ChatMessageInner({
 
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="bubble-actions">
+            {/* Live while loading: a tap then cancels the read-aloud, rather
+                than leaving a disabled button until the audio arrives. */}
             <button
               className={`listen-btn ${playingTurnId === turn.id ? 'listen-btn-active' : ''}`}
               onClick={() => onListen(turn.id, stripCitationMarkers(turn.content))}
-              disabled={ttsLoading === turn.id || isTransitioning}
-              aria-label={playingTurnId === turn.id ? 'Stop listening' : `Listen in ${localeLabel(locale)}`}
+              disabled={isTransitioning}
+              aria-label={
+                playingTurnId === turn.id || ttsLoading === turn.id
+                  ? 'Stop listening'
+                  : `Listen in ${localeLabel(locale)}`
+              }
             >
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>

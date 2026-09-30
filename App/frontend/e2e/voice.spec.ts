@@ -18,6 +18,7 @@
  */
 import { expect, test } from "@playwright/test";
 
+import { TINY_WAV_B64 } from "./fixtures";
 import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
 
 // Desktop-only: some composer controls are hidden <720px.
@@ -164,6 +165,45 @@ test.describe("Voice STT/TTS (mocked)", () => {
     const body = (await ttsReq).postDataJSON();
     expect(body.language).toBe("en");
     expect(body.text.length).toBeGreaterThan(0);
+  });
+
+  test("stopping a read-aloud while it loads also stops its whole-reply fallback", async ({ page }) => {
+    await page.addInitScript(() => {
+      const start = AudioBufferSourceNode.prototype.start;
+      AudioBufferSourceNode.prototype.start = function (...args) {
+        const w = window as unknown as { __played?: number };
+        w.__played = (w.__played ?? 0) + 1;
+        return start.apply(this, args);
+      };
+    });
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.route("**/api/v1/tts/stream", (route) => route.fulfill({ status: 503, body: "down" }));
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/tts", async (route) => {
+      await held;
+      await route.fulfill({
+        json: { sample_rate: 22050, num_samples: 1102, duration_s: 0.05, latency_s: 0.1,
+                backend: "stub", voice: "stub", audio_base64: TINY_WAV_B64, error: null },
+      });
+    });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+
+    // The stream fails, so the whole reply is fetched; the reader stops it meanwhile.
+    const fallback = page.waitForRequest("**/api/v1/tts");
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    await fallback;
+    await page.getByRole("button", { name: "Stop listening" }).last().click();
+    release();
+    await page.waitForTimeout(1000);
+    expect(await page.evaluate(() => (window as unknown as { __played?: number }).__played ?? 0)).toBe(0);
+    await expect(page.getByRole("button", { name: /Listen in English/ }).last()).toBeEnabled();
   });
 
   test("dictation still works with no browser Speech API", async ({ page }) => {

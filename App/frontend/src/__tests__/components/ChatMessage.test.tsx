@@ -168,6 +168,12 @@ describe("ChatMessage", () => {
     expect(screen.getByLabelText(/Stop listening/)).toBeInTheDocument();
   });
 
+  it("lets a read-aloud that is still loading be stopped", () => {
+    renderMsg(assistantTurn, { ttsLoading: "a1" });
+    const stop = screen.getByLabelText(/Stop listening/);
+    expect(stop).toBeEnabled();
+  });
+
   it("has correct article semantic element", () => {
     const { container } = renderMsg(userTurn);
     expect(container.querySelector("article")).toBeInTheDocument();
