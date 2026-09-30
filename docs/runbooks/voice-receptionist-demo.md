@@ -332,7 +332,8 @@ API answers 403 and the console hides **Take over**. A supervisor
 (`ura_admin`) can step in (`officer_takeover`). Every AI question is the only
 question in its turn, so "yes" can only mean one thing. A "yes" or "okay" said
 over an answer, before its question was heard, is a backchannel: the question
-is asked again, and nothing is acted on.
+is asked again, and nothing is acted on. An at-risk caller who talked over the
+officer offer and moved on is offered again with the next answer.
 
 ### Step 4: Transfer to Human Officer
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
@@ -499,14 +500,16 @@ Orpheus runs weight-only FP8 (`ORPHEUS_QUANTIZATION=fp8`): at bf16 an RTX A6000
 generates at only ~0.96× real time, which leaves no headroom; FP8 measured 234 ms to
 first audio at 0.63× real time (`evals/reports/orpheus_tts_2026-09-24_*.json`).
 
-**Replay check** (`scripts/replay_call_audio.py`, sixteen scenarios): besides the
+**Replay check** (`scripts/replay_call_audio.py`, seventeen scenarios): besides the
 language events, each turn declares the language its answer must be in and fails if
 the receptionist's own word lists place it in another — a Swahili caller answered in
 English passed every other check. `12_silent_caller` says nothing after the greeting
 and expects the call to end. `13`–`16` check escalation: a worried caller is offered
 an officer and says yes (transferred) or no (stays with the AI); "Officer, please"
 alone transfers; a caller in crisis hears the crisis lines, emergency numbers in
-words, and is transferred on yes. A scenario can require text in a reply
+words, and is transferred on yes. `17_yes_over_the_answer_is_asked_again` says "Yes,
+please" over the worried caller's answer, before its officer offer is heard: the
+assistant stops, asks the question again and transfers no one. A scenario can require text in a reply
 (`expect_reply`), text said while lingering, and a status that must never come. The harness receives audio at the demo socket's pace,
 twice real time, so it can start talking during a pause *between* greeting sentences;
 that shows up as one barge-in on a first turn and is an artefact of the harness, not
