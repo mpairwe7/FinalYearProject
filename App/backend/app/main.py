@@ -1310,8 +1310,16 @@ async def transcribe_audio(
         metrics.observe("speech_asr_latency_s", result.latency_s)
     if result.error:
         metrics.inc("speech_asr_errors_total")
+    text = result.text
+    # The chat composer's dictation (domain=tax) gets the same repair of
+    # Whisper's TIN/URA mishears as the voice chat and the call: "namba ya
+    # timu kutoka Ura" becomes "namba ya TIN kutoka Ura".
+    if text and request.query_params.get("domain") == "tax":
+        from .receptionist.lexicon import repair_asr_entities
+
+        text = repair_asr_entities(text)
     return TranscribeResponse(
-        text=result.text,
+        text=text,
         language=result.language,
         duration_s=result.duration_s,
         latency_s=result.latency_s,

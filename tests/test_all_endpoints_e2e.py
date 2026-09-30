@@ -541,6 +541,18 @@ def test_asr_transcribes_audio():
     assert body["backend"] == "stub-asr"
 
 
+def test_asr_repairs_tax_terms_when_the_chat_dictates():
+    """The composer's dictation (domain=tax) gets the voice chat's TIN/URA repair."""
+    c = _client(speech=True)
+    c.app.state.speech.transcribe.return_value = TranscribeResult(
+        text="namba ya timu kutoka mu era", backend="stub-asr"
+    )
+    plain = c.post("/v1/asr?sample_rate=16000&language=sw", content=_AUDIO)
+    repaired = c.post("/v1/asr?sample_rate=16000&language=sw&domain=tax", content=_AUDIO)
+    assert plain.json()["text"] == "namba ya timu kutoka mu era"
+    assert repaired.json()["text"] == "namba ya TIN kutoka mu URA"
+
+
 def test_tts_synthesizes_audio():
     c = _client(speech=True)
     r = c.post("/v1/tts", json={"text": "the vat rate is eighteen percent"})
