@@ -302,6 +302,8 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\btiimu\b", re.IGNORECASE), "TIN"),
     (re.compile(r"\btimu\b", re.IGNORECASE), "TIN"),
     (re.compile(r"\bttini\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\btti+n\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\b(?:nnamba|namba)\s+ya\s+tiini\b", re.IGNORECASE), "TIN"),
     # Same frames as clarify._CONTEXT_MISHEARS. "era" alone is "and".
     # "ora" is the GPU Whisper-SALT hearing of URA on lg_tin.wav
     # ("okuva mu ora"), not the conjunction.
@@ -317,9 +319,10 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\bkwa ora\b", re.IGNORECASE), "kwa URA"),
     (re.compile(r"\bkutoka ora\b", re.IGNORECASE), "kutoka URA"),
     (re.compile(r"\bokuva ora\b", re.IGNORECASE), "okuva URA"),
+    (re.compile(r"\b(with|from|mu|ku|kwa|kutoka|okuva)\s+u\s+[ra]\b", re.IGNORECASE), r"\1 URA"),
     # NIN (National Identification Number) acoustic variants & mishears
     (re.compile(r"\b(?:nnamba\s+ya\s+nin|namba\s+ya\s+nin)\b", re.IGNORECASE), "NIN number"),
-    (re.compile(r"\b(?:neen|niini|n-i-n|n\.i\.n\.)\b", re.IGNORECASE), "NIN"),
+    (re.compile(r"\b(?:neen|niini|ninete|n-i-n|n\.i\.n\.)\b", re.IGNORECASE), "NIN"),
     # PRN (Payment Registration Number) acoustic variants
     (re.compile(r"\b(?:nnamba\s+ya\s+prn|namba\s+ya\s+prn)\b", re.IGNORECASE), "PRN number"),
     (re.compile(r"\b(?:peera|pier\s*en|pi\s*ar\s*en|p-r-n|p\.r\.n\.)\b", re.IGNORECASE), "PRN"),
@@ -331,17 +334,21 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\b(?:ten\s+number|10\s+number|teen\s+number)\b", re.IGNORECASE), "TIN number"),
     (re.compile(r"\bteam\s+yange\b", re.IGNORECASE), "TIN yange"),
     # VAT acoustic variants
-    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|baati|bbaati)\b", re.IGNORECASE), "VAT"),
+    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|veti|vaati|baati|bbaati)\b", re.IGNORECASE), "VAT"),
     # PAYE acoustic variants
     # Not "payee": that is an English word ("who is the payee on a PRN?").
     (re.compile(r"\b(?:peeyi|p-a-y-e|p\.a\.y\.e\.)\b", re.IGNORECASE), "PAYE"),
     # TCC (Tax Clearance Certificate)
+    (re.compile(r"\b(?:ebbaluwa|ebaluwa)\s+ya\s+(?:tic|tizi)\b", re.IGNORECASE), "ebbaluwa ya TCC"),
+    (re.compile(r"\b(?:cheti|keti)\s+cha\s+(?:tic|tizi)\b", re.IGNORECASE), "cheti cha TCC"),
     (re.compile(r"\b(?:tc\s+certificate|t-c\s+certificate|t\.c\.\s+certificate)\b", re.IGNORECASE), "TCC certificate"),
     (re.compile(r"\b(?:t-c-c|t\.c\.c\.|ti\s*si\s*si)\b", re.IGNORECASE), "TCC"),
     # DTS (Digital Tax Stamps)
     (re.compile(r"\b(?:d-t-s|d\.t\.s\.|di\s*ti\s*es)\b", re.IGNORECASE), "DTS"),
     # ASYCUDA
     (re.compile(r"\b(?:asikuda|asi\s*kuda|asi\s*cuda)\b", re.IGNORECASE), "ASYCUDA"),
+    # e-Tax
+    (re.compile(r"\b(?:etac|e-tac)\b", re.IGNORECASE), "e-Tax"),
     # URA acoustic variants
     (re.compile(r"\b(?:you\s+are\s+a|u-r-a|u\.r\.a\.)\b", re.IGNORECASE), "URA"),
     # Luganda "layisensi" is any licence (trading, driving, …); the words
