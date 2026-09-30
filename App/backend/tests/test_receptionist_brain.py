@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app import database as db
 from app.flags import flags
-from app.receptionist.brain import LLMContextFrame, UraReceptionistBrain
+from app.receptionist.brain import (
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    LLMContextFrame,
+    UraReceptionistBrain,
+)
 from app.receptionist.clarify import ClarifyState
 from app.receptionist.serializer import (
     InterruptionFrame,
@@ -294,6 +299,7 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
 
         with self._offer_officer():
             await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            await self.brain.process_frame(BotStartedSpeakingFrame())
             await self.brain.process_frame(InterruptionFrame())  # talked over it, before the question
             await self.brain.process_frame(LLMContextFrame(context="Okay."))
             self.assertEqual(self.state.mode, "ai")
@@ -301,6 +307,17 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
             await self.brain.process_frame(LLMContextFrame(context="Yes."))
         self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "offer_accepted"))
         self.assertEqual(self.chat_model.generate.call_count, 1)
+
+    async def test_a_yes_after_the_question_was_heard_is_a_yes(self):
+        # Pipecat interrupts as every caller turn starts: after the assistant
+        # has finished speaking that is no barge-in (live replay, 2026-09-30).
+        with self._offer_officer():
+            await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+            await self.brain.process_frame(BotStartedSpeakingFrame())
+            await self.brain.process_frame(BotStoppedSpeakingFrame())
+            await self.brain.process_frame(InterruptionFrame())
+            await self.brain.process_frame(LLMContextFrame(context="Yes please."))
+        self.assertEqual((self.state.mode, self.state.transfer_reason), ("transferring", "offer_accepted"))
 
     async def test_are_you_still_there_replaces_an_unanswered_offer(self):
         with self._offer_officer():

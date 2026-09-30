@@ -47,6 +47,8 @@ try:
     from pipecat.services.llm_service import LLMService
     from pipecat.processors.frame_processor import FrameDirection
     from pipecat.frames.frames import (
+        BotStartedSpeakingFrame,
+        BotStoppedSpeakingFrame,
         LLMContextFrame,
         LLMFullResponseEndFrame,
         LLMFullResponseStartFrame,
@@ -63,6 +65,12 @@ except ImportError:
 
         async def push_frame(self, frame: Any, direction: Any = None):
             pass
+
+    class BotStartedSpeakingFrame(Frame):  # type: ignore[no-redef]
+        pass
+
+    class BotStoppedSpeakingFrame(Frame):  # type: ignore[no-redef]
+        pass
 
     class LLMContextFrame(Frame):  # type: ignore[no-redef]
         def __init__(self, context: Any = None):
@@ -322,6 +330,9 @@ class UraReceptionistBrain(LLMService):
         # True while an answer is being worked out: the silence is ours then,
         # not the caller's (see on_caller_idle).
         self._answering = False
+        # True while the assistant's audio is going out: an interruption then
+        # is the caller talking over it (see CallState.offer_interrupted).
+        self._bot_speaking = False
 
     @property
     def language(self) -> str:
@@ -353,6 +364,11 @@ class UraReceptionistBrain(LLMService):
         self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM
     ) -> None:
         """Process incoming Pipecat frames."""
+        if isinstance(frame, BotStartedSpeakingFrame):
+            self._bot_speaking = True
+        elif isinstance(frame, BotStoppedSpeakingFrame):
+            self._bot_speaking = False
+
         if isinstance(frame, InterruptionFrame):
             switching = bool((getattr(frame, "metadata", None) or {}).get("language_switch"))
             if switching:
@@ -367,7 +383,9 @@ class UraReceptionistBrain(LLMService):
             # Caller barged in: invalidate pending LLM generation.
             self.room.state.generation_id += 1
             self.room.state.barge_in_count += 1
-            if self.room.state.pending_offer:
+            # Pipecat also interrupts as each caller turn starts; only one that
+            # cuts the assistant off can have cut off the question it ended on.
+            if self.room.state.pending_offer and self._bot_speaking:
                 self.room.state.offer_interrupted = True
             await self.push_frame(frame, direction)
             return
