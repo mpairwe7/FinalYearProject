@@ -253,7 +253,9 @@ docker compose logs api | grep "Voice receptionist"
 
 Expose using ngrok:
 ```bash
-ngrok http 8000
+./scripts/manage_ngrok.sh start
+# Publishes local frontend (port 3032 -> API :8083 proxy) over the enterprise domain:
+# https://struttingly-nongeological-briella.ngrok-free.dev
 ```
 
 ---
@@ -514,6 +516,12 @@ assistant stops, asks the question again and transfers no one. A scenario can re
 twice real time, so it can start talking during a pause *between* greeting sentences;
 that shows up as one barge-in on a first turn and is an artefact of the harness, not
 something a caller listening at normal speed triggers.
+
+Run the test suite against the live WebSocket endpoint:
+```bash
+python3 scripts/replay_call_audio.py --ws ws://127.0.0.1:8083/v1/calls/stream
+```
+*Validated 2026-10-01 on GPU stack (`evals/reports/call_replay_2026-10-01.json`): 17/17 passed (100%), median first-audio latency ~1,320 ms, barge-in cutoff < 1,000 ms.*
 
 **Before any demo:** the Luganda and Swahili lines in `receptionist/phrases.py` and the
 call-screen strings in `lib/i18n/{lg,sw}.ts` are drafts. Have a native speaker of each

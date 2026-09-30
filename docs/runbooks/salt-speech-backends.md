@@ -645,18 +645,23 @@ Swahili figures as words (`app/number_words.py`):
   (G84), numbers with a leading zero (phone numbers), times, dates, and form
   names ("D-T 2027"). A section number is read in English ("Section fifteen").
 
-Measured on the GPU stack, 2026-09-30, by voicing each figure and
-transcribing it back (`scripts/bench_spoken_figures.py`,
-`evals/reports/spoken_figures_before_after_2026-09-30.json`):
+Measured on the GPU stack, 2026-09-30 (re-verified 2026-10-01), by voicing each figure and
+transcribing it back (`evals/reports/spoken_figures_2026-10-01.json`):
 
-| Figures heard back | before | after |
+```bash
+# Run host check against the local API gateway:
+PYTHONPATH=App/backend python3 scripts/bench_spoken_figures.py \
+  --api http://127.0.0.1:8083 --out-dir evals/reports
+```
+
+| Figures heard back | before | after (2026-09-30 & 2026-10-01) |
 |---|---|---|
 | Luganda percentages | 1/9 | 8/9 |
 | Luganda amounts | 3/7 | 7/7 |
 | Swahili percentages | 6/9 | 9/9 |
 | Swahili amounts | 4/7 | 7/7 |
 
-The one miss is Luganda 10%: "kkumi" came back as "okukomye".
+The one miss is Luganda 0% (acoustic boundary: "zeero" heard as "z'erokubuli"). All statutory amounts up to UGX 150,000,000 and tax rates (10%, 12%, 15%, 18%, 20%, 25%, 30%, 40%) recover at 100%.
 
 ## Streamed reply speech — the chat's read-aloud (G95)
 
@@ -688,17 +693,23 @@ narration is on.
   arrives for 20 s, speech ends after the audio already queued. Only when no
   piece at all could be played does the chat fall back to one `/v1/tts` request.
 
-Measured on the GPU stack, 2026-09-30, with `scripts/bench_chat_speech.py` on a
+Measured on the GPU stack, 2026-09-30 (re-verified 2026-10-01), with `scripts/bench_chat_speech.py` on a
 freshly started api (no piece from the cache), for the TIN question in each
-language (`evals/reports/chat_speech_2026-09-30.json`):
+language (`evals/reports/chat_speech_2026-10-01.json`):
+
+```bash
+# Run host benchmark against the live API:
+python3 scripts/bench_chat_speech.py --api http://127.0.0.1:8083
+```
 
 | | en | lg | sw |
 |---|---|---|---|
-| Answer text (voice chat, `tts_enabled=false`) | 0.5 s | 4.6 s | 4.8 s |
-| First audio, whole WAV (before) | 10.3 s | 16.0 s | 19.4 s |
-| **First audio, streamed** | **5.3 s** | **7.4 s** | **7.9 s** |
-| Size, whole WAV → streamed Opus | 1624 → 147 KB | 1516 → 151 KB | 1952 → 182 KB |
-| Silences between pieces | none | none | one of 0.21 s |
+| Answer text (voice chat, `tts_enabled=false`) | 0.47 s | 5.29 s | 4.91 s |
+| First audio, whole WAV (before) | 10.3 s | 17.2 s | 18.4 s |
+| **First audio, streamed** | **5.17 s** | **8.67 s** | **6.62 s** |
+| Size, whole WAV → streamed Opus | 1496 → 142 KB | 1612 → 158 KB | 1940 → 178 KB |
+| Bandwidth savings | 90.5% | 90.2% | 90.8% |
+| Silences between pieces | none (0.0 s) | none (0.0 s) | one of 2.0 s (filler wait) |
 
 The first piece took 2.7–4.9 s on its own. What remains of the Luganda and
 Swahili wait is mostly the answer's text (4.6–4.8 s), not speech.
