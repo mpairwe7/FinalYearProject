@@ -381,7 +381,7 @@ export function closePlaybackContext(): void {
   }
 }
 
-/** Stop any currently playing audio. */
+/** Stop any currently playing audio, including a streamed reply and what it has queued. */
 export function stopPlayback(): void {
   if (_currentSource) {
     try {
@@ -391,11 +391,169 @@ export function stopPlayback(): void {
     }
     _currentSource = null;
   }
+  if (_speechStream) {
+    _speechStream.abort();
+    _speechStream = null;
+  }
+  for (const source of _streamSources) {
+    try {
+      source.stop();
+    } catch {
+      // already stopped
+    }
+  }
+  _streamSources.clear();
 }
 
-/** Returns true if audio is currently playing. */
+/** Returns true if audio is currently playing (or a streamed reply is still arriving). */
 export function isPlaying(): boolean {
-  return _currentSource !== null;
+  return _currentSource !== null || _speechStream !== null || _streamSources.size > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Streamed speech (/v1/tts/stream)
+// ---------------------------------------------------------------------------
+
+/** One piece of a streamed reply, in speaking order. `error` instead of audio when it could not be voiced. */
+export interface SpeechPiece {
+  seq: number;
+  text: string;
+  format?: 'ogg_opus' | 'wav' | 'mp3';
+  audio_base64?: string;
+  duration_s?: number;
+  backend?: string;
+  error?: string;
+}
+
+export interface SpokenOutcome {
+  /** From asking to the first sound, in ms; null when nothing played. */
+  firstAudioMs: number | null;
+  pieces: number;
+  failed: number;
+  /** Stopped by stopPlayback() before the end. */
+  stopped: boolean;
+}
+
+let _speechStream: AbortController | null = null;
+const _streamSources = new Set<AudioBufferSourceNode>();
+
+/** 'opus' where this browser plays Ogg/Opus (about a tenth of WAV's size), else 'wav'. */
+export function speechFormat(): 'opus' | 'wav' {
+  try {
+    return typeof Audio !== 'undefined' && new Audio().canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'wav';
+  } catch {
+    return 'wav';
+  }
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/** The pieces of speech for `text`, in speaking order, as the server finishes each one. */
+export async function* streamSpeech(
+  text: string,
+  opts: { language?: string; voice?: string; signal?: AbortSignal } = {},
+): AsyncGenerator<SpeechPiece> {
+  const res = await fetch(`${API_URL}/v1/tts/stream`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ text, language: opts.language ?? 'en', voice: opts.voice, format: speechFormat() }),
+    signal: opts.signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`TTS stream failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (value) buffered += decoder.decode(value, { stream: true });
+    for (let nl = buffered.indexOf('\n'); nl >= 0; nl = buffered.indexOf('\n')) {
+      const line = buffered.slice(0, nl).trim();
+      buffered = buffered.slice(nl + 1);
+      if (!line) continue;
+      const message = JSON.parse(line) as SpeechPiece & { done?: boolean };
+      if (message.done) return;
+      yield message;
+    }
+    if (done) return;
+  }
+}
+
+/**
+ * Speak `text` as it is synthesised. Each piece of /v1/tts/stream is decoded
+ * when it arrives and scheduled to start as the one before ends, so a long
+ * answer is heard after its first sentence, not after all of it (9–20 s on
+ * the GPU stack before, the whole reply as one WAV).
+ *
+ * Throws only when nothing could be played: the caller then asks /v1/tts for
+ * the whole reply once. A failure part-way, or a server that stops sending
+ * for `stallMs`, ends quietly after what is already queued: the answer is on
+ * screen.
+ */
+export async function speakStreamed(
+  text: string,
+  opts: { language?: string; voice?: string; onFirstAudio?: () => void; stallMs?: number } = {},
+): Promise<SpokenOutcome> {
+  stopPlayback();
+  const controller = new AbortController();
+  _speechStream = controller;
+  const ctx = getPlaybackContext();
+  if (ctx.state === 'suspended') await ctx.resume();
+  const started = performance.now();
+  const stallMs = opts.stallMs ?? 20_000;
+  let stalled = false;
+  let watchdog = setTimeout(() => ((stalled = true), controller.abort()), stallMs);
+  let nextStart = 0;
+  let firstAudioMs: number | null = null;
+  let pieces = 0;
+  let failed = 0;
+  let lastEnded: Promise<void> = Promise.resolve();
+  try {
+    for await (const piece of streamSpeech(text, { ...opts, signal: controller.signal })) {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => ((stalled = true), controller.abort()), stallMs);
+      if (!piece.audio_base64) {
+        failed += 1;
+        continue;
+      }
+      const buffer = await ctx.decodeAudioData(base64ToArrayBuffer(piece.audio_base64));
+      if (controller.signal.aborted) break;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      const startAt = Math.max(ctx.currentTime + 0.02, nextStart);
+      source.start(startAt);
+      nextStart = startAt + buffer.duration;
+      pieces += 1;
+      _streamSources.add(source);
+      lastEnded = new Promise<void>((resolve) => {
+        source.onended = () => {
+          _streamSources.delete(source);
+          resolve();
+        };
+      });
+      if (firstAudioMs === null) {
+        firstAudioMs = Math.round(performance.now() - started);
+        opts.onFirstAudio?.();
+      }
+    }
+  } catch (err) {
+    if (pieces === 0 && !(controller.signal.aborted && !stalled)) {
+      if (_speechStream === controller) _speechStream = null;
+      throw err;
+    }
+  } finally {
+    clearTimeout(watchdog);
+  }
+  const stopped = controller.signal.aborted && !stalled;
+  if (_speechStream === controller) _speechStream = null;
+  if (pieces === 0 && !stopped) throw new Error(failed ? 'No piece of the reply could be voiced' : 'Empty speech stream');
+  if (!stopped) await lastEnded;
+  return { firstAudioMs, pieces, failed, stopped };
 }
 
 // ---------------------------------------------------------------------------

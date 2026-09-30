@@ -20,6 +20,7 @@ import {
   AudioRecorder,
   closePlaybackContext,
   playAudioBase64,
+  speakStreamed,
   stopPlayback,
   isPlaying,
   transcribe,
@@ -759,9 +760,11 @@ export default function Page() {
   // Auto-narrate new assistant messages
   const lastChatLength = useRef(chat.length);
   const handleListenToReply = useCallback(async (turnId: string, text: string) => {
-    if (playingTurnId === turnId) {
+    // A second tap stops it, whether it is playing or still fetching its first piece.
+    if (playingTurnId === turnId || ttsLoading === turnId) {
       stopPlayback();
       setPlayingTurnId(null);
+      setTtsLoading(null);
       return;
     }
     stopPlayback();
@@ -772,11 +775,24 @@ export default function Page() {
         setTtsLoading(null);
         return;
       }
-      const result = await ttsMutation.mutateAsync({
-        text: speechText,
-        language: locale,
-        voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
-      });
+      const voice = useVoiceStore.getState().voiceByLocale[locale] || undefined;
+      try {
+        // Streamed: speaking starts after the first sentence is synthesised,
+        // in Opus where the browser plays it (a tenth of WAV's size).
+        const outcome = await speakStreamed(speechText, {
+          language: locale,
+          voice,
+          onFirstAudio: () => {
+            setTtsLoading(null);
+            setPlayingTurnId(turnId);
+          },
+        });
+        if (outcome.failed) trackErrorOccurred('tts_failed');
+        return;
+      } catch {
+        // Nothing of the stream could be played: ask for the whole reply once.
+      }
+      const result = await ttsMutation.mutateAsync({ text: speechText, language: locale, voice });
       setTtsLoading(null);
       if (result.error || !result.audio_base64) {
         if (result.error) trackErrorOccurred('tts_failed');
@@ -791,7 +807,7 @@ export default function Page() {
       setTtsLoading(null);
       setPlayingTurnId((prev) => (prev === turnId ? null : prev));
     }
-  }, [playingTurnId, locale, ttsMutation]);
+  }, [playingTurnId, ttsLoading, locale, ttsMutation]);
 
   useEffect(() => {
     if (!autoNarrate || chat.length <= lastChatLength.current) {
@@ -1327,10 +1343,14 @@ export default function Page() {
           const conversationId = activeConversationId ?? ensureActiveConversationId();
           trackChatSent(0);
           try {
+            // Text first, then speech: the answer is on screen as soon as it is
+            // known (0.4 s in English, ~4.6 s in Luganda on the GPU stack), and
+            // is spoken as a stream, instead of both waiting for the whole
+            // reply to be synthesised (9–20 s).
             const r = await voiceChat(pcm16, {
               language: locale,
               conversationId,
-              ttsEnabled: autoNarrate,
+              ttsEnabled: false,
               voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
               sessionId: getAnalyticsSessionId(),
             });
@@ -1340,13 +1360,7 @@ export default function Page() {
               addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);
               trackChatReceived(Date.now() - t0, (r.sources?.length ?? 0) > 0);
               const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
-              if (r.reply_audio_base64) {
-                if (tid) { setPlayingTurnId(tid); try { await playAudioBase64(r.reply_audio_base64); } finally { setPlayingTurnId((p) => p === tid ? null : p); } }
-              } else if (autoNarrate && !isLowBandwidth && tid) {
-                // Server skipped inline narration (time budget) — the text is
-                // already on screen; fetch the audio as its own request.
-                void handleListenToReply(tid, r.reply);
-              }
+              if (autoNarrate && tid) void handleListenToReply(tid, r.reply);
             }
           } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
         } else {
@@ -1515,7 +1529,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, isLowBandwidth, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
