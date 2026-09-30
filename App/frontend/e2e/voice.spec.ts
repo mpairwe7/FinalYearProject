@@ -16,7 +16,7 @@
  * are CSS-hidden below 720px and skip on mobile-chrome, where the equivalent
  * flow lives in the composer (see voice.mobile.spec.ts).
  */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { TINY_WAV_B64 } from "./fixtures";
 import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
@@ -58,6 +58,31 @@ async function assertNoSpeechApi(page: import("@playwright/test").Page) {
     return Boolean(w.SpeechRecognition || w.webkitSpeechRecognition);
   });
   expect(visible, "Speech API still reachable — the fallback branch was not exercised").toBe(false);
+}
+
+/**
+ * A microphone that says something for 1.5 s, then goes quiet.
+ *
+ * A 500 Hz tone, in the band the end-of-turn meter listens to, at about
+ * -23 dBFS. Chromium's own fake device only beeps, which is not speech.
+ */
+async function speakThenPause(page: Page) {
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const ac = new AudioContext();
+      const voice = ac.createOscillator();
+      voice.frequency.value = 500;
+      const level = ac.createGain();
+      level.gain.value = 0;
+      const out = ac.createMediaStreamDestination();
+      voice.connect(level).connect(out);
+      voice.start();
+      const at = ac.currentTime + 0.5;
+      level.gain.setValueAtTime(0.1, at);
+      level.gain.setValueAtTime(0, at + 1.5);
+      return out.stream;
+    };
+  });
 }
 
 test.describe("Voice STT/TTS (mocked)", () => {
@@ -204,6 +229,48 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await page.waitForTimeout(1000);
     expect(await page.evaluate(() => (window as unknown as { __played?: number }).__played ?? 0)).toBe(0);
     await expect(page.getByRole("button", { name: /Listen in English/ }).last()).toBeEnabled();
+  });
+
+  test("voice mode sends the turn by itself when the speaker pauses", async ({ page }) => {
+    test.slow(); // a real recording window, then the pause
+    await speakThenPause(page);
+    await mockBackend(page);
+    await page.goto("/");
+
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    const voiceReq = page.waitForRequest("**/api/v1/voice/chat**", { timeout: 15_000 });
+    await page.locator('[data-testid="composer-mic"]').click();
+    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Sends when you pause.", { exact: false })).toBeVisible();
+
+    // No tap on the checkmark: 1.5 s of sound, then 1.2 s of quiet sends it.
+    const req = await voiceReq;
+    expect(req.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeHidden();
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+  });
+
+  test("voice mode closes a mic that heard nothing, and sends nothing", async ({ page }) => {
+    test.slow(); // waits out the 8 s of silence
+    await mockBackend(page);
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/v1/voice/chat")) sent.push(r.url());
+    });
+    await page.goto("/");
+
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    await page.locator('[data-testid="composer-mic"]').click();
+    const confirm = page.locator('[data-testid="composer-rec-confirm"]');
+    await expect(confirm).toBeVisible({ timeout: 10_000 });
+
+    // Chromium's fake device is silence with a short beep every 500 ms: nothing
+    // a person said, so after 8 s the mic closes by itself and says why.
+    await expect(confirm).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByText("I didn’t hear anything", { exact: false })).toBeVisible();
+    expect(sent).toEqual([]);
   });
 
   test("dictation still works with no browser Speech API", async ({ page }) => {

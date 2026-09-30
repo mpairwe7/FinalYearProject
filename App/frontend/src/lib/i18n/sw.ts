@@ -48,6 +48,8 @@ export const sw: Partial<Dictionary> = {
   'composer.dictate': 'Imba maandishi',
   'composer.stopAndInsert': 'Simamisha na uweke maandishi',
   'composer.recHintVoice': 'Gusa alama ya tiki kutuma, au X kughairi.',
+  'composer.recHintVoiceAuto': 'Inatumwa ukinyamaza. Gusa alama ya tiki kutuma sasa, au X kughairi.',
+  'composer.noSpeechHeard': 'Sikusikia chochote, kwa hivyo maikrofoni imezimwa. Iguse ujaribu tena.',
   'composer.recHintDictation':
     'Gusa alama ya tiki kuongeza uliyosema kwenye ujumbe, au X kutupa.',
   'composer.stop': 'Simamisha',

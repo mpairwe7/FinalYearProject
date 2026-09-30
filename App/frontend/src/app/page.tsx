@@ -26,6 +26,7 @@ import {
   transcribe,
   voiceChat,
 } from '../services/voiceService';
+import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -341,8 +342,14 @@ export default function Page() {
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
+  // Voice mode sends a turn by itself after this much quiet (0: only a tap does).
+  const silenceTimeout = useVoiceStore((s) => s.silenceTimeout);
+  // What the end-of-turn watcher does with an event; set below, once the
+  // handlers it calls exist, so it never calls a stale one.
+  const onTurnEventRef = useRef<(event: TurnEvent) => void>(() => {});
 
-  // Live microphone frequency analyser for responsive composer waveform
+  // Live microphone frequency analyser for responsive composer waveform, and
+  // in voice mode the end-of-turn watcher, on the same audio graph.
   useEffect(() => {
     if (!isRecording) {
       if (animFrameRef.current !== null) {
@@ -360,6 +367,7 @@ export default function Page() {
     const stream = recorderRef.current?.getStream();
     if (!stream) return;
 
+    let stopWatching: (() => void) | null = null;
     try {
       const AudioCtx =
         window.AudioContext ||
@@ -371,6 +379,12 @@ export default function Page() {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 64;
       source.connect(analyser);
+      if (voiceMode && silenceTimeout > 0) {
+        stopWatching = watchEndOfTurn(ctx, source, {
+          silenceMs: silenceTimeout,
+          onEvent: (event) => onTurnEventRef.current(event),
+        });
+      }
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const update = () => {
@@ -392,6 +406,7 @@ export default function Page() {
     }
 
     return () => {
+      stopWatching?.();
       if (animFrameRef.current !== null) {
         cancelAnimationFrame(animFrameRef.current);
         animFrameRef.current = null;
@@ -401,7 +416,7 @@ export default function Page() {
         audioContextRef.current = null;
       }
     };
-  }, [isRecording]);
+  }, [isRecording, voiceMode, silenceTimeout]);
 
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
@@ -1550,6 +1565,22 @@ export default function Page() {
     setIsTransitioning(false);
   }, [disarmMic, setSpeechState]);
 
+  // Voice mode's end of turn. A pause after speech, or a turn that reached
+  // its limit, is sent as the checkmark sends it. A mic that heard nothing
+  // closes and says so: left open, it would listen to the room indefinitely.
+  useEffect(() => {
+    onTurnEventRef.current = (event) => {
+      if (event === 'speech' || !recorderRef.current?.isRecording) return;
+      if (event === 'no-speech') {
+        handleCancelRecording();
+        audioSignifiers.playMicStop();
+        setDictationNotice(t('composer.noSpeechHeard'));
+        return;
+      }
+      void handleMicClick();
+    };
+  }, [handleCancelRecording, handleMicClick, t]);
+
   const handleStarterPrompt = useCallback((prompt: string) => {
     trackStarterPromptUsed(prompt);
     sendMessage(prompt);
@@ -1656,6 +1687,7 @@ export default function Page() {
     speechUnavailable: speechState === 'unavailable' && !hasMediaRecorder,
     speechState,
     voiceMode,
+    autoSend: silenceTimeout > 0,
     onMessageChange: setMessage,
     onSend: sendMessage,
     onMicClick: handleMicClick,
