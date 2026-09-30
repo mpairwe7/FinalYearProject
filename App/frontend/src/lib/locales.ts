@@ -23,8 +23,9 @@ export interface LocaleOption {
   /** BCP-47 tag for the browser SpeechRecognition API, where it is used. */
   speechLang: string;
   /** Who transcribes dictation into the composer. `browser`: the Web Speech
-   *  API, which types words as they are spoken but, in Chrome and Safari,
-   *  sends the audio to the vendor's cloud. `server`: the local Sunbird
+   *  API, which types words as they are spoken but, in Chrome, sends the
+   *  audio to Google's servers (other browsers may recognise on the device or
+   *  remotely, depending on platform and version). `server`: the local Sunbird
    *  Whisper-SALT model through /v1/asr. Chrome's engine has no Luganda (it
    *  fails with "language-not-supported", which read as "speech recognition
    *  is unavailable"), and SALT is the more accurate for Luganda and Swahili,
