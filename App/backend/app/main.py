@@ -1325,7 +1325,12 @@ async def transcribe_audio(
     )
 
     with_words = request.query_params.get("with_words", "").lower() in ("true", "1")
-    result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language, with_words=with_words)
+    # Off the event loop, like every speech call here: run inline, one
+    # synthesis or transcription held up the whole api for its duration
+    # (/health took 5.8 s during a 6.2 s /v1/tts on the GPU stack, G96).
+    result = await asyncio.to_thread(
+        speech.transcribe, audio_bytes, sample_rate=sample_rate, language=language, with_words=with_words
+    )
     metrics.inc("speech_asr_total")
     if result.latency_s:
         metrics.observe("speech_asr_latency_s", result.latency_s)
@@ -1361,7 +1366,7 @@ async def synthesize_audio(
     """Synthesize text to WAV audio. Returns base64-encoded WAV bytes."""
     import base64
 
-    result = speech.synthesize(text=body.text, voice=body.voice, language=body.language)
+    result = await asyncio.to_thread(speech.synthesize, text=body.text, voice=body.voice, language=body.language)
     metrics.inc("speech_tts_total")
     if result.latency_s:
         metrics.observe("speech_tts_latency_s", result.latency_s)
@@ -1396,7 +1401,8 @@ async def translate_text(
             latency_s=0.0,
             backend="passthrough",
         )
-    result = speech.translate(
+    result = await asyncio.to_thread(
+        speech.translate,
         text=body.text,
         source_lang=body.source_lang,
         target_lang=body.target_lang,
@@ -1824,7 +1830,7 @@ async def voice_chat(
     session_id = request.headers.get("X-Session-ID") or None
 
     # --- 1. ASR ---------------------------------------------------------------
-    asr_result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    asr_result = await asyncio.to_thread(speech.transcribe, audio_bytes, sample_rate=sample_rate, language=language)
     asr_latency = asr_result.latency_s or 0.0
     metrics.inc("speech_asr_total")
     if asr_result.latency_s:
@@ -1911,7 +1917,7 @@ async def voice_chat(
                 spoken_reply = " ".join(sentences[:3])
             if len(spoken_reply) > 500:
                 spoken_reply = spoken_reply[:500].rsplit(" ", 1)[0] + "."
-            tts_result = speech.synthesize(text=spoken_reply, voice=voice, language=tts_lang)
+            tts_result = await asyncio.to_thread(speech.synthesize, text=spoken_reply, voice=voice, language=tts_lang)
             tts_latency = tts_result.latency_s
             tts_backend = tts_result.backend
             tts_sample_rate = tts_result.sample_rate

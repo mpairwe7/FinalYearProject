@@ -571,6 +571,38 @@ def test_asr_takes_a_declared_raw_format_as_wav():
     assert body["sample_rate"] == 22050
 
 
+def test_speech_work_does_not_hold_up_the_rest_of_the_api():
+    """G96: synthesis ran on the event loop, so /health waited for it (5.8 s on the GPU stack)."""
+    import asyncio
+    import time as _time
+
+    import httpx
+
+    c = _client(speech=True)
+
+    def slow_synthesize(**_kw):
+        _time.sleep(0.6)
+        return SynthesizeResult(audio=b"RIFFstub-wav-bytes", sample_rate=22050, num_samples=0,
+                                duration_s=1.0, latency_s=0.6, backend="stub-tts", voice="v")
+
+    c.app.state.speech.synthesize.side_effect = slow_synthesize
+
+    async def health_while_synthesising() -> tuple[int, float]:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as client:
+            started = _time.perf_counter()
+            tts = asyncio.create_task(client.post("/v1/tts", json={"text": "slow", "language": "en"}))
+            await asyncio.sleep(0.1)  # the synthesis is under way
+            health = await client.get("/health")
+            answered = _time.perf_counter() - started
+            assert (await tts).status_code == 200
+            return health.status_code, answered
+
+    status, answered = asyncio.run(health_while_synthesising())
+    assert status == 200
+    # Blocked, /health could not even be sent until the 0.6 s synthesis ended.
+    assert answered < 0.45, f"/health answered {answered:.2f}s in, behind a synthesis"
+
+
 def test_voice_chat_asr_branch():
     """The compound voice route is reachable end-to-end; an empty transcript
     returns a well-formed 200 with a spoken-error hint (no LLM path needed)."""
