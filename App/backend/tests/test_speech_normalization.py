@@ -169,6 +169,20 @@ def test_a_number_the_caller_asked_for_is_still_spoken():
     assert res == "U-R-A's toll-free line is 0 800, 117, 0 0 0."
 
 
+def test_the_aside_rules_run_in_linear_time():
+    # CodeQL py/polynomial-redos: a leading \s* before "(" was retried from
+    # every position in a run of spaces (20k spaces took ~1 s).
+    import time
+
+    from app.speech_normalization import _FY_ASIDE_RE, _REPEATED_FIGURE_RE
+
+    for text in (" " * 20000 + "(FY", "0" * 20000 + " (0"):
+        start = time.perf_counter()
+        _FY_ASIDE_RE.sub("", text)
+        _REPEATED_FIGURE_RE.sub(r"\1", text)
+        assert time.perf_counter() - start < 0.2
+
+
 def test_a_fiscal_year_rolls_over_the_century():
     assert clean_text_for_speech("FY2099-00", locale="en") == "2099 to 2100"
 

@@ -93,8 +93,10 @@ _CONTACT_FOOTER_RE = re.compile(
 # as "18% (18%)" (a digit anchor for translation) and names a tax as "(VAT /
 # omusolo gwa VAT / ushuru wa VAT)"; spoken by the English voice, the VAT
 # answer ran on as "…to gwa gwa, isi isi zo…" until the 17 s cap.
-_REPEATED_FIGURE_RE = re.compile(r"(?<![\w.,])(\d[\d,.]*\s?%?)\s*\(\s*\1\s*\)")
-_FY_ASIDE_RE = re.compile(r"\s*\(\s*FY\s?(\d{4})\s?[-\u2013/]\s?(\d{2,4})\s*\)", re.IGNORECASE)
+# Bounded on purpose: an unbounded run of digits or spaces before the "(" is
+# retried from every position in it (CodeQL py/polynomial-redos).
+_REPEATED_FIGURE_RE = re.compile(r"(?<![\w.,])(\d[\d,.]{0,24}[ \t]?%?)[ \t]?\([ \t]?\1[ \t]?\)")
+_FY_ASIDE_RE = re.compile(r"[ \t]?\([ \t]?FY[ \t]?(\d{4})[ \t]?[-\u2013/][ \t]?(\d{2,4})[ \t]?\)", re.IGNORECASE)
 _FY_RE = re.compile(r"\bFY\s?(\d{4})\s?[-\u2013/]\s?(\d{2,4})\b", re.IGNORECASE)
 _ALIAS_ASIDE_RE = re.compile(r"\(([^()/]{1,60}(?:/[^()/]{1,60})+)\)")
 

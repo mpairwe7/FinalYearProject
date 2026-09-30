@@ -372,6 +372,8 @@ G42 fix, which is live there. The one failure:
 
 | G86 🟢 | **The voice socket read ordinary numbers as steps.** Its sentence splitter rewrote every "N. " as "Step N:", so "Your reference number is 123. Keep it safe." was shown and spoken as "Step 123". | CodeRabbit on #519, 2026-09-30. | **Fixed 2026-09-30.** Only list markers are rewritten: a "1." that opens a line or follows a colon, then the next number of that list. |
 
+| G87 🟠 | **Several speech-normaliser patterns run in quadratic time.** On 50,000 characters of newlines, zeros or spaces, these each take 4–25 s: `_NUMBERED_STEP_RE`, `_BULLET_RE` and `_HEADER_RE` (a `^\s*` under MULTILINE also spans newlines), `_BROKEN_MD_LINK_RE`, `_CITATION_RE`, `_TABLE_PIPE_RE` and `_TABLE_ROW_RE`. Every TTS request runs them, `/v1/tts` included. Its 4,000-character cap bounds one request to about 0.5 s. | Measured while fixing CodeQL's polynomial-regex alerts on #520 (the aside patterns, now linear), 2026-09-30. | **Open.** Bound the leading runs as the aside patterns now are (`[ \t]?`, `{0,n}`), with a linear-time test like `test_the_aside_rules_run_in_linear_time`. |
+
 
 Two probe bugs were found and corrected rather than reported as defects: `invoic`
 and `regist` were asserted as stems against a token-boundary matcher, so
