@@ -468,18 +468,24 @@ export async function* streamSpeech(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffered = '';
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (value) buffered += decoder.decode(value, { stream: true });
-    for (let nl = buffered.indexOf('\n'); nl >= 0; nl = buffered.indexOf('\n')) {
-      const line = buffered.slice(0, nl).trim();
-      buffered = buffered.slice(nl + 1);
-      if (!line) continue;
-      const message = JSON.parse(line) as SpeechPiece & { done?: boolean };
-      if (message.done) return;
-      yield message;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value) buffered += decoder.decode(value, { stream: true });
+      for (let nl = buffered.indexOf('\n'); nl >= 0; nl = buffered.indexOf('\n')) {
+        const line = buffered.slice(0, nl).trim();
+        buffered = buffered.slice(nl + 1);
+        if (!line) continue;
+        const message = JSON.parse(line) as SpeechPiece & { done?: boolean };
+        if (message.done) return;
+        yield message;
+      }
+      if (done) return;
     }
-    if (done) return;
+  } finally {
+    // A caller that stops listening early closes the request, so the server
+    // stops voicing the rest.
+    reader.cancel().catch(() => {});
   }
 }
 
@@ -520,7 +526,16 @@ export async function speakStreamed(
         failed += 1;
         continue;
       }
-      const buffer = await ctx.decodeAudioData(base64ToArrayBuffer(piece.audio_base64));
+      let buffer: AudioBuffer;
+      try {
+        buffer = await ctx.decodeAudioData(base64ToArrayBuffer(piece.audio_base64));
+      } catch (err) {
+        // Before anything has played, the format is the likely fault: give up
+        // at once so the caller falls back to one WAV. After, skip the piece.
+        if (pieces === 0) throw err;
+        failed += 1;
+        continue;
+      }
       if (controller.signal.aborted) break;
       const source = ctx.createBufferSource();
       source.buffer = buffer;

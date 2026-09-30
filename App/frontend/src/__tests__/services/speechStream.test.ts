@@ -41,7 +41,7 @@ const line = (obj: object) => `${JSON.stringify(obj)}\n`;
 const piece = (seq: number, seconds: number | string) => ({ seq, text: `piece ${seq}`, format: 'ogg_opus', audio_base64: btoa(String(seconds)) });
 
 /** A fetch whose body yields the given NDJSON chunks, one read at a time. */
-function respondWith(chunks: string[], { hang = false } = {}) {
+function respondWith(chunks: string[], { hang = false, onCancel = () => {} } = {}) {
   return vi.fn(async (_url: string, init: RequestInit) => {
     const encoder = new TextEncoder();
     let i = 0;
@@ -54,6 +54,7 @@ function respondWith(chunks: string[], { hang = false } = {}) {
         if (i < chunks.length) controller.enqueue(encoder.encode(chunks[i++]));
         else if (!hang) controller.close();
       },
+      cancel: onCancel,
     });
     return new Response(body, { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } });
   });
@@ -108,6 +109,22 @@ describe('speakStreamed', () => {
     await vi.waitFor(() => expect(FakeSource.all).toHaveLength(2));
     finishAudio();
     expect(await spoken).toMatchObject({ pieces: 2, failed: 1 });
+  });
+
+  it('skips a piece it cannot decode once speech has started', async () => {
+    const ndjson = line(piece(0, 1)) + line(piece(1, 'broken')) + line(piece(2, 1)) + line({ done: true });
+    vi.stubGlobal('fetch', respondWith([ndjson]));
+    const spoken = speakStreamed('Three pieces.');
+    await vi.waitFor(() => expect(FakeSource.all).toHaveLength(2));
+    finishAudio();
+    expect(await spoken).toMatchObject({ pieces: 2, failed: 1 });
+  });
+
+  it('closes the request when it gives up, so the server stops voicing', async () => {
+    const onCancel = vi.fn();
+    vi.stubGlobal('fetch', respondWith([line(piece(0, 'broken')) + line(piece(1, 1))], { hang: true, onCancel }));
+    await expect(speakStreamed('Hello.')).rejects.toThrow(/cannot decode/);
+    expect(onCancel).toHaveBeenCalled();
   });
 
   it('stops everything queued when stopPlayback is called', async () => {
