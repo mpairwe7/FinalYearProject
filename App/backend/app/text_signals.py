@@ -904,6 +904,21 @@ CONTACT_FOOTER = (
     "WhatsApp 0772 140 000."
 )
 
+# CONTACT_FOOTER as localize_reply re-attaches it to a translated answer (the
+# footer itself never goes through MT, so its numbers cannot be mangled).
+LOCALIZED_CONTACT_FOOTERS = {
+    "lg": (
+        "Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: "
+        "genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku "
+        "nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000."
+    ),
+    "sw": (
+        "Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari "
+        "kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu "
+        "bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000."
+    ),
+}
+
 GROUNDED_REVISION_PREAMBLE = (
     "Here's the most relevant guidance I found in official URA sources:"
 )

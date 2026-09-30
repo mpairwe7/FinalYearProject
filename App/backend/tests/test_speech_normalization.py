@@ -155,6 +155,20 @@ def test_other_asides_are_left_alone(raw, spoken):
     assert clean_text_for_speech(raw, locale="en") == spoken
 
 
+def test_the_contact_footer_is_not_spoken_in_any_language():
+    from app.text_signals import CONTACT_FOOTER, LOCALIZED_CONTACT_FOOTERS
+
+    for locale, footer in {"en": CONTACT_FOOTER, **LOCALIZED_CONTACT_FOOTERS}.items():
+        res = clean_text_for_speech(f"Register on the portal.\n\n{footer}\n\nYou might also want to know: X", locale)
+        assert "0800" not in res and "0772" not in res
+        assert res.startswith("Register on the portal.") and res.endswith("You might also want to know: X")
+
+
+def test_a_number_the_caller_asked_for_is_still_spoken():
+    res = clean_text_for_speech("URA's toll-free line is 0800 117 000.", locale="en")
+    assert res == "U-R-A's toll-free line is 0 800, 117, 0 0 0."
+
+
 def test_a_fiscal_year_rolls_over_the_century():
     assert clean_text_for_speech("FY2099-00", locale="en") == "2099 to 2100"
 

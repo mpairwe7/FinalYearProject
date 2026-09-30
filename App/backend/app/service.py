@@ -129,6 +129,7 @@ from .text_signals import (
     GRATITUDE_REPLY,
     GREETING_REPLY,
     GROUNDED_REVISION_PREAMBLE,
+    LOCALIZED_CONTACT_FOOTERS,
     NO_HITS_REPLY,
     get_greeting_reply,
     get_gratitude_reply,
@@ -3239,15 +3240,7 @@ def localize_reply(reply: str, locale: str) -> str:
         return reply
 
     if contact_footer_present and localized:
-        footer_loc = (
-            "Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: "
-            "genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku "
-            "nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000."
-            if locale == "lg"
-            else "Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari "
-            "kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu "
-            "bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000."
-        )
+        footer_loc = LOCALIZED_CONTACT_FOOTERS["lg" if locale == "lg" else "sw"]
         localized = f"{localized.rstrip()}\n\n{footer_loc}"
 
     localized = OutputGuard.normalize_structure(localized)

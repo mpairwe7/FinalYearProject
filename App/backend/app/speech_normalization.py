@@ -79,6 +79,16 @@ _PCT_RE = re.compile(r"\b(\d+(?:\.\d+)?)\s*%", re.IGNORECASE)
 # Legal citations
 _SEC_RE = re.compile(r"\bSec(?:tion)?\.?\s*(\d+[A-Za-z]?)\b", re.IGNORECASE)
 
+# The contact footer answers end with (text_signals.CONTACT_FOOTER and
+# localize_reply's Luganda and Swahili copies) is not spoken. Its phone numbers
+# are what Orpheus cannot say: every spelling tried, digits or words, looped
+# ("zero eight hundred one one one one…"). A caller is already on the line to
+# URA, and the written answer keeps the footer. Matched by its opening words,
+# so an answer that gives the number because it was asked for is still read.
+_CONTACT_FOOTER_RE = re.compile(
+    r"(?:If you get stuck at any step|Bw'oba ng'osanze obuzibu|Ikiwa utakabiliwa na changamoto)[^\n]*"
+)
+
 # Asides that read badly and make Orpheus babble. The calculator writes a rate
 # as "18% (18%)" (a digit anchor for translation) and names a tax as "(VAT /
 # omusolo gwa VAT / ushuru wa VAT)"; spoken by the English voice, the VAT
@@ -182,7 +192,7 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     if not text:
         return ""
 
-    t = text
+    t = _CONTACT_FOOTER_RE.sub("", text)
 
     # 1. Strip markdown links, including a missing opening bracket, then any
     #    bare URL the model left behind. A neural voice reads "www dot" aloud.
