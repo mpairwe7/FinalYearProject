@@ -97,6 +97,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Speech / voice ---
     ("POST", "/v1/asr"),
     ("POST", "/v1/tts"),
+    ("POST", "/v1/tts/stream"),
     ("POST", "/v1/translate"),
     ("GET", "/v1/speech/health"),
     ("GET", "/v1/speech/voices"),
@@ -210,6 +211,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/faq/{tag}"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/v1/asr"): "this:test_asr_transcribes_audio",
     ("POST", "/v1/tts"): "this:test_tts_synthesizes_audio",
+    ("POST", "/v1/tts/stream"): "this:test_tts_stream_sends_pieces_in_order",
     ("POST", "/v1/translate"): "this:test_translate_passthrough + test_translate_en_to_lg",
     ("GET", "/v1/speech/health"): "test_api_endpoints.SpeechEndpoints",
     ("GET", "/v1/speech/voices"): "this:test_speech_voices_catalogue",
@@ -419,10 +421,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (89 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (90 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 89, f"expected 89 HTTP endpoints, found {len(http)}"
+    assert len(http) == 90, f"expected 90 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -601,6 +603,32 @@ def test_speech_work_does_not_hold_up_the_rest_of_the_api():
     assert status == 200
     # Blocked, /health could not even be sent until the 0.6 s synthesis ended.
     assert answered < 0.45, f"/health answered {answered:.2f}s in, behind a synthesis"
+
+
+def test_tts_stream_sends_pieces_in_order():
+    """Streamed speech: one NDJSON line per piece, in speaking order, then a done line."""
+    import json as _json
+
+    c = _client(speech=True)
+    speech = c.app.state.speech
+    voiced = SynthesizeResult(audio=b"RIFFstub-wav-bytes", sample_rate=22050, num_samples=0,
+                              duration_s=1.0, latency_s=0.1, backend="stub-tts", voice="v")
+    failed = SynthesizeResult(audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
+                              latency_s=0.0, backend="stub-tts", voice="v", error="voice down")
+    speech.synthesize.side_effect = lambda text, **_kw: failed if "Third" in text else voiced
+    text = "First, a short opening. " + "Second sentence that runs on for a while about VAT. " * 3 + "Third one fails."
+    r = c.post("/v1/tts/stream", json={"text": text, "language": "en", "format": "wav"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    lines = [_json.loads(line) for line in r.text.splitlines()]
+    pieces, done = lines[:-1], lines[-1]
+    assert [p["seq"] for p in pieces] == list(range(len(pieces)))
+    assert len(pieces) >= 3
+    assert len(pieces[0]["text"]) <= 60  # a short first piece
+    assert pieces[0]["audio_base64"] == base64.b64encode(b"RIFFstub-wav-bytes").decode("ascii")
+    assert pieces[-1]["error"] == "voice down"
+    assert "audio_base64" not in pieces[-1]
+    assert done == {"done": True, "pieces": len(pieces), "failed": 1}
 
 
 def test_voice_chat_asr_branch():
