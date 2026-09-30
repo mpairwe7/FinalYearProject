@@ -147,7 +147,8 @@ class TestLugandaCrossLingualKnowledgeReceptionist(unittest.IsolatedAsyncioTestC
         self.assertEqual(len(turns), 2)
         assistant_turn = turns[1]
         self.assertEqual(assistant_turn["speaker"], "assistant")
-        self.assertTrue(any(term in assistant_turn["text"] for term in ("18%", "18", "ebitundu 18")))
+        # The spoken turn carries the figure as words, which Orpheus says and "18" it does not.
+        self.assertTrue(any(term in assistant_turn["text"] for term in ("18%", "18", "kkumi na munaana")))
 
     async def test_tin_registration_procedure_in_luganda(self):
         """TIN registration question is answered directly in Luganda without officer transfer."""
@@ -180,7 +181,7 @@ class TestLugandaCrossLingualKnowledgeReceptionist(unittest.IsolatedAsyncioTestC
 
         self.assertEqual(self.room.state.mode, "ai")
         turns = list_turns(self.call_id)
-        self.assertTrue(any(term in turns[1]["text"] for term in ("12%", "12", "ebitundu 12")))
+        self.assertTrue(any(term in turns[1]["text"] for term in ("12%", "12", "kkumi na bibiri")))
 
     async def test_late_payment_penalty_preserves_2_percent(self):
         """Late tax payment penalty inquiry preserves 2% statutory figure."""
@@ -196,7 +197,7 @@ class TestLugandaCrossLingualKnowledgeReceptionist(unittest.IsolatedAsyncioTestC
 
         self.assertEqual(self.room.state.mode, "ai")
         turns = list_turns(self.call_id)
-        self.assertTrue(any(term in turns[1]["text"] for term in ("2%", "2", "ebitundu 2")))
+        self.assertTrue(any(term in turns[1]["text"] for term in ("2%", "2", "ebitundu bibiri")))
 
     async def test_moderate_confidence_speaks_answer_and_offers_officer(self):
         """Pillar 2: Moderate confidence (0.35-0.50) speaks answer + offers officer without hard transfer."""

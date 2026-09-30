@@ -10,13 +10,17 @@ into natural spoken language:
 - Expands Ugandan tax acronyms (EFRIS, URA, PAYE, WHT, VAT) for clear phonetics
 - Spells out 10-digit URA Taxpayer Identification Numbers (TINs) digit by digit
 - Normalizes currency amounts (UGX 50,000,000 -> 50 million Uganda shillings)
-- Converts percentage figures (18% -> 18 percent / ebitundu 18 ku buli kikumi)
+- Converts percentage figures (18% -> 18 percent / ebitundu kkumi na munaana ku buli kikumi)
+- Says Luganda and Swahili figures as words, which Orpheus reads and digits it
+  does not (``number_words``)
 - Expands legal references (Sec. 118A -> Section 118A)
 """
 
 from __future__ import annotations
 
 import re
+
+from .number_words import decimal_words, en_words, en_year, lg_words, sw_words
 
 # Citation markers: [1], [1, 2], [1; 3], ignoring markdown links [1](url)
 _CITATION_RE = re.compile(r"\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()")
@@ -70,7 +74,7 @@ _GENERAL_TOLLFREE_RE = re.compile(r"\b0800\s*(\d{3})\s*(\d{3})\b")
 _NUMBERED_STEP_RE = re.compile(r"^\s*(\d+)\.\s+", re.MULTILINE)
 
 # Currency amounts
-_UGX_RE = re.compile(r"\bUGX\s*(\d+(?:,\d{3})*(?:\.\d+)?)\b", re.IGNORECASE)
+_UGX_RE = re.compile(r"\bUGX\s*([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)\b", re.IGNORECASE)
 _USD_RE = re.compile(r"\bUSD\s*(\d+(?:,\d{3})*(?:\.\d+)?)\b", re.IGNORECASE)
 
 # Percentages
@@ -95,10 +99,32 @@ _CONTACT_FOOTER_RE = re.compile(
 # answer ran on as "…to gwa gwa, isi isi zo…" until the 17 s cap.
 # Bounded on purpose: an unbounded run of digits or spaces before the "(" is
 # retried from every position in it (CodeQL py/polynomial-redos).
-_REPEATED_FIGURE_RE = re.compile(r"(?<![\w.,])(\d[\d,.]{0,24}[ \t]?%?)[ \t]?\([ \t]?\1[ \t]?\)")
+# Translated, the anchor can carry a word: "ebitundu 18% (eza 18%)".
+_REPEATED_FIGURE_RE = re.compile(
+    r"(?<![\w.,])(\d[\d,.]{0,24}[ \t]?%?)[ \t]?\([ \t]?(?:[^\W\d_]{1,8}[ \t])?\1[ \t]?\)"
+)
 _FY_ASIDE_RE = re.compile(r"[ \t]?\([ \t]?FY[ \t]?(\d{4})[ \t]?[-\u2013/][ \t]?(\d{2,4})[ \t]?\)", re.IGNORECASE)
 _FY_RE = re.compile(r"\bFY\s?(\d{4})\s?[-\u2013/]\s?(\d{2,4})\b", re.IGNORECASE)
+# "2026-27" with no "FY": a year range only when the second year follows the
+# first within ten years, so an ISO date ("2026-09-30") is not one.
+_YEAR_RANGE_RE = re.compile(r"(?<![0-9-])((?:19|20)[0-9]{2})[-\u2013/]([0-9]{2}|(?:19|20)[0-9]{2})(?![0-9-])")
 _ALIAS_ASIDE_RE = re.compile(r"\(([^()/]{1,60}(?:/[^()/]{1,60})+)\)")
+# "Withholding Tax (WHT)" once the acronym is expanded: a name said twice.
+_ECHO_ASIDE_RE = re.compile(r"[ \t]?\(([^()]{2,60})\)")
+
+# A range, "UGX 335,000 – UGX 410,000", read as a pause without its "to".
+_RANGE_RE = re.compile(r"([0-9][0-9,.]{0,24}[ \t]?%?)[ \t]+[\u2013\u2014-][ \t]+(?=(?:UGX|USD)?[ \t]?[0-9])")
+_RANGE_WORD = {"en": "to", "lg": "okutuuka ku", "sw": "hadi"}
+
+# Percentages, keeping a word the text already has: "ku bitundu 18%" is not
+# "ku bitundu ebitundu 18 ku buli kikumi", nor "asilimia 18%" "asilimia asilimia".
+_LG_PCT_RE = re.compile(r"\b(e?bitundu[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+ku[ \t]+buli[ \t]+kikumi\b)?", re.IGNORECASE)
+_SW_PCT_RE = re.compile(r"\b(?:asilimia[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%", re.IGNORECASE)
+
+# A number standing on its own: not part of a word (118A, 30th), a date, a
+# time, a decimal or a range written without spaces. ASCII digits only here
+# and in the figure patterns: `\d` also matches other scripts' digits.
+_BARE_NUMBER_RE = re.compile(r"(?<![\w.])(?<![0-9][,/:-])([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(\.[0-9]+)?(?!\w)(?![,/:.-][0-9])")
 
 # Acronyms and institutional terms in Ugandan tax context
 _ACRONYMS = [
@@ -138,14 +164,14 @@ def _format_ugx_amount(amount_str: str, locale: str) -> str:
         return f"{amount_str} Uganda shillings"
 
     if locale == "lg":
-        if val >= 1_000_000 and val % 1_000_000 == 0:
-            return f"shilingi obukadde {int(val // 1_000_000)}"
-        return f"shilingi za Yuganda {amount_str}"
+        millions = int(val // 1_000_000)
+        if val >= 1_000_000 and val % 1_000_000 == 0 and millions <= 100:
+            return "shilingi akakadde kamu" if millions == 1 else f"shilingi obukadde {lg_words(millions, 'bu')}"
+        # Larger or uneven amounts in English words, as money is commonly said.
+        return f"shilingi {_spoken_number(clean_num, 'lg', years=False)}"
 
     if locale == "sw":
-        if val >= 1_000_000 and val % 1_000_000 == 0:
-            return f"shilingi milioni {int(val // 1_000_000)} za Uganda"
-        return f"shilingi za Uganda {amount_str}"
+        return f"shilingi {_spoken_number(clean_num, 'sw')} za Uganda"
 
     # English default
     if val >= 1_000_000_000 and val % 1_000_000_000 == 0:
@@ -158,18 +184,30 @@ def _format_ugx_amount(amount_str: str, locale: str) -> str:
     return f"{amount_str} Uganda shillings"
 
 
-def _fiscal_year(match: re.Match[str], locale: str) -> str:
-    """ "FY2026-27" -> "2026 to 2027" in English (Orpheus reads "2026-27" as anything
-    from "twenty-six twenty-seven" to "ten thousand and twenty-seven"); the
-    digits alone elsewhere."""
-    first, second = match.group(1), match.group(2)
-    if locale != "en":
-        return f"{first}-{second}"
+def _second_year(first: str, second: str) -> str:
+    """"2026", "27" -> "2027"; "2099", "00" -> "2100"."""
     if len(second) < 4:
-        second = f"{first[: 4 - len(second)]}{second}"
-        if int(second) < int(first):
-            second = str(int(second) + 10 ** len(match.group(2)))
-    return f"{first} to {second}"
+        full = f"{first[: 4 - len(second)]}{second}"
+        if int(full) < int(first):
+            full = str(int(full) + 10 ** len(second))
+        return full
+    return second
+
+
+def _fiscal_year(match: re.Match[str], locale: str) -> str:
+    """ "FY2026-27" -> "2026 to 2027" (Orpheus reads "2026-27" as anything from
+    "twenty-six twenty-seven" to "ten thousand and twenty-seven"), with the
+    locale's "to"; Luganda and Swahili then say the years as words."""
+    first = match.group(1)
+    return f"{first} {_RANGE_WORD.get(locale, 'to')} {_second_year(first, match.group(2))}"
+
+
+def _year_range(match: re.Match[str], locale: str) -> str:
+    first = match.group(1)
+    second = _second_year(first, match.group(2))
+    if not 0 < int(second) - int(first) <= 10:
+        return match.group(0)
+    return f"{first} {_RANGE_WORD.get(locale, 'to')} {second}"
 
 
 def _first_alias(match: re.Match[str]) -> str:
@@ -179,6 +217,58 @@ def _first_alias(match: re.Match[str]) -> str:
     if head and all(re.search(rf"\b{re.escape(head)}\b", name, re.IGNORECASE) for name in names[1:]):
         return f"({head})"
     return match.group(0)
+
+
+def _spoken_number(number: str, locale: str, years: bool = True) -> str:
+    """"335000" or "2.5" as words: Swahili for sw, Luganda up to 100 for lg, English otherwise.
+
+    In Luganda a bare four-digit number from 1100 to 2099 is read as a year
+    ("twenty twenty-six"); *years* is off for amounts of money.
+    """
+    if "." in number:
+        return decimal_words(number, "sw" if locale == "sw" else "en")
+    n = int(number)
+    if locale == "sw":
+        return sw_words(n)
+    if locale == "lg":
+        is_year = years and len(number) == 4 and 1100 <= n <= 2099
+        return lg_words(n) or (en_year(n) if is_year else en_words(n))
+    return en_words(n)
+
+
+def _lg_percent(match: re.Match[str]) -> str:
+    number = match.group(2)
+    words = lg_words(int(number), "bi") if "." not in number else None
+    return f"{match.group(1) or 'ebitundu '}{words or _spoken_number(number, 'en')} ku buli kikumi"
+
+
+def _bare_number(match: re.Match[str], locale: str) -> str:
+    """A number left in Luganda or Swahili text, as words; digit runs stay as they are."""
+    text, start, end = match.string, match.start(), match.end()
+    digits = match.group(1)
+    before = text[max(0, start - 8) : start]
+    # A TIN, PRN or toll-free number read digit by digit ("0 800, 117, 0 0 0"),
+    # a phone number (a leading zero), and a form name ("D-T 2027") are not amounts.
+    if (
+        (len(digits) > 1 and digits.startswith("0") and not match.group(2))
+        or re.search(r"\d[ \t]$|\d,[ \t]$", before)
+        or re.match(r"[ \t]\d|,[ \t]\d", text[end : end + 3])
+        or before.endswith("D-T ")
+    ):
+        return match.group(0)
+    number = digits.replace(",", "") + (match.group(2) or "")
+    if before.endswith("Section "):
+        return _spoken_number(number, "en")
+    return _spoken_number(number, locale)
+
+
+def _drop_echo(match: re.Match[str]) -> str:
+    """"Withholding Tax (Withholding Tax)" -> "Withholding Tax"."""
+    said = match.group(1).strip()
+    preceding = match.string[: match.start()].rstrip()
+    # A whole-word echo only: "118 percent (18 percent)" names two figures.
+    echoed = said and preceding.lower().endswith(said.lower())
+    return "" if echoed and not preceding[-len(said) - 1 : -len(said)].isalnum() else match.group(0)
 
 
 def clean_text_for_speech(text: str, locale: str = "en") -> str:
@@ -230,6 +320,7 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     else:
         t = _FY_ASIDE_RE.sub("", t)
     t = _FY_RE.sub(lambda m: _fiscal_year(m, locale), t)
+    t = _YEAR_RANGE_RE.sub(lambda m: _year_range(m, locale), t)
 
     # 7. Normalize 9-digit or 10-digit TINs (spell out digits clearly with pause)
     def _tin_sub(m: re.Match) -> str:
@@ -257,15 +348,18 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     else:
         t = _NUMBERED_STEP_RE.sub(r"Step \1: ", t)
 
+    # 7e. A range's dash is a "to"
+    t = _RANGE_RE.sub(lambda m: f"{m.group(1)} {_RANGE_WORD.get(locale, 'to')} ", t)
+
     # 8. Currency amounts (UGX and USD)
     t = _UGX_RE.sub(lambda m: _format_ugx_amount(m.group(1), locale), t)
     t = _USD_RE.sub(r"\1 US dollars", t)
 
     # 9. Percentages
     if locale == "lg":
-        t = _PCT_RE.sub(r"ebitundu \1 ku buli kikumi", t)
+        t = _LG_PCT_RE.sub(_lg_percent, t)
     elif locale == "sw":
-        t = _PCT_RE.sub(r"asilimia \1", t)
+        t = _SW_PCT_RE.sub(lambda m: f"asilimia {_spoken_number(m.group(1), 'sw')}", t)
     else:
         t = _PCT_RE.sub(r"\1 percent", t)
 
@@ -275,6 +369,11 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     # 11. Domain acronym expansion for phonetics
     for pattern, replacement in _ACRONYMS:
         t = pattern.sub(replacement, t)
+    t = _ECHO_ASIDE_RE.sub(_drop_echo, t)
+
+    # 11b. Luganda and Swahili figures as words (see number_words)
+    if locale in ("lg", "sw"):
+        t = _BARE_NUMBER_RE.sub(lambda m: _bare_number(m, locale), t)
 
     # 12. Punctuation and whitespace hygiene
     # Remove dangling symbols: *, ~, >, #, |, ^

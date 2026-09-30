@@ -1,0 +1,280 @@
+{
+ "date": "2026-09-30",
+ "method": "Each sentence as dev's normaliser spoke it (old) and as this change speaks it (new), voiced by /v1/tts (Orpheus) and transcribed by /v1/asr (Whisper-SALT) on the GPU stack. A figure counts as heard if its digits, the spoken words or its English words (75% of tokens) come back.",
+ "summary": {
+  "lg/percent": {
+   "old": "1/9",
+   "new": "8/9"
+  },
+  "lg/amount": {
+   "old": "3/7",
+   "new": "7/7"
+  },
+  "sw/percent": {
+   "old": "6/9",
+   "new": "9/9"
+  },
+  "sw/amount": {
+   "old": "4/7",
+   "new": "7/7"
+  }
+ },
+ "rows": [
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 0%.",
+   "old": "Omusolo guli ebitundu 0 ku buli kikumi.",
+   "old_heard": "Omusolo buli ebitundu ozirwako buli kikumi.",
+   "new": "Omusolo guli ebitundu zeero ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu zeero ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 0%.",
+   "old": "Kodi ni asilimia 0.",
+   "old_heard": "Kodi miasili mia zero.",
+   "new": "Kodi ni asilimia sifuri.",
+   "new_heard": "Kodi ni asimia sifuri."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 10%.",
+   "old": "Omusolo guli ebitundu 10 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu ttoni ku buli kikumi.",
+   "new": "Omusolo guli ebitundu kkumi ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu okukomye ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 10%.",
+   "old": "Kodi ni asilimia 10.",
+   "old_heard": "Kodi ni asilimia 10.",
+   "new": "Kodi ni asilimia kumi.",
+   "new_heard": "Koi ni asilimia kumi."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 12%.",
+   "old": "Omusolo guli ebitundu 12 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu twaavu ku buli kikumi.",
+   "new": "Omusolo guli ebitundu kkumi na bibiri ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu kkumi na bibiri ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 12%.",
+   "old": "Kodi ni asilimia 12.",
+   "old_heard": "Kodi ni asilimia twelfth.",
+   "new": "Kodi ni asilimia kumi na mbili.",
+   "new_heard": "Kodi ni asilimia kumi na mbili."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 15%.",
+   "old": "Omusolo guli ebitundu 15 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu fayivitini ku buli kikumi.",
+   "new": "Omusolo guli ebitundu kkumi na bitaano ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu kkumi na bitaano ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 15%.",
+   "old": "Kodi ni asilimia 15.",
+   "old_heard": "Kodi ni asimia fifteen.",
+   "new": "Kodi ni asilimia kumi na tano.",
+   "new_heard": "Kodi asilimia kumi na tano."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 18%.",
+   "old": "Omusolo guli ebitundu 18 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu e tini ku buli kikumi.",
+   "new": "Omusolo guli ebitundu kkumi na munaana ku buli kikumi.",
+   "new_heard": "Omusolo buli ebitundu kkumi na munaana ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 18%.",
+   "old": "Kodi ni asilimia 18.",
+   "old_heard": "Kodi ni asilimia aching.",
+   "new": "Kodi ni asilimia kumi na nane.",
+   "new_heard": "Kodi ni asilimia kumi na nane."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 20%.",
+   "old": "Omusolo guli ebitundu 20 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu twanti ku buli kikumi.",
+   "new": "Omusolo guli ebitundu amakumi abiri ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu amakumi abiri ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 20%.",
+   "old": "Kodi ni asilimia 20.",
+   "old_heard": "Kodi ni asilimia twenty.",
+   "new": "Kodi ni asilimia ishirini.",
+   "new_heard": "Kodi ni asilimia ishirini."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 25%.",
+   "old": "Omusolo guli ebitundu 25 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu twenty five ku buli kikumi.",
+   "new": "Omusolo guli ebitundu amakumi abiri mu bitaano ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu amakumi abiri mu bitaano ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 25%.",
+   "old": "Kodi ni asilimia 25.",
+   "old_heard": "Kodi ni asilimia twenty five.",
+   "new": "Kodi ni asilimia ishirini na tano.",
+   "new_heard": "Odi ni asilimia ishirini na tano."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 30%.",
+   "old": "Omusolo guli ebitundu 30 ku buli kikumi.",
+   "old_heard": "Omusolo guli ebitundu ssati ku buli kikumi.",
+   "new": "Omusolo guli ebitundu amakumi asatu ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu amakumi asatu ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 30%.",
+   "old": "Kodi ni asilimia 30.",
+   "old_heard": "Kodi asilimia thelathini.",
+   "new": "Kodi ni asilimia thelathini.",
+   "new_heard": "Kodi ni asimia thelathini."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusolo guli 40%.",
+   "old": "Omusolo guli ebitundu 40 ku buli kikumi.",
+   "old_heard": "Omusolo obuli ebitundu ffu oti ku buli kikumi.",
+   "new": "Omusolo guli ebitundu amakumi ana ku buli kikumi.",
+   "new_heard": "Omusolo guli ebitundu amakumi ana ku buli kikumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Kodi ni 40%.",
+   "old": "Kodi ni asilimia 40.",
+   "old_heard": "Kodi ni asilimia fulani.",
+   "new": "Kodi ni asilimia arobaini.",
+   "new_heard": "Mapodi ni asilimia arobaini."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 5,000.",
+   "old": "Omusaala gwa shilingi za Yuganda 5,000.",
+   "old_heard": "Omusaala gwa shiringi za Uganda five thousand.",
+   "new": "Omusaala gwa shilingi five thousand.",
+   "new_heard": "Omusaala gwa shilling gye five thousand."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 5,000.",
+   "old": "Mshahara wa shilingi za Uganda 5,000.",
+   "old_heard": "Mshahara wa Shilingi za Uganda Five thousand.",
+   "new": "Mshahara wa shilingi elfu tano za Uganda.",
+   "new_heard": "Mshahara wa Shilingi elfu tano za Uganda."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 20,000.",
+   "old": "Omusaala gwa shilingi za Yuganda 20,000.",
+   "old_heard": "Omusaala gwa shilingi za Uganda twenty thousand.",
+   "new": "Omusaala gwa shilingi twenty thousand.",
+   "new_heard": "Omusaala gwa shilling twenty thousand."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 20,000.",
+   "old": "Mshahara wa shilingi za Uganda 20,000.",
+   "old_heard": "Mshahara wa Shilingi za Uganda, twenty thousand.",
+   "new": "Mshahara wa shilingi elfu ishirini za Uganda.",
+   "new_heard": "Mshahara wa Shilingi elfu ishirini za Uganda."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 335,000.",
+   "old": "Omusaala gwa shilingi za Yuganda 335,000.",
+   "old_heard": "Omusaala gwa shiringi za Uganda, three hundred and five ola.",
+   "new": "Omusaala gwa shilingi three hundred and thirty-five thousand.",
+   "new_heard": "Omusaala kwa shiringi three hundred and thirty five thousand."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 335,000.",
+   "old": "Mshahara wa shilingi za Uganda 335,000.",
+   "old_heard": "Mshahara wa Shilingi za Uganda, three hundred thirty-five thousand.",
+   "new": "Mshahara wa shilingi elfu mia tatu thelathini na tano za Uganda.",
+   "new_heard": "Mshahara wa Shilingi elfu mia tatu thelathini na tano za Uganda."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 410,000.",
+   "old": "Omusaala gwa shilingi za Yuganda 410,000.",
+   "old_heard": "Omusaala gwa shiringi za Uganda, Fuwandu Tuuna.",
+   "new": "Omusaala gwa shilingi four hundred and ten thousand.",
+   "new_heard": "Omusaala gwa shiringi four hundred and ten thousand."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 410,000.",
+   "old": "Mshahara wa shilingi za Uganda 410,000.",
+   "old_heard": "Mshahara wa Shilingi za Uganda, four hundred and nineteen thousand.",
+   "new": "Mshahara wa shilingi elfu mia nne na kumi za Uganda.",
+   "new_heard": "Mshahara wa Shilingi elfu mia nne na kumi za Uganda."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 1,000,000.",
+   "old": "Omusaala gwa shilingi obukadde 1.",
+   "old_heard": "Omusaala gwa kiringyobukadde one?",
+   "new": "Omusaala gwa shilingi akakadde kamu.",
+   "new_heard": "Omusana gwa kiringi akakadde kamu."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 1,000,000.",
+   "old": "Mshahara wa shilingi milioni 1 za Uganda.",
+   "old_heard": "Mshahara wa shilingi ni genuine za uganda.",
+   "new": "Mshahara wa shilingi milioni moja za Uganda.",
+   "new_heard": "Mshahara wa Shilingi milioni moja za Uganda."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 10,000,000.",
+   "old": "Omusaala gwa shilingi obukadde 10.",
+   "old_heard": "Omusaala gwa kiringi obukadde ttene.",
+   "new": "Omusaala gwa shilingi obukadde kkumi.",
+   "new_heard": "Omusaala gwa kiringi obukadde kkumi."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 10,000,000.",
+   "old": "Mshahara wa shilingi milioni 10 za Uganda.",
+   "old_heard": "Mshahara wa Shilingi milioni ten za Uganda.",
+   "new": "Mshahara wa shilingi milioni kumi za Uganda.",
+   "new_heard": "Mshahara wa Shilingi milioni kumi za Uganda."
+  },
+  {
+   "lang": "lg",
+   "raw": "Omusaala gwa UGX 150,000,000.",
+   "old": "Omusaala gwa shilingi obukadde 150.",
+   "old_heard": "Omusaala gwa kiringi obukadde one hundred and fifty.",
+   "new": "Omusaala gwa shilingi one hundred and fifty million.",
+   "new_heard": "Omusaala gwa shilling one hundred and fifty million."
+  },
+  {
+   "lang": "sw",
+   "raw": "Mshahara wa UGX 150,000,000.",
+   "old": "Mshahara wa shilingi milioni 150 za Uganda.",
+   "old_heard": "Mushahara wa shilingi milioni one five fondi za Uganda.",
+   "new": "Mshahara wa shilingi milioni mia moja na hamsini za Uganda.",
+   "new_heard": "Mshahara wa Shilingi milioni mia moja na hamsini za Uganda."
+  }
+ ]
+}
