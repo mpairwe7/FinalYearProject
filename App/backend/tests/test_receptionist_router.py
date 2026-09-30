@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import unittest
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from app import database as db
 from app.receptionist.language import LanguagePolicy, LanguageVote, PolicyConfig
@@ -97,10 +98,24 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.router.interrupt.assert_awaited_once()
         self.brain.say_filler.assert_awaited_once()  # something to hear at once
         self.speech.transcribe.assert_called_once_with(pcm16_to_wav(PCM), 16000, "lg", True)
-        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN", ["w"])
+        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN", ["w"], reasked_since=ANY)
         captions = self.sent("caption")
         self.assertEqual((captions[0]["speaker"], captions[0]["text"]), ("caller", "Nsaba okumanya ku TIN"))
         self.assertEqual(self.sent("language")[0]["language"], "lg")
+
+    async def test_the_re_ask_says_when_its_turn_began(self):
+        # The brain drops a clarification this turn's old-language transcript opened (G92).
+        before = time.monotonic()
+        await self.router.on_speech_started()
+        await self.router.on_vote(vote("lg", 0.9), PCM, None)
+        await self.router.on_speech_started()  # a second segment: the same turn
+        await self.router.on_turn_end(PCM, 2)
+        await self.settle()
+        since = self.brain.handle_external_question.await_args.kwargs["reasked_since"]
+        self.assertGreaterEqual(since, before)
+        self.assertLessEqual(since, time.monotonic())
+        await self.turn(vote("en", 0.95), decoded=("What is the VAT rate?", "en"))
+        self.assertGreater(self.brain.handle_external_question.await_args.kwargs["reasked_since"], since)
 
     async def test_the_switched_turn_stays_claimed_until_the_caller_speaks_again(self):
         await self.turn(vote("lg", 0.9))
@@ -112,14 +127,14 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_sentinel_s_decode_is_reused(self):
         await self.turn(vote("lg", 0.9), decoded=("Nsaba okumanya ku TIN yange", "lg"))
         self.speech.transcribe.assert_not_called()
-        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN yange", [])
+        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN yange", [], reasked_since=ANY)
 
     async def test_back_to_english_is_answered_on_the_same_local_engine(self):
         await self.turn(vote("lg", 0.9))
         await self.turn(vote("en", 0.95), decoded=("What is the VAT rate?", "en"))
         self.assertEqual(self.room.state.locale, "en")
         self.assertEqual(self.room.state.language_switches, 2)
-        self.brain.handle_external_question.assert_awaited_with("What is the VAT rate?", [])
+        self.brain.handle_external_question.assert_awaited_with("What is the VAT rate?", [], reasked_since=ANY)
 
     async def test_an_explicit_request_is_confirmed_not_answered(self):
         await self.turn(vote("en", 0.95, speech_s=1.4, text="Can we speak Luganda?"))

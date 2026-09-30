@@ -202,6 +202,14 @@ fix below came from a scenario that failed:
   or bump the brain's generation and drop the answer. The router now waits (≤ 0.5 s)
   for the target engine to report that the interruption has passed, and a
   switch-interruption no longer counts as a barge-in.
+- **The re-ask drops a clarification the old transcript opened (G92, 2026-09-30).**
+  Whisper's transcript of the turn can reach the brain before the language vote. The
+  brain then takes the Luganda question as English, and its known-mishear check asks
+  "Excuse me, did you say tin?". The Luganda re-ask then went to that clarification
+  and came back as "please tell me your question again", so the caller lost their
+  first question. The router now stamps when each turn begins and passes the stamp
+  with the re-ask. The brain drops a clarification opened during that turn and keeps
+  one from an earlier turn. Replay scenarios 2 and 5.
 - **Gemini's caller transcript goes upstream.** `GeminiLiveLLMService` pushes the
   caller's transcription *up*, so the tap after it never saw one: Gemini calls had no
   caller turns in the transcript. `GeminiCallerTap`, placed before the service,

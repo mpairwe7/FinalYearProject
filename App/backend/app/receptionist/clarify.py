@@ -103,6 +103,10 @@ class ClarifyState:
     suggested_term: str | None = None
     previous_word: str | None = None
     attempts: int = 0
+    # When it was asked (time.monotonic()). A language switch re-asks the
+    # turn it was decided in; a clarification opened during that same turn
+    # came from the old-language transcript and is dropped (G92).
+    opened_at: float = 0.0
 
 
 # Whisper-SALT hears these as fluent words, so the probability gate never

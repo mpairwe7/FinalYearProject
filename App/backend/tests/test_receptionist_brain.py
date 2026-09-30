@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -29,6 +30,14 @@ from app.receptionist.store import (
     list_turns,
     update_call,
 )
+
+#: A Luganda TIN question as Whisper hears it in English, word by word and
+#: confident: "ttiimu" is a known mishear of TIN, so the gate asks about it.
+ENGLISH_HEARING = "Nyinza ntya okwewandiisa okufuna ttiimu yange?"
+
+
+def _words(text: str) -> list[dict]:
+    return [{"word": w, "prob": 0.95} for w in text.split()]
 
 
 class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
@@ -256,6 +265,30 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         await self.brain.process_frame(LLMContextFrame(context="No, thank you."))
         await self.brain.process_frame(LLMContextFrame(context="How do I file a return?"))
         self.assertFalse(list_turns(self.call_id)[-1]["text"].endswith(offer))  # declined: not offered again
+
+    async def test_a_switch_re_asks_the_question_not_the_clarification_its_old_transcript_opened(self):
+        # G92: Whisper's English transcript of a Luganda question landed before the language vote.
+        from app.receptionist.phrases import phrase
+
+        started = time.monotonic()
+        await self.brain.handle_external_question(ENGLISH_HEARING, _words(ENGLISH_HEARING))
+        self.assertIsNotNone(self.state.clarify)  # "Excuse me, did you say tin?"
+        self.state.locale = "sw"  # the router moved the call, and re-asks the turn
+        await self.brain.handle_external_question(
+            "Ninawezaje kujisajili kupata TIN yangu?", [], reasked_since=started
+        )
+        self.assertIsNone(self.state.clarify)
+        self.assertNotIn(phrase("clarify_restart", "sw"), [t["text"] for t in list_turns(self.call_id)])
+        self.assertEqual(self.chat_model.generate.call_args.kwargs["locale"], "sw")  # answered
+
+    async def test_a_clarification_from_an_earlier_turn_survives_a_switch(self):
+        await self.brain.handle_external_question(ENGLISH_HEARING, _words(ENGLISH_HEARING))
+        self.assertIsNotNone(self.state.clarify)
+        started = time.monotonic()  # the caller's next turn, after hearing the question
+        self.state.locale = "sw"
+        with patch.object(self.brain.clarify_gate, "resolve", wraps=self.brain.clarify_gate.resolve) as resolve:
+            await self.brain.handle_external_question("Ndiyo, TIN", [], reasked_since=started)
+        resolve.assert_called_once()  # taken as the reply to it, not dropped
 
     def _long_answer(self, **extra):
         """An answer longer than RECEPTIONIST_MAX_SPOKEN_SENTENCES (3)."""

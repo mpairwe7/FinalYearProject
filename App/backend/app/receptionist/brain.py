@@ -433,17 +433,28 @@ class UraReceptionistBrain(LLMService):
             return
         await self.handle_external_question(user_text, words)
 
-    async def handle_external_question(self, user_text: str, words: list[Any] | None = None) -> None:
+    async def handle_external_question(
+        self, user_text: str, words: list[Any] | None = None, *, reasked_since: float | None = None
+    ) -> None:
         """Record the caller's turn and respond to it.
 
         The context aggregator reaches this through ``_handle_context_frame``;
         the language router calls it directly when a call moves to this engine
         mid-turn, so the question that triggered the switch is answered
-        without the caller repeating it.
+        without the caller repeating it. It passes *reasked_since*, when that
+        turn began. Whisper's transcript of the turn in the old language can
+        land before the language vote, and a clarification it opened ("Excuse
+        me, did you say tin?") asks about words the caller never said: it is
+        dropped, so the re-ask is answered rather than taken as the reply to it
+        (G92). A clarification from an earlier turn stands.
         """
         user_text = user_text.strip()
         if not user_text:
             return
+        clarify = self.room.state.clarify
+        if reasked_since is not None and clarify is not None and clarify.opened_at >= reasked_since:
+            logger.info("Dropping the clarification the old-language transcript opened on call %s", self.room.call_id)
+            self.room.state.clarify = None
         words = list(words or [])
         language = self.language
         self.room.state.idle_prompts = 0
@@ -609,6 +620,7 @@ class UraReceptionistBrain(LLMService):
                 suggested_term=action.candidate,
                 previous_word=action.previous_word,
                 attempts=0,
+                opened_at=time.monotonic(),
             )
             await self._say_and_record(action.prompt or "", kind="clarify")
             return

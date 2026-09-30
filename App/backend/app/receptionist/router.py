@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -113,6 +114,10 @@ class LanguageRouter:
         # the router re-asks that turn in the new language, so the brain must
         # not also answer the transcript it got in the old one.
         self._turn_claimed = False
+        # When the caller's current turn began (time.monotonic()), for the
+        # re-ask: the old-language transcript can reach the brain before the
+        # vote, and whatever it opened then is this turn's, not an earlier one's.
+        self._turn_started_at: float | None = None
 
     def claims_turn(self) -> bool:
         """Wired to the brain's ``turn_claimed``: whether this turn is the router's to answer."""
@@ -137,6 +142,8 @@ class LanguageRouter:
 
     async def on_speech_started(self) -> None:
         """An utterance began: a new turn, unless a switch is waiting on this one."""
+        if self._turn_started_at is None:
+            self._turn_started_at = time.monotonic()
         if self._pending is None:
             self._turn_claimed = False
 
@@ -209,18 +216,21 @@ class LanguageRouter:
     async def on_turn_end(self, pcm: bytes, segments: int) -> None:
         """The caller finished a turn. Carry out a switch decided during it."""
         async with self._lock:
+            started, self._turn_started_at = self._turn_started_at, None
             pending, self._pending = self._pending, None
             if pending is None:
                 return
             # The sentinel's text is of one segment; a longer turn is re-read.
             decoded = pending.decoded if segments <= 1 else None
-            await self._execute(pending.decision, pcm, decoded)
+            await self._execute(pending.decision, pcm, decoded, turn_started_at=started)
 
     async def _execute(
         self,
         decision: Decision,
         pcm: bytes | None,
         decoded: tuple[str, str] | None,
+        *,
+        turn_started_at: float | None = None,
     ) -> None:
         state = self.room.state
         state.locale = decision.target
@@ -232,9 +242,15 @@ class LanguageRouter:
         await self._interrupt_for_switch()
         await self._send(message)
         logger.info("Call %s moved to %s (%s)", self.room.call_id, decision.target, decision.reason)
-        self._spawn(self._answer(decision, pcm, decoded))
+        self._spawn(self._answer(decision, pcm, decoded, turn_started_at))
 
-    async def _answer(self, decision: Decision, pcm: bytes | None, decoded: tuple[str, str] | None) -> None:
+    async def _answer(
+        self,
+        decision: Decision,
+        pcm: bytes | None,
+        decoded: tuple[str, str] | None,
+        turn_started_at: float | None = None,
+    ) -> None:
         if self.brain is None:
             return
         target = decision.target
@@ -255,7 +271,7 @@ class LanguageRouter:
             "type": "caption", "speaker": "caller", "text": text, "final": True,
             "turn_id": self.room.state.turn_seq + 1,
         })
-        await self.brain.handle_external_question(text, words)
+        await self.brain.handle_external_question(text, words, reasked_since=turn_started_at)
 
     async def _transcribe(
         self, pcm: bytes, language: str, decoded: tuple[str, str] | None
