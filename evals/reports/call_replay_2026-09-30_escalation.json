@@ -1,0 +1,899 @@
+{
+ "date": "2026-09-30",
+ "ws": "ws://127.0.0.1:8083/v1/calls/stream",
+ "passed": 15,
+ "scenarios": 17,
+ "first_audio_ms_p50": 1413.0,
+ "results": [
+  {
+   "name": "1_english_stays_english",
+   "note": "English caller: locks English, never leaves it.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1587,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1304,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.86
+      }
+     ],
+     "assistant": [
+      "Happy to help you register for a T-I-N!\n\nTo register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/N-I-N) or an organisation (requires Certificate of Incorporation)?"
+     ],
+     "caller": [
+      "Hello.",
+      "How do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 1822,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1540,
+     "languages": [],
+     "assistant": [
+      "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; V-A-T-registered businesses collect it from customers and remit it to U-R-A. - Statutory Basis: Value Added Tax Act\n\nThat comes from the official U-R-A 2026 to 2027 rate table. Would you like more detail?"
+     ],
+     "caller": [
+      "What is the standard VAT rate in Uganda?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_ea450a28c53d",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "2_selected_english_speaks_luganda",
+   "note": "First answer in Luganda, same question, not repeated.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 2660,
+     "filler_caption_ms": 2336,
+     "answer_caption_ms": 2302,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Excuse me, did you say tin?",
+      "Nkebera kati.",
+      "Nsonyiwa ku ekyo — nsaba oddemu ekibuuzo kyo."
+     ],
+     "caller": [
+      "Nyinza ndyo kwewandiisa okufuna timu yange okuva neera?",
+      "Ekiriza ntya okwewandiisa okufuna ttiimu yange okuva n'era?"
+     ],
+     "status": [],
+     "reply_language": null,
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_8580ce02c32f",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": false
+  },
+  {
+   "name": "3_swahili_local",
+   "note": "Answered in Swahili on the local engine.",
+   "turns": [
+    {
+     "utterance": "sw_tin",
+     "said": "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+     "first_audio_ms": 2124,
+     "filler_caption_ms": 2121,
+     "answer_caption_ms": 19296,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Sekunde moja.",
+      "Kupata T-I-N kutoka U-R-A unapaswa kufuata hatua hizi:\nHatua 1: Jaza fomu ya maombi: Jaza fomu ya maombi ya T-I-N kwenye tovuti ya U-R-A au katika ofisi za U-R-A karibu nawe. Fomu hii inapatikana kwenye tovuti ya U-R-A kwenye ukurasa wa \"T-I-N Application\". 2. Sindika nyaraka za usaidizi: Nyaraka muhimu ambazo unaweza kuzihitaji ni pamoja na:\nHati ya kusafiria (Passport) - Hati ya kuthibitisha utambulisho (identity card) - Hati ya kuthibitisha ukaazi (residence permit) - Hati ya kuthibitisha biashara (business registration certificate) - Hati ya kuthibitisha umiliki wa mali (property ownership certificate) 3. Wasilisha maombi yako: Wasilisha fomu iliyojazwa na nyaraka za usaidizi kwenye ofisi za U-R-A au kwa njia ya mtandao. Je, ungependa kuzungumza na afisa kuhusu hili?"
+     ],
+     "caller": [
+      "Habari, inawezaje kujisajili kupata mamlaka ya tini kutoka Ura.",
+      "Habari, Inawezaje kujisayi kupata namba ya TIN kutoka uura."
+     ],
+     "status": [],
+     "reply_language": "sw",
+     "reply_language_expected": "sw",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_103af87502e9",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "sw"
+   ],
+   "passed": true
+  },
+  {
+   "name": "4_luganda_then_english",
+   "note": "Mid-call switch followed within one turn.",
+   "turns": [
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1236,
+     "filler_caption_ms": 1235,
+     "answer_caption_ms": 17808,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka nkebere.",
+      "Okusinziira ku mateeka ga U-R-A, sati yo ey'engoye egwa mu kiti ky'ebintu ebirina okussibwako omusolo gwa V.A.T. ogwa bitundu ebitundu 18 ku buli kikumi. Osaanidde okugisasulira omusolo guno singa ogitunda oba ogigabira omuntu omulala. Wandiyagadde okwogera n'omukozi ku nsonga eno?"
+     ],
+     "caller": [
+      "Vat yanga entya oku gisasula, era ebitundu bimeeka?",
+      "Sati yange ntya okugisasula era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1098,
+     "filler_caption_ms": 1097,
+     "answer_caption_ms": 2582,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.86
+      }
+     ],
+     "assistant": [
+      "okay, so",
+      "Happy to help you register for a T-I-N!\n\nTo register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/N-I-N) or an organisation (requires Certificate of Incorporation)?"
+     ],
+     "caller": [
+      "Elo.",
+      "How do I register for a tin number with ORA?",
+      "Hello, how do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_ae152914e8fd",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg",
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "5_code_switched_luganda_stays",
+   "note": "Luganda with TIN/VAT: no flip-flop.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 2244,
+     "filler_caption_ms": 2243,
+     "answer_caption_ms": 2230,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Excuse me, did you say tin?",
+      "Ka ndabe.",
+      "Nsonyiwa ku ekyo — nsaba oddemu ekibuuzo kyo."
+     ],
+     "caller": [
+      "Nyinza ndya okwewandiisa okufuna timu yange okuva neera?",
+      "Ekiriza ntyo kwewandiisa okufuna ttiimu yange okuva n'era?"
+     ],
+     "status": [],
+     "reply_language": null,
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1671,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1425,
+     "languages": [],
+     "assistant": [
+      "Nsonyiwa, ogambye VAT?"
+     ],
+     "caller": [
+      "Vat yange ntya okugisasula era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": null,
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_903a288a51d7",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": false
+  },
+  {
+   "name": "6_explicit_request",
+   "note": "Immediate switch.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1269,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1264,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.8
+      }
+     ],
+     "assistant": [
+      "Happy to help you register for a T-I-N!\n\nTo register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/N-I-N) or an organisation (requires Certificate of Incorporation)?"
+     ],
+     "caller": [
+      "Hello.",
+      "How do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_ask_sw",
+     "said": "Can we speak Swahili, please?",
+     "first_audio_ms": 1194,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1187,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "explicit",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Sawa — tuendelee kwa Kiswahili."
+     ],
+     "caller": [
+      "Can we speak Swahili, please?"
+     ],
+     "status": [],
+     "reply_language": "sw",
+     "reply_language_expected": "sw",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_aec5d18bff6f",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en",
+    "sw"
+   ],
+   "passed": true
+  },
+  {
+   "name": "7_override_luganda_holds",
+   "note": "Pinned to Luganda on screen; English speech does not move it.",
+   "turns": [
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 1850,
+     "filler_caption_ms": 1848,
+     "answer_caption_ms": 5422,
+     "languages": [],
+     "assistant": [
+      "Ka ndabe.",
+      "Omusolo ogw'omuwendo ogwongerwako (V-A-T) guli ebitundu ebitundu 18 ku buli kikumi (eza ebitundu 18 ku buli kikumi). Omusolo gw'omuwendo ogwongerwako guwoozebwa ku bitundu ebitundu 18 ku buli kikumi ku bintu n’obuweereza ebisabibwa omusolo; bizinensi ezirina okusasula omusolo zikungaanya omusolo guno okuva mu bakasitoma era ne baguweereza eri U-R-A.\nOmusingi gw'Amateeka: Etteeka ly'Omusolo ogw'Omugatte gw'Omugaso\n\nKino kiva mu tteeka lya U-R-A erya 2026-27"
+     ],
+     "caller": [
+      "What is the standard VAT rate in Uganda?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_eafa24379c33",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "8_transfer_from_luganda",
+   "note": "Officer request in Luganda transfers; staff see a Luganda caller.",
+   "turns": [
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1240,
+     "filler_caption_ms": 1236,
+     "answer_caption_ms": 2719,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Nkebera kati.",
+      "Nsonyiwa, ogambye PIT?"
+     ],
+     "caller": [
+      "Vat yanga entya oku gisasula, era ebitundu bimeeka?",
+      "Pati yange ntya okugisasula, era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": null,
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_person",
+     "said": "Njagala okwogera n'omuntu, omukozi wa URA.",
+     "first_audio_ms": 2571,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 2567,
+     "languages": [],
+     "assistant": [
+      "Nkukwataganya n'omukozi wa URA, nsaba olindeko."
+     ],
+     "caller": [
+      "Nijja ddala okwogera n'omuntu omukozi wa URA."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": null,
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_45e662bd8771",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "9_barge_in_greeting",
+   "note": "Talking over the greeting stops it, and the question is answered.",
+   "turns": [
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 1364,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1362,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.84
+      }
+     ],
+     "assistant": [
+      "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; V-A-T-registered businesses collect it from customers and remit it to U-R-A. - Statutory Basis: Value Added Tax Act\n\nThat comes from the official U-R-A 2026 to 2027 rate table. Would you like more detail?"
+     ],
+     "caller": [
+      "What is the standard VAT rate in Uganda?"
+     ],
+     "status": [],
+     "barge": {
+      "talking_at_barge": true,
+      "bot_stop_ms": 890,
+      "interrupt_ms": 905,
+      "stopped": true
+     },
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_29196a3856f4",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "10_barge_in_luganda_answer",
+   "note": "Talking over a Luganda answer stops it (Orpheus voice).",
+   "turns": [
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 1371,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1368,
+     "languages": [],
+     "assistant": [
+      "Omusolo ogw'omuwendo ogwongerwako (V-A-T) guli ebitundu ebitundu 18 ku buli kikumi (eza ebitundu 18 ku buli kikumi). Omusolo gw'omuwendo ogwongerwako guwoozebwa ku bitundu ebitundu 18 ku buli kikumi ku bintu n’obuweereza ebisabibwa omusolo; bizinensi ezirina okusasula omusolo zikungaanya omusolo guno okuva mu bakasitoma era ne baguweereza eri U-R-A.\nOmusingi gw'Amateeka: Etteeka ly'Omusolo ogw'Omugatte gw'Omugaso\n\nKino kiva mu tteeka lya U-R-A erya 2026-27"
+     ],
+     "caller": [
+      "What is the standard VAT rate in Uganda?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 3085,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 2832,
+     "languages": [],
+     "assistant": [
+      "Nsonyiwa, ogambye TIN?"
+     ],
+     "caller": [
+      "Ninza ntya okwewandiisa okufuna ttiimu yange okuva neera?"
+     ],
+     "status": [],
+     "barge": {
+      "talking_at_barge": true,
+      "bot_stop_ms": 931,
+      "interrupt_ms": 944,
+      "stopped": true
+     },
+     "reply_language": null,
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_b1335a1a84ff",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "11_officer_request_times_out",
+   "note": "The receptionist queues the call with the packet's topic (account) and priority (high), tells the caller every 30 s that they are still holding; nobody answers, so it returns to the AI owing a callback, with a short reference on screen.",
+   "turns": [
+    {
+     "utterance": "en_officer",
+     "said": "I would like to talk to an officer about my account balance, please.",
+     "first_audio_ms": 1952,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1945,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.73
+      }
+     ],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "I would like to talk to an officer about my account balance please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_cf673992fbd6",
+   "language_detection": true,
+   "after_linger": [
+    "ai"
+   ],
+   "said_while_lingering": [
+    "Thank you for holding. An officer will be with you shortly.",
+    "Thank you for holding. An officer will be with you shortly.",
+    "All our officers are busy, so an officer will call you back. Meanwhile, I can still help with other questions.",
+    "Your reference: TIC-324E022E"
+   ],
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "12_silent_caller",
+   "note": "A silent caller is checked on once, then the call is ended.",
+   "turns": [],
+   "call_id": "call_c3f3c1d3f574",
+   "language_detection": true,
+   "after_linger": [
+    "ended"
+   ],
+   "said_while_lingering": [
+    "Are you still there? I'm here whenever you're ready to ask your question.",
+    "I haven't heard anything, so I'll end the call now. Thank you for calling URA. Goodbye."
+   ],
+   "lingering_missing": [],
+   "language_sequence": [],
+   "passed": true
+  },
+  {
+   "name": "13_officer_offer_accepted",
+   "note": "The answer ends on the officer offer alone; yes transfers the call.",
+   "turns": [
+    {
+     "utterance": "en_worried_tin",
+     "said": "I'm really worried about this. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1599,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1348,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.84
+      }
+     ],
+     "assistant": [
+      "I understand this can feel stressful — let's take it step by step. Happy to help you register for a T-I-N! To register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit. Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "I'm really worried about this.",
+      "How do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_yes",
+     "said": "Yes, please.",
+     "first_audio_ms": 1351,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1346,
+     "languages": [],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "Yes please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_d9eb5cac5806",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "14_officer_offer_declined",
+   "note": "No keeps the AI on the call.",
+   "turns": [
+    {
+     "utterance": "en_worried_tin",
+     "said": "I'm really worried about this. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1455,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1452,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.91
+      }
+     ],
+     "assistant": [
+      "I understand this can feel stressful — let's take it step by step. Happy to help you register for a T-I-N! To register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit. Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "I'm really worried about this, how do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_no",
+     "said": "No, thank you.",
+     "first_audio_ms": 1296,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1028,
+     "languages": [],
+     "assistant": [
+      "No problem. What else can I help you with?"
+     ],
+     "caller": [
+      "No, thank you."
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_f795805d9148",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "15_one_word_officer",
+   "note": "\"Officer, please\" alone is a request for a person, as the greeting says.",
+   "turns": [
+    {
+     "utterance": "en_officer_word",
+     "said": "Officer, please.",
+     "first_audio_ms": 1213,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1212,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.98
+      }
+     ],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "Officer, please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_2084ce47bd7c",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "16_crisis_support",
+   "note": "Crisis lines in full (emergency numbers in words, the counselling line on screen), then an urgent transfer on yes.",
+   "turns": [
+    {
+     "utterance": "en_crisis",
+     "said": "I can't pay these taxes. I just want to end my life.",
+     "first_audio_ms": 1024,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 777,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.96
+      }
+     ],
+     "assistant": [
+      "I'm really sorry you're feeling this way. Your safety matters more than any tax matter. If you are in danger right now, please call nine nine nine, or one one two. The number for free counselling is on your screen. Would you like me to connect you to a URA officer as well?",
+      "Emergency: 999 or 112. Free counselling, Mental Health Uganda: 0800 21 21 21 (Monday to Friday, 8:30am to 5pm)."
+     ],
+     "caller": [
+      "I can't pay these taxes, I just want to end my life."
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_yes",
+     "said": "Yes, please.",
+     "first_audio_ms": 1359,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1355,
+     "languages": [],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "Yes please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_bef091bb8d10",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "17_yes_over_the_answer_is_asked_again",
+   "note": "Talking over an answer never answers the question at its end.",
+   "turns": [
+    {
+     "utterance": "en_worried_tin",
+     "said": "I'm really worried about this. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1603,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1600,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.91
+      }
+     ],
+     "assistant": [
+      "I understand this can feel stressful — let's take it step by step. Happy to help you register for a T-I-N! To register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit. Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "I'm really worried about this, how do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_yes",
+     "said": "Yes, please.",
+     "first_audio_ms": 1346,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1344,
+     "languages": [],
+     "assistant": [
+      "Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "Yes please."
+     ],
+     "status": [],
+     "barge": {
+      "talking_at_barge": true,
+      "bot_stop_ms": 830,
+      "interrupt_ms": 849,
+      "stopped": true
+     },
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_3e240fca2818",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  }
+ ]
+}

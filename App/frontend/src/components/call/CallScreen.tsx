@@ -5,6 +5,7 @@ import { useTranslation } from '@/lib/i18n';
 import { useChatStore } from '@/store/useChatStore';
 import type { CallLanguage, CallLanguageSource, CaptionEntry } from '@/store/useCallStore';
 import { useCall } from '@/hooks/useCall';
+import { ticketRef as caseReference } from '@/lib/ticketUi';
 import { CallOrb } from '@/components/call/CallOrb';
 import {
   CheckIcon,
@@ -252,7 +253,7 @@ export function CallScreen() {
               />
             )}
             {status === 'transferring' && ticketRef && (
-              <span className="call-ticket-chip">{`Ticket: ${ticketRef}`}</span>
+              <span className="call-ticket-chip">{`Ticket: ${caseReference(ticketRef)}`}</span>
             )}
             {live && <span className="call-timer">{formatDuration(duration)}</span>}
           </div>

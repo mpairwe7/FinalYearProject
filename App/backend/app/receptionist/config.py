@@ -235,6 +235,15 @@ def get_claim_timeout_s() -> float:
     return max(1.0, _env_float("RECEPTIONIST_CLAIM_TIMEOUT_S", 20.0))
 
 
+def get_hold_update_s() -> float:
+    """Seconds between "thank you for holding" lines while a caller waits for an officer.
+
+    ``0`` turns them off. At the default 30 s a caller hears two in the
+    ``RECEPTIONIST_TRANSFER_TIMEOUT_S`` (90 s) before the wait becomes a callback.
+    """
+    return max(0.0, _env_float("RECEPTIONIST_HOLD_UPDATE_S", 30.0))
+
+
 def local_barge_in_enabled() -> bool:
     """Whether the call's own VAD stops the assistant when the caller talks over it.
 

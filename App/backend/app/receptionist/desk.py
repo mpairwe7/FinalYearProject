@@ -98,9 +98,19 @@ def _live_room(call_id: str) -> CallRoom:
 
 
 async def claim(
-    call_id: str, officer_id: str, chat_model: Any = None, officer_name: str = ""
+    call_id: str,
+    officer_id: str,
+    chat_model: Any = None,
+    officer_name: str = "",
+    *,
+    is_supervisor: bool = False,
 ) -> dict[str, Any]:
-    """Take a waiting call (or one the AI is handling) for *officer_id*."""
+    """Take a call the AI handed over for *officer_id*.
+
+    Officers get the calls the AI escalates. Stepping into a call the AI is
+    still handling is a supervisor's call to make (*is_supervisor*), as barge-in
+    is on any contact-centre floor; it goes through the queue like a transfer.
+    """
     room = _live_room(call_id)
     timeout = get_claim_timeout_s()
     name = officer_name or officer_display_name(officer_id)
@@ -110,6 +120,10 @@ async def claim(
             holder = room.state.officer_id or room.state.claimed_by or ""
             raise DeskError(409, "An officer already has this call", claimed_by=holder,
                             officer_name=_holder_name(room, holder))
+        if mode == "ai" and not is_supervisor:
+            raise DeskError(
+                403, "The AI is handling this call: officers take the calls it hands over, a supervisor can step in"
+            )
         if mode == "ai" and not flags.is_enabled("ticket_queue"):
             raise DeskError(409, "The officer queue is off")
         now = time.time()

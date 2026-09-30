@@ -3568,14 +3568,14 @@ async def get_call_brief_endpoint(
 
 @app.post("/v1/admin/calls/{call_id}/claim", tags=["admin"])
 async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
-    """Take a waiting call (or one the AI is handling): first officer wins, the rest get 409."""
+    """Take a call the AI handed over (a supervisor may step into one it is handling): first wins, the rest get 409."""
     from .receptionist import desk
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
         result = await desk.claim(call_id, ctx.user_id, chat_model=getattr(app.state, "model", None),
-                                  officer_name=_desk_officer_name(ctx))
+                                  officer_name=_desk_officer_name(ctx), is_supervisor=ctx.role == "ura_admin")
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_claimed")

@@ -29,6 +29,9 @@ const FLASH_MS = 1200;
 
 export function CallWorkspace({ callId, role }: { callId: string; role: string }) {
   const canTake = role === 'ura_staff' || role === 'ura_admin';
+  // Officers take the calls the AI hands over. Stepping into a call the AI is
+  // still handling is a supervisor's call; the API refuses anyone else.
+  const canStepIn = role === 'ura_admin';
   const now = useNow();
   const { data: detail, isLoading, error, refetch } = useCall(callId);
   const live = useCallLive(callId);
@@ -240,7 +243,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
             onEvidence={showEvidence}
             compact
           />
-          {state === 'ai' && canTake && (
+          {state === 'ai' && canStepIn && (
             <div className="cw-actions">
               <button type="button" className="cc-btn cc-btn--primary" data-action="take" onClick={take} disabled={busy}>
                 {busy ? 'Connecting…' : 'Take over'} <kbd>A</kbd>

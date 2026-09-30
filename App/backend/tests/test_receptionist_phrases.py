@@ -41,11 +41,18 @@ class PhraseTableIsComplete(unittest.TestCase):
 class Greeting(unittest.TestCase):
     def test_the_call_opens_with_the_agreed_english_line(self):
         greeting = phrases.phrase("greeting", "en")
-        self.assertTrue(greeting.startswith("Hi, thanks for contacting URA. I'm your assistant today."))
+        self.assertTrue(greeting.startswith("Hi, thanks for contacting URA."))
         self.assertIn("preferred language", greeting)
         self.assertTrue(greeting.endswith("How can I help you today?"))
         for name in ("English", "Luganda", "Swahili"):
             self.assertIn(name, greeting)
+
+    def test_the_caller_hears_first_that_it_is_an_ai_and_a_person_is_one_request_away(self):
+        greeting = phrases.phrase("greeting", "en")
+        self.assertIn("I'm your AI assistant today.", greeting)  # "virtual" was heard as "vital"
+        self.assertIn("You can ask for an officer at any time.", greeting)
+        self.assertIn("AI", phrases.phrase("greeting", "lg"))
+        self.assertIn("AI", phrases.phrase("greeting", "sw"))
 
     def test_the_brain_greets_with_it(self):
         from app.receptionist.brain import GREETING_TEXT
@@ -56,7 +63,7 @@ class Greeting(unittest.TestCase):
 class Lookup(unittest.TestCase):
     def test_formatting(self):
         self.assertEqual(phrases.phrase("clarify_term", "lg", term="TIN"), "Nsonyiwa, ogambye TIN?")
-        self.assertIn("URA-CALL", phrases.phrase("officers_busy", "sw", ref="URA-CALL"))
+        self.assertIn("TIC-1458BC4D", phrases.phrase("reference_screen", "sw", ref="TIC-1458BC4D"))
 
     def test_an_unknown_language_falls_back_to_english(self):
         self.assertEqual(phrases.phrase("transfer", "nyn"), phrases.phrase("transfer", "en"))
@@ -75,6 +82,41 @@ class Lookup(unittest.TestCase):
         self.assertTrue(all("{" not in line for line in lines))
         self.assertIn(phrases.phrase("transfer", "lg"), lines)
         self.assertTrue(set(phrases.fillers("lg")) <= set(lines))
+
+    def test_screen_lines_are_never_synthesised(self):
+        for lang in ("en", "lg", "sw"):
+            lines = phrases.prewarm_phrases(lang)
+            with self.subTest(lang=lang):
+                self.assertNotIn(phrases.phrase("crisis_screen", lang), lines)
+                self.assertNotIn(phrases.phrase("tollfree_screen", lang), lines)
+
+
+class NumbersTheVoiceCannotSay(unittest.TestCase):
+    """Orpheus loops on phone numbers and said "999 or 112" as "nine nine or one twelve"."""
+
+    def test_no_spoken_line_carries_a_number(self):
+        import re
+
+        for lang in ("en", "lg", "sw"):
+            for key in phrases.KEYS:
+                if key in phrases.UNSPOKEN:
+                    continue
+                with self.subTest(lang=lang, key=key):
+                    self.assertIsNone(re.search(r"\d", phrases.phrase(key, lang)))
+
+    def test_the_crisis_numbers_are_the_chat_s_verified_ones(self):
+        from app.text_signals import crisis_support_reply
+
+        chat = crisis_support_reply()
+        for number in ("999", "112", "0800 21 21 21"):
+            self.assertIn(number, chat)
+            for lang in ("en", "lg", "sw"):
+                with self.subTest(number=number, lang=lang):
+                    self.assertIn(number, phrases.phrase("crisis_screen", lang))
+        # Spoken in words, in each call language.
+        self.assertIn("nine nine nine, or one one two", phrases.phrase("crisis_support", "en"))
+        self.assertIn("mwenda mwenda mwenda", phrases.phrase("crisis_support", "lg"))
+        self.assertIn("tisa tisa tisa", phrases.phrase("crisis_support", "sw"))
 
 
 class YesNoInEachLanguage(unittest.TestCase):

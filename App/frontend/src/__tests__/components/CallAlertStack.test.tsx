@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CallAlertStack } from '@/components/staff/calls/console/CallAlertStack';
+import { transferReasonLabel } from '@/components/staff/calls/console/CallAlertToast';
 import { callsApi, ClaimConflictError } from '@/services/callsApi';
 import { resetSessionForTests } from '@/services/officerCallSession';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
@@ -85,5 +86,17 @@ describe('CallAlertStack', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
     expect(screen.queryByText('Caller waiting for an officer')).not.toBeInTheDocument();
     expect(document.title).toMatch(/^\(1\) Caller waiting/); // still waiting, still counted
+  });
+});
+
+describe('transferReasonLabel', () => {
+  it('says why the AI handed the caller over', () => {
+    expect(transferReasonLabel('officer_takeover')).toBe('Taken over from the AI');
+    expect(transferReasonLabel('offer_accepted')).toBe('Said yes when the AI offered an officer');
+    expect(transferReasonLabel('safety_concern')).toBe('Safety concern: crisis lines given');
+    expect(transferReasonLabel('caller_requested')).toBe('Asked for a person');
+    expect(transferReasonLabel('no_knowledge_match')).toBe('The AI could not answer');
+    expect(transferReasonLabel('tax_dispute')).toBe('A tax dispute');
+    expect(transferReasonLabel('')).toBe('Asked for an officer');
   });
 });

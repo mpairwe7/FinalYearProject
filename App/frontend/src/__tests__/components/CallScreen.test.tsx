@@ -133,12 +133,13 @@ describe('CallScreen component', () => {
   it('displays transferring state when officer requested', () => {
     useCallStore.getState().openCall();
     useCallStore.getState().setStatus('transferring');
-    useCallStore.getState().setTicketRef('TICK-1234');
+    useCallStore.getState().setTicketRef('1458bc4d-2b9f-4ed8-8ffb-18fee33ed5c9');
 
     render(<CallScreen />);
 
     expect(screen.getAllByText('Connecting you to an officer…').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Ticket: TICK-1234')).toBeDefined();
+    // The short reference the chat's support cases use, not the ticket UUID.
+    expect(screen.getByText('Ticket: TIC-1458BC4D')).toBeDefined();
   });
 
   it('displays bridged officer state when officer joins', () => {

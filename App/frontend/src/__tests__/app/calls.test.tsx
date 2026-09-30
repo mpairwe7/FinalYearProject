@@ -103,12 +103,20 @@ describe('The Call Desk (/calls)', () => {
     expect(screen.queryByRole('button', { name: /Take call/ })).not.toBeInTheDocument();
   });
 
-  it('follows a call the AI is still handling, and offers to take it over', async () => {
+  it('lets an officer follow a call the AI is still handling, but not take it over', async () => {
     mockCalls([callRecord({ call_id: 'call_ai_1', status: 'ai', transferred: false })]);
     renderPage();
     expect(await screen.findByText(/AI handling ·/)).toBeInTheDocument();
     const mark = await screen.findByTitle('heard with 31% confidence');
     expect(mark.tagName.toLowerCase()).toBe('mark');
+    // Officers take the calls the AI hands over; stepping in is a supervisor's call.
+    expect(screen.queryByRole('button', { name: /Take over/ })).not.toBeInTheDocument();
+  });
+
+  it('offers a supervisor to take over a call the AI is still handling', async () => {
+    mockCalls([callRecord({ call_id: 'call_ai_1', status: 'ai', transferred: false })]);
+    renderPage('ura_admin');
+    expect(await screen.findByText(/AI handling ·/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Take over/ })).toBeInTheDocument();
   });
 
