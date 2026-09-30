@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Voice — narration on/off, and a speaker per language.
+ * Voice — narration on/off, when voice mode sends a turn, and a speaker per
+ * language.
  *
  * Per language, not one voice, because a speaker only exists inside its own
  * language: Sunbird's catalog tags are language-scoped and the backend refuses
@@ -13,9 +14,9 @@
  * voices on a deployment with no Sunbird key, and picking one would silently
  * get an English voice reading Luganda.
  *
- * Deliberately absent: `useVoiceStore` also persists auto-barge-in, silence
- * timeout and accent profile, which nothing reads. Offering them would be a
- * panel of switches that change nothing.
+ * Deliberately absent: `useVoiceStore` also persists auto-barge-in and an
+ * accent profile, which nothing reads. Offering them would be a panel of
+ * switches that change nothing.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -32,7 +33,25 @@ import {
 import { useChatStore } from "../../store/useChatStore";
 import { useVoiceStore } from "../../store/useVoiceStore";
 import { SpeakerIcon, StopIcon } from "../Icons";
-import { SettingsRow, SettingsSection, StatusNote, Toggle } from "./controls";
+import {
+  Segmented,
+  SettingsRow,
+  SettingsSection,
+  StatusNote,
+  Toggle,
+  type SegmentedOption,
+} from "./controls";
+
+/**
+ * How long a pause ends a turn in voice mode. Voice agents use 0.8–1.2 s;
+ * 2 s is for anyone who is cut off, and Off keeps the tap.
+ */
+const PAUSE_OPTIONS: readonly SegmentedOption<string>[] = [
+  { value: "0", label: "Off" },
+  { value: "800", label: "0.8 s" },
+  { value: "1200", label: "1.2 s" },
+  { value: "2000", label: "2 s" },
+];
 
 interface VoiceSectionProps {
   autoNarrate: boolean;
@@ -49,6 +68,8 @@ export default function VoiceSection({
   const chatLocale = useChatStore((s) => s.locale);
   const voiceByLocale = useVoiceStore((s) => s.voiceByLocale);
   const setVoiceForLocale = useVoiceStore((s) => s.setVoiceForLocale);
+  const silenceTimeout = useVoiceStore((s) => s.silenceTimeout);
+  const setSilenceTimeout = useVoiceStore((s) => s.setSilenceTimeout);
 
   const [playing, setPlaying] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -130,6 +151,27 @@ export default function VoiceSection({
             label="Narrate replies aloud"
             checked={autoNarrate}
             onChange={onAutoNarrateChange}
+          />
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Voice mode"
+        description="When you have finished speaking, voice mode can send your turn by itself."
+      >
+        <SettingsRow
+          label="Send after a pause"
+          hint={
+            silenceTimeout > 0
+              ? `Sends what you said after ${silenceTimeout / 1000} s of quiet. Choose a longer pause if it cuts you off.`
+              : "Sends only when you tap the checkmark."
+          }
+        >
+          <Segmented
+            label="Send after a pause"
+            value={String(silenceTimeout)}
+            options={PAUSE_OPTIONS}
+            onChange={(value) => setSilenceTimeout(Number(value))}
           />
         </SettingsRow>
       </SettingsSection>
