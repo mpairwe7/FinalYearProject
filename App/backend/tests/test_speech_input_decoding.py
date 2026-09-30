@@ -8,7 +8,6 @@ frame-sync test, so libsndfile decoded the speech as an MP3.
 
 from __future__ import annotations
 
-import io
 import unittest
 from unittest.mock import patch
 
@@ -24,6 +23,11 @@ def _tone(first_sample: int | None = None, peak: float = 0.25, offset: int = 0) 
     if first_sample is not None:
         pcm[0] = first_sample
     return pcm
+
+
+def _mp3_frames(count: int = 3) -> bytes:
+    """MPEG-1 Layer III frames: 128 kbps at 44.1 kHz, no padding, so 417 bytes each."""
+    return (b"\xff\xfb\x90\x00" + b"\x00" * 413) * count
 
 
 def _decode(data: bytes) -> np.ndarray:
@@ -42,16 +46,11 @@ class RawPcmIsNotMistakenForMp3(unittest.TestCase):
                 self.assertFalse(_looks_like_mp3(pcm.tobytes()))
                 np.testing.assert_allclose(_decode(pcm.tobytes()), pcm / 32768.0, atol=1e-6)
 
-    def test_a_real_mp3_is_still_recognised(self):
-        import soundfile as sf
-
-        buf = io.BytesIO()
-        try:
-            sf.write(buf, _tone() / 32768.0, 16000, format="MP3")
-        except (sf.LibsndfileError, ValueError, TypeError):
-            self.skipTest("this libsndfile cannot write MP3")
-        self.assertTrue(_looks_like_mp3(buf.getvalue()))
-        self.assertGreater(len(_decode(buf.getvalue())), 12000)
+    def test_an_mp3_stream_is_still_recognised(self):
+        self.assertTrue(_looks_like_mp3(_mp3_frames()))
+        self.assertTrue(_looks_like_mp3(b"ID3\x04\x00\x00\x00\x00\x00\x00" + _mp3_frames()))
+        # One header and nothing one frame later to confirm it.
+        self.assertFalse(_looks_like_mp3(_mp3_frames()[:417]))
 
 
 class Int16IsNotMistakenForFloat32(unittest.TestCase):

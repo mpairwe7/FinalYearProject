@@ -92,7 +92,7 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(page.getByRole("button", { name: "Start speaking" })).toBeEnabled();
   });
 
-  test("recording a turn POSTs raw audio + consent to /v1/voice/chat and renders transcript + reply", async ({
+  test("recording a turn POSTs WAV audio + consent to /v1/voice/chat and renders transcript + reply", async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
@@ -114,7 +114,9 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
     const req = await voiceReq;
     expect(req.method()).toBe("POST");
-    expect((req.headers()["content-type"] || "")).toContain("application/octet-stream");
+    // WAV, not headerless PCM: a recording starting on sample -1 (FF FF) was sniffed as MP3 (G93).
+    expect((req.headers()["content-type"] || "")).toContain("audio/wav");
+    expect(req.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
     expect(req.headers()["x-voice-consent"]).toBe("true");
     expect(req.url()).toContain("sample_rate=");
 
