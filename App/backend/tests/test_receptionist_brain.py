@@ -275,7 +275,7 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(self.state.clarify)  # "Excuse me, did you say tin?"
         self.state.locale = "sw"  # the router moved the call, and re-asks the turn
         await self.brain.handle_external_question(
-            "Ninawezaje kujisajili kupata TIN yangu?", [], reasked_since=started
+            "Ninawezaje kujisajili kupata TIN yangu?", [], reask_window=(started, time.monotonic())
         )
         self.assertIsNone(self.state.clarify)
         self.assertNotIn(phrase("clarify_restart", "sw"), [t["text"] for t in list_turns(self.call_id)])
@@ -287,8 +287,19 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         started = time.monotonic()  # the caller's next turn, after hearing the question
         self.state.locale = "sw"
         with patch.object(self.brain.clarify_gate, "resolve", wraps=self.brain.clarify_gate.resolve) as resolve:
-            await self.brain.handle_external_question("Ndiyo, TIN", [], reasked_since=started)
+            await self.brain.handle_external_question("Ndiyo, TIN", [], reask_window=(started, time.monotonic()))
         resolve.assert_called_once()  # taken as the reply to it, not dropped
+
+    async def test_a_clarification_from_a_turn_begun_during_the_re_ask_survives_it(self):
+        # CodeRabbit on #522: a slow re-transcription can finish after the
+        # caller has started the next turn, and that turn opened its own.
+        window = (time.monotonic(), time.monotonic())  # the re-asked turn, and the switch
+        await self.brain.handle_external_question(ENGLISH_HEARING, _words(ENGLISH_HEARING))  # the next turn
+        opened = self.state.clarify
+        self.assertIsNotNone(opened)
+        self.state.locale = "sw"
+        await self.brain.handle_external_question("Ninawezaje kujisajili kupata TIN yangu?", [], reask_window=window)
+        self.assertIsNotNone(self.state.clarify)  # still asking the later turn's question
 
     def _long_answer(self, **extra):
         """An answer longer than RECEPTIONIST_MAX_SPOKEN_SENTENCES (3)."""

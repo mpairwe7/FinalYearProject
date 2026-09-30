@@ -207,9 +207,10 @@ fix below came from a scenario that failed:
   brain then takes the Luganda question as English, and its known-mishear check asks
   "Excuse me, did you say tin?". The Luganda re-ask then went to that clarification
   and came back as "please tell me your question again", so the caller lost their
-  first question. The router now stamps when each turn begins and passes the stamp
-  with the re-ask. The brain drops a clarification opened during that turn and keeps
-  one from an earlier turn. Replay scenarios 2 and 5.
+  first question. The router now stamps when each turn begins and passes the re-ask
+  the window from that stamp to the switch. The brain drops a clarification opened
+  inside it and keeps one from an earlier turn, or from a turn begun while the
+  re-ask was being transcribed. Replay scenarios 2 and 5.
 - **Gemini's caller transcript goes upstream.** `GeminiLiveLLMService` pushes the
   caller's transcription *up*, so the tap after it never saw one: Gemini calls had no
   caller turns in the transcript. `GeminiCallerTap`, placed before the service,

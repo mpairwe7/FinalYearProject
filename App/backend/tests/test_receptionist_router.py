@@ -98,7 +98,7 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         self.router.interrupt.assert_awaited_once()
         self.brain.say_filler.assert_awaited_once()  # something to hear at once
         self.speech.transcribe.assert_called_once_with(pcm16_to_wav(PCM), 16000, "lg", True)
-        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN", ["w"], reasked_since=ANY)
+        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN", ["w"], reask_window=ANY)
         captions = self.sent("caption")
         self.assertEqual((captions[0]["speaker"], captions[0]["text"]), ("caller", "Nsaba okumanya ku TIN"))
         self.assertEqual(self.sent("language")[0]["language"], "lg")
@@ -111,11 +111,13 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
         await self.router.on_speech_started()  # a second segment: the same turn
         await self.router.on_turn_end(PCM, 2)
         await self.settle()
-        since = self.brain.handle_external_question.await_args.kwargs["reasked_since"]
-        self.assertGreaterEqual(since, before)
-        self.assertLessEqual(since, time.monotonic())
+        started, switched = self.brain.handle_external_question.await_args.kwargs["reask_window"]
+        self.assertLessEqual(before, started)
+        self.assertLessEqual(started, switched)
+        self.assertLessEqual(switched, time.monotonic())
         await self.turn(vote("en", 0.95), decoded=("What is the VAT rate?", "en"))
-        self.assertGreater(self.brain.handle_external_question.await_args.kwargs["reasked_since"], since)
+        next_started, _ = self.brain.handle_external_question.await_args.kwargs["reask_window"]
+        self.assertGreater(next_started, switched)  # each turn has its own window
 
     async def test_the_switched_turn_stays_claimed_until_the_caller_speaks_again(self):
         await self.turn(vote("lg", 0.9))
@@ -127,14 +129,14 @@ class RouterTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_sentinel_s_decode_is_reused(self):
         await self.turn(vote("lg", 0.9), decoded=("Nsaba okumanya ku TIN yange", "lg"))
         self.speech.transcribe.assert_not_called()
-        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN yange", [], reasked_since=ANY)
+        self.brain.handle_external_question.assert_awaited_once_with("Nsaba okumanya ku TIN yange", [], reask_window=ANY)
 
     async def test_back_to_english_is_answered_on_the_same_local_engine(self):
         await self.turn(vote("lg", 0.9))
         await self.turn(vote("en", 0.95), decoded=("What is the VAT rate?", "en"))
         self.assertEqual(self.room.state.locale, "en")
         self.assertEqual(self.room.state.language_switches, 2)
-        self.brain.handle_external_question.assert_awaited_with("What is the VAT rate?", [], reasked_since=ANY)
+        self.brain.handle_external_question.assert_awaited_with("What is the VAT rate?", [], reask_window=ANY)
 
     async def test_an_explicit_request_is_confirmed_not_answered(self):
         await self.turn(vote("en", 0.95, speech_s=1.4, text="Can we speak Luganda?"))

@@ -434,25 +434,31 @@ class UraReceptionistBrain(LLMService):
         await self.handle_external_question(user_text, words)
 
     async def handle_external_question(
-        self, user_text: str, words: list[Any] | None = None, *, reasked_since: float | None = None
+        self,
+        user_text: str,
+        words: list[Any] | None = None,
+        *,
+        reask_window: tuple[float, float] | None = None,
     ) -> None:
         """Record the caller's turn and respond to it.
 
         The context aggregator reaches this through ``_handle_context_frame``;
         the language router calls it directly when a call moves to this engine
         mid-turn, so the question that triggered the switch is answered
-        without the caller repeating it. It passes *reasked_since*, when that
-        turn began. Whisper's transcript of the turn in the old language can
-        land before the language vote, and a clarification it opened ("Excuse
-        me, did you say tin?") asks about words the caller never said: it is
-        dropped, so the re-ask is answered rather than taken as the reply to it
-        (G92). A clarification from an earlier turn stands.
+        without the caller repeating it. It passes *reask_window*: when that
+        turn began, and when the switch was carried out. Whisper's transcript
+        of the turn in the old language can land before the language vote, and
+        a clarification it opened in that window ("Excuse me, did you say
+        tin?") asks about words the caller never said: it is dropped, so the
+        re-ask is answered rather than taken as the reply to it (G92). A
+        clarification from an earlier turn stands, and so does one from a turn
+        the caller began while the re-ask was being transcribed.
         """
         user_text = user_text.strip()
         if not user_text:
             return
         clarify = self.room.state.clarify
-        if reasked_since is not None and clarify is not None and clarify.opened_at >= reasked_since:
+        if reask_window is not None and clarify is not None and reask_window[0] <= clarify.opened_at <= reask_window[1]:
             logger.info("Dropping the clarification the old-language transcript opened on call %s", self.room.call_id)
             self.room.state.clarify = None
         words = list(words or [])

@@ -239,17 +239,21 @@ class LanguageRouter:
         # The turn in flight was transcribed in the old language: drop its
         # answer and stop whatever is playing, here and in the browser.
         state.generation_id += 1
+        # The re-asked turn ran from its first word to now: a clarification the
+        # brain opened in between came from its old-language transcript. One
+        # opened later belongs to a turn the caller began meanwhile.
+        window = (turn_started_at, time.monotonic()) if turn_started_at is not None else None
         await self._interrupt_for_switch()
         await self._send(message)
         logger.info("Call %s moved to %s (%s)", self.room.call_id, decision.target, decision.reason)
-        self._spawn(self._answer(decision, pcm, decoded, turn_started_at))
+        self._spawn(self._answer(decision, pcm, decoded, window))
 
     async def _answer(
         self,
         decision: Decision,
         pcm: bytes | None,
         decoded: tuple[str, str] | None,
-        turn_started_at: float | None = None,
+        reask_window: tuple[float, float] | None = None,
     ) -> None:
         if self.brain is None:
             return
@@ -271,7 +275,7 @@ class LanguageRouter:
             "type": "caption", "speaker": "caller", "text": text, "final": True,
             "turn_id": self.room.state.turn_seq + 1,
         })
-        await self.brain.handle_external_question(text, words, reasked_since=turn_started_at)
+        await self.brain.handle_external_question(text, words, reask_window=reask_window)
 
     async def _transcribe(
         self, pcm: bytes, language: str, decoded: tuple[str, str] | None

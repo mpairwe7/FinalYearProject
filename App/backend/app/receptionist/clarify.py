@@ -104,8 +104,9 @@ class ClarifyState:
     previous_word: str | None = None
     attempts: int = 0
     # When it was asked (time.monotonic()). A language switch re-asks the
-    # turn it was decided in; a clarification opened during that same turn
-    # came from the old-language transcript and is dropped (G92).
+    # turn it was decided in; a clarification opened between that turn's
+    # start and the switch came from the old-language transcript and is
+    # dropped (G92).
     opened_at: float = 0.0
 
 
