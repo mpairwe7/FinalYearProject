@@ -9,7 +9,7 @@
  * audio still plays, and nothing looks broken.
  *
  * So these assert the outgoing contract per locale rather than any transcript:
- *   - narration POSTs /v1/tts with that locale and the voice chosen for it
+ *   - narration POSTs /v1/tts/stream with that locale and the voice chosen for it
  *   - dictation in Luganda and Swahili POSTs /v1/asr with that locale and
  *     domain=tax, even where the browser has a Speech API (G94)
  *   - English dictation configures the browser recognizer with en-US, and
@@ -30,7 +30,14 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
-import { clearChatStore, mockBackend, openSettings, seedConsent, sendMessage } from "./helpers";
+import {
+  clearChatStore,
+  mockBackend,
+  openSettings,
+  seedConsent,
+  sendMessage,
+  speechStreamBody,
+} from "./helpers";
 
 /** Mirrors src/lib/locales.ts — kept here so a silent edit there fails a test. */
 const LOCALES = [
@@ -117,25 +124,14 @@ test.describe("Every configured language, through the UI", () => {
   });
 
   for (const locale of LOCALES) {
-    test(`${locale.label}: narration asks /v1/tts for ${locale.value}`, async ({ page }) => {
+    test(`${locale.label}: narration asks /v1/tts/stream for ${locale.value}`, async ({ page }) => {
       await mockBackend(page);
       await mockVoiceCatalogue(page);
 
       const ttsBodies: Array<Record<string, unknown>> = [];
-      await page.route("**/api/v1/tts", async (route) => {
+      await page.route("**/api/v1/tts/stream", async (route) => {
         ttsBodies.push(route.request().postDataJSON());
-        await route.fulfill({
-          json: {
-            sample_rate: 22050,
-            num_samples: 1102,
-            duration_s: 0.05,
-            latency_s: 0.1,
-            backend: "stub",
-            voice: "stub",
-            audio_base64: "",
-            error: null,
-          },
-        });
+        await route.fulfill({ contentType: "application/x-ndjson", body: speechStreamBody() });
       });
 
       await page.goto("/");
@@ -182,12 +178,9 @@ test.describe("Every configured language, through the UI", () => {
     await mockVoiceCatalogue(page);
 
     const ttsBodies: Array<Record<string, unknown>> = [];
-    await page.route("**/api/v1/tts", async (route) => {
+    await page.route("**/api/v1/tts/stream", async (route) => {
       ttsBodies.push(route.request().postDataJSON());
-      await route.fulfill({
-        json: { sample_rate: 22050, num_samples: 1, duration_s: 0, latency_s: 0,
-                backend: "stub", voice: "stub", audio_base64: "", error: null },
-      });
+      await route.fulfill({ contentType: "application/x-ndjson", body: speechStreamBody() });
     });
 
     await page.goto("/");
@@ -348,5 +341,8 @@ test.describe("Voice round-trip carries the language", () => {
 
     await expect.poll(() => urls.length, { timeout: 20_000 }).toBeGreaterThan(0);
     expect(urls[0]).toContain("language=lg");
+    // Text first: the reply is shown when it is known and spoken as a stream,
+    // not held back until all of it is synthesised.
+    expect(urls[0]).toContain("tts_enabled=false");
   });
 });

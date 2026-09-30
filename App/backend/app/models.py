@@ -464,6 +464,9 @@ class SynthesizeRequest(BaseModel):
     )
     language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 language code")
     streaming: bool = Field(False, description="Emit audio as a sentence-chunked stream")
+    format: Literal["wav", "opus"] = Field(
+        "wav", description="/v1/tts/stream only: 'opus' for Ogg/Opus pieces, about a tenth the size of WAV"
+    )
 
 
 class SynthesizeResponse(BaseModel):

@@ -643,6 +643,70 @@ class SynthesizeResult:
     error: str | None = None
 
 
+#: Characters in the first piece of a streamed reply (/v1/tts/stream). Speech
+#: starts once that piece is synthesised: at Orpheus's real-time factor (~0.65)
+#: 45–50 characters took 2.7–3.4 s on the GPU stack, a full 120-character piece
+#: about 6 s.
+STREAM_FIRST_PIECE_CHARS = int(os.getenv("SPEECH_STREAM_FIRST_PIECE_CHARS", "60"))
+#: The second piece: short enough to be ready before the first has been
+#: heard, so speech does not pause after the first sentence. The rest take the
+#: Orpheus cap.
+STREAM_SECOND_PIECE_CHARS = 90
+
+
+def voice_pieces(text: str) -> list[str]:
+    """*text* in speaking order, cut for streaming into pieces that grow: 60, 90, then 120 characters.
+
+    Cut at sentence, clause, then word breaks (``orpheus_tts.split_for_voice``),
+    so each piece is also a cache entry that a later read-aloud of the same
+    answer finds.
+    """
+    from . import orpheus_tts
+
+    limits = (STREAM_FIRST_PIECE_CHARS, STREAM_SECOND_PIECE_CHARS)
+    pieces: list[str] = []
+    for unit in orpheus_tts.split_for_voice(text, limit=STREAM_FIRST_PIECE_CHARS):
+        if not unit.strip():
+            continue
+        if pieces:
+            index = len(pieces) - 1
+            limit = limits[index] if index < len(limits) else orpheus_tts._max_chars()
+            if len(pieces[-1]) + 1 + len(unit) <= limit:
+                pieces[-1] = f"{pieces[-1]} {unit}"
+                continue
+        pieces.append(unit)
+    return pieces
+
+
+def audio_for_client(result: SynthesizeResult, fmt: str) -> tuple[bytes, str]:
+    """The audio of *result* for a client that asked for *fmt*, and the format it is in.
+
+    WAV becomes Ogg/Opus when ``fmt == "opus"``: about a tenth of the size
+    (4.4 s of speech, 208 KB as WAV, 20 KB as Opus). Encoding costs ~5% of the
+    audio's length on the CPU. Anything else is sent as it came (edge-tts MP3
+    is already compressed), and so is WAV that will not encode.
+    """
+    audio = result.audio
+    if audio[:4] == b"RIFF":
+        if fmt == "opus":
+            try:
+                import io
+
+                import soundfile as sf
+
+                data, rate = sf.read(io.BytesIO(audio), dtype="float32")
+                if rate in (8000, 12000, 16000, 24000, 48000):  # the rates Opus accepts
+                    out = io.BytesIO()
+                    sf.write(out, data, rate, format="OGG", subtype="OPUS")
+                    return out.getvalue(), "ogg_opus"
+            except Exception:
+                logger.debug("Opus encoding failed; sending WAV", exc_info=True)
+        return audio, "wav"
+    if _looks_like_mp3(audio):
+        return audio, "mp3"
+    return audio, "wav"
+
+
 @dataclass
 class TranslateResult:
     text: str

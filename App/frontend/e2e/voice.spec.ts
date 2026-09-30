@@ -4,7 +4,8 @@
  * Exercises the browser side of the STT/TTS surface against a fully stubbed
  * `/api/*` (see helpers.ts): the real getUserMedia → MediaRecorder → AudioContext
  * capture pipeline runs against Chromium's fake media device, and the captured
- * audio is POSTed to the stubbed `/v1/voice/chat` and `/v1/tts`. We assert the UI
+ * audio is POSTed to the stubbed `/v1/voice/chat`, and replies are read from the
+ * stubbed `/v1/tts/stream` (or `/v1/tts`, its fallback). We assert the UI
  * state machine and the *request contract* (raw-audio body, consent header,
  * sample-rate query) rather than transcription accuracy (the fake mic is silent).
  *
@@ -17,6 +18,7 @@
  */
 import { expect, test } from "@playwright/test";
 
+import { TINY_WAV_B64 } from "./fixtures";
 import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
 
 // Desktop-only: some composer controls are hidden <720px.
@@ -129,8 +131,29 @@ test.describe("Voice STT/TTS (mocked)", () => {
     });
   });
 
-  test("listening to a reply calls /v1/tts with the reply text", async ({ page }) => {
+  test("listening to a reply streams its speech from /v1/tts/stream", async ({ page }) => {
     await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+
+    const streamReq = page.waitForRequest("**/api/v1/tts/stream");
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    const req = await streamReq;
+    expect(req.method()).toBe("POST");
+    const body = req.postDataJSON();
+    expect(body.language).toBe("en");
+    expect(typeof body.text).toBe("string");
+    expect(body.text.length).toBeGreaterThan(0);
+    // Opus where the browser plays it, else WAV.
+    expect(["opus", "wav"]).toContain(body.format);
+  });
+
+  test("listening falls back to /v1/tts when the stream is unavailable", async ({ page }) => {
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.route("**/api/v1/tts/stream", (route) => route.fulfill({ status: 503, body: "down" }));
     await page.goto("/");
     await sendMessage(page, "What is the VAT rate?");
     await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
@@ -139,12 +162,48 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
     const ttsReq = page.waitForRequest("**/api/v1/tts");
     await page.getByRole("button", { name: /Listen in English/ }).last().click();
-    const req = await ttsReq;
-    expect(req.method()).toBe("POST");
-    const body = req.postDataJSON();
+    const body = (await ttsReq).postDataJSON();
     expect(body.language).toBe("en");
-    expect(typeof body.text).toBe("string");
     expect(body.text.length).toBeGreaterThan(0);
+  });
+
+  test("stopping a read-aloud while it loads also stops its whole-reply fallback", async ({ page }) => {
+    await page.addInitScript(() => {
+      const start = AudioBufferSourceNode.prototype.start;
+      AudioBufferSourceNode.prototype.start = function (...args) {
+        const w = window as unknown as { __played?: number };
+        w.__played = (w.__played ?? 0) + 1;
+        return start.apply(this, args);
+      };
+    });
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.route("**/api/v1/tts/stream", (route) => route.fulfill({ status: 503, body: "down" }));
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/tts", async (route) => {
+      await held;
+      await route.fulfill({
+        json: { sample_rate: 22050, num_samples: 1102, duration_s: 0.05, latency_s: 0.1,
+                backend: "stub", voice: "stub", audio_base64: TINY_WAV_B64, error: null },
+      });
+    });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+
+    // The stream fails, so the whole reply is fetched; the reader stops it meanwhile.
+    const fallback = page.waitForRequest("**/api/v1/tts");
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    await fallback;
+    await page.getByRole("button", { name: "Stop listening" }).last().click();
+    release();
+    await page.waitForTimeout(1000);
+    expect(await page.evaluate(() => (window as unknown as { __played?: number }).__played ?? 0)).toBe(0);
+    await expect(page.getByRole("button", { name: /Listen in English/ }).last()).toBeEnabled();
   });
 
   test("dictation still works with no browser Speech API", async ({ page }) => {

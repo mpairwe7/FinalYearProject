@@ -927,6 +927,7 @@ Content-Type: application/json
 | `language` | string | `"en"` | ISO 639-1 |
 | `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` — see below |
 | `streaming` | bool | `false` | Reserved for future use |
+| `format` | string | `"wav"` | `/v1/tts/stream` only: `"opus"` sends Ogg/Opus pieces, about a tenth of WAV's size |
 
 `/v1/asr` distinguishes hearing nothing from being unable to hear. A backend
 that ran and returned an empty transcript answers `200` with `text: ""`,
@@ -947,6 +948,48 @@ A Sunbird tag is never forwarded to edge-tts — edge has no such speaker and th
 call would return no audio, losing the fallback. List the choices with
 `GET /v1/speech/voices`; the response's `voice` field reports the speaker
 actually used, so a caller can tell a honoured pick from a fallback.
+
+---
+
+### Stream Reply Speech
+
+```http
+POST /v1/tts/stream
+Content-Type: application/json
+```
+
+The chat's read-aloud. It takes the same body as `/v1/tts` and answers with
+NDJSON, one line per piece of the text as soon as that piece is voiced, in
+speaking order, so playback starts after the first sentence instead of after
+the whole answer. Before it, the voice chat's spoken reply to a TIN question
+arrived as one 1.1–1.6 MB WAV, 9–20 s after the question was sent.
+
+**Request**
+```json
+{"text": "To register for a TIN, …", "language": "lg", "format": "opus"}
+```
+
+**Response** (`application/x-ndjson`)
+```text
+{"seq": 0, "text": "To register for a TIN,", "format": "ogg_opus", "audio_base64": "T2dnUw…", "duration_s": 2.4, "backend": "orpheus_salt"}
+{"seq": 1, "text": "open the URA portal …", "format": "ogg_opus", "audio_base64": "T2dnUw…", "duration_s": 6.1, "backend": "orpheus_salt"}
+{"seq": 2, "text": "…", "error": "no audio"}
+{"done": true, "pieces": 3, "failed": 1}
+```
+
+| Field | Meaning |
+|---|---|
+| `seq` | Speaking order, from 0 |
+| `text` | The words this piece says |
+| `format` | `ogg_opus`, `wav` or `mp3`. `format: "opus"` gives Ogg/Opus when the voice's sample rate is one Opus takes (8, 12, 16, 24 or 48 kHz); anything else stays WAV. Edge-tts English arrives as MP3 and passes through |
+| `error` | Instead of audio, for a piece no backend could voice. The stream goes on with the next piece |
+| `done` | The last line: how many pieces there were and how many failed |
+
+Pieces are cut at sentence, clause, then word breaks, and grow: the first
+holds at most `SPEECH_STREAM_FIRST_PIECE_CHARS` (60) characters, the second 90,
+and the rest Orpheus's 120. The first piece is voiced alone; from then on two
+pieces are in flight, so the next is ready before the current one finishes
+playing. Once the client disconnects, no further piece is started.
 
 ---
 
@@ -2224,6 +2267,7 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
 | `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
 | `SPEECH_TTS_CACHE_SIZE` | LRU entries for repeated-phrase TTS (0 disables) | `256` |
+| `SPEECH_STREAM_FIRST_PIECE_CHARS` | Longest first piece `/v1/tts/stream` voices; smaller starts speech sooner, at the cost of a short first phrase | `60` |
 | `VOICE_LLM_DEADLINE_S` | Hard ceiling on the LLM stage of a voice turn | `45` |
 | `VOICE_CHAT_BUDGET_S` | Time budget for batch `/v1/voice/chat`; once spent, reply-TTS is skipped (`tts_skipped=true`) so the text reply beats the gateway timeout and the client narrates via `/v1/tts` | `50` |
 | `SPEECH_CLOUD_DEADLINE_S` | Hard ceiling per cloud speech-tier call (Sunbird/edge-tts/Workers AI, all of ASR/TTS/MT); a hung upstream fails that tier and falls through instead of 504ing the request | `40` |

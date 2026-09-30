@@ -8,7 +8,7 @@
  *   SPEECH_ENABLED=true SPEECH_ASR_BACKEND=mock SPEECH_TTS_BACKEND=mock \
  *   SPEECH_MT_BACKEND=mock LLM_ENABLED=false
  *
- * so it serves /v1/speech/health (ready), /v1/tts (real WAV bytes), and
+ * so it serves /v1/speech/health (ready), /v1/tts/stream (real WAV pieces), and
  * /v1/voice/chat (200; mock ASR yields no transcript → the graceful
  * "No speech detected" path) without downloading any heavy models.
  *
@@ -67,7 +67,7 @@ test.describe("Voice STT/TTS — real backend (integration)", () => {
     );
   });
 
-  test("real TTS: narrating a reply hits /v1/tts and returns audio", async ({ page }) => {
+  test("real TTS: narrating a reply streams audio from /v1/tts/stream", async ({ page }) => {
     test.slow();
     await page.goto("/");
     const chatDone = page.waitForResponse(
@@ -82,17 +82,31 @@ test.describe("Voice STT/TTS — real backend (integration)", () => {
     const listen = page.getByRole("button", { name: /Listen in English/ }).last();
     await expect(listen).toBeVisible({ timeout: 25_000 });
 
-    const ttsResp = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/tts") && r.request().method() === "POST",
-      { timeout: 30_000 },
-    );
+    // Chromium keeps no copy of a body the page reads as a stream, so the
+    // test reads the real stream through the proxy and hands it on.
+    const lines: Array<Record<string, unknown>> = [];
+    await page.route("**/api/v1/tts/stream", async (route) => {
+      const response = await route.fetch();
+      const body = await response.text();
+      expect(response.status()).toBe(200);
+      lines.push(...body.trim().split("\n").map((l) => JSON.parse(l)));
+      await route.fulfill({ response, body });
+    });
+    const fallbacks: string[] = [];
+    page.on("request", (req) => {
+      if (new URL(req.url()).pathname === "/api/v1/tts") fallbacks.push(req.url());
+    });
+
     await listen.click();
-    const r = await ttsResp;
-    expect(r.status()).toBe(200);
-    const body = await r.json();
-    // Mock TTS produces a real WAV payload.
-    expect(typeof body.audio_base64).toBe("string");
-    expect(body.audio_base64.length).toBeGreaterThan(100);
-    expect(body.error).toBeFalsy();
+    await expect.poll(() => lines.length, { timeout: 30_000 }).toBeGreaterThan(0);
+    // NDJSON: a line per piece, then the closing line. Mock TTS produces a
+    // real WAV payload for every piece.
+    const pieces = lines.filter((l) => l.audio_base64);
+    expect(pieces.length).toBeGreaterThan(0);
+    expect(String(pieces[0].audio_base64).length).toBeGreaterThan(100);
+    expect(lines[lines.length - 1]).toMatchObject({ done: true, failed: 0 });
+    // The page played it: the whole-reply /v1/tts is asked only when nothing could be.
+    await page.waitForTimeout(1500);
+    expect(fallbacks).toEqual([]);
   });
 });

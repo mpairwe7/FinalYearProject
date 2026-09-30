@@ -17,14 +17,14 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -115,6 +115,7 @@ from .speech_service import (
     SPEECH_MT_BACKEND,
     SPEECH_TTS_BACKEND,
     SpeechModel,
+    SynthesizeResult,
 )
 from .workflows.registry import WorkflowRegistry
 
@@ -1325,7 +1326,12 @@ async def transcribe_audio(
     )
 
     with_words = request.query_params.get("with_words", "").lower() in ("true", "1")
-    result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language, with_words=with_words)
+    # Off the event loop, like every speech call here: run inline, one
+    # synthesis or transcription held up the whole api for its duration
+    # (/health took 5.8 s during a 6.2 s /v1/tts on the GPU stack, G96).
+    result = await asyncio.to_thread(
+        speech.transcribe, audio_bytes, sample_rate=sample_rate, language=language, with_words=with_words
+    )
     metrics.inc("speech_asr_total")
     if result.latency_s:
         metrics.observe("speech_asr_latency_s", result.latency_s)
@@ -1350,6 +1356,68 @@ async def transcribe_audio(
     )
 
 
+@app.post("/v1/tts/stream", tags=["speech"])
+@limiter.limit(_RATE_LIMIT)
+async def synthesize_audio_stream(
+    request: Request,
+    body: SynthesizeRequest,
+    speech: SpeechModel = Depends(get_speech_model),
+    _ctx: AuthContext = Depends(optional_user),
+) -> StreamingResponse:
+    """Speech for *text*, one piece at a time, as NDJSON, so playback starts early.
+
+    One line per piece as soon as it is ready, in speaking order:
+    ``{"seq", "text", "format", "audio_base64", "duration_s", "backend"}``;
+    a piece that could not be voiced has ``"error"`` instead of audio. The last
+    line is ``{"done": true, "pieces": n, "failed": k}``. The first piece is
+    short (``SPEECH_STREAM_FIRST_PIECE_CHARS``), so a long answer starts being
+    heard after one sentence rather than after all of it, and ``format=opus``
+    sends each piece as Ogg/Opus, about a tenth of WAV's size.
+    """
+    import base64
+
+    from .speech_service import audio_for_client, voice_pieces
+
+    pieces = voice_pieces(body.text)
+
+    def voice(piece: str) -> tuple[SynthesizeResult, bytes, str]:
+        result = speech.synthesize(text=piece, voice=body.voice, language=body.language)
+        audio, fmt = audio_for_client(result, body.format) if result.audio else (b"", "")
+        return result, audio, fmt
+
+    async def lines() -> AsyncIterator[str]:
+        # The first piece is voiced alone, so speech starts soonest; after it,
+        # two pieces are always in flight, so the next is ready before the one
+        # playing ends. The Orpheus sidecar batches, but not for free: with
+        # two in flight from the start the first piece took 0.3-1.6 s longer
+        # on the GPU stack, and one at a time left pauses of up to 0.4 s.
+        futures = [asyncio.ensure_future(asyncio.to_thread(voice, pieces[0]))] if pieces else []
+        failed = 0
+        try:
+            for seq, piece in enumerate(pieces):
+                result, audio, fmt = await futures[seq]
+                while len(futures) < min(seq + 3, len(pieces)):
+                    futures.append(asyncio.ensure_future(asyncio.to_thread(voice, pieces[len(futures)])))
+                metrics.inc("speech_tts_total")
+                if result.latency_s:
+                    metrics.observe("speech_tts_latency_s", result.latency_s)
+                line: dict[str, Any] = {"seq": seq, "text": piece}
+                if audio:
+                    line.update(format=fmt, audio_base64=base64.b64encode(audio).decode("ascii"),
+                                duration_s=result.duration_s, backend=result.backend)
+                else:
+                    failed += 1
+                    metrics.inc("speech_tts_errors_total")
+                    line["error"] = result.error or "no audio"
+                yield json.dumps(line) + "\n"
+            yield json.dumps({"done": True, "pieces": len(pieces), "failed": failed}) + "\n"
+        finally:
+            for future in futures:  # the listener left: nothing more to send
+                future.cancel()
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store"})
+
+
 @app.post("/v1/tts", response_model=SynthesizeResponse, tags=["speech"])
 @limiter.limit(_RATE_LIMIT)
 async def synthesize_audio(
@@ -1361,7 +1429,7 @@ async def synthesize_audio(
     """Synthesize text to WAV audio. Returns base64-encoded WAV bytes."""
     import base64
 
-    result = speech.synthesize(text=body.text, voice=body.voice, language=body.language)
+    result = await asyncio.to_thread(speech.synthesize, text=body.text, voice=body.voice, language=body.language)
     metrics.inc("speech_tts_total")
     if result.latency_s:
         metrics.observe("speech_tts_latency_s", result.latency_s)
@@ -1396,7 +1464,8 @@ async def translate_text(
             latency_s=0.0,
             backend="passthrough",
         )
-    result = speech.translate(
+    result = await asyncio.to_thread(
+        speech.translate,
         text=body.text,
         source_lang=body.source_lang,
         target_lang=body.target_lang,
@@ -1824,7 +1893,7 @@ async def voice_chat(
     session_id = request.headers.get("X-Session-ID") or None
 
     # --- 1. ASR ---------------------------------------------------------------
-    asr_result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    asr_result = await asyncio.to_thread(speech.transcribe, audio_bytes, sample_rate=sample_rate, language=language)
     asr_latency = asr_result.latency_s or 0.0
     metrics.inc("speech_asr_total")
     if asr_result.latency_s:
@@ -1911,7 +1980,7 @@ async def voice_chat(
                 spoken_reply = " ".join(sentences[:3])
             if len(spoken_reply) > 500:
                 spoken_reply = spoken_reply[:500].rsplit(" ", 1)[0] + "."
-            tts_result = speech.synthesize(text=spoken_reply, voice=voice, language=tts_lang)
+            tts_result = await asyncio.to_thread(speech.synthesize, text=spoken_reply, voice=voice, language=tts_lang)
             tts_latency = tts_result.latency_s
             tts_backend = tts_result.backend
             tts_sample_rate = tts_result.sample_rate
