@@ -486,6 +486,11 @@ mic that heard nothing for 8 s closes and says so, rather than listening to the
 room indefinitely. Sound that never passed for speech keeps the mic open for a
 tap, since it may be a quiet speaker. Every turn ends at 60 s. It is a level
 detector, not a speech model: a loud noise that lasts can pass for speech (G97).
+With the pause on, the conversation is hands-free both ways: once a reply has
+been read aloud, the mic opens again for the next turn. A reply stopped by the
+listener does not reopen it. Opening the mic, by a tap or by itself, silences a
+reply still being read, so it neither talks over the speaker nor ends up in
+their recording.
 On a phone, the composer's hint line hid everything, including these notices;
 it now hides only the standing disclaimer.
 

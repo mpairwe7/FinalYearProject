@@ -157,14 +157,14 @@ export default function VoiceSection({
 
       <SettingsSection
         title="Voice mode"
-        description="When you have finished speaking, voice mode can send your turn by itself."
+        description="Voice mode can hold the conversation hands-free: it sends your turn when you pause, and listens again after each reply."
       >
         <SettingsRow
           label="Send after a pause"
           hint={
             silenceTimeout > 0
-              ? `Sends what you said after ${silenceTimeout / 1000} s of quiet. Choose a longer pause if it cuts you off.`
-              : "Sends only when you tap the checkmark."
+              ? `Sends what you said after ${silenceTimeout / 1000} s of quiet, and listens again once the reply has been read. Choose a longer pause if it cuts you off.`
+              : "Sends only when you tap the checkmark, and listens only when you tap the mic."
           }
         >
           <Segmented

@@ -165,7 +165,9 @@ describe("SettingsDialog", () => {
     // Off keeps the tap: the hint says so rather than promising a pause.
     fireEvent.click(within(pause).getByRole("radio", { name: "Off" }));
     expect(useVoiceStore.getState().silenceTimeout).toBe(0);
-    expect(screen.getByText("Sends only when you tap the checkmark.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Sends only when you tap the checkmark, and listens only when you tap the mic."),
+    ).toBeInTheDocument();
   });
 
   it("hands narration changes back to the page that owns the state", () => {

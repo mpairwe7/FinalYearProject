@@ -18,6 +18,7 @@
  */
 import { expect, test, type Page } from "@playwright/test";
 
+import { silentWavB64 } from "./audio";
 import { TINY_WAV_B64 } from "./fixtures";
 import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
 
@@ -271,6 +272,55 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(confirm).toBeHidden({ timeout: 15_000 });
     await expect(page.getByText("I didn’t hear anything", { exact: false })).toBeVisible();
     expect(sent).toEqual([]);
+  });
+
+  test("voice mode listens again once the reply has been read", async ({ page }) => {
+    test.slow(); // two spoken turns
+    await speakThenPause(page);
+    await mockBackend(page);
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/v1/voice/chat")) sent.push(r.url());
+    });
+    await page.goto("/");
+
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    await page.locator('[data-testid="composer-mic"]').click();
+    // The first turn sends itself; its reply is read (one short piece); then the
+    // mic opens again with no tap, and the second turn sends itself too.
+    await expect.poll(() => sent.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+  });
+
+  test("opening the mic silences a reply being read aloud", async ({ page }) => {
+    await page.addInitScript(() => {
+      const stop = AudioBufferSourceNode.prototype.stop;
+      AudioBufferSourceNode.prototype.stop = function (...args) {
+        const w = window as unknown as { __stopped?: number };
+        w.__stopped = (w.__stopped ?? 0) + 1;
+        return stop.apply(this, args);
+      };
+    });
+    await withoutSpeechApi(page);
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    // A reply that takes 20 s to read.
+    await page.route("**/api/v1/tts/stream", (route) =>
+      route.fulfill({
+        contentType: "application/x-ndjson",
+        body: `${JSON.stringify({ seq: 0, text: "long", format: "wav", audio_base64: silentWavB64(20), duration_s: 20 })}\n${JSON.stringify({ done: true, pieces: 1, failed: 0 })}\n`,
+      }),
+    );
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    await expect(page.getByRole("button", { name: "Stop listening" }).last()).toBeVisible();
+
+    // Dictate over it: the reply stops at once, rather than being recorded too.
+    await page.getByRole("button", { name: "Start speaking" }).click();
+    await expect(page.getByRole("button", { name: "Stop and insert text" })).toBeVisible({ timeout: 10_000 });
+    expect(await page.evaluate(() => (window as unknown as { __stopped?: number }).__stopped ?? 0)).toBeGreaterThan(0);
   });
 
   test("dictation still works with no browser Speech API", async ({ page }) => {
