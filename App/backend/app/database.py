@@ -1118,23 +1118,23 @@ def get_recent_turns(
     """
     if conversation_id:
         if user_id:
-            sql = """SELECT user_message, bot_reply FROM conversations
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
                      WHERE conversation_id = ? AND user_id = ?
                      ORDER BY created_at DESC LIMIT ?"""
             args: tuple[Any, ...] = (conversation_id, user_id, limit)
         else:
-            sql = """SELECT user_message, bot_reply FROM conversations
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
                      WHERE conversation_id = ?
                      ORDER BY created_at DESC LIMIT ?"""
             args = (conversation_id, limit)
     elif session_id:
         if user_id:
-            sql = """SELECT user_message, bot_reply FROM conversations
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
                      WHERE session_id = ? AND user_id = ?
                      ORDER BY created_at DESC LIMIT ?"""
             args = (session_id, user_id, limit)
         else:
-            sql = """SELECT user_message, bot_reply FROM conversations
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
                      WHERE session_id = ?
                      ORDER BY created_at DESC LIMIT ?"""
             args = (session_id, limit)
@@ -1145,7 +1145,12 @@ def get_recent_turns(
     rows = conn.execute(sql, args).fetchall()
     # Reverse to chronological order
     return [
-        {"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)
+        {
+            "user_message": r["user_message"],
+            "bot_reply": r["bot_reply"],
+            "locale": r["locale"] if "locale" in r.keys() else "",
+        }
+        for r in reversed(rows)
     ]
 
 

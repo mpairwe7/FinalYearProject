@@ -1031,6 +1031,9 @@ export default function Page() {
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
       if (d.conversation_id) sessionIdRef.current = d.conversation_id;
+      if (d.locale && d.locale !== useChatStore.getState().locale) {
+        useChatStore.getState().setLocale(d.locale);
+      }
       const content = cleanResponse(d.reply ?? '');
       const meta = {
         citations: d.citations ?? [],
@@ -1127,6 +1130,9 @@ export default function Page() {
               if (p && typeof p === 'object' && !Array.isArray(p)) {
                 meta = { ...meta, ...p };
                 if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+                if (p.locale && p.locale !== useChatStore.getState().locale) {
+                  useChatStore.getState().setLocale(p.locale);
+                }
                 if (typeof p.reply === 'string' && p.reply.trim()) {
                   reveal.set(cleanResponse(p.reply));
                 }
@@ -1161,6 +1167,9 @@ export default function Page() {
               const p = JSON.parse(trimmedData);
               meta = { ...meta, ...p };
               if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+              if (p.locale && p.locale !== useChatStore.getState().locale) {
+                useChatStore.getState().setLocale(p.locale);
+              }
               if (typeof p.reply === 'string' && p.reply.trim()) {
                 reveal.set(cleanResponse(p.reply));
               }

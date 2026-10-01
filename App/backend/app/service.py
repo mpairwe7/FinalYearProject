@@ -1580,6 +1580,11 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             rewritten=str(result.get("_rewritten") or ""),
             recent_turns=history_turns,
         )
+        if locale not in ("", "en"):
+            if result.get("resources"):
+                result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
+            if result.get("next_actions"):
+                result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
 
         yield (
             "retrieval.completed",
@@ -4489,10 +4494,158 @@ class ChatModel:
 
         return "\n\n".join(sections)
 
+    _ACTION_TRANSLATIONS: Final[dict[tuple[str, str], str]] = {
+        # Handoff / officer
+        ("Speak to a URA officer", "lg"): "Yogera n'omukozi wa URA",
+        ("Speak to a URA officer", "sw"): "Ongea na afisa wa URA",
+        ("Talk to an officer", "lg"): "Yogera n'omukozi",
+        ("Talk to an officer", "sw"): "Ongea na afisa",
+        ("Ask for human support if your case is account-specific or time-sensitive.", "lg"): "Saba obuyambi bw'omuntu singa ensonga yo ekwata ku akawunti yo oba ng'eyanguwa.",
+        ("Ask for human support if your case is account-specific or time-sensitive.", "sw"): "Omba usaidizi wa binadamu ikiwa suala lako linahusu akaunti mahususi au ni la dharura.",
+        ("Prepare the listed reference details before speaking to a URA officer.", "lg"): "Tegeka ebirukwataho ebijuliziddwa nga tonnayogera n'omukozi wa URA.",
+        ("Prepare the listed reference details before speaking to a URA officer.", "sw"): "Andaa maelezo ya marejeleo yaliyoorodheshwa kabla ya kuongea na afisa wa URA.",
+        ("Use the URA Contact Centre if you need immediate human assistance.", "lg"): "Kozesa URA Contact Centre bw'oba weetaaga obuyambi bw'amangu obw'omukozi.",
+        ("Use the URA Contact Centre if you need immediate human assistance.", "sw"): "Tumia Kituo cha Mawasiliano cha URA ikiwa unahitaji usaidizi wa haraka wa binadamu.",
+        # Guidance / Workflow
+        ("Would you like step-by-step guidance on this?", "lg"): "Wandiyagadde obuyambi obw'odaala ku daala ku kino?",
+        ("Would you like step-by-step guidance on this?", "sw"): "Je, ungependa mwongozo wa hatua kwa hatua kuhusu hili?",
+        ("Reply with the requested detail to continue the guided process.", "lg"): "Ddamu n'obubaka obwetaagibwa okweyongerayo n'enkola ekulemberwa.",
+        ("Reply with the requested detail to continue the guided process.", "sw"): "Jibu kwa kutoa maelezo yanayohitajika ili kuendelea na mchakato unaoongozwa.",
+        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "lg"): "Weereza 'cancel' bw'oba oyagala okuva mu nkola eno obuuze ekibuuzo ekirala.",
+        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "sw"): "Tuma 'cancel' ikiwa unataka kutoka kwenye mchakato huu na kuuliza swali tofauti.",
+        ("Reply with the missing detail so I can answer more precisely.", "lg"): "Ddamu n'ebikwataho ebibuze nsobole okukuddamu mu bujjuvu.",
+        ("Reply with the missing detail so I can answer more precisely.", "sw"): "Jibu kwa kutoa maelezo yaliyokosekana ili niweze kujibu kwa usahihi zaidi.",
+        ("Review the cited URA sources before acting on this answer.", "lg"): "Kebera ebiwandiiko bya URA ebijuliziddwa nga tonnakola ku kuddamu kuno.",
+        ("Review the cited URA sources before acting on this answer.", "sw"): "Pitia vyanzo vya URA vilivyotajwa kabla ya kuchukua hatua kuhusu jibu hili.",
+        ("Rephrase your question about a URA service — I'm glad to help.", "lg"): "Ddamu obuulize ekibuuzo kyo ku buweereza bwa URA — nze nneeteeseteese okukuyamba.",
+        ("Rephrase your question about a URA service — I'm glad to help.", "sw"): "Eleza upya swali lako kuhusu huduma ya URA — niko tayari kukusaidia.",
+        ("Ask how to register for a TIN", "lg"): "Buuza ku kwewandiisa ku TIN",
+        ("Ask how to register for a TIN", "sw"): "Uliza jinsi ya kujisajili kwa TIN",
+        ("Ask about filing deadlines", "lg"): "Buuza ku bisanjiro by'okuwaayo emisolo",
+        ("Ask about filing deadlines", "sw"): "Uliza kuhusu tarehe za mwisho za kuwasilisha",
+        ("Ask about TIN registration", "lg"): "Buuza ku kwewandiisa ku TIN",
+        ("Ask about TIN registration", "sw"): "Uliza kuhusu usajili wa TIN",
+        ("Learn about VAT", "lg"): "Yiga ku musolo gwa VAT",
+        ("Learn about VAT", "sw"): "Jifunze kuhusu VAT",
+        ("File a tax return", "lg"): "Waayo alipoota y'omusolo",
+        ("File a tax return", "sw"): "Wasilisha marejesho ya kodi",
+    }
+
+    _RESOURCE_TRANSLATIONS: Final[dict[tuple[str, str], str]] = {
+        ("URA e-Services Web Portal", "lg"): "Omukutu gwa URA ogwa e-Services",
+        ("URA e-Services Web Portal", "sw"): "Tovuti ya Huduma za URA Mtandaoni",
+        ("Individual TIN Application Portal", "lg"): "Omukutu gw'okwewandiisa ku TIN y'omuntu kinnoomu",
+        ("Individual TIN Application Portal", "sw"): "Tovuti ya Maombi ya TIN ya Mtu Binafsi",
+        ("Non-Individual TIN Application (Companies & Partnerships)", "lg"): "Okwewandiisa ku TIN ya Bizinensi ne Kampuni",
+        ("Non-Individual TIN Application (Companies & Partnerships)", "sw"): "Maombi ya TIN ya Kampuni na Ushirika",
+        ("Online PRN Payment Slip Generation", "lg"): "Okukola Foomu y'okusasulirako eya PRN",
+        ("Online PRN Payment Slip Generation", "sw"): "Kutengeneza Hati ya Malipo ya PRN Mtandaoni",
+        ("e-Tax Portal Login", "lg"): "Yingira ku Mukutu gwa e-Tax",
+        ("e-Tax Portal Login", "sw"): "Kuingia kwenye Tovuti ya e-Tax",
+        ("EFRIS Portal Login", "lg"): "Yingira ku Mukutu gwa EFRIS",
+        ("EFRIS Portal Login", "sw"): "Kuingia kwenye Tovuti ya EFRIS",
+        ("VAT Registration Application Form", "lg"): "Foomu y'okwewandiisa ku musolo gwa VAT",
+        ("VAT Registration Application Form", "sw"): "Fomu ya Maombi ya Usajili wa VAT",
+        ("Tax Clearance Certificate (TCC) Application", "lg"): "Saba Ebbaluwa y'okumalaayo Emisolo (TCC)",
+        ("Tax Clearance Certificate (TCC) Application", "sw"): "Maombi ya Cheti cha Uondoaji Ushuru (TCC)",
+        ("Motor Vehicle Transfer Application", "lg"): "Okwewandiisa okukyusa Ebyapa by'Emmotoka",
+        ("Motor Vehicle Transfer Application", "sw"): "Maombi ya Uhamisho wa Umiliki wa Gari",
+        ("Tax Objection & Dispute Lodgement Form", "lg"): "Foomu y'okuwakanya Emisolo n'Enkaayana",
+        ("Tax Objection & Dispute Lodgement Form", "sw"): "Fomu ya Kupinga Makadirio ya Kodi",
+    }
+
+    @classmethod
+    def _localize_next_actions(cls, actions: list[str], locale: str) -> list[str]:
+        if not actions or locale in ("", "en"):
+            return actions
+        out: list[str] = []
+        for action in actions:
+            if not action or not isinstance(action, str):
+                continue
+            key = (action.strip(), locale)
+            if key in cls._ACTION_TRANSLATIONS:
+                out.append(cls._ACTION_TRANSLATIONS[key])
+            else:
+                loc = localize_reply(action.strip(), locale)
+                out.append(loc if loc else action)
+        return out
+
+    @classmethod
+    def _localize_resource(cls, res: dict[str, Any], locale: str) -> dict[str, Any]:
+        if not res or locale in ("", "en"):
+            return res
+        out = dict(res)
+        title = str(out.get("title") or "").strip()
+        if title:
+            key_t = (title, locale)
+            if key_t in cls._RESOURCE_TRANSLATIONS:
+                out["title"] = cls._RESOURCE_TRANSLATIONS[key_t]
+            else:
+                loc_t = localize_reply(title, locale)
+                if loc_t:
+                    out["title"] = loc_t
+
+        desc = str(out.get("description") or "").strip()
+        if desc:
+            key_d = (desc, locale)
+            if key_d in cls._RESOURCE_TRANSLATIONS:
+                out["description"] = cls._RESOURCE_TRANSLATIONS[key_d]
+            else:
+                loc_d = localize_reply(desc, locale)
+                if loc_d:
+                    out["description"] = loc_d
+        return out
+
+    @staticmethod
+    def _resolve_conversation_locale(
+        message: str,
+        requested_locale: str,
+        conversation_history: list[dict[str, Any]] | None,
+    ) -> str:
+        """Resolve the effective locale for a turn, preserving the conversation's language across follow-ups."""
+        from .receptionist.language import detect_explicit_request
+        explicit = detect_explicit_request(message)
+        if explicit in SUPPORTED_LOCALES:
+            return explicit
+
+        # Check established locale from conversation history
+        established_locale: str | None = None
+        if conversation_history:
+            for turn in reversed(conversation_history[-4:]):
+                usr = str(turn.get("user_message") or "").strip()
+                bot = str(turn.get("bot_reply") or "").strip()
+                for sample in (usr, bot):
+                    if not sample or len(sample) < 4:
+                        continue
+                    loc = detect_language(sample, default_lang="en")
+                    if loc in ("lg", "sw"):
+                        established_locale = loc
+                        break
+                if established_locale:
+                    break
+
+        if requested_locale not in ("", "en") and requested_locale in SUPPORTED_LOCALES:
+            return requested_locale
+
+        if established_locale in ("lg", "sw"):
+            return established_locale
+
+        detected = detect_language(message, default_lang="en")
+        if detected in SUPPORTED_LOCALES:
+            return detected
+
+        return requested_locale or "en"
+
     def _finalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
-        """Return a shallow copy with a production-safe user-facing reply."""
+        """Return a shallow copy with a production-safe user-facing reply and localized metadata."""
         out = dict(result)
         out["reply"] = self._finalize_reply(str(out.get("reply", "")))
+        locale = str(out.get("locale") or "en")
+        if locale not in ("", "en"):
+            if "next_actions" in out and isinstance(out["next_actions"], list):
+                out["next_actions"] = self._localize_next_actions(out["next_actions"], locale)
+            if "resources" in out and isinstance(out["resources"], list):
+                out["resources"] = [self._localize_resource(r, locale) for r in out["resources"]]
         return out
 
     @staticmethod
@@ -7093,6 +7246,10 @@ class ChatModel:
                 result["reply"] = self._localize_reply(english, effective)
                 if result["reply"] != english or _is_already_in_locale(english.strip(), effective):
                     result["reply_locale"] = effective
+                if "next_actions" in result and isinstance(result["next_actions"], list):
+                    result["next_actions"] = self._localize_next_actions(result["next_actions"], effective)
+                if "resources" in result and isinstance(result["resources"], list):
+                    result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
         return result
 
     def _generate_en(
@@ -7178,18 +7335,11 @@ class ChatModel:
                         )
                     )
 
-            # 0c. Language detection — auto-detect user's language for
-            #     adapter routing and locale-aware responses. Only promotes
-            #     to a locale in SUPPORTED_LOCALES — detect_language() can
-            #     still tell other Ugandan languages apart, but until they're
-            #     ungated a positive detection there stays "en" rather than
-            #     running an incomplete translation/localization round trip.
-            if locale == "en":
-                with trace_stage("lang_detect", timings=timings):
-                    detected_locale = detect_language(rewritten, default_lang=locale)
-                    if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
-                        locale = detected_locale
-                        logger.info("Auto-detected locale: %s", locale)
+            # 0c. Language detection & multi-turn continuity — auto-detect user's language,
+            #     preserving established conversation locale across follow-up turns.
+            with trace_stage("lang_detect", timings=timings):
+                locale = self._resolve_conversation_locale(message, locale, conversation_history)
+                logger.info("Effective turn locale: %s", locale)
 
             # The deterministic routers below — workflows, TIN clarification,
             # calculators, rate tables — match English patterns. Retrieval
@@ -8779,14 +8929,10 @@ class ChatModel:
         else:
             rewritten = normalize_query(message)
 
-        # Language detection — auto-detect for adapter routing. Only
-        # promotes to a locale in SUPPORTED_LOCALES; see _generate_en's
-        # matching gate above for the full reasoning.
-        if locale == "en":
-            detected_locale = detect_language(rewritten, default_lang=locale)
-            if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
-                locale = detected_locale
-                logger.info("Auto-detected locale: %s (streaming)", locale)
+        # Language detection & multi-turn continuity — auto-detect user's language,
+        # preserving established conversation locale across follow-up turns.
+        locale = self._resolve_conversation_locale(message, locale, conversation_history)
+        logger.info("Effective turn locale (streaming): %s", locale)
 
         personalization = self._load_personalization_state(user_id)
         # Attachment turns and ongoing multi-turn conversations are never cache-served
