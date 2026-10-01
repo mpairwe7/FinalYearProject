@@ -55,6 +55,7 @@ services:
               device_ids: ["2", "3"]
               capabilities: [gpu]
     networks:
+      - dev2-network
       - app-network
 
   # ---------------------------------------------------------------------------
@@ -135,7 +136,11 @@ services:
       vllm-master:
         condition: service_healthy
     networks:
-      - app-network
+      dev2-network:
+        aliases:
+          - api
+          - ura-app-api-dev2
+      app-network:
 
   # ---------------------------------------------------------------------------
   # Frontend UI
@@ -147,16 +152,18 @@ services:
       - "3034:3000"
     environment:
       - NODE_ENV=production
-      - INTERNAL_API_URL=http://ura-app-api-dev2:8000
+      - INTERNAL_API_URL=http://api:8000
       - NEXT_PUBLIC_DEV_SIGNIN=true
     restart: unless-stopped
     depends_on:
       api:
         condition: service_healthy
     networks:
-      - app-network
+      - dev2-network
 
 networks:
+  dev2-network:
+    name: dev2_network
   app-network:
     name: app_app-network
     external: true
