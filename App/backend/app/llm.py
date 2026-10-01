@@ -1833,12 +1833,23 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     specialist = specialist_prompt(agent_role)
     if specialist:
         system_content += f"\n\n{specialist}"
+
+    calc_ground_truth = ""
+    other_personalization = ""
     if personalization_context:
+        if "## Verified Statutory Calculation" in personalization_context:
+            parts_split = personalization_context.split("## Verified Statutory Calculation", 1)
+            other_personalization = parts_split[0].strip()
+            calc_ground_truth = "## Verified Statutory Calculation" + parts_split[1]
+        else:
+            other_personalization = personalization_context.strip()
+
+    if other_personalization:
         system_content += (
             "\n\n## Consent-granted personalization context\n"
             "Use this only to tailor the explanation style and defaults. "
             "Do not treat it as live URA account data.\n"
-            f"{personalization_context.strip()}"
+            f"{other_personalization}"
         )
     if context_summary:
         system_content += (
@@ -1881,13 +1892,27 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         if locale != "en":
             parts.append(f"(Respond in locale: {locale})")
         parts.append(f"## User question\n{query}")
+        if calc_ground_truth:
+            parts.append(
+                "\n## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
+                f"{calc_ground_truth}\n\n"
+                "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
+                "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
+                "2. Use the exact pre-computed figures above in your answer. Do NOT substitute generic FAQ example figures (like UGX 6M) when the taxpayer gave you specific figures.\n"
+                "3. Address every specific sub-question the taxpayer asked.\n"
+                "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
+            )
         messages.append({"role": "user", "content": "\n".join(parts)})
     else:
         locale_hint = f"(Respond in locale: {locale})\n\n" if locale != "en" else ""
+        calc_note = (
+            f"\n\n## Verified Scenario Ground Truth\n{calc_ground_truth}"
+            if calc_ground_truth else ""
+        )
         messages.append(
             {
                 "role": "user",
-                "content": f"{locale_hint}{query}",
+                "content": f"{locale_hint}{query}{calc_note}",
             }
         )
 
