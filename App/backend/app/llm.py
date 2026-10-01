@@ -1429,7 +1429,7 @@ def translate_text(
                 messages, temperature=0.0, top_p=0.9, max_tokens=token_budget, timeout=VLLM_HTTP_TIMEOUT,
             ) or "").strip()
             # Clean stray digit bracket glitches and rogue language tags
-            raw = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", raw)
+            raw = re.sub(r"(\d+)\s*\[+(?!\d+\])[^0-9\n\]]+\s*(\d+)", r"\1\2", raw)
             raw = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", raw, flags=re.IGNORECASE)
             raw = re.sub(r"\[+([a-zA-Z_]+)\]*", r"\1", raw)
             raw = re.sub(r"\[{2,}", "", raw)

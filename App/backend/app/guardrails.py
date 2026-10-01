@@ -554,6 +554,7 @@ class OutputGuard:
         text = re.sub(r"<[^>]+>", "", text)
         # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
         text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
+        text = re.sub(r"(?<=\d)\[(\d+)\]", r" [\1]", text)
         # Remove markdown image links to non-URA domains
         text = re.sub(
             r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
@@ -616,7 +617,8 @@ class OutputGuard:
         text = re.sub(r"\bura\.go\.tz\b", "ura.go.ug", text, flags=re.IGNORECASE)
 
         # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
-        text = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", text)
+        # Negative lookahead (?!\d+\]) protects statutory citations like [1] or [2]
+        text = re.sub(r"(\d+)\s*\[+(?!\d+\])[^0-9\n\]]+\s*(\d+)", r"\1\2", text)
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
         text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
 
