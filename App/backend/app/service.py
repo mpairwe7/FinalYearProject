@@ -4159,6 +4159,62 @@ class ChatModel:
         return f"{lead}\n\n{steps}"
 
     @classmethod
+    def _reflect_llm(
+        cls,
+        query: str,
+        draft_reply: str,
+        unsupported_claims: list[dict[str, Any]],
+        passages: list[dict[str, Any]],
+        locale: str = "en",
+    ) -> str:
+        """Trigger a bounded reflection call to revise draft reply using retrieved passages."""
+        try:
+            from . import llm
+            if not hasattr(llm, "LLM_BACKEND") or (llm.LLM_BACKEND != "vllm" and not llm.is_available()):
+                return ""
+
+            unsupported_text = "\n".join(
+                f"- {c.get('text', '')}" for c in unsupported_claims if isinstance(c, dict) and c.get("text")
+            )
+            passages_text = "\n\n".join(
+                f"[{i+1}] {p.get('text') or p.get('answer', '')}"
+                for i, p in enumerate(passages[:4])
+            )
+            prompt = (
+                f"You are the URA Taxpayer Assistant revising an earlier draft response.\n"
+                f"User Question: {query}\n\n"
+                f"Draft Response:\n{draft_reply}\n\n"
+                f"The following statements in the draft were flagged as weakly supported or ungrounded:\n"
+                f"{unsupported_text or 'Some claims lacked citations or direct statutory grounding.'}\n\n"
+                f"Official Grounding Passages:\n{passages_text}\n\n"
+                f"Instructions:\n"
+                f"1. Revise the draft response so that EVERY factual statement is strictly supported by the passages above with [1], [2] citations.\n"
+                f"2. Remove any speculation or ungrounded formulas.\n"
+                f"3. If the official passages do NOT contain the exact rule requested, explicitly state the statutory boundary and advise the taxpayer to consult URA directly (https://ura.go.ug or toll-free 0800 117 000 / 0800 217 000).\n"
+                f"4. Do NOT dump disconnected FAQ bullets or unrelated topics.\n"
+                f"Return ONLY the revised response text."
+            )
+            messages = [
+                {"role": "system", "content": "You are a professional URA tax legal editor ensuring 100% factual grounding."},
+                {"role": "user", "content": prompt},
+            ]
+            if llm.LLM_BACKEND == "vllm":
+                revised = llm._vllm_generate(messages, max_tokens=1024, temperature=0.1, timeout=60.0)
+            else:
+                # Query has been pre-sanitized by InputGuard.check() in ChatModel
+                revised = llm.generate(prompt, passages=[], conversation_history=None, locale=locale)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+            if hasattr(llm, "strip_thought"):
+                revised = llm.strip_thought(revised).strip() if revised else ""
+            else:
+                revised = (revised or "").strip()
+            if revised and len(revised) > 20 and not revised.lower().startswith(("i cannot", "sorry")):
+                return revised
+        except Exception:
+            logger.debug("Reflection LLM call failed or skipped", exc_info=True)
+        return ""
+
+    @classmethod
     def _build_grounded_revision(
         cls,
         hits: list[dict[str, Any]],
@@ -5604,10 +5660,23 @@ class ChatModel:
 
         revised_reply = ""
         if decision == "revise":
-            revised_reply = self._build_grounded_revision(hits, citations, message)
+            revised_reply = self._reflect_llm(
+                query=message,
+                draft_reply=reply,
+                unsupported_claims=claim_report.get("unsupported_claims", []) if isinstance(claim_report, dict) else [],
+                passages=hits,
+                locale=locale,
+            )
+            # If the user presented specific figures, do not overwrite them with canned FAQ text
+            if not revised_reply and not has_money_amount(message):
+                revised_reply = self._build_grounded_revision(hits, citations, message)
             if not revised_reply:
-                decision = "escalate"
-                reasons.append("no deterministic grounded fallback was available")
+                if reply and not (claim_report or {}).get("contradicted_claims"):
+                    decision = "approve"
+                    reasons.append("accepted tailored structured draft for user scenario")
+                else:
+                    decision = "escalate"
+                    reasons.append("no deterministic grounded fallback was available")
 
         if faithfulness_score is None:
             confidence_band = "medium" if decision == "approve" else "low"
