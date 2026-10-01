@@ -445,12 +445,22 @@ def _build_messages(
     spotlight markers (LLM01 defence).
     """
     system_content = SYSTEM_PROMPT + (STRUCTURED_JSON_SUFFIX if structured else "")
+    calc_ground_truth = ""
+    other_personalization = ""
     if personalization_context:
+        if "## Verified Statutory Calculation" in personalization_context:
+            parts_split = personalization_context.split("## Verified Statutory Calculation", 1)
+            other_personalization = parts_split[0].strip()
+            calc_ground_truth = "## Verified Statutory Calculation" + parts_split[1]
+        else:
+            other_personalization = personalization_context.strip()
+
+    if other_personalization:
         system_content += (
             "\n\n## Consent-granted personalization context\n"
             "Use this only to tailor explanation depth, examples, and workflow defaults. "
             "Do not treat it as live URA account data.\n"
-            f"{personalization_context.strip()}"
+            f"{other_personalization}"
         )
     if context_summary:
         system_content += (
@@ -546,6 +556,18 @@ def _build_messages(
 
     parts.append(f"## User question\n{query}")
     parts.append("")
+
+    if calc_ground_truth:
+        parts.append(
+            "## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
+            f"{calc_ground_truth}\n\n"
+            "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
+            "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
+            "2. Use the exact pre-computed figures above in your answer. Do NOT substitute generic FAQ example figures (like UGX 6M) when the taxpayer gave you specific figures.\n"
+            "3. Address every specific sub-question the taxpayer asked.\n"
+            "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
+        )
+        parts.append("")
 
     stat_params = extract_statutory_context(prepared_passages)
     if stat_params:
