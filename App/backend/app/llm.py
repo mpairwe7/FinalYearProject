@@ -75,7 +75,7 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
 LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
-LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "3072"))
+LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
@@ -934,17 +934,18 @@ def _vllm_generate(
         import json as _json
         import urllib.request
 
-        # Ensure total context length strictly respects vLLM's 4096-token hard limit
+        # Ensure total context length respects model's context window without premature truncation
+        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
         total_chars = sum(len(m.get("content", "")) for m in messages)
-        while total_chars > 10000:
+        while total_chars > max_prompt_chars:
             if len(messages) > 2:
                 popped = messages.pop(1)
                 total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > 4000:
-                messages[-1]["content"] = messages[-1]["content"][:4000]
+            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
+                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
                 total_chars = sum(len(m.get("content", "")) for m in messages)
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > 4000:
-                messages[0]["content"] = messages[0]["content"][:4000]
+            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
+                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
                 total_chars = sum(len(m.get("content", "")) for m in messages)
             else:
                 break
@@ -952,7 +953,7 @@ def _vllm_generate(
         est_prompt_tokens = max(100, total_chars // 3)
         safe_max_tokens = min(
             LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(128, 4000 - est_prompt_tokens),
+            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
         )
 
         body = _json.dumps(

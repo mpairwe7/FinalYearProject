@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
 import { useConnectorStore } from '../store/useConnectorStore';
 import { CameraCapture } from './CameraCapture';
@@ -178,8 +178,19 @@ function ChatInputInner({
     }
   };
 
-  const handleTakePhotoClick = () => {
+  const [addMenuFocusIdx, setAddMenuFocusIdx] = useState<number | null>(null);
+  const addBtnRef = useRef<HTMLButtonElement>(null);
+  const addMenuPanelRef = useRef<HTMLDivElement>(null);
+  const addMenuOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const closeAddMenu = useCallback(() => {
+    setAddMenuFocusIdx(null);
     setShowAttachMenu(false);
+    addBtnRef.current?.focus();
+  }, []);
+
+  const handleTakePhotoClick = () => {
+    closeAddMenu();
     if (typeof navigator !== 'undefined' && navigator.mediaDevices && window.innerWidth >= 768) {
       setIsCameraActive(true);
     } else {
@@ -187,17 +198,64 @@ function ChatInputInner({
     }
   };
 
+  const addMenuRovingIdx = addMenuFocusIdx ?? 0;
+
+  // Focus active option on open; lock body scroll; trap Tab and Escape
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (attachMenuRef.current && !attachMenuRef.current.contains(event.target as Node)) {
-        setShowAttachMenu(false);
+    if (!showAttachMenu) return;
+    addMenuOptionRefs.current[addMenuRovingIdx]?.focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAddMenu();
+        return;
       }
+      if (e.key !== 'Tab') return;
+      const focusables = addMenuPanelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled])'
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showAttachMenu, closeAddMenu, addMenuRovingIdx]);
+
+  const onAddMenuOptionKey = (e: React.KeyboardEvent, idx: number) => {
+    const totalOptions = 3;
+    const move = (next: number) => {
+      const clamped = (next + totalOptions) % totalOptions;
+      setAddMenuFocusIdx(clamped);
+      addMenuOptionRefs.current[clamped]?.focus();
+    };
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      move(idx + 1);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      move(idx - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      move(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      move(totalOptions - 1);
     }
-    if (showAttachMenu) {
-      document.addEventListener('mousedown', handleClickOutside);
-      return () => document.removeEventListener('mousedown', handleClickOutside);
-    }
-  }, [showAttachMenu]);
+  };
   // Drives the morph in the primary slot: nothing typed yet -> offer voice
   // mode; the moment there is something to send -> offer send. Trimmed, so a
   // stray space does not present a send button that refuses to send.
@@ -492,76 +550,152 @@ function ChatInputInner({
               />
               <div className="relative" ref={attachMenuRef}>
                 <button
+                  ref={addBtnRef}
                   type="button"
-                  className={`composer-circle-btn add-circle-btn ${showAttachMenu ? 'bg-neutral-700 text-white' : ''}`}
+                  className={`composer-circle-btn add-circle-btn transition-all duration-200 ${
+                    showAttachMenu
+                      ? 'is-active bg-neutral-800 text-white border border-neutral-700 shadow-sm'
+                      : 'text-neutral-400 hover:text-white hover:bg-neutral-800/80'
+                  }`}
                   onClick={() => setShowAttachMenu((prev) => !prev)}
                   disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
                   aria-label="Attach a document (PDF, Word, Excel, CSV, or image), take a photo, or add connector"
-                  data-tip="Add (File, Photo, Connector)"
+                  aria-haspopup="dialog"
+                  aria-expanded={showAttachMenu}
+                  title="Add to conversation"
+                  data-tip="Add to conversation"
                   data-testid="composer-add-btn"
                 >
-                  <PlusIcon size={18} />
+                  <PlusIcon
+                    size={18}
+                    className={`transition-transform duration-200 ease-out ${
+                      showAttachMenu ? 'rotate-45 text-white' : ''
+                    }`}
+                  />
                 </button>
 
                 {showAttachMenu && (
-                  <div className="absolute bottom-full left-0 mb-2 w-72 p-1.5 rounded-xl bg-neutral-900 border border-neutral-700 shadow-2xl z-50 text-neutral-200 animate-fade-in">
-                    {/* Option 1: Upload a file */}
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs hover:bg-neutral-800 transition text-left group"
-                      onClick={() => {
-                        setShowAttachMenu(false);
-                        fileInputRef.current?.click();
-                      }}
+                  <div
+                    className="lmv2-overlay addmenu-overlay"
+                    onMouseDown={(e) => {
+                      if (e.target === e.currentTarget) closeAddMenu();
+                    }}
+                  >
+                    <div
+                      ref={addMenuPanelRef}
+                      className="lmv2 addmenu-dialog"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label="Add to conversation"
                     >
-                      <div className="p-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-300 group-hover:text-white">
-                        <FileIcon />
+                      <div className="lmv2-head addmenu-head">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
+                            <PlusIcon size={14} />
+                          </div>
+                          <h2>Add to conversation</h2>
+                        </div>
+                        <button
+                          type="button"
+                          className="dlgv2-x lmv2-x"
+                          onClick={closeAddMenu}
+                          aria-label="Close add menu"
+                        >
+                          <CloseIcon />
+                        </button>
                       </div>
-                      <div>
-                        <div className="font-semibold text-white">Upload a file</div>
-                        <div className="text-[10px] text-neutral-400">PDF, Word, Excel, CSV, or image</div>
-                      </div>
-                    </button>
 
-                    {/* Option 2: Take a photo */}
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs hover:bg-neutral-800 transition text-left group border-t border-neutral-800/80"
-                      onClick={handleTakePhotoClick}
-                    >
-                      <div className="p-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-300 group-hover:text-white">
-                        <CameraIcon />
-                      </div>
-                      <div>
-                        <div className="font-semibold text-white">Take a photo</div>
-                        <div className="text-[10px] text-neutral-400">Snap National ID, receipt, or physical doc</div>
-                      </div>
-                    </button>
+                      <div className="lmv2-list addmenu-list" role="menu" aria-label="Attachment and tool options">
+                        {/* Option 1: Upload a file */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[0] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
+                          className="addmenu-opt group"
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
+                          onClick={() => {
+                            closeAddMenu();
+                            fileInputRef.current?.click();
+                          }}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition">
+                              <FileIcon size={18} />
+                            </div>
+                            <div className="min-w-0 text-left">
+                              <div className="font-semibold text-sm text-[var(--text-0)]">Upload a file</div>
+                              <div className="text-xs text-[var(--text-2)] truncate">PDF, Word, Excel, CSV, or high-res image</div>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                            File
+                          </span>
+                        </button>
 
-                    {/* Option 3: Add connector */}
-                    <button
-                      type="button"
-                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs hover:bg-neutral-800 transition text-left group border-t border-neutral-800/80"
-                      onClick={() => {
-                        setShowAttachMenu(false);
-                        openModal();
-                      }}
-                    >
-                      <div className="p-1.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                        <PlugIcon size={14} />
-                      </div>
-                      <div className="flex-1">
-                        <div className="font-semibold text-white flex items-center justify-between">
-                          <span>Add connector</span>
-                          <span className="text-[10px] text-emerald-400 font-mono">
+                        {/* Option 2: Take a photo */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[1] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
+                          className="addmenu-opt group"
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
+                          onClick={handleTakePhotoClick}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20 transition">
+                              <CameraIcon />
+                            </div>
+                            <div className="min-w-0 text-left">
+                              <div className="font-semibold text-sm text-[var(--text-0)]">Take a photo</div>
+                              <div className="text-xs text-[var(--text-2)] truncate">Snap National ID, receipt, or physical doc</div>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                            Camera
+                          </span>
+                        </button>
+
+                        {/* Option 3: Add connector */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[2] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
+                          className="addmenu-opt group"
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
+                          onClick={() => {
+                            closeAddMenu();
+                            openModal();
+                          }}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
+                              <PlugIcon size={18} />
+                            </div>
+                            <div className="min-w-0 text-left">
+                              <div className="font-semibold text-sm text-[var(--text-0)]">Add connector</div>
+                              <div className="text-xs text-[var(--text-2)] truncate">EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments</div>
+                            </div>
+                          </div>
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                             {activeConnectorIds.length}/{connectors.length} Connected
                           </span>
-                        </div>
-                        <div className="text-[10px] text-neutral-400">
-                          EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments
-                        </div>
+                        </button>
                       </div>
-                    </button>
+
+                      <div className="lmv2-foot addmenu-foot">
+                        Snap a Ugandan National ID card for autonomous instant TIN issuance, or attach receipts for tax calculation.
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
