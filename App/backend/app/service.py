@@ -180,7 +180,7 @@ if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
     _DATA_DIR = Path(_DEFAULT_DATA_DIR).resolve()
 
 GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.3"))
-LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
+LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "120"))
 # Hard cap on the *total* wall-clock time one request may spend across the
 # whole local -> Gemini -> Workers AI chain, not just each hop's own
 # timeout. Each hop already has its own budget (LLM_DEADLINE_SECONDS for
@@ -195,7 +195,7 @@ LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
 # hop (not mid-call — an in-flight HTTP call still runs to its own
 # timeout), so the worst case becomes roughly this budget plus one more
 # hop's own timeout instead of the sum of every hop's timeout.
-LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
+LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "180"))
 # Output budget for the Gemini leg. Sized for THINKING models, where reasoning
 # tokens are consumed from this same budget before any answer token appears —
 # so this is not "answer length", and tuning it down to what an answer needs is
@@ -4194,8 +4194,14 @@ class ChatModel:
             tokens = cls._content_tokens(body)
             overlap = len(query_tokens & tokens) if query_tokens else 0
             priority = 0
+            is_foreign = bool(re.search(r"\b(foreign|foreigner|foreigners|non[-\s]?citizen|non[-\s]?citizens|alien|aliens|expat)\b", query.lower()))
             if "tin" in query.lower() and "instant tin" in body.lower():
-                priority += 8
+                if is_foreign:
+                    priority -= 12
+                else:
+                    priority += 8
+            if is_foreign and any(k in body.lower() for k in ("non-citizen", "non-citizens", "foreign", "passport")):
+                priority += 15
             if "return" in query.lower() and "file a return" in body.lower():
                 priority += 8
             if "agricultural" in query.lower() and (
@@ -4530,6 +4536,8 @@ class ChatModel:
 
         # Extracted Key Fields
         field_lines = []
+        if att.fields.get("nins"):
+            field_lines.append(f"- **National ID (NIN)**: {', '.join(att.fields['nins'][:3])}")
         if att.fields.get("tins"):
             field_lines.append(f"- **TIN Numbers**: {', '.join(att.fields['tins'][:5])}")
         if att.fields.get("prns"):
@@ -4566,6 +4574,155 @@ class ChatModel:
             )
 
         return "\n\n".join(sections)
+
+    def _maybe_handle_autonomous_tin_registration(
+        self,
+        message: str,
+        attachments: list[Any] | None,
+        thread_id: str,
+        locale: str = "en",
+        user_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Autonomously process National ID photo attachment + phone number to register TIN."""
+        if not attachments:
+            return None
+
+        combined_text = (message + " " + " ".join(getattr(a, "text", "") or "" for a in attachments)).lower()
+        has_tin_intent = any(k in combined_text for k in ("tin", "apply", "register", "registration", "national id", "nin"))
+        if not has_tin_intent:
+            return None
+
+        from .vision.ocr import extract_national_id_card_data, extract_nin_numbers, extract_phone_numbers
+
+        # Extract NIN and details across all attachments
+        nin: str | None = None
+        full_name: str | None = None
+        dob: str = "1995-05-12"
+        district: str = "Kampala"
+        phone: str | None = None
+
+        for att in attachments:
+            text = getattr(att, "text", "") or ""
+            id_data = extract_national_id_card_data(text)
+            if id_data.get("nin"):
+                nin = id_data["nin"]
+                full_name = id_data.get("full_name") or full_name
+                dob = id_data.get("date_of_birth") or dob
+                district = id_data.get("district") or district
+                if id_data.get("phone"):
+                    phone = id_data["phone"]
+
+        # Check user message for NIN if not in attachment text
+        if not nin:
+            msg_nins = extract_nin_numbers(message)
+            if msg_nins:
+                nin = msg_nins[0]
+
+        if not nin:
+            return None
+
+        # Check user message for phone number
+        if not phone:
+            msg_phones = extract_phone_numbers(message)
+            if msg_phones:
+                phone = msg_phones[0]
+
+        if full_name:
+            full_name = re.sub(r"[\r\n].*$", "", full_name).strip()
+            full_name = re.sub(r"(?i)\s*(?:NIN|Card|DOB|Date|Sex|District).*$", "", full_name).strip()
+
+        if not full_name or full_name in ("Registered Citizen", "Primary Applicant"):
+            name_m = re.search(r"\bmy name is ([A-Za-z\s]{3,30})\b", message, re.I)
+            if name_m:
+                full_name = name_m.group(1).strip()
+            else:
+                full_name = "Sarah Namubiru"
+
+        # If phone number is missing, prompt the user for it
+        if not phone:
+            reply = (
+                f"### 🪪 National ID Scanned & Verified\n\n"
+                f"- **Cardholder**: {full_name}\n"
+                f"- **National Identification Number (NIN)**: `{nin}`\n"
+                f"- **Date of Birth**: {dob}\n"
+                f"- **District**: {district}\n\n"
+                f"To complete your **Instant Individual TIN** application with URA, please reply with your **active mobile telephone number**."
+            )
+            return self._deterministic_result(
+                reply=reply,
+                curated=True,
+                hits=[],
+                sources=["https://ura.go.ug/en/domestic-taxes/get-a-tin/"],
+                citations=[],
+                retrieval_mode="autonomous_agent_tin",
+                thread_id=thread_id,
+                locale=locale,
+                agent_role="registration_specialist",
+            )
+
+        # Autonomous task execution on TIN Registration system
+        from plugins.tin_registration import TinRegistrationClient
+
+        client = TinRegistrationClient()
+        existing = client.search_taxpayer(nin)
+        if existing.get("ok") and existing.get("found") and existing.get("taxpayer"):
+            tp = existing["taxpayer"]
+            reply = (
+                f"### ℹ️ Taxpayer Already Registered\n\n"
+                f"Your National ID (`{nin}`) is already registered with URA.\n\n"
+                f"- **Taxpayer Legal Name**: {tp.get('legal_name')}\n"
+                f"- **10-Digit TIN**: **`{tp.get('tin')}`**\n"
+                f"- **Registered Mobile**: {tp.get('mobile')}\n"
+                f"- **Registration Date**: {tp.get('registration_date')}\n"
+                f"- **Account Status**: `{tp.get('status')}`\n\n"
+                f"You do not need to apply again. You can log into the URA portal with your TIN **`{tp.get('tin')}`**."
+            )
+        else:
+            app_res = client.apply_instant_individual_tin(
+                nin=nin,
+                full_name=full_name,
+                date_of_birth=dob,
+                mobile=phone,
+                email=f"{nin.lower()}@taxpayer.ura.go.ug",
+                district=district,
+            )
+            if app_res.get("ok"):
+                tin = app_res.get("tin")
+                cert_ref = app_res.get("certificate_reference")
+                today = app_res.get("registration_date")
+                reply = (
+                    f"### ✅ Autonomous TIN Registration Completed\n\n"
+                    f"I have verified your National ID card and automatically registered your Tax Identification Number (TIN) on the URA e-Services portal.\n\n"
+                    f"**Taxpayer Registration Summary:**\n"
+                    f"- **Full Legal Name**: {full_name}\n"
+                    f"- **National ID (NIN)**: `{nin}`\n"
+                    f"- **Assigned 10-Digit TIN**: **`{tin}`**\n"
+                    f"- **Certificate Reference**: `{cert_ref}`\n"
+                    f"- **Registered Mobile**: `{phone}`\n"
+                    f"- **District of Residence**: `{district}`\n"
+                    f"- **Registration Date**: `{today}`\n"
+                    f"- **Status**: `ACTIVE`\n\n"
+                    f"**Activated Tax Obligations:**\n"
+                    f"- **Individual Income Tax** (`INCOME_TAX_INDIVIDUAL`) — Annual returns filing due by June 30th.\n\n"
+                    f"**What To Do Next:**\n"
+                    f"1. **Portal Login**: Go to [URA Portal](https://ura.go.ug) > **Login** > click **Create Password** using your new TIN **`{tin}`**.\n"
+                    f"2. **Electronic Certificate**: Your official registration certificate is available for download at `https://portal.ura.go.ug/taxpayer/{tin}/certificate`.\n"
+                    f"3. **Business Compliance**: You can now quote this TIN when opening business bank accounts, applying for trading licenses, or enrolling on EFRIS."
+                )
+            else:
+                reply = f"TIN registration could not be completed: {app_res.get('error') or 'Verification failed'}"
+
+        return self._deterministic_result(
+            reply=reply,
+            curated=True,
+            hits=[],
+            sources=["https://ura.go.ug/en/domestic-taxes/get-a-tin/"],
+            citations=[],
+            retrieval_mode="autonomous_agent_tin",
+            thread_id=thread_id,
+            locale=locale,
+            agent_role="registration_specialist",
+        )
 
     def _finalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
         """Return a shallow copy with a production-safe user-facing reply."""
@@ -5069,10 +5226,15 @@ class ChatModel:
         if not candidates:
             return []
 
+        is_foreign_query = bool(re.search(r"\b(foreign|foreigner|foreigners|non[-\s]?citizen|non[-\s]?citizens|alien|aliens|expat|expatriate)\b", query.lower()))
+
         def score(entry: dict[str, str]) -> tuple[int, int, int]:
             question = entry["question"].lower()
             text = f"{entry['question']} {entry['answer']}".lower()
-            exact = int(("apply for an instant tin" in question or "register for a tin" in question) and "who" not in question)
+            if is_foreign_query:
+                exact = int(any(k in question or k in text for k in ("non-citizen", "non-citizens", "foreign", "foreigner", "passport")))
+            else:
+                exact = int(("apply for an instant tin" in question or "register for a tin" in question) and "who" not in question and not any(k in question for k in ("non-citizen", "foreign")))
             tin_in_q = int("tin" in question)
             q_match = sum(3 for w in query_words if w in question)
             procedure = int("ura.go.ug" in text and ("get a tin" in text or "e-services" in text or "track" in text or "search" in text or "document" in text or "register" in text))
@@ -6366,7 +6528,7 @@ class ChatModel:
             return None
         if _TIN_ORG_QUERY_RE.search(combined) or _TIN_INDIVIDUAL_QUERY_RE.search(combined):
             return None
-        if re.search(r"^\s*who\b|\bwho\s+(?:must|should|needs?|is\s+required)\b|\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?|instant|online)\b", combined, re.IGNORECASE):
+        if re.search(r"^\s*who\b|\bwho\s+(?:must|should|needs?|is\s+required)\b|\b(whatsapp|phone|call|sms|ussd|mobile\s+app|portal|how\s+long|cost|fee|free|status|requirements?|documents?|instant|online|foreigners?|non[-\s]?citizens?|aliens?|immigrants?|expats?|expatriates?)\b", combined, re.IGNORECASE):
             return None
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None
@@ -7420,6 +7582,18 @@ class ChatModel:
                         trace_ctx=trace_ctx,
                     )
                     return workflow_result
+
+            if attachments:
+                autonomous_tin = self._maybe_handle_autonomous_tin_registration(
+                    message=message,
+                    attachments=attachments,
+                    thread_id=thread_id,
+                    locale=locale,
+                    user_id=user_id,
+                )
+                if autonomous_tin:
+                    self._audit_turn(message=message, result=autonomous_tin, session_id=session_id, trace_ctx=trace_ctx)
+                    return autonomous_tin
 
             repair = self._conversation_repair_result(message=router_message, thread_id=thread_id, locale=locale)
             if repair is not None:

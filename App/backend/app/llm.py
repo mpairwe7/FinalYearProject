@@ -848,19 +848,25 @@ def filter_thought_stream(token_stream: Generator[str, None, None]) -> Generator
     prefix_buffer = ""
 
     for token in token_stream:
-        if not in_thought and not thought_buffer and len(prefix_buffer) < 15:
-            prefix_buffer += token
-            stripped = prefix_buffer.lstrip()
-            if stripped.startswith(("<thought>", "<think>")):
-                in_thought = True
-                thought_buffer.append(prefix_buffer)
-                prefix_buffer = ""
-                continue
-            elif any(tag.startswith(stripped) for tag in ("<thought>", "<think>")) and len(stripped) < 10:
-                continue
+        if not in_thought and not thought_buffer:
+            if len(prefix_buffer) < 15:
+                prefix_buffer += token
+                stripped = prefix_buffer.lstrip()
+                if stripped.startswith(("<thought>", "<think>")):
+                    in_thought = True
+                    thought_buffer.append(prefix_buffer)
+                    prefix_buffer = ""
+                    continue
+                elif stripped and any(tag.startswith(stripped) for tag in ("<thought>", "<think>")) and len(stripped) < 10:
+                    continue
+                else:
+                    yield prefix_buffer
+                    prefix_buffer = ""
+                    continue
             else:
                 yield prefix_buffer
                 prefix_buffer = ""
+                yield token
                 continue
         elif in_thought:
             thought_buffer.append(token)
