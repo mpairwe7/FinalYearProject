@@ -867,6 +867,26 @@ def _prefer_cloud_primary(locale: str) -> bool:
     return _cloud_llm_ready()
 
 
+def _evaluate_calculation_context(query: str) -> str:
+    """Evaluate pure tax calculator if amounts/salary/turnover are in the query, returning structured context."""
+    from .calculator_router import format_calc_reply, plan_calculation
+    try:
+        plan = plan_calculation(query)
+        if plan and not plan.missing:
+            from .mcp import get_client
+            call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
+            if call and call.result and call.result.get("ok"):
+                breakdown = format_calc_reply(plan.tool, call.result, list(plan.assumptions))
+                return (
+                    f"\n\n## Verified Statutory Calculation (Tool Ground Truth)\n"
+                    f"{breakdown}\n"
+                    f"Present these exact computed figures in a clean Markdown table with statutory references."
+                )
+    except Exception:
+        pass
+    return ""
+
+
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -876,6 +896,7 @@ def _call_llm_with_deadline(
     deadline_s: float = LLM_DEADLINE_SECONDS,
     tone_hint: str = "",
     context_summary: str = "",
+    tier: ModelTier | None = None,
 ) -> str:
     """Generate a reply, honouring the hybrid cloud/local routing policy.
 
@@ -883,7 +904,10 @@ def _call_llm_with_deadline(
     runs first with the local Qwen3-8B as the fallback; otherwise the resilient
     local-first path runs with the cloud chain as its fallback.
     """
-    if _prefer_cloud_primary(locale):
+    calc_context = _evaluate_calculation_context(query)
+    if calc_context:
+        personalization_context = (personalization_context + calc_context).strip()
+    if _prefer_cloud_primary(locale) or (tier == ModelTier.T3 and _cloud_llm_ready() and flags.is_enabled("model_tiering")):
         text = _llm_cloud_fallback(
             query,
             passages,
@@ -906,6 +930,7 @@ def _call_llm_with_deadline(
             allow_cloud_fallback=False,  # cloud already attempted above
             tone_hint=tone_hint,
             context_summary=context_summary,
+            tier=tier,
         )
     return _local_llm_then_cloud(
         query,
@@ -917,6 +942,7 @@ def _call_llm_with_deadline(
         allow_cloud_fallback=True,
         tone_hint=tone_hint,
         context_summary=context_summary,
+        tier=tier,
     )
 
 
@@ -931,6 +957,7 @@ def _local_llm_then_cloud(
     allow_cloud_fallback: bool = True,
     tone_hint: str = "",
     context_summary: str = "",
+    tier: ModelTier | None = None,
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
@@ -1035,6 +1062,9 @@ def stream_llm_tokens(
     answer first (chunked) with the local model as fallback; everyone else
     streams locally with the cloud chain as fallback.
     """
+    calc_context = _evaluate_calculation_context(query)
+    if calc_context:
+        personalization_context = (personalization_context + calc_context).strip()
     if _prefer_cloud_primary(locale):
         saw_cloud = False
         for chunk in _stream_cloud_fallback(
@@ -4093,6 +4123,62 @@ class ChatModel:
         return f"{lead}\n\n{steps}"
 
     @classmethod
+    def _reflect_llm(
+        cls,
+        query: str,
+        draft_reply: str,
+        unsupported_claims: list[dict[str, Any]],
+        passages: list[dict[str, Any]],
+        locale: str = "en",
+    ) -> str:
+        """Trigger a bounded reflection call to revise draft reply using retrieved passages."""
+        try:
+            from . import llm
+            if not hasattr(llm, "LLM_BACKEND") or (llm.LLM_BACKEND != "vllm" and not llm.is_available()):
+                return ""
+
+            unsupported_text = "\n".join(
+                f"- {c.get('text', '')}" for c in unsupported_claims if isinstance(c, dict) and c.get("text")
+            )
+            passages_text = "\n\n".join(
+                f"[{i+1}] {p.get('text') or p.get('answer', '')}"
+                for i, p in enumerate(passages[:4])
+            )
+            prompt = (
+                f"You are the URA Taxpayer Assistant revising an earlier draft response.\n"
+                f"User Question: {query}\n\n"
+                f"Draft Response:\n{draft_reply}\n\n"
+                f"The following statements in the draft were flagged as weakly supported or ungrounded:\n"
+                f"{unsupported_text or 'Some claims lacked citations or direct statutory grounding.'}\n\n"
+                f"Official Grounding Passages:\n{passages_text}\n\n"
+                f"Instructions:\n"
+                f"1. Revise the draft response so that EVERY factual statement is strictly supported by the passages above with [1], [2] citations.\n"
+                f"2. Remove any speculation or ungrounded formulas.\n"
+                f"3. If the official passages do NOT contain the exact rule requested, explicitly state the statutory boundary and advise the taxpayer to consult URA directly (https://ura.go.ug or toll-free 0800 117 000 / 0800 217 000).\n"
+                f"4. Do NOT dump disconnected FAQ bullets or unrelated topics.\n"
+                f"Return ONLY the revised response text."
+            )
+            messages = [
+                {"role": "system", "content": "You are a professional URA tax legal editor ensuring 100% factual grounding."},
+                {"role": "user", "content": prompt},
+            ]
+            if llm.LLM_BACKEND == "vllm":
+                revised = llm._vllm_generate(messages, max_tokens=1024, temperature=0.1, timeout=15.0)
+            else:
+                # Query has been pre-sanitized by InputGuard.check() in ChatModel
+                revised = llm.generate(prompt, passages=[], conversation_history=None, locale=locale)  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+            if hasattr(llm, "strip_thought"):
+                revised = llm.strip_thought(revised).strip() if revised else ""
+            else:
+                revised = (revised or "").strip()
+            if revised and len(revised) > 20 and not revised.lower().startswith(("i cannot", "sorry")):
+                return revised
+        except Exception:
+            logger.debug("Reflection LLM call failed or skipped", exc_info=True)
+        return ""
+
+    @classmethod
     def _build_grounded_revision(
         cls,
         hits: list[dict[str, Any]],
@@ -5259,7 +5345,15 @@ class ChatModel:
 
         revised_reply = ""
         if decision == "revise":
-            revised_reply = self._build_grounded_revision(hits, citations, message)
+            revised_reply = self._reflect_llm(
+                query=message,
+                draft_reply=reply,
+                unsupported_claims=claim_report.get("unsupported_claims", []) if isinstance(claim_report, dict) else [],
+                passages=hits,
+                locale=locale,
+            )
+            if not revised_reply:
+                revised_reply = self._build_grounded_revision(hits, citations, message)
             if not revised_reply:
                 decision = "escalate"
                 reasons.append("no deterministic grounded fallback was available")
@@ -7569,6 +7663,7 @@ class ChatModel:
                 # what the single configured model has always been.
                 tier_decision = select_tier(
                     route_decision.route.value,
+                    query=rewritten,
                     confidence=route_decision.confidence,
                     tool_count=len(route_decision.suggested_tools),
                     locale=locale,
@@ -8205,6 +8300,7 @@ class ChatModel:
                             ),
                             tone_hint=tone_hint,
                             context_summary=context_summary,
+                            tier=tier_decision.tier,
                         )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:

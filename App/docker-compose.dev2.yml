@@ -1,0 +1,162 @@
+# =============================================================================
+# Sovereign Hybrid Architecture: Master Tax Brain (dev-2.0)
+# Isolated deployment stack running concurrently on project namespace dev2
+# Non-conflicting ports:
+#   - Frontend: 3034
+#   - Backend API: 8084
+#   - Master Brain vLLM: 8002 (TP=2 on GPUs 2 & 3)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Master Brain vLLM Engine (Qwen-2.5-72B-Instruct-AWQ on GPUs 2 & 3)
+  # ---------------------------------------------------------------------------
+  vllm-master:
+    image: vllm/vllm-openai:v0.8.5
+    container_name: ura-app-vllm-master
+    command:
+      - --model
+      - /model
+      - --served-model-name
+      - Qwen/Qwen2.5-72B-Instruct-AWQ
+      - --port
+      - "8002"
+      - --tensor-parallel-size
+      - "2"
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - "0.85"
+      - --quantization
+      - awq_marlin
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+    ports:
+      - "8002:8002"
+    volumes:
+      - /mnt/nas1/caches/huggingface_cache/Qwen2.5-72B-Instruct-AWQ:/model:ro
+    ipc: host
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=2,3
+      - HF_HUB_OFFLINE=1
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/v1/models', timeout=5).status == 200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+      start_period: 3m
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2", "3"]
+              capabilities: [gpu]
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Backend API Gateway (GPU 6 for Dense Retrieval & Reranker)
+  # ---------------------------------------------------------------------------
+  api:
+    image: app-api:gpu
+    container_name: ura-app-api-dev2
+    ports:
+      - "8084:8000"
+    environment:
+      - APP_ENV=development
+      - PORT=8000
+      - WORKERS=1
+      - LOG_LEVEL=info
+      - QDRANT_URL=http://ura-app-qdrant:6333
+      - QDRANT_COLLECTION=ura_knowledge_base_jsonl_active
+      - DENSE_FALLBACK_BACKEND=none
+      - RETRIEVAL_MT_BACKEND=local
+      - REPLY_MT_BACKEND=local
+      - REDIS_URL=redis://ura-app-redis:6379/2
+      - SLOWAPI_STORAGE_URI=redis://ura-app-redis:6379/3
+      - CACHE_BACKEND=redis
+      - CORS_ORIGINS=http://localhost:3034,http://127.0.0.1:3034,*
+      - LLM_BACKEND=vllm
+      - LLM_MODEL=Qwen/Qwen2.5-72B-Instruct-AWQ
+      - VLLM_BASE_URL=http://ura-app-vllm-master:8002/v1
+      - VLLM_API_KEY=not-needed
+      - VLLM_HTTP_TIMEOUT=180
+      - LLM_MAX_TOKENS=1536
+      - RETRIEVER_DENSE_DEVICE=cuda:0
+      - RERANKER_DEVICE=cpu
+      - NVIDIA_VISIBLE_DEVICES=6
+      - PROJECT_ROOT=/app
+      - HF_HOME=/app/hf_cache
+      - HF_HUB_OFFLINE=0
+      - INDEX_API_KEY=dev-index-key
+      - SPEECH_ENABLED=true
+      - ORPHEUS_TTS_URL=http://ura-app-orpheus-tts:8100
+      - SUNFLOWER_BASE_URL=http://ura-app-vllm-sunflower:8001/v1
+      - FLAG_VOICE_STREAMING=true
+      - FLAG_NATIVE_VOICE=true
+      - FLAG_STREAMING_TTS_V2=true
+      - FLAG_SPECULATIVE_PREFETCH=true
+      - FLAG_GRAPH_FUSION=true
+      - FLAG_TAX_GRAPH=true
+      - FLAG_MODEL_TIERING=true
+      - FLAG_QUERY_REWRITE=true
+    env_file:
+      - ../.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ../Data/dataset:/app/Data/dataset:ro
+      - ../Data/pdfs:/app/Data/pdfs:ro
+      - ./Model:/app/Model:ro
+      - ../artifacts:/app/artifacts:ro
+      - ../fine-tuning/adapters:/app/adapters:ro
+      - ../ml:/app/ml:ro
+      - ../data_store:/app/data_store
+      - /mnt/nas1/caches/huggingface_cache:/app/hf_cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 4m
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["6"]
+              capabilities: [gpu]
+    depends_on:
+      vllm-master:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # ---------------------------------------------------------------------------
+  # Frontend UI
+  # ---------------------------------------------------------------------------
+  frontend:
+    image: app-frontend:latest
+    container_name: ura-app-frontend-dev2
+    ports:
+      - "3034:3000"
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_API_URL=http://ura-app-api-dev2:8000
+      - NEXT_PUBLIC_DEV_SIGNIN=true
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    name: app_app-network
+    external: true

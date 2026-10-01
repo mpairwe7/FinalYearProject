@@ -424,12 +424,12 @@ export function normalizeAssistantResponse(text: string): string {
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
     // Unsmash lead-ins into first numbered item (e.g. 'steps:1.**' or 'steps: 1.')
-    .replace(/([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
+    .replace(/(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
     // A sentence boundary before a step ('taxes.2.**'). A rate ('VAT 18. File') has no boundary.
-    .replace(/([.!?])[ \t]*(\d{1,2})[.)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
+    .replace(/(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[.)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
     // A word glued to a step ('template2. Enable'), not a section or a rate ('Section5', 'VAT18').
     .replace(
-      /(^|[^A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|paragraph|vat|paye|wht|tin|cit|pit|ugx|efris)\d)([A-Za-z]{3,})([1-9]|1[0-2])[.)][ \t]*(\*{0,2}[A-Za-z])/gi,
+      /(^|[^A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|paragraph|vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent)\d)([A-Za-z]{3,})([1-9]|1[0-2])[.)][ \t]*(\*{0,2}[A-Za-z])/gi,
       '$1$2.\n\n$3. $4',
     )
     // Separate closing/assistance paragraphs (e.g. 'month.For assistance' -> 'month.\n\nFor assistance')
@@ -450,6 +450,9 @@ export function normalizeAssistantResponse(text: string): string {
 export function cleanResponse(text: string): string {
   let cleaned = stripTelemetryJson(text);
   if (!cleaned) return cleaned;
+
+  // Strip internal model scratchpad thoughts
+  cleaned = cleaned.replace(/<(?:thought|think)>[\s\S]*?<\/(?:thought|think)>\s*/gi, '').trim();
 
   // Split into paragraph blocks
   const blocks = cleaned.split('\n\n').filter((b) => b.trim());

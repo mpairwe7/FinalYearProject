@@ -646,11 +646,17 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 missing.append("annual_turnover")
             return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
 
+    # Informational legal inquiry guard: questions about legal provisions, penalties, or
+    # input tax claims should not be hijacked into a calculator wizard.
+    _LEGAL_INQUIRY_RE = re.compile(
+        r"\b(can\s+i|eligible|claim\b.*\b(?:input|vat|tax)|penalt\w*|disallow\w*|require\w*|obligat\w*|procedure|statut\w*|act\b)\b",
+        re.IGNORECASE,
+    )
+    if _LEGAL_INQUIRY_RE.search(text) and not _CALC_VERB_RE.search(text):
+        return None
+
     if not _CALC_VERB_RE.search(text) and not (
-        has_money_amount(text) and (
-            _DEFINITIONAL_OPENER_RE.search(text)
-            or detect_calculator_intent(text) is not None
-        )
+        has_money_amount(text) and _DEFINITIONAL_OPENER_RE.search(text)
     ):
         return None
 

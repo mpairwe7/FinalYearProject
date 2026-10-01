@@ -66,6 +66,14 @@ _LEGITIMATE_TAX_MODIFIERS = frozenset({
     "local excise duty",
     "stamp",
     "stamp duty",
+    "dispute",
+    "disputes",
+    "disputed",
+    "non resident",
+    "non-resident",
+    "input",
+    "input vat",
+    "input tax",
     "environmental",
     "environmental levy",
     "infrastructure",
@@ -218,6 +226,13 @@ _INTERROGATIVE_PREFIX = re.compile(
     re.IGNORECASE,
 )
 
+_NON_TAX_NOUN_FOLLOWERS = re.compile(
+    r"^(table|tables|bracket|brackets|rate|rates|band|bands|return|returns|"
+    r"law|laws|act|acts|code|codes|assessment|assessments|credit|credits|"
+    r"invoice|invoices|receipt|receipts|officer|officers|portal|head|heads)\b",
+    re.IGNORECASE,
+)
+
 
 def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
     """Extract candidate (modifier, kind) pairs from *query*."""
@@ -230,6 +245,9 @@ def _extract_candidate_tax_concepts(query: str) -> list[tuple[str, str]]:
     for target in (normalized_text, text):
         for pattern in _CANDIDATE_PATTERNS:
             for match in pattern.finditer(target):
+                following_text = target[match.end():].lstrip()
+                if _NON_TAX_NOUN_FOLLOWERS.match(following_text):
+                    continue
                 raw_mod = match.group("modifier").strip()
                 kind = match.group("kind").strip().lower()
                 # Normalize kind to singular for comparison
