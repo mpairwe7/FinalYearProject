@@ -80,7 +80,7 @@ from .conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
-from .providers.routing import log_tier, select_tier
+from .providers.routing import ModelTier, log_tier, select_tier
 from .cache import create_cache
 from .calculator_router import (
     _CURRENCY,
