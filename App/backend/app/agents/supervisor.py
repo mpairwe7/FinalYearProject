@@ -33,6 +33,8 @@ import re
 from typing import TYPE_CHECKING
 
 from ..calculator_router import (
+    _CALC_VERB_RE,
+    _LEGAL_INQUIRY_RE,
     INTENT_TOOLS,
     detect_calculator_intent,
     has_money_amount,
@@ -203,15 +205,19 @@ class Supervisor:
             )
 
         # 3. Calculation intents → tool route with calculator whitelist
-        for pat, reason, tools in pats.calc:
-            if pat.search(probe):
-                logger.info("supervisor: TOOLS (calc) pattern=%r", pat.pattern[:40])
-                return RouteDecision(
-                    route=AgentRoute.TOOLS,
-                    reason=reason,
-                    confidence=0.92,
-                    suggested_tools=tools + ["search_ura_knowledge_base"],
-                )
+        # Informational legal inquiry guard: questions about legal provisions, penalties,
+        # or cross-border rules should not route to calculation tools without an explicit calculation verb.
+        is_legal_inquiry = bool(_LEGAL_INQUIRY_RE.search(q) and not _CALC_VERB_RE.search(q))
+        if not is_legal_inquiry:
+            for pat, reason, tools in pats.calc:
+                if pat.search(probe):
+                    logger.info("supervisor: TOOLS (calc) pattern=%r", pat.pattern[:40])
+                    return RouteDecision(
+                        route=AgentRoute.TOOLS,
+                        reason=reason,
+                        confidence=0.92,
+                        suggested_tools=tools + ["search_ura_knowledge_base"],
+                    )
 
         # 3b. A figure plus a calculator intent is a calculation ask,
         #     whatever the word order.  The patterns above need a trigger
