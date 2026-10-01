@@ -368,6 +368,10 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
 
     if not _RULE_CUE_RE.search(claim):
         return False
+    # If the claim is presenting an example calculation or computed breakdown,
+    # intermediate or resulting figures are computed arithmetic, not statutory contradictions.
+    if re.search(r"\b(for example|e\.g\.|example|calculate|computed|resulting|payable of|chargeable income of|=|\*)\b", claim, re.IGNORECASE):
+        return False
     ca = canonical_amounts(claim)
     xa = canonical_amounts(context)
     qa = canonical_amounts(user_query) if user_query else set()
