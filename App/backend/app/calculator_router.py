@@ -221,11 +221,6 @@ _INFO_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 
-_LEGAL_INQUIRY_RE = re.compile(
-    r"\b(can\s+i|eligible|claim\b.*\b(?:input|vat|tax)|penalt\w*|disallow\w*|require\w*|obligat\w*|procedure|statut\w*|act\b)\b",
-    re.IGNORECASE,
-)
-
 _ANNUAL_RE = re.compile(r"\b(a\s+year|per\s+year|annual(?:ly)?|p\.?a\.?|yearly)\b", re.IGNORECASE)
 _MONTHLY_RE = re.compile(r"\b(a\s+month|per\s+month|monthly|each\s+month)\b", re.IGNORECASE)
 _NON_RESIDENT_RE = re.compile(r"\bnon[-\s]?resident\b", re.IGNORECASE)
@@ -405,7 +400,7 @@ def detect_calculator_intent(message: str) -> str | None:
     to offer — and the tool loop still gets to not use them.
     """
     text = (message or "").strip()
-    if not text or _INFO_ONLY_RE.search(text) or (_LEGAL_INQUIRY_RE.search(text) and not _CALC_VERB_RE.search(text)):
+    if not text or _INFO_ONLY_RE.search(text):
         return None
     return next((name for name, pat in _INTENT_RES if pat.search(text)), None)
 
@@ -651,13 +646,11 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
                 missing.append("annual_turnover")
             return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
 
-    # Informational legal inquiry guard: questions about legal provisions, penalties, or
-    # input tax claims should not be hijacked into a calculator wizard.
-    if _LEGAL_INQUIRY_RE.search(text) and not _CALC_VERB_RE.search(text):
-        return None
-
     if not _CALC_VERB_RE.search(text) and not (
-        has_money_amount(text) and _DEFINITIONAL_OPENER_RE.search(text)
+        has_money_amount(text) and (
+            _DEFINITIONAL_OPENER_RE.search(text)
+            or detect_calculator_intent(text) is not None
+        )
     ):
         return None
 

@@ -323,5 +323,6 @@ from . import rates as _rates  # noqa: E402, F401
 from . import portal_navigator as _portal_navigator  # noqa: E402, F401
 from . import ura_account as _ura_account  # noqa: E402, F401
 from . import ura_actions as _ura_actions  # noqa: E402, F401
+from . import plugins as _plugins  # noqa: E402, F401
 
 __all__ = ["Tool", "ToolSchema", "ToolRegistry"]

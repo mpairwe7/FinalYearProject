@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from plugins.orchestrator import get_orchestrator  # noqa: E402
+
     from . import ToolRegistry  # noqa: E402
 
     # Orchestrate and register all active connector tools into ToolRegistry

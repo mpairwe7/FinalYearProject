@@ -167,6 +167,11 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/offline/status"),
     ("POST", "/v1/offline/sync"),
     ("GET", "/v1/offline/bundle"),
+    # --- System connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments, External) ---
+    ("GET", "/v1/connectors"),
+    ("POST", "/v1/connectors/{name}/toggle"),
+    ("GET", "/v1/connectors/{name}/records"),
+    ("POST", "/v1/connectors/register"),
     # --- Receptionist (simulated phone calls) ---
     ("GET", "/v1/admin/calls"),
     ("GET", "/v1/admin/calls/metrics"),
@@ -270,6 +275,10 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/offline/status"): "this:test_offline_status_flag_on",
     ("POST", "/v1/offline/sync"): "test_api_endpoints.OfflineModelEndpoints",
     ("GET", "/v1/offline/bundle"): "test_api_endpoints.OfflineModelEndpoints",
+    ("GET", "/v1/connectors"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/toggle"): "this:test_connectors_endpoints",
+    ("GET", "/v1/connectors/{name}/records"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/register"): "this:test_connectors_endpoints",
     ("GET", "/v1/admin/calls"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
@@ -419,10 +428,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (89 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (93 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 89, f"expected 89 HTTP endpoints, found {len(http)}"
+    assert len(http) == 93, f"expected 93 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -718,6 +727,43 @@ def test_auth_dev_token():
     assert body["role"] == "ura_staff"
     assert body["email"] == "officer@ura.go.ug"
     assert "token" in body and body["token"].startswith("eyJ")
+
+
+def test_connectors_endpoints():
+    """Verify GET /v1/connectors, POST /v1/connectors/{name}/toggle, GET /v1/connectors/{name}/records."""
+    c = _client()
+    r1 = c.get("/v1/connectors")
+    assert r1.status_code == 200
+    data = r1.json()
+    assert data["ok"] is True
+    assert len(data["connectors"]) >= 2
+
+    # Toggle connector
+    r2 = c.post("/v1/connectors/efris/toggle", json={"enable": True})
+    assert r2.status_code == 200
+    assert r2.json()["ok"] is True
+
+    # Inspect records from independent database
+    r3 = c.get("/v1/connectors/efris/records?limit=3")
+    assert r3.status_code == 200
+    assert r3.json()["ok"] is True
+    assert "invoices" in r3.json()
+
+    # Register external API/MCP connector
+    r4 = c.post(
+        "/v1/connectors/register",
+        json={
+            "name": "stripe_payments",
+            "endpoint_url": "http://127.0.0.1:8200",
+            "api_key": "sec_test_stripe_token",  # pragma: allowlist secret
+            "system_type": "external_payment",
+            "display_name": "Stripe Gateway",
+            "description": "External payment processor",
+        },
+    )
+    assert r4.status_code == 200
+    assert r4.json()["ok"] is True
+    assert r4.json()["status"] == "connected"
 
 
 if __name__ == "__main__":

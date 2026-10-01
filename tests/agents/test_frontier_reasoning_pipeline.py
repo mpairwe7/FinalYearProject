@@ -35,6 +35,21 @@ class TestCalculatorRouterGuards:
         assert plan.tool == "calculate_vat"
         assert plan.params.get("amount") == 5000000.0
 
+    def test_rental_pooling_calculation_context(self):
+        from app.service import _evaluate_calculation_context
+        query = (
+            "I own a multi-story building in Kampala generating UGX 90M annually—the upper floors "
+            "are residential apartments (UGX 40M) and the ground floor is commercial shops (UGX 50M). "
+            "How is my rental income tax calculated as an individual? Does the UGX 2,820,000 threshold and "
+            "20% expense deduction apply across both, or are they treated separately?"
+        )
+        ctx = _evaluate_calculation_context(query)
+        assert "90,000,000" in ctx
+        assert "2,820,000" in ctx
+        assert "10,461,600" in ctx
+        assert "Section 5(3)" in ctx
+        assert "ZERO expense deductions" in ctx
+
 
 class TestDistressSignals:
     def test_statutory_penalty_noun_does_not_trigger_distress(self):

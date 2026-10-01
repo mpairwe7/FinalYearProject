@@ -1,0 +1,25 @@
+services:
+  ura-plugins-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.plugins
+    container_name: ura-enterprise-plugins
+    ports:
+      - "8200:8200"
+    environment:
+      - PORT=8200
+      - EFRIS_DB_PATH=/app/data_store/efris_system.db
+      - DTS_DB_PATH=/app/data_store/dts_system.db
+      - URSB_DB_PATH=/app/data_store/ursb_system.db
+      - BWIMS_DB_PATH=/app/data_store/bwims_system.db
+      - TIN_DB_PATH=/app/data_store/tin_system.db
+      - PAYMENT_DB_PATH=/app/data_store/payments_system.db
+      - PLUGINS_API_KEY=${PLUGINS_API_KEY:-}
+    volumes:
+      - ./data_store:/app/data_store
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8200/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

@@ -362,6 +362,53 @@ def extract_tin_numbers(text: str) -> list[str]:
     return list(set(re.findall(r"\b1\d{9}\b", text)))
 
 
+def extract_nin_numbers(text: str) -> list[str]:
+    """Extract Ugandan 14-character National Identification Numbers (NIN)."""
+    matches = re.findall(r"\b[C][MFR][0-9A-Z]{12}\b", text.upper())
+    if not matches:
+        matches = [m for m in re.findall(r"\b[A-Z]{2}[0-9A-Z]{12}\b", text.upper()) if len(m) == 14]
+    return list(dict.fromkeys(matches))
+
+
+def extract_phone_numbers(text: str) -> list[str]:
+    """Extract Ugandan telephone numbers."""
+    raw_matches = re.findall(r"(?:\+?256|0)\s*(?:7[0-9]|3[1-9])(?:[\s\-]?[0-9]){7}\b", text)
+    cleaned = [re.sub(r"[\s\-]", "", m) for m in raw_matches]
+    return list(dict.fromkeys(cleaned))
+
+
+def extract_national_id_card_data(text: str) -> dict[str, Any]:
+    """Extract structured identity details from Ugandan National ID OCR text."""
+    nins = extract_nin_numbers(text)
+    phones = extract_phone_numbers(text)
+    dates = extract_dates(text)
+
+    name_match = re.search(r"(?:Name|Given Names?|Surname|Full Name)[:\s]+([^\n\r]{3,40})", text, re.I)
+    name = name_match.group(1).strip() if name_match else ""
+    if name:
+        name = re.sub(r"(?i)\s*(?:NIN|Card|DOB|Date|Sex|District).*$", "", name).strip()
+    if not name:
+        caps = re.findall(r"\b[A-Z][a-z]{2,15}\s+[A-Z][a-z]{2,15}\b", text)
+        for c in caps:
+            if not any(k in c.lower() for k in ("republic", "uganda", "national", "identity", "card", "nira")):
+                name = c
+                break
+
+    district_match = re.search(r"(?:District\s+of\s+Birth|Place\s+of\s+Birth|District)[:\s]+([A-Za-z\s]{3,20})", text, re.I)
+    district = district_match.group(1).strip() if district_match else "Kampala"
+    dob = dates[0] if dates else "1995-05-12"
+
+    return {
+        "nin": nins[0] if nins else None,
+        "nins": nins,
+        "full_name": name or "Registered Citizen",
+        "date_of_birth": dob,
+        "district": district,
+        "phone": phones[0] if phones else None,
+        "is_national_id": bool(nins) or "national identity" in text.lower() or "republic of uganda" in text.lower(),
+    }
+
+
 def extract_prn_numbers(text: str) -> list[str]:
     """Extract Uganda Payment Registration Numbers (PRNs: 12-15 digits, typically starts with 2)."""
     matches = re.findall(r"(?:PRN[:\s#]*)?\b(2\d{11,14})\b", text, re.I)

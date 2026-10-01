@@ -87,7 +87,7 @@ services:
       - VLLM_HTTP_TIMEOUT=180
       - LLM_MAX_TOKENS=1536
       - RETRIEVER_DENSE_DEVICE=cuda:0
-      - RERANKER_DEVICE=cpu
+      - RERANKER_DEVICE=cuda:0
       - NVIDIA_VISIBLE_DEVICES=6
       - PROJECT_ROOT=/app
       - HF_HOME=/app/hf_cache
@@ -116,6 +116,7 @@ services:
       - ../artifacts:/app/artifacts:ro
       - ../fine-tuning/adapters:/app/adapters:ro
       - ../ml:/app/ml:ro
+      - ../plugins:/app/plugins:ro
       - ../data_store:/app/data_store
       - /mnt/nas1/caches/huggingface_cache:/app/hf_cache
     healthcheck:

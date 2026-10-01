@@ -80,7 +80,7 @@ from .conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
-from .providers.routing import ModelTier, log_tier, select_tier
+from .providers.routing import log_tier, select_tier
 from .cache import create_cache
 from .calculator_router import (
     _CURRENCY,
@@ -180,7 +180,7 @@ if not _DATA_DIR.is_relative_to(_PROJECT_ROOT):
     _DATA_DIR = Path(_DEFAULT_DATA_DIR).resolve()
 
 GROUNDING_THRESHOLD = float(os.getenv("GROUNDING_THRESHOLD", "0.3"))
-LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "120"))
+LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "45"))
 # Hard cap on the *total* wall-clock time one request may spend across the
 # whole local -> Gemini -> Workers AI chain, not just each hop's own
 # timeout. Each hop already has its own budget (LLM_DEADLINE_SECONDS for
@@ -195,7 +195,7 @@ LLM_DEADLINE_SECONDS = float(os.getenv("LLM_DEADLINE_SECONDS", "120"))
 # hop (not mid-call — an in-flight HTTP call still runs to its own
 # timeout), so the worst case becomes roughly this budget plus one more
 # hop's own timeout instead of the sum of every hop's timeout.
-LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "180"))
+LLM_TOTAL_BUDGET_SECONDS = float(os.getenv("LLM_TOTAL_BUDGET_SECONDS", "70"))
 # Output budget for the Gemini leg. Sized for THINKING models, where reasoning
 # tokens are consumed from this same budget before any answer token appears —
 # so this is not "answer length", and tuning it down to what an answer needs is
@@ -806,6 +806,8 @@ def _stream_cloud_fallback(
     )
     if not text:
         return
+    from .llm import strip_thought
+    text = strip_thought(text)
     for chunk in re.findall(r"\S+\s*", text):
         yield chunk
 
@@ -867,26 +869,6 @@ def _prefer_cloud_primary(locale: str) -> bool:
     return _cloud_llm_ready()
 
 
-def _evaluate_calculation_context(query: str) -> str:
-    """Evaluate pure tax calculator if amounts/salary/turnover are in the query, returning structured context."""
-    from .calculator_router import format_calc_reply, plan_calculation
-    try:
-        plan = plan_calculation(query)
-        if plan and not plan.missing:
-            from .mcp import get_client
-            call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
-            if call and call.result and call.result.get("ok"):
-                breakdown = format_calc_reply(plan.tool, call.result, list(plan.assumptions))
-                return (
-                    f"\n\n## Verified Statutory Calculation (Tool Ground Truth)\n"
-                    f"{breakdown}\n"
-                    f"Present these exact computed figures in a clean Markdown table with statutory references."
-                )
-    except Exception:
-        pass
-    return ""
-
-
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -896,7 +878,6 @@ def _call_llm_with_deadline(
     deadline_s: float = LLM_DEADLINE_SECONDS,
     tone_hint: str = "",
     context_summary: str = "",
-    tier: ModelTier | None = None,
 ) -> str:
     """Generate a reply, honouring the hybrid cloud/local routing policy.
 
@@ -904,10 +885,8 @@ def _call_llm_with_deadline(
     runs first with the local Qwen3-8B as the fallback; otherwise the resilient
     local-first path runs with the cloud chain as its fallback.
     """
-    calc_context = _evaluate_calculation_context(query)
-    if calc_context:
-        personalization_context = (personalization_context + calc_context).strip()
-    if _prefer_cloud_primary(locale) or (tier == ModelTier.T3 and _cloud_llm_ready() and flags.is_enabled("model_tiering")):
+    from .llm import strip_thought
+    if _prefer_cloud_primary(locale):
         text = _llm_cloud_fallback(
             query,
             passages,
@@ -918,9 +897,9 @@ def _call_llm_with_deadline(
             deadline=time.monotonic() + LLM_TOTAL_BUDGET_SECONDS,
         )
         if text and text.strip():
-            return text
+            return strip_thought(text)
         logger.warning("Cloud-primary LLM unavailable/empty — falling back to local Qwen3-8B")
-        return _local_llm_then_cloud(
+        return strip_thought(_local_llm_then_cloud(
             query,
             passages,
             conversation_history,
@@ -930,9 +909,8 @@ def _call_llm_with_deadline(
             allow_cloud_fallback=False,  # cloud already attempted above
             tone_hint=tone_hint,
             context_summary=context_summary,
-            tier=tier,
-        )
-    return _local_llm_then_cloud(
+        ))
+    return strip_thought(_local_llm_then_cloud(
         query,
         passages,
         conversation_history,
@@ -942,8 +920,7 @@ def _call_llm_with_deadline(
         allow_cloud_fallback=True,
         tone_hint=tone_hint,
         context_summary=context_summary,
-        tier=tier,
-    )
+    ))
 
 
 def _local_llm_then_cloud(
@@ -957,7 +934,6 @@ def _local_llm_then_cloud(
     allow_cloud_fallback: bool = True,
     tone_hint: str = "",
     context_summary: str = "",
-    tier: ModelTier | None = None,
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
@@ -1062,21 +1038,33 @@ def stream_llm_tokens(
     answer first (chunked) with the local model as fallback; everyone else
     streams locally with the cloud chain as fallback.
     """
-    calc_context = _evaluate_calculation_context(query)
-    if calc_context:
-        personalization_context = (personalization_context + calc_context).strip()
-    if _prefer_cloud_primary(locale):
-        saw_cloud = False
-        for chunk in _stream_cloud_fallback(
-            query, passages, conversation_history, locale, personalization_context, tone_hint
-        ):
-            if cancel_event is not None and cancel_event.is_set():
+    from .llm import filter_thought_stream
+
+    def _raw_stream():
+        if _prefer_cloud_primary(locale):
+            saw_cloud = False
+            for chunk in _stream_cloud_fallback(
+                query, passages, conversation_history, locale, personalization_context, tone_hint
+            ):
+                if cancel_event is not None and cancel_event.is_set():
+                    return
+                saw_cloud = True
+                yield chunk
+            if saw_cloud:
                 return
-            saw_cloud = True
-            yield chunk
-        if saw_cloud:
+            logger.warning("Cloud-primary stream unavailable — falling back to local Qwen3-8B")
+            yield from _stream_local_then_cloud(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                personalization_context,
+                cancel_event,
+                allow_cloud_fallback=False,  # cloud already attempted above
+                tone_hint=tone_hint,
+                context_summary=context_summary,
+            )
             return
-        logger.warning("Cloud-primary stream unavailable — falling back to local Qwen3-8B")
         yield from _stream_local_then_cloud(
             query,
             passages,
@@ -1084,22 +1072,12 @@ def stream_llm_tokens(
             locale,
             personalization_context,
             cancel_event,
-            allow_cloud_fallback=False,  # cloud already attempted above
+            allow_cloud_fallback=True,
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
-        return
-    yield from _stream_local_then_cloud(
-        query,
-        passages,
-        conversation_history,
-        locale,
-        personalization_context,
-        cancel_event,
-        allow_cloud_fallback=True,
-        tone_hint=tone_hint,
-        context_summary=context_summary,
-    )
+
+    yield from filter_thought_stream(_raw_stream())
 
 
 def _stream_local_then_cloud(
@@ -1602,6 +1580,13 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
             rewritten=str(result.get("_rewritten") or ""),
             recent_turns=history_turns,
         )
+        if locale not in ("", "en"):
+            if result.get("resources"):
+                result["resources"] = [ChatModel._localize_resource(r, locale) for r in result["resources"]]
+            if result.get("next_actions"):
+                result["next_actions"] = ChatModel._localize_next_actions(result["next_actions"], locale)
+            if result.get("workflow"):
+                result["workflow"] = ChatModel._localize_workflow(result["workflow"], locale)
 
         yield (
             "retrieval.completed",
@@ -4123,62 +4108,6 @@ class ChatModel:
         return f"{lead}\n\n{steps}"
 
     @classmethod
-    def _reflect_llm(
-        cls,
-        query: str,
-        draft_reply: str,
-        unsupported_claims: list[dict[str, Any]],
-        passages: list[dict[str, Any]],
-        locale: str = "en",
-    ) -> str:
-        """Trigger a bounded reflection call to revise draft reply using retrieved passages."""
-        try:
-            from . import llm
-            if not hasattr(llm, "LLM_BACKEND") or (llm.LLM_BACKEND != "vllm" and not llm.is_available()):
-                return ""
-
-            unsupported_text = "\n".join(
-                f"- {c.get('text', '')}" for c in unsupported_claims if isinstance(c, dict) and c.get("text")
-            )
-            passages_text = "\n\n".join(
-                f"[{i+1}] {p.get('text') or p.get('answer', '')}"
-                for i, p in enumerate(passages[:4])
-            )
-            prompt = (
-                f"You are the URA Taxpayer Assistant revising an earlier draft response.\n"
-                f"User Question: {query}\n\n"
-                f"Draft Response:\n{draft_reply}\n\n"
-                f"The following statements in the draft were flagged as weakly supported or ungrounded:\n"
-                f"{unsupported_text or 'Some claims lacked citations or direct statutory grounding.'}\n\n"
-                f"Official Grounding Passages:\n{passages_text}\n\n"
-                f"Instructions:\n"
-                f"1. Revise the draft response so that EVERY factual statement is strictly supported by the passages above with [1], [2] citations.\n"
-                f"2. Remove any speculation or ungrounded formulas.\n"
-                f"3. If the official passages do NOT contain the exact rule requested, explicitly state the statutory boundary and advise the taxpayer to consult URA directly (https://ura.go.ug or toll-free 0800 117 000 / 0800 217 000).\n"
-                f"4. Do NOT dump disconnected FAQ bullets or unrelated topics.\n"
-                f"Return ONLY the revised response text."
-            )
-            messages = [
-                {"role": "system", "content": "You are a professional URA tax legal editor ensuring 100% factual grounding."},
-                {"role": "user", "content": prompt},
-            ]
-            if llm.LLM_BACKEND == "vllm":
-                revised = llm._vllm_generate(messages, max_tokens=1024, temperature=0.1, timeout=15.0)
-            else:
-                # Query has been pre-sanitized by InputGuard.check() in ChatModel
-                revised = llm.generate(prompt, passages=[], conversation_history=None, locale=locale)  # nosemgrep: ura-llm01-raw-user-input-to-llm
-
-            if hasattr(llm, "strip_thought"):
-                revised = llm.strip_thought(revised).strip() if revised else ""
-            else:
-                revised = (revised or "").strip()
-            if revised and len(revised) > 20 and not revised.lower().startswith(("i cannot", "sorry")):
-                return revised
-        except Exception:
-            logger.debug("Reflection LLM call failed or skipped", exc_info=True)
-        return ""
-
-    @classmethod
     def _build_grounded_revision(
         cls,
         hits: list[dict[str, Any]],
@@ -4194,14 +4123,8 @@ class ChatModel:
             tokens = cls._content_tokens(body)
             overlap = len(query_tokens & tokens) if query_tokens else 0
             priority = 0
-            is_foreign = bool(re.search(r"\b(foreign|foreigner|foreigners|non[-\s]?citizen|non[-\s]?citizens|alien|aliens|expat)\b", query.lower()))
             if "tin" in query.lower() and "instant tin" in body.lower():
-                if is_foreign:
-                    priority -= 12
-                else:
-                    priority += 8
-            if is_foreign and any(k in body.lower() for k in ("non-citizen", "non-citizens", "foreign", "passport")):
-                priority += 15
+                priority += 8
             if "return" in query.lower() and "file a return" in body.lower():
                 priority += 8
             if "agricultural" in query.lower() and (
@@ -4536,8 +4459,6 @@ class ChatModel:
 
         # Extracted Key Fields
         field_lines = []
-        if att.fields.get("nins"):
-            field_lines.append(f"- **National ID (NIN)**: {', '.join(att.fields['nins'][:3])}")
         if att.fields.get("tins"):
             field_lines.append(f"- **TIN Numbers**: {', '.join(att.fields['tins'][:5])}")
         if att.fields.get("prns"):
@@ -4575,159 +4496,289 @@ class ChatModel:
 
         return "\n\n".join(sections)
 
-    def _maybe_handle_autonomous_tin_registration(
-        self,
+    _ACTION_TRANSLATIONS: Final[dict[tuple[str, str], str]] = {
+        # Handoff / officer
+        ("Speak to a URA officer", "lg"): "Yogera n'omukozi wa URA",
+        ("Speak to a URA officer", "sw"): "Ongea na afisa wa URA",
+        ("Talk to an officer", "lg"): "Yogera n'omukozi",
+        ("Talk to an officer", "sw"): "Ongea na afisa",
+        ("Ask for human support if your case is account-specific or time-sensitive.", "lg"): "Saba obuyambi bw'omuntu singa ensonga yo ekwata ku akawunti yo oba ng'eyanguwa.",
+        ("Ask for human support if your case is account-specific or time-sensitive.", "sw"): "Omba usaidizi wa binadamu ikiwa suala lako linahusu akaunti mahususi au ni la dharura.",
+        ("Prepare the listed reference details before speaking to a URA officer.", "lg"): "Tegeka ebirukwataho ebijuliziddwa nga tonnayogera n'omukozi wa URA.",
+        ("Prepare the listed reference details before speaking to a URA officer.", "sw"): "Andaa maelezo ya marejeleo yaliyoorodheshwa kabla ya kuongea na afisa wa URA.",
+        ("Use the URA Contact Centre if you need immediate human assistance.", "lg"): "Kozesa URA Contact Centre bw'oba weetaaga obuyambi bw'amangu obw'omukozi.",
+        ("Use the URA Contact Centre if you need immediate human assistance.", "sw"): "Tumia Kituo cha Mawasiliano cha URA ikiwa unahitaji usaidizi wa haraka wa binadamu.",
+        # Guidance / Workflow
+        ("Would you like step-by-step guidance on this?", "lg"): "Wandiyagadde obuyambi obw'odaala ku daala ku kino?",
+        ("Would you like step-by-step guidance on this?", "sw"): "Je, ungependa mwongozo wa hatua kwa hatua kuhusu hili?",
+        ("Reply with the requested detail to continue the guided process.", "lg"): "Ddamu n'obubaka obwetaagibwa okweyongerayo n'enkola ekulemberwa.",
+        ("Reply with the requested detail to continue the guided process.", "sw"): "Jibu kwa kutoa maelezo yanayohitajika ili kuendelea na mchakato unaoongozwa.",
+        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "lg"): "Weereza 'cancel' bw'oba oyagala okuva mu nkola eno obuuze ekibuuzo ekirala.",
+        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "sw"): "Tuma 'cancel' ikiwa unataka kutoka kwenye mchakato huu na kuuliza swali tofauti.",
+        ("Reply with the missing detail so I can answer more precisely.", "lg"): "Ddamu n'ebikwataho ebibuze nsobole okukuddamu mu bujjuvu.",
+        ("Reply with the missing detail so I can answer more precisely.", "sw"): "Jibu kwa kutoa maelezo yaliyokosekana ili niweze kujibu kwa usahihi zaidi.",
+        ("Review the cited URA sources before acting on this answer.", "lg"): "Kebera ebiwandiiko bya URA ebijuliziddwa nga tonnakola ku kuddamu kuno.",
+        ("Review the cited URA sources before acting on this answer.", "sw"): "Pitia vyanzo vya URA vilivyotajwa kabla ya kuchukua hatua kuhusu jibu hili.",
+        ("Rephrase your question about a URA service — I'm glad to help.", "lg"): "Ddamu obuulize ekibuuzo kyo ku buweereza bwa URA — nze nneeteeseteese okukuyamba.",
+        ("Rephrase your question about a URA service — I'm glad to help.", "sw"): "Eleza upya swali lako kuhusu huduma ya URA — niko tayari kukusaidia.",
+        ("Ask how to register for a TIN", "lg"): "Buuza ku kwewandiisa ku TIN",
+        ("Ask how to register for a TIN", "sw"): "Uliza jinsi ya kujisajili kwa TIN",
+        ("Ask about filing deadlines", "lg"): "Buuza ku bisanjiro by'okuwaayo emisolo",
+        ("Ask about filing deadlines", "sw"): "Uliza kuhusu tarehe za mwisho za kuwasilisha",
+        ("Ask about TIN registration", "lg"): "Buuza ku kwewandiisa ku TIN",
+        ("Ask about TIN registration", "sw"): "Uliza kuhusu usajili wa TIN",
+        ("Learn about VAT", "lg"): "Yiga ku musolo gwa VAT",
+        ("Learn about VAT", "sw"): "Jifunze kuhusu VAT",
+        ("File a tax return", "lg"): "Waayo alipoota y'omusolo",
+        ("File a tax return", "sw"): "Wasilisha marejesho ya kodi",
+    }
+
+    _RESOURCE_TRANSLATIONS: Final[dict[tuple[str, str], str]] = {
+        ("URA e-Services Web Portal", "lg"): "Omukutu gwa URA ogwa e-Services",
+        ("URA e-Services Web Portal", "sw"): "Tovuti ya Huduma za URA Mtandaoni",
+        ("Individual TIN Application Portal", "lg"): "Omukutu gw'okwewandiisa ku TIN y'omuntu kinnoomu",
+        ("Individual TIN Application Portal", "sw"): "Tovuti ya Maombi ya TIN ya Mtu Binafsi",
+        ("Non-Individual TIN Application (Companies & Partnerships)", "lg"): "Okwewandiisa ku TIN ya Bizinensi ne Kampuni",
+        ("Non-Individual TIN Application (Companies & Partnerships)", "sw"): "Maombi ya TIN ya Kampuni na Ushirika",
+        ("Online PRN Payment Slip Generation", "lg"): "Okukola Foomu y'okusasulirako eya PRN",
+        ("Online PRN Payment Slip Generation", "sw"): "Kutengeneza Hati ya Malipo ya PRN Mtandaoni",
+        ("e-Tax Portal Login", "lg"): "Yingira ku Mukutu gwa e-Tax",
+        ("e-Tax Portal Login", "sw"): "Kuingia kwenye Tovuti ya e-Tax",
+        ("EFRIS Portal Login", "lg"): "Yingira ku Mukutu gwa EFRIS",
+        ("EFRIS Portal Login", "sw"): "Kuingia kwenye Tovuti ya EFRIS",
+        ("VAT Registration Application Form", "lg"): "Foomu y'okwewandiisa ku musolo gwa VAT",
+        ("VAT Registration Application Form", "sw"): "Fomu ya Maombi ya Usajili wa VAT",
+        ("Tax Clearance Certificate (TCC) Application", "lg"): "Saba Ebbaluwa y'okumalaayo Emisolo (TCC)",
+        ("Tax Clearance Certificate (TCC) Application", "sw"): "Maombi ya Cheti cha Uondoaji Ushuru (TCC)",
+        ("Motor Vehicle Transfer Application", "lg"): "Okwewandiisa okukyusa Ebyapa by'Emmotoka",
+        ("Motor Vehicle Transfer Application", "sw"): "Maombi ya Uhamisho wa Umiliki wa Gari",
+        ("Tax Objection & Dispute Lodgement Form", "lg"): "Foomu y'okuwakanya Emisolo n'Enkaayana",
+        ("Tax Objection & Dispute Lodgement Form", "sw"): "Fomu ya Kupinga Makadirio ya Kodi",
+    }
+
+    @classmethod
+    def _localize_next_actions(cls, actions: list[str], locale: str) -> list[str]:
+        if not actions or locale in ("", "en"):
+            return actions
+        out: list[str] = []
+        for action in actions:
+            if not action or not isinstance(action, str):
+                continue
+            key = (action.strip(), locale)
+            if key in cls._ACTION_TRANSLATIONS:
+                out.append(cls._ACTION_TRANSLATIONS[key])
+            else:
+                loc = localize_reply(action.strip(), locale)
+                out.append(loc if loc else action)
+        return out
+
+    @classmethod
+    def _localize_resource(cls, res: dict[str, Any], locale: str) -> dict[str, Any]:
+        if not res or locale in ("", "en"):
+            return res
+        out = dict(res)
+        title = str(out.get("title") or "").strip()
+        if title:
+            key_t = (title, locale)
+            if key_t in cls._RESOURCE_TRANSLATIONS:
+                out["title"] = cls._RESOURCE_TRANSLATIONS[key_t]
+            else:
+                loc_t = localize_reply(title, locale)
+                if loc_t:
+                    out["title"] = loc_t
+
+        desc = str(out.get("description") or "").strip()
+        if desc:
+            key_d = (desc, locale)
+            if key_d in cls._RESOURCE_TRANSLATIONS:
+                out["description"] = cls._RESOURCE_TRANSLATIONS[key_d]
+            else:
+                loc_d = localize_reply(desc, locale)
+                if loc_d:
+                    out["description"] = loc_d
+        return out
+
+    _WORKFLOW_LOCALIZATIONS: dict[str, dict[str, dict[str, Any]]] = {
+        "sw": {
+            "names": {
+                "TIN Registration": "Usajili wa TIN",
+                "TIN Registration Help": "Usaidizi wa Usajili wa TIN",
+                "VAT Registration Check": "Ukaguzi wa Usajili wa VAT",
+                "VAT Calculator": "Kikokotoo cha VAT",
+                "PAYE Calculator": "Kikokotoo cha PAYE",
+                "Payment Assistance": "Msaada wa Malipo ya Ushuru",
+                "Tax Clearance Certificate": "Cheti cha Kibali cha Ushuru",
+                "Return Filing Help": "Usaidizi wa Uwasilishaji wa Marejesho",
+                "Customs Clearance Help": "Usaidizi wa Kibali cha Forodha",
+                "Motor Vehicle Registration": "Usajili wa Gari au Pikipiki",
+                "Objection or Dispute": "Pingamizi au Mgogoro wa Kodi",
+            },
+            "step_titles": {
+                "Taxpayer type": "Aina ya Mlipakodi",
+                "Kind": "Aina ya Mlipakodi",
+                "Legal name": "Jina la Kisheria",
+                "National ID (NIN)": "Kitambulisho cha Taifa (NIN) au Pasipoti",
+                "National ID (NIN) / Passport": "Kitambulisho cha Taifa (NIN) au Pasipoti",
+                "Company registration": "Usajili wa Kampuni",
+                "NGO registration": "Usajili wa Shirika (NGO)",
+                "Phone number": "Nambari ya Simu",
+                "Email address": "Barua Pepe",
+                "Confirm": "Thibitisha",
+                "Next steps": "Hatua Zinazofuata",
+                "Annual turnover": "Mauzo ya Mwaka",
+                "Monthly salary": "Mshahara wa Kila Mwezi",
+                "Gross amount": "Kiasi Kamili",
+                "Tax rate": "Kiwango cha Ushuru",
+            },
+            "options": {
+                "individual": "mtu binafsi",
+                "organisation": "shirika",
+                "organization": "shirika",
+                "company": "kampuni",
+                "ngo": "shirika lisilo la kiserikali",
+                "yes": "ndiyo",
+                "no": "hapana",
+                "resident": "mkazi",
+                "non-resident": "asiye mkazi",
+                "citizen": "mwananchi",
+                "foreigner": "mgeni",
+            },
+        },
+        "lg": {
+            "names": {
+                "TIN Registration": "Okwewandiisa ku TIN",
+                "TIN Registration Help": "Obuyambi bw'Okwewandiisa ku TIN",
+                "VAT Registration Check": "Okwekebejja Okwewandiisa ku VAT",
+                "VAT Calculator": "Okubala Omusolo gwa VAT",
+                "PAYE Calculator": "Okubala Omusolo gwa PAYE",
+                "Payment Assistance": "Obuyambi bw'Okusasula Omusolo",
+                "Tax Clearance Certificate": "Satifiketi y'Okumalayo Omusolo",
+                "Return Filing Help": "Obuyambi bw'Okusindika Alitula",
+                "Customs Clearance Help": "Obuyambi bw'Okuyisa Ebyamaguzi mu Forodha",
+                "Motor Vehicle Registration": "Okwewandiisa kw'Emmotoka oba Pikipiki",
+                "Objection or Dispute": "Okwemulugunya ku Musolo",
+            },
+            "step_titles": {
+                "Taxpayer type": "Ekika ky'Omusasuzi",
+                "Kind": "Ekika ky'Omusasuzi",
+                "Legal name": "Erinnya ly'Amateeka",
+                "National ID (NIN)": "Endagamuntu (NIN) oba Paasipooti",
+                "National ID (NIN) / Passport": "Endagamuntu (NIN) oba Paasipooti",
+                "Company registration": "Okwewandiisa kwa Kampuni",
+                "NGO registration": "Okwewandiisa kw'Ekitongole ky'Obwannakyewa",
+                "Phone number": "Ennamba y'Essimu",
+                "Email address": "Imeeyiro",
+                "Confirm": "Kakasa",
+                "Next steps": "Emitendera Egiddako",
+                "Annual turnover": "Ennyingiza y'Omwaka",
+                "Monthly salary": "Omusaala gw'Omwezi",
+                "Gross amount": "Omuwendo Gwonnamu",
+                "Tax rate": "Omutemwa gw'Omusolo",
+            },
+            "options": {
+                "individual": "omuntu kinnoomu",
+                "organisation": "ekitongole",
+                "organization": "ekitongole",
+                "company": "kampuni",
+                "ngo": "ekitongole ky'obwannakyewa",
+                "yes": "yeeyo",
+                "no": "nedda",
+                "resident": "omutuuze",
+                "non-resident": "atali mutuuze",
+                "citizen": "omunnansi",
+                "foreigner": "omugwira",
+            },
+        },
+    }
+
+    @classmethod
+    def _localize_workflow(cls, wf: dict[str, Any] | None, locale: str) -> dict[str, Any] | None:
+        if not wf or not isinstance(wf, dict) or locale in ("", "en"):
+            return wf
+        loc_data = cls._WORKFLOW_LOCALIZATIONS.get(locale)
+        if not loc_data:
+            return wf
+        out = dict(wf)
+        names = loc_data.get("names", {})
+        step_titles = loc_data.get("step_titles", {})
+        options_map = loc_data.get("options", {})
+
+        cur_name = str(out.get("name") or "").strip()
+        if cur_name in names:
+            out["name"] = names[cur_name]
+
+        cur_step_title = str(out.get("step_title") or "").strip()
+        if cur_step_title in step_titles:
+            out["step_title"] = step_titles[cur_step_title]
+
+        if "options" in out and isinstance(out["options"], list):
+            out["options"] = [options_map.get(opt, opt) for opt in out["options"]]
+
+        if "all_steps" in out and isinstance(out["all_steps"], list):
+            new_all = []
+            for step in out["all_steps"]:
+                if isinstance(step, dict):
+                    s_copy = dict(step)
+                    t = str(s_copy.get("title") or "").strip()
+                    if t in step_titles:
+                        s_copy["title"] = step_titles[t]
+                    new_all.append(s_copy)
+                else:
+                    new_all.append(step)
+            out["all_steps"] = new_all
+
+        return out
+
+    @staticmethod
+    def _resolve_conversation_locale(
         message: str,
-        attachments: list[Any] | None,
-        thread_id: str,
-        locale: str = "en",
-        user_id: str | None = None,
-    ) -> dict[str, Any] | None:
-        """Autonomously process National ID photo attachment + phone number to register TIN."""
-        if not attachments:
-            return None
+        requested_locale: str,
+        conversation_history: list[dict[str, Any]] | None,
+    ) -> str:
+        """Resolve the effective locale for a turn, preserving the conversation's language across follow-ups."""
+        from .receptionist.language import detect_explicit_request
+        explicit = detect_explicit_request(message)
+        if explicit in SUPPORTED_LOCALES:
+            return explicit
 
-        combined_text = (message + " " + " ".join(getattr(a, "text", "") or "" for a in attachments)).lower()
-        has_tin_intent = any(k in combined_text for k in ("tin", "apply", "register", "registration", "national id", "nin"))
-        if not has_tin_intent:
-            return None
+        # Check established locale from conversation history
+        established_locale: str | None = None
+        if conversation_history:
+            for turn in reversed(conversation_history[-4:]):
+                usr = str(turn.get("user_message") or "").strip()
+                bot = str(turn.get("bot_reply") or "").strip()
+                for sample in (usr, bot):
+                    if not sample or len(sample) < 4:
+                        continue
+                    loc = detect_language(sample, default_lang="en")
+                    if loc in ("lg", "sw"):
+                        established_locale = loc
+                        break
+                if established_locale:
+                    break
 
-        from .vision.ocr import extract_national_id_card_data, extract_nin_numbers, extract_phone_numbers
+        if requested_locale not in ("", "en") and requested_locale in SUPPORTED_LOCALES:
+            return requested_locale
 
-        # Extract NIN and details across all attachments
-        nin: str | None = None
-        full_name: str | None = None
-        dob: str = "1995-05-12"
-        district: str = "Kampala"
-        phone: str | None = None
+        if established_locale in ("lg", "sw"):
+            return established_locale
 
-        for att in attachments:
-            text = getattr(att, "text", "") or ""
-            id_data = extract_national_id_card_data(text)
-            if id_data.get("nin"):
-                nin = id_data["nin"]
-                full_name = id_data.get("full_name") or full_name
-                dob = id_data.get("date_of_birth") or dob
-                district = id_data.get("district") or district
-                if id_data.get("phone"):
-                    phone = id_data["phone"]
+        detected = detect_language(message, default_lang="en")
+        if detected in SUPPORTED_LOCALES:
+            return detected
 
-        # Check user message for NIN if not in attachment text
-        if not nin:
-            msg_nins = extract_nin_numbers(message)
-            if msg_nins:
-                nin = msg_nins[0]
-
-        if not nin:
-            return None
-
-        # Check user message for phone number
-        if not phone:
-            msg_phones = extract_phone_numbers(message)
-            if msg_phones:
-                phone = msg_phones[0]
-
-        if full_name:
-            full_name = re.sub(r"[\r\n].*$", "", full_name).strip()
-            full_name = re.sub(r"(?i)\s*(?:NIN|Card|DOB|Date|Sex|District).*$", "", full_name).strip()
-
-        if not full_name or full_name in ("Registered Citizen", "Primary Applicant"):
-            name_m = re.search(r"\bmy name is ([A-Za-z\s]{3,30})\b", message, re.I)
-            if name_m:
-                full_name = name_m.group(1).strip()
-            else:
-                full_name = "Sarah Namubiru"
-
-        # If phone number is missing, prompt the user for it
-        if not phone:
-            reply = (
-                f"### 🪪 National ID Scanned & Verified\n\n"
-                f"- **Cardholder**: {full_name}\n"
-                f"- **National Identification Number (NIN)**: `{nin}`\n"
-                f"- **Date of Birth**: {dob}\n"
-                f"- **District**: {district}\n\n"
-                f"To complete your **Instant Individual TIN** application with URA, please reply with your **active mobile telephone number**."
-            )
-            return self._deterministic_result(
-                reply=reply,
-                curated=True,
-                hits=[],
-                sources=["https://ura.go.ug/en/domestic-taxes/get-a-tin/"],
-                citations=[],
-                retrieval_mode="autonomous_agent_tin",
-                thread_id=thread_id,
-                locale=locale,
-                agent_role="registration_specialist",
-            )
-
-        # Autonomous task execution on TIN Registration system
-        from plugins.tin_registration import TinRegistrationClient
-
-        client = TinRegistrationClient()
-        existing = client.search_taxpayer(nin)
-        if existing.get("ok") and existing.get("found") and existing.get("taxpayer"):
-            tp = existing["taxpayer"]
-            reply = (
-                f"### ℹ️ Taxpayer Already Registered\n\n"
-                f"Your National ID (`{nin}`) is already registered with URA.\n\n"
-                f"- **Taxpayer Legal Name**: {tp.get('legal_name')}\n"
-                f"- **10-Digit TIN**: **`{tp.get('tin')}`**\n"
-                f"- **Registered Mobile**: {tp.get('mobile')}\n"
-                f"- **Registration Date**: {tp.get('registration_date')}\n"
-                f"- **Account Status**: `{tp.get('status')}`\n\n"
-                f"You do not need to apply again. You can log into the URA portal with your TIN **`{tp.get('tin')}`**."
-            )
-        else:
-            app_res = client.apply_instant_individual_tin(
-                nin=nin,
-                full_name=full_name,
-                date_of_birth=dob,
-                mobile=phone,
-                email=f"{nin.lower()}@taxpayer.ura.go.ug",
-                district=district,
-            )
-            if app_res.get("ok"):
-                tin = app_res.get("tin")
-                cert_ref = app_res.get("certificate_reference")
-                today = app_res.get("registration_date")
-                reply = (
-                    f"### ✅ Autonomous TIN Registration Completed\n\n"
-                    f"I have verified your National ID card and automatically registered your Tax Identification Number (TIN) on the URA e-Services portal.\n\n"
-                    f"**Taxpayer Registration Summary:**\n"
-                    f"- **Full Legal Name**: {full_name}\n"
-                    f"- **National ID (NIN)**: `{nin}`\n"
-                    f"- **Assigned 10-Digit TIN**: **`{tin}`**\n"
-                    f"- **Certificate Reference**: `{cert_ref}`\n"
-                    f"- **Registered Mobile**: `{phone}`\n"
-                    f"- **District of Residence**: `{district}`\n"
-                    f"- **Registration Date**: `{today}`\n"
-                    f"- **Status**: `ACTIVE`\n\n"
-                    f"**Activated Tax Obligations:**\n"
-                    f"- **Individual Income Tax** (`INCOME_TAX_INDIVIDUAL`) — Annual returns filing due by June 30th.\n\n"
-                    f"**What To Do Next:**\n"
-                    f"1. **Portal Login**: Go to [URA Portal](https://ura.go.ug) > **Login** > click **Create Password** using your new TIN **`{tin}`**.\n"
-                    f"2. **Electronic Certificate**: Your official registration certificate is available for download at `https://portal.ura.go.ug/taxpayer/{tin}/certificate`.\n"
-                    f"3. **Business Compliance**: You can now quote this TIN when opening business bank accounts, applying for trading licenses, or enrolling on EFRIS."
-                )
-            else:
-                reply = f"TIN registration could not be completed: {app_res.get('error') or 'Verification failed'}"
-
-        return self._deterministic_result(
-            reply=reply,
-            curated=True,
-            hits=[],
-            sources=["https://ura.go.ug/en/domestic-taxes/get-a-tin/"],
-            citations=[],
-            retrieval_mode="autonomous_agent_tin",
-            thread_id=thread_id,
-            locale=locale,
-            agent_role="registration_specialist",
-        )
+        return requested_locale or "en"
 
     def _finalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
-        """Return a shallow copy with a production-safe user-facing reply."""
+        """Return a shallow copy with a production-safe user-facing reply and localized metadata."""
         out = dict(result)
         out["reply"] = self._finalize_reply(str(out.get("reply", "")))
+        locale = str(out.get("locale") or "en")
+        if locale not in ("", "en"):
+            if "next_actions" in out and isinstance(out["next_actions"], list):
+                out["next_actions"] = self._localize_next_actions(out["next_actions"], locale)
+            if "resources" in out and isinstance(out["resources"], list):
+                out["resources"] = [self._localize_resource(r, locale) for r in out["resources"]]
         return out
 
     @staticmethod
@@ -5226,15 +5277,10 @@ class ChatModel:
         if not candidates:
             return []
 
-        is_foreign_query = bool(re.search(r"\b(foreign|foreigner|foreigners|non[-\s]?citizen|non[-\s]?citizens|alien|aliens|expat|expatriate)\b", query.lower()))
-
         def score(entry: dict[str, str]) -> tuple[int, int, int]:
             question = entry["question"].lower()
             text = f"{entry['question']} {entry['answer']}".lower()
-            if is_foreign_query:
-                exact = int(any(k in question or k in text for k in ("non-citizen", "non-citizens", "foreign", "foreigner", "passport")))
-            else:
-                exact = int(("apply for an instant tin" in question or "register for a tin" in question) and "who" not in question and not any(k in question for k in ("non-citizen", "foreign")))
+            exact = int(("apply for an instant tin" in question or "register for a tin" in question) and "who" not in question)
             tin_in_q = int("tin" in question)
             q_match = sum(3 for w in query_words if w in question)
             procedure = int("ura.go.ug" in text and ("get a tin" in text or "e-services" in text or "track" in text or "search" in text or "document" in text or "register" in text))
@@ -5507,15 +5553,7 @@ class ChatModel:
 
         revised_reply = ""
         if decision == "revise":
-            revised_reply = self._reflect_llm(
-                query=message,
-                draft_reply=reply,
-                unsupported_claims=claim_report.get("unsupported_claims", []) if isinstance(claim_report, dict) else [],
-                passages=hits,
-                locale=locale,
-            )
-            if not revised_reply:
-                revised_reply = self._build_grounded_revision(hits, citations, message)
+            revised_reply = self._build_grounded_revision(hits, citations, message)
             if not revised_reply:
                 decision = "escalate"
                 reasons.append("no deterministic grounded fallback was available")
@@ -7341,6 +7379,12 @@ class ChatModel:
                 result["reply"] = self._localize_reply(english, effective)
                 if result["reply"] != english or _is_already_in_locale(english.strip(), effective):
                     result["reply_locale"] = effective
+                if "next_actions" in result and isinstance(result["next_actions"], list):
+                    result["next_actions"] = self._localize_next_actions(result["next_actions"], effective)
+                if "resources" in result and isinstance(result["resources"], list):
+                    result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
+                if "workflow" in result and isinstance(result["workflow"], dict):
+                    result["workflow"] = self._localize_workflow(result["workflow"], effective)
         return result
 
     def _generate_en(
@@ -7426,18 +7470,11 @@ class ChatModel:
                         )
                     )
 
-            # 0c. Language detection — auto-detect user's language for
-            #     adapter routing and locale-aware responses. Only promotes
-            #     to a locale in SUPPORTED_LOCALES — detect_language() can
-            #     still tell other Ugandan languages apart, but until they're
-            #     ungated a positive detection there stays "en" rather than
-            #     running an incomplete translation/localization round trip.
-            if locale == "en":
-                with trace_stage("lang_detect", timings=timings):
-                    detected_locale = detect_language(rewritten, default_lang=locale)
-                    if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
-                        locale = detected_locale
-                        logger.info("Auto-detected locale: %s", locale)
+            # 0c. Language detection & multi-turn continuity — auto-detect user's language,
+            #     preserving established conversation locale across follow-up turns.
+            with trace_stage("lang_detect", timings=timings):
+                locale = self._resolve_conversation_locale(message, locale, conversation_history)
+                logger.info("Effective turn locale: %s", locale)
 
             # The deterministic routers below — workflows, TIN clarification,
             # calculators, rate tables — match English patterns. Retrieval
@@ -7582,18 +7619,6 @@ class ChatModel:
                         trace_ctx=trace_ctx,
                     )
                     return workflow_result
-
-            if attachments:
-                autonomous_tin = self._maybe_handle_autonomous_tin_registration(
-                    message=message,
-                    attachments=attachments,
-                    thread_id=thread_id,
-                    locale=locale,
-                    user_id=user_id,
-                )
-                if autonomous_tin:
-                    self._audit_turn(message=message, result=autonomous_tin, session_id=session_id, trace_ctx=trace_ctx)
-                    return autonomous_tin
 
             repair = self._conversation_repair_result(message=router_message, thread_id=thread_id, locale=locale)
             if repair is not None:
@@ -7837,7 +7862,6 @@ class ChatModel:
                 # what the single configured model has always been.
                 tier_decision = select_tier(
                     route_decision.route.value,
-                    query=rewritten,
                     confidence=route_decision.confidence,
                     tool_count=len(route_decision.suggested_tools),
                     locale=locale,
@@ -8474,7 +8498,6 @@ class ChatModel:
                             ),
                             tone_hint=tone_hint,
                             context_summary=context_summary,
-                            tier=tier_decision.tier,
                         )
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
@@ -9041,14 +9064,10 @@ class ChatModel:
         else:
             rewritten = normalize_query(message)
 
-        # Language detection — auto-detect for adapter routing. Only
-        # promotes to a locale in SUPPORTED_LOCALES; see _generate_en's
-        # matching gate above for the full reasoning.
-        if locale == "en":
-            detected_locale = detect_language(rewritten, default_lang=locale)
-            if detected_locale != "en" and detected_locale in SUPPORTED_LOCALES:
-                locale = detected_locale
-                logger.info("Auto-detected locale: %s (streaming)", locale)
+        # Language detection & multi-turn continuity — auto-detect user's language,
+        # preserving established conversation locale across follow-up turns.
+        locale = self._resolve_conversation_locale(message, locale, conversation_history)
+        logger.info("Effective turn locale (streaming): %s", locale)
 
         personalization = self._load_personalization_state(user_id)
         # Attachment turns and ongoing multi-turn conversations are never cache-served

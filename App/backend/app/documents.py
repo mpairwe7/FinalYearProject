@@ -139,6 +139,7 @@ _KIND_BY_CONTENT_TYPE: dict[str, str] = {
 _DOC_TYPE_LABELS: dict[str, str] = {
     "receipt": "Payment receipt",
     "tin_card": "TIN registration document",
+    "national_id": "National Identity Card",
     "assessment": "Tax assessment notice",
     "customs_declaration": "Customs declaration",
     "filing_form": "Tax return / filing form",
@@ -151,6 +152,7 @@ _DOC_TYPE_LABELS: dict[str, str] = {
 _DOC_TYPE_HINTS: dict[str, str] = {
     "receipt": "You can ask the assistant to verify totals, payment dates, or EFRIS details from this receipt.",
     "tin_card": "You can ask the assistant about TIN obligations, updates, or what this registration covers.",
+    "national_id": "You can ask the assistant to apply for a TIN, verify your NIN, or register for taxes using this National ID.",
     "assessment": "You can ask the assistant to explain the assessed amounts, deadlines, or objection procedure.",
     "customs_declaration": "You can ask the assistant about duty calculations, HS codes, or clearance steps.",
     "filing_form": "You can ask the assistant to explain fields on this return or the filing deadlines.",

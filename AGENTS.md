@@ -22,6 +22,7 @@ This file is the repo-wide router. Package rules live next to the code.
 | `prompts/` | Pointer to runtime prompts | `prompts/README.md` |
 | `skills/` | Pointer to Cursor/Claude skills | `skills/README.md` |
 | `packages/` | Why this is not a split monorepo | `packages/README.md` |
+| `plugins/` | System plugins (EFRIS, DTS) & connectors | `plugins/README.md` |
 | `configs/` | Prototype env | `configs/README.md` |
 
 Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `app.*`.

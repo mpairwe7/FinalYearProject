@@ -1,17 +1,27 @@
-import React, { memo, useLayoutEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
+import { useConnectorStore } from '../store/useConnectorStore';
+import { CameraCapture } from './CameraCapture';
 import {
   MicIcon,
   SendIcon,
   CloseIcon,
   CheckIcon,
-  PaperclipIcon,
   FileIcon,
   LoadingDots,
   VoiceWaveIcon,
   StopIcon,
   DownloadIcon,
   EyeIcon,
+  PlugIcon,
+  CameraIcon,
+  PlusIcon,
+  EfrisLogo,
+  DtsLogo,
+  UrsbLogo,
+  BwimsLogo,
+  TinLogo,
+  PaymentLogo,
 } from './Icons';
 import {
   ATTACHMENT_ACCEPT,
@@ -86,6 +96,25 @@ function InlineWaveform({ levels }: { levels?: number[] }) {
   );
 }
 
+function getMiniLogo(id: string) {
+  switch (id) {
+    case 'efris':
+      return <EfrisLogo size={14} />;
+    case 'digital_tax_stamps':
+      return <DtsLogo size={14} />;
+    case 'ursb':
+      return <UrsbLogo size={14} />;
+    case 'bwims':
+      return <BwimsLogo size={14} />;
+    case 'tin_registration':
+      return <TinLogo size={14} />;
+    case 'payment_system':
+      return <PaymentLogo size={14} />;
+    default:
+      return null;
+  }
+}
+
 function ChatInputInner({
   message,
   isLoading,
@@ -110,11 +139,65 @@ function ChatInputInner({
   audioLevels,
 }: ChatInputProps) {
   const t = useTranslation();
+  const { connectors, activeConnectorIds, openModal, toggleConnector } = useConnectorStore();
   const [isDragging, setIsDragging] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
+
+  const handleCameraCapture = (imageBase64: string) => {
+    setIsCameraActive(false);
+    if (!onAttachFiles) return;
+
+    try {
+      const arr = imageBase64.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const file = new File(
+        [u8arr],
+        `ura_photo_capture_${Date.now().toString().slice(-4)}.jpg`,
+        { type: mime }
+      );
+      if (typeof DataTransfer !== 'undefined') {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        onAttachFiles(dt.files);
+      }
+    } catch (err) {
+      console.error('Failed to process camera capture', err);
+    }
+  };
+
+  const handleTakePhotoClick = () => {
+    setShowAttachMenu(false);
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices && window.innerWidth >= 768) {
+      setIsCameraActive(true);
+    } else {
+      cameraInputRef.current?.click();
+    }
+  };
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(event.target as Node)) {
+        setShowAttachMenu(false);
+      }
+    }
+    if (showAttachMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showAttachMenu]);
   // Drives the morph in the primary slot: nothing typed yet -> offer voice
   // mode; the moment there is something to send -> offer send. Trimmed, so a
   // stray space does not present a send button that refuses to send.
@@ -304,6 +387,58 @@ function ChatInputInner({
             ))}
           </div>
         )}
+        {/* Active System Connectors Bar (inspired by Grok apps) */}
+        {activeConnectorIds.length > 0 && (
+          <div className="composer-connector-bar flex flex-wrap items-center gap-1.5 px-3 pt-2 pb-1" aria-label="Active system connectors">
+            {activeConnectorIds.map((id) => {
+              const c = connectors.find((item) => item.id === id);
+              if (!c) return null;
+              const shortName =
+                c.id === 'digital_tax_stamps'
+                  ? 'DTS'
+                  : c.id === 'tin_registration'
+                  ? 'TIN'
+                  : c.id === 'payment_system'
+                  ? 'PAYMENTS'
+                  : c.id.toUpperCase();
+              return (
+                <span
+                  key={c.id}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/15 transition cursor-pointer select-none"
+                  onClick={() => openModal(c.id)}
+                  title={`${c.name} (Independent DB: ${c.database?.database || c.id + '_system.db'})`}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  {getMiniLogo(c.id)}
+                  <span className="font-semibold">{shortName}</span>
+                  <span className="text-emerald-400/80">· Active</span>
+                  <button
+                    type="button"
+                    className="text-emerald-400/50 hover:text-emerald-200 text-xs px-0.5 leading-none ml-0.5"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleConnector(c.id);
+                    }}
+                    title={`Disconnect ${c.name}`}
+                    aria-label={`Disconnect ${c.name}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => openModal()}
+              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-neutral-800/90 border border-neutral-700/80 text-neutral-300 hover:text-white hover:border-neutral-600 transition"
+              title="Add or configure URA system connectors"
+            >
+              <PlugIcon size={11} />
+              <span>+ Add Connector</span>
+            </button>
+          </div>
+        )}
+
         <textarea
           ref={inputRef}
           className="input"
@@ -342,15 +477,94 @@ function ChatInputInner({
                   e.target.value = '';
                 }}
               />
-              <button
-                className="composer-circle-btn attach-circle-btn"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
-                aria-label="Attach a document (PDF, Word, Excel, CSV, or image)"
-                data-tip="Attach a document"
-              >
-                <PaperclipIcon />
-              </button>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="attachment-file-input"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(e) => {
+                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <div className="relative" ref={attachMenuRef}>
+                <button
+                  type="button"
+                  className={`composer-circle-btn add-circle-btn ${showAttachMenu ? 'bg-neutral-700 text-white' : ''}`}
+                  onClick={() => setShowAttachMenu((prev) => !prev)}
+                  disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
+                  aria-label="Attach a document (PDF, Word, Excel, CSV, or image), take a photo, or add connector"
+                  data-tip="Add (File, Photo, Connector)"
+                  data-testid="composer-add-btn"
+                >
+                  <PlusIcon size={18} />
+                </button>
+
+                {showAttachMenu && (
+                  <div className="absolute bottom-full left-0 mb-2 w-72 p-1.5 rounded-xl bg-neutral-900 border border-neutral-700 shadow-2xl z-50 text-neutral-200 animate-fade-in">
+                    {/* Option 1: Upload a file */}
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs hover:bg-neutral-800 transition text-left group"
+                      onClick={() => {
+                        setShowAttachMenu(false);
+                        fileInputRef.current?.click();
+                      }}
+                    >
+                      <div className="p-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-300 group-hover:text-white">
+                        <FileIcon />
+                      </div>
+                      <div>
+                        <div className="font-semibold text-white">Upload a file</div>
+                        <div className="text-[10px] text-neutral-400">PDF, Word, Excel, CSV, or image</div>
+                      </div>
+                    </button>
+
+                    {/* Option 2: Take a photo */}
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs hover:bg-neutral-800 transition text-left group border-t border-neutral-800/80"
+                      onClick={handleTakePhotoClick}
+                    >
+                      <div className="p-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-300 group-hover:text-white">
+                        <CameraIcon />
+                      </div>
+                      <div>
+                        <div className="font-semibold text-white">Take a photo</div>
+                        <div className="text-[10px] text-neutral-400">Snap National ID, receipt, or physical doc</div>
+                      </div>
+                    </button>
+
+                    {/* Option 3: Add connector */}
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs hover:bg-neutral-800 transition text-left group border-t border-neutral-800/80"
+                      onClick={() => {
+                        setShowAttachMenu(false);
+                        openModal();
+                      }}
+                    >
+                      <div className="p-1.5 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                        <PlugIcon size={14} />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold text-white flex items-center justify-between">
+                          <span>Add connector</span>
+                          <span className="text-[10px] text-emerald-400 font-mono">
+                            {activeConnectorIds.length}/{connectors.length} Connected
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-neutral-400">
+                          EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                )}
+              </div>
             </>
           )}
           <div className="cmpv2-spacer" />
@@ -456,6 +670,14 @@ function ChatInputInner({
             ? t('composer.voiceHint')
             : t('composer.disclaimer')}
       </p>
+
+      {isCameraActive && (
+        <CameraCapture
+          active={isCameraActive}
+          onCapture={handleCameraCapture}
+          onClose={() => setIsCameraActive(false)}
+        />
+      )}
     </>
   );
 }
