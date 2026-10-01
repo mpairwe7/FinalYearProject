@@ -107,12 +107,12 @@ def test_tax_acronym_expansion():
     res = clean_text_for_speech(raw, locale="en")
     assert "Efris" in res
     assert "U R A" in res
-    assert "P-A-Y-E" in res
+    assert "Payee" in res
     assert "Withholding Tax" in res
 
 
 def test_ura_specific_terms_and_dotted_acronyms():
-    raw = "Provide your N.I.N. and T.I.N. for V.A.T. and TCC clearance under ASYCUDA and e-Tax on E-F-R-I-S."
+    raw = "Provide your N.I.N. and T.I.N. for V.A.T. and TCC clearance under ASYCUDA and e-Tax on E-F-R-I-S. Email services@ura.go.ug or check ura.go.ug for paye with ura."
     res = clean_text_for_speech(raw, locale="en")
     assert "NIN" in res
     assert "TIN" in res
@@ -121,6 +121,10 @@ def test_ura_specific_terms_and_dotted_acronyms():
     assert "Asycuda" in res
     assert "E-Tax" in res
     assert "Efris" in res
+    assert "services at U R A dot go dot u g" in res
+    assert "U R A dot go dot u g" in res
+    assert "payee" in res or "Payee" in res
+    assert "U R A" in res
 
 
 def test_ugandan_nin_digit_expansion():

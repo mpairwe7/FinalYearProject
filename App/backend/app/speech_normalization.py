@@ -40,6 +40,14 @@ _URL_WITH_PREPOSITION_RE = re.compile(
     r"\s(?:at|via)\s+(?:https?://|www\.)[^\s<>\"]*[^\s<>\".,;:!?)\]]", re.IGNORECASE
 )
 
+# URA official emails and web domain: spoken naturally as "U R A dot go dot u g"
+_URA_EMAIL_RE = re.compile(
+    r"\b([A-Za-z0-9._%+-]+)@(?:www\.)?ura\.go\.ug\b", re.IGNORECASE
+)
+_URA_DOMAIN_RE = re.compile(
+    r"\b(?:https?://)?(?:www\.)?ura\.go\.ug(?:/[^\s.,;:!?)\]]*)?\b", re.IGNORECASE
+)
+
 # Code blocks and inline code
 _CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 _INLINE_CODE_RE = re.compile(r"`([^`]+)`")
@@ -137,15 +145,15 @@ _ACRONYMS = [
     # in Ugandan tax administration, rather than spelled letter-by-letter.
     (re.compile(r"\bE-?F-?R-?I-?S\b", re.IGNORECASE), "Efris"),
     # URA is an institutional initialism pronounced letter-by-letter as "U R A" (/juː ɑːr eɪ/), never as word "ura".
-    (re.compile(r"(?:\bU\.R\.A\.?|\bU-R-A\b|\bURA\b)"), "U R A"),
+    (re.compile(r"(?:\bU\.R\.A\.?|\bU-R-A\b|\bURA\b|\bura\b)", re.IGNORECASE), "U R A"),
     # TIN, NIN, VAT are acronyms naturally pronounced as words ("tin"/"teen", "nin", "vat")
     # in everyday Ugandan tax speech, rather than reading each as a separate letter.
     (re.compile(r"(?:\bT\.I\.N\.?|\bT-I-N\b)"), "TIN"),
     (re.compile(r"(?:\bN\.I\.N\.?|\bN-I-N\b)"), "NIN"),
     (re.compile(r"(?:\bV\.A\.T\.?|\bV-A-T\b)"), "VAT"),
     (re.compile(r"\bV-?A-?T-?A\b"), "VAT Act"),
-    # Initialisms that must be read as separate letters or expanded phrases
-    (re.compile(r"(?:\bP\.A\.Y\.E\.?|\bP-A-Y-E\b|\bPAYE\b)"), "P-A-Y-E"),
+    # PAYE is universally spoken in Uganda as "payee" (/peɪˈiː/), rather than spelled letter-by-letter.
+    (re.compile(r"(?:\bP\.A\.Y\.E\.?|\bP-A-Y-E\b|\bPAYE\b|\bpaye\b)", re.IGNORECASE), "Payee"),
     (re.compile(r"\bWHT\b|\bW\.H\.T\.?\b"), "Withholding Tax"),
     (re.compile(r"(?:\bC\.I\.T\.?|\bC-I-T\b|\bCIT\b)"), "C-I-T"),
     (re.compile(r"(?:\bP\.I\.T\.?|\bP-I-T\b|\bPIT\b)"), "P-I-T"),
@@ -309,6 +317,8 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = _BROKEN_MD_LINK_RE.sub(r"\1", t)
     t = _DANGLING_URL_TAIL_RE.sub("", t)
     t = _URL_WITH_PREPOSITION_RE.sub("", t)
+    t = _URA_EMAIL_RE.sub(r"\1 at U R A dot go dot u g", t)
+    t = _URA_DOMAIN_RE.sub("U R A dot go dot u g", t)
     t = _BARE_URL_RE.sub("", t)
 
     # 2. Strip inline citation markers: [1], [1, 2]
