@@ -937,6 +937,9 @@ def _call_llm_with_deadline(
     local-first path runs with the cloud chain as its fallback.
     """
     from .llm import strip_thought
+    calc_context = _evaluate_calculation_context(query)
+    if calc_context:
+        personalization_context = (personalization_context + calc_context).strip()
     if _prefer_cloud_primary(locale):
         text = _llm_cloud_fallback(
             query,
@@ -1090,6 +1093,9 @@ def stream_llm_tokens(
     streams locally with the cloud chain as fallback.
     """
     from .llm import filter_thought_stream
+    calc_context = _evaluate_calculation_context(query)
+    if calc_context:
+        personalization_context = (personalization_context + calc_context).strip()
 
     def _raw_stream():
         if _prefer_cloud_primary(locale):
