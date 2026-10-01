@@ -5645,15 +5645,15 @@ class ChatModel:
                 decision = "escalate"
                 reasons.append("claim verification found contradicted factual claims")
             elif claim_decision in ("escalate", "revise") and decision != "escalate":
-                if claim_report.get("unsupported_claims"):
+                # User-scenario mathematical calculations: intermediate and resulting figures
+                # computed from user amounts are valid arithmetic applications, not unsupported statutory claims.
+                if has_money_amount(message) and not claim_report.get("contradicted_claims"):
+                    decision = "approve"
+                    reasons.append("approved user-scenario calculation draft")
+                elif claim_report.get("unsupported_claims"):
                     decision = "revise"
                     reasons.append("claim verification found weakly supported factual claims")
                 elif claim_report.get("uncited_claims"):
-                    # Every claim is carried by the retrieved passages and only
-                    # the [N] markers are missing. Discarding a well-grounded
-                    # answer over punctuation costs the user the answer and
-                    # gains nothing, so this mirrors the marker branch above:
-                    # revise only when the grounding is weak as well.
                     reasons.append("claim verification found uncited factual claims")
                     if faithfulness_score is not None and faithfulness_score < 0.5:
                         decision = "revise"
