@@ -126,6 +126,36 @@ function drawCaptcha(canvasId, code) {
     ctx.fill();
   }
 }
+
+function notifyParentOAuthSuccess(connectorId, accountName, identifier) {
+  if (window.opener && !window.opener.closed) {
+    try {
+      window.opener.postMessage({
+        type: 'URA_CONNECTOR_AUTH_SUCCESS',
+        connectorId: connectorId,
+        accountName: accountName || identifier,
+        identifier: identifier,
+      }, '*');
+      setTimeout(() => window.close(), 350);
+      return true;
+    } catch (e) {
+      console.error('Error posting message to opener', e);
+    }
+  }
+  return false;
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (window.opener && !window.opener.closed) {
+    const authWrapper = document.querySelector('.auth-wrapper');
+    if (authWrapper) {
+      const banner = document.createElement('div');
+      banner.style.cssText = 'background: rgba(0, 173, 181, 0.15); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 1rem; font-size: 12px; display: flex; align-items: center; gap: 8px;';
+      banner.innerHTML = '<span>⚡</span><div><strong>URA AI Assistant Integration</strong><br><span style="color:var(--text-muted);">Sign in to authorize connecting this system to your chat assistant.</span></div>';
+      authWrapper.insertBefore(banner, authWrapper.firstChild);
+    }
+  }
+});
 """
 
 EFRIS_LOGO_SVG = """<svg width="{size}" height="{size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -98,22 +98,22 @@ function InlineWaveform({ levels }: { levels?: number[] }) {
   );
 }
 
-function getMiniLogo(id: string) {
+function getSystemLogo(id: string, size = 18) {
   switch (id) {
     case 'efris':
-      return <EfrisLogo size={14} />;
+      return <EfrisLogo size={size} />;
     case 'digital_tax_stamps':
-      return <DtsLogo size={14} />;
+      return <DtsLogo size={size} />;
     case 'ursb':
-      return <UrsbLogo size={14} />;
+      return <UrsbLogo size={size} />;
     case 'bwims':
-      return <BwimsLogo size={14} />;
+      return <BwimsLogo size={size} />;
     case 'tin_registration':
-      return <TinLogo size={14} />;
+      return <TinLogo size={size} />;
     case 'payment_system':
-      return <PaymentLogo size={14} />;
+      return <PaymentLogo size={size} />;
     default:
-      return null;
+      return <PlugIcon size={size} />;
   }
 }
 
@@ -142,9 +142,18 @@ function ChatInputInner({
   autoSend = false,
 }: ChatInputProps) {
   const t = useTranslation();
-  const { connectors, activeConnectorIds, openModal, toggleConnector } = useConnectorStore();
+  const {
+    connectors,
+    activeConnectorIds,
+    connectedAccounts,
+    isConnecting,
+    connectViaPopup,
+    disconnectConnector,
+    openModal,
+  } = useConnectorStore();
   const [isDragging, setIsDragging] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [addMenuView, setAddMenuView] = useState<'main' | 'connectors'>('main');
   const [isCameraActive, setIsCameraActive] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
@@ -189,6 +198,7 @@ function ChatInputInner({
   const closeAddMenu = useCallback(() => {
     setAddMenuFocusIdx(null);
     setShowAttachMenu(false);
+    setAddMenuView('main');
     addBtnRef.current?.focus();
   }, []);
 
@@ -448,57 +458,6 @@ function ChatInputInner({
             ))}
           </div>
         )}
-        {/* Active System Connectors Bar (inspired by Grok apps) */}
-        {activeConnectorIds.length > 0 && (
-          <div className="composer-connector-bar flex flex-wrap items-center gap-1.5 px-3 pt-2 pb-1" aria-label="Active system connectors">
-            {activeConnectorIds.map((id) => {
-              const c = connectors.find((item) => item.id === id);
-              if (!c) return null;
-              const shortName =
-                c.id === 'digital_tax_stamps'
-                  ? 'DTS'
-                  : c.id === 'tin_registration'
-                  ? 'TIN'
-                  : c.id === 'payment_system'
-                  ? 'PAYMENTS'
-                  : c.id.toUpperCase();
-              return (
-                <span
-                  key={c.id}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/15 transition cursor-pointer select-none"
-                  onClick={() => openModal(c.id)}
-                  title={`${c.name} (Independent DB: ${c.database?.database || c.id + '_system.db'})`}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  {getMiniLogo(c.id)}
-                  <span className="font-semibold">{shortName}</span>
-                  <span className="text-emerald-400/80">· Active</span>
-                  <button
-                    type="button"
-                    className="text-emerald-400/50 hover:text-emerald-200 text-xs px-0.5 leading-none ml-0.5"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleConnector(c.id);
-                    }}
-                    title={`Disconnect ${c.name}`}
-                    aria-label={`Disconnect ${c.name}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => openModal()}
-              className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-neutral-800/90 border border-neutral-700/80 text-neutral-300 hover:text-white hover:border-neutral-600 transition"
-              title="Add or configure URA system connectors"
-            >
-              <PlugIcon size={11} />
-              <span>+ Add Connector</span>
-            </button>
-          </div>
-        )}
 
         <textarea
           ref={inputRef}
@@ -589,115 +548,218 @@ function ChatInputInner({
                       className="lmv2 addmenu-dialog"
                       role="dialog"
                       aria-modal="true"
-                      aria-label="Add to conversation"
+                      aria-label={addMenuView === 'connectors' ? "Connect extra systems & apps" : "Add to conversation"}
                     >
-                      <div className="lmv2-head addmenu-head">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
-                            <PlusIcon size={14} />
+                      {addMenuView === 'connectors' ? (
+                        <>
+                          <div className="lmv2-head addmenu-head">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setAddMenuView('main')}
+                                className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300 hover:text-white hover:bg-neutral-700 transition"
+                                aria-label="Back to add menu"
+                                title="Back"
+                              >
+                                ←
+                              </button>
+                              <h2>Connect extra systems</h2>
+                            </div>
+                            <button
+                              type="button"
+                              className="dlgv2-x lmv2-x"
+                              onClick={closeAddMenu}
+                              aria-label="Close add menu"
+                            >
+                              <CloseIcon />
+                            </button>
                           </div>
-                          <h2>Add to conversation</h2>
-                        </div>
-                        <button
-                          type="button"
-                          className="dlgv2-x lmv2-x"
-                          onClick={closeAddMenu}
-                          aria-label="Close add menu"
-                        >
-                          <CloseIcon />
-                        </button>
-                      </div>
 
-                      <div className="lmv2-list addmenu-list" role="menu" aria-label="Attachment and tool options">
-                        {/* Option 1: Upload a file */}
-                        <button
-                          ref={(el) => {
-                            addMenuOptionRefs.current[0] = el;
-                          }}
-                          type="button"
-                          role="menuitem"
-                          tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
-                          className="addmenu-opt group"
-                          onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
-                          onClick={() => {
-                            closeAddMenu();
-                            fileInputRef.current?.click();
-                          }}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition">
-                              <FileIcon size={18} />
-                            </div>
-                            <div className="min-w-0 text-left">
-                              <div className="font-semibold text-sm text-[var(--text-0)]">Upload a file</div>
-                              <div className="text-xs text-[var(--text-2)] truncate">PDF, Word, Excel, CSV, or high-res image</div>
-                            </div>
+                          <div className="lmv2-list addmenu-list max-h-[360px] overflow-y-auto p-2 space-y-2" role="menu" aria-label="System connectors">
+                            {connectors.map((c) => {
+                              const isConnected = activeConnectorIds.includes(c.id);
+                              const isConn = isConnecting[c.id];
+                              const accountName = connectedAccounts[c.id];
+                              return (
+                                <div
+                                  key={c.id}
+                                  className="flex items-center justify-between p-2.5 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:border-neutral-700 transition"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                                    <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-neutral-800/80 border border-neutral-700/60">
+                                      {getSystemLogo(c.id, 20)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
+                                        <span>{c.name}</span>
+                                        {isConnected && (
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-neutral-400 truncate">
+                                        {isConnected ? (
+                                          <span className="text-emerald-400">Connected · {accountName || 'Active'}</span>
+                                        ) : (
+                                          c.description
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="shrink-0">
+                                    {isConnected ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => disconnectConnector(c.id)}
+                                        className="px-2.5 py-1 text-xs rounded-lg font-medium text-neutral-300 hover:text-red-400 hover:bg-red-500/10 border border-neutral-700 hover:border-red-500/30 transition"
+                                        aria-label={`Disconnect ${c.name}`}
+                                      >
+                                        Disconnect
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={isConn}
+                                        onClick={() => connectViaPopup(c.id)}
+                                        className="px-3 py-1 text-xs rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition flex items-center gap-1 shadow-sm"
+                                        aria-label={`Connect ${c.name}`}
+                                      >
+                                        <span>{isConn ? 'Opening...' : 'Connect'}</span>
+                                        <span className="text-[10px] opacity-75">↗</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                            File
-                          </span>
-                        </button>
 
-                        {/* Option 2: Take a photo */}
-                        <button
-                          ref={(el) => {
-                            addMenuOptionRefs.current[1] = el;
-                          }}
-                          type="button"
-                          role="menuitem"
-                          tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
-                          className="addmenu-opt group"
-                          onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
-                          onClick={handleTakePhotoClick}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20 transition">
-                              <CameraIcon />
-                            </div>
-                            <div className="min-w-0 text-left">
-                              <div className="font-semibold text-sm text-[var(--text-0)]">Take a photo</div>
-                              <div className="text-xs text-[var(--text-2)] truncate">Snap National ID, receipt, or physical doc</div>
-                            </div>
+                          <div className="lmv2-foot addmenu-foot flex items-center justify-between text-[11px] text-neutral-400">
+                            <span>OAuth popup with CAPTCHA verification</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                closeAddMenu();
+                                openModal();
+                              }}
+                              className="text-blue-400 hover:text-blue-300 underline font-medium"
+                            >
+                              Manage DBs ↗
+                            </button>
                           </div>
-                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                            Camera
-                          </span>
-                        </button>
-
-                        {/* Option 3: Add connector */}
-                        <button
-                          ref={(el) => {
-                            addMenuOptionRefs.current[2] = el;
-                          }}
-                          type="button"
-                          role="menuitem"
-                          tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
-                          className="addmenu-opt group"
-                          onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
-                          onClick={() => {
-                            closeAddMenu();
-                            openModal();
-                          }}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
-                              <PlugIcon size={18} />
+                        </>
+                      ) : (
+                        <>
+                          <div className="lmv2-head addmenu-head">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
+                                <PlusIcon size={14} />
+                              </div>
+                              <h2>Add to conversation</h2>
                             </div>
-                            <div className="min-w-0 text-left">
-                              <div className="font-semibold text-sm text-[var(--text-0)]">Add connector</div>
-                              <div className="text-xs text-[var(--text-2)] truncate">EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments</div>
-                            </div>
+                            <button
+                              type="button"
+                              className="dlgv2-x lmv2-x"
+                              onClick={closeAddMenu}
+                              aria-label="Close add menu"
+                            >
+                              <CloseIcon />
+                            </button>
                           </div>
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            {activeConnectorIds.length}/{connectors.length} Connected
-                          </span>
-                        </button>
-                      </div>
 
-                      <div className="lmv2-foot addmenu-foot">
-                        Snap a Ugandan National ID card for autonomous instant TIN issuance, or attach receipts for tax calculation.
-                      </div>
+                          <div className="lmv2-list addmenu-list" role="menu" aria-label="Attachment and tool options">
+                            {/* Option 1: Upload a file */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[0] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
+                              onClick={() => {
+                                closeAddMenu();
+                                fileInputRef.current?.click();
+                              }}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition">
+                                  <FileIcon size={18} />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">Upload a file</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">PDF, Word, Excel, CSV, or high-res image</div>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                                File
+                              </span>
+                            </button>
+
+                            {/* Option 2: Take a photo */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[1] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
+                              onClick={handleTakePhotoClick}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20 transition">
+                                  <CameraIcon />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">Take a photo</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">Snap National ID, receipt, or physical doc</div>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                                Camera
+                              </span>
+                            </button>
+
+                            {/* Option 3: Add connector */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[2] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
+                              onClick={() => {
+                                setAddMenuView('connectors');
+                              }}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
+                                  <PlugIcon size={18} />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">Add connector</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  {activeConnectorIds.length}/{connectors.length} Connected
+                                </span>
+                                <span className="text-neutral-500 group-hover:text-neutral-300 text-xs">→</span>
+                              </div>
+                            </button>
+                          </div>
+
+                          <div className="lmv2-foot addmenu-foot">
+                            Snap a Ugandan National ID card for autonomous instant TIN issuance, or attach receipts for tax calculation.
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

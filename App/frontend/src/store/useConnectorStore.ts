@@ -36,9 +36,20 @@ export interface ConnectorItem {
   database: ConnectorDatabaseStats;
 }
 
+export const SYSTEM_AUTH_URLS: Record<string, string> = {
+  efris: 'https://ura-efris-67a9f3c3.renu-01.cranecloud.io',
+  digital_tax_stamps: 'https://ura-dts-f1af1c08.renu-01.cranecloud.io',
+  ursb: 'https://ura-ursb-7e854617.renu-01.cranecloud.io',
+  bwims: 'https://ura-bwims-d16293b1.renu-01.cranecloud.io',
+  tin_registration: 'https://ura-plugins-gateway-6f178237.renu-01.cranecloud.io',
+  payment_system: 'https://ura-plugins-gateway-6f178237.renu-01.cranecloud.io',
+};
+
 interface ConnectorState {
   connectors: ConnectorItem[];
   activeConnectorIds: string[];
+  connectedAccounts: Record<string, string>;
+  isConnecting: Record<string, boolean>;
   isModalOpen: boolean;
   inspectingConnectorId: string | null;
   databaseRecords: Record<string, Record<string, unknown>>;
@@ -50,6 +61,8 @@ interface ConnectorState {
   closeModal: () => void;
   setInspectingId: (id: string | null) => void;
   toggleConnector: (id: string) => Promise<void>;
+  connectViaPopup: (id: string) => Promise<boolean>;
+  disconnectConnector: (id: string) => Promise<void>;
   fetchConnectors: () => Promise<void>;
   fetchDatabaseRecords: (id: string) => Promise<void>;
 }
@@ -224,6 +237,15 @@ const DEFAULT_CONNECTORS: ConnectorItem[] = [
 export const useConnectorStore = create<ConnectorState>((set, get) => ({
   connectors: DEFAULT_CONNECTORS,
   activeConnectorIds: ['efris', 'digital_tax_stamps', 'ursb', 'bwims', 'tin_registration', 'payment_system'],
+  connectedAccounts: {
+    efris: 'Kakira Sugar Limited (1000000001)',
+    digital_tax_stamps: 'Nile Breweries Ltd (1000000002)',
+    ursb: 'URSB Incorporated (URSB-CO-10001)',
+    bwims: 'Nakawa ICD Bond (WH-KLA-001)',
+    tin_registration: 'Verified Taxpayer (1000000001)',
+    payment_system: 'URA e-Payment Gateway',
+  },
+  isConnecting: {},
   isModalOpen: false,
   inspectingConnectorId: null,
   databaseRecords: {},
@@ -243,6 +265,89 @@ export const useConnectorStore = create<ConnectorState>((set, get) => ({
     }),
 
   setInspectingId: (id) => set({ inspectingConnectorId: id }),
+
+  connectViaPopup: (id: string) => {
+    return new Promise<boolean>((resolve) => {
+      const url = SYSTEM_AUTH_URLS[id] || 'https://ura-plugins-gateway-6f178237.renu-01.cranecloud.io';
+      if (typeof window === 'undefined') {
+        resolve(false);
+        return;
+      }
+
+      set((state) => ({ isConnecting: { ...state.isConnecting, [id]: true } }));
+
+      const w = 540;
+      const h = 680;
+      const left = window.screenX + (window.outerWidth - w) / 2;
+      const top = window.screenY + (window.outerHeight - h) / 2;
+
+      const popup = window.open(
+        url,
+        `Connect_${id}`,
+        `width=${w},height=${h},left=${left},top=${top},scrollbars=yes,status=1`
+      );
+
+      if (!popup) {
+        // Fallback if blocked
+        get().toggleConnector(id);
+        set((state) => ({ isConnecting: { ...state.isConnecting, [id]: false } }));
+        resolve(true);
+        return;
+      }
+
+      const handleMessage = (e: MessageEvent) => {
+        if (e.data && e.data.type === 'URA_CONNECTOR_AUTH_SUCCESS' && e.data.connectorId === id) {
+          window.removeEventListener('message', handleMessage);
+          const account = e.data.accountName || e.data.identifier || 'Verified Account';
+          const { activeConnectorIds, connectors, connectedAccounts } = get();
+          set({
+            connectedAccounts: { ...connectedAccounts, [id]: account },
+            activeConnectorIds: activeConnectorIds.includes(id) ? activeConnectorIds : [...activeConnectorIds, id],
+            connectors: connectors.map((c) => (c.id === id ? { ...c, connected: true } : c)),
+            isConnecting: { ...get().isConnecting, [id]: false },
+          });
+          try {
+            fetch(`/api/v1/connectors/${encodeURIComponent(id)}/toggle`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enable: true }),
+            });
+          } catch {}
+          resolve(true);
+        }
+      };
+
+      window.addEventListener('message', handleMessage);
+
+      // Clean up if popup closed
+      const checkClosedTimer = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosedTimer);
+          window.removeEventListener('message', handleMessage);
+          set((state) => ({ isConnecting: { ...state.isConnecting, [id]: false } }));
+          resolve(get().activeConnectorIds.includes(id));
+        }
+      }, 500);
+    });
+  },
+
+  disconnectConnector: async (id: string) => {
+    const { activeConnectorIds, connectors, connectedAccounts } = get();
+    const nextAccounts = { ...connectedAccounts };
+    delete nextAccounts[id];
+    set({
+      activeConnectorIds: activeConnectorIds.filter((cid) => cid !== id),
+      connectedAccounts: nextAccounts,
+      connectors: connectors.map((c) => (c.id === id ? { ...c, connected: false } : c)),
+    });
+    try {
+      await fetch(`/api/v1/connectors/${encodeURIComponent(id)}/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: false }),
+      });
+    } catch {}
+  },
 
   fetchConnectors: async () => {
     try {

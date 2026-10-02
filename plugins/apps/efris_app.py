@@ -365,6 +365,7 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('efris_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
+      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('efris', res.body.user.business_name, res.body.user.tin)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';

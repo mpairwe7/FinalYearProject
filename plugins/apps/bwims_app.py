@@ -301,6 +301,7 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('bwims_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
+      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('bwims', res.body.user.facility_name, res.body.user.warehouse_code)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';

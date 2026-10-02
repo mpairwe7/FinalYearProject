@@ -315,6 +315,7 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('ursb_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
+      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('ursb', res.body.user.business_name, res.body.user.registration_number)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';

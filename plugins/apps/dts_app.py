@@ -312,6 +312,7 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('dts_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
+      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('digital_tax_stamps', res.body.user.manufacturer_name, res.body.user.tin)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';

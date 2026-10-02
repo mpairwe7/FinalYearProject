@@ -377,6 +377,7 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('gateway_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
+      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('tin_registration', res.body.user.legal_name, res.body.user.tin)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';
