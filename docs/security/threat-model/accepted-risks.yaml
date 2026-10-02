@@ -24,8 +24,8 @@
 - risk_id: T-LLM-04
   severity: Medium
   accepted_by: ML Platform Lead
-  accepted_date: "2026-04-10"
-  review_date: "2026-10-10"
+  accepted_date: "2026-10-02"
+  review_date: "2027-04-10"
   justification: >
     Max model context is clamped to 8192 tokens with input validation and rate
     limiting preventing sustained quadratic attention exhaustion.
