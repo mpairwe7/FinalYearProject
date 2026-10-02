@@ -372,10 +372,10 @@ def extract_statutory_context(prepared: list[tuple[int, str]]) -> str:
     listed = list(indices.items())[:_FIGURE_CROSSCHECK_LIMIT]
     omitted = len(indices) - len(listed)
     lines = [
-        "## Statutory reference figures",
-        "The following figures appear verbatim in the passages above with the "
-        "passages that state them. You may perform accurate arithmetic and apply the "
-        "statutory rates to user figures:",
+        "## Figure cross-check",
+        "Every figure below appears verbatim in the passages above, with the "
+        "passage that states it. Do not state a figure that is not in this "
+        "list, and do not attribute one to a passage it is not listed against.",
     ]
     lines += [
         f"- {figure} " + "".join(f"[{i}]" for i in sorted(index_list))
