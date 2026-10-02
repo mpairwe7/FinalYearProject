@@ -4327,6 +4327,72 @@ def download_offline_bundle(
 
 
 # ---------------------------------------------------------------------------
+# Connectors (EFRIS, Digital Tax Stamps)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/connectors", tags=["connectors"])
+def list_system_connectors() -> dict[str, Any]:
+    """List system connectors (EFRIS, DTS) with health and independent database metrics."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    return {
+        "ok": True,
+        "connectors": orchestrator.get_connectors_summary(),
+        "health": orchestrator.health_check(),
+    }
+
+
+@app.post("/v1/connectors/{name}/toggle", tags=["connectors"])
+def toggle_system_connector(
+    name: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Connect or disconnect an enterprise system connector."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    enable = bool(payload.get("enable", True))
+    return orchestrator.toggle_connector(name, enable)
+
+
+@app.get("/v1/connectors/{name}/records", tags=["connectors"])
+def inspect_connector_database(
+    name: str,
+    limit: int = Query(5, ge=1, le=50),
+) -> dict[str, Any]:
+    """Retrieve recent records from the connector's independent SQLite database."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    return orchestrator.get_connector_records(name, limit=limit)
+
+
+@app.post("/v1/connectors/register", tags=["connectors"])
+def register_external_connector(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Register an external API/MCP system connector (e.g. Stripe, GitHub, or standalone enterprise server)."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    name = str(payload.get("name", "")).strip()
+    endpoint_url = str(payload.get("endpoint_url", "")).strip()
+    if not name or not endpoint_url:
+        raise HTTPException(status_code=400, detail="name and endpoint_url are required")
+
+    return orchestrator.register_remote_connector(
+        name=name,
+        endpoint_url=endpoint_url,
+        api_key=str(payload.get("api_key", "")),
+        system_type=str(payload.get("system_type", "external_mcp")),
+        display_name=str(payload.get("display_name", "")),
+        description=str(payload.get("description", "")),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Voice + Vision (Phase 27)
 # ---------------------------------------------------------------------------
 

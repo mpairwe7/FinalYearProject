@@ -91,8 +91,8 @@ export const CloseIcon = () => (
     <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
-export const PlusIcon = () => (
-  <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+export const PlusIcon = ({ size = 18, className = '' }: { size?: number; className?: string } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" className={className}>
     <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
   </svg>
 );
@@ -177,8 +177,8 @@ export const PaperclipIcon = () => (
     <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
-export const FileIcon = () => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+export const FileIcon = ({ size = 15 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
     <path d="M14 2v6h6" />
   </svg>
@@ -246,6 +246,12 @@ export const ShieldIcon = () => (
     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
   </svg>
 );
+export const ShieldCheckIcon = ({ size = 16 }: { size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+    <path d="m9 12 2 2 4-4" />
+  </svg>
+);
 export const SearchIcon = () => (
   <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
     <circle cx="11" cy="11" r="7" /><path d="m20 20-3.6-3.6" />
@@ -268,8 +274,8 @@ export const PencilIcon = () => (
     <path d="M4 20h4L19.5 8.5a2.12 2.12 0 0 0-3-3L5 17v3Z" /><path d="M14.5 6.5 17.5 9.5" />
   </svg>
 );
-export const EyeIcon = () => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+export const EyeIcon = ({ size = 15 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
     <circle cx="12" cy="12" r="3" />
   </svg>
@@ -278,5 +284,87 @@ export const CheckCircleIcon = () => (
   <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
     <polyline points="22 4 12 14.01 9 11.01" />
+  </svg>
+);
+export const PlugIcon = ({ size = 16 }: { size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22v-5" />
+    <path d="M9 8V2" />
+    <path d="M15 8V2" />
+    <path d="M18 8v5a6 6 0 0 1-12 0V8z" />
+  </svg>
+);
+export const DatabaseIcon = ({ size = 16 }: { size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <ellipse cx="12" cy="5" rx="9" ry="3" />
+    <path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" />
+    <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3" />
+  </svg>
+);
+export const ReceiptIcon = ({ size = 16 }: { size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+    <path d="M8 7h8" />
+    <path d="M8 11h8" />
+    <path d="M8 15h5" />
+  </svg>
+);
+export const StampIcon = ({ size = 16 }: { size?: number }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M5 22h14" />
+    <path d="M19.27 13.73A2.5 2.5 0 0 0 17.5 13h-11a2.5 2.5 0 0 0-1.77.73l-1.44 1.45A1.5 1.5 0 0 0 4.35 18h15.3a1.5 1.5 0 0 0 1.06-2.56Z" />
+    <path d="M14 13V8a2 2 0 0 0-2-2h0a2 2 0 0 0-2 2v5" />
+    <path d="M10 6a2 2 0 1 1 4 0" />
+  </svg>
+);
+export const EfrisLogo = ({ size = 28 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#0369a1" />
+    <path d="M7 6h18v20l-3-2-3 2-3-2-3 2-3-2-3 2V6z" fill="#0284c7" />
+    <path d="M10 11h12M10 15h12M10 19h7" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+    <circle cx="21" cy="20" r="3" fill="#38bdf8" />
+    <path d="m20 20 1 1 2-2" stroke="#0f172a" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+export const DtsLogo = ({ size = 28 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#b45309" />
+    <path d="M6 9a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9z" fill="#d97706" />
+    <path d="M10 11h4v4h-4zM18 11h4v4h-4zM10 17h4v4h-4z" fill="#ffffff" />
+    <circle cx="20" cy="19" r="2.5" fill="#fef08a" />
+    <path d="M8 7l16 18" stroke="#f59e0b" strokeWidth="1" strokeDasharray="2 2" />
+  </svg>
+);
+export const UrsbLogo = ({ size = 28 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#6b21a8" />
+    <path d="M16 6l10 5H6l10-5z" fill="#c084fc" />
+    <path d="M9 13v9M14 13v9M18 13v9M23 13v9" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+    <path d="M6 24h20v2H6v-2z" fill="#e9d5ff" />
+  </svg>
+);
+export const BwimsLogo = ({ size = 28 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#047857" />
+    <path d="M6 20h20l-3 6H9l-3-6z" fill="#10b981" />
+    <path d="M8 12h5v6H8zM15 10h5v8h-5zM21 14h4v4h-4z" fill="#34d399" />
+    <path d="M5 24c4 1 7-1 11 0s7-1 11 0" stroke="#a7f3d0" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+export const TinLogo = ({ size = 28 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#0e7490" />
+    <rect x="6" y="8" width="20" height="16" rx="3" fill="#0891b2" stroke="#67e8f9" strokeWidth="1.5" />
+    <rect x="9" y="11" width="5" height="5" rx="1" fill="#cffafe" />
+    <path d="M17 12h6M17 15h4M9 19h14" stroke="#ffffff" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+export const PaymentLogo = ({ size = 28 }: { size?: number } = {}) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 32 32" fill="none">
+    <rect width="32" height="32" rx="8" fill="#be123c" />
+    <rect x="5" y="9" width="22" height="14" rx="2.5" fill="#e11d48" stroke="#fecdd3" strokeWidth="1.2" />
+    <path d="M5 13h22" stroke="#881337" strokeWidth="2" />
+    <circle cx="10" cy="18" r="1.5" fill="#ffffff" />
+    <path d="M14 18h8" stroke="#ffe4e6" strokeWidth="1.5" strokeLinecap="round" />
   </svg>
 );

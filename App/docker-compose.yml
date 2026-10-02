@@ -132,6 +132,7 @@ services:
       - ../artifacts:/app/artifacts:ro
       - ../fine-tuning/adapters:/app/adapters:ro
       - ../ml:/app/ml:ro
+      - ../plugins:/app/plugins:ro
       - api_logs:/app/logs
       - ../data_store:/app/data_store
       - /mnt/nas1/caches/huggingface_cache:/app/hf_cache:ro

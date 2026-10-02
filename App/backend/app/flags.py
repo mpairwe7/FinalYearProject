@@ -333,6 +333,12 @@ _REGISTRY: dict[str, Flag] = {
             "and adds an agentic event surface (tool_call.*, retrieval.*, "
             "response.cancel). SSE endpoint /v1/chat/stream stays unchanged.",
         ),
+        Flag(
+            "enterprise_connectors",
+            False,
+            "Enable enterprise system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). "
+            "In production (APP_ENV=production), local mock connectors are disabled unless this flag is on.",
+        ),
         # Phase 30 (2026) — next-generation architecture increments.
         # All default off and all subject-addressable, so each lands on a
         # cohort before it lands on taxpayers.  See

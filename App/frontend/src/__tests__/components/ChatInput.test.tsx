@@ -116,6 +116,18 @@ describe("ChatInput attachments", () => {
     expect(screen.queryByLabelText(/Attach a document/)).not.toBeInTheDocument();
   });
 
+  it("renders the Add button and opens Grok-style dropdown with Upload, Photo, and Connector options", async () => {
+    render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
+    const addBtn = screen.getByTestId("composer-add-btn");
+    expect(addBtn).toBeInTheDocument();
+
+    await userEvent.click(addBtn);
+
+    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+    expect(screen.getByText("Take a photo")).toBeInTheDocument();
+    expect(screen.getByText("Add connector")).toBeInTheDocument();
+  });
+
   it("renders ready chips with doc type and fires remove", async () => {
     const onRemove = vi.fn();
     render(

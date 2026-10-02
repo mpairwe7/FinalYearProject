@@ -1,0 +1,36 @@
+# Standalone Dockerfile for URA Enterprise Systems & MCP Gateway
+FROM python:3.11.16-slim-bookworm
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8200
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install minimal server requirements matching backend stack
+RUN pip install --no-cache-dir \
+    "fastapi>=0.115.5,<0.116" \
+    "uvicorn>=0.32.0,<0.33" \
+    "pydantic>=2.10.1,<2.11"
+
+# Create non-root user
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser
+
+# Copy plugins package and create data_store volume directory
+COPY --chown=appuser:appuser plugins/ /app/plugins/
+RUN mkdir -p /app/data_store && chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8200
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8200/health || exit 1
+
+CMD ["uvicorn", "plugins.server:app", "--host", "0.0.0.0", "--port", "8200"]
