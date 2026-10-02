@@ -159,8 +159,8 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "urgency",
         re.compile(
             r"urgent|asap|as soon as possible|deadline|due (today|tomorrow)"
-            r"|penalt|\bfines?\b|\bfined\b|audit|enforcement|seiz|arrears"
-            r"|overdue|late fee"
+            r"|\b(?:under\s+audit|being\s+audited|facing\s+penalt\w*|incurred\s+penalt\w*|threatened\s+with|been\s+fined)\b"
+            r"|enforcement|seiz|arrears|overdue|late fee"
         ),
     ),
 )

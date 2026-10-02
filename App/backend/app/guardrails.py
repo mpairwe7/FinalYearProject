@@ -248,10 +248,8 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
-    # Standard contiguous TIN
-    ("ug_tin", re.compile(r"\b1\d{9}\b")),
-    # Spaced / hyphenated TIN variants (e.g. "100 012 3456" or "100-012-3456")
-    ("ug_tin", re.compile(r"\b1\d{2}[\s-]\d{3}[\s-]\d{4}\b")),
+    # Standard contiguous TIN, context-bound TIN, or spaced/hyphenated variants
+    ("ug_tin", re.compile(r"(?i)(?:\bTIN\s*[:#-]?\s*|\bTax Identification Number\s*[:#-]?\s*)(1\d{9})\b|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b")),
     ("ug_nid", re.compile(r"\bC[MF]\d{2}[A-Z]{5}\d{5}[A-Z]\b")),
     # Spaced NID variant (e.g. "CM 89 ABCDE 12345 F")
     ("ug_nid", re.compile(r"\bC[MF]\s?\d{2}\s?[A-Z]{5}\s?\d{5}\s?[A-Z]\b")),
@@ -359,6 +357,21 @@ def is_official_ura_email(email: str) -> bool:
     )
 
 
+_CURRENCY_INDICATORS_BEFORE = re.compile(r"(?i)\b(?:ugx|ush|shs|usd|eur|gbp|\$|€|£)\s*$")
+_CURRENCY_INDICATORS_AFTER = re.compile(r"(?i)^\s*(?:ugx|ush|shs|usd|shillings?|/=|per\b|annum\b|month\b|year\b)")
+
+
+def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
+    """Return True if 10-digit number is surrounded by currency markers (e.g. 1000000000 UGX)."""
+    matched = match.group(0)
+    if re.search(r"(?i)\btin\b", matched) or "-" in matched or " " in matched:
+        return False
+    start, end = match.span()
+    before = text[max(0, start - 20) : start]
+    after = text[end : min(len(text), end + 20)]
+    return bool(_CURRENCY_INDICATORS_BEFORE.search(before) or _CURRENCY_INDICATORS_AFTER.search(after))
+
+
 def redact_pii_text(text: str) -> str:
     """Replace detected PII with redaction markers.
 
@@ -377,6 +390,13 @@ def redact_pii_text(text: str) -> str:
                 return "[REDACTED_EMAIL]"
 
             result = pattern.sub(_replace_email, result)
+        elif pii_type == "ug_tin":
+            def _replace_tin(m: re.Match[str]) -> str:
+                if _is_currency_boundary(m, result):
+                    return m.group(0)
+                return "[REDACTED_UG_TIN]"
+
+            result = pattern.sub(_replace_tin, result)
         else:
             result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
     return result
@@ -388,6 +408,10 @@ def contains_pii(text: str) -> bool:
         if pii_type == "email":
             for m in pattern.finditer(text):
                 if not is_official_ura_email(m.group(0)):
+                    return True
+        elif pii_type == "ug_tin":
+            for m in pattern.finditer(text):
+                if not _is_currency_boundary(m, text):
                     return True
         elif pattern.search(text):
             return True
@@ -401,7 +425,7 @@ _LISTISH_VERB_RE = re.compile(
 _SENTENCE_BREAK_RE = re.compile(r"(?<=[a-z][.!?])\s+(?=[A-Z])")
 _GLUED_STEP_RE = re.compile(
     r"(?i)(?<![A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|"
-    r"paragraph|ekitundu|kifungu|ibarra|vat|paye|wht|tin|cit|pit|ugx|efris)\d)"
+    r"paragraph|ekitundu|kifungu|ibarra|vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent|percentage)\d)"
     r"([A-Za-z]{3,})((?:[1-9]|1[0-2]))[\.\)][ \t]*(\*{0,2}[A-Za-z])"
 )
 
@@ -540,6 +564,7 @@ class OutputGuard:
         text = re.sub(r"<[^>]+>", "", text)
         # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
         text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
+        text = re.sub(r"(?<=\d)\[(\d+)\]", r" [\1]", text)
         # Remove markdown image links to non-URA domains
         text = re.sub(
             r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
@@ -602,7 +627,8 @@ class OutputGuard:
         text = re.sub(r"\bura\.go\.tz\b", "ura.go.ug", text, flags=re.IGNORECASE)
 
         # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
-        text = re.sub(r"(\d+)\s*\[+[^0-9\n]*\s*(\d+)", r"\1\2", text)
+        # Negative lookahead (?!\d+\]) protects statutory citations like [1] or [2]
+        text = re.sub(r"(\d+)\s*\[+(?!\d+\])[^0-9\n\]]+\s*(\d+)", r"\1\2", text)
         text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
         text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
 
@@ -649,8 +675,9 @@ class OutputGuard:
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
 
         # Separate lead-in from first numbered item if smashed on same line (e.g. 'offered:1.Tax' or 'services:1.**')
+        # Requires (?<!\d) before punctuation so decimal numbers like 1.5% or Section 5.1 are not split
         text = re.sub(
-            r"([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
+            r"(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
             r"\1\n\n\2. \3",
             text,
         )

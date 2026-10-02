@@ -78,6 +78,7 @@ COPY --from=builder /opt/venv /opt/venv
 
 # Copy application code
 COPY --chown=appuser:appuser App/backend/app ./app/
+COPY --chown=appuser:appuser plugins ./plugins/
 COPY --chown=appuser:appuser App/backend/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # Create necessary directories (including models + offline bundle dirs)

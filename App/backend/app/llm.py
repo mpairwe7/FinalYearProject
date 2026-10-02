@@ -75,7 +75,7 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
 LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
-LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "3072"))
+LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
@@ -372,10 +372,10 @@ def extract_statutory_context(prepared: list[tuple[int, str]]) -> str:
     listed = list(indices.items())[:_FIGURE_CROSSCHECK_LIMIT]
     omitted = len(indices) - len(listed)
     lines = [
-        "## Figure cross-check",
-        "Every figure below appears verbatim in the passages above, with the "
-        "passage that states it. Do not state a figure that is not in this "
-        "list, and do not attribute one to a passage it is not listed against.",
+        "## Statutory reference figures",
+        "The following figures appear verbatim in the passages above with the "
+        "passages that state them. You may perform accurate arithmetic and apply the "
+        "statutory rates to user figures:",
     ]
     lines += [
         f"- {figure} " + "".join(f"[{i}]" for i in sorted(index_list))
@@ -445,12 +445,22 @@ def _build_messages(
     spotlight markers (LLM01 defence).
     """
     system_content = SYSTEM_PROMPT + (STRUCTURED_JSON_SUFFIX if structured else "")
+    calc_ground_truth = ""
+    other_personalization = ""
     if personalization_context:
+        if "## Verified Statutory Calculation" in personalization_context:
+            parts_split = personalization_context.split("## Verified Statutory Calculation", 1)
+            other_personalization = parts_split[0].strip()
+            calc_ground_truth = "## Verified Statutory Calculation" + parts_split[1]
+        else:
+            other_personalization = personalization_context.strip()
+
+    if other_personalization:
         system_content += (
             "\n\n## Consent-granted personalization context\n"
             "Use this only to tailor explanation depth, examples, and workflow defaults. "
             "Do not treat it as live URA account data.\n"
-            f"{personalization_context.strip()}"
+            f"{other_personalization}"
         )
     if context_summary:
         system_content += (
@@ -546,6 +556,18 @@ def _build_messages(
 
     parts.append(f"## User question\n{query}")
     parts.append("")
+
+    if calc_ground_truth:
+        parts.append(
+            "## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
+            f"{calc_ground_truth}\n\n"
+            "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
+            "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
+            "2. Use the exact pre-computed figures above in your answer. Do NOT substitute generic FAQ example figures (like UGX 6M) when the taxpayer gave you specific figures.\n"
+            "3. Address every specific sub-question the taxpayer asked.\n"
+            "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
+        )
+        parts.append("")
 
     stat_params = extract_statutory_context(prepared_passages)
     if stat_params:
@@ -934,17 +956,18 @@ def _vllm_generate(
         import json as _json
         import urllib.request
 
-        # Ensure total context length strictly respects vLLM's 4096-token hard limit
+        # Ensure total context length respects model's context window without premature truncation
+        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
         total_chars = sum(len(m.get("content", "")) for m in messages)
-        while total_chars > 10000:
+        while total_chars > max_prompt_chars:
             if len(messages) > 2:
                 popped = messages.pop(1)
                 total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > 4000:
-                messages[-1]["content"] = messages[-1]["content"][:4000]
+            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
+                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
                 total_chars = sum(len(m.get("content", "")) for m in messages)
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > 4000:
-                messages[0]["content"] = messages[0]["content"][:4000]
+            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
+                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
                 total_chars = sum(len(m.get("content", "")) for m in messages)
             else:
                 break
@@ -952,7 +975,7 @@ def _vllm_generate(
         est_prompt_tokens = max(100, total_chars // 3)
         safe_max_tokens = min(
             LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(128, 4000 - est_prompt_tokens),
+            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
         )
 
         body = _json.dumps(
@@ -997,26 +1020,26 @@ def _vllm_chat_completion(
         import json as _json
         import urllib.request
 
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        if tools:
-            total_chars += len(_json.dumps(tools))
-        while total_chars > 8500:
+        tools_chars = len(_json.dumps(tools)) if tools else 0
+        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
+        total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
+        while total_chars > max_prompt_chars:
             if len(messages) > 2:
                 popped = messages.pop(1)
                 total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > 3000:
-                messages[-1]["content"] = messages[-1]["content"][:3000]
-                total_chars = sum(len(m.get("content", "")) for m in messages) + (len(_json.dumps(tools)) if tools else 0)
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > 3000:
-                messages[0]["content"] = messages[0]["content"][:3000]
-                total_chars = sum(len(m.get("content", "")) for m in messages) + (len(_json.dumps(tools)) if tools else 0)
+            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
+                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
+                total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
+            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
+                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
+                total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
             else:
                 break
 
         est_prompt_tokens = max(100, total_chars // 3)
         safe_max_tokens = min(
             LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(128, 4000 - est_prompt_tokens),
+            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
         )
 
         payload: dict[str, Any] = {
@@ -1029,7 +1052,6 @@ def _vllm_chat_completion(
             "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools:
             payload["tools"] = tools
@@ -1810,12 +1832,23 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     specialist = specialist_prompt(agent_role)
     if specialist:
         system_content += f"\n\n{specialist}"
+
+    calc_ground_truth = ""
+    other_personalization = ""
     if personalization_context:
+        if "## Verified Statutory Calculation" in personalization_context:
+            parts_split = personalization_context.split("## Verified Statutory Calculation", 1)
+            other_personalization = parts_split[0].strip()
+            calc_ground_truth = "## Verified Statutory Calculation" + parts_split[1]
+        else:
+            other_personalization = personalization_context.strip()
+
+    if other_personalization:
         system_content += (
             "\n\n## Consent-granted personalization context\n"
             "Use this only to tailor the explanation style and defaults. "
             "Do not treat it as live URA account data.\n"
-            f"{personalization_context.strip()}"
+            f"{other_personalization}"
         )
     if context_summary:
         system_content += (
@@ -1858,13 +1891,27 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         if locale != "en":
             parts.append(f"(Respond in locale: {locale})")
         parts.append(f"## User question\n{query}")
+        if calc_ground_truth:
+            parts.append(
+                "\n## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
+                f"{calc_ground_truth}\n\n"
+                "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
+                "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
+                "2. Use the exact pre-computed figures above in your answer. Do NOT substitute generic FAQ example figures (like UGX 6M) when the taxpayer gave you specific figures.\n"
+                "3. Address every specific sub-question the taxpayer asked.\n"
+                "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
+            )
         messages.append({"role": "user", "content": "\n".join(parts)})
     else:
         locale_hint = f"(Respond in locale: {locale})\n\n" if locale != "en" else ""
+        calc_note = (
+            f"\n\n## Verified Scenario Ground Truth\n{calc_ground_truth}"
+            if calc_ground_truth else ""
+        )
         messages.append(
             {
                 "role": "user",
-                "content": f"{locale_hint}{query}",
+                "content": f"{locale_hint}{query}{calc_note}",
             }
         )
 

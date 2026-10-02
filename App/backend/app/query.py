@@ -470,12 +470,19 @@ def expand_abbreviations(query: str) -> str:
     """Expand known abbreviations inline for better retrieval recall."""
     words = query.split()
     expanded = []
-    for w in words:
+    for i, w in enumerate(words):
         key = w.lower().strip(".,;:?!\"'()")
         if key in _ABBREVIATIONS:
+            expansion = _ABBREVIATIONS[key]
+            # Avoid duplicate expansion if already expanded or surrounded by the expansion
+            prev_word = words[i - 1].lower().strip(".,;:?!\"'()") if i > 0 else ""
+            next_word = words[i + 1].lower().strip(".,;:?!\"'()") if i + 1 < len(words) else ""
+            if expansion.lower() in query.lower() and (prev_word in expansion.lower() or next_word in expansion.lower()):
+                expanded.append(w)
+                continue
             # Preserve trailing punctuation
             suffix = w[len(w.rstrip(".,;:?!\"'()")) :]
-            expanded.append(_ABBREVIATIONS[key] + suffix)
+            expanded.append(expansion + suffix)
         else:
             expanded.append(w)
     return " ".join(expanded)
@@ -485,14 +492,14 @@ _TAX_DOMAIN_VOCAB: frozenset[str] = frozenset({
     "register", "registration", "registered", "registers",
     "taxpayer", "taxpayers", "individual", "individuals", "organisation", "organization", "organisations", "organizations",
     "company", "companies", "corporate", "corporation",
-    "withholding", "customs", "clearance", "assessment", "assessments", "assessed", "dispute", "disputes", "objection", "objections",
+    "withholding", "customs", "clearance", "assessment", "assessments", "assessed", "dispute", "disputes", "disputed", "objection", "objections",
     "appeal", "appeals", "invoicing", "receipting", "receipt", "receipts", "clarify", "clarification", "document", "documents", "application", "applications",
     "apply", "threshold", "thresholds", "compulsory", "voluntary", "higher", "lower", "purchase", "purchases", "invoice", "invoices",
-    "resident", "residents", "residence", "salary", "employment", "turnover", "penalty", "penalties",
+    "resident", "residents", "residence", "salary", "employment", "turnover", "penalty", "penalties", "residential", "commercial",
     "provisional", "exemption", "exemptions", "exempt", "deadline", "deadlines", "declaration", "declarations",
-    "electronic", "online", "statement", "statements", "payment", "payments", "business", "commercial", "import", "imports", "export", "exports",
-    "compute", "computation", "calculate", "calculation", "return", "returns", "filing", "late",
-    "compliance", "certificate", "certificates", "presumptive", "income", "rental", "refund", "refunds",
+    "electronic", "online", "statement", "statements", "payment", "payments", "business", "import", "imports", "importing", "export", "exports", "exported",
+    "compute", "computation", "calculate", "calculation", "return", "returns", "filing", "late", "default", "disallowing", "disallowed", "disallowance",
+    "compliance", "certificate", "certificates", "presumptive", "income", "rental", "refund", "refunds", "consulting", "contracting", "contracted",
     "tin", "pin", "nin", "prn", "fdn", "brn", "paye", "vat",
     "motor", "vehicle", "vehicles", "car", "cars", "motorcycle", "motorcycles", "truck", "trucks", "lorry", "lorries",
     "bus", "buses", "taxi", "taxis", "logbook", "plate", "plates", "numberplate", "ownership", "duplicate", "inspection",
@@ -719,6 +726,66 @@ def normalize(query: str) -> str:
     return q
 
 
+REWRITE_PROMPT = """Given the recent conversation history and a follow-up user query, rewrite the query into an independent, explicit search query about Uganda tax law and procedures.
+If the query is already self-contained, return it unchanged.
+Do NOT answer the question. Return ONLY the rewritten query text.
+
+Examples:
+History:
+User: What is presumptive tax in Uganda?
+Assistant: Presumptive tax is a simplified tax regime for small businesses with turnover below UGX 150 million...
+Follow-up: What if it's 150m?
+Rewritten: What is the tax rate and filing requirement in Uganda for business annual turnover of 150 million UGX?
+
+History:
+User: How do I register for a TIN?
+Assistant: You can apply online via the URA web portal...
+Follow-up: What documents do I need for that?
+Rewritten: What documents are required for individual TIN registration in Uganda?
+
+History: {history_summary}
+Follow-up: {query}
+Rewritten:"""
+
+
+def _llm_rewrite_query(query: str, history: list[dict[str, Any]]) -> str | None:
+    """Use the local Master Brain LLM to rewrite follow-up query into a canonical search query."""
+    try:
+        from . import flags, llm
+        if not flags.is_enabled("query_rewrite"):
+            return None
+        if not hasattr(llm, "LLM_BACKEND") or (llm.LLM_BACKEND != "vllm" and not llm.is_available()):
+            return None
+
+        history_summary = "\n".join(
+            f"User: {t.get('user_message', '')}\nAssistant: {t.get('bot_reply', '')[:160]}"
+            for t in history[-3:]
+            if t.get("user_message") or t.get("bot_reply")
+        )
+        if not history_summary.strip():
+            return None
+
+        prompt = REWRITE_PROMPT.format(history_summary=history_summary, query=query)
+        messages = [
+            {"role": "system", "content": "You are a specialized query rewriter for Uganda tax law. Return ONLY the rewritten query text."},
+            {"role": "user", "content": prompt},
+        ]
+        if llm.LLM_BACKEND == "vllm":
+            out = llm._vllm_generate(messages, max_tokens=100, temperature=0.0, timeout=10.0)
+        else:
+            # Query and prompt are constructed for retrieval rewriting
+            out = llm.generate(prompt, passages=[], conversation_history=None, locale="en")  # nosemgrep: ura-llm01-raw-user-input-to-llm
+
+        out = (out or "").strip().split("\n")[0].strip()
+        if out.lower().startswith("rewritten:"):
+            out = out[len("rewritten:") :].strip()
+        if out and len(out) >= 3 and not out.lower().startswith(("i cannot", "sorry", "here is")):
+            return out
+    except Exception:
+        logger.debug("LLM query rewrite attempt failed or skipped", exc_info=True)
+    return None
+
+
 def rewrite_with_history(
     query: str,
     history: list[dict[str, Any]],
@@ -745,6 +812,12 @@ def rewrite_with_history(
     normalized_history = normalize_history_turns(history)
     if not normalized_history:
         return query
+
+    # 0. Fast LLM Contextual Rewriter (Master Brain)
+    llm_rewritten = _llm_rewrite_query(q, normalized_history)
+    if llm_rewritten:
+        logger.debug("Query rewritten by LLM contextual rewriter: %s -> %s", q, llm_rewritten)
+        return llm_rewritten
 
     last_turn = normalized_history[-1]
     last_user = last_turn.get("user_message", "")

@@ -30,6 +30,7 @@ from enum import Enum
 class DocumentType(str, Enum):
     RECEIPT = "receipt"
     TIN_CARD = "tin_card"
+    NATIONAL_ID = "national_id"
     ASSESSMENT = "assessment"
     CUSTOMS_DECLARATION = "customs_declaration"
     FILING_FORM = "filing_form"
@@ -51,6 +52,17 @@ class ClassificationResult:
 # ---------------------------------------------------------------------------
 
 _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
+    # National Identity Card (NIRA Uganda)
+    (
+        DocumentType.NATIONAL_ID,
+        re.compile(
+            r"national\s+identity\s+card|republic\s+of\s+uganda.*identity|"
+            r"national\s+identification\s+registration\s+authority|\bnira\b|"
+            r"(?:given\s+names?|surname).*(?:date\s+of\s+birth|\bnin\b)|\b[C][MFR][0-9A-Z]{12}\b",
+            re.I,
+        ),
+        0.96,
+    ),
     # Statutory Acts, Domestic Tax Laws, and Legal Compendiums
     (
         DocumentType.STATUTORY_ACT,

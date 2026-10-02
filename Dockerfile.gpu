@@ -177,6 +177,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chmod=755 /opt/spark-tts /opt/spark-tts
 
 COPY --chown=appuser:appuser App/backend/app ./app/
+COPY --chown=appuser:appuser plugins ./plugins/
 COPY --chown=appuser:appuser App/backend/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 RUN mkdir -p /app/models /app/logs /app/cache /app/offline /app/quantized /app/hf_cache && \
