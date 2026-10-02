@@ -209,7 +209,7 @@ async def test_manual_language_override_ux() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
 
-    is_luganda = language_of(answer_text) == "lg" and "18" in answer_text
+    is_luganda = language_of(answer_text) == "lg" and ("18" in answer_text or "kkumi na munaana" in answer_text)
     passed = override_event_seen and is_luganda
     print(f" -> Result: {'PASS' if passed else 'FAIL'} (Override event: {override_event_seen}, Luganda answer verified)")
     return {
@@ -406,7 +406,7 @@ async def test_multilingual_accuracy_statutory_fidelity() -> dict[str, Any]:
         await ws.send(json.dumps({"type": "hangup"}))
         pump_task.cancel()
     vat_lg = " ".join(answers)
-    lg_ok = language_of(vat_lg) == "lg" and "18" in vat_lg
+    lg_ok = language_of(vat_lg) == "lg" and ("18" in vat_lg or "kkumi na munaana" in vat_lg)
     results["lg_vat_accuracy"] = {"passed": lg_ok, "text": vat_lg}
     print(f" -> Luganda: {'PASS' if lg_ok else 'FAIL'} (Vernacular accuracy: {vat_lg[:60]}...)")
 

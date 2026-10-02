@@ -165,6 +165,8 @@ services:
       - type: bind
         source: /mnt/nas1/caches/huggingface_cache
         target: /app/hf_cache
+    ports:
+      - "18100:8100"
     ipc: host
     restart: unless-stopped
     deploy:

@@ -1,0 +1,101 @@
+{
+ "date": "2026-10-03",
+ "api": "http://127.0.0.1:8083",
+ "question": "<lang>_tin.wav",
+ "runs": {
+  "en": [
+   {
+    "text_s": 0.42,
+    "reply_chars": 362,
+    "streamed": {
+     "first_piece_s": 3.66,
+     "pieces": 5,
+     "cached_pieces": 0,
+     "failed": 0,
+     "formats": [
+      "ogg_opus"
+     ],
+     "gaps_s": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "kb": 125.4,
+     "heard_s": 27.9,
+     "first_audio_s": 4.08
+    },
+    "whole": {
+     "total_s": 8.86,
+     "kb": 1364.0,
+     "duration_s": 29.099,
+     "backend": "orpheus_salt",
+     "first_audio_s": 9.28
+    }
+   }
+  ],
+  "lg": [
+   {
+    "text_s": 4.71,
+    "reply_chars": 401,
+    "streamed": {
+     "first_piece_s": 2.18,
+     "pieces": 6,
+     "cached_pieces": 0,
+     "failed": 0,
+     "formats": [
+      "ogg_opus"
+     ],
+     "gaps_s": [
+      0.0,
+      1.64,
+      0.0,
+      0.0,
+      0.0
+     ],
+     "kb": 161.6,
+     "heard_s": 37.3,
+     "first_audio_s": 6.89
+    },
+    "whole": {
+     "total_s": 10.59,
+     "kb": 1636.0,
+     "duration_s": 34.901,
+     "backend": "orpheus_salt",
+     "first_audio_s": 15.3
+    }
+   }
+  ],
+  "sw": [
+   {
+    "text_s": 1.16,
+    "reply_chars": 361,
+    "streamed": {
+     "first_piece_s": 2.52,
+     "pieces": 5,
+     "cached_pieces": 0,
+     "failed": 0,
+     "formats": [
+      "ogg_opus"
+     ],
+     "gaps_s": [
+      0.0,
+      1.91,
+      0.0,
+      0.0
+     ],
+     "kb": 190.1,
+     "heard_s": 45.1,
+     "first_audio_s": 3.68
+    },
+    "whole": {
+     "total_s": 14.58,
+     "kb": 2032.0,
+     "duration_s": 43.349,
+     "backend": "orpheus_salt",
+     "first_audio_s": 15.74
+    }
+   }
+  ]
+ }
+}
