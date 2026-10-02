@@ -1,0 +1,299 @@
+"""Everything the receptionist says itself, in English, Luganda and Swahili.
+
+Answers come from the RAG brain; this table is the rest — the greeting,
+fillers while an answer is fetched, clarification prompts, the transfer and
+timeout lines, and the confirmation spoken when the call changes language.
+``brain.py`` and ``clarify.py`` read from it by ``room.state.locale``.
+
+REVIEW STATUS: the Luganda and Swahili strings are drafts. They were written
+from the project's existing, reviewed copy where it existed (``glossary.py``,
+the ``lib/i18n`` dictionaries, ``text_signals`` courtesy replies) and have
+**not yet been checked by a native speaker**. Do not demo them before that
+review — see ``docs/runbooks/voice-receptionist-demo.md``. A missing key in a
+language falls back to English rather than failing a call, and
+``test_receptionist_phrases.py`` fails the build if any key is missing.
+"""
+
+from __future__ import annotations
+
+import random
+import re
+from functools import lru_cache
+
+#: Languages whose strings still need a native speaker's sign-off.
+UNREVIEWED: frozenset[str] = frozenset({"lg", "sw"})
+
+#: Lines shown on the caller's screen and never voiced: numbers a caller must
+#: keep, which Orpheus reads badly (it said "999 or 112" as "nine nine or one
+#: twelve"; see speech_normalization for the phone numbers it loops on).
+#: Spoken lines give an emergency number in words, the screen in digits.
+UNSPOKEN: frozenset[str] = frozenset({"crisis_screen", "reference_screen", "tollfree_screen"})
+
+_PHRASES: dict[str, dict[str, str]] = {
+    "en": {
+        # The agreed line (docs/plans/multilingual-receptionist.md §1), plus
+        # what a caller must hear first on an AI-answered line: that it is an
+        # AI, and that a person is one request away.
+        "greeting": (
+            "Hi, thanks for contacting URA. I'm your AI assistant today. Ask your question "
+            "in your preferred language — English, Luganda or Swahili — and I'll give you "
+            "the answer in that language. You can ask for an officer at any time. "
+            "How can I help you today?"
+        ),
+        "more_detail": "Would you like more detail?",
+        "timeout_transfer": (
+            "I'm sorry, checking the database is taking longer than expected. "
+            "Let me connect you to an officer."
+        ),
+        "error_transfer": (
+            "I encountered an error looking up that tax information. "
+            "Let me connect you to an officer."
+        ),
+        "transfer": "I'm connecting you to a URA officer, please hold.",
+        "queue_disabled": (
+            "I can't transfer you right now. Please call URA's toll-free line during working hours; "
+            "the number is on your screen."
+        ),
+        "tollfree_screen": "URA toll-free line: 0800 117 000",
+        # While a caller waits for an officer, and when nobody answers in time.
+        "still_holding": "Thank you for holding. An officer will be with you shortly.",
+        "officers_busy": (
+            "All our officers are busy, so an officer will call you back. "
+            "Meanwhile, I can still help with other questions."
+        ),
+        "reference_screen": "Your reference: {ref}",
+        "clarify_term": "Excuse me, did you say {term}?",
+        "clarify_confirm": "So if I got it right, you're asking about {highlight} — is that right?",
+        "clarify_repeat_after": "Sorry, I didn't catch the word after '{prev}' — could you say it again?",
+        "clarify_repeat": "Sorry, I didn't catch that — could you say it again?",
+        "clarify_restart": "Sorry about that — please tell me your question again.",
+        "switched": "Sure — let's continue in English.",
+        "officer_offer": "Would you like to speak to an officer about this?",
+        # A caller who speaks of ending their life (text_signals.detect_crisis):
+        # the same help as the chat's crisis_support_reply, and the same
+        # numbers, checked on CRISIS_LINES_VERIFIED_ON.
+        "crisis_support": (
+            "I'm really sorry you're feeling this way. Your safety matters more than any tax matter. "
+            "If you are in danger right now, please call nine nine nine, or one one two. "
+            "The number for free counselling is on your screen."
+        ),
+        "crisis_offer": "Would you like me to connect you to a URA officer as well?",
+        "crisis_declined": (
+            "That's okay. The numbers are on your screen whenever you need them. "
+            "I'm here if there's anything else."
+        ),
+        "crisis_screen": (
+            "Emergency: 999 or 112. Free counselling, Mental Health Uganda: 0800 21 21 21 "
+            "(Monday to Friday, 8:30am to 5pm)."
+        ),
+        # Call Desk: an officer joins the call, holds it, reconnects, and ends it.
+        "officer_joining": "You're now connected to {name}.",
+        "officer_reconnecting": "Please hold, I'm reconnecting you.",
+        "on_hold": "Please hold.",
+        "officer_closing": "Thank you for calling URA. Goodbye.",
+        # A caller who has gone quiet: checked on, then the call is ended.
+        "idle_check": "Are you still there? I'm here whenever you're ready to ask your question.",
+        # "Speak slower": the local voices have no speed control, so the call
+        # pauses between sentences — say so rather than promise a new speed.
+        "slow_ack": "Of course. I'll slow down, with a pause between points. What is your question?",
+        "offer_declined": "No problem. What else can I help you with?",
+        "idle_goodbye": "I haven't heard anything, so I'll end the call now. Thank you for calling URA. Goodbye.",
+    },
+    "lg": {
+        "greeting": (
+            "Gyebale ko, weebale okutuukirira URA. Nze muyambi wo owa AI leero. Buuza ekibuuzo kyo "
+            "mu lulimi lw'oyagala — Lungereza, Luganda oba Kiswahili — nange nja kukuddamu "
+            "mu lulimi olwo. Osobola okusaba omukozi wa URA essaawa yonna. "
+            "Nnyinza kukuyamba ntya leero?"
+        ),
+        "more_detail": "Oyagala okumanya ebisingawo?",
+        "timeout_transfer": (
+            "Nsonyiwa, okunoonya kutwala ekiseera kiwanvu okusinga bwe kyandibadde. "
+            "Ka nkukwataganye n'omukozi wa URA."
+        ),
+        "error_transfer": (
+            "Nsonyiwa, waliwo ekizibu mu kunoonya ebikwata ku musolo ogwo. "
+            "Ka nkukwataganye n'omukozi wa URA."
+        ),
+        "transfer": "Nkukwataganya n'omukozi wa URA, nsaba olindeko.",
+        "queue_disabled": (
+            "Kati sisobola kukukwataganya n'omukozi. Nsaba okube ku layini ya URA ey'obwereere "
+            "mu ssaawa z'okukola; namba eri ku ssirini yo."
+        ),
+        "tollfree_screen": "Layini ya URA ey'obwereere: 0800 117 000",
+        "still_holding": "Webale okulinda. Omukozi wa URA ajja kukwogerako mu kaseera katono.",
+        "officers_busy": (
+            "Abakozi baffe bonna balina emirimu, kale omukozi ajja kukukubira essimu. "
+            "Mu kiseera kino, nkyasobola okukuyamba ku bibuuzo ebirala."
+        ),
+        "reference_screen": "Namba yo ey'okujuliza: {ref}",
+        "clarify_term": "Nsonyiwa, ogambye {term}?",
+        "clarify_confirm": "Kale, obuuza ku {highlight} — kituufu?",
+        "clarify_repeat_after": "Nsonyiwa, ekigambo ekiddirira '{prev}' sikiwulidde — oyinza okukiddamu?",
+        "clarify_repeat": "Nsonyiwa, sikuwulidde bulungi — oyinza okuddamu?",
+        "clarify_restart": "Nsonyiwa ku ekyo — nsaba oddemu ekibuuzo kyo.",
+        "switched": "Kale — tweyongere mu Luganda.",
+        "officer_offer": "Wandiyagadde okwogera n'omukozi ku nsonga eno?",
+        "crisis_support": (
+            "Nsonyiwa nnyo olw'engeri gy'owuliramu. Obulamu bwo bukulu okusinga ensonga yonna "
+            "ey'omusolo. Bw'oba ng'oli mu kabi kati, nsaba okube ku mwenda mwenda mwenda, "
+            "oba emu emu bbiri. Namba ey'okuweebwa amagezi ku bwereere eri ku ssirini yo."
+        ),
+        "crisis_offer": "Wandiyagadde era nkukwataganye n'omukozi wa URA?",
+        "crisis_declined": (
+            "Kale. Namba ziri ku ssirini yo buli lw'onoozeetaaga. Ndi wano bw'oba olina ekirala."
+        ),
+        "crisis_screen": (
+            "Obuyambi obw'amangu: 999 oba 112. Okuweebwa amagezi ku bwereere, Mental Health "
+            "Uganda: 0800 21 21 21 (Balaza okutuuka ku Lwakutaano, 8:30–17:00)."
+        ),
+        "officer_joining": "Kati oyogera ne {name}.",
+        "officer_reconnecting": "Nsaba olindeko, nkyakukwataganya n'omukozi.",
+        "on_hold": "Nsaba olindeko.",
+        "officer_closing": "Webale okukuba essimu eri URA. Weeraba.",
+        "idle_check": "Okyaliwo? Ndi wano, buuza ekibuuzo kyo bw'oba weetegese.",
+        "slow_ack": "Kale. Nja kwogera mpola, nga nnyimiriramu wakati. Ekibuuzo kyo kiri kki?",
+        "offer_declined": "Kale. Kiki ekirala kye nnyinza okukuyambako?",
+        "idle_goodbye": "Siwulidde kintu kyonna, kale nkomya essimu kati. Webale okukuba essimu eri URA. Weeraba.",
+    },
+    "sw": {
+        "greeting": (
+            "Habari, asante kwa kuwasiliana na URA. Mimi ni msaidizi wako wa AI leo. Uliza swali "
+            "lako kwa lugha unayopendelea — Kiingereza, Luganda au Kiswahili — nami "
+            "nitakujibu kwa lugha hiyo. Unaweza kuomba afisa wakati wowote. Nikusaidie vipi leo?"
+        ),
+        "more_detail": "Ungependa maelezo zaidi?",
+        "timeout_transfer": (
+            "Samahani, kutafuta kunachukua muda mrefu kuliko kawaida. "
+            "Nitakuunganisha na afisa wa URA."
+        ),
+        "error_transfer": (
+            "Samahani, kumetokea hitilafu katika kutafuta taarifa hiyo ya kodi. "
+            "Nitakuunganisha na afisa wa URA."
+        ),
+        "transfer": "Ninakuunganisha na afisa wa URA, tafadhali subiri.",
+        "queue_disabled": (
+            "Siwezi kukuunganisha sasa hivi. Tafadhali piga simu ya bure ya URA wakati wa saa za kazi; "
+            "nambari iko kwenye skrini yako."
+        ),
+        "tollfree_screen": "Simu ya bure ya URA: 0800 117 000",
+        "still_holding": "Asante kwa kusubiri. Afisa atakuhudumia hivi punde.",
+        "officers_busy": (
+            "Maafisa wetu wote wana shughuli, kwa hiyo afisa atakupigia simu. "
+            "Kwa sasa, bado ninaweza kukusaidia na maswali mengine."
+        ),
+        "reference_screen": "Nambari yako ya kumbukumbu: {ref}",
+        "clarify_term": "Samahani, ulisema {term}?",
+        "clarify_confirm": "Kwa hiyo, kama nimeelewa vizuri, unauliza kuhusu {highlight} — ni sahihi?",
+        "clarify_repeat_after": "Samahani, sikusikia neno baada ya '{prev}' — unaweza kulirudia?",
+        "clarify_repeat": "Samahani, sikusikia vizuri — unaweza kurudia?",
+        "clarify_restart": "Samahani kwa hilo — tafadhali niambie swali lako tena.",
+        "switched": "Sawa — tuendelee kwa Kiswahili.",
+        "officer_offer": "Je, ungependa kuzungumza na afisa kuhusu hili?",
+        "crisis_support": (
+            "Samahani sana kwamba unajisikia hivi. Usalama wako ni muhimu kuliko jambo lolote la kodi. "
+            "Ikiwa uko hatarini sasa hivi, tafadhali piga tisa tisa tisa, au moja moja mbili. "
+            "Nambari ya ushauri nasaha bila malipo iko kwenye skrini yako."
+        ),
+        "crisis_offer": "Je, ungependa pia nikuunganishe na afisa wa URA?",
+        "crisis_declined": (
+            "Sawa. Nambari ziko kwenye skrini yako wakati wowote utakapozihitaji. "
+            "Niko hapa ikiwa kuna jambo lingine."
+        ),
+        "crisis_screen": (
+            "Dharura: 999 au 112. Ushauri nasaha bila malipo, Mental Health Uganda: 0800 21 21 21 "
+            "(Jumatatu hadi Ijumaa, 8:30–17:00)."
+        ),
+        "officer_joining": "Sasa umeunganishwa na {name}.",
+        "officer_reconnecting": "Tafadhali subiri, ninaendelea kukuunganisha na afisa.",
+        "on_hold": "Tafadhali subiri.",
+        "officer_closing": "Asante kwa kupiga simu URA. Kwaheri.",
+        "idle_check": "Bado uko kwenye simu? Niko hapa, uliza swali lako ukiwa tayari.",
+        "slow_ack": "Sawa. Nitaongea polepole, nikipumzika kati ya hoja. Una swali gani?",
+        "offer_declined": "Sawa. Nikusaidie nini kingine?",
+        "idle_goodbye": "Sijasikia chochote, kwa hiyo nitakata simu sasa. Asante kwa kupiga simu URA. Kwaheri.",
+    },
+}
+
+_FILLERS: dict[str, tuple[str, ...]] = {
+    "en": (
+        "mm, one sec",
+        "okay, so",
+        "let me see",
+        "right, checking now",
+        "one moment",
+        "let me check that",
+        "just a second",
+        "Let me check that for you.",
+    ),
+    "lg": (
+        "Lindako katono.",
+        "Ka nkebere.",
+        "Nkebera kati.",
+        "Akaseera katono.",
+        "Ka ndabe.",
+        "Ka nkukeberere.",
+    ),
+    "sw": (
+        "Subiri kidogo.",
+        "Ngoja niangalie.",
+        "Naangalia sasa.",
+        "Sekunde moja.",
+        "Hebu nione.",
+        "Ngoja nikuangalie.",
+    ),
+}
+
+# Yes / no for the clarification loop, beyond the English words clarify.py
+# already knows. Short particles that double as ordinary grammar ("nga",
+# Swahili "la") are left out: a false "no" restarts the question.
+_YES_WORDS: dict[str, tuple[str, ...]] = {
+    "lg": ("yee", "ye", "weewaawo", "kituufu", "bwe kiri", "kyekyo", "kye kyo"),
+    "sw": ("ndiyo", "ndio", "sawa", "kweli", "sahihi", "hasa", "naam"),
+}
+_NO_WORDS: dict[str, tuple[str, ...]] = {
+    "lg": ("nedda", "si kyo", "si kituufu", "ssi"),
+    "sw": ("hapana", "sio", "si sahihi"),
+}
+
+KEYS: tuple[str, ...] = tuple(_PHRASES["en"])
+
+
+def phrase(key: str, language: str, **fmt: str) -> str:
+    """The *key* line in *language*, falling back to English."""
+    table = _PHRASES.get(language) or _PHRASES["en"]
+    text = table.get(key) or _PHRASES["en"][key]
+    return text.format(**fmt) if fmt else text
+
+
+def fillers(language: str) -> tuple[str, ...]:
+    return _FILLERS.get(language) or _FILLERS["en"]
+
+
+def pick_filler(language: str, last: str | None = None) -> str:
+    """A filler for *language* that is not the one just used."""
+    pool = fillers(language)
+    choices = [f for f in pool if f != last]
+    return random.choice(choices) if choices else pool[0]  # noqa: S311 — variety, not security
+
+
+@lru_cache(maxsize=8)
+def yes_no_patterns(language: str) -> tuple[re.Pattern[str] | None, re.Pattern[str] | None]:
+    """Extra yes / no regexes for *language* (``None`` where English suffices)."""
+
+    def build(words: tuple[str, ...]) -> re.Pattern[str] | None:
+        if not words:
+            return None
+        return re.compile(r"\b(" + "|".join(re.escape(w) for w in words) + r")\b", re.IGNORECASE)
+
+    return build(_YES_WORDS.get(language, ())), build(_NO_WORDS.get(language, ()))
+
+
+def prewarm_phrases(language: str) -> list[str]:
+    """Fixed lines worth synthesising before the first call reaches them.
+
+    Formatted lines (``{ref}``, ``{term}``…) are left out — their text is
+    only known mid-call — and so are the ``UNSPOKEN`` screen lines.
+    """
+    fixed = [text for key, text in _PHRASES.get(language, {}).items() if "{" not in text and key not in UNSPOKEN]
+    return [*fillers(language), *fixed]

@@ -187,6 +187,9 @@ def build_event(ticket: dict[str, Any], event_type: str = "escalation.created") 
         "team": ticket.get("team", ""),
         "reason": ticket.get("reason", ""),
         "created_at": ticket.get("created_at", 0),
+        "locale": ticket.get("locale", "en"),
+        "modality": ticket.get("modality", "text"),
+        "user_query_en": ticket.get("user_query_en", ""),
     }
     for key in ("topic", "sentiment", "transfer_style"):
         if handoff.get(key) is not None:

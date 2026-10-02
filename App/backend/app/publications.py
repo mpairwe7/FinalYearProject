@@ -101,7 +101,7 @@ def fetch_publications(url: str | None = None) -> tuple[bytes, str]:
     if not target:
         raise ValueError("URA_PUBLICATIONS_URL must be an https URL")
     req = Request(target, headers={"User-Agent": "ura-chatbot-freshness/1.0"})
-    with urlopen(req, timeout=20) as resp:  # noqa: S310 — https-only above
+    with urlopen(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
         body = resp.read()
     return body, _digest(body)
 

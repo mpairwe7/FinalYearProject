@@ -37,8 +37,8 @@ const BENEFITS = [
     body: "Your profile — taxpayer type, industry, preferred detail level — shapes the answers, and conversations follow you between devices.",
   },
   {
-    title: "URA employees",
-    body: "Staff roles are granted by the identity provider, not requested here. Register first, then an administrator assigns the role.",
+    title: "URA employees & staff",
+    body: "Staff, admin, and auditor roles are predefined and assigned by URA Administration. Staff accounts are not registered here — sign in directly with your official credentials.",
   },
 ] as const;
 
@@ -48,6 +48,7 @@ export default function SignUpPage() {
     message: "",
   });
   const [starting, setStarting] = useState(false);
+
   // Someone who already has a token does not need this page; say so instead of
   // starting a second flow that would just replace a working session.
   const token = useSyncExternalStore(subscribeAuthToken, getAuthToken, getServerAuthToken);
@@ -60,9 +61,6 @@ export default function SignUpPage() {
       // the callback sends them back to the assistant rather than to /admin.
       await beginOidcFlow({ mode: "signup", returnTo: "/" });
       if (isEmbedded()) {
-        // beginOidcFlow opened a new tab rather than redirecting: identity
-        // providers refuse to render inside a frame. Say where it went — the
-        // button would otherwise spin on a page that is never going to move.
         setStarting(false);
         setStatus({
           kind: "info",
@@ -80,24 +78,11 @@ export default function SignUpPage() {
   }, []);
 
   // Auto-start when the embedded page handed the flow to this tab.
-  //
-  // beginOidcFlow opens `?continue=signup` in a new top-level tab when it is
-  // framed, because identity providers refuse to render in a frame. Without
-  // this the person would have to press the same button a second time in a tab
-  // they did not ask for, which reads as the first press having failed.
-  //
-  // Guarded on not being embedded, so a framed page carrying the parameter
-  // cannot loop itself opening tabs.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isEmbedded() || !OIDC_CONFIGURED) return;
     if (new URLSearchParams(window.location.search).get("continue") !== "signup") return;
-    // queueMicrotask, not a bare call: startSignUp sets its pending state before
-    // its first await, and doing that synchronously inside an effect cascades a
-    // render. Deferring past commit avoids the cascade rather than suppressing
-    // the warning about it.
     queueMicrotask(() => void startSignUp());
-    // Once only: the parameter is stripped so a reload does not redirect again.
     window.history.replaceState({}, "", window.location.pathname);
   }, [startSignUp]);
 
@@ -117,8 +102,8 @@ export default function SignUpPage() {
         <section className="signin-block" aria-labelledby="signup-h">
           <h2 id="signup-h">Register with the URA identity provider</h2>
           <p className="signin-note">
-            Accounts, passwords, multi-factor setup and recovery are held by the
-            identity provider — this application never sees a password. You will
+            Accounts, passwords, Google sign-in and security recovery are managed by
+            URA&apos;s configured Auth0 identity provider — this application never sees your password. You will
             be taken there to register and returned here once you are done.
           </p>
           <button
@@ -156,15 +141,11 @@ export default function SignUpPage() {
 
         {token && (
           <p className="signin-status ok" role="status">
-            You are already signed in on this browser. Registering again will
-            replace that session.
+            You are signed in on this browser.
           </p>
         )}
 
         {status.message && (
-          // Kind-driven, not hardcoded: this slot now also carries the "opened
-          // in a new tab" notice, and styling that as an error — announced with
-          // role=alert — would report a working redirect as a failure.
           <p
             className={`signin-status ${status.kind === "error" ? "error" : "ok"}`}
             role={status.kind === "error" ? "alert" : "status"}

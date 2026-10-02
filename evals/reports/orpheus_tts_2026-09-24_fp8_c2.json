@@ -1,0 +1,661 @@
+{
+ "date": "2026-09-24",
+ "url": "http://127.0.0.1:18100",
+ "concurrency": 2,
+ "overall": {
+  "n": 60,
+  "ttfa_ms_p50": 264.6,
+  "ttfa_ms_p95": 273.0,
+  "total_ms_p50": 2942.1,
+  "total_ms_p95": 5735.1,
+  "rtf_p50": 0.691
+ },
+ "by_speaker": {
+  "salt_lug_0001": {
+   "n": 30,
+   "ttfa_ms_p50": 264.6,
+   "ttfa_ms_p95": 272.5,
+   "total_ms_p50": 2851.5,
+   "total_ms_p95": 5220.6,
+   "rtf_p50": 0.687
+  },
+  "waxal_lug_0005": {
+   "n": 30,
+   "ttfa_ms_p50": 264.7,
+   "ttfa_ms_p95": 273.3,
+   "total_ms_p50": 3060.8,
+   "total_ms_p95": 5979.6,
+   "rtf_p50": 0.693
+  }
+ },
+ "by_length": {
+  "short": {
+   "n": 20,
+   "ttfa_ms_p50": 260.9,
+   "ttfa_ms_p95": 272.5,
+   "total_ms_p50": 1197.6,
+   "total_ms_p95": 1499.2,
+   "rtf_p50": 0.698
+  },
+  "medium": {
+   "n": 20,
+   "ttfa_ms_p50": 264.7,
+   "ttfa_ms_p95": 274.5,
+   "total_ms_p50": 2942.1,
+   "total_ms_p95": 3613.4,
+   "rtf_p50": 0.688
+  },
+  "long": {
+   "n": 20,
+   "ttfa_ms_p50": 266.0,
+   "ttfa_ms_p95": 271.0,
+   "total_ms_p50": 5177.8,
+   "total_ms_p95": 6325.8,
+   "rtf_p50": 0.685
+  }
+ },
+ "latency_verdict": "GO",
+ "naturalness": "pending — native-speaker ratings in evals/orpheus_tts/listening_sheet.csv",
+ "requests": [
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 0,
+   "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+   "ttfa_ms": 267.5,
+   "total_ms": 6302.9,
+   "audio_s": 9.22,
+   "rtf": 0.684
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 1,
+   "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+   "ttfa_ms": 267.2,
+   "total_ms": 4926.1,
+   "audio_s": 7.17,
+   "rtf": 0.687
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 2,
+   "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+   "ttfa_ms": 265.7,
+   "total_ms": 5067.7,
+   "audio_s": 7.42,
+   "rtf": 0.683
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 3,
+   "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+   "ttfa_ms": 261.2,
+   "total_ms": 5123.7,
+   "audio_s": 7.51,
+   "rtf": 0.682
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 4,
+   "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+   "ttfa_ms": 266.4,
+   "total_ms": 4707.9,
+   "audio_s": 6.91,
+   "rtf": 0.681
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 5,
+   "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+   "ttfa_ms": 264.9,
+   "total_ms": 5299.8,
+   "audio_s": 7.77,
+   "rtf": 0.682
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 6,
+   "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+   "ttfa_ms": 260.7,
+   "total_ms": 4606.6,
+   "audio_s": 6.66,
+   "rtf": 0.692
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 7,
+   "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+   "ttfa_ms": 272.9,
+   "total_ms": 4982.2,
+   "audio_s": 7.25,
+   "rtf": 0.687
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 8,
+   "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+   "ttfa_ms": 269.0,
+   "total_ms": 4484.8,
+   "audio_s": 6.57,
+   "rtf": 0.683
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "long",
+   "index": 9,
+   "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+   "ttfa_ms": 269.4,
+   "total_ms": 4371.9,
+   "audio_s": 6.4,
+   "rtf": 0.683
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 0,
+   "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+   "ttfa_ms": 260.2,
+   "total_ms": 3049.6,
+   "audio_s": 4.44,
+   "rtf": 0.687
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 1,
+   "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+   "ttfa_ms": 262.8,
+   "total_ms": 2701.8,
+   "audio_s": 3.93,
+   "rtf": 0.688
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 2,
+   "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+   "ttfa_ms": 265.5,
+   "total_ms": 1931.9,
+   "audio_s": 2.82,
+   "rtf": 0.686
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 3,
+   "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+   "ttfa_ms": 255.6,
+   "total_ms": 3126.2,
+   "audio_s": 4.61,
+   "rtf": 0.678
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 4,
+   "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+   "ttfa_ms": 264.3,
+   "total_ms": 2850.2,
+   "audio_s": 4.18,
+   "rtf": 0.682
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 5,
+   "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+   "ttfa_ms": 263.7,
+   "total_ms": 2852.8,
+   "audio_s": 4.18,
+   "rtf": 0.682
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 6,
+   "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+   "ttfa_ms": 263.0,
+   "total_ms": 2450.8,
+   "audio_s": 3.58,
+   "rtf": 0.684
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 7,
+   "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+   "ttfa_ms": 266.8,
+   "total_ms": 3027.4,
+   "audio_s": 4.44,
+   "rtf": 0.682
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 8,
+   "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+   "ttfa_ms": 268.7,
+   "total_ms": 3031.3,
+   "audio_s": 4.44,
+   "rtf": 0.683
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "medium",
+   "index": 9,
+   "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+   "ttfa_ms": 264.4,
+   "total_ms": 2745.5,
+   "audio_s": 4.01,
+   "rtf": 0.685
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 0,
+   "text": "Weebale kukuba ku URA.",
+   "ttfa_ms": 261.9,
+   "total_ms": 1481.7,
+   "audio_s": 2.13,
+   "rtf": 0.695
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 1,
+   "text": "Lindako katono.",
+   "ttfa_ms": 279.8,
+   "total_ms": 1660.7,
+   "audio_s": 2.39,
+   "rtf": 0.695
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 2,
+   "text": "Nkebera kati.",
+   "ttfa_ms": 262.4,
+   "total_ms": 900.6,
+   "audio_s": 1.28,
+   "rtf": 0.704
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 3,
+   "text": "Oyagala kumanya ki?",
+   "ttfa_ms": 253.2,
+   "total_ms": 1185.2,
+   "audio_s": 1.71,
+   "rtf": 0.694
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 4,
+   "text": "Kale, nkutegedde.",
+   "ttfa_ms": 260.6,
+   "total_ms": 1194.6,
+   "audio_s": 1.71,
+   "rtf": 0.7
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 5,
+   "text": "Nsonyiwa, ddamu nate.",
+   "ttfa_ms": 268.2,
+   "total_ms": 1209.7,
+   "audio_s": 1.71,
+   "rtf": 0.709
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 6,
+   "text": "Mbuulira TIN yo.",
+   "ttfa_ms": 272.1,
+   "total_ms": 1027.9,
+   "audio_s": 1.45,
+   "rtf": 0.709
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 7,
+   "text": "Tukwataganya n'omukozi.",
+   "ttfa_ms": 271.2,
+   "total_ms": 1200.6,
+   "audio_s": 1.71,
+   "rtf": 0.703
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 8,
+   "text": "Kiki ekirala?",
+   "ttfa_ms": 261.1,
+   "total_ms": 1077.5,
+   "audio_s": 1.54,
+   "rtf": 0.701
+  },
+  {
+   "speaker": "salt_lug_0001",
+   "length": "short",
+   "index": 9,
+   "text": "Yee, kituufu.",
+   "ttfa_ms": 259.5,
+   "total_ms": 1128.0,
+   "audio_s": 1.62,
+   "rtf": 0.696
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 0,
+   "text": "Okwewandiisa ku TIN, genda ku mukutu gwa URA, jjuzaamu foomu, olwo ofune namba yo mu nnaku ntono nga tosasudde kintu kyonna.",
+   "ttfa_ms": 265.0,
+   "total_ms": 6760.1,
+   "audio_s": 9.9,
+   "rtf": 0.683
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 1,
+   "text": "Bw'oba ng'ofuna enfuna okuva mu nnyumba z'opangisa, olina okuwaayo alipoota y'omusolo gw'ennyumba ezipangisibwa buli mwaka.",
+   "ttfa_ms": 270.9,
+   "total_ms": 5506.6,
+   "audio_s": 8.02,
+   "rtf": 0.686
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 2,
+   "text": "Abakozesa bonna balina okuggyako omusolo gwa PAYE ku misaala gy'abakozi baabwe ne bagusasula eri URA buli mwezi.",
+   "ttfa_ms": 266.7,
+   "total_ms": 5612.6,
+   "audio_s": 8.19,
+   "rtf": 0.685
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 3,
+   "text": "Singa olemwa okusasula omusolo ku budde, URA eyinza okukusalira ekibonerezo, n'olwekyo kirungi okusasula mangu.",
+   "ttfa_ms": 264.0,
+   "total_ms": 6199.7,
+   "audio_s": 9.05,
+   "rtf": 0.685
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 4,
+   "text": "Okukyusa obwannannyini bw'emmotoka, omuguzi n'omutunzi balina okujja ne TIN zaabwe n'ebiwandiiko by'emmotoka.",
+   "ttfa_ms": 265.2,
+   "total_ms": 5236.1,
+   "audio_s": 7.59,
+   "rtf": 0.689
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 5,
+   "text": "EFRIS nkola ya URA ey'okufulumya risiiti ku kompyuta, era buli muntu awandiisiddwa ku VAT alina okugikozesa.",
+   "ttfa_ms": 268.1,
+   "total_ms": 5658.8,
+   "audio_s": 8.19,
+   "rtf": 0.691
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 6,
+   "text": "Bw'oba toli mumativu n'omusolo gwe bakusalidde, osobola okuwakanya mu bbanga ery'ennaku amakumi asatu.",
+   "ttfa_ms": 269.5,
+   "total_ms": 5231.8,
+   "audio_s": 7.51,
+   "rtf": 0.697
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 7,
+   "text": "Nkukwataganya n'omukozi wa URA kati, nsaba olinde ku ssimu, omukozi ajja kufuna ebikwata ku kibuuzo kyo byonna.",
+   "ttfa_ms": 264.4,
+   "total_ms": 5710.6,
+   "audio_s": 8.28,
+   "rtf": 0.69
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 8,
+   "text": "Abasuubuzi abatono basobola okusasula omusolo omukalu buli mwaka singa enfuna yaabwe teri waggulu nnyo.",
+   "ttfa_ms": 258.8,
+   "total_ms": 4833.5,
+   "audio_s": 7.08,
+   "rtf": 0.682
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "long",
+   "index": 9,
+   "text": "Okufuna ebisingawo, kuba ku nnamba ey'obwereere, oba genda ku mukutu gwa URA ku yintaneeti.",
+   "ttfa_ms": 265.6,
+   "total_ms": 4853.9,
+   "audio_s": 7.42,
+   "rtf": 0.654
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 0,
+   "text": "Okwewandiisa ku TIN tekusasulwa, era osobola okukikola ku mukutu gwa URA.",
+   "ttfa_ms": 269.6,
+   "total_ms": 3948.2,
+   "audio_s": 5.72,
+   "rtf": 0.691
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 1,
+   "text": "Omusolo gwa VAT guli ebitundu kkumi na munaana ku buli kikumi.",
+   "ttfa_ms": 274.4,
+   "total_ms": 2967.9,
+   "audio_s": 4.27,
+   "rtf": 0.696
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 2,
+   "text": "Nsaba ondinde katono nga nkebera amawulire gano.",
+   "ttfa_ms": 255.3,
+   "total_ms": 2197.6,
+   "audio_s": 3.16,
+   "rtf": 0.696
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 3,
+   "text": "Alipoota y'omusolo gw'enfuna eweebwayo ng'omwaka gw'ebyensimbi guwedde.",
+   "ttfa_ms": 253.6,
+   "total_ms": 3595.8,
+   "audio_s": 5.21,
+   "rtf": 0.691
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 4,
+   "text": "Omukozi wa URA ajja kukukubira essimu mu bbanga ttono.",
+   "ttfa_ms": 269.8,
+   "total_ms": 3153.6,
+   "audio_s": 4.52,
+   "rtf": 0.697
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 5,
+   "text": "Nnyinza okukuyamba ku by'okwewandiisa, okusasula, n'eby'oku mwalo.",
+   "ttfa_ms": 268.5,
+   "total_ms": 3439.5,
+   "audio_s": 4.95,
+   "rtf": 0.695
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 6,
+   "text": "Namba yo ey'okujuliza eri ku ssimu yo, gikuume bulungi.",
+   "ttfa_ms": 266.6,
+   "total_ms": 2888.2,
+   "audio_s": 4.18,
+   "rtf": 0.691
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 7,
+   "text": "Tosobola kusasula ssente mu ngalo; kozesa banka oba essimu.",
+   "ttfa_ms": 262.8,
+   "total_ms": 2814.3,
+   "audio_s": 4.01,
+   "rtf": 0.702
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 8,
+   "text": "Kino kikwatagana n'omusolo gwa PAYE ku musaala gw'abakozi.",
+   "ttfa_ms": 265.0,
+   "total_ms": 2916.2,
+   "audio_s": 4.18,
+   "rtf": 0.697
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "medium",
+   "index": 9,
+   "text": "Nsonyiwa, sikuwulidde bulungi, oyinza okuddamu ekibuuzo kyo?",
+   "ttfa_ms": 277.0,
+   "total_ms": 3568.3,
+   "audio_s": 5.21,
+   "rtf": 0.686
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 0,
+   "text": "Weebale kukuba ku URA.",
+   "ttfa_ms": 271.9,
+   "total_ms": 1490.7,
+   "audio_s": 2.13,
+   "rtf": 0.699
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 1,
+   "text": "Lindako katono.",
+   "ttfa_ms": 258.4,
+   "total_ms": 1012.0,
+   "audio_s": 1.45,
+   "rtf": 0.698
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 2,
+   "text": "Nkebera kati.",
+   "ttfa_ms": 254.8,
+   "total_ms": 843.5,
+   "audio_s": 1.19,
+   "rtf": 0.706
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 3,
+   "text": "Oyagala kumanya ki?",
+   "ttfa_ms": 257.6,
+   "total_ms": 1238.4,
+   "audio_s": 1.79,
+   "rtf": 0.691
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 4,
+   "text": "Kale, nkutegedde.",
+   "ttfa_ms": 256.2,
+   "total_ms": 1010.1,
+   "audio_s": 1.45,
+   "rtf": 0.696
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 5,
+   "text": "Nsonyiwa, ddamu nate.",
+   "ttfa_ms": 255.4,
+   "total_ms": 1420.1,
+   "audio_s": 2.05,
+   "rtf": 0.693
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 6,
+   "text": "Mbuulira TIN yo.",
+   "ttfa_ms": 263.9,
+   "total_ms": 1203.9,
+   "audio_s": 1.71,
+   "rtf": 0.705
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 7,
+   "text": "Tukwataganya n'omukozi.",
+   "ttfa_ms": 259.9,
+   "total_ms": 1241.9,
+   "audio_s": 1.79,
+   "rtf": 0.693
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 8,
+   "text": "Kiki ekirala?",
+   "ttfa_ms": 251.5,
+   "total_ms": 897.1,
+   "audio_s": 1.28,
+   "rtf": 0.701
+  },
+  {
+   "speaker": "waxal_lug_0005",
+   "length": "short",
+   "index": 9,
+   "text": "Yee, kituufu.",
+   "ttfa_ms": 262.3,
+   "total_ms": 1367.7,
+   "audio_s": 1.96,
+   "rtf": 0.697
+  }
+ ]
+}

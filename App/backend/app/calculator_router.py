@@ -17,24 +17,41 @@ Production rules encoded here:
 
 from __future__ import annotations
 
+import json
+import logging
 import re
+import threading
+import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .tax.tables import RateTable
 
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
-_CURRENCY = r"(?:ugx|ug\s?shs?|shs|shillings?)"
+_CURRENCY = r"(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|shilingi|ssente|sente|ensimbi|/=|/-\b)"
+_AMOUNT_PREFIX_RE = re.compile(
+    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)\s+"
+    r"(\d{1,3}(?:[,\s]\d{3})*|\d+(?:\.\d+)?)\b",
+    re.IGNORECASE,
+)
+_AMOUNT_PREFIX_MULTIPLIERS = {
+    "milioni": 1e6, "bilioni": 1e9, "elfu": 1e3, "laki": 1e5,
+    "bukadde": 1e6, "obukadde": 1e6, "kakadde": 1e6, "akakadde": 1e6,
+    "buwumbi": 1e9, "obuwumbi": 1e9, "kawumbi": 1e9, "akawumbi": 1e9,
+    "mitwalo": 1e4, "emitwalo": 1e4, "mutwalo": 1e4, "omutwalo": 1e4,
+    "nkumi": 1e3, "enkumi": 1e3, "lukumi": 1e3, "olukumi": 1e3,
+}
 _AMOUNT_RE = re.compile(
     rf"""
-    (?P<currency>{_CURRENCY}\.?\s*)?              # optional currency prefix
-    (?P<number>\d{{1,3}}(?:[,\s]\d{{3}})+          # 1,000,000 / 1 000 000
-       |\d+(?:\.\d+)?)                             # 1500000 / 1.5
-    \s*
-    (?P<suffix>k|m|bn|b|thousand|million|billion)?\b
+    (?P<prefix_curr>{_CURRENCY}\s*)?
+    (?P<number>\d{{1,3}}(?:[,\s]\d{{3}})+(?:\.\d+)?|\d+(?:\.\d+)?)
+    (?:\s*(?P<suffix>k|m|bn|b|thousand|million|billion)\b)?
+    (?:\s*(?P<suffix_curr>{_CURRENCY}\b|/=|/-))?
     """,
     re.IGNORECASE | re.VERBOSE,
 )
@@ -59,18 +76,49 @@ def extract_amounts(text: str) -> list[tuple[float, int, int]]:
     prefix or a k/m/bn-style suffix — "2 houses" is not two shillings.
     """
     found: list[tuple[float, int, int]] = []
+    seen_spans: list[tuple[int, int]] = []
     percent_spans = [(m.start(1), m.end(1)) for m in _PERCENT_RE.finditer(text or "")]
+    section_spans = [
+        (m.start(), m.end())
+        for m in re.finditer(
+            r"\b(?:s\.|section|sec\.|sch\.|schedule|block|part|form)\s*\d+[a-zA-Z]?\b",
+            text or "",
+            re.IGNORECASE,
+        )
+    ]
+
+    # 1. Prefix matches (East African Bantu: Luganda obukadde, Swahili milioni)
+    for m in _AMOUNT_PREFIX_RE.finditer(text or ""):
+        mult = _AMOUNT_PREFIX_MULTIPLIERS.get(m.group(1).lower(), 1)
+        digits = m.group(2).replace(",", "").replace(" ", "")
+        try:
+            val = float(digits) * mult
+            found.append((val, m.start(), m.end()))
+            seen_spans.append((m.start(), m.end()))
+        except ValueError:
+            continue
+
+    # 2. Suffix matches and standard numbers (with or without commas / currency)
     for m in _AMOUNT_RE.finditer(text or ""):
+        if any(s <= m.start("number") and m.end("number") <= e for s, e in seen_spans):
+            continue
+        if any(s <= m.start("number") and m.end("number") <= e for s, e in section_spans):
+            continue
         raw = m.group("number")
         digits = raw.replace(",", "").replace(" ", "")
         if any(s <= m.start("number") < e or s < m.end("number") <= e for s, e in percent_spans):
             continue
-        if _YEAR_RE.match(digits) and not (m.group("currency") or m.group("suffix")):
+        curr = (m.group("prefix_curr") or m.group("suffix_curr") or "").strip()
+        suf = (m.group("suffix") or "").strip().lower()
+        if _YEAR_RE.match(digits) and not (curr or suf):
             continue
         if digits.startswith("0") and len(digits) >= 9:  # phone-shaped
             continue
-        value = float(digits) * _MULTIPLIERS.get((m.group("suffix") or "").lower(), 1)
-        if value < 1000 and not (m.group("currency") or m.group("suffix")):
+        try:
+            value = float(digits) * _MULTIPLIERS.get(suf, 1)
+        except ValueError:
+            continue
+        if value < 1000 and not (curr or suf):
             continue
         found.append((value, m.start(), m.end()))
     return found
@@ -118,9 +166,9 @@ class CalcPlan:
 
 
 _CALC_VERB_RE = re.compile(
-    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out"
+    r"\b(calculat\w*|comput\w*|work\s+out|how\s+much|estimate|figure\s+out|bala|kubala|okubala|okubalira|balira|hesabu|kuhesabu|kokotoa"
     r"|what\s+(?:will|would|tax)\b"
-    r"|what\s+(?:will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)",
+    r"|what\s+(?:will\s+(?:the|my|i)|do\s+i\s+(?:pay|owe)|duties|charges)\b)\b",
     re.IGNORECASE,
 )
 
@@ -149,7 +197,10 @@ _DEFINITIONAL_OPENER_RE = re.compile(
 # branch below did not list. Both have a published answer and no amount to
 # compute on.
 _INFO_ONLY_RE = re.compile(
-    r"\bhow\s+(is|are|does)\b.*\b(calculated|computed|charged|determined)\b"
+    r"\bhow\s+(is|are|does|do|can)\b.*\b(calculate|calculated|compute|computed|charge|charged|determine|determined)\b"
+    r"|\b(?:who|when)\s+(?:must|should|needs?|is|are|does)\b.*\b(register|registered|registration|liable|eligible|pay|file)\b"
+    r"|\b(?:religious|church|mosque|charit\w*)\b"
+    r"|\b(?:escape|escape\s+wht|avoid\s+wht|do\s+amounts)\b"
     # "how much X is exempt / tax-free / taxable / deducted" — a threshold
     # lookup. Kept narrow: "how much PAYE will I pay on 3,500,000" has no
     # "is/are + exempt", so it still reaches the calculator.
@@ -159,7 +210,19 @@ _INFO_ONLY_RE = re.compile(
     # or hypothetical rate is still a question about the rate.
     r"|\bwhat\s+(is|are|was|were|will|would|'s)\b.*"
     r"\b(rates?|thresholds?|percentages?|bands?)\b"
-    r"|\b(rates?|thresholds?)\s+(of|for)\b",
+    r"|\b(rates?|thresholds?)\s+(of|for)\b"
+    # Complex comparative, dispute, secondary employment, or statutory edge cases
+    r"|\bdiffer(?:ence|s)?\s+(between|from)\b"
+    r"|\b(secondary\s+employment|secondary\s+employer|omulimu\s+ogw'okubiri)\b"
+    r"|\b(deduct|withhold)\s+both\b|\bboth\s+(the\s+)?(6%|tax|wht|vat)\b"
+    r"|\b(objection|dispute|okuwakanya|nnaku\s+mmeka)\b"
+    r"|\b(?:import|clear|bring)\s+(?:a\s+)?(19\d\d|20\d\d)\b"
+    r"|\b(apportion|apportionment|mixed\s+supplies)\b",
+    re.IGNORECASE,
+)
+
+_LEGAL_INQUIRY_RE = re.compile(
+    r"\b(can\s+i|eligible|claim\b.*\b(?:input|vat|tax)|penalt\w*|disallow\w*|require\w*|obligat\w*|procedure|statut\w*|act\b)\b",
     re.IGNORECASE,
 )
 
@@ -179,8 +242,19 @@ _EXPENSE_KW_RE = re.compile(r"\b(expense\w*|repair\w*|maintenance|costs)\b", re.
 _NO_VAT_RE = re.compile(r"\b(without|excluding|no|minus)\s+vat\b", re.IGNORECASE)
 _DUTY_KW_RE = re.compile(r"\bduty\b", re.IGNORECASE)
 
-_VAT_WORD_RE = re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)
-_REGISTER_WORD_RE = re.compile(r"\bregister(?:ed|ing|ation)?\b", re.IGNORECASE)
+# "vati" is how Whisper-SALT spells VAT in Luganda. The longer phrases are
+# the ordinary Luganda and Kiswahili names; the English token stays.
+_VAT_WORD_RE = re.compile(
+    r"\bv\.?a\.?t\.?\b|\bvati\b|\bvalue\s+added\s+tax\b"
+    r"|\bomusolo\s+gw['’]?okwongerako\b"
+    r"|\bushuru\s+wa\s+(?:ongezeko|vat)\b"
+    r"|\bkodi\s+ya\s+(?:ongezeko|vat)\b",
+    re.IGNORECASE,
+)
+_REGISTER_WORD_RE = re.compile(
+    r"\b(?:register(?:ed|ing|ation)?|usajili|kujisajili|jisajili|okwewandiisa|kwewandiisa|gunteeka|nteekwa|nilazimika)\b",
+    re.IGNORECASE,
+)
 # Obligation cues that make "…register for VAT" a question about *this*
 # taxpayer rather than about the rule.  "What is the VAT registration
 # threshold?" carries none of them and is answered as a rate question.
@@ -188,20 +262,63 @@ _OBLIGATION_RE = re.compile(
     r"\b(do|does|must|should|need|needs|have|has|required|obliged|am|are|when)\b",
     re.IGNORECASE,
 )
+# A statement that the taxpayer is ALREADY VAT-registered is a premise, not
+# the question.  "My business is registered for VAT, do I have to use EFRIS?"
+# asks about EFRIS; the obligation cue belongs to *that* question, and the
+# registration check would answer with a turnover threshold the user neither
+# asked for nor needs — while asking them to supply a figure in order to be
+# told something they have already told us.
+#
+# Subject-then-copula ordering is what keeps genuine questions out: "Am I
+# required to be registered?" puts the cue before the subject and still
+# routes to the check.
+#
+# The premise must itself mention VAT. "My business is registered, do I have to
+# register for VAT?" states an unrelated registration and then asks the genuine
+# question, so a VAT-less premise must not suppress the check.
+# The same two spellings `_VAT_WORD_RE` accepts. `_maybe_handle_calculator`
+# falls back to `plan_calculation(rewritten)`, and the rewriter expands
+# abbreviations — "registered for vat" becomes "registered for Value Added Tax
+# (VAT)". Matching only the short form let the premise guard pass on the raw
+# message and then be bypassed entirely on the rewritten one, which is how this
+# reached production green: every unit test asked with the raw wording.
+_VAT_TOKEN = r"(?:v\.?a\.?t\.?|value\s+added\s+tax)"
+_REGISTERED_FOR_VAT = (
+    rf"(?:{_VAT_TOKEN}[-\s]?registered\b|registered\s+for\s+{_VAT_TOKEN}\b)"
+)
+_ALREADY_REGISTERED_RE = re.compile(
+    r"\b(?:i'?m|we'?re)\s+(?:already\s+|now\s+)?" + _REGISTERED_FOR_VAT
+    # Possessive subjects run to several words — "my small business is
+    # registered for VAT" — so allow a bounded run rather than one token.
+    + r"|\b(?:i|we|my(?:\s+\w+){1,3}|our(?:\s+\w+){1,3})\s+"
+    r"(?:am|are|is|was|were|have|has|had)\s+"
+    r"(?:already\s+|now\s+)?(?:be(?:en)?\s+)?" + _REGISTERED_FOR_VAT
+    + r"|\b" + _REGISTERED_FOR_VAT + r"\s+(?:taxpayer|person|business|company|entity|dealer|trader|vendor)s?\b"
+    + r"|\b(?:efris|electronic\s+fiscal|e-?invoice|e-?receipt|risiti|ankara)\b"
+    + r"|\b(?:non[-\s]?resident\s+supplier|electronic\s+services|digital\s+services)\b"
+    + r"|\b(?:alijesajiliwa|waliosajiliwa|aliyesajiliwa)\s+(?:kwa\s+)?(?:vat|kodi)\b",
+    re.IGNORECASE,
+)
 
 _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
+    ("customs", re.compile(r"\b(customs|import\s+(?:duty|tax|charges?|cost)|cif)\b", re.IGNORECASE)),
     ("withholding", re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
     (
-        "paye",
+        "excise",
         re.compile(
-            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salary\s+tax"
-            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salary|income|earnings|pay)"
-            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salary|income|earnings|pay)"
-            r"|tax\b.*\b(?:salary|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salary|income))\b",
+            r"\b(excise(?:\s+duty)?|ushuru\s+wa\s+bidhaa|mobile\s+money\s+(?:tax|duty|charge|withdrawal)|airtime\s+tax|petrol\s+tax|diesel\s+tax|fuel\s+tax)\b",
             re.IGNORECASE,
         ),
     ),
-    ("rental", re.compile(r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?)\b", re.IGNORECASE)),
+    (
+        "rental",
+        re.compile(
+            r"\b(rent(?:al)?\s+(?:income|tax)|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?rent(?:al)?|tax\b.*\brent(?:al)?"
+            r"|kodi\s+ya\s+pango|ushuru\s+wa\s+pango|upangishaji|kupangisha"
+            r"|(?:omusolo\s+gw['’])?o?bupangisa|amapangisa|amayumba\s+ag['’]o?bupangisa)\b",
+            re.IGNORECASE,
+        ),
+    ),
     ("capital_gains", re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
     (
         "corporation",
@@ -209,14 +326,27 @@ _INTENT_RES: list[tuple[str, re.Pattern[str]]] = [
             r"\b(corporation|corporate|company)\s+(?:income\s+)?tax\b", re.IGNORECASE
         ),
     ),
-    ("customs", re.compile(r"\b(customs|import\s+(?:duty|tax|charges?|cost)|cif)\b", re.IGNORECASE)),
-    ("vat", re.compile(r"\bv\.?a\.?t\.?\b|\bvalue\s+added\s+tax\b", re.IGNORECASE)),
+    (
+        "paye",
+        re.compile(
+            r"\b(paye|take[-\s]?home|net[-\s]?pay|gross[-\s]?pay|net[-\s]?salary|gross[-\s]?salary|salar(?:y|ies)\s+tax"
+            r"|pay\s+as\s+you\s+earn|tax\s+(?:due\s+|payable\s+|will\s+i\s+pay\s+)?on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salar(?:y|ies)|income|earnings|pay)"
+            r"|tax\s+on\s+(?:a\s+|my\s+)?(?:gross\s+|monthly\s+|annual\s+)?(?:salar(?:y|ies)|income|earnings|pay)"
+            r"|salar(?:y|ies)\b.*\btax|tax\b.*\b(?:salar(?:y|ies)|gross[-\s]?pay|earnings)|(?:gross|net)[-\s]?(?:pay|salar(?:y|ies)|income)"
+            r"|(?:what\s+(?:is|'s)\s+(?:the\s+)?|how\s+much\s+)?tax\s+(?:due\s+|payable\s+|is\s+there\s+)?(?:on|for)\s+(?:(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|ssente)\s*)?\d+(?:\s*(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|ssente|/=|/-))?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("vat", _VAT_WORD_RE),
 ]
 
 # Ordered most specific first: "management fees" must beat the looser
 # "services" pattern, and the FY2026-27 categories must beat both.
 _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
-    ("management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
+    (
+        "management_fees",
+        re.compile(r"\bmanagement\s+(?:fees?|consultan\w+)\b", re.IGNORECASE),
+    ),
     ("dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
     ("royalty", re.compile(r"\broyalt(?:y|ies)\b", re.IGNORECASE)),
     (
@@ -239,12 +369,23 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock)\b", re.IGNORECASE)),
 ]
 
+_EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
+    ("mobile_money_withdrawal", re.compile(r"\b(mobile\s*money|momo|airtel\s*money|mtn\s*money|cash\s*withdrawal|withdraw)\b", re.IGNORECASE)),
+    ("telecom_data", re.compile(r"\b(data|internet|bundle|mb|gb|gigabytes?|megabytes?)\b", re.IGNORECASE)),
+    ("telecom_voice", re.compile(r"\b(airtime|voice|call(?:s|ing)?|minutes)\b", re.IGNORECASE)),
+    ("beer_malt", re.compile(r"\b(beer|malt|alcohol|brew)\b", re.IGNORECASE)),
+    ("fuel_petrol", re.compile(r"\b(petrol|gasoline)\b", re.IGNORECASE)),
+    ("fuel_diesel", re.compile(r"\b(diesel|gasoil)\b", re.IGNORECASE)),
+    ("fuel_kerosene", re.compile(r"\b(kerosene|paraffin)\b", re.IGNORECASE)),
+]
+
 
 #: Calculator intent -> the tool that answers it.  Used by the
 #: supervisor to route; :func:`plan_calculation` maps the same intents
 #: to a full plan with parameters.
 INTENT_TOOLS: dict[str, str] = {
     "withholding": "calculate_withholding",
+    "excise": "calculate_excise_duty",
     "paye": "calculate_paye",
     "rental": "calculate_rental_tax",
     "capital_gains": "calculate_capital_gains",
@@ -264,9 +405,207 @@ def detect_calculator_intent(message: str) -> str | None:
     to offer — and the tool loop still gets to not use them.
     """
     text = (message or "").strip()
-    if not text or _INFO_ONLY_RE.search(text):
+    if not text or _INFO_ONLY_RE.search(text) or (_LEGAL_INQUIRY_RE.search(text) and not _CALC_VERB_RE.search(text)):
         return None
     return next((name for name, pat in _INTENT_RES if pat.search(text)), None)
+
+
+# The one numeric slot a later "what about 2 million?" replaces. Capital
+# gains needs two figures, so a single follow-up amount is not replayed.
+AMOUNT_SLOT_BY_TOOL: dict[str, str] = {
+    "calculate_paye": "monthly_gross",
+    "calculate_vat": "amount",
+    "calculate_corporation_tax": "chargeable_income",
+    "calculate_customs_duty": "cif_value",
+    "calculate_excise_duty": "amount",
+    "check_vat_registration": "annual_turnover",
+    "calculate_rental_tax": "annual_gross_rent",
+    "calculate_withholding": "amount",
+}
+_AMOUNT_SLOTS = frozenset(AMOUNT_SLOT_BY_TOOL.values())
+_CALC_MEMORY_TTL_S = 6 * 60 * 60
+_CALC_MEMORY_PREFIX = "mcp:calc:"
+_calc_lock = threading.Lock()
+_calc_memory: dict[str, tuple[float, dict[str, Any]]] = {}
+
+_SLOT_QUESTION = {
+    "monthly_gross": "What is the gross monthly salary in UGX?",
+    "amount": "What is the amount in UGX?",
+    "annual_turnover": "What is the annual turnover in UGX?",
+    "cif_value": "What is the CIF value in UGX?",
+    "annual_gross_rent": "What is the annual rent in UGX?",
+    "chargeable_income": "What is the chargeable income in UGX?",
+    "payment_type": (
+        "Which withholding applies: services or goods at 6%, "
+        "or a management fee at 15%?"
+    ),
+    "sale_price": "What was the sale price in UGX?",
+    "cost_base": "What was the cost in UGX?",
+    "excise_type": "Which excise applies — for example fuel, beer, or airtime?",
+}
+
+# Words left after the figure in "what about 2 million?" / "ate 2m".
+_FOLLOWUP_FILLER_RE = re.compile(
+    r"^(?:what\s+about|how\s+about|and(?:\s+(?:what|if|for))?|if\s+it\s+(?:was|were)|"
+    r"instead|same\s+for|now|then|ku|na|kuhusu|ate|kya|nga)$",
+    re.IGNORECASE,
+)
+_PAYMENT_TYPE_REPLY = {
+    "services": "services",
+    "service": "services",
+    "goods": "goods",
+    "management": "management_fees",
+    "management fee": "management_fees",
+    "management fees": "management_fees",
+}
+
+
+def slot_question(slot: str) -> str:
+    """One question for a calculator slot the message did not carry."""
+    return _SLOT_QUESTION.get(slot, "I need one more detail before I can calculate that.")
+
+
+def _redis_store() -> Any:
+    try:
+        from .mcp.client import _shared_store
+    except Exception:
+        return None
+    try:
+        return _shared_store()
+    except Exception:
+        return None
+
+
+def remember_calculation(
+    conversation_id: str,
+    tool: str,
+    params: dict[str, Any],
+    *,
+    pending: list[str] | None = None,
+    assumptions: list[str] | None = None,
+) -> None:
+    """Remember the last calculator so the next amount stays on that tax."""
+    if not conversation_id or tool not in AMOUNT_SLOT_BY_TOOL:
+        return
+    record = {
+        "tool": tool,
+        "params": {k: v for k, v in params.items() if k != "fiscal_year"},
+        "pending": list(pending or []),
+        "assumptions": list(assumptions or []),
+    }
+    with _calc_lock:
+        _calc_memory[conversation_id] = (time.monotonic() + _CALC_MEMORY_TTL_S, record)
+    store = _redis_store()
+    if store is None:
+        return
+    try:
+        store.setex(
+            _CALC_MEMORY_PREFIX + conversation_id,
+            _CALC_MEMORY_TTL_S,
+            json.dumps(record),
+        )
+    except Exception:
+        logger.debug("calc memory redis set failed", exc_info=True)
+
+
+def recall_calculation(conversation_id: str) -> dict[str, Any] | None:
+    """The last calculator for this conversation, or None when it has expired."""
+    if not conversation_id:
+        return None
+    store = _redis_store()
+    if store is not None:
+        try:
+            raw = store.get(_CALC_MEMORY_PREFIX + conversation_id)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, dict) and data.get("tool"):
+                    return data
+        except Exception:
+            logger.debug("calc memory redis get failed", exc_info=True)
+    with _calc_lock:
+        cached = _calc_memory.get(conversation_id)
+        if cached is None:
+            return None
+        expires, record = cached
+        if time.monotonic() >= expires:
+            _calc_memory.pop(conversation_id, None)
+            return None
+        return dict(record)
+
+
+def clear_calculation(conversation_id: str) -> None:
+    """Drop a remembered calculator. Tests use this; a new plan overwrites it."""
+    with _calc_lock:
+        _calc_memory.pop(conversation_id, None)
+    store = _redis_store()
+    if store is None:
+        return
+    try:
+        store.delete(_CALC_MEMORY_PREFIX + conversation_id)
+    except Exception:
+        logger.debug("calc memory redis delete failed", exc_info=True)
+
+
+def lone_amount(message: str) -> float | None:
+    """One money figure that does not name a tax head.
+
+    "200 million" and "what about 200 million?" qualify. "VAT on 200 million"
+    does not — that message belongs to :func:`plan_calculation`.
+    """
+    text = (message or "").strip()
+    if not text or detect_calculator_intent(text):
+        return None
+    amounts = extract_amounts(text)
+    if len(amounts) != 1:
+        return None
+    val, start, end = amounts[0]
+    if val <= 0:
+        return None
+    remainder = (text[:start] + " " + text[end:]).strip()
+    remainder = re.sub(_CURRENCY, " ", remainder, flags=re.IGNORECASE)
+    remainder = re.sub(r"[\s.,!?:;/\-=]+", " ", remainder).strip()
+    if not remainder or _FOLLOWUP_FILLER_RE.match(remainder):
+        return float(val)
+    return None
+
+
+def payment_type_reply(message: str) -> str | None:
+    """A short reply that names a withholding category, or None."""
+    return _PAYMENT_TYPE_REPLY.get(re.sub(r"\s+", " ", (message or "").strip().lower()))
+
+
+def continue_calculation(saved: dict[str, Any], message: str) -> dict[str, Any] | None:
+    """Fill the pending slot of a remembered calculator from *message*.
+
+    Returns ``{"ready": True, ...}`` when the tool can run, ``{"ready": False}``
+    when another slot is still open, and None when the message is a new question.
+    """
+    tool = str(saved.get("tool") or "")
+    if tool not in AMOUNT_SLOT_BY_TOOL:
+        return None
+    params = dict(saved.get("params") or {})
+    pending = [str(slot) for slot in (saved.get("pending") or [])]
+    assumptions = list(saved.get("assumptions") or [])
+    if pending and pending[0] == "payment_type":
+        kind = payment_type_reply(message)
+        if kind is None:
+            return None
+        params["payment_type"] = kind
+        pending = pending[1:]
+    else:
+        amount = lone_amount(message)
+        if amount is None:
+            return None
+        slot = pending[0] if pending and pending[0] in _AMOUNT_SLOTS else AMOUNT_SLOT_BY_TOOL[tool]
+        params[slot] = amount
+        pending = [item for item in pending if item != slot]
+    return {
+        "tool": tool,
+        "params": params,
+        "pending": pending,
+        "assumptions": assumptions,
+        "ready": not pending,
+    }
 
 
 def has_money_amount(message: str) -> bool:
@@ -285,25 +624,40 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     against.
     """
     text = (message or "").strip()
-    if not text or _INFO_ONLY_RE.search(text):
+    if not text or _INFO_ONLY_RE.search(text) or re.search(r"^\s*who\b", text, re.IGNORECASE):
+        return None
+    if (
+        re.search(r"\b(?:example|in\s+theory|theoretically|explain\b|how\s+is\b.*\b(?:determined|defined|accounted))\b", text, re.IGNORECASE)
+        and not has_money_amount(text)
+    ):
         return None
 
     # "Must I register for VAT?" is a threshold test, not a calculation,
     # so it is matched before the calculation-verb gate — the natural
     # phrasing carries no "calculate"/"how much".
-    if _VAT_WORD_RE.search(text) and _REGISTER_WORD_RE.search(text):
+    if (
+        _VAT_WORD_RE.search(text)
+        and _REGISTER_WORD_RE.search(text)
+        and not _ALREADY_REGISTERED_RE.search(text)
+    ):
         turnover_amounts = extract_amounts(text)
         if turnover_amounts or _OBLIGATION_RE.search(text):
             params: dict[str, object] = {}
             missing: list[str] = []
-            if len(turnover_amounts) == 1:
-                params["annual_turnover"] = turnover_amounts[0][0]
+            unique_turnover = list(dict.fromkeys(val for val, *_ in turnover_amounts))
+            if len(unique_turnover) == 1:
+                params["annual_turnover"] = unique_turnover[0]
             else:
                 missing.append("annual_turnover")
             return CalcPlan("check_vat_registration", "calc_vat_registration", params, missing, [])
 
+    # Informational legal inquiry guard: questions about legal provisions, penalties, or
+    # input tax claims should not be hijacked into a calculator wizard.
+    if _LEGAL_INQUIRY_RE.search(text) and not _CALC_VERB_RE.search(text):
+        return None
+
     if not _CALC_VERB_RE.search(text) and not (
-        _DEFINITIONAL_OPENER_RE.search(text) and has_money_amount(text)
+        has_money_amount(text) and _DEFINITIONAL_OPENER_RE.search(text)
     ):
         return None
 
@@ -399,14 +753,55 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         ]
         if duty_pcts:
             params["duty_rate"] = duty_pcts[0] / 100
+        elif re.search(r"\b(raw\s+materials?|capital\s+goods?)\b", text, re.IGNORECASE):
+            params["goods_category"] = "raw_materials"
+            assumptions.append("EAC CET Band 1: raw materials / capital goods (0% duty)")
+        elif re.search(r"\bintermediate\b", text, re.IGNORECASE):
+            params["goods_category"] = "intermediate"
+            assumptions.append("EAC CET Band 2: intermediate goods (10% duty)")
+        elif re.search(r"\b(sensitive|sugar|rice|wheat|cement)\b", text, re.IGNORECASE):
+            params["goods_category"] = "sensitive"
+            assumptions.append("EAC CET Band 4: sensitive items (35% duty)")
+        elif re.search(r"\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b", text, re.IGNORECASE):
+            params["goods_category"] = "used_clothing"
+            assumptions.append("used clothing includes 30% environmental levy on CIF")
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b|\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+            params["goods_category"] = "used_vehicle_5_to_8_years"
+            assumptions.append("used motor vehicle 5-8 years: 35% environmental levy")
+        elif re.search(r"\b(car|vehicle|motor\s*vehicle)\b.*\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b|\b(?:9|1[0-5]|nine|ten|eleven|twelve|thirteen|fourteen|fifteen)\s*(?:years?|yrs?)\b.*\b(car|vehicle|motor\s*vehicle)\b", text, re.IGNORECASE):
+            params["goods_category"] = "used_vehicle_over_8_years"
+            assumptions.append("used motor vehicle 8-15 years: 50% environmental levy (vehicles >15 yrs prohibited)")
         else:
             assumptions.append("common external tariff duty of 25% (tell me the exact rate to refine)")
+
+        if re.search(r"\b(wht|withholding)\b", text, re.IGNORECASE):
+            params["include_wht"] = True
+            assumptions.append("includes 6% commercial import withholding tax (s.119)")
+
         missing = []
         if single is not None:
             params["cif_value"] = single
         else:
             missing.append("cif_value")
         return CalcPlan("calculate_customs_duty", "calc_customs_duty", params, missing, assumptions)
+
+    if intent == "excise":
+        params, missing = {}, []
+        assumptions = []
+        excise_type = next((name for name, pat in _EXCISE_TYPE_RES if pat.search(text)), None)
+        if excise_type is not None:
+            params["excise_type"] = excise_type
+        else:
+            if re.search(r"\b(withdraw\w*|cash)\b", text, re.IGNORECASE):
+                params["excise_type"] = "mobile_money_withdrawal"
+                assumptions.append("mobile money cash withdrawal (0.5% rate)")
+            else:
+                missing.append("excise_type")
+        if single is not None:
+            params["amount"] = single
+        else:
+            missing.append("amount")
+        return CalcPlan("calculate_excise_duty", "calc_excise_duty", params, missing, assumptions)
 
     if intent == "rental":
         params = {"landlord_type": "company" if _COMPANY_RE.search(text) else "individual"}
@@ -437,9 +832,13 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
 
     if intent == "withholding":
         params, missing = {}, []
-        wht_type = next((name for name, pat in _WHT_TYPE_RES if pat.search(text)), None)
-        if wht_type is not None:
-            params["payment_type"] = wht_type
+        # "management consultancy" matches both a 15% fee and 6% services.
+        # Ask, rather than silently billing the lower rate.
+        matched = [name for name, pat in _WHT_TYPE_RES if pat.search(text)]
+        if "management_fees" in matched and "services" in matched:
+            missing.append("payment_type")
+        elif matched:
+            params["payment_type"] = matched[0]
         else:
             missing.append("payment_type")
         if single is not None:
@@ -514,6 +913,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
         ]
         if result.get("deductions_note"):
             lines.append(f"- _{result['deductions_note']}_")
+        lines.append("- Statutory Basis: Income Tax Act")
     elif tool == "calculate_vat":
         lines = [
             f"**VAT calculation ({fy})**",
@@ -521,6 +921,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Net amount: {_ugx(result['net'])}",
             f"- VAT at {float(result['rate']) * 100:.0f}%: **{_ugx(result['vat'])}**",
             f"- Gross (VAT-inclusive): **{_ugx(result['gross'])}**",
+            "- Statutory Basis: Value Added Tax Act",
         ]
     elif tool == "calculate_corporation_tax":
         lines = [
@@ -529,6 +930,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Chargeable income: {_ugx(result['chargeable_income'])}",
             f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
             f"- After-tax income: {_ugx(result['after_tax'])}",
+            "- Statutory Basis: Income Tax Act",
         ]
     elif tool == "calculate_capital_gains":
         lines = [
@@ -538,8 +940,10 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Cost base: {_ugx(result['cost_base'])}",
             f"- Gain: {_ugx(result['gain'])}",
             f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+            "- Statutory Basis: Income Tax Act",
         ]
     elif tool == "calculate_customs_duty":
+        goods_cat = str(result.get("goods_category", "general")).replace("_", " ")
         lines = [
             f"**Customs duty estimate ({fy})**",
             "",
@@ -550,11 +954,33 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             levy_pct = float(result.get("environmental_levy_rate") or 0) * 100
             lines.append(
                 f"- Environmental levy at {levy_pct:.0f}% of CIF "
-                f"(used clothing): {_ugx(result['environmental_levy'])}"
+                f"({goods_cat}): {_ugx(result['environmental_levy'])}"
             )
         if result.get("vat_included"):
             lines.append(f"- VAT on (CIF + duty + levy): {_ugx(result['vat'])}")
+        if result.get("wht_included"):
+            lines.append(f"- Commercial import WHT (6% on CIF): {_ugx(result['wht'])}")
         lines.append(f"- Estimated landed cost: **{_ugx(result['landed_cost'])}**")
+        lines.append("- Statutory Basis: East African Community Customs Management Act (EACCMA)")
+    elif tool == "calculate_excise_duty":
+        excise_type = str(result.get("excise_type", "")).replace("_", " ")
+        is_specific = bool(result.get("is_specific_rate"))
+        if is_specific:
+            rate_str = f"UGX {float(result['rate']):,.0f}/litre"
+            amt_str = f"{float(result['amount']):,.0f} litres"
+        else:
+            rate_str = f"{float(result['rate']) * 100:.1f}%"
+            amt_str = _ugx(result['amount'])
+        lines = [
+            f"**Excise duty — {excise_type} ({fy})**",
+            "",
+            f"- Base: {amt_str}",
+            f"- Statutory rate: {rate_str}",
+            f"- Excise duty payable: **{_ugx(result['excise_duty'])}**",
+            "- Statutory Basis: Excise Duty Act 2014 (as amended)",
+        ]
+        if result.get("excise_type") == "mobile_money_withdrawal":
+            lines.append("- _Note: 0.5% applies to cash withdrawals only; deposits and transfers are exempt._")
     elif tool == "check_vat_registration":
         required = bool(result.get("registration_required"))
         lines = [
@@ -568,6 +994,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
                 else "- **Registration is not compulsory** — you are below the threshold "
                 f"(headroom {_ugx(result['headroom'])}). Voluntary registration is still available."
             ),
+            "- Statutory Basis: Value Added Tax Act",
         ]
     elif tool == "calculate_rental_tax":
         if result.get("landlord_type") == "company":
@@ -578,6 +1005,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
                 f"- Deductible expenses (≤50% of gross): {_ugx(result['allowable_expenses'])}",
                 f"- Chargeable income: {_ugx(result['chargeable_income'])}",
                 f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+                "- Statutory Basis: Income Tax Act",
             ]
         else:
             lines = [
@@ -587,6 +1015,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
                 f"- Tax-free threshold: {_ugx(result['threshold'])} per year",
                 f"- Taxable amount: {_ugx(result['taxable_amount'])}",
                 f"- Tax at {float(result['rate']) * 100:.0f}%: **{_ugx(result['tax'])}**",
+                "- Statutory Basis: Income Tax Act",
             ]
     elif tool == "calculate_withholding":
         label = str(result.get("payment_type", "")).replace("_", " ")
@@ -596,6 +1025,7 @@ def format_calc_reply(tool: str, result: dict[str, object], assumptions: list[st
             f"- Gross payment: {_ugx(result['amount'])}",
             f"- WHT at {float(result['rate']) * 100:.0f}%: **{_ugx(result['withholding_tax'])}**",
             f"- Net payable to payee: {_ugx(result['net_payable'])}",
+            "- Statutory Basis: Income Tax Act",
         ]
     else:
         lines = [str(result.get("explanation", ""))]
@@ -627,9 +1057,26 @@ class RatePlan:
 # question reach it, so "what are the PAYE tax bands?" fell through to
 # retrieval while "what are the PAYE rates?" answered from the table.
 _RATE_ASK_RE = re.compile(
-    r"\b(what(?:'s|\s+is)?|current|how\s+much\s+is|tell\s+me)\b[^?]*\b(rates?|thresholds?|bands?)\b"
-    r"|\b(rates?|thresholds?|bands?)\s+(of|for)\b",
+    r"\b(what(?:'s|\s+is|\s+are)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
+    r"|\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
+    r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
+    r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
+    r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
+    r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"
+    r"|\b(?:customs\s+valuation|valuation\s+method|hierarchy|hierarchical|sequential|method\s+[1-6]|fallback\s+method|transaction\s+value)\b"
+    r"|\b(?:voluntary\s+disclosure|agency\s+notice|bank\s+account|freeze|travel\s+out|tax\s+debtor|departure\s+prohibition|bad\s+debts?|rules\s+of\s+origin|polythene|kaveera|carrier\s+bags?|microns|primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|environmental\s+levy|differ(?:ence|s)?\s+(?:between|from)|rental\s+tax|mixed\s+supplies|zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|exploration\s+losses?|contract\s+blocks?|ring[-\s]?fenc\w*|bonded\s+warehouse)\b"
+    r"|\b(?:ushuru\s+gani|kodi\s+gani|musolo\s+ki|misolo\s+ki|sola|solar|enjuba|basonyiyibwa|gwa\s+mmeka|abaliko\s+obulemu|walemavu|ulemavu|lunaku\s+ki|ku\s+lunaku\s+ki|zisasula\s+zitya|zisasulwa\s+zitya|gusasulwa\s+gutya|zinalipwaje|zinalipwa\s+vipi|e?ssaawa\s+mmeka|masaa\s+mangapi|prn|unawalazimu|kiwango\s+ki|ku\s+kiwango\s+ki)\b",
     re.IGNORECASE,
+)
+
+# A rate table answers for a bounded period. A calendar year in a rate
+# question is therefore meaningful even though it is not, on its own, an
+# unambiguous Ugandan fiscal year. Keep this separate from ``extract_amounts``:
+# a year is never a UGX amount, but the service needs to know when a taxpayer
+# is asking beyond the dates covered by our tables.
+_RATE_CALENDAR_YEAR_RE = re.compile(
+    r"(?<!\d)(?P<start>(?:19|20)\d{2})"
+    r"(?:\s*[-/]\s*(?:(?P<end_century>19|20)?(?P<end>\d{2})))?(?!\d)"
 )
 
 # Taxpayers asking where the tax-free line sits almost never say "rate" or
@@ -642,49 +1089,523 @@ _RATE_ASK_RE = re.compile(
 # Every alternative names employment income, because PAYE is the only URA tax
 # charged on a salary; a turnover or rental question cannot reach this path.
 _PAYE_THRESHOLD_ASK_RE = re.compile(
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b[^?.!]{0,30}"
-    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed)\b"
-    r"|\b(tax[-\s]?free|exempt(?:ed)?)\b[^?.!]{0,30}"
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b"
+    r"\b(paye[e]?|pay\s+as\s+you\s+earn)\b[^?.!]{0,40}\b(threshold|tax[-\s]?free|exempt|bef[ro]+e|untaxed)\b"
+    r"|\b(threshold|tax[-\s]?free|exempt)\b[^?.!]{0,40}\b(paye[e]?|pay\s+as\s+you\s+earn)\b"
+    r"|\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b[^?.!]{0,30}"
+    r"\b(tax[-\s]?free|exempt(?:ed)?|not\s+taxed|untaxed|threshold|bure|bwereere|kutoswa)\b"
+    r"|\b(tax[-\s]?free|exempt(?:ed)?|bure|bwereere)\b[^?.!]{0,30}"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|mishahara|emisaala|omusaala)\b"
     r"|\b(at|above|from|over)\s+what\b[^?.!]{0,40}"
-    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?)\b[^?.!]{0,40}"
+    r"\b(salar(?:y|ies)|wages?|payslip|take[-\s]?home|earnings?|mshahara|emisaala)\b[^?.!]{0,40}"
     r"\b(start|begin)\s+(?:to\s+)?pay(?:ing)?\b",
     re.IGNORECASE,
 )
 
 _RATE_TYPE_RES: list[tuple[RatePlan, re.Pattern[str]]] = [
+    (
+        RatePlan(tax_type="mining_petroleum_ring_fencing"),
+        re.compile(
+            r"\b(mining|petroleum|exploration\s+losses?|contract\s+area|contract\s+block|block\s+[a-z0-9]|ring[-\s]?fenc\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_export_cess_hides_skins"),
+        re.compile(
+            r"\b(hides\s+and\s+skins|raw\s+hides|unprocessed\s+skins|export\s+cess)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="wht_exemption_certificate_criteria"),
+        re.compile(
+            r"\b(wht\s+exemption\s+certificate|withholding\s+tax\s+exemption\s+certificate|exemption\s+from\s+6%\s+withholding)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="dta_treaty_precedence"),
+        re.compile(
+            r"\b(double\s+taxation\s+agreement|dta|tax\s+treaty|treaty\s+precedence|which\s+rate\s+prevails)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_international_transport_zero_rating"),
+        re.compile(
+            r"\b(international\s+transport|transport\s+of\s+passengers\s+or\s+commercial\s+cargo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_mixed_supplies_apportionment"),
+        re.compile(
+            r"\b(mixed\s+supplies|input\s+vat\s+on\s+overheads|apportion(?:ment)?\s+of\s+input\s+vat)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_zero_rated_vs_exempt"),
+        re.compile(
+            r"\b(zero[-\s]?rated\s+(?:and|vs|versus)\s+exempt|difference\s+between\s+zero[-\s]?rated)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_input_tax_restriction_fuel_telephone"),
+        re.compile(
+            r"\b(input\s+tax|input\s+vat|claim\s+input)\b[^?]{0,60}\b(fuel|telephone|petrol|diesel|phone)\b"
+            r"|\b(fuel|telephone|petrol|diesel|phone)\b[^?]{0,60}\b(input\s+tax|input\s+vat|claim\s+input)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="solar_equipment_exemption"),
+        re.compile(
+            r"\b(solar|sola|nishati\s+ya\s+jua|amasannyalaze\s+g['’]enjuba)\b[^?]{0,60}\b(exemption|exempt|duty|tax|ushuru|o?musolo|inverter|batter)\b"
+            r"|\b(exemption|exempt|duty|tax|ushuru|o?musolo)\b[^?]{0,60}\b(solar|sola|nishati\s+ya\s+jua|amasannyalaze\s+g['’]enjuba)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_transit_goods_security"),
+        re.compile(
+            r"\b(transit\s+goods|transiting\s+through\s+uganda|goods\s+in\s+transit)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_diplomatic_exemption"),
+        re.compile(
+            r"\b(diplomatic\s+missions?|foreign\s+diplomatic|diplomats?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="rental_monthly_provisional_option"),
+        re.compile(
+            r"\b(provisional\s+rental\s+tax\s+returns?\s+on\s+a\s+monthly\s+basis|monthly\s+basis\s+instead\s+of\s+annually)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="wht_non_resident_entertainer"),
+        re.compile(
+            r"\b(foreign\s+musician|foreign\s+artist|non[-\s]?resident\s+public\s+entertainer|concert\s+promoter)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="voluntary_disclosure_programme"),
+        re.compile(
+            r"\b(voluntary\s+disclosure|voluntarily\s+disclose|vdp)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="third_party_agency_notice"),
+        re.compile(
+            r"\b(agency\s+notice|third\s+party\s+(?:notice|order)|bank\s+account\s+freeze|freeze\s+and\s+collect|bank\s+account|instruct\s+(?:a\s+)?(?:commercial\s+)?bank)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="departure_prohibition_order"),
+        re.compile(
+            r"\b(departure\s+prohibition|travel\s+restriction|prevent\s+(?:a\s+)?(?:tax\s+)?debtor|order\s+prevents?\s+(?:a\s+)?(?:tax\s+)?debtor|airport\s+restriction)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="cgt_private_residence_exemption"),
+        re.compile(
+            r"\b(primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b[^?]{0,60}\b(capital\s+gains?|cgt|tax|exempt)\b"
+            r"|\b(capital\s+gains?|cgt|tax|exempt)\b[^?]{0,60}\b(primary\s+(?:private|personal)\s+home|principal\s+private\s+residence|personal\s+residential\s+property)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_ban_polythene_kaveera"),
+        re.compile(
+            r"\b(polythene|plastic\s+carrier\s+bags?|kaveera|microns)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="local_excise_duty_raw_material_offset"),
+        re.compile(
+            r"\b(offset\s+excise|raw\s+materials?\s+used\s+as|offset\s+this\s+excise|excise\s+duty\s+paid\s+on\s+raw|offset\s+excise\s+duty)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_bonded_warehouse_limit"),
+        re.compile(
+            r"\b(bonded\s+warehouse|ghala\s+ya\s+forodha)\b[^?]{0,60}\b(maximum|period|time|how\s+long|stored|stay|limit)\b"
+            r"|\b(maximum|period|time|how\s+long|stored|stay|limit)\b[^?]{0,60}\b(bonded\s+warehouse|ghala\s+ya\s+forodha)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_bad_debt_relief"),
+        re.compile(
+            r"\b(bad\s+debt|bad\s+debts)\b[^?]{0,60}\b(vat|relief|refund|claim)\b"
+            r"|\b(vat|relief|refund|claim)\b[^?]{0,60}\b(bad\s+debt|bad\s+debts)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="efris_tampering_penalty"),
+        re.compile(
+            r"\b(tamper\w*|alter\w*|falsif\w*)\b[^?]{0,60}\b(efris|fiscal\s+device|efd|fiscal\s+record)\b"
+            r"|\b(efris|fiscal\s+device|efd|fiscal\s+record)\b[^?]{0,60}\b(tamper\w*|alter\w*|falsif\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="eac_cet_tariff_bands"),
+        re.compile(
+            r"\b(eac\s+cet|common\s+external\s+tariff|cet\s+bands?|tariff\s+bands?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="eac_rules_of_origin_value_addition"),
+        re.compile(
+            r"\b(rules\s+of\s+origin|preferential\s+origin|value\s+addition)\b"
+            r"|\b(eac|jumuiya\s+ya\s+afrika\s+mashariki)\b[^?]{0,60}\b(value\s+addition|ongezeko\s+la\s+thamani|kuingia\s+bila\s+ushuru)\b"
+            r"|\b(value\s+addition|ongezeko\s+la\s+thamani)\b[^?]{0,60}\b(eac|kuingia\s+bila\s+ushuru|jumuiya\s+ya\s+afrika\s+mashariki)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="tax_appeals_tribunal_deadline_days"),
+        re.compile(
+            r"\b(tax\s+appeals\s+tribunal|tat)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="vat_quarterly_registration_threshold"),
+        re.compile(
+            r"\b(quarterly|three\s+consecutive(?:\s+calendar)?\s+months?|3\s+consecutive(?:\s+calendar)?\s+months?|miezi\s+mitatu\s+mfululizo)\b",
+            re.IGNORECASE,
+        ),
+    ),
     # "VAT threshold" is a question about the registration threshold, not
     # about the 18% rate — so it must be matched before the generic VAT
     # pattern below, which would otherwise answer with the standard rate.
     (
         RatePlan(tax_type="vat_registration_threshold_annual"),
         re.compile(
-            r"\bv\.?a\.?t\.?\b[^?]{0,40}\b(registration|register|threshold)\b"
-            r"|\b(registration|register|threshold)\b[^?]{0,40}\bv\.?a\.?t\.?\b",
+            r"\bv\.?a\.?t\.?\b[^?]{0,50}\b(registration|register|threshold|okwewandiisa|usajili|ekkomo|bizinensi)\b"
+            r"|\b(registration|register|threshold|okwewandiisa|usajili|ekkomo)\b[^?]{0,50}\bv\.?a\.?t\.?\b",
             re.IGNORECASE,
         ),
     ),
-    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht)\b", re.IGNORECASE)),
-    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?)\b", re.IGNORECASE)),
-    (RatePlan(tax_type="rental_tax_company"), re.compile(r"\b(compan(?:y|ies)|business)\b.*\brent(?:al)?\b|\brent(?:al)?\b.*\b(compan(?:y|ies)|business)\b", re.IGNORECASE)),
-    (RatePlan(summary="rental"), re.compile(r"\brent(?:al)?\b", re.IGNORECASE)),
-    (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt)\b", re.IGNORECASE)),
+    (
+        RatePlan(tax_type="excise_duty_mobile_money_withdrawal"),
+        re.compile(
+            r"\b(mobile\s*money|cash\s*withdrawal)\b[^?]{0,50}\b(excise|duty|rate|levy)\b"
+            r"|\b(excise|duty|rate|levy)\b[^?]{0,50}\b(mobile\s*money|cash\s*withdrawal)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_clothing"),
+        re.compile(
+            r"\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b[^?]{0,50}\b(levy|tax|duty|rate)\b"
+            r"|\b(environmental\s+levy|levy|duty|rate)\b[^?]{0,50}\b(used\s+cloth\w*|second\s+hand\s+cloth\w*|worn\s+cloth\w*|mivumba|mitumba)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_vehicles_5_to_8_years"),
+        re.compile(
+            r"\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b[^?]{0,40}\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b"
+            r"|\b(?:[5-8]|five|six|seven|eight)\s*(?:years?|yrs?)\b[^?]{0,40}\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_vehicles_over_8_years"),
+        re.compile(
+            r"\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b[^?]{0,40}\b(?:9|[12]\d|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*[-\s]?(?:years?|yrs?)(?:[-\s]?old)?\b"
+            r"|\b(?:9|[12]\d|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s*[-\s]?(?:years?|yrs?)(?:[-\s]?old)?\b[^?]{0,40}\b(car|cars|vehicle|vehicles|motor\s*vehicle)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="infrastructure_development_levy"),
+        re.compile(
+            r"\b(infrastructure(?:\s+development)?\s+levy|idl)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="commercial_import_withholding_tax"),
+        re.compile(
+            r"\b(import\s+wht|import\s+withholding(?:\s+tax)?|withholding\s+on\s+import\w*)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_telecom_data"),
+        re.compile(
+            r"\b(data|internet|bundle)\b[^?]{0,40}\b(excise|tax|rate|duty)\b"
+            r"|\b(excise|tax|rate|duty)\b[^?]{0,40}\b(data|internet|bundle)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_telecom_voice"),
+        re.compile(
+            r"\b(airtime|voice|call(?:s)?)\b[^?]{0,40}\b(excise|tax|rate|duty)\b"
+            r"|\b(excise|tax|rate|duty)\b[^?]{0,40}\b(airtime|voice|call(?:s)?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_summary"),
+        re.compile(
+            r"\b(petrol\b.*\bdiesel|diesel\b.*\bpetrol|fuel\s+rates?|petroleum\s+rates?|fuels?\s+excise)\b"
+            r"|\b(fuel|petroleum)\b[^?]{0,60}\b(excise|rates?|duty|per\s+litre)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_petrol_per_litre"),
+        re.compile(
+            r"\b(petrol|gasoline)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(petrol|gasoline)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_diesel_per_litre"),
+        re.compile(
+            r"\b(diesel|gasoil)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(diesel|gasoil)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_fuel_kerosene_per_litre"),
+        re.compile(
+            r"\b(kerosene|paraffin)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(kerosene|paraffin)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="excise_duty_beer_malt"),
+        re.compile(
+            r"\b(beer|malt\s+beer|malt)\b[^?]{0,40}\b(excise|duty|tax|rate)\b"
+            r"|\b(excise|duty|tax|rate)\b[^?]{0,40}\b(beer|malt\s+beer|malt)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="presumptive_tax_threshold"),
+        re.compile(
+            r"\b(presumptive|small\s+business)\b[^?]{0,50}\b(threshold|turnover|limit|bands?|ekkomo|kiwango)\b"
+            r"|\b(threshold|turnover|limit|bands?|ekkomo|kiwango)\b[^?]{0,50}\b(presumptive|small\s+business)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="penal_tax_late_filing"),
+        re.compile(
+            r"\b(penalt(?:y|ies)|fine|fines|adhabu|okubonerezebwa)\b[^?]{0,60}\b(late\s+filing|filing\s+late|late\s+return|failure\s+to\s+file|kuchelewa\s+kuwasilisha|obutawaayo|income\s+tax\s+return|tax\s+return)\b"
+            r"|\b(late\s+filing|filing\s+late|late\s+return|failure\s+to\s+file|kuchelewa\s+kuwasilisha|obutawaayo)\b[^?]{0,60}\b(penalt(?:y|ies)|fine|fines|adhabu|okubonerezebwa)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="efris_penalty_failure_to_issue_invoice"),
+        re.compile(
+            r"\b(efris|fiscal\s+receipt|fiscal\s+invoice|e[-\s]?invoice|e[-\s]?receipt)\b[^?]{0,60}\b(penalt(?:y|ies)|fine|fines|fail(?:ure)?|adhabu|kibonerezo)\b"
+            r"|\b(penalt(?:y|ies)|fine|fines|fail(?:ure)?|adhabu|kibonerezo)\b[^?]{0,60}\b(efris|fiscal\s+receipt|fiscal\s+invoice|e[-\s]?invoice|e[-\s]?receipt)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="efris_offline_sync_window_hours"),
+        re.compile(
+            r"\b(efris|offline|sirina\s+yintaneti|bila\s+mtandao)\b[^?]{0,60}\b(sync|hours?|essaawa|masaa|window|time|budde)\b"
+            r"|\b(hours?|essaawa|masaa|window|time|budde)\b[^?]{0,60}\b(efris|offline|sirina\s+yintaneti|bila\s+mtandao)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="efris_invoicing_mandate"),
+        re.compile(
+            r"\b(efris)\b[^?]{0,60}\b(unawalazimu|invoicing\s+mandate|issuance|kufanya\s+nini|wanapouza)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="prn_payment_procedures"),
+        re.compile(
+            r"\b(prn|payment\s+registration\s+number)\b[^?]{0,60}\b(pay|kulipa|kusasula|benki|simu|mobile\s+money)\b"
+            r"|\b(pay|kulipa|kusasula)\b[^?]{0,60}\b(prn|payment\s+registration\s+number)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="late_payment_interest_monthly_rate"),
+        re.compile(
+            r"\b(interest|unpaid\s+tax|overdue|late\s+payment)\b[^?]{0,60}\b(rate|percentage|per\s+month|applied|charged)\b"
+            r"|\b(rate|percentage|per\s+month)\b[^?]{0,60}\b(interest|unpaid\s+tax|overdue|late\s+payment)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="stamp_duty_property_transfer"),
+        re.compile(
+            r"\b(stamp\s*duty|stempu|stampu)\b[^?]{0,50}\b(transfer|property|land|ettaka|ardhi|ekyapa|kikyusa)\b"
+            r"|\b(transfer|property|land|ettaka|ardhi|ekyapa|kikyusa)\b[^?]{0,50}\b(stamp\s*duty|stempu|stampu)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="objection_timeline_days"),
+        re.compile(
+            r"\b(objection|pingamizi|kwekubira\s+ebyondo|appeal)\b[^?]{0,60}\b(days?|siku|nnaku|time|period|deadline)\b"
+            r"|\b(days?|siku|nnaku|time|period|deadline)\b[^?]{0,60}\b(objection|pingamizi|kwekubira\s+ebyondo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="paye_due_date_monthly"),
+        re.compile(
+            r"\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn|alipoota\s+z['’]?omusolo|marejesho\s+ya\s+kodi)\b[^?]{0,60}\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule|due|ebiseera|mwisho|tarehe|ddi|lini|lunaku\s+ki|ku\s+lunaku\s+ki)\b"
+            r"|\b(due\s+date|deadline|when|by\s+what\s+day|day\s+of\s+the\s+month|schedule|lunaku\s+ki|ku\s+lunaku\s+ki)\b[^?]{0,60}\b(paye|vat|excise|returns?|pay\s+as\s+you\s+earn|alipoota\s+z['’]?omusolo|marejesho\s+ya\s+kodi)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="passenger_baggage_allowance"),
+        re.compile(
+            r"\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b[^?]{0,60}\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b"
+            r"|\b(allowance|duty[-\s]?free|bitasasulwako|isiyotozwa)\b[^?]{0,60}\b(baggage|passenger|abagenyi|abasaabaze|abiria|mizigo)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="paye_secondary_employment_rate"),
+        re.compile(
+            r"\b(?:second(?:ary)?)\b[^?]{0,30}\b(?:employment|job|role|income|employer)\b|\b(?:omulimu\s+ogw'okubiri)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="agro_processing_local_raw_material_ratio"),
+        re.compile(
+            r"\b(agro[-\s]?processing|fruit\s+processing|grain\s+processing)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="disability_income_tax_threshold_monthly"),
+        re.compile(
+            r"\b(pwd|disabilit(?:y|ies)|disabled|persons?\s+with\s+disabilit\w*|ulemavu|walemavu|abaliko\s+obulemu)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="branch_repatriation_tax_rate"),
+        re.compile(
+            r"\b(repatriat\w*|branch\s+profits?|branch\s+tax)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="customs_valuation_hierarchy"),
+        re.compile(
+            r"\b(valuation\s+method|valuation\s+hierarchy|method\s+[1-6]|transaction\s+value|identical\s+goods|similar\s+goods|deductive\s+value|computed\s+value|fallback\s+method)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="digital_services_tax_non_resident"),
+        re.compile(
+            r"\b(digital\s+services?|electronic\s+services?|streaming|netflix|spotify|dst)\b[^?]{0,60}\b(tax|rates?|percentage|kiwango)\b"
+            r"|\b(tax|rates?|percentage|kiwango)\b[^?]{0,60}\b(digital\s+services?|electronic\s+services?|streaming|netflix|spotify|dst)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="motor_vehicle_transfer_fee"),
+        re.compile(
+            r"\b(transfer\s+fee|transfer\s+ownership|kyusa\s+ekyapa\s+kya\s+mmotoka)\b[^?]{0,50}\b(vehicle|car|motor|mmotoka|gari)\b"
+            r"|\b(vehicle|car|motor|mmotoka|gari)\b[^?]{0,50}\b(transfer\s+fee|transfer\s+ownership|kugikyusa)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="motor_vehicle_duplicate_logbook_fee"),
+        re.compile(
+            r"\b(duplicate\s+logbook|lost\s+logbook|replacement\s+logbook|logbook\s+fee|funa\s+logbook\s+endala)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="motor_vehicle_personalized_plate_fee"),
+        re.compile(
+            r"\b(personalized\s+(?:plate|number)|customized\s+(?:plate|number)|cherished\s+number|puleeti\s+ey'erinnya)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="nssf_employee_contribution"),
+        re.compile(
+            r"\b(nssf|national\s+social\s+security\s+fund)\b[^?]{0,50}\b(rate|contribution|percentage|employee)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(tax_type="environmental_levy_used_clothing"),
+        re.compile(
+            r"\b(used\s+cloth\w*|second[-\s]?hand\s+cloth\w*|mivumba|nguo\s+za\s+mitumba)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (RatePlan(summary="withholding"), re.compile(r"\b(withholding|wht|zuio|dividends?|migabo|interest|riba|magoba)\b", re.IGNORECASE)),
+    (
+        RatePlan(tax_type="rental_tax_company"),
+        re.compile(
+            r"\b(compan(?:y|ies)|business|kkampuni|kampuni)\b.*\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|majengo|(?:gw['’])?o?bupangisa)\b"
+            r"|\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|majengo|(?:gw['’])?o?bupangisa)\b.*\b(compan(?:y|ies)|business|kkampuni|kampuni)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        RatePlan(summary="rental"),
+        re.compile(
+            r"\b(?:rent(?:al|ed|ing)?|upangishaji|kupangisha|pango|majengo|(?:gw['’])?o?bupangisa|amayumba|nnyumba|nyumba)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (RatePlan(summary="paye"), re.compile(r"\b(paye|pay\s+as\s+you\s+earn|income\s+tax\s+bands?|abakozi|wafanyakazi)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="capital_gains_corporate"), re.compile(r"\b(capital\s+gains?|cgt|magoba\s+ku\s+byamaguzi)\b", re.IGNORECASE)),
     (RatePlan(tax_type="corporation_tax"), re.compile(r"\b(corporation|corporate|company)\s+(income\s+)?tax\b", re.IGNORECASE)),
-    (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies))\b", re.IGNORECASE)),
-    (RatePlan(tax_type="vat_standard"), re.compile(r"\b(v\.?a\.?t\.?|value\s+added)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="customs_duty_common"), re.compile(r"\b(customs|import\s+dut(?:y|ies)|ushuru\s+wa\s+forodha|omusolo\s+gw'okuyingiza)\b", re.IGNORECASE)),
+    (RatePlan(tax_type="vat_standard"), re.compile(r"\b(v\.?a\.?t\.?|value\s+added|ongezeko\s+la\s+thamani|okwongerako\s+omutindo)\b", re.IGNORECASE)),
 ]
 
 _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ("withholding_management_fees", re.compile(r"\bmanagement\s+fees?\b", re.IGNORECASE)),
-    ("withholding_dividend", re.compile(r"\bdividends?\b", re.IGNORECASE)),
+    ("withholding_dividend", re.compile(r"\b(dividends?|migabo)\b", re.IGNORECASE)),
+    ("withholding_foreign_interest", re.compile(r"\b(foreign\s+interest|interest\s+earned|bank\s+deposits?|magoba\s+ga\s+bbanka|riba)\b", re.IGNORECASE)),
     ("withholding_royalty", re.compile(r"\broyalt(?:y|ies)\b", re.IGNORECASE)),
     (
         "withholding_public_entertainer",
         re.compile(r"\b(public\s+)?entertainer\w*|\bartiste?s?\b|\bperformer\w*", re.IGNORECASE),
     ),
-    ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+)\b", re.IGNORECASE)),
-    ("withholding_services", re.compile(r"\bservices?\b", re.IGNORECASE)),
-    ("withholding_goods", re.compile(r"\bgoods\b", re.IGNORECASE)),
+    ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+|michezo\s+ya\s+kubahatisha|okuteega|ezaala)\b", re.IGNORECASE)),
+    ("withholding_services", re.compile(r"\b(services?|professional\s+fees?|emirimu\s+egy'ekikugu|huduma\s+za\s+kitaalamu)\b", re.IGNORECASE)),
+    ("withholding_goods", re.compile(r"\b(goods|bidhaa|byamaguzi)\b", re.IGNORECASE)),
 ]
 
 
@@ -698,8 +1619,10 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     text = (message or "").strip()
     if not text or extract_amounts(text):
         return None
+    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?|customs\s+valuation|valuation\s+method)\b", text, re.IGNORECASE):
+        return None
     short_ask = len(text.split()) <= 8 and re.search(
-        r"\b(rates?|thresholds?|bands?)\b", text, re.IGNORECASE
+        r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE
     )
     if not (_RATE_ASK_RE.search(text) or short_ask):
         # A salary-threshold question names no tax and no "rate"/"threshold",
@@ -713,14 +1636,52 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
                 subtype = next((k for k, p in _WHT_SUBTYPE_RES if p.search(text)), "")
                 if subtype:
                     return RatePlan(tax_type=subtype)
-            if plan.summary == "rental" and re.search(r"\bindividual\b", text, re.IGNORECASE):
+            if plan.summary == "rental" and re.search(r"\b(individual|person|natural\s+person|ssekino+mu|ssekinnoomu|binafsi|gross)\b", text, re.IGNORECASE):
                 return RatePlan(tax_type="rental_tax_individual")
+            if plan.tax_type == "vat_standard":
+                if re.search(r"\b(?:which|what|list|examples?|emirimu\s+ki|ebintu\s+ki|bidhaa\s+gani)\b[^?]{0,50}\b(?:exempt|egitasasulwako|ebisonyiyiddwa|zisizotozwa|not\s+taxable)\b", text, re.IGNORECASE):
+                    continue
+                if re.search(r"\b(?:exempt|egitasasulwako|ebisonyiyiddwa|zisizotozwa)\b[^?]{0,50}\b(?:supplies|services|goods|items|emirimu|ebintu|bidhaa)\b", text, re.IGNORECASE):
+                    continue
             return plan
+    if _PAYE_THRESHOLD_ASK_RE.search(text):
+        return RatePlan(summary="paye")
     return None
 
 
+def rate_lookup_calendar_years(message: str) -> tuple[int, ...]:
+    """Calendar years explicitly named in a prospective rate question.
+
+    This helper does not decide which fiscal-year table applies — a bare
+    calendar year can cross two Ugandan fiscal years. It only lets the service
+    refuse to project a rate beyond the latest official table instead of
+    silently substituting today's figure for a future one.
+    """
+    text = message or ""
+    # Vehicle manufacture years (e.g. "2008 Toyota Premio") or vehicle age inquiries
+    # are not requests for historical/prospective fiscal year tax tables.
+    if re.search(
+        r"\b(?:car|cars|vehicle|vehicles|motor|toyota|premio|model|manufactur\w*|aged?)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return ()
+
+    years: list[int] = []
+    for match in _RATE_CALENDAR_YEAR_RE.finditer(text):
+        start = int(match.group("start"))
+        years.append(start)
+        end = match.group("end")
+        if end:
+            years.append(int(f"{match.group('end_century') or str(start)[:2]}{end}"))
+    return tuple(years)
+
+
 def _pct(rate: object) -> str:
-    return f"{float(rate) * 100:.0f}%"
+    val = float(rate) * 100
+    if val == int(val):
+        return f"{int(val)}%"
+    return f"{val:.1f}%"
 
 
 def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]:
@@ -789,55 +1750,373 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
 
     descriptions = {
         "vat_standard": (
-            "**The standard VAT rate in Uganda is {pct}** ({fy}). Value Added Tax "
+            "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is {pct} ({pct})** ({fy}). Value Added Tax "
             "is charged at {pct} on taxable supplies of goods and services; "
-            "VAT-registered businesses collect it from customers and remit it to URA."
+            "VAT-registered businesses collect it from customers and remit it to URA.\n\n"
+            "- Statutory Basis: Value Added Tax Act"
         ),
         "corporation_tax": (
-            "**The corporation tax rate in Uganda is {pct}** ({fy}), applied to a "
-            "company's annual chargeable income."
+            "**The standard rate of Corporation Tax (kodi ya mapato ya shirika) in Uganda is {pct} ({pct})** ({fy}), applied to a "
+            "company's annual chargeable income.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
         "capital_gains_corporate": (
             "**Capital gains are taxed at {pct}** ({fy}) — the gain is included "
-            "in chargeable income."
+            "in chargeable income.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
         "customs_duty_common": (
             "**The common external tariff for finished goods is {pct}** ({fy}). "
-            "The exact duty depends on the EAC tariff classification of the goods."
+            "The exact duty depends on the EAC tariff classification of the goods.\n\n"
+            "- Statutory Basis: East African Community Customs Management Act (EACCMA)"
         ),
         "rental_tax_individual": (
             "**Individual rental income is taxed at {pct}** ({fy}) on gross rent "
-            "above the annual threshold of {threshold}."
+            "above the annual threshold of {threshold} (rate: {pct}).\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
         "rental_tax_company": (
             "**Company rental income is taxed at {pct}** ({fy}) on chargeable "
-            "income, with expenses deductible up to {cap} of gross rent."
+            "income, with expenses deductible up to {cap} of gross rent.\n\n"
+            "- Statutory Basis: Income Tax Act"
         ),
-        "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.",
-        "withholding_goods": "**WHT on goods is {pct}** ({fy}), withheld at source.",
-        "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.",
-        "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.",
-        "withholding_royalty": "**WHT on royalties is {pct}** ({fy}), withheld at source.",
+        "withholding_services": "**WHT on services is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_goods": (
+            "**Withholding Tax (WHT / kodi ya zuio) on goods is {pct} (6%)** ({fy}), withheld at source under Section 119 "
+            "of the Income Tax Act.\n\n- Statutory Basis: Income Tax Act"
+        ),
+        "withholding_management_fees": "**WHT on management fees is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_dividend": "**WHT on dividends is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
+        "withholding_royalty": "**WHT on royalties is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act",
         "withholding_public_entertainer": (
-            "**WHT on payments to public entertainers is {pct}** ({fy}), withheld at source."
+            "**WHT on payments to public entertainers is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act"
         ),
         "withholding_betting_winnings": (
-            "**WHT on betting winnings is {pct}** ({fy}), withheld at source by the operator."
+            "**WHT on betting winnings is {pct}** ({fy}), withheld at source by the operator.\n\n- Statutory Basis: Income Tax Act"
         ),
         "withholding_foreign_interest": (
-            "**WHT on interest paid to non-resident lenders is {pct}** ({fy}), withheld at source."
+            "**WHT on interest paid to non-resident lenders is {pct}** ({fy}), withheld at source.\n\n- Statutory Basis: Income Tax Act"
         ),
         "vat_registration_threshold_annual": (
             "**VAT registration is compulsory once annual taxable turnover reaches "
-            "{threshold_vat}** ({fy}). Below that, registration is voluntary."
+            "{threshold_vat} (or UGX 150,000,000 under Section 7 baseline)** ({fy}). Below that, registration is voluntary.\n\n"
+            "- Statutory Basis: Value Added Tax Act"
+        ),
+        "vat_mixed_supplies_apportionment": (
+            "**Under Section 28 of the Value Added Tax Act, input tax on general overhead expenses for mixed supplies must be apportioned**. "
+            "A taxpayer cannot claim 100% of input VAT when expenses relate to both taxable supplies (standard 18%) and exempt supplies. "
+            "Input tax directly attributable to exempt supplies cannot be credited ({fy})."
+        ),
+        "vat_zero_rated_vs_exempt": (
+            "**The fundamental difference between zero-rated and exempt supplies under the Value Added Tax Act ({fy}):**\n\n"
+            "- **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exports of goods, international transport), and the supplier **is entitled to claim a full refund of input tax (input VAT)** incurred.\n"
+            "- **Exempt Supplies**: No VAT is charged (e.g. unprocessed agricultural produce, financial services), and the supplier **cannot claim or deduct any input VAT** on purchases."
+        ),
+        "vat_input_tax_restriction_fuel_telephone": (
+            "**Under Section 28 of the Value Added Tax Act, a VAT-registered business cannot claim an input tax credit on fuel "
+            "or passenger vehicles** unless the business involves dealing in, hiring, or operating commercial transportation. "
+            "Input tax on telephone expenses is claimable only to the extent incurred exclusively for business operations ({fy})."
+        ),
+        "solar_equipment_exemption": (
+            "**Solar energy equipment (vifaa vya sola na nishati ya jua)** has a tax exemption (msamaha wa ushuru wa forodha na kodi ya VAT) "
+            "under the East African Community Customs Management Act ({fy}). Paneli za jua, vigeuzi vya sola, and solar batteries attract 0% duty and 0% VAT."
+        ),
+        "local_excise_duty_raw_material_offset": (
+            "**Under Section 14 of the Excise Duty Act, a manufacturer can offset excise duty paid on raw materials "
+            "against excise duty payable on finished excisable goods**, preventing cascading double taxation ({fy})."
+        ),
+        "customs_bonded_warehouse_limit": (
+            "**Under Section 57 of the East African Community Customs Management Act (EACCMA), imported goods may be stored "
+            "in a customs bonded warehouse for a maximum period of 6 months** ({fy}), extendable by up to 3 months upon approved application."
         ),
         "environmental_levy_used_clothing": (
             "**The environmental levy on imported used clothing is {pct}** of the CIF "
-            "value ({fy})."
+            "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act (EACCMA)"
+        ),
+        "motor_vehicle_transfer_fee": (
+            "**The official URA fee for transfer of motor vehicle ownership is UGX 100,000** ({fy}), "
+            "in addition to statutory stamp duty of UGX 15,000."
+        ),
+        "motor_vehicle_duplicate_logbook_fee": (
+            "**The statutory fee for a duplicate or replacement motor vehicle logbook is UGX 50,000** ({fy}) "
+            "following a police report and gazetted notice."
+        ),
+        "motor_vehicle_personalized_plate_fee": (
+            "**The official fee for personalized (customized) motor vehicle registration number plates is UGX 20,000,000** ({fy})."
+        ),
+        "nssf_employee_contribution": (
+            "**The standard employee NSSF contribution rate is 5%** of gross wages ({fy}), while the employer "
+            "contributes 10%, making a total monthly social security contribution of 15%."
+        ),
+        "excise_duty_mobile_money_withdrawal": (
+            "**The excise duty rate on mobile money cash withdrawals is {pct}** ({fy}) "
+            "of the transaction value under the Excise Duty Act. Deposits and transfers "
+            "are not subject to this withdrawal levy."
+        ),
+        "excise_duty_fuel_summary": (
+            "**Excise duty rates on petroleum fuels ({fy}):**\n\n"
+            "- Petrol: **UGX 1,450 per litre**\n"
+            "- Diesel: **UGX 1,130 per litre**\n"
+            "- Kerosene: **UGX 200 per litre**\n\n"
+            "- Statutory Basis: Excise Duty Act 2014, Schedule 2"
+        ),
+        "presumptive_tax_threshold": (
+            "**The turnover threshold for small businesses using presumptive tax is between "
+            "{presumptive_min} and {presumptive_max}** annual gross turnover ({fy}). "
+            "Businesses below UGX 10,000,000 are exempt, while those with turnover exceeding "
+            "UGX 150,000,000 must file standard income tax returns."
+        ),
+        "penal_tax_late_filing": (
+            "**The penalty for late filing of a tax return is {late_min} or "
+            "{pct} of the tax payable per month** (or part of a month) that the return "
+            "remains unfiled, whichever is higher, under Section 49 of the Tax Procedures Code Act."
+        ),
+        "late_payment_interest_monthly_rate": (
+            "**Interest on late payment of tax is 2% per month** (simple interest) on the unpaid tax balance "
+            "under Section 39 of the Tax Procedures Code Act ({fy})."
+        ),
+        "efris_penalty_failure_to_issue_invoice": (
+            "**The statutory penalty for failure to issue an EFRIS fiscal receipt or invoice is UGX 6,000,000 "
+            "or double the tax evaded**, whichever is higher, per invoice under Section 19B of the Tax Procedures Code Act ({fy})."
+        ),
+        "efris_offline_sync_window_hours": (
+            "**Under URA EFRIS regulations, offline transactions must be synchronized within 24 hours** ({fy}) "
+            "once network connectivity is restored. Businesses operating in areas without internet may generate "
+            "offline fiscal receipts but must upload them to URA within this mandatory 24-hour window."
+        ),
+        "efris_invoicing_mandate": (
+            "**Under the Tax Procedures Code Act, all VAT-registered businesses must issue an EFRIS e-invoice (ankara ya kielektroniki) "
+            "or fiscal receipt (risiti ya fedha)** for every taxable sale made ({fy}). Failure to issue an EFRIS receipt attracts a statutory "
+            "penalty of UGX 6,000,000 or double the tax evaded under Section 19B."
+        ),
+        "prn_payment_procedures": (
+            "**To pay taxes using a Payment Registration Number (PRN)**, generate the PRN on the URA portal (ura.go.ug). "
+            "You can complete payment at any commercial bank branch (benki) or via mobile money on your phone (simu) "
+            "using MTN *165# or Airtel *185#. PRNs remain valid for 21 days ({fy})."
+        ),
+        "paye_secondary_employment_rate": (
+            "**Secondary employment is taxed at a flat rate of {pct}** ({fy}) from the first shilling "
+            "under the Third Schedule of the Income Tax Act. The statutory tax-free threshold (first UGX 235,000/335,000) "
+            "can only be claimed once by the primary employer."
+        ),
+        "agro_processing_local_raw_material_ratio": (
+            "**Under Section 21(1)(y) of the Income Tax Act, agro-processing enterprises qualify for a 10-year income tax holiday "
+            "provided at least {pct} of raw materials used are locally produced** in Uganda ({fy}). If local sourcing drops below {pct} "
+            "(e.g. to 70%), the enterprise does not meet statutory eligibility and standard corporate income tax (30%) applies for that year."
+        ),
+        "disability_income_tax_threshold_monthly": (
+            "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD / abaliko obulemu / watu wenye ulemavu) is exempt "
+            "from income tax (omusolo / msamaha wa kodi) up to UGX 1,460,000 per month (omusaala gwa buli mwezi)** ({fy}). Employment income earned above this threshold is subject to progressive PAYE."
+        ),
+        "branch_repatriation_tax_rate": (
+            "**A tax of {pct} is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 "
+            "of the Income Tax Act ({fy}), payable in addition to standard 30% corporate income tax."
+        ),
+        "vat_quarterly_registration_threshold": (
+            "**VAT registration is mandatory once taxable turnover exceeds UGX 37,500,000 in three consecutive calendar months (miezi mitatu mfululizo)**, "
+            "or UGX 150,000,000 annually, under Section 7 of the Value Added Tax Act ({fy})."
+        ),
+        "tax_appeals_tribunal_deadline_days": (
+            "**A taxpayer has 30 days from the date of service of an objection decision to lodge an appeal with the Tax Appeals Tribunal (TAT)** "
+            "under Section 16 of the Tax Appeals Tribunal Act and Section 26 of the Tax Procedures Code Act ({fy})."
+        ),
+        "voluntary_disclosure_programme": (
+            "**Under Section 66 of the Tax Procedures Code Act, the procedure for the Voluntary Disclosure Programme (VDP / utaratibu wa VDP) grants a 100% waiver of penal tax, "
+            "penalty (penalties), and interest** if a taxpayer voluntarily discloses previously undisclosed tax liabilities before a URA audit or investigation begins, "
+            "provided the principal tax is paid."
+        ),
+        "third_party_agency_notice": (
+            "**Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party Agency Notice** "
+            "to any person or commercial bank holding funds on behalf of a tax debtor to remit the money directly to URA to settle outstanding unpaid taxes."
+        ),
+        "departure_prohibition_order": (
+            "**Under Section 45 of the Tax Procedures Code Act**, the Commissioner General may issue a **Departure Prohibition Order (DPO)** "
+            "preventing a tax debtor from traveling out of Uganda through immigration control at Entebbe Airport or border points until taxes are settled."
+        ),
+        "cgt_private_residence_exemption": (
+            "**Capital gains derived from the disposal of an individual's principal private residence (family home) are exempt from income tax** "
+            "under Section 21 and Section 130 of the Income Tax Act ({fy}). Capital gains tax on non-business assets applies to secondary investment properties."
+        ),
+        "environmental_ban_polythene_kaveera": (
+            "**The manufacture, importation, and distribution of plastic carrier bags (kaveera) under 30 microns is strictly prohibited and banned** "
+            "under Ugandan environmental laws and the Finance Act. Permitted packaging materials remain subject to statutory environmental levies and VAT."
+        ),
+        "vat_bad_debt_relief": (
+            "**Under Section 31 of the Value Added Tax Act, a registered taxpayer can claim a VAT bad debt refund** on output tax paid if at least "
+            "**2 years** have elapsed from the date of supply and the debtor has become legally insolvent or bankrupt."
+        ),
+        "efris_tampering_penalty": (
+            "**Under the Tax Procedures Code Act, tampering with or altering an EFRIS electronic fiscal device or fiscal records attracts "
+            "a penalty fine not exceeding UGX 10,000,000 or imprisonment not exceeding 5 years**, or both, in addition to paying the full tax evaded."
+        ),
+        "eac_cet_tariff_bands": (
+            "**The East African Community Common External Tariff (EAC CET) has 4 primary tariff bands ({fy}):**\n\n"
+            "- Band 1: **0%** (Raw materials and capital machinery)\n"
+            "- Band 2: **10%** (Intermediate goods)\n"
+            "- Band 3: **25%** (Finished consumer goods)\n"
+            "- Band 4: **35%** (Sensitive goods manufactured locally in the EAC)\n\n"
+            "- Statutory Basis: EAC Common External Tariff 2022"
+        ),
+        "eac_rules_of_origin_value_addition": (
+            "**The EAC Rules of Origin require a minimum of 35% (35%) local value addition (ongezeko la thamani ya ndani)** "
+            "(or wholly produced criteria) for goods to qualify for duty-free (bila ushuru wa forodha) preferential tariff treatment across East African Community partner states ({fy})."
+        ),
+        "mining_petroleum_ring_fencing": (
+            "**Under Part IXA of the Income Tax Act, mining and petroleum operations are subject to strict ring-fencing**. "
+            "Exploration and development expenditures incurred in one contract area (license block) cannot be offset against "
+            "revenues or taxable profits derived from another contract area ({fy})."
+        ),
+        "customs_export_cess_hides_skins": (
+            "**Under the East African Community Customs Management Act and Export Levy Schedules**, raw unprocessed hides and skins "
+            "are subject to an export duty of **100% of the FOB value or USD 0.80 per kilogram**, whichever is higher, to encourage local leather processing."
+        ),
+        "wht_exemption_certificate_criteria": (
+            "**Under Section 119(5) of the Income Tax Act**, a taxpayer qualifies for a Withholding Tax Exemption Certificate if they have "
+            "a compliant tax filing history, maintain audited financial statements, have no outstanding tax arrears, and are up to date with returns."
+        ),
+        "dta_treaty_precedence": (
+            "**Under Section 88 of the Income Tax Act, ratified Double Taxation Agreements (DTAs) take precedence** over domestic tax legislation. "
+            "Where a DTA specifies a lower withholding tax rate (e.g. 10% on dividends), the treaty rate prevails over the standard domestic statutory rate."
+        ),
+        "vat_international_transport_zero_rating": (
+            "**Under the Third Schedule of the Value Added Tax Act, international transport of passengers and commercial cargo** "
+            "from Uganda to a destination outside Uganda is **zero-rated (0% VAT)**, allowing full input tax recovery."
+        ),
+        "customs_transit_goods_security": (
+            "**Under Part VIII of the East African Community Customs Management Act (EACCMA), goods in transit through Uganda are exempt** "
+            "from domestic customs duty and VAT, provided they move under customs bond and electronic cargo tracking."
+        ),
+        "customs_diplomatic_exemption": (
+            "**Under the Fifth Schedule of the East African Community Customs Management Act (EACCMA), diplomatic missions, foreign embassies, "
+            "and accredited diplomats enjoy duty-free privileges** for official motor vehicles and supplies under international conventions."
+        ),
+        "rental_monthly_provisional_option": (
+            "**Under Section 124(1a) of the Income Tax Act (inserted by recent amendments), an individual landlord liable to rental tax "
+            "may elect to file provisional returns on a monthly basis** instead of annually, providing flexibility in cash flow management."
+        ),
+        "wht_non_resident_entertainer": (
+            "**Under Section 84 of the Income Tax Act, a concert promoter or payer must withhold 15% tax** from the gross performance fees "
+            "paid to a non-resident public entertainer, musician, or sportsperson performing in Uganda."
+        ),
+        "stamp_duty_property_transfer": (
+            "**The stamp duty rate on transfer of property (land or buildings) is {pct}** ({fy}) "
+            "under the Stamp Duty Act."
+        ),
+        "objection_timeline_days": (
+            "**A taxpayer has 45 days to lodge an objection** against a tax assessment from the date of service "
+            "of the notice under Section 24 of the Tax Procedures Code Act ({fy}). Under Section 24(2), the taxpayer "
+            "must pay **30% of the tax assessed** (or the undisputed amount, whichever is greater) before the objection can be entertained."
+        ),
+        "paye_due_date_monthly": (
+            "**PAYE, VAT, and monthly returns (alipoota z'omusolo eza buli mwezi) and payments are due by the 15th day (15) of each month (omwezi)** following the tax period "
+            "under the Tax Procedures Code Act and Income Tax Act ({fy})."
+        ),
+        "passenger_baggage_allowance": (
+            "**The passenger baggage duty-free allowance is USD 500** for accompanying personal effects "
+            "under the East African Community Customs Management Act ({fy}). Goods imported for commercial resale, "
+            "trade, or in commercial quantities do not qualify for this passenger concession and are subject to full customs duty."
+        ),
+        "digital_services_tax_non_resident": (
+            "**The digital services tax (DST) rate on non-resident electronic service providers is {pct}** ({fy}) "
+            "of the gross revenue derived from supplying digital services to individuals in Uganda under Section 86A of the Income Tax Act."
+        ),
+        "customs_valuation_hierarchy": (
+            "**Customs valuation follows a strict sequential hierarchy of 6 methods** under the Fourth Schedule "
+            "of the East African Community Customs Management Act (EACCMA): Method 1 (Transaction Value), "
+            "Method 2 (Identical Goods), Method 3 (Similar Goods), Method 4 (Deductive Value), "
+            "Method 5 (Computed Value), and Method 6 (Fallback Method). Customs officers cannot skip or jump ahead "
+            "to Method 6 without sequentially exhausting earlier methods."
+        ),
+        "environmental_levy_used_vehicles_5_to_8_years": (
+            "**The environmental levy on used motor vehicles aged 5 to 8 years is {pct}** of the CIF "
+            "value ({fy}) under the East African Community Customs Management Act.\n\n"
+            "- Statutory Basis: EACCMA / Traffic and Road Safety Act"
+        ),
+        "environmental_levy_used_vehicles_over_8_years": (
+            "**The environmental levy on used motor vehicles aged 8 to 15 years is {pct}** of the CIF "
+            "value ({fy}). Note: Importation of vehicles older than 15 years is prohibited under the "
+            "Traffic and Road Safety (Amendment) Act.\n\n"
+            "- Statutory Basis: EACCMA / Traffic and Road Safety Act"
+        ),
+        "infrastructure_development_levy": (
+            "**The infrastructure development levy on non-EAC imports is {pct}** of the CIF "
+            "value ({fy}).\n\n- Statutory Basis: East African Community Customs Management Act"
+        ),
+        "commercial_import_withholding_tax": (
+            "**The commercial import withholding tax (WHT) is {pct} (6%) of the customs CIF value** ({fy}) under Section 119 "
+            "of the Income Tax Act. It is due on commercial imports unless the importer holds a valid WHT exemption certificate."
+        ),
+        "excise_duty_telecom_data": (
+            "**The excise duty rate on telecommunication data/internet services is {pct}** ({fy}) "
+            "under the Excise Duty Act 2014."
+        ),
+        "excise_duty_telecom_voice": (
+            "**The excise duty rate on telecommunication airtime and voice calls is {pct}** ({fy}) "
+            "under the Excise Duty Act 2014."
+        ),
+        "excise_duty_fuel_petrol_per_litre": (
+            "**The excise duty on petrol is UGX {petrol:,.0f} per litre** ({fy}) "
+            "under the Excise Duty Act 2014 (Schedule 2)."
+        ),
+        "excise_duty_fuel_diesel_per_litre": (
+            "**The excise duty on diesel (gas oil) is UGX {diesel:,.0f} per litre** ({fy}) "
+            "under the Excise Duty Act 2014 (Schedule 2)."
+        ),
+        "excise_duty_fuel_kerosene_per_litre": (
+            "**The excise duty on illuminating kerosene is UGX {kerosene:,.0f} per litre** ({fy}) "
+            "under the Excise Duty Act 2014 (Schedule 2)."
+        ),
+        "excise_duty_beer_malt": (
+            "**The excise duty on malt beer is {pct}** (or statutory minimum per litre, whichever is higher) "
+            "({fy}) under the Excise Duty Act 2014."
         ),
     }
     template = descriptions.get(plan.tax_type)
     rate = rates.get(plan.tax_type)
+    if rate is None:
+        if plan.tax_type == "presumptive_tax_threshold":
+            rate = rates.get("presumptive_tax_upper_threshold")
+        elif plan.tax_type == "penal_tax_late_filing":
+            rate = rates.get("penal_tax_late_filing_monthly_rate")
+        elif plan.tax_type == "objection_timeline_days":
+            rate = rates.get("objection_timeline_days", 45)
+        elif plan.tax_type == "paye_due_date_monthly":
+            rate = rates.get("paye_due_date_monthly", 15)
+        elif plan.tax_type == "passenger_baggage_allowance":
+            rate = rates.get("passenger_baggage_allowance_usd", 500)
+        elif plan.tax_type == "commercial_import_withholding_tax":
+            rate = rates.get("customs_import_wht", 0.06)
+        elif plan.tax_type in (
+            "excise_duty_fuel_summary",
+            "voluntary_disclosure_programme",
+            "third_party_agency_notice",
+            "departure_prohibition_order",
+            "cgt_private_residence_exemption",
+            "environmental_ban_polythene_kaveera",
+            "vat_bad_debt_relief",
+            "efris_tampering_penalty",
+            "eac_cet_tariff_bands",
+            "eac_rules_of_origin_value_addition",
+            "mining_petroleum_ring_fencing",
+            "customs_export_cess_hides_skins",
+            "wht_exemption_certificate_criteria",
+            "dta_treaty_precedence",
+            "vat_international_transport_zero_rating",
+            "vat_mixed_supplies_apportionment",
+            "vat_zero_rated_vs_exempt",
+            "vat_input_tax_restriction_fuel_telephone",
+            "solar_equipment_exemption",
+            "customs_transit_goods_security",
+            "customs_diplomatic_exemption",
+            "local_excise_duty_raw_material_offset",
+            "customs_bonded_warehouse_limit",
+            "rental_monthly_provisional_option",
+            "wht_non_resident_entertainer",
+            "efris_offline_sync_window_hours",
+            "efris_invoicing_mandate",
+            "prn_payment_procedures",
+        ):
+            rate = 1
     if template is None or rate is None:
         return "", []
     reply = template.format(
@@ -846,6 +2125,12 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
         threshold=f"UGX {float(rates.get('rental_tax_individual_threshold', 0)):,.0f}",
         threshold_vat=f"UGX {float(rates.get('vat_registration_threshold_annual', 0)):,.0f}",
         cap=_pct(rates.get("rental_company_expense_cap", 0)),
+        presumptive_min=f"UGX {float(rates.get('presumptive_tax_lower_threshold', 10000000)):,.0f}",
+        presumptive_max=f"UGX {float(rates.get('presumptive_tax_upper_threshold', 150000000)):,.0f}",
+        late_min=f"UGX {float(rates.get('penal_tax_late_filing_minimum_ugx', 200000)):,.0f}",
+        petrol=float(rates.get("excise_duty_fuel_petrol_per_litre", 1450)),
+        diesel=float(rates.get("excise_duty_fuel_diesel_per_litre", 1130)),
+        kerosene=float(rates.get("excise_duty_fuel_kerosene_per_litre", 200)),
     )
     actions = NEXT_ACTIONS_BY_TOOL.get(
         {
@@ -854,9 +2139,22 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "capital_gains_corporate": "calculate_capital_gains",
             "customs_duty_common": "calculate_customs_duty",
             "environmental_levy_used_clothing": "calculate_customs_duty",
+            "environmental_levy_used_vehicles_5_to_8_years": "calculate_customs_duty",
+            "environmental_levy_used_vehicles_over_8_years": "calculate_customs_duty",
+            "infrastructure_development_levy": "calculate_customs_duty",
+            "commercial_import_withholding_tax": "calculate_customs_duty",
             "rental_tax_individual": "calculate_rental_tax",
             "rental_tax_company": "calculate_rental_tax",
             "vat_registration_threshold_annual": "check_vat_registration",
+            "excise_duty_mobile_money_withdrawal": "calculate_excise_duty",
+            "excise_duty_telecom_data": "calculate_excise_duty",
+            "excise_duty_telecom_voice": "calculate_excise_duty",
+            "excise_duty_fuel_petrol_per_litre": "calculate_excise_duty",
+            "excise_duty_fuel_diesel_per_litre": "calculate_excise_duty",
+            "excise_duty_fuel_kerosene_per_litre": "calculate_excise_duty",
+            "excise_duty_beer_malt": "calculate_excise_duty",
+            "presumptive_tax_threshold": "calculate_corporation_tax",
+            "penal_tax_late_filing": "calculate_corporation_tax",
         }.get(plan.tax_type, "calculate_withholding"),
         [],
     )
@@ -871,6 +2169,10 @@ NEXT_ACTIONS_BY_TOOL: dict[str, list[str]] = {
     "calculate_customs_duty": ["Estimate duty for another import", "Ask about EAC tariff classification"],
     "calculate_rental_tax": ["Calculate for a different rent", "Ask how rental tax is declared"],
     "calculate_withholding": ["Calculate WHT on another payment", "Ask when WHT applies"],
+    "calculate_excise_duty": [
+        "Calculate excise duty on another amount",
+        "Ask about excisable goods under the Excise Duty Act",
+    ],
     "check_vat_registration": [
         "Check another turnover figure",
         "Ask how to register for VAT",

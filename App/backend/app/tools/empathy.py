@@ -17,8 +17,10 @@ What it adds over the raw helper:
 - **Intensity**, from how many independent cues fire, so a mildly
   confused message and a panicking one are distinguishable.
 - **Handoff signalling** — hardship ("I can't afford this", "I'll lose
-  my business") and sustained frustration are the two states that should
-  put a person in the loop, and the tool says which.
+  my business") and sustained distress across turns (``history``) are the
+  states that should put a person in the loop, and the tool says which.
+- **Crisis** — a message about self-harm short-circuits every other
+  reading: ``crisis`` is true and the only guidance is the crisis lines.
 - **Handling guidance** the caller can act on: whether to lead with an
   acknowledgement, whether to offer a human, and what to avoid.
 
@@ -31,7 +33,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from ..text_signals import detect_user_distress, empathy_ack, tone_hint_for
+from ..text_signals import (
+    detect_crisis,
+    detect_user_distress,
+    distress_trajectory,
+    empathy_ack,
+    tone_hint_for,
+)
 from . import Tool, ToolRegistry, ToolSchema
 
 EMPATHY_NAMESPACE = "empathy"
@@ -40,8 +48,9 @@ _INTENSITY_CUES = (
     re.compile(r"[A-Z]{4,}"),  # shouting
     re.compile(r"!{2,}"),
     re.compile(r"\b(very|really|extremely|so|totally|completely)\b", re.IGNORECASE),
-    re.compile(r"\b(please|help)\b", re.IGNORECASE),
 )
+# "please" and "help" were intensity cues, so every polite request scored one
+# notch more upset than a curt one. Politeness is not intensity.
 
 _GUIDANCE: dict[str, dict[str, Any]] = {
     "frustration": {
@@ -71,15 +80,33 @@ _GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 
-def assess(message: str) -> dict[str, Any]:
+def assess(message: str, history: list[str] | None = None) -> dict[str, Any]:
     """Classify *message* and return handling guidance.
 
     Classification comes from :func:`app.text_signals.detect_user_distress`
     so the tool and the deterministic reply paths cannot disagree; this
     function adds the intensity and handling guidance on top.
+
+    *history* is the taxpayer's earlier messages in this conversation,
+    oldest first. With it, "sustained" means what it says — the same upset
+    across turns — instead of being guessed from one message.
     """
     text = message or ""
+    if detect_crisis(text):
+        return {
+            "kind": "hardship",
+            "intensity": "high",
+            "crisis": True,
+            "sustained": False,
+            "acknowledgement": "",
+            "tone_hint": "",
+            "lead_with_acknowledgement": False,
+            "offer_human_handoff": True,
+            "avoid": "Do not answer a tax question in this turn; give the crisis lines first.",
+            "explanation": "The message expresses intent to self-harm; reply with crisis support.",
+        }
     kind = detect_user_distress(text)
+    trajectory = distress_trajectory(kind, history or [])
 
     cue_count = sum(1 for pattern in _INTENSITY_CUES if pattern.search(text))
     if not kind:
@@ -95,14 +122,19 @@ def assess(message: str) -> dict[str, Any]:
     tone_hint = tone_hint_for(kind)
     guidance = _GUIDANCE.get(kind, _GUIDANCE[""])
 
-    # A human is offered for hardship, and for anything else only when the
-    # user is clearly at the end of their patience — offering too early
-    # reads as a brush-off.
-    offer_human = kind == "hardship" or (kind == "frustration" and intensity == "high")
+    # A human is offered for hardship or high-intensity anxiety/frustration —
+    # offering too early on mild queries reads as a brush-off.
+    offer_human = (
+        kind == "hardship"
+        or (kind in ("frustration", "anxiety") and intensity == "high")
+        or trajectory["sustained"]
+    )
 
     return {
         "kind": kind,
         "intensity": intensity,
+        "crisis": False,
+        "sustained": trajectory["sustained"],
         "acknowledgement": acknowledgement,
         "tone_hint": tone_hint,
         "lead_with_acknowledgement": bool(acknowledgement)
@@ -140,7 +172,13 @@ class EmotionalToneTool(Tool):
                         "type": "string",
                         "minLength": 1,
                         "description": "The taxpayer's message, verbatim.",
-                    }
+                    },
+                    "history": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 10,
+                        "description": "The taxpayer's earlier messages in this conversation, oldest first.",
+                    },
                 },
                 "required": ["message"],
                 "additionalProperties": False,
@@ -161,6 +199,8 @@ class EmotionalToneTool(Tool):
                     "tone_hint": {"type": "string"},
                     "lead_with_acknowledgement": {"type": "boolean"},
                     "offer_human_handoff": {"type": "boolean"},
+                    "crisis": {"type": "boolean"},
+                    "sustained": {"type": "boolean"},
                     "avoid": {"type": "string"},
                 },
                 "required": ["ok", "kind", "intensity"],
@@ -171,10 +211,10 @@ class EmotionalToneTool(Tool):
             title="Assess emotional tone",
         )
 
-    def execute(self, message: str = "") -> dict[str, Any]:
+    def execute(self, message: str = "", history: list[str] | None = None) -> dict[str, Any]:
         if not str(message).strip():
             return {"ok": False, "error": "message is required"}
-        return {"ok": True, **assess(message)}
+        return {"ok": True, **assess(message, history=[str(h) for h in (history or [])][-10:])}
 
 
 ToolRegistry.register(EmotionalToneTool())

@@ -121,7 +121,7 @@ class SpeculativePrefetcher:
         if len(tokens) < MIN_PREFETCH_TOKENS:
             return
 
-        prefix_hash = hashlib.md5(stable_prefix.lower().encode()).hexdigest()[:12]
+        prefix_hash = hashlib.sha256(stable_prefix.lower().encode()).hexdigest()[:12]
         if prefix_hash == self._last_prefix_hash:
             return  # identical prefix already in flight or completed
         self._last_prefix_hash = prefix_hash

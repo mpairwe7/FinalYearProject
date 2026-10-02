@@ -1,28 +1,46 @@
 # Core API backend
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
-pydantic==2.13.4
+pydantic==2.13.5
 slowapi>=0.1.9
 limits[redis]>=3.13
 sse-starlette>=3.4.6
 httpx>=0.28.1,<0.29
 
 # Data / modeling stack for notebooks (CSV/PDF RAG + tagging + TTS)
-pandas>=1.5,<4.0
+pandas>=3.0.5,<4.0
 numpy==1.26.4
-sentence-transformers==3.4.1
-langchain==1.3.17
+# Pinned as a cluster with transformers/huggingface-hub below — see the note
+# there. 3.4.1 caps `transformers<5.0.0`, so it could not stay while the CVE
+# fix required moving to 5.x.
+sentence-transformers==6.0.1
+langchain==1.3.18
 langchain-community==0.4.2
 langchain-core>=1.3.2,<2.0.0
 langchain-text-splitters==1.1.2
 langchain-qdrant==1.1.0
 qdrant-client>=1.17.1,<2.0.0
+# Deliberately NOT moved with the cluster below. datasets 4.x/5.x all require
+# pyarrow>=21.0.0, so bumping it would drag a third unrelated package along.
+# (pyarrow itself has since moved to 23.0.1 for CVE-2026-25087 -- see its own
+# note further down; that direction is safe, this one still is not.)
+# Verified instead that 3.3.2 works against
+# huggingface-hub 1.29.0 — `Dataset.from_list`, the only call the serving path
+# makes (App/backend/app/evaluation.py), round-trips fine.
 datasets==3.3.2
 evaluate==0.4.6
-transformers==4.48.3
-accelerate==1.14.0
+# CVE-2026-9856 / GHSA-xrqw-3rrv-vx5w: path traversal in `save_pretrained()`
+# on PreTrainedTokenizerBase and ProcessorMixin — `chat_template` dict keys were
+# used as filenames without validation, giving arbitrary file write. Fixed only
+# in 5.10.0, so remediating meant a 4.x -> 5.x major bump rather than a patch.
+#
+# transformers 5.x requires huggingface-hub>=1.5.0, and sentence-transformers
+# 3.4.1 caps transformers<5.0.0, so these four move together or not at all.
+# Changing transformers alone does not resolve.
+transformers==5.16.1
+accelerate==1.15.0
 torch>=2.13.0  # matches App/backend/requirements.txt's pin; <2.13 is flagged by SAST
-huggingface-hub==0.27.1
+huggingface-hub==1.29.0
 sentencepiece==0.2.2
 kagglehub==0.3.12
 openpyxl==3.1.5
@@ -46,8 +64,21 @@ fpdf2>=2.8.7
 beautifulsoup4>=4.12.0
 
 # Text-to-Speech (legacy — kept for notebooks only, not production path)
-TTS==0.22.0; python_version < '3.12'
-gTTS>=2.5.0; python_version >= '3.12'
+# Coqui `TTS` is NOT here: it pins pandas<2.0, which cannot coexist with the
+# pandas>=3.0.5 this file and App/backend/requirements.txt now require. It is
+# imported by exactly one offline training script, which already degrades on
+# ImportError, so it lives in requirements-tts-train.txt instead. See that
+# file before installing it.
+#
+# `gTTS` is NOT here either, and unlike Coqui TTS it did not earn its own
+# split-out file: nothing in the tree imports it — the only `gtts` matches are
+# the substring inside `StreamingTTS`. Every published gTTS release through
+# 2.5.4 caps `click<8.2`, while huggingface-hub==1.29.0 (pinned above as part
+# of the transformers 5.x / CVE-2026-9856 cluster) requires `click>=8.4.2`, so
+# no version of the two can coexist. With both present this file did not
+# resolve at all, which is worse than it sounds: a `pip install -r` that never
+# resolves means the CI dependency gates — the test suites and pip-audit —
+# report on an environment that was never built. Removed 2026-09-04.
 pydub==0.25.1
 
 # ----------------------------------------------------------------------------
@@ -58,7 +89,18 @@ peft>=0.14.0
 trl>=0.12.0
 bitsandbytes>=0.50.0; sys_platform == 'linux'
 # ONNX export + quantisation
-optimum[onnxruntime]>=1.24.0
+#
+# `optimum[onnxruntime]` is NOT here — it lives in requirements-onnx-export.txt
+# because it cannot coexist with the transformers 5.x required by CVE-2026-9856.
+# From optimum 2.0 the ORT extra delegates to optimum-onnx, and no release of
+# that supports transformers 5 (newest, 0.1.0, caps `transformers<4.58.0`);
+# optimum[onnxruntime] 1.24-2.2 cap it directly. That is an upstream gap, not
+# something a pin can bridge. Every import of it is a lazy one inside a
+# try/except that already degrades to "skipping ONNX export", and no workflow
+# installs it from this file, so splitting costs nothing at runtime.
+#
+# `onnxruntime` itself stays: App/backend/app/offline_rag.py loads it at
+# serving time, independently of the export toolchain.
 onnxruntime>=1.20.0
 # Unified on-device audio runtime (ASR + VAD + TTS + lang-ID)
 sherpa-onnx>=1.11.0
@@ -78,13 +120,24 @@ lingua-language-detector>=2.0.0
 
 # Data Ingestion & Augmentation
 datasketch==1.10.0
-pyarrow==18.1.0
-pandera==0.32.1
+# CVE-2026-25087: use-after-free DoS when reading Arrow IPC files, fixed
+# only in 23.0.1. Moving pyarrow alone is safe in this direction --
+# datasets 3.3.2 requires `pyarrow>=15.0.0` with no upper bound, so the
+# constraint noted above (datasets 4.x/5.x *forcing* pyarrow>=21) does not
+# run the other way and datasets stays put.
+pyarrow==23.0.1
+pandera==0.33.1
 ftfy>=6.2.0  # Unicode mojibake repair for NFKC normalisation
 
 # Fine-tuning evaluation
-rouge-score==0.1.2
-nltk==3.10.3
+# rouge-score / nltk are deliberately absent. Nothing imports either one:
+# fine-tuning/scripts/10_evaluate_lora_qwen.py computes ROUGE-L and BLEU-1
+# itself from the standard library. They were pulling nltk, whose
+# PYSEC-2026-3740 path traversal has no fixed release (3.10.3 is both the
+# newest version and, per the advisory text, affected), so carrying them meant
+# formally accepting an unfixable advisory for code that never runs. Removing
+# the vulnerability is strictly better than accepting it; re-add both here if
+# a real ROUGE/BLEU implementation is ever wired up.
 sacrebleu==2.6.0
 
 # Visualization & reporting

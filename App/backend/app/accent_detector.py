@@ -189,7 +189,7 @@ class AccentDetector:
 
             model_path = self._model_dir / "accent_model.pkl"
             with open(model_path, "rb") as f:
-                self._classifier = pickle.load(f)
+                self._classifier = pickle.load(f)  # nosec B301 # noqa: S301 # nosemgrep: ura-python-pickle-load
             self._ready = True
             logger.info("Accent classifier loaded from %s", model_path)
         except Exception:

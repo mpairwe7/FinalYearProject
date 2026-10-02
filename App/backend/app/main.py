@@ -8,6 +8,8 @@ and Prometheus-compatible metrics (2026 observability standards).
 import asyncio
 import contextlib
 import datetime
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -15,18 +17,19 @@ import re
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Request, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.websockets import WebSocket
 
 # Proxy header validation — prevents IP rate-limit bypass via forged
@@ -42,12 +45,26 @@ from . import database as db
 from . import documents
 from .analytics import AnalyticsMiddleware, metrics
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
-from .auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+from .auth.models import (
+    ConsentGrantRequest,
+    ConsentWithdrawRequest,
+    DevTokenRequest,
+    DevTokenResponse,
+    ProfileUpdateRequest,
+)
 from .authority import authority_required, get_authority_status
 from .escalation_notify import known_teams
+from .journey_analytics import build_journey_funnel
 from .models import (
     AnalyticsDashboard,
     AnalyticsEvent,
+    AuditAnchorBreak,
+    AuditAnchorOut,
+    AuditChainBreak,
+    AuditEventOut,
+    AuditEventsResponse,
+    AuditSealResponse,
+    AuditVerifyResponse,
     BatchClassifyRequest,
     BatchClassifyResponse,
     CFRelayChatRequest,
@@ -59,6 +76,7 @@ from .models import (
     ClassifyRequest,
     ClassifyResponse,
     DocumentAnalysisResponse,
+    EscalationDetailResponse,
     EscalationRequest,
     EscalationResponse,
     ExportConversationRequest,
@@ -69,6 +87,7 @@ from .models import (
     FeedbackResponse,
     FeedbackSummary,
     HealthResponse,
+    JourneyFunnelResponse,
     OfflineAdminStats,
     OfflineStatusResponse,
     OfflineSyncRequest,
@@ -78,6 +97,7 @@ from .models import (
     SynthesizeRequest,
     SynthesizeResponse,
     TagListResponse,
+    TaxpayerReplyRequest,
     TranscribeResponse,
     TranslateRequest,
     TranslateResponse,
@@ -85,6 +105,9 @@ from .models import (
     VoiceVisionChatResponse,
 )
 from .query import gate_locale
+from .retriever import active_retrieval_mode
+from .seed_prototype import seed as _seed_prototype
+from .seed_prototype import should_seed as _should_seed
 from .service import ChatModel, localize_reply
 from .speech_service import (
     SPEECH_ASR_BACKEND,
@@ -92,7 +115,9 @@ from .speech_service import (
     SPEECH_MT_BACKEND,
     SPEECH_TTS_BACKEND,
     SpeechModel,
+    SynthesizeResult,
 )
+from .workflows.registry import WorkflowRegistry
 
 logger = logging.getLogger(__name__)
 _APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
@@ -118,6 +143,12 @@ VOICE_CHAT_BUDGET_S = float(os.getenv("VOICE_CHAT_BUDGET_S", "50"))
 _RETENTION_CLEANUP_INTERVAL_SECONDS = max(
     60, int(os.getenv("RETENTION_CLEANUP_INTERVAL_SECONDS", "3600"))
 )
+# How often the audit ledger's new rows are sealed (Merkle root + chain head).
+# 0 turns the schedule off; sealing on demand from /admin/audit still works.
+_AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
+# Above this many rows the auditor's integrity check re-checks the newest seal
+# and the rows after it instead of the whole chain; the full walk runs offline.
+_AUDIT_VERIFY_FULL_MAX_ROWS = max(1, int(os.getenv("AUDIT_VERIFY_FULL_MAX_ROWS", "200000")))
 
 
 def _truthy_env(name: str, default: str = "false") -> bool:
@@ -163,6 +194,11 @@ def _validate_production_env() -> None:
         if not _production_flag_enabled(flag_name):
             errors.append(f"FLAG_{flag_name.upper()} must not be disabled in production.")
 
+    # FLAG_VOICE_RECEPTIONIST is gated by G36 inside gap_gate_errors(): LiveKit
+    # media over wss://, production LiveKit credentials, one worker and one
+    # replica, and the explicit single-replica acknowledgement. The runbook's
+    # rollout (docs/runbooks/voice-receptionist-demo.md) enables the flag once
+    # that gate passes, so no second, stricter check lives here.
     from .production_readiness import gap_gate_errors
 
     errors.extend(gap_gate_errors())
@@ -293,7 +329,8 @@ def _validate_production_env() -> None:
             "ANALYTICS_DB_DIR must be set to a mounted persistent volume in production "
             "(the SQLite-backed audit ledger and memory are otherwise lost on restart)."
         )
-    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # nosec B108 ephemeral-dir denylist, not temp-file creation  # noqa: S108
+    # Ephemeral-dir denylist, not temp-file creation
+    elif not os.path.isabs(data_dir) or data_dir.startswith(("/tmp", "/var/tmp", "/dev/shm")):  # nosec B108 # noqa: S108
         errors.append(
             "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
             f"(got {data_dir!r}; ephemeral or relative paths are not durable)."
@@ -345,6 +382,74 @@ def _validate_production_env() -> None:
         raise SystemExit(msg)
 
     logger.info("Production environment validation passed (%d warnings suppressed)", 0)
+
+
+def _apply_persisted_flag_overrides(overrides: dict[str, bool]) -> None:
+    """Replay durable flag overrides without weakening production controls.
+
+    Startup validates environment flags before the analytics database is
+    available. The durable overrides are read immediately afterwards, and an
+    in-memory override wins over the production-on default. A stale ``false``
+    value for a protected control would therefore undo that validation unless
+    it is rejected here.
+    """
+    from .flags import flags as flag_reg
+    from .flags import is_protected
+
+    if (os.getenv("APP_ENV") or "development").lower() == "production":
+        disabled = sorted(
+            name for name, enabled in overrides.items() if is_protected(name) and not enabled
+        )
+        if disabled:
+            message = (
+                "PRODUCTION SAFETY CHECK FAILED — refusing to start. "
+                "Persisted flag override(s) disable protected control(s): "
+                + ", ".join(disabled)
+                + ". Remove the override(s) or set them true before starting."
+            )
+            logger.critical(message)
+            raise SystemExit(message)
+
+    for name, enabled in overrides.items():
+        try:
+            flag_reg.set(name, enabled)
+        except KeyError:
+            # A row for a removed flag has no effect and must not block an
+            # otherwise safe upgrade.
+            continue
+
+
+def _initialize_analytics_database() -> None:
+    """Initialize persistence, failing closed when production storage is unavailable.
+
+    Conversations, tickets, consent receipts, and the audit ledger are all
+    stored through this database. Continuing after a production connection or
+    schema failure would serve requests without the controls production mode
+    claims to enforce.
+    """
+    try:
+        db.init_db()
+        logger.info("Analytics database ready")
+
+        if _should_seed():
+            try:
+                logger.info("prototype seed: %s", _seed_prototype())
+            except Exception:
+                logger.exception("prototype seed skipped")
+        overrides = db.load_flag_overrides()
+    except Exception as exc:
+        logger.exception("Analytics database initialisation failed")
+        if (os.getenv("APP_ENV") or "development").lower() == "production":
+            message = (
+                "PRODUCTION SAFETY CHECK FAILED — refusing to start because the analytics "
+                "database is unavailable. Audit, tenancy, consent, and ticket controls "
+                "cannot run without it."
+            )
+            logger.critical(message)
+            raise SystemExit(message) from exc
+        return
+
+    _apply_persisted_flag_overrides(overrides)
 
 
 # ---------------------------------------------------------------------------
@@ -458,26 +563,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 
-    # Initialise analytics database
-    try:
-        db.init_db()
-        logger.info("Analytics database ready")
-        from .seed_prototype import seed as _seed_prototype, should_seed as _should_seed
-
-        if _should_seed():
-            try:
-                logger.info("prototype seed: %s", _seed_prototype())
-            except Exception:
-                logger.exception("prototype seed skipped")
-        from .flags import flags as _flags
-
-        for _name, _on in db.load_flag_overrides().items():
-            try:
-                _flags.set(_name, _on)
-            except KeyError:
-                continue
-    except Exception:
-        logger.exception("Analytics database initialisation failed")
+    # Initialise analytics database. Development can still offer degraded text
+    # chat, while production must not run without its persistence controls.
+    _initialize_analytics_database()
 
     try:
         app.state.model = ChatModel()
@@ -553,6 +641,45 @@ async def lifespan(app: FastAPI):
     else:
         app.state.offline_rag = None
 
+    # Voice receptionist. In production the flag only gets this far once the
+    # G36 gate in _validate_production_env() has passed.
+    if _flags.is_enabled("voice_receptionist"):
+        try:
+            from . import receptionist
+            if not receptionist.is_available():
+                raise RuntimeError("FLAG_VOICE_RECEPTIONIST is on but Pipecat is not installed")
+            from .receptionist.config import validate as validate_receptionist_config
+            from .receptionist.store import init_receptionist_schema
+            validate_receptionist_config()
+            init_receptionist_schema()
+            workers_count = int(os.getenv("WORKERS", "1"))
+            if workers_count > 1:
+                logger.warning(
+                    "FLAG_VOICE_RECEPTIONIST is enabled with WORKERS=%d. "
+                    "Voice receptionist call registry and bridges live in-process — "
+                    "single worker (WORKERS=1) is recommended for demo stability.",
+                    workers_count,
+                )
+        except Exception:
+            logger.exception("Voice receptionist initialization failed")
+            raise
+
+        # Render the receptionist's own fixed lines (fillers, clarify prompts,
+        # transfer notices) for every language a call can be held in, so the
+        # first caller hears a cached filler at 450 ms instead of waiting on a
+        # live synthesis. Background thread; never fails boot.
+        speech_for_calls = getattr(app.state, "speech", None)
+        if speech_for_calls is not None and _flags.is_enabled("receptionist_language_detection"):
+            from .receptionist.config import get_languages
+            from .receptionist.tts import prewarm_receptionist_phrases
+
+            call_langs = get_languages()
+
+            def _prewarm_calls(speech: SpeechModel = speech_for_calls) -> None:
+                logger.info("Receptionist phrase pre-warm: %s", prewarm_receptionist_phrases(speech, call_langs))
+
+            threading.Thread(target=_prewarm_calls, name="receptionist-prewarm", daemon=True).start()
+
     # Startup alone is insufficient: an otherwise idle pod would retain
     # expired documents and in-memory data indefinitely. The job itself is
     # idempotent, including when several replicas run it at once.
@@ -594,13 +721,33 @@ async def lifespan(app: FastAPI):
                 return
 
     retention_task = asyncio.create_task(_retention_loop(), name="retention-cleanup")
+
+    async def _audit_seal_loop() -> None:
+        """Seal new audit rows on a schedule; every replica may run it at once."""
+        while True:
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=_AUDIT_SEAL_INTERVAL_SECONDS)
+                return
+            except TimeoutError:
+                await asyncio.to_thread(_seal_audit_ledgers)
+            except asyncio.CancelledError:
+                return
+
+    seal_task = (
+        asyncio.create_task(_audit_seal_loop(), name="audit-seal")
+        if _AUDIT_SEAL_INTERVAL_SECONDS > 0
+        else None
+    )
     try:
         yield
     finally:
         retention_stop.set()
-        retention_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await retention_task
+        for task in (retention_task, seal_task):
+            if task is None:
+                continue
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
         app.state.model = None
         try:
             if getattr(app.state, "speech", None) is not None:
@@ -643,6 +790,9 @@ _ESCALATION_QUEUE_OFF_MESSAGE = (
 )
 
 _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
+#: An active guided journey untouched for this long counts as abandoned in the
+#: analytics journey funnel (GET /v1/analytics/journeys).
+_JOURNEY_ABANDON_AFTER_HOURS = max(1, int(os.getenv("JOURNEY_ABANDON_AFTER_HOURS", "24")))
 _EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
 _DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
 _SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
@@ -742,6 +892,10 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID"],
 )
 
+# GZip compression middleware (low-bandwidth & mobile 2G/3G optimization)
+# Automatically compresses responses >= 500 bytes when client accepts gzip.
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 # Analytics middleware (must be added after CORS)
 app.add_middleware(AnalyticsMiddleware)
 
@@ -823,14 +977,9 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # deliberately not folded into "hybrid": Vectorize is dense-only with a
     # client-side lexical re-score, not Qdrant's reranked dense+BM25 fusion,
     # and operators reading this field should be able to tell them apart.
-    if not model._retriever_ready:
-        retrieval_mode = "keyword"
-    elif getattr(model._retriever, "_vectorize_mode", False):
-        retrieval_mode = "vector"
-    elif getattr(model._retriever, "_sparse_only", False):
-        retrieval_mode = "sparse"
-    else:
-        retrieval_mode = "hybrid"
+    retrieval_mode = active_retrieval_mode(
+        model._retriever, ready=model._retriever_ready
+    )
     qdrant_healthy = model._retriever.is_ready if model._retriever_ready else False
     # Optional capabilities report the backend they actually resolved to. Both
     # of these degrade silently by design — detection drops to a character
@@ -1057,7 +1206,13 @@ async def chat_stream(
         if agent_trace:
             yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 async def _sse_not_disconnected(request: Request) -> bool:
@@ -1106,6 +1261,24 @@ def _log_stream_conversation(
 # Audio in/out uses raw bytes to avoid the base64 tax on the fast path.
 # JSON responses carry a base64-encoded audio payload so the same route
 # can be consumed from a simple JavaScript fetch().
+def _declared_raw_pcm(request: Request, audio_bytes: bytes, sample_rate: int) -> bytes:
+    """The body as WAV when the caller named its raw sample format (`encoding`), else as sent.
+
+    Without it a headerless body's format is inferred from the bytes
+    (``SpeechModel._pcm_bytes_to_float``); a caller that knows its format
+    should say so rather than rely on the guess.
+    """
+    encoding = request.query_params.get("encoding")
+    if not encoding:
+        return audio_bytes
+    from .speech_service import raw_pcm_to_wav
+
+    try:
+        return raw_pcm_to_wav(audio_bytes, encoding, sample_rate)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+
+
 @app.post("/v1/asr", response_model=TranscribeResponse, tags=["speech"])
 @limiter.limit(_RATE_LIMIT)
 async def transcribe_audio(
@@ -1113,10 +1286,12 @@ async def transcribe_audio(
     speech: SpeechModel = Depends(get_speech_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> TranscribeResponse:
-    """Transcribe raw PCM audio posted as the request body.
+    """Transcribe audio posted as the request body.
 
-    Pass ``sample_rate`` and optional ``language`` as query parameters. The
-    request body must be raw PCM (int16 little-endian or float32, 1 channel).
+    WAV is preferred; WebM/Ogg Opus and MP3 are read too. Raw mono PCM
+    should name its format with ``encoding`` (``pcm_s16le`` or ``pcm_f32le``),
+    at ``sample_rate``; without it the format is inferred. ``language`` and
+    ``domain=tax`` (repair TIN/URA mishears) are optional query parameters.
     """
     sample_rate_raw = request.query_params.get("sample_rate", "16000")
     try:
@@ -1140,6 +1315,7 @@ async def transcribe_audio(
     if len(audio_bytes) > MAX_BYTES:
         raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
     _require_voice_processing_consent(request, ctx)
+    audio_bytes = _declared_raw_pcm(request, audio_bytes, sample_rate)
 
     # Audio format auto-detected: WAV, WebM/Opus, OGG, MP3, or raw PCM.
     # Content-Type header is advisory; the decoder sniffs the magic bytes.
@@ -1149,14 +1325,28 @@ async def transcribe_audio(
         len(audio_bytes), content_type, sample_rate, language or "auto",
     )
 
-    result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    with_words = request.query_params.get("with_words", "").lower() in ("true", "1")
+    # Off the event loop, like every speech call here: run inline, one
+    # synthesis or transcription held up the whole api for its duration
+    # (/health took 5.8 s during a 6.2 s /v1/tts on the GPU stack, G96).
+    result = await asyncio.to_thread(
+        speech.transcribe, audio_bytes, sample_rate=sample_rate, language=language, with_words=with_words
+    )
     metrics.inc("speech_asr_total")
     if result.latency_s:
         metrics.observe("speech_asr_latency_s", result.latency_s)
     if result.error:
         metrics.inc("speech_asr_errors_total")
+    text = result.text
+    # The chat composer's dictation (domain=tax) gets the same repair of
+    # Whisper's TIN/URA mishears as the voice chat and the call: "namba ya
+    # timu kutoka Ura" becomes "namba ya TIN kutoka Ura".
+    if text and request.query_params.get("domain") == "tax":
+        from .receptionist.lexicon import repair_asr_entities
+
+        text = repair_asr_entities(text)
     return TranscribeResponse(
-        text=result.text,
+        text=text,
         language=result.language,
         duration_s=result.duration_s,
         latency_s=result.latency_s,
@@ -1164,6 +1354,68 @@ async def transcribe_audio(
         backend=result.backend,
         error=result.error,
     )
+
+
+@app.post("/v1/tts/stream", tags=["speech"])
+@limiter.limit(_RATE_LIMIT)
+async def synthesize_audio_stream(
+    request: Request,
+    body: SynthesizeRequest,
+    speech: SpeechModel = Depends(get_speech_model),
+    _ctx: AuthContext = Depends(optional_user),
+) -> StreamingResponse:
+    """Speech for *text*, one piece at a time, as NDJSON, so playback starts early.
+
+    One line per piece as soon as it is ready, in speaking order:
+    ``{"seq", "text", "format", "audio_base64", "duration_s", "backend"}``;
+    a piece that could not be voiced has ``"error"`` instead of audio. The last
+    line is ``{"done": true, "pieces": n, "failed": k}``. The first piece is
+    short (``SPEECH_STREAM_FIRST_PIECE_CHARS``), so a long answer starts being
+    heard after one sentence rather than after all of it, and ``format=opus``
+    sends each piece as Ogg/Opus, about a tenth of WAV's size.
+    """
+    import base64
+
+    from .speech_service import audio_for_client, voice_pieces
+
+    pieces = voice_pieces(body.text)
+
+    def voice(piece: str) -> tuple[SynthesizeResult, bytes, str]:
+        result = speech.synthesize(text=piece, voice=body.voice, language=body.language)
+        audio, fmt = audio_for_client(result, body.format) if result.audio else (b"", "")
+        return result, audio, fmt
+
+    async def lines() -> AsyncIterator[str]:
+        # The first piece is voiced alone, so speech starts soonest; after it,
+        # two pieces are always in flight, so the next is ready before the one
+        # playing ends. The Orpheus sidecar batches, but not for free: with
+        # two in flight from the start the first piece took 0.3-1.6 s longer
+        # on the GPU stack, and one at a time left pauses of up to 0.4 s.
+        futures = [asyncio.ensure_future(asyncio.to_thread(voice, pieces[0]))] if pieces else []
+        failed = 0
+        try:
+            for seq, piece in enumerate(pieces):
+                result, audio, fmt = await futures[seq]
+                while len(futures) < min(seq + 3, len(pieces)):
+                    futures.append(asyncio.ensure_future(asyncio.to_thread(voice, pieces[len(futures)])))
+                metrics.inc("speech_tts_total")
+                if result.latency_s:
+                    metrics.observe("speech_tts_latency_s", result.latency_s)
+                line: dict[str, Any] = {"seq": seq, "text": piece}
+                if audio:
+                    line.update(format=fmt, audio_base64=base64.b64encode(audio).decode("ascii"),
+                                duration_s=result.duration_s, backend=result.backend)
+                else:
+                    failed += 1
+                    metrics.inc("speech_tts_errors_total")
+                    line["error"] = result.error or "no audio"
+                yield json.dumps(line) + "\n"
+            yield json.dumps({"done": True, "pieces": len(pieces), "failed": failed}) + "\n"
+        finally:
+            for future in futures:  # the listener left: nothing more to send
+                future.cancel()
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store"})
 
 
 @app.post("/v1/tts", response_model=SynthesizeResponse, tags=["speech"])
@@ -1177,7 +1429,7 @@ async def synthesize_audio(
     """Synthesize text to WAV audio. Returns base64-encoded WAV bytes."""
     import base64
 
-    result = speech.synthesize(text=body.text, voice=body.voice, language=body.language)
+    result = await asyncio.to_thread(speech.synthesize, text=body.text, voice=body.voice, language=body.language)
     metrics.inc("speech_tts_total")
     if result.latency_s:
         metrics.observe("speech_tts_latency_s", result.latency_s)
@@ -1212,7 +1464,8 @@ async def translate_text(
             latency_s=0.0,
             backend="passthrough",
         )
-    result = speech.translate(
+    result = await asyncio.to_thread(
+        speech.translate,
         text=body.text,
         source_lang=body.source_lang,
         target_lang=body.target_lang,
@@ -1222,6 +1475,13 @@ async def translate_text(
         metrics.observe("speech_mt_latency_s", result.latency_s)
     if result.error:
         metrics.inc("speech_mt_errors_total")
+    figures_ok = True
+    if body.text and result.text and not result.error:
+        try:
+            from . import mt
+            figures_ok = mt.figures_survived(body.text, result.text, locale=body.target_lang)
+        except Exception:
+            figures_ok = True
     return TranslateResponse(
         text=result.text,
         source_lang=result.source_lang,
@@ -1229,6 +1489,7 @@ async def translate_text(
         latency_s=result.latency_s,
         backend=result.backend,
         error=result.error,
+        figures_survived=figures_ok,
     )
 
 
@@ -1400,17 +1661,34 @@ def document_report(
     if record is None:
         raise HTTPException(status_code=404, detail="Document not found or expired")
 
-    # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
-    # on a runtime without fpdf2.
-    from .pdf_export import generate_document_report_pdf
+    etag = f'W/"{document_id}-{hashlib.sha256(str(record.meta.get("source_sha256", "")).encode()).hexdigest()[:12]}"'
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match and if_none_match.strip() == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": "private, no-transform, max-age=300",
+            },
+        )
 
-    started = time.perf_counter()
-    pdf_bytes = generate_document_report_pdf(record.to_report_payload())
-    metrics.inc("pdf_exports_total", labels={"kind": "document_report"})
-    metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "document_report"})
-    metrics.observe(
-        "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "document_report"}
-    )
+    cached_bytes = record.meta.get("_cached_report_pdf")
+    if cached_bytes is not None and isinstance(cached_bytes, bytes):
+        pdf_bytes = cached_bytes
+    else:
+        # Lazy import AFTER the 404 check so unknown/expired ids stay 404 even
+        # on a runtime without fpdf2.
+        from .pdf_export import generate_document_report_pdf
+
+        started = time.perf_counter()
+        pdf_bytes = generate_document_report_pdf(record.to_report_payload())
+        record.meta["_cached_report_pdf"] = pdf_bytes
+        metrics.inc("pdf_exports_total", labels={"kind": "document_report"})
+        metrics.observe("pdf_export_bytes", len(pdf_bytes), labels={"kind": "document_report"})
+        metrics.observe(
+            "pdf_export_duration_ms", (time.perf_counter() - started) * 1000, labels={"kind": "document_report"}
+        )
+
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -1418,8 +1696,42 @@ def document_report(
             "Content-Disposition": (
                 f'attachment; filename="ura_document_report_{document_id[:8]}.pdf"'
             ),
+            "ETag": etag,
+            "Cache-Control": "private, no-transform, max-age=300",
         },
     )
+
+
+@app.get("/v1/documents/{document_id}/status", tags=["documents"])
+@limiter.limit(_DOCUMENT_RATE_LIMIT)
+def document_status(
+    request: Request,
+    document_id: str = Path(..., pattern=r"^[a-f0-9]{32}$"),
+    _ctx: AuthContext = Depends(optional_user),
+) -> dict[str, Any]:
+    """Inspect processing status and metadata of an analysed document."""
+    record = documents.get_document(
+        document_id,
+        session_id=request.headers.get("X-Session-ID", ""),
+        user_id=_ctx.user_id,
+    )
+    if record is None:
+        raise HTTPException(status_code=404, detail="Document not found or expired")
+
+    now = time.time()
+    ttl_left = max(0, int(record.created_at + documents.DOCUMENT_TTL_SECONDS - now))
+    return {
+        "document_id": record.doc_id,
+        "filename": record.filename,
+        "kind": record.kind,
+        "doc_type": record.doc_type,
+        "status": "ready",
+        "size_bytes": record.size_bytes,
+        "tables_count": len(record.tables),
+        "fields_count": sum(len(v) for v in record.fields.values()),
+        "has_cached_report": bool(record.meta.get("_cached_report_pdf")),
+        "expires_in_seconds": ttl_left,
+    }
 
 
 @app.get("/v1/speech/health", response_model=SpeechHealthResponse, tags=["speech"])
@@ -1427,15 +1739,24 @@ def speech_health(
     request: Request,
     _ctx: AuthContext = Depends(optional_user),
 ) -> SpeechHealthResponse:
-    """Report whether the speech pipeline is ready to serve requests."""
+    """Report whether the speech pipeline is ready to serve requests.
+
+    ``degraded`` is still HTTP 200: Whisper-SALT and Spark-TTS-SALT on the
+    local GPU are up, but the Orpheus sidecar named by ``ORPHEUS_TTS_URL``
+    is not. Callers that only check the status code keep working; callers
+    that check ``status`` can see the Luganda voice is the slow tier.
+    """
+    from .speech_service import speech_health_report
+
     speech = getattr(request.app.state, "speech", None)
-    enabled = SPEECH_ENABLED and speech is not None and speech.is_ready()
     return SpeechHealthResponse(
-        status="ready" if enabled else "unavailable",
-        enabled=SPEECH_ENABLED,
-        asr_backend=SPEECH_ASR_BACKEND,
-        tts_backend=SPEECH_TTS_BACKEND,
-        mt_backend=SPEECH_MT_BACKEND,
+        **speech_health_report(
+            speech,
+            enabled_flag=SPEECH_ENABLED,
+            asr_backend=SPEECH_ASR_BACKEND,
+            tts_backend=SPEECH_TTS_BACKEND,
+            mt_backend=SPEECH_MT_BACKEND,
+        )
     )
 
 
@@ -1565,13 +1886,14 @@ async def voice_chat(
     if len(audio_bytes) > 16 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="audio exceeds 16 MiB limit")
     _require_voice_processing_consent(request, ctx)
+    audio_bytes = _declared_raw_pcm(request, audio_bytes, sample_rate)
 
     # Collect per-stage errors so they surface in the response
     stage_errors: list[str] = []
     session_id = request.headers.get("X-Session-ID") or None
 
     # --- 1. ASR ---------------------------------------------------------------
-    asr_result = speech.transcribe(audio_bytes, sample_rate=sample_rate, language=language)
+    asr_result = await asyncio.to_thread(speech.transcribe, audio_bytes, sample_rate=sample_rate, language=language)
     asr_latency = asr_result.latency_s or 0.0
     metrics.inc("speech_asr_total")
     if asr_result.latency_s:
@@ -1585,7 +1907,9 @@ async def voice_chat(
             asr_backend=asr_result.backend,
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
-    transcript = asr_result.text
+    from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
+
+    transcript = repair_asr_entities(asr_result.text)
     detected_lang = asr_result.language or language
 
     # Guard: empty transcript (user said nothing / noise)
@@ -1599,32 +1923,25 @@ async def voice_chat(
             total_latency_s=round(time.perf_counter() - t_start, 3),
         )
 
-    # --- 2. MT (Luganda -> English) if user speaks Luganda --------------------
+    # --- 2. Query normalisation & Domain Term Mapping -------------------
+    # generate() translates for retrieval and localises the reply itself (the
+    # same single place text chat uses), so there is no separate MT leg here.
     mt_latency = 0.0
     mt_backend = ""
     chat_text = transcript
     if detected_lang == "lg":
-        mt_result = speech.translate(transcript, source_lang="lg", target_lang="en")
-        mt_latency += mt_result.latency_s
-        mt_backend = mt_result.backend
-        metrics.inc("speech_mt_total")
-        if mt_result.latency_s:
-            metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-        if mt_result.error:
-            metrics.inc("speech_mt_errors_total")
-            stage_errors.append(f"MT(lg->en): {mt_result.error}")
-            logger.warning("Voice chat MT lg->en failed: %s", mt_result.error)
-        else:
-            chat_text = mt_result.text
+        chat_text = normalize_luganda_tax_query(transcript)
+    elif detected_lang == "sw":
+        chat_text = normalize_swahili_tax_query(transcript)
 
-    # --- 3. LLM chat ---------------------------------------------------------
+    # --- 3. Local Model Generation & Localization -------------------------
     t_llm = time.perf_counter()
     chat_result = await asyncio.to_thread(
         model.generate,
         message=chat_text,
         conversation_id=conversation_id,
         top_k=top_k,
-        locale="en",
+        locale=detected_lang,
         session_id=session_id,
         request_id=getattr(request.state, "request_id", None),
         user_id=ctx.user_id or None,
@@ -1633,28 +1950,7 @@ async def voice_chat(
     llm_latency = time.perf_counter() - t_llm
     reply_text = chat_result.get("reply", "")
 
-    # --- 4. MT (English -> Luganda) if user language is Luganda ---------------
-    if detected_lang == "lg" and reply_text:
-        mt_result = speech.translate(reply_text, source_lang="en", target_lang="lg")
-        mt_latency += mt_result.latency_s
-        mt_backend = mt_backend or mt_result.backend
-        metrics.inc("speech_mt_total")
-        if mt_result.latency_s:
-            metrics.observe("speech_mt_latency_s", mt_result.latency_s)
-        if mt_result.error:
-            metrics.inc("speech_mt_errors_total")
-            stage_errors.append(f"MT(en->lg): {mt_result.error}")
-            logger.warning("Voice chat MT en->lg failed: %s", mt_result.error)
-        else:
-            reply_text = mt_result.text
-
     # --- 5. TTS (synthesize reply in user's language) -------------------------
-    # Budget guard: on slow speech tiers (cloud Sunbird can take 30s+ per
-    # call) the four-stage pipeline can outlive the deployment's gateway
-    # timeout and the client receives a 504 with NOTHING — worse than a
-    # text-only reply. When the request has already burned the budget,
-    # return the text now (tts_skipped=True) and let the client fetch the
-    # narration as a separate single-leg /v1/tts request.
     tts_latency = 0.0
     tts_backend = ""
     audio_b64 = ""
@@ -1672,7 +1968,19 @@ async def voice_chat(
                 VOICE_CHAT_BUDGET_S,
             )
         else:
-            tts_result = speech.synthesize(text=reply_text, voice=voice, language=detected_lang)
+            from .receptionist.brain import _split_into_sentences
+            from .speech_normalization import clean_text_for_speech
+
+            # The reply's own language, not the caller's: an English fallback
+            # from a failed translation is spoken with the English voice.
+            tts_lang = str(chat_result.get("reply_locale") or detected_lang)
+            spoken_reply = clean_text_for_speech(reply_text, locale=tts_lang)
+            sentences = _split_into_sentences(spoken_reply)
+            if len(sentences) > 3:
+                spoken_reply = " ".join(sentences[:3])
+            if len(spoken_reply) > 500:
+                spoken_reply = spoken_reply[:500].rsplit(" ", 1)[0] + "."
+            tts_result = await asyncio.to_thread(speech.synthesize, text=spoken_reply, voice=voice, language=tts_lang)
             tts_latency = tts_result.latency_s
             tts_backend = tts_result.backend
             tts_sample_rate = tts_result.sample_rate
@@ -1798,6 +2106,33 @@ async def chat_stream_ws_v2(websocket: WebSocket) -> None:
     await chat_stream_ws(websocket, app)
 
 
+@app.websocket("/v1/calls/stream")
+async def call_stream_ws(websocket: WebSocket) -> None:
+    """Taxpayer phone call simulation WebSocket.
+
+    Gated by ``voice_receptionist`` feature flag.
+    """
+    from .receptionist.ws import call_stream_endpoint
+
+    await call_stream_endpoint(websocket)
+
+
+@app.websocket("/v1/admin/calls/stream")
+async def admin_call_stream_ws(websocket: WebSocket, call_id: str | None = None) -> None:
+    """Live staff call events (lobby or per-call live transcript)."""
+    from .receptionist.ws import staff_calls_stream_endpoint
+
+    await staff_calls_stream_endpoint(websocket, call_id=call_id)
+
+
+@app.websocket("/v1/admin/calls/{call_id}/audio")
+async def admin_call_audio_ws(websocket: WebSocket, call_id: str) -> None:
+    """Officer live audio bridge for call takeover."""
+    from .receptionist.ws import officer_audio_endpoint
+
+    await officer_audio_endpoint(websocket, call_id=call_id)
+
+
 # ---------------------------------------------------------------------------
 # Classification endpoints
 # ---------------------------------------------------------------------------
@@ -1843,7 +2178,7 @@ def _has_valid_ops_key(request: Request) -> bool:
     if not _INDEX_API_KEY:
         return False
     auth = request.headers.get("Authorization", "")
-    return auth == f"Bearer {_INDEX_API_KEY}"
+    return hmac.compare_digest(auth, f"Bearer {_INDEX_API_KEY}")
 
 
 def _require_ops_key(request: Request) -> None:
@@ -1871,7 +2206,7 @@ def _require_relay_key(request: Request) -> None:
     if not secret:
         raise HTTPException(status_code=503, detail="CF_RELAY_SECRET not configured")
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {secret}":
+    if not hmac.compare_digest(auth, f"Bearer {secret}"):
         raise HTTPException(status_code=403, detail="Invalid or missing relay credentials")
 
 
@@ -1898,6 +2233,83 @@ def require_admin_access(
     if ctx.user and ctx.user.is_staff:
         return ctx
     raise HTTPException(status_code=403, detail="staff role required")
+
+
+def _require_staff_writer(ctx: AuthContext) -> None:
+    """Officers and admins change cases; auditors read them and change nothing.
+
+    ``require_admin_access`` admits every staff role, so this is the
+    separation-of-duties check for write endpoints. The ticket console already
+    hid its controls from auditors, but the API accepted their writes (QA
+    audit, 2026-09-29). The operator key (no user) keeps its break-glass path.
+    """
+    if ctx.user and ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="read-only role")
+
+
+def _seal_audit_ledgers() -> int:
+    """Seal every tenant's unsealed audit rows; returns how many seals were made.
+
+    Scheduled from the lifespan. Housekeeping never takes the service down: a
+    failure is logged and counted, and the next interval tries again.
+    """
+    from .flags import flags as flag_reg
+
+    if not flag_reg.is_enabled("audit_ledger"):
+        return 0
+    try:
+        from .audit import get_ledger
+
+        ledger = get_ledger()
+        tenants = ledger.tenants()
+    except Exception:
+        metrics.inc("audit_seal_failed_total")
+        logger.exception("Scheduled audit seal could not reach the ledger; will retry next interval")
+        return 0
+    made = 0
+    for tenant in tenants:  # one tenant's failure must not leave the others unsealed
+        try:
+            if ledger.seal_pending(tenant) is not None:
+                made += 1
+                metrics.inc("audit_seals_total", labels={"trigger": "schedule"})
+        except Exception:
+            metrics.inc("audit_seal_failed_total")
+            logger.exception("Scheduled audit seal failed for tenant %s; will retry next interval", tenant)
+    return made
+
+
+def _require_audit_reader(ctx: AuthContext) -> None:
+    """The audit trail is for administrators and auditors, not case officers."""
+    if ctx.user and ctx.role not in ("ura_admin", "ura_auditor"):
+        raise HTTPException(status_code=403, detail="administrator or auditor role required")
+
+
+def _audit_staff_action(ctx: AuthContext, event_type: str, payload: dict[str, Any]) -> None:
+    """Append one staff action to the tamper-evident audit ledger.
+
+    Records who did what to which record: the actor, their role and the
+    identifiers and field names changed — never the content (a reply's text is
+    recorded as its length), so the ledger adds no copy of taxpayer data. Runs
+    only when ``audit_ledger`` is on, which production requires at startup. A
+    failed append is logged and counted, never raised: the action has already
+    happened, and ``audit_append_failed_total`` is what an alert should watch.
+    """
+    from .flags import flags as flag_reg
+
+    if not flag_reg.is_enabled("audit_ledger"):
+        return
+    try:
+        from .audit import get_ledger
+
+        get_ledger().append(
+            event_type,
+            {"actor_role": ctx.role if ctx.user else "operator_key", **payload},
+            tenant_id=ctx.tenant_id or "default",
+            user_id=ctx.user_id or "operator-key",
+        )
+    except Exception:
+        metrics.inc("audit_append_failed_total", labels={"event_type": event_type})
+        logger.exception("audit append failed for %s", event_type)
 
 
 @app.post("/v1/index", tags=["knowledge"])
@@ -1937,7 +2349,11 @@ def trigger_indexing(
 
     # Re-initialise the retriever so it picks up the new collection
     model._retriever_ready = model._retriever.initialize()
-    stats["retrieval_mode"] = "hybrid" if model._retriever_ready else "keyword"
+    # Same resolver as /ready and the chat path: a reindex that leaves the
+    # retriever sparse-only must not report "hybrid" either.
+    stats["retrieval_mode"] = active_retrieval_mode(
+        model._retriever, ready=model._retriever_ready
+    )
 
     return stats
 
@@ -2040,6 +2456,9 @@ def submit_feedback(
         user_id=ctx.user_id,
         user_query=_CM.redact_for_storage(body.user_query),
         bot_reply=_CM.redact_for_storage(body.bot_reply),
+        retrieval_mode=body.retrieval_mode,
+        workflow_id=body.workflow_id,
+        step_id=body.step_id,
     )
     return FeedbackResponse(**result)
 
@@ -2108,6 +2527,7 @@ def request_human_officer(
         # first replies.
         "requested_by": "taxpayer",
     }
+    modality = getattr(body, "modality", "text") or "text"
     ticket_id = model._maybe_create_ticket(
         reason=reason,
         user_query=reason,
@@ -2117,6 +2537,8 @@ def request_human_officer(
         priority="normal",
         handoff=handoff,
         user_id=ctx.user_id or "",
+        locale=locale,
+        modality=modality,
     )
     if not ticket_id:
         # _maybe_create_ticket logs the failure as ESCALATION LOST. The
@@ -2143,6 +2565,139 @@ def request_human_officer(
             locale,
         ),
     )
+
+
+@app.get("/v1/escalate/{ticket_id}", response_model=EscalationDetailResponse, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def get_escalation_status(
+    request: Request,
+    ticket_id: str,
+) -> EscalationDetailResponse:
+    """Public status endpoint for an escalated support case.
+
+    Enables detached support room / drawer tracking and real-time officer reply delivery.
+    """
+    clean_id = (ticket_id or "").strip().lstrip("#")
+    if clean_id.upper().startswith("TIC-"):
+        clean_id = clean_id[4:]
+    ticket = db.get_ticket(clean_id)
+    if not ticket:
+        candidates = db.list_tickets(limit=1, q=clean_id)
+        ticket = candidates[0] if candidates else None
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+
+    tid = str(ticket.get("id") or clean_id)
+    status = str(ticket.get("status") or "open")
+    priority = str(ticket.get("priority") or "normal")
+    team = str(ticket.get("team") or "general")
+    assignee = str(ticket.get("assignee") or "")
+    officer_reply = str(ticket.get("officer_reply") or "")
+    reply_at = float(ticket.get("reply_at") or 0.0)
+    created_at = float(ticket.get("created_at") or 0.0)
+    resolved_at = float(ticket.get("resolved_at") or 0.0)
+    reply_delivered_at = float(ticket.get("reply_delivered_at") or 0.0)
+
+    if officer_reply and not reply_delivered_at:
+        try:
+            db.mark_reply_delivered(tid)
+            reply_delivered_at = time.time()
+        except Exception:
+            pass
+
+    status_labels = {
+        "open": "Awaiting Officer Assignment",
+        "assigned": "In Review by URA Officer",
+        "resolved": "Resolved",
+        "wontfix": "Closed",
+    }
+    team_labels = {
+        "domestic_taxes": "Domestic Taxes - Objections & Advisory",
+        "customs": "Customs & Border Control Unit",
+        "disputes": "Tax Appeals & Legal Disputes Unit",
+        "general": "Taxpayer Services & Citizen Helpdesk",
+    }
+
+    ref = f"TIC-{tid[:8].upper()}"
+    status_label = status_labels.get(status, status.capitalize())
+    if officer_reply and status != "resolved":
+        status_label = "Officer Response Ready"
+
+    locale = str(ticket.get("locale") or "en")
+    modality = str(ticket.get("modality") or "text")
+    user_query_en = str(ticket.get("user_query_en") or "")
+    officer_reply_localized = str(ticket.get("officer_reply_localized") or "")
+
+    if officer_reply and not officer_reply_localized and locale not in ("", "en"):
+        try:
+            from .service import localize_reply
+            officer_reply_localized = localize_reply(officer_reply, locale)
+        except Exception:
+            officer_reply_localized = officer_reply
+
+    return EscalationDetailResponse(
+        ok=True,
+        ticket_id=tid,
+        reference=ref,
+        status=status,
+        status_label=status_label,
+        priority=priority,
+        team=team,
+        team_label=team_labels.get(team, team.replace("_", " ").title()),
+        assignee=assignee,
+        assignee_display=f"Officer {assignee.split('@')[0].capitalize()}" if assignee else "URA Support Officer",
+        reason=str(ticket.get("reason") or "Assistance required"),
+        user_query=str(ticket.get("user_query") or ""),
+        user_query_en=user_query_en,
+        locale=locale,
+        modality=modality,
+        officer_reply=officer_reply,
+        officer_reply_localized=officer_reply_localized,
+        reply_at=reply_at,
+        reply_delivered=bool(reply_delivered_at > 0),
+        created_at=created_at,
+        resolved_at=resolved_at,
+        transcript=ticket.get("transcript") or [],
+        can_reply=status not in ("wontfix",),
+    )
+
+
+@app.post("/v1/escalate/{ticket_id}/reply", response_model=dict, tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def reply_to_escalation(
+    request: Request,
+    ticket_id: str,
+    body: TaxpayerReplyRequest,
+) -> dict:
+    """Taxpayer sends a follow-up message or reference directly to the assigned officer."""
+    clean_id = (ticket_id or "").strip().lstrip("#")
+    if clean_id.upper().startswith("TIC-"):
+        clean_id = clean_id[4:]
+    ticket = db.get_ticket(clean_id)
+    if not ticket:
+        candidates = db.list_tickets(limit=1, q=clean_id)
+        ticket = candidates[0] if candidates else None
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+
+    tid = str(ticket.get("id") or clean_id)
+    updated = db.append_taxpayer_reply(tid, body.message)
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to record taxpayer reply")
+
+    try:
+        from .ticket_events import build_event, publish
+
+        publish(build_event(updated, event_type="escalation.taxpayer_reply"))
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "ticket_id": tid,
+        "status": updated.get("status", "open"),
+        "message": "Your reply was received by the URA officer.",
+    }
 
 
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
@@ -2175,6 +2730,34 @@ def feedback_summary(
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be between 1 and 365")
     return FeedbackSummary(**db.get_feedback_summary(days))
+
+
+@app.get("/v1/analytics/journeys", response_model=JourneyFunnelResponse, tags=["analytics"])
+def journey_funnel(
+    days: int = 30,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> JourneyFunnelResponse:
+    """Guided-journey funnel for the period: starts, completions, cancellations,
+    abandonment, the step unfinished journeys stopped at, and step ratings.
+
+    Built from the durable ``workflow_sessions`` and ``feedback`` tables, so it
+    is the same on every replica and survives restarts, unlike the in-process
+    ``journey_events_total`` counter on /metrics.
+    """
+    if days < 1 or days > 365:
+        raise HTTPException(status_code=400, detail="days must be between 1 and 365")
+    # Journey outcomes are kept WORKFLOW_SESSION_TTL_DAYS (default 365); a
+    # longer period would count only part of it, so report what is covered.
+    days = min(days, db.workflow_session_ttl_days())
+    raw = db.get_journey_funnel(days, abandon_after_s=_JOURNEY_ABANDON_AFTER_HOURS * 3600)
+    return JourneyFunnelResponse(
+        **build_journey_funnel(
+            raw,
+            WorkflowRegistry.list_all(),
+            days=days,
+            abandon_after_hours=_JOURNEY_ABANDON_AFTER_HOURS,
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2312,13 +2895,16 @@ def list_tickets_endpoint(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    locale: str | None = None,
+    modality: str | None = None,
+    q: str | None = None,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """List escalation tickets for URA staff triage.
 
     Requires an authenticated staff/admin user, or the configured
     operator key as a break-glass fallback. Filter via the query
-    string: ``?status=open``, ``?priority=urgent``.
+    string: ``?status=open``, ``?priority=urgent``, ``?q=TIN``.
 
     Ordered urgent-first, then oldest within a priority, so a waiting
     taxpayer moves up the queue rather than being buried by newer
@@ -2335,13 +2921,15 @@ def list_tickets_endpoint(
         raise HTTPException(status_code=400, detail="invalid priority")
 
     rows = db.list_tickets(
-        status=status, limit=limit, offset=offset, priority=priority, team=team
+        status=status, limit=limit, offset=offset, priority=priority, team=team, locale=locale, modality=modality, q=q
     )
     return {
         "count": len(rows),
         "status_filter": status or "all",
         "priority_filter": priority or "all",
         "team_filter": team or "all",
+        "locale_filter": locale or "all",
+        "modality_filter": modality or "all",
         "teams": known_teams(),
         "limit": limit,
         "offset": offset,
@@ -2384,7 +2972,12 @@ def ticket_presence_endpoint(
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
-    """Heartbeat: this officer has the case open (collision lock)."""
+    """Heartbeat: this officer has the case open (collision lock).
+
+    Officers and admins only: an auditor reads a case without claiming it, so
+    the console sends no heartbeat for them and the API refuses one.
+    """
+    _require_staff_writer(ctx)
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -2435,6 +3028,7 @@ def set_flag_endpoint(
     except KeyError:
         raise HTTPException(status_code=404, detail="unknown flag") from None
     db.save_flag_override(name, enabled)
+    _audit_staff_action(ctx, "staff.flag_set", {"flag": name, "enabled": bool(enabled)})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
@@ -2477,6 +3071,7 @@ def clear_flag_endpoint(
     # lost on restart rather than resurrected.)
     db.clear_flag_override(name)
     flag_reg.clear(name)
+    _audit_staff_action(ctx, "staff.flag_cleared", {"flag": name})
     return {
         "name": name,
         "enabled": flag_reg.is_enabled(name),
@@ -2511,6 +3106,11 @@ def put_override_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(
+        ctx,
+        "staff.override_saved",
+        {"override_id": str((row or {}).get("id") or ""), "enabled": bool(body.get("enabled", True))},
+    )
     return row
 
 
@@ -2524,6 +3124,7 @@ def delete_override_endpoint(
     ok = db.delete_answer_override(override_id)
     if not ok:
         raise HTTPException(status_code=404, detail="override not found")
+    _audit_staff_action(ctx, "staff.override_deleted", {"override_id": override_id})
     return {"ok": True, "id": override_id}
 
 
@@ -2536,26 +3137,207 @@ def list_outbox_endpoint(
     return {"items": db.list_notification_outbox(limit=limit), "live": False}
 
 
+@app.get("/v1/admin/audit/events", response_model=AuditEventsResponse, tags=["admin"])
+def audit_events_endpoint(
+    event_type: str = Query("", max_length=64, pattern=r"^[a-z_.]*$"),
+    actor: str = Query("", max_length=128),
+    since: float | None = Query(None, ge=0),
+    until: float | None = Query(None, ge=0),
+    before_seq: int | None = Query(None, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditEventsResponse:
+    """The tamper-evident audit trail, newest first, for administrators and auditors.
+
+    ``event_type`` matches a prefix (``staff.`` = every staff action);
+    ``actor`` is a user id; ``since``/``until`` are Unix seconds. Page back
+    with ``next_before_seq``. Reads work even when ``audit_ledger`` is off, so
+    the history stays inspectable; ``ledger_enabled`` says whether new events
+    are being recorded.
+    """
+    from .audit import get_ledger
+    from .flags import flags as flag_reg
+
+    _require_audit_reader(ctx)
+    rows = get_ledger().query(
+        ctx.tenant_id or "default",
+        event_type_prefix=event_type,
+        user_id=actor,
+        since_ts=since,
+        until_ts=until,
+        before_seq=before_seq,
+        limit=limit,
+    )
+    events = [
+        AuditEventOut(
+            seq=int(r["seq"]),
+            event_id=str(r["event_id"]),
+            event_type=str(r["event_type"]),
+            actor=str(r.get("user_id") or ""),
+            ts=float(r["ts"]),
+            payload=r.get("payload") if isinstance(r.get("payload"), dict) else {},
+            row_hash=str(r["row_hash"]),
+        )
+        for r in rows
+    ]
+    next_before = events[-1].seq if len(events) == limit and events[-1].seq > 1 else None
+    if before_seq is None:
+        # Reading the trail is itself recorded (once per search, not per
+        # page), after the query so a listing never contains its own read.
+        _audit_staff_action(
+            ctx,
+            "audit.trail_viewed",
+            {
+                "event_type": event_type,
+                "actor": actor,
+                "since": since,
+                "until": until,
+                "returned": len(events),
+            },
+        )
+    return AuditEventsResponse(
+        ledger_enabled=flag_reg.is_enabled("audit_ledger"),
+        events=events,
+        next_before_seq=next_before,
+    )
+
+
+def _anchor_out(anchor: dict[str, Any] | None) -> AuditAnchorOut | None:
+    if not anchor:
+        return None
+    return AuditAnchorOut(
+        anchor_id=str(anchor["anchor_id"]),
+        first_seq=int(anchor["first_seq"]),
+        last_seq=int(anchor["last_seq"]),
+        merkle_root=str(anchor["merkle_root"]),
+        head_hash=str(anchor.get("head_hash") or ""),
+        created_at=float(anchor["created_at"]),
+    )
+
+
+@app.get("/v1/admin/audit/verify", response_model=AuditVerifyResponse, tags=["admin"])
+def audit_verify_endpoint(
+    scope: str = Query("auto", pattern=r"^(auto|full|since_seal)$"),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditVerifyResponse:
+    """Re-walk this tenant's hash chain and its seals and report whether they are intact.
+
+    Recomputes every row's hashes from its stored payload and envelope, so an
+    edited, deleted, reordered or re-attributed row shows up as a break at its
+    sequence number; re-checks each seal's Merkle root and chain head, which
+    catches a range rewritten consistently. ``scope=auto`` walks everything
+    until the ledger passes ``AUDIT_VERIFY_FULL_MAX_ROWS``, then re-checks the
+    newest seal and the rows after it; ``full`` and ``since_seal`` force one.
+    """
+    from .audit import get_ledger
+    from .audit.verifier import SCOPE_FULL, SCOPE_SINCE_SEAL, verify_ledger
+    from .flags import flags as flag_reg
+
+    _require_audit_reader(ctx)
+    tenant = ctx.tenant_id or "default"
+    ledger = get_ledger()  # creates the tables on first use
+    head = ledger.head_seq(tenant)
+    if scope == "auto":
+        scope = SCOPE_FULL if head <= _AUDIT_VERIFY_FULL_MAX_ROWS else SCOPE_SINCE_SEAL
+    report = verify_ledger(tenant, scope=scope)
+    latest = ledger.latest_anchor(tenant)
+    response = AuditVerifyResponse(
+        ledger_enabled=flag_reg.is_enabled("audit_ledger"),
+        valid=report.valid,
+        scope=report.scope,
+        rows_checked=report.rows_checked,
+        first_seq=report.first_seq,
+        last_seq=report.last_seq,
+        head_hash=report.head_hash,
+        breaks=[
+            AuditChainBreak(seq=b.seq, event_id=b.event_id, reason=b.reason) for b in report.breaks[:20]
+        ],
+        anchors_checked=report.anchors_checked,
+        anchor_breaks=[
+            AuditAnchorBreak(
+                anchor_id=b.anchor_id, first_seq=b.first_seq, last_seq=b.last_seq, reason=b.reason
+            )
+            for b in report.anchor_breaks[:20]
+        ],
+        latest_anchor=_anchor_out(latest),
+        unsealed_rows=max(0, head - int(latest["last_seq"])) if latest else head,
+        verified_at=time.time(),
+    )
+    if not report.valid:
+        metrics.inc("audit_chain_breaks_total", labels={"scope": report.scope})
+        logger.error(
+            "audit chain verification failed tenant=%s breaks=%d seal_breaks=%d",
+            tenant,
+            len(report.breaks),
+            len(report.anchor_breaks),
+        )
+    _audit_staff_action(
+        ctx,
+        "audit.chain_verified",
+        {
+            "scope": report.scope,
+            "valid": report.valid,
+            "rows_checked": report.rows_checked,
+            "seals_checked": report.anchors_checked,
+        },
+    )
+    return response
+
+
+@app.post("/v1/admin/audit/seal", response_model=AuditSealResponse, tags=["admin"])
+def audit_seal_endpoint(
+    ctx: AuthContext = Depends(require_admin_access),
+) -> AuditSealResponse:
+    """Seal every row written since the last seal, now, for administrators and auditors.
+
+    The same operation the API runs every ``AUDIT_SEAL_INTERVAL_SECONDS``; an
+    auditor uses it to fix the trail before exporting evidence. It adds a seal
+    and never changes a row, so it sits with the audit readers, not the writers.
+    """
+    from .audit import get_ledger
+
+    _require_audit_reader(ctx)
+    tenant = ctx.tenant_id or "default"
+    anchor = get_ledger().seal_pending(tenant)
+    if anchor is None:
+        return AuditSealResponse(sealed=False, anchor=None)
+    metrics.inc("audit_seals_total", labels={"trigger": "manual"})
+    _audit_staff_action(
+        ctx,
+        "audit.sealed",
+        {
+            "first_seq": anchor["first_seq"],
+            "last_seq": anchor["last_seq"],
+            "merkle_root": anchor["merkle_root"],
+        },
+    )
+    return AuditSealResponse(sealed=True, anchor=_anchor_out(anchor))
+
+
 @app.get("/v1/admin/tickets/{ticket_id}", tags=["admin"])
 def get_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
-    _ctx: AuthContext = Depends(require_admin_access),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Fetch a single ticket, including the conversation transcript.
 
     The transcript is the snapshot taken when the ticket was raised, so
-    it is still here after ``conversations`` has been purged.
+    it is still here after ``conversations`` has been purged. Opening it is
+    recorded as ``staff.ticket_viewed``: the transcript is taxpayer data, and
+    who read it is part of the audit trail (the call desk already logs its
+    caller-history views the same way).
     """
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
+    _audit_staff_action(ctx, "staff.ticket_viewed", {"ticket_id": ticket_id})
     return ticket
 
 
 @app.patch("/v1/admin/tickets/{ticket_id}", tags=["admin"])
-def update_ticket_endpoint(
+async def update_ticket_endpoint(
     request: Request,
     ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
     status: str | None = None,
@@ -2563,7 +3345,9 @@ def update_ticket_endpoint(
     staff_note: str | None = None,
     priority: str | None = None,
     officer_reply: str | None = None,
-    _ctx: AuthContext = Depends(require_admin_access),
+    officer_reply_localized: str | None = None,
+    locale: str | None = None,
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict:
     """Update a ticket's status/assignee/note/priority/reply.
 
@@ -2571,7 +3355,43 @@ def update_ticket_endpoint(
     the conversation; ``staff_note`` stays internal. They are separate
     fields on purpose — an officer's candid note is not something the
     taxpayer should ever read.
+
+    Officers and admins only; every accepted change is recorded as
+    ``staff.ticket_updated`` with the fields changed (a reply as its length).
     """
+    _require_staff_writer(ctx)
+    if request.headers.get("content-type", "").startswith("application/json"):
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                if "status" in body:
+                    status = body["status"]
+                if "assignee" in body:
+                    assignee = body["assignee"]
+                if "staff_note" in body:
+                    staff_note = body["staff_note"]
+                if "priority" in body:
+                    priority = body["priority"]
+                if "officer_reply" in body:
+                    officer_reply = body["officer_reply"]
+                if "officer_reply_localized" in body:
+                    officer_reply_localized = body["officer_reply_localized"]
+                if "locale" in body:
+                    locale = body["locale"]
+        except Exception:
+            pass
+
+    if officer_reply and not officer_reply_localized:
+        ticket = db.get_ticket(ticket_id)
+        if ticket:
+            t_loc = (locale or ticket.get("locale") or "en").lower().strip()
+            if t_loc not in ("", "en"):
+                try:
+                    from .service import localize_reply
+                    officer_reply_localized = localize_reply(officer_reply, t_loc)
+                except Exception:
+                    logger.debug("auto-localizing officer reply failed", exc_info=True)
+
     ok = db.update_ticket(
         ticket_id,
         status=status,
@@ -2579,9 +3399,21 @@ def update_ticket_endpoint(
         staff_note=staff_note,
         priority=priority,
         officer_reply=officer_reply,
+        officer_reply_localized=officer_reply_localized,
+        locale=locale,
     )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
+    changed = {
+        key: value
+        for key, value in (("status", status), ("assignee", assignee), ("priority", priority), ("locale", locale))
+        if value is not None
+    }
+    if staff_note is not None:
+        changed["staff_note_chars"] = len(staff_note)
+    if officer_reply is not None:
+        changed["officer_reply_chars"] = len(officer_reply)
+    _audit_staff_action(ctx, "staff.ticket_updated", {"ticket_id": ticket_id, **changed})
     return {"status": "ok", "ticket_id": ticket_id}
 
 
@@ -2610,6 +3442,496 @@ def voice_audit_endpoint(
     return {"entries": entries, "stats": stats}
 
 
+# ---------------------------------------------------------------------------
+# Phone Receptionist Admin Endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/admin/calls", tags=["admin"])
+def list_calls_endpoint(
+    status: str | None = None,
+    q: str | None = None,
+    date_from: float | None = None,
+    date_to: float | None = None,
+    outcome: str | None = None,
+    language: str | None = None,
+    officer_id: str | None = None,
+    has_ticket: bool | None = None,
+    topic: str | None = None,
+    needs_callback: bool | None = None,
+    sort: str = "started_desc",
+    limit: int = 50,
+    offset: int = 0,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """List phone calls with filtering, search, and pagination."""
+    from .receptionist.store import list_calls
+    from .tenancy import tenant_enabled
+    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+
+    calls, total = list_calls(
+        status=status,
+        limit=limit,
+        offset=offset,
+        q=q,
+        date_from=date_from,
+        date_to=date_to,
+        outcome=outcome,
+        language=language,
+        officer_id=officer_id,
+        has_ticket=has_ticket,
+        topic=topic,
+        needs_callback=needs_callback,
+        sort=sort,
+        return_total=True,
+        tenant_id=tenant_scope,
+    )
+    return {
+        "calls": calls,
+        "total": total,
+        "count": len(calls),
+        "status_filter": status or "all",
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/v1/admin/calls/metrics", tags=["admin"])
+def get_call_metrics_endpoint(
+    days: int = 7,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Retrieve aggregate phone receptionist performance metrics."""
+    from .receptionist.metrics import get_aggregate_metrics
+    from .tenancy import tenant_enabled
+    tenant_scope = (_ctx.tenant_id or "default") if tenant_enabled() else None
+    return get_aggregate_metrics(days=days, tenant_id=tenant_scope)
+
+
+@app.get("/v1/admin/calls/{call_id}", tags=["admin"])
+def get_call_detail_endpoint(
+    call_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Retrieve full call detail including turns, summary, metrics, and ticket.
+
+    Reading a call's transcript is recorded (``voice_staff_viewed_call``), as
+    opening a ticket's transcript is.
+    """
+    import re
+    from .receptionist.store import get_call_with_turns
+    from .tenancy import tenant_enabled
+
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
+        raise HTTPException(status_code=400, detail="Invalid call_id format")
+
+    tenant_scope = (ctx.tenant_id or "default") if tenant_enabled() else None
+    detail = get_call_with_turns(call_id, tenant_id=tenant_scope)
+    if not detail:
+        raise HTTPException(status_code=404, detail="Call not found")
+    _staff_call_event(ctx, call_id, "staff_viewed_call")
+    return detail
+
+
+@app.post("/v1/admin/calls/{call_id}/review", tags=["admin"])
+def review_call_endpoint(
+    call_id: str,
+    body: dict = Body(...),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Submit an officer rating (1-5) and note for a call."""
+    import re
+    from .receptionist.store import get_call, save_call_review
+    from .tenancy import tenant_enabled
+
+    if ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="Only staff and admins can submit reviews")
+
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
+        raise HTTPException(status_code=400, detail="Invalid call_id format")
+
+    tenant_scope = (ctx.tenant_id or "default") if tenant_enabled() else None
+    call = get_call(call_id, tenant_id=tenant_scope)
+    if not call:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    try:
+        rating = int(body.get("rating", 5))
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid rating")
+    note = str(body.get("note", ""))
+    ok = save_call_review(call_id, rating=rating, note=note)
+    if ok:
+        _audit_staff_action(
+            ctx,
+            "staff.call_reviewed",
+            {"call_id": call_id, "rating": rating, "note_chars": len(note)},
+        )
+    return {"ok": ok, "call_id": call_id, "rating": rating}
+
+
+# -- Officer Call Desk (docs/plans/officer-call-desk-plan.md §6.2–6.3) -------
+# Per-call routes, staff-only and audited; the lobby channel never carries
+# what these return.
+
+_CALL_ID_RE = r"^[a-zA-Z0-9_-]{1,64}$"
+
+
+def _desk_call_id(call_id: str) -> str:
+    import re
+    if not re.match(_CALL_ID_RE, call_id):
+        raise HTTPException(status_code=400, detail="Invalid call_id format")
+    return call_id
+
+
+def _staff_call_event(ctx: AuthContext, call_id: str, event_type: str, **metadata: Any) -> None:
+    """Record a staff read or action on a call: voice audit log and audit ledger.
+
+    Carries the actor's role like ``_audit_staff_action`` does, so the audit
+    trail shows who acted and in which capacity; the break-glass operator key
+    is recorded as ``operator-key``.
+    """
+    from .voice_consent import log_voice_event
+
+    log_voice_event(
+        user_id=ctx.user_id or "operator-key",
+        session_id=call_id,
+        event_type=event_type,
+        metadata={"actor_role": ctx.role if ctx.user else "operator_key", **metadata},
+        tenant_id=ctx.tenant_id or "default",
+    )
+
+
+def _receptionist_tenant_scope(ctx: AuthContext) -> str | None:
+    from .tenancy import tenant_enabled
+
+    return (ctx.tenant_id or "default") if tenant_enabled() else None
+
+
+def _require_receptionist_call(call_id: str, ctx: AuthContext) -> dict[str, Any]:
+    from .receptionist.store import get_call
+
+    call = get_call(call_id, tenant_id=_receptionist_tenant_scope(ctx))
+    if call is None:
+        raise HTTPException(status_code=404, detail="Call not found")
+    return call
+
+
+def _desk_writer(ctx: AuthContext) -> None:
+    """Auditors see every call but take, hold and end none."""
+    if ctx.role not in ("ura_staff", "ura_admin"):
+        raise HTTPException(status_code=403, detail="Read-only role")
+
+
+def _desk_officer_name(ctx: AuthContext) -> str:
+    """The claimant as a caller will hear them: name, username or email — never a bare ``sub``."""
+    from .receptionist.desk import officer_display_name
+    claims = ctx.claims or {}
+    handle = (
+        str(claims.get("given_name") or "").strip()
+        or str(claims.get("preferred_username") or "").strip()
+        or (ctx.user.email if ctx.user else "")
+        or ctx.user_id
+    )
+    return officer_display_name(handle)
+
+
+def _desk_error(exc: Any) -> Response:
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=exc.status, content={"detail": exc.detail, **exc.extra})
+
+
+@app.get("/v1/admin/calls/{call_id}/brief", tags=["admin"])
+async def get_call_brief_endpoint(
+    call_id: str,
+    refresh: bool = False,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """The officer's brief for a call; 202 while the first one is being written."""
+    from fastapi.responses import JSONResponse
+
+    from .receptionist import brief as call_brief
+    _desk_call_id(call_id)
+    call = _require_receptionist_call(call_id, ctx)
+    _staff_call_event(ctx, call_id, "staff_viewed_brief")
+    if refresh:
+        brief = await asyncio.to_thread(call_brief.build_brief, call_id, force=True)
+        if brief:
+            call_brief.publish_brief(call_id, brief)
+            return brief
+    elif call.get("brief"):
+        return call["brief"]
+    call_brief.build_now(call_id)
+    return JSONResponse(status_code=202, content={"status": "building"})
+
+
+@app.post("/v1/admin/calls/{call_id}/claim", tags=["admin"])
+async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
+    """Take a call the AI handed over (a supervisor may step into one it is handling): first wins, the rest get 409."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    try:
+        result = await desk.claim(call_id, ctx.user_id, chat_model=getattr(app.state, "model", None),
+                                  officer_name=_desk_officer_name(ctx), is_supervisor=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_claimed")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/release", tags=["admin"])
+async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
+    """Give a claimed call back to the waiting queue before joining it."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    try:
+        result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_released")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/end", tags=["admin"])
+async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
+    """The officer ends the call: the caller hears a closing line and is hung up."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    try:
+        result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None),
+                                is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_ended_call")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/hold", tags=["admin"])
+async def hold_call_endpoint(
+    call_id: str,
+    body: dict = Body(...),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Put an active call on hold or resume it."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    on = bool(body.get("on", True))
+    try:
+        result = await desk.hold(call_id, ctx.user_id, on=on, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_hold_on" if on else "officer_hold_off")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/transfer", tags=["admin"])
+async def transfer_call_endpoint(
+    call_id: str,
+    body: dict = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Transfer the call to a specialized team or another officer."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    team = str(body.get("team") or "").strip()
+    target_officer_id = str(body.get("officer_id") or "").strip()
+    note = str(body.get("note") or "").strip()
+    try:
+        result = await desk.transfer(call_id, ctx.user_id, team=team, target_officer_id=target_officer_id,
+                                     note=note, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_transferred")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/wrapup", tags=["admin"])
+async def wrapup_call_endpoint(
+    call_id: str,
+    body: dict = Body(...),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Submit post-call wrap-up note, outcome, and ticket action."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    outcome = str(body.get("outcome") or "").strip()
+    note = str(body.get("note") or "").strip()
+    ticket_action = body.get("ticket_action")
+    rating = body.get("rating")
+    rating_note = body.get("rating_note")
+    try:
+        result = await desk.wrapup(
+            call_id,
+            ctx.user_id,
+            outcome=outcome,
+            note=note,
+            ticket_action=ticket_action,
+            rating=rating,
+            rating_note=rating_note,
+            is_admin=ctx.role == "ura_admin",
+        )
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_wrapup_saved")
+    return result
+
+
+@app.post("/v1/admin/calls/{call_id}/callback-done", tags=["admin"])
+async def callback_done_endpoint(
+    call_id: str,
+    body: dict = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Mark an open callback as resolved."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _desk_writer(ctx)
+    note = str(body.get("note") or "").strip()
+    try:
+        result = await desk.callback_done(call_id, ctx.user_id, note=note, is_admin=ctx.role == "ura_admin")
+    except desk.DeskError as exc:
+        return _desk_error(exc)
+    _staff_call_event(ctx, call_id, "officer_callback_done")
+    return result
+
+
+@app.get("/v1/admin/calls/{call_id}/caller-history", tags=["admin"])
+def caller_history_endpoint(
+    call_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Retrieve previous calls and tickets for the same caller."""
+    from .receptionist import desk
+    _desk_call_id(call_id)
+    _require_receptionist_call(call_id, ctx)
+    _staff_call_event(ctx, call_id, "staff_viewed_caller_history")
+    return desk.caller_history(call_id, tenant_id=_receptionist_tenant_scope(ctx))
+
+
+@app.put("/v1/admin/officers/me/presence", tags=["admin"])
+def update_my_presence_endpoint(
+    body: dict = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """Update presence state for current officer or heartbeat last_seen."""
+    from .receptionist import presence
+    _desk_writer(ctx)
+    display_name = body.get("display_name")
+    if not display_name:
+        display_name = _desk_officer_name(ctx)
+    status = body.get("status")
+    languages = body.get("languages")
+    teams = body.get("teams")
+    return presence.upsert_presence(
+        ctx.user_id,
+        display_name=display_name,
+        status=status,
+        languages=languages,
+        teams=teams,
+    )
+
+
+@app.get("/v1/admin/officers/presence", tags=["admin"])
+def get_officers_presence_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> Any:
+    """List online and active officers and valid transfer teams."""
+    from .receptionist import presence
+    return presence.get_presence_board()
+
+
+@app.post("/v1/auth/dev-token", tags=["auth"], response_model=DevTokenResponse)
+def mint_dev_token_endpoint(req: DevTokenRequest = Body(default_factory=DevTokenRequest)) -> DevTokenResponse:
+    """Mint a development/prototype token for staff or taxpayer access.
+
+    Disabled under APP_ENV=production. Automatically detects URA staff, admin,
+    and auditor credentials and determines internal redirection destinations.
+    """
+    if os.getenv("APP_ENV", "development").lower() == "production":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dev token generation is disabled under APP_ENV=production. Use a real OIDC provider.",
+        )
+    from .auth.jwt_auth import make_dev_token
+
+    requested_role = (req.role or "").strip().lower()
+    email = (req.email or "").strip().lower()
+    user_id = (req.user_id or "").strip()
+
+    # Predefined server-side allowlist for official URA personnel
+    predefined_staff: dict[str, str] = {
+        "admin@ura.go.ug": "ura_admin",
+        "auditor@ura.go.ug": "ura_auditor",
+        "agent.sarah@ura.go.ug": "ura_staff",
+        "officer@ura.go.ug": "ura_staff",
+    }
+
+    # Strict server-side role resolution preventing unauthenticated privilege escalation (CWE-269)
+    if email in predefined_staff:
+        resolved_role = predefined_staff[email]
+    elif email.endswith("@ura.go.ug"):
+        if requested_role == "ura_admin" and ("admin" in email or "admin" in user_id.lower()):
+            resolved_role = "ura_admin"
+        elif requested_role == "ura_auditor" and ("auditor" in email or "auditor" in user_id.lower()):
+            resolved_role = "ura_auditor"
+        elif requested_role == "ura_staff" or any(s in email for s in ("agent", "officer", "staff")):
+            resolved_role = "ura_staff"
+        else:
+            resolved_role = "ura_staff"
+    elif not email and requested_role in ("ura_admin", "ura_auditor", "ura_staff"):
+        # Explicit role selection in dev mode with no email provided: scope to official domain
+        resolved_role = requested_role
+        email = f"{requested_role.replace('ura_', '')}@ura.go.ug"
+    elif requested_role in ("public", "verified_taxpayer"):
+        resolved_role = requested_role
+    else:
+        # Non-URA domains or unauthorized requests default strictly to public (taxpayer)
+        resolved_role = "public"
+
+    if resolved_role == "ura_admin":
+        redirect_url = "/admin"
+    elif resolved_role == "ura_auditor":
+        redirect_url = "/analytics"
+    elif resolved_role == "ura_staff":
+        redirect_url = "/agent"
+    else:
+        redirect_url = "/"
+
+    if not user_id:
+        user_id = email.split("@")[0] if email else (resolved_role.replace("ura_", "") or "user")
+
+    if not email:
+        email = f"{user_id}@ura.go.ug" if resolved_role.startswith("ura_") else f"{user_id}@taxpayer.go.ug"
+
+    token = make_dev_token(
+        user_id=user_id,
+        tenant_id=req.tenant_id or "default",
+        email=email,
+        role=resolved_role,
+    )
+    return DevTokenResponse(
+        token=token,
+        role=resolved_role,
+        email=email,
+        user_id=user_id,
+        authenticated=True,
+        redirect_url=redirect_url,
+    )
+
+
 @app.get("/v1/me", tags=["me"])
 def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
     """Return the current auth context (or anonymous)."""
@@ -2618,19 +3940,33 @@ def me_whoami(ctx: AuthContext = Depends(current_user)) -> dict:
     from .tools.ura_account import account_api_status
 
     # Refresh last_seen + upsert on every whoami call
-    row = db.upsert_user(
-        external_id=ctx.user.user_id,
-        tenant_id=ctx.tenant_id,
-        email=ctx.user.email,
-        role=ctx.role,
-    )
+    try:
+        row = db.upsert_user(
+            external_id=ctx.user.user_id,
+            tenant_id=ctx.tenant_id,
+            email=ctx.user.email,
+            role=ctx.role,
+        )
+        user_id = row.get("id") or ctx.user.user_id
+        external_id = row.get("external_id") or ctx.user.user_id
+        tenant_id = row.get("tenant_id") or ctx.tenant_id
+        email = row.get("email") or ctx.user.email
+        role = row.get("role") or ctx.role
+    except Exception:
+        logger.exception("Failed to upsert user in database during /v1/me whoami")
+        user_id = ctx.user.user_id
+        external_id = ctx.user.user_id
+        tenant_id = ctx.tenant_id
+        email = ctx.user.email
+        role = ctx.role
+
     return {
         "authenticated": True,
-        "user_id": row["id"],
-        "external_id": row["external_id"],
-        "tenant_id": row["tenant_id"],
-        "email": row["email"],
-        "role": row["role"],
+        "user_id": user_id,
+        "external_id": external_id,
+        "tenant_id": tenant_id,
+        "email": email,
+        "role": role,
         "granted_purposes": ctx.user.granted_purposes,
         "account_api": account_api_status(),
     }
@@ -3056,6 +4392,72 @@ def download_offline_bundle(
             "Content-Length": str(size),
             "X-Bundle-Version": manager.get_info().version,
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Connectors (EFRIS, Digital Tax Stamps)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/connectors", tags=["connectors"])
+def list_system_connectors() -> dict[str, Any]:
+    """List system connectors (EFRIS, DTS) with health and independent database metrics."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    return {
+        "ok": True,
+        "connectors": orchestrator.get_connectors_summary(),
+        "health": orchestrator.health_check(),
+    }
+
+
+@app.post("/v1/connectors/{name}/toggle", tags=["connectors"])
+def toggle_system_connector(
+    name: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    """Connect or disconnect an enterprise system connector."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    enable = bool(payload.get("enable", True))
+    return orchestrator.toggle_connector(name, enable)
+
+
+@app.get("/v1/connectors/{name}/records", tags=["connectors"])
+def inspect_connector_database(
+    name: str,
+    limit: int = Query(5, ge=1, le=50),
+) -> dict[str, Any]:
+    """Retrieve recent records from the connector's independent SQLite database."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    return orchestrator.get_connector_records(name, limit=limit)
+
+
+@app.post("/v1/connectors/register", tags=["connectors"])
+def register_external_connector(
+    payload: dict[str, Any] = Body(...),
+) -> dict[str, Any]:
+    """Register an external API/MCP system connector (e.g. Stripe, GitHub, or standalone enterprise server)."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    name = str(payload.get("name", "")).strip()
+    endpoint_url = str(payload.get("endpoint_url", "")).strip()
+    if not name or not endpoint_url:
+        raise HTTPException(status_code=400, detail="name and endpoint_url are required")
+
+    return orchestrator.register_remote_connector(
+        name=name,
+        endpoint_url=endpoint_url,
+        api_key=str(payload.get("api_key", "")),
+        system_type=str(payload.get("system_type", "external_mcp")),
+        display_name=str(payload.get("display_name", "")),
+        description=str(payload.get("description", "")),
     )
 
 

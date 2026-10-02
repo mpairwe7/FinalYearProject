@@ -179,3 +179,38 @@ class TestJudgeRescueIsOffByDefault(unittest.TestCase):
             ),
         ):
             self.assertEqual(service._judge_rescue("What is VAT?", _index(), 4), [])
+
+
+class TestNativeMultilingualFaqMatching(unittest.TestCase):
+    def test_direct_native_hit_bypasses_translator(self):
+        idx = {
+            "vat": [
+                {
+                    "question": "What is the VAT rate in Uganda?",
+                    "answer": "The standard VAT rate in Uganda is 18 percent under the VAT Act.",
+                    "question_lg": "Omusolo gwa VAT gw'ameka mu Uganda?",
+                    "answer_lg": "Omusolo gwa VAT ogwa bulijjo guli ebitundu 18 ku buli kikumi wansi w'etteeka lya VAT.",
+                    "question_sw": "Kiwango cha kodi ya VAT nchini Uganda ni kipi?",
+                    "answer_sw": "Kiwango cha kawaida cha VAT nchini Uganda ni asilimia 18 chini ya Sheria ya VAT.",
+                    "source": "ura_vat_faqs.csv",
+                    "tag": "vat",
+                }
+            ]
+        }
+        with patch("app.sunbird.translate_to_english") as tr:
+            hits = service._simple_search("Omusolo gwa VAT gw'ameka mu Uganda?", idx, top_k=4, locale="lg")
+            self.assertTrue(hits)
+            tr.assert_not_called()
+            self.assertEqual(hits[0].get("_matched_locale"), "lg")
+            retrieval_hits = service._faq_hits_to_retrieval_hits(hits, locale="lg")
+            self.assertEqual(retrieval_hits[0]["answer"], idx["vat"][0]["answer_lg"])
+            self.assertEqual(retrieval_hits[0]["question"], idx["vat"][0]["question_lg"])
+
+        with patch("app.sunbird.translate_to_english") as tr:
+            hits_sw = service._simple_search("Kiwango cha kodi ya VAT nchini Uganda ni kipi?", idx, top_k=4, locale="sw")
+            self.assertTrue(hits_sw)
+            tr.assert_not_called()
+            self.assertEqual(hits_sw[0].get("_matched_locale"), "sw")
+            retrieval_hits_sw = service._faq_hits_to_retrieval_hits(hits_sw, locale="sw")
+            self.assertEqual(retrieval_hits_sw[0]["answer"], idx["vat"][0]["answer_sw"])
+            self.assertEqual(retrieval_hits_sw[0]["question"], idx["vat"][0]["question_sw"])

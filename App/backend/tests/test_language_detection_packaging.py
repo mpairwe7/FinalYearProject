@@ -63,6 +63,23 @@ class LugandaDetectionTest(unittest.TestCase):
         self.assertEqual(detect_language("What is the VAT rate in Uganda?"), "en")
         self.assertEqual(detect_language("Kodi ya VAT ni kiasi gani?"), "sw")
 
+    def test_misspelled_words_do_not_alter_response_language(self) -> None:
+        """Misspelling of words should not alter response language; always use default set language."""
+        noisy_english = [
+            "How do I pay assessmnt witholding tax?",
+            "wat is the vat rat?",
+            "hw to aply for tin",
+            "penlaty for late fillling",
+            "incom tax for busines",
+            "can u claryfy efris invoyce requrments?",
+            "what is the dedline for filing?",
+            "is vat compulsary or voluntery?",
+            "wan to register tin in kampala",
+        ]
+        for query in noisy_english:
+            with self.subTest(query=query):
+                self.assertEqual(detect_language(query, default_lang="en"), "en")
+
     def test_the_lingua_backend_is_actually_reachable(self) -> None:
         """Guards the silent degradation itself, not just its symptom."""
         from app import query

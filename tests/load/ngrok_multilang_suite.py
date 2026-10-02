@@ -218,7 +218,10 @@ async def send_one(
             # locale "en" on every request: service.py only runs auto-detection
             # when the caller sends "en", so this is the path under test.
             json={"message": message, "locale": "en"},
-            headers={"X-Session-ID": f"loadtest-{phase}-{expect}-{random.randint(0, 10**9)}"},
+            headers={
+                "X-Session-ID": f"loadtest-{phase}-{expect}-{random.randint(0, 10**9)}",
+                "ngrok-skip-browser-warning": "1",
+            },
         )
         dt = time.perf_counter() - t0
         rec = Record(
@@ -650,7 +653,7 @@ async def main() -> None:
     summaries: list[dict[str, Any]] = []
     all_records: list[dict] = []
     limits = httpx.Limits(max_connections=64, max_keepalive_connections=32)
-    async with httpx.AsyncClient(timeout=args.timeout, limits=limits) as client:
+    async with httpx.AsyncClient(timeout=args.timeout, limits=limits, headers={"ngrok-skip-browser-warning": "1"}) as client:
         for name in names:
             fn = PHASES[name.strip()]
             print(f"\n>>> running phase: {name} ...", flush=True)

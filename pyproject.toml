@@ -164,6 +164,7 @@ ignore = [
 "App/backend/app/speech_service.py" = ["S110"]
 # URL opens use known http(s) schemes only
 "App/backend/app/llm.py" = ["S310", "S112", "E402"]
+"App/backend/tests/**" = ["PT009"]
 
 [tool.mypy]
 python_version = "3.11"

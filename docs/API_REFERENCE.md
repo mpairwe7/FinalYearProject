@@ -399,6 +399,13 @@ POST /v1/feedback
 | `session_id` | string | No | Client session identifier |
 | `user_query` | string | No | Original question (PII-redacted before storage) |
 | `bot_reply` | string | No | Bot response that was rated (PII-redacted before storage) |
+| `retrieval_mode` | string | No | Route that produced the reply (e.g. `workflow`, `hybrid`) |
+| `workflow_id` | string | No | Guided journey the reply belongs to (e.g. `tax_clearance`) |
+| `step_id` | string | No | Journey step the reply asked (e.g. `collect_returns_filed`) |
+
+The three context fields are identifiers only: lowercase letters, digits and
+`_`, at most 64 characters. Anything else is refused with 422. They let
+`GET /v1/analytics/journeys` attribute ratings to journey steps.
 
 **Response**
 ```json
@@ -473,6 +480,172 @@ GET /v1/feedback/summary?days=30
 `recent` carries at most the 20 newest ratings. `user_query` is the
 taxpayer's question as typed, stored PII-redacted at write time — it is
 what `/analytics` renders under "Taxpayer question".
+
+---
+
+### Guided-Journey Funnel
+
+How far taxpayers get through each guided journey in the period. Staff only
+(OIDC staff role or the operator key). Built from the stored journey sessions
+and feedback, so it is the same on every replica and survives restarts; the
+`journey_events_total` counter on `/metrics` is per replica and resets.
+
+```http
+GET /v1/analytics/journeys?days=30
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `days` | integer | No | Period in days (1–365, default 30), capped by `WORKFLOW_SESSION_TTL_DAYS` |
+
+`period_days` in the response is the covered period after that cap.
+Journey outcomes are retained for `WORKFLOW_SESSION_TTL_DAYS` (365 days by
+default); collected slot answers and the last prompt are cleared after
+`CONVERSATION_TTL_DAYS` (7 days by default).
+
+**Response**
+```json
+{
+  "period_days": 30,
+  "abandon_after_hours": 24,
+  "journeys": [
+    {
+      "workflow_id": "tax_clearance",
+      "name": "Tax Clearance Certificate",
+      "started": 10,
+      "completed": 6,
+      "cancelled": 1,
+      "abandoned": 2,
+      "in_progress": 1,
+      "completion_pct": 60.0,
+      "steps": [
+        {"step_id": "collect_returns_filed", "title": "Returns filed",
+         "stopped": 3, "helpful": 1, "not_helpful": 2}
+      ]
+    }
+  ]
+}
+```
+
+A journey still active but untouched for `JOURNEY_ABANDON_AFTER_HOURS`
+(default 24) counts as abandoned. `stopped` is attributed to the step at the
+session's saved position. Every journey a taxpayer can start by name is
+listed, even at zero; calculators appear once used. `/analytics` renders this
+as the "Guided journeys" panel.
+
+---
+
+### Audit Trail Events
+
+The tamper-evident audit trail, newest first. Administrators and auditors
+only (`ura_staff` gets 403). See `docs/runbooks/audit-trail.md` for what is
+recorded.
+
+```http
+GET /v1/admin/audit/events?event_type=staff.&actor=&since=&until=&before_seq=&limit=50
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `event_type` | string | No | Event-type prefix, `[a-z_.]` only (`staff.` = every staff action) |
+| `actor` | string | No | Acting user's id |
+| `since` / `until` | number | No | Unix seconds |
+| `before_seq` | integer | No | Page cursor: the previous page's `next_before_seq` |
+| `limit` | integer | No | 1–200, default 50 |
+
+**Response**
+```json
+{
+  "ledger_enabled": true,
+  "events": [
+    {"seq": 42, "event_id": "…", "event_type": "staff.ticket_updated",
+     "actor": "officer-1", "ts": 1790000100.0,
+     "payload": {"actor_role": "ura_staff", "ticket_id": "…", "status": "resolved", "officer_reply_chars": 24},
+     "row_hash": "…"}
+  ],
+  "next_before_seq": 42
+}
+```
+
+`ledger_enabled` false means this deployment is not recording new events;
+what was recorded before is still returned. The first page of each search
+(no `before_seq`) is itself recorded as an `audit.trail_viewed` event with
+the filters used, after the query runs.
+
+---
+
+### Audit Trail Verification
+
+Re-walks the tenant's hash chain and re-checks its seals, and reports whether
+both are intact. Administrators and auditors only. Each call is recorded as
+an `audit.chain_verified` event.
+
+```http
+GET /v1/admin/audit/verify?scope=auto
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `scope` | string | No | `auto` (default): `full` up to `AUDIT_VERIFY_FULL_MAX_ROWS` rows (default 200 000), `since_seal` above it. `full`: every row and every seal. `since_seal`: the newest seal and the rows after it, resumed from the chain head the seal recorded (falls back to `full` with no seal). Anything else: 422. |
+
+**Response**
+```json
+{
+  "ledger_enabled": true,
+  "valid": false,
+  "scope": "full",
+  "rows_checked": 42,
+  "first_seq": 1,
+  "last_seq": 42,
+  "head_hash": "…",
+  "breaks": [{"seq": 17, "event_id": "…", "reason": "row_hash mismatch"}],
+  "anchors_checked": 1,
+  "anchor_breaks": [
+    {"anchor_id": "…", "first_seq": 1, "last_seq": 40,
+     "reason": "merkle_root mismatch: a sealed row's content changed"}
+  ],
+  "latest_anchor": {"anchor_id": "…", "first_seq": 1, "last_seq": 40,
+                    "merkle_root": "…", "head_hash": "…", "created_at": 1790000000.0},
+  "unsealed_rows": 2,
+  "verified_at": 1790000200.0
+}
+```
+
+Row `breaks` reasons: `payload_hash mismatch`, `prev_hash does not match
+previous row_hash`, `row_hash mismatch` (for v2 rows this includes an edited
+actor, event type or time), `sequence gap: rows a..b are missing`,
+`duplicate sequence number (two writers forked the chain)`, `hash format
+downgraded after a newer row`. Seal `anchor_breaks` reasons: `sealed range
+holds n rows, expected m`, `merkle_root mismatch: …`, `head_hash mismatch: the
+chain was rewritten under the seal`. Each list holds at most the first 20.
+Ticket updates (`PATCH /v1/admin/tickets/{id}`) and the presence heartbeat
+answer 403 to `ura_auditor`, which is read-only.
+
+---
+
+### Seal the Audit Trail
+
+Seals every row written since the newest seal: records the range's Merkle
+root and the chain head, and writes the same values to the log as the
+external witness. Administrators and auditors only (`ura_staff` gets 403).
+The API also seals on a schedule (`AUDIT_SEAL_INTERVAL_SECONDS`, default
+3600). A seal made here is recorded as an `audit.sealed` event.
+
+```http
+POST /v1/admin/audit/seal
+```
+
+**Response**
+```json
+{
+  "sealed": true,
+  "anchor": {"anchor_id": "…", "first_seq": 41, "last_seq": 58,
+             "merkle_root": "…", "head_hash": "…", "created_at": 1790000300.0}
+}
+```
+
+`{"sealed": false, "anchor": null}` when there is nothing new to seal, or
+another replica sealed the same rows first.
 
 ---
 
@@ -678,27 +851,41 @@ GET /v1/speech/health
   "enabled": true,
   "asr_backend": "auto",
   "tts_backend": "auto",
-  "mt_backend": "auto"
+  "mt_backend": "auto",
+  "orpheus": "unconfigured",
+  "whisper_salt": true,
+  "spark_tts": true,
+  "last_tts_backend": "",
+  "last_asr_backend": "",
+  "last_asr_rtf": null
 }
 ```
 
-Always returns 200 (even when speech is unavailable). Check `status` field.
+Always returns 200. `status` is `ready`, `degraded`, or `unavailable`.
+
+`degraded` means Whisper-SALT and Spark-TTS-SALT are serving, but `ORPHEUS_TTS_URL` is set and the sidecar is not accepting connections (`orpheus` is `down` or `cooldown`). Luganda speech then uses Spark on the local GPU, one sentence at a time. `unavailable` means the speech pipeline itself is off.
 
 ---
 
 ### Transcribe Audio (ASR)
 
 ```http
-POST /v1/asr?sample_rate=16000&language=en
-Content-Type: application/octet-stream
+POST /v1/asr?sample_rate=16000&language=en&domain=tax
+Content-Type: audio/wav
 
-<raw PCM16 little-endian bytes, mono channel>
+<WAV: 16-bit PCM, mono>
 ```
+
+The body may also be WebM/Ogg Opus, MP3, or raw mono PCM at `sample_rate`. Send
+WAV where you can, and name a raw body's format with `encoding`; otherwise the
+format of a headerless body is inferred from its bytes.
 
 | Query Param | Type | Default | Validation |
 |---|---|---|---|
 | `sample_rate` | int | 16000 | 8000-48000 |
 | `language` | string | (auto-detect) | ISO 639-1, e.g. `en`, `lg` |
+| `domain` | string | (none) | `tax`: repair Whisper's TIN/URA mishears ("namba ya timu" → "namba ya TIN"), as the chat's dictation does |
+| `encoding` | string | (inferred) | Raw PCM only: `pcm_s16le` or `pcm_f32le`. Anything else is 400 |
 
 **Limits:** Max 16 MiB audio body (~2 min at 16 kHz int16).
 
@@ -740,6 +927,7 @@ Content-Type: application/json
 | `language` | string | `"en"` | ISO 639-1 |
 | `voice` | string | (auto by language) | `[a-zA-Z0-9_-]{1,64}` — see below |
 | `streaming` | bool | `false` | Reserved for future use |
+| `format` | string | `"wav"` | `/v1/tts/stream` only: `"opus"` sends Ogg/Opus pieces, about a tenth of WAV's size |
 
 `/v1/asr` distinguishes hearing nothing from being unable to hear. A backend
 that ran and returned an empty transcript answers `200` with `text: ""`,
@@ -760,6 +948,48 @@ A Sunbird tag is never forwarded to edge-tts — edge has no such speaker and th
 call would return no audio, losing the fallback. List the choices with
 `GET /v1/speech/voices`; the response's `voice` field reports the speaker
 actually used, so a caller can tell a honoured pick from a fallback.
+
+---
+
+### Stream Reply Speech
+
+```http
+POST /v1/tts/stream
+Content-Type: application/json
+```
+
+The chat's read-aloud. It takes the same body as `/v1/tts` and answers with
+NDJSON, one line per piece of the text as soon as that piece is voiced, in
+speaking order, so playback starts after the first sentence instead of after
+the whole answer. Before it, the voice chat's spoken reply to a TIN question
+arrived as one 1.1–1.6 MB WAV, 9–20 s after the question was sent.
+
+**Request**
+```json
+{"text": "To register for a TIN, …", "language": "lg", "format": "opus"}
+```
+
+**Response** (`application/x-ndjson`)
+```text
+{"seq": 0, "text": "To register for a TIN,", "format": "ogg_opus", "audio_base64": "T2dnUw…", "duration_s": 2.4, "backend": "orpheus_salt"}
+{"seq": 1, "text": "open the URA portal …", "format": "ogg_opus", "audio_base64": "T2dnUw…", "duration_s": 6.1, "backend": "orpheus_salt"}
+{"seq": 2, "text": "…", "error": "no audio"}
+{"done": true, "pieces": 3, "failed": 1}
+```
+
+| Field | Meaning |
+|---|---|
+| `seq` | Speaking order, from 0 |
+| `text` | The words this piece says |
+| `format` | `ogg_opus`, `wav` or `mp3`. `format: "opus"` gives Ogg/Opus when the voice's sample rate is one Opus takes (8, 12, 16, 24 or 48 kHz); anything else stays WAV. Edge-tts English arrives as MP3 and passes through |
+| `error` | Instead of audio, for a piece no backend could voice. The stream goes on with the next piece |
+| `done` | The last line: how many pieces there were and how many failed |
+
+Pieces are cut at sentence, clause, then word breaks, and grow: the first
+holds at most `SPEECH_STREAM_FIRST_PIECE_CHARS` (60) characters, the second 90,
+and the rest Orpheus's 120. The first piece is voiced alone; from then on two
+pieces are in flight, so the next is ready before the current one finishes
+playing. Once the client disconnects, no further piece is started.
 
 ---
 
@@ -860,10 +1090,10 @@ This is the primary endpoint for voice mode in the web client.
 
 ```http
 POST /v1/voice/chat?language=en&sample_rate=16000&tts_enabled=true&top_k=4
-Content-Type: application/octet-stream
+Content-Type: audio/wav
 X-Session-ID: <session-id>
 
-<raw PCM16 little-endian bytes, mono channel>
+<WAV: 16-bit PCM, mono (raw PCM with `encoding` is also accepted; see Transcribe Audio)>
 ```
 
 | Query Param | Type | Default | Validation |
@@ -1036,13 +1266,18 @@ CRUD endpoints for the escalation ticket queue. All admin endpoints require oper
 #### List Escalation Tickets
 
 ```http
-GET /v1/admin/tickets?status=open&limit=20&offset=0
+GET /v1/admin/tickets?status=open&priority=urgent&team=domestic_taxes&locale=lg&modality=voice&limit=20&offset=0
 ```
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | string | No | Filter by status (`open`, `in_progress`, `resolved`, `closed`) |
-| `limit` | integer | No | Page size (default 20) |
+| `status` | string | No | Filter by status (`open`, `assigned`, `resolved`, `wontfix`) |
+| `priority` | string | No | Filter by priority (`urgent`, `high`, `normal`, `low`) |
+| `team` | string | No | Filter by team (`domestic_taxes`, `customs`, `disputes`, `general`) |
+| `locale` | string | No | Filter by taxpayer language (`en`, `lg`, `sw`, etc.) |
+| `modality` | string | No | Filter by input modality (`text`, `voice`) |
+| `q` | string | No | Search query matching ID, reference, reason, query, translation, or notes |
+| `limit` | integer | No | Page size (1..500, default 50) |
 | `offset` | integer | No | Pagination offset (default 0) |
 
 **Response**
@@ -1483,8 +1718,8 @@ POST /v1/documents/analyze
 XLSX/XLSM, CSV, TXT, and images (PNG/JPEG/WebP/BMP/TIFF, OCR best-effort).
 Max 10 MB. Extracts text and tables, classifies the document against the
 URA taxonomy (receipt, tin_card, assessment, customs_declaration,
-filing_form, invoice, generic), and pulls TINs, UGX amounts, dates, and
-reference numbers.
+filing_form, invoice, statutory_act, portal_screenshot, generic), and pulls TINs, UGX amounts, dates, and
+reference numbers. For portal screenshots, returns interactive diagnostic troubleshooting steps, UI click hotspots, and portal links.
 
 **Response** `200`
 ```json
@@ -1498,6 +1733,7 @@ reference numbers.
   "tables": [],
   "text_preview": "…",
   "summary": "Payment receipt (92% classification confidence). …",
+  "screenshot_guidance": {},
   "warnings": [],
   "expires_in_seconds": 7200
 }
@@ -1672,6 +1908,10 @@ class FeedbackRequest(BaseModel):
     session_id: str | None = Field(None, max_length=128)
     user_query: str = Field("", max_length=2000)
     bot_reply: str = Field("", max_length=5000)
+    # Where the rated reply came from; identifiers only, never free text.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
 ```
 
 ### FeedbackResponse
@@ -1803,11 +2043,17 @@ class VoiceChatResponse(BaseModel):
 ### SpeechHealthResponse
 ```python
 class SpeechHealthResponse(BaseModel):
-    status: str       # "ready" or "unavailable"
+    status: str       # "ready", "degraded", or "unavailable"
     enabled: bool
     asr_backend: str
     tts_backend: str
     mt_backend: str
+    orpheus: str      # "unconfigured", "up", "down", or "cooldown"
+    whisper_salt: bool
+    spark_tts: bool
+    last_tts_backend: str
+    last_asr_backend: str
+    last_asr_rtf: float | None
 ```
 
 ---
@@ -2001,6 +2247,7 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | **Privacy** | | |
 | `STORE_RAW_PROMPTS` | Store unredacted prompts (false = PII redacted) | `false` |
 | `CONVERSATION_TTL_DAYS` | Days to retain conversation logs | `7` |
+| `VOICE_TRANSCRIPT_TTL_DAYS` | Days to retain voice-call transcripts and non-ticketed call records | `90` |
 | `FEEDBACK_TTL_DAYS` | Days to retain feedback | `90` |
 | **Observability** | | |
 | `OTEL_ENABLED` | Enable OpenTelemetry tracing | `false` |
@@ -2019,7 +2266,8 @@ docker run -p 8887:8887 landwind/ura-chatbot-api:latest
 | `SPEECH_MT_BACKEND` | MT backend selection | `prompted` |
 | `SPEECH_DEADLINE_S` | Max wall-clock time per speech inference | `20` |
 | `SPEECH_MAX_CONCURRENCY` | Thread pool workers for speech | `2` |
-| `SPEECH_TTS_CACHE_SIZE` | LRU entries for repeated-phrase TTS (0 disables) | `64` |
+| `SPEECH_TTS_CACHE_SIZE` | LRU entries for repeated-phrase TTS (0 disables) | `256` |
+| `SPEECH_STREAM_FIRST_PIECE_CHARS` | Longest first piece `/v1/tts/stream` voices; smaller starts speech sooner, at the cost of a short first phrase | `60` |
 | `VOICE_LLM_DEADLINE_S` | Hard ceiling on the LLM stage of a voice turn | `45` |
 | `VOICE_CHAT_BUDGET_S` | Time budget for batch `/v1/voice/chat`; once spent, reply-TTS is skipped (`tts_skipped=true`) so the text reply beats the gateway timeout and the client narrates via `/v1/tts` | `50` |
 | `SPEECH_CLOUD_DEADLINE_S` | Hard ceiling per cloud speech-tier call (Sunbird/edge-tts/Workers AI, all of ASR/TTS/MT); a hung upstream fails that tier and falls through instead of 504ing the request | `40` |
@@ -2090,7 +2338,7 @@ All responses include hardened security headers (OWASP, NIST SSDF):
 - **Multi-turn Memory**: 5-turn sliding window from SQLite conversation history
 - **Circuit Breaker**: Thread-safe Qdrant circuit breaker with exponential backoff (10s→300s)
 - **Rate Limiting**: `slowapi` with configurable per-IP limits on chat endpoints
-- **OutputGuard on SSE**: PII redaction and XSS sanitization applied to streaming tokens
+- **OutputGuard on SSE**: PII redaction, XSS sanitization, and reply structure (steps, paragraphs of at most three sentences, rates and section numbers left intact) applied to streaming tokens
 - **Per-stage Tracing**: OpenTelemetry spans with automatic timing for each RAG stage
 
 ### v1.4.0 (2026-04-29) — Quantization, Offline RAG & Voice-First Mobile

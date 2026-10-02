@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -41,8 +40,8 @@ def pytest_configure(config: pytest.Config) -> None:
     or downloads Qwen weights.  Individual tests that want to exercise
     the local-LLM path must use the ``mock_llm`` fixture.
     """
-    os.environ.setdefault("LLM_ENABLED", "false")
-    os.environ.setdefault("LLM_BACKEND", "local")
+    os.environ["LLM_ENABLED"] = "false"
+    os.environ["LLM_BACKEND"] = "local"
     os.environ.setdefault("CACHE_BACKEND", "memory")
     os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
     os.environ.setdefault("OTEL_ENABLED", "false")

@@ -66,6 +66,7 @@ per-request in tests via `flags.set("tool_use", True)`.
              ▼
       ┌─────────────────────────────────────────────────┐
       │  OutputGuard — PII, sanitise, prompt leakage   │
+      │  Structure: steps, paragraphs, kept rates      │
       │  Grounding check (RAGAS-lite)                   │
       │  Escalation check                               │
       └──────┬──────────────────────────────────────────┘
@@ -102,7 +103,12 @@ in the supervisor-specialist graph.
 | `calculate_paye` | low | pure fn | Monthly PAYE on employment income (progressive bands) |
 | `calculate_corporation_tax` | low | pure fn | 30% CIT on chargeable income |
 | `calculate_capital_gains` | low | pure fn | Corporate CGT = 30% × (sale − cost) |
-| `calculate_customs_duty` | low | pure fn | CIF + duty + VAT landed cost estimator |
+| `calculate_rental_tax` | low | pure fn | Individual (12% above threshold) or corporate (30% net) rental tax |
+| `calculate_withholding` | low | pure fn | Statutory WHT at source (services, goods, dividends, royalties, etc.) |
+| `calculate_customs_duty` | low | pure fn | CIF + duty + levies + VAT landed cost estimator (EAC CET 4-band + vehicle/clothing levies) |
+| `calculate_excise_duty` | low | pure fn | Statutory excise duty (mobile money 0.5%, telecom data/voice 12%, fuel, beer) |
+| `check_vat_registration` | low | pure fn | Annual turnover evaluation against the statutory VAT threshold |
+| `explain_tax_concept` | low | pure fn | Scaffolded, misconception-first tax education with live worked examples & active-recall checks |
 | `get_current_date` | low | read-only | Today's date + Ugandan fiscal year + days remaining |
 | `get_next_deadlines` | low | read-only | Next N upcoming URA filing deadlines |
 | `lookup_rate` | low | read-only | Single tax rate by key (`vat_standard`, `corporation_tax`, …) |
@@ -173,7 +179,7 @@ The routing is handled in
 |---|---|---|---|
 | 1 | `ESCALATE` | Human-contact phrases (`speak to`, `talk to`, `contact a human/agent/officer`) | None |
 | 1 | `ESCALATE` | Dispute / legal vocab (`dispute`, `objection`, `audit`, `appeal`, `court`, `lawyer`, `fraud`) | None |
-| 1 | `ESCALATE` | Account-specific (`my TIN`, `my filing`, `my return`, `my account`, `my balance`) | None |
+| 1 | `ESCALATE` | Account-specific (`my TIN`, `my filing`, `my return`, `my account`, `my balance`) | Not phrased as a how-to (`HOW_TO_QUESTION_RE` in `agents/patterns/en.py`: "how do I", "how to", "where can I", "guide me", "walk me through", "steps to", "procedure"). "How do I file my return?" is answered; "What is my balance?" and "Please help me, my account is locked" escalate — "help me" is deliberately not a how-to cue. The answer judge applies the same exemption. |
 | 2 | `CLARIFY` | Single-word stop-word-only queries | No conversation history |
 | 3 | `TOOLS` | Calculation intent: `how much X` / `calculate X` for VAT, PAYE, CIT, CGT, customs duty | None |
 | 4 | `TOOLS` | Temporal: `today`, `now`, `current fiscal year`, `next deadline`, `this month` | None |
@@ -567,6 +573,14 @@ Qwen.  Live-LLM integration tests belong in a separate
 
 ## 12. What this branch does NOT include
 
+Runtime clarification (2026-09-29): the langgraph flag currently selects a
+repository-owned, synchronous, request-scoped dispatcher with LangGraph-style
+nodes; it is not the upstream LangGraph package and does not provide
+checkpointing, durable resume, interrupts, or retries. It runs only when
+`agentic_mode` is enabled, and tool dispatch additionally requires `tool_use`.
+Graph fusion and tax graph remain off by default pending stronger held-out evaluation. See
+RAG_ARCHITECTURE.md for the runtime boundary and fusion details.
+
 These items from `docs/GAPS_AND_AGENTIC_ROADMAP.md` are **still
 gaps**.  The agent runtime is capable of handling them, but the
 integrations haven't been built yet:
@@ -576,7 +590,7 @@ integrations haven't been built yet:
 | G1 — Auth | 🟢 **Landed in Phase 14** — OIDC-ready JWT verifier + FastAPI dependencies.  HS256 dev path + RS256/JWKS stubs for Keycloak. |
 | G2 — User profile | 🟢 **Landed in Phase 14** — `users` + `user_profiles` + `consent_receipts` tables + /v1/me/* endpoints. |
 | G5 — Long-term memory | 🟢 **Landed in Phase 16** — three-tier (working + episodic + semantic) with consent-gated retrieval + temporal decay. |
-| G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. |
+| G8 — Audit ledger | 🟢 **Landed in Phase 21 subset** — hash-chained `audit_events` + Merkle anchoring + `verify_chain` CLI. 2026-09-29: envelope hashed (v2), scheduled and on-demand seals checked by `verify_ledger`, auditor view at `/admin/audit` (gaps G66–G72). |
 | G13 — Document uploads | 🟢 **Landed (#222)** — `POST /v1/documents/analyze` + `GET /v1/documents/{id}/report`, backed by `documents.py`, `ocr_service.py` and `vision/`. **2026-08-17:** `pdf_guards.py` fail-closed intake (header, encryption, JS/Launch/embedded files, xref/page caps), Office zip-slip/macro reject, LLM01 scrub + `<untrusted_user_document>` wrap. No ClamAV; no `mcp_document_parser`. |
 | G14 — Notifications | ⚪ Scheduler for deadline reminders via email / SMS / in-app.  Phase 20 (scaffolded). |
 | G16 — Knowledge graph | 🟡 **Graph + RRF fusion code shipped 2026-08-17** — `app/graph/` projects the rate tables; REST/stream fuse it as a third RRF leg. `FLAG_TAX_GRAPH` / `FLAG_GRAPH_FUSION` stay default off until unseen multi-hop ≥ 75%. Fusion is rank-level, not passage-id linked. Golden set: `agents/eval_multihop.py`. |

@@ -16,6 +16,12 @@ exclude_dirs:
   - __pycache__
   - node_modules
   - .next
+  - .venv
+  - .venv-gpu
+  - artifacts
+  - .cache
+  - CosyVoice
+  - MobileApp
 
 # Test plugins to skip (with justification)
 skips:
@@ -47,7 +53,6 @@ tests:
   - B312   # telnet
   - B313   # xml_bad_cElementTree
   - B314   # xml_bad_ElementTree
-  - B320   # xml_bad_lxml
   - B323   # unverified_context (SSL)
   - B324   # hashlib_insecure
   - B501   # request_with_no_cert_validation

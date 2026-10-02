@@ -26,6 +26,17 @@ class CanonicalAmountTests(unittest.TestCase):
         self.assertIn(300_000_000.0, canonical_amounts("300 million"))
         self.assertIn(2_000_000_000.0, canonical_amounts("2bn"))
 
+    def test_east_african_multilingual_amounts(self) -> None:
+        # Swahili prefix and suffix
+        self.assertIn(150_000_000.0, canonical_amounts("shilingi milioni 150"))
+        self.assertIn(150_000_000.0, canonical_amounts("150 milioni"))
+        self.assertIn(500_000.0, canonical_amounts("laki 5"))
+        self.assertIn(50_000.0, canonical_amounts("elfu 50"))
+        # Luganda prefix and suffix
+        self.assertIn(150_000_000.0, canonical_amounts("obukadde 150"))
+        self.assertIn(235_000.0, canonical_amounts("emitwalo 23.5"))
+        self.assertIn(50_000.0, canonical_amounts("enkumi 50"))
+
     def test_percentages_are_not_read_as_amounts(self) -> None:
         self.assertNotIn(18.0, canonical_amounts("VAT is charged at 18%"))
 

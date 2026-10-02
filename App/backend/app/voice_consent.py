@@ -10,7 +10,7 @@ Privacy design:
   recorded in the audit trail for tamper-evidence.
 * ``VOICE_STORE_RAW_AUDIO=true`` enables temporary storage with TTL
   cleanup (default 24h).
-* Transcripts follow the existing ``CONVERSATION_TTL_DAYS`` policy.
+* Transcripts follow ``VOICE_TRANSCRIPT_TTL_DAYS`` (90d by default).
 * Voice audit entries are retained for ``ANALYTICS_TTL_DAYS`` (365d).
 """
 
@@ -53,6 +53,23 @@ VOICE_EVENT_TYPES = frozenset({
     "session_start",
     "session_end",
     "barge_in",
+    "call_started",
+    "call_transferred",
+    "officer_joined",
+    "call_ended",
+    # Staff reads and call-desk actions (docs/runbooks/audit-trail.md).
+    "staff_viewed_call",
+    "staff_viewed_brief",
+    "staff_viewed_caller_history",
+    "staff_listened_call",
+    "officer_claimed",
+    "officer_released",
+    "officer_ended_call",
+    "officer_hold_on",
+    "officer_hold_off",
+    "officer_transferred",
+    "officer_wrapup_saved",
+    "officer_callback_done",
 })
 
 
@@ -112,7 +129,7 @@ def init_voice_consent_schema() -> None:
 # ---------------------------------------------------------------------------
 
 
-def require_voice_consent(user_id: str) -> bool:
+def require_voice_consent(user_id: str, tenant_id: str = "default") -> bool:
     """Check if user has granted ``voice_recording`` consent.
 
     Returns ``True`` if:
@@ -131,7 +148,7 @@ def require_voice_consent(user_id: str) -> bool:
     try:
         from . import database as db
 
-        return db.has_active_consent(user_id, "voice_recording")
+        return db.has_active_consent(user_id, "voice_recording", tenant_id=tenant_id)
     except Exception:
         logger.exception("Consent check failed for user=%s", user_id)
         return False
@@ -231,9 +248,16 @@ def log_voice_event(
                     **(metadata or {}),
                 },
                 tenant_id=tenant_id,
+                # The ledger's actor column is what /admin/audit shows and
+                # filters by; without it every call-desk action and call read
+                # appeared as done by nobody.
+                user_id=user_id,
             )
         except Exception:
-            logger.debug("AuditLedger chain failed for voice event", exc_info=True)
+            from .analytics import metrics
+
+            metrics.inc("audit_append_failed_total", labels={"event_type": f"voice_{event_type}"})
+            logger.warning("AuditLedger chain failed for voice event %s", event_type, exc_info=True)
 
     return row_id
 
@@ -272,14 +296,14 @@ def get_voice_audit_log(
             params.append(since)
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        query = f"""
-            SELECT id, user_id, session_id, event_type,
-                   metadata_json, audio_hash, tenant_id, created_at
-            FROM voice_audit_log
-            {where}
-            ORDER BY created_at DESC
-            LIMIT ?
-        """
+        query = (
+            "SELECT id, user_id, session_id, event_type, "  # nosec B608 # noqa: S608
+            "metadata_json, audio_hash, tenant_id, created_at "
+            "FROM voice_audit_log "
+            f"{where} "  # nosec B608 # noqa: S608
+            "ORDER BY created_at DESC "
+            "LIMIT ?"
+        )
         params.append(limit)
 
         rows = db.query_all(query, tuple(params))

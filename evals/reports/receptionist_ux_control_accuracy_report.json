@@ -1,0 +1,82 @@
+{
+  "timestamp": 1790727977.3851798,
+  "target_url": "ws://127.0.0.1:8083/v1/calls/stream",
+  "all_passed": true,
+  "total_tests": 7,
+  "passed_tests": 7,
+  "results": [
+    {
+      "test": "voice_consent_enforcement",
+      "passed": true,
+      "detail": "Voice recording consent required before processing call."
+    },
+    {
+      "test": "manual_language_override_ux",
+      "passed": true,
+      "detail": "Override emitted: True; Response: Omusolo ogw'omuwendo ogwongerwako (V-A-T) guli ebitundu ebitundu 18 ku..."
+    },
+    {
+      "test": "live_partial_captions_ux",
+      "passed": true,
+      "interim_count": 3,
+      "final_caller": [
+        "So, how do I register for a tin number with ORA?"
+      ],
+      "final_assistant": [
+        "Happy to help you register for a T-I-N!\n\nTo register for a T-I-N with U-R-A in Uganda: 1. Visit the official U-R-A web portal 2. Navigate to eServices T-I-N Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/N-I-N) or an organisation (requires Certificate of Incorporation)?"
+      ]
+    },
+    {
+      "test": "barge_in_user_control",
+      "passed": true,
+      "bot_stop_ms": 1140,
+      "talking_at_barge": true,
+      "interrupt_seen": true
+    },
+    {
+      "test": "human_officer_transfer_control",
+      "passed": true,
+      "transfer_status_seen": true,
+      "spoken_notice": "I'm connecting you to a URA officer, please hold."
+    },
+    {
+      "test": "multilingual_accuracy_statutory_fidelity",
+      "passed": true,
+      "languages": {
+        "en_vat_accuracy": {
+          "passed": true,
+          "text": "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; V-A-T-registered businesses collect it from customers and remit it to U-R-A. - Statutory Basis: Value Added Tax Act\n\nThat comes from the official U-R-A 2026 to 2027 rate table. Would you like more detail?"
+        },
+        "lg_vat_accuracy": {
+          "passed": true,
+          "text": "Okusinziira ku biwandiiko bya U-R-A, omusolo ogw'ebitundu ebitundu 18 ku buli kikumi gussibwa ku nsimbi zonna ezikung'aanyiziddwa mu kusuza abagenyi mu wooteeri oba ebifo ebisulwamu. Wandiyagadde okwogera n'omukozi ku nsonga eno?"
+        },
+        "sw_tin_accuracy": {
+          "passed": true,
+          "text": "Ninafurahi kukusaidia kujisajili kwa ajili ya T-I-N! Kusajiliwa kwa T-I-N na U-R-A nchini Uganda:\nHatua 1: Tembelea tovuti rasmi ya U-R-A kwenye 2. Nenda kwenye eServices Usajili wa T-I-N 3. Jaza fomu ya maombi mtandaoni na uwasilishe. Je! Ungependa maelezo zaidi?"
+        }
+      }
+    },
+    {
+      "test": "main_chat_streaming_voice_ws",
+      "passed": true,
+      "ready": true,
+      "vad": true,
+      "transcript": "What is the standard VAT rate in Uganda?",
+      "reply": "The standard rate of Value Added Tax (V-A-T) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; V-A-T-registered businesses collect it from customers and remit it to U-R-A. Statutory Basis: Value Added Tax Act\n\nThat comes from the official U-R-A 2026 to 2027 rate table.",
+      "retrieval_mode": "calculator",
+      "audio_chunks": 4,
+      "latency_report": {
+        "type": "latency_report",
+        "asr_ms": 337.0,
+        "mt_ms": 0.0,
+        "llm_ms": 43.6,
+        "tts_first_chunk_ms": 5351.9,
+        "total_ms": 5732.5,
+        "asr_backend": "whisper_salt",
+        "tts_backend": "speech.tts",
+        "mt_backend": ""
+      }
+    }
+  ]
+}

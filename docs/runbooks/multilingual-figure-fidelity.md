@@ -1,0 +1,289 @@
+# Runbook — multilingual figure fidelity
+
+Operator guide for the path a reply takes from English generation to a
+taxpayer reading Luganda or Swahili: `app/mt.py`, `service.localize_reply`,
+and the decoding parameters in `app/llm.py` that feed it.
+
+Decisions recorded here reflect the code as of 2026-09-09. Where a decision
+reversed an earlier one, the earlier one is stated too — the reversals are
+the part that is easy to re-litigate by accident.
+
+## What problem this solves
+
+Machine translation is paraphrastic, and paraphrasing a number changes it. A
+reply that said `UGX 235,000` comes back saying `UGX 253,000`. On a revenue
+authority's assistant that is indistinguishable from the assistant inventing
+a figure, and it is the one failure the service cannot ship.
+
+The original guard, `mt.figures_survived`, compared the money amounts and
+percentages on both sides and served the English text when they disagreed.
+Correct, and expensive in a way that does not show up in a metric: a Luganda
+speaker who asks about the VAT threshold gets an English wall of text back,
+which is the outcome the multilingual work exists to prevent.
+
+## Decision 1 — figures are masked before translation, not repaired after
+
+**Current behaviour.** `mt.protect_figures` replaces every digit group with an
+opaque sentinel (`#NMBRA#`, `#NMBRB#`, …) before the text reaches a
+translator. `mt.restore_figures` puts the original digits back afterwards. A
+translator that is never shown a digit cannot paraphrase one.
+
+Only the digits are masked. `UGX` and `%` stay visible, because they are the
+cue the target language needs to build the right construction — Luganda
+renders a rate as *"ebitundu 18 ku buli kikumi"* and can only do that if it
+can still see that 18 was a percentage.
+
+Sentinel labels are letters, never digits (`A`…`Z`, `AA`, …). A numeric index
+would be exposed to exactly the failure the sentinel exists to prevent.
+
+**What this replaced, and why.** `heal_vernacular_figures` (PR #481, narrowed
+in #482) took the opposite approach: let the translation come back wrong, then
+re-insert the statutory figure. Repairing after the fact means guessing where
+the number belonged, and CodeRabbit found the guess writing figures into
+sentences that never had one. #482 narrowed it so it could not guess — and
+that made it unreachable. `mt.figures()` pools percentages and amounts as
+plain numbers, so a bare `18` already satisfies the guard; a figure therefore
+only counted as missing once its digits were absent, while every insertion
+path #482 left required those digits to be present. The two conditions are
+mutually exclusive. Verified against all nine realistic translation outcomes:
+the function changed nothing in any of them. Masking before the fact needs no
+guess, so it has no equivalent failure.
+
+**Do not reintroduce output repair.** If a figure is wrong in a vernacular
+reply, the fix is upstream — masking, or the translation tier — never a
+regex that edits the answer on its way out.
+
+## Decision 2 — a tier that cannot carry sentinels is retried unprotected
+
+`service.localize_reply` runs the protected pass first. If it comes back with
+sentinel fragments still in the text, with a figure missing, collapsed, or
+empty, the reply is translated again **without** masking, which is exactly the
+behaviour that shipped before this change. Only when that also fails does the
+taxpayer get English.
+
+This is what makes the change safe to default on: protection can add
+vernacular coverage and cannot remove it. The cost is one extra round trip,
+and only on a path that was already failing.
+
+Sentinel residue is never shipped. A leftover `#NMBRA#` in an answer is
+visible garbage, so any residue fails the pass outright regardless of what the
+figures say.
+
+**Kill switch.** `MT_PROTECT_FIGURES=false` disables masking entirely. Reach
+for it only to rule masking out while debugging a translation-quality report;
+the automatic retry already covers a tier that mishandles sentinels.
+
+## Decision 3 — decoding parameters reach different paths, and that is load-bearing
+
+vLLM serves production; the local Transformers path is the CPU/no-GPU
+fallback. They do not take the same sampling parameters, and the docs
+previously implied they did.
+
+| Parameter | Default | Reaches |
+|---|---|---|
+| `LLM_REPETITION_PENALTY` | 1.1 | both paths |
+| `LLM_MIN_P` | 0.08 | **vLLM only** |
+| `LLM_PRESENCE_PENALTY` | 0.05 | **vLLM only** |
+| `LLM_NO_REPEAT_NGRAM_SIZE` | **0 (off)** | **Transformers only** |
+
+`no_repeat_ngram_size` is not a vLLM `SamplingParams` field, so it never
+reaches `Sunflower-14B-FP8` however it is set. `docs/MODEL_CARD.md` claimed it
+as a property of the served model; that was wrong and is corrected. Its code
+default, `.env.example` and the docs also disagreed three ways (6 / 0 / 6),
+which is the `.env`-versus-Space-secret drift pattern that has caused silent
+production differences before — an operator copying `.env.example` got one
+value and the Space, carrying no such secret, got the code default.
+
+It is now 0 everywhere on purpose. A hard block on every repeated 6-gram is
+the wrong instrument for statutory text: a correct tax answer repeats phrases
+like *"value added tax (VAT) registration threshold"* and repeats a citation
+string verbatim, and banning that forces the model off a correct phrasing.
+The graded penalties break loops without banning anything. Set it to 6 only
+when debugging a Transformers-path loop the penalties did not catch.
+
+Note also that at `LLM_TEMPERATURE=0.2` the distribution is already sharp
+enough that `min_p=0.08` rarely binds. Loop-breaking on the served path is
+carried mostly by the repetition and presence penalties. Raising `min_p` is
+only meaningful alongside a higher temperature.
+
+## Decision 4 — the figure cross-check is built from the prompt's own text
+
+`llm.extract_statutory_context` lists every figure found in the retrieved
+passages, each with the citation index of the passages that state it, and tells
+the model not to state a figure absent from the list.
+
+**It reads the prepared passage text, never the raw retrieval payload.**
+`_build_messages` scrubs each passage with `scan_retrieved_text` (LLM01) and
+trims it to the token budget before wrapping it in a hash-bound `<passage>`
+spotlight marker. The first version of this function re-read `p["text"]` after
+all of that, which put it behind both defences: a figure planted inside an
+injected span was mined for the prompt after the passage body carrying it had
+been redacted, and a figure trimmed away for budget was projected with no
+passage left to support it. It now takes `(citation index, prepared text)`
+pairs, so what it lists is exactly what the model can read.
+
+**What it is and is not.** It is an allowlist derived from what was retrieved:
+it constrains the model to the retrieved figure set and binds each figure to a
+passage. It does **not** validate that the corpus is correct — `scan_retrieved_text`
+removes injection *phrasing*, not planted numbers, so a poisoned corpus entry
+saying "the rate is 99%" still reaches the passage body and therefore the list.
+That is a corpus-provenance problem, handled by source allowlisting and the
+freshness/coverage gates, not by this block.
+
+**No prose leaves the spotlight.** Only the figure and its indices are emitted.
+Quoting the clause around a number would caption it usefully and move
+attacker-controlled text outside the `<passage>` isolation to do it; the
+citation index gives the same attribution without that trade.
+
+Ordering follows retrieval rank, and truncation past
+`_FIGURE_CROSSCHECK_LIMIT` is declared in the block. A partial list that reads
+as exhaustive is worse than no list: the model has no way to tell it is missing
+the figure it needs.
+
+## Verifying a change here
+
+Masking is unit-tested and does not need a live model:
+
+```bash
+PYTHONPATH=App/backend python3 -m pytest \
+  App/backend/tests/test_mt_cache.py \
+  App/backend/tests/test_reply_localization.py \
+  App/backend/tests/test_localization_integrity.py \
+  App/backend/tests/test_statutory_projection.py -q
+```
+
+Run `pytest tests/` as well before pushing. The command in `AGENTS.md`
+(`App/backend/tests tests/agents tests/chaos`) does not cover the whole
+`tests/` tree, which CI does — a duplicate assertion living there is how a
+green local run reached a red **Lint & Unit Tests**.
+
+`FigureProtectionTest` covers the round trip, the sentinel-tolerance cases a
+real translator produces (lowercased, spaced, hashes stripped, noun-class
+prefix glued on), and the `#NMBRA#`-inside-`#NMBRAA#` boundary.
+`ProtectedLocalizationTest` covers what the taxpayer receives: a
+digit-transposing tier no longer costs the figure, an echoing tier never ships
+a fragment, and a tier that drops sentinels still yields a vernacular answer
+through the unprotected retry.
+
+`test_localization_integrity.py` covers the three properties masking does *not*
+protect and that claim verification, having run on the English draft, assumes:
+the unit survives ("18%" must not arrive as a bare "18"), the answer is not
+truncated (the floor is measured from `Data/online_corpora/salt/`, not chosen),
+and the `[n]` citation markers still match the ones the verification report was
+written about.
+
+Against a live deployment, do not read success off the response body. The
+translation chain has four tiers (`local` → `sunbird` → Gemini → CF Llama) and
+a failure in one is invisible downstream — probe per locale and compare the
+figures in the reply against the English one, rather than checking that a
+reply came back at all.
+
+## What the metrics mean
+
+| Metric | Reading |
+|---|---|
+| `reply_localization_protected_retry_total{locale,reason}` | A *recovered* condition, not a served failure. A steady low rate is the mechanism working. |
+| `reply_localization_figures_changed_total{locale}` | Both passes failed and the taxpayer got English. This is the correctness signal. |
+| `reply_localization_units_dropped_total{locale}` | The digits survived and the unit did not — "18%" came back as "18". A translator-side fault, not a paraphrased number, and it wants a different fix from the row above. |
+| `reply_localization_citations_lost_total{locale}` | The translation dropped or renumbered a `[n]` marker, so the shipped answer's provenance no longer matches the claim-verification report that approved it. |
+
+`reason=sentinel_residue` climbing for one locale says that locale's MT tier
+mangles sentinels and is now running every figure-bearing reply through two
+round trips. That is a latency problem, not a correctness one, and the reason
+to look at `REPLY_MT_BACKEND` for that locale — or, if it persists, to turn
+masking off for that deployment.
+
+Full metric definitions: `docs/MONITORING.md`.
+
+## Known gaps
+
+Tracked as **G56** in `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
+
+Closed: `llm.extract_statutory_context` used to re-read raw passage text after
+`scan_retrieved_text` had scrubbed and trimmed the same passages in
+`_build_messages`. It now takes the prepared `(citation index, text)` pairs —
+the scrubbed, trimmed text the model actually sees — and emits a
+`## Figure cross-check` block in which every figure carries the passages that
+state it. See Decision 4 below.
+
+Closed (2026-09-09, **G57**): the cross-lingual eval stemmer in
+`scripts/evaluate_1000_faqs_ngrok.py` was one of four defects that capped its
+Luganda and Kiswahili scores near 30% by construction — the locale keyword lists
+were English prose scraped off the English answer, `"ura"` was an anchor in both
+languages and matched inside `"accurate"`, non-answers scored 0.75, and every
+non-200 left the denominator. **No score that harness published before
+2026-09-09 is comparable to one it publishes after.** A re-run under the new
+scorer is the only baseline.
+
+Closed (2026-09-09, **G58**): masking protects the digits and nothing checked
+the units, the length or the citation markers. All three are now guards on the
+same round trip.
+
+Closed (2026-09-17, **G59**): vernacular numeral and idiom disambiguation in
+`entailment.py` and `mt.py`. Disambiguated Luganda action verb *"saba"* (*"to
+apply/request"*) from Swahili cardinal numeral *"saba"* (*7*); shielded non-numeric
+idioms (*"mtu wa tatu"*, *"third party"*); added English number words (`two`...`ten`,
+`twenty`...`fifty`) to align with translated vernacular words; shielded decimal legal
+citations (`Article 1.2`, `ekiwandiiko 1.2`, `kawaayiro 1.2`); and included East African
+currency tokens (`milioni`, `obukadde`, `emitwalo`) in `_CURRENCY_TOKEN_RE`.
+
+Closed (2026-09-17, **G60**): W3C Server-Sent Events (SSE) multiline token stream
+preservation in `App/frontend/src/app/page.tsx` and list step unsmashing in
+`useChatStore.ts` and `guardrails.py`. Pushed lines within a single SSE event are
+joined with `\n` on event boundaries (`\r\n\r\n`), eliminating line smashing in chat UI
+numbered lists and procedural instructions.
+
+Closed (2026-09-17, **G61**): multiline sentence splitting for RAG faithfulness scoring in
+`text_signals.py` (`_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")`). Bulleted lists,
+numbered steps, and catalogued services are split into discrete clauses rather than
+evaluated as one composite sentence, eliminating false `low_faithfulness=0.00` escalations
+on comprehensive answers (e.g. *"What services does URA provide?"*).
+
+Still open:
+
+- Semantic drift inside the translated prose — a flipped negation, a dropped
+  condition — passes every guard on this path. The guards cover mechanical
+  harms; detecting meaning change needs entailment over the localized text and a
+  per-locale golden set to gate it.
+- `scripts/test_master_qa_multilingual_benchmark.py` cannot yet detect two of
+  the failures it exists to catch, so **do not read a pass from it as
+  confirmation**:
+  - Its TTS section reads `len(response.body)` and asserts `> 2000`. `/v1/tts`
+    returns JSON (`SynthesizeResponse`), not audio bytes, so a JSON *error*
+    payload passes. It never reads the `backend` or `error` fields, which are
+    the only way to tell Spark-TTS-SALT from a fallback tier.
+  - Its chat probes assert keyword hits and `retrieval_mode`, both of which raw
+    extractive passages satisfy, so it reports PASS while LLM generation is
+    gated off. `ChatResponse` carries no generation-provenance field; adding one
+    is what would make this assertable from the response body instead of from
+    Space logs.
+  - It always exits 0, so it cannot gate anything, and its paths are
+    `/api/v1/...` (the frontend proxy) rather than the backend's `/v1/...`, so
+    it cannot be pointed at the Space without editing.
+  - `scripts/` is outside the CI lint scope (`ruff check ml/ App/backend/`), so
+    its unused-variable and swallowed-exception findings do not surface.
+
+## Decision 4 — compound statutory rate words and vernacular orthography (2026-09-28)
+
+**Current behaviour.** When statutory tax rates and figures appear as spelled-out words rather than digits:
+- **Luganda (`lg`)**: `_LG_WORD_NUMBERS` in `app/mt.py` and `_LUGANDA_PCT_WORDS` in `app/entailment.py` recognize both geminate and single consonant orthographies (`kkumi na munaana` / `kumi na munaana` for 18%, `kkumi na bbiri` for 12%, `kkumi na ttaano` for 15%, `asatu` for 30%). Vernacular percentage idiom `ku buli kikumi` ("per hundred") is stripped during normalization so that "kikumi" is not falsely parsed as a standalone 100.0 tax amount.
+- **Swahili (`sw`)**: `_SW_WORD_NUMBERS` in `app/mt.py` supports compound statutory rate phrases (`kumi na nane` for 18%, `kumi na mbili` for 12%, `kumi na tano` for 15%, `thelathini` for 30%).
+- **English (`en`)**: `_EN_WORD_NUMBERS` supports `eighteen` (18.0) and `twelve` (12.0).
+
+Parsing evaluates compound words in descending order of key length so that larger compound numbers (`18.0`) are matched without leaving component single digits (`10.0`, `8.0`) behind.
+
+## Decision 5 — versioned parallel multilingual FAQ corpus and native retrieval (2026-09-28)
+
+**Current behaviour.** High-frequency canonical statutory FAQs (e.g. VAT in `ura_vat_faqs.csv` and Corporation Tax in `ura_corporation_tax_faqs.csv`) carry pre-translated and verified vernacular parallel fields:
+- `question_lg`, `answer_lg`
+- `question_sw`, `answer_sw`
+
+1. **Build-time figure verification (`app/faq_corpus.py`)**:
+   During corpus compilation (`export_faq_csvs_to_jsonl`), every localized answer (`answer_lg`, `answer_sw`) is validated with `mt.figures_survived(row['answer'], row[f'answer_{lang}'], locale=lang)`. If any statutory rate (18%, 30%), currency figure, or compliance timeline is mutated or missing, the build fails immediately with a `CorpusValidationError`.
+2. **Deterministic Manifest Auditing**:
+   `Data/faq_jsonl/faq_corpus_manifest.json` tracks `"multilingual_records"` counts alongside source file SHA-256 hashes.
+3. **Direct Native Retrieval (`service._simple_search`)**:
+   When a taxpayer queries in Luganda or Swahili (`locale in ("lg", "sw")`), `_simple_search` performs a direct native pass against the pre-translated vernacular question and answer texts (`_vernacular_pass`).
+   - If a match is found: the pre-verified native FAQ answer is returned directly, bypassing runtime MT round-trips and dropping median latency from ~5.4 seconds to under 50 ms.
+   - If no native translation is found: the pipeline gracefully falls back to lazy translate-then-retrieve (`translate_query_for_retrieval`), preserving 100% backward compatibility.
+

@@ -122,7 +122,7 @@ User Query
 | Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API |
 | Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0) |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
-| Fallback | Keyword-overlap search on in-memory FAQ index |
+| Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 
 ### LLM Generation (`llm.py`)
 
@@ -135,6 +135,10 @@ User Query
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
 | Max tokens | 512 | `LLM_MAX_TOKENS` |
+| Repetition penalty | 1.1 | `LLM_REPETITION_PENALTY` (both paths) |
+| Min-p sampling | 0.08 | `LLM_MIN_P` — **vLLM path only**; rarely binds at temperature 0.2 |
+| Presence penalty | 0.05 | `LLM_PRESENCE_PENALTY` — **vLLM path only** |
+| No repeat n-gram | 0 (off) | `LLM_NO_REPEAT_NGRAM_SIZE` — **Transformers path only**; vLLM `SamplingParams` has no such field |
 | Concurrency | 2 | `LLM_MAX_CONCURRENCY` |
 | Deadline | 45s | `LLM_DEADLINE_SECONDS` |
 | Trust remote code | `false` | `LLM_TRUST_REMOTE_CODE` (OWASP LLM03) |
@@ -231,7 +235,7 @@ questions in English while `ChatModel.generate()` handled them correctly.
 | Control | Implementation | Module |
 |---------|---------------|--------|
 | LLM01 Prompt Injection | 11 regex patterns + max length + system prompt isolation | `guardrails.py` → `InputGuard` |
-| LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport) | `guardrails.py` → `OutputGuard.redact_pii()` |
+| LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails.py` → `OutputGuard.redact_pii()` |
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
 | LLM05 Improper Output | XSS strip, HTML sanitize, suspicious link removal | `guardrails.py` → `OutputGuard.sanitize()` |
@@ -242,6 +246,23 @@ questions in English while `ChatModel.generate()` handled them correctly.
 - Triggers when average reranker score < `CORRECTIVE_RAG_THRESHOLD` (default: 0.3)
 - Re-retrieves with expanded query + domain context
 - Merges and deduplicates by chunk_id, keeps results only if quality improved
+
+**Protected translation & statutory projection** (`mt.py`, `service.py`, `llm.py`):
+- Figures are masked behind opaque sentinels (`#NMBRA#`) *before* a reply is handed to a translator and restored verbatim afterwards — `mt.protect_figures` / `mt.restore_figures`, wired in `service.localize_reply`. A translator that never sees a digit cannot paraphrase one, so figure mutation is prevented rather than detected.
+- Only the digits are masked. The currency code and the percent sign stay visible because they are the cue the target language needs to build the right construction: Luganda renders a rate as "ebitundu 18 ku buli kikumi" and can only do so if it can still see that 18 was a percentage.
+- `figures_survived` remains as the assertion, not the mechanism. It still fires when a tier drops a sentinel outright rather than mutating it, and English remains the fallback for that case.
+- A tier that cannot carry the sentinels (an NMT model that drops unknown tokens) fails a guard and is retried **unprotected**, which is the pre-existing behaviour. Protection therefore only ever adds vernacular coverage, at the cost of one extra round trip on a path that was already failing. `MT_PROTECT_FIGURES=false` is the kill switch.
+- This replaced `heal_vernacular_figures`, which repaired MT output after the fact. Repairing means guessing where a number belonged; guessing wrong wrote a figure into a sentence that never had one, and narrowing it until it could not guess left it unable to fire at all. See G55 in `docs/GAPS_AND_AGENTIC_ROADMAP.md`.
+- A `## Figure cross-check` block lists every figure found in the retrieved passages, each with the citation index of the passages that state it, and instructs the model not to state a figure absent from the list or attribute one to a passage it is not listed against (`llm.extract_statutory_context`). It is an allowlist derived from what was retrieved — it constrains the model to the retrieved figure set; it does not validate that the corpus itself is correct, which is a corpus-provenance concern.
+- The block is built from the **prepared** passage text — already scrubbed by `scan_retrieved_text` and already trimmed to the token budget — not from the raw retrieval payload. Reading the raw payload put it behind both defences: a figure inside an injected span was mined after the passage body had been redacted, and a figure trimmed away for budget was projected with no passage left to support it.
+- Only the figure and its indices are emitted, never a quotation of the surrounding prose. Passage bodies are isolated inside hash-bound `<passage>` spotlight markers, and lifting a clause out to caption a number would move attacker-controlled text outside that isolation for attribution the citation index already gives.
+- Ordering follows retrieval rank and truncation is declared in the block rather than silent, because a partial list that reads as exhaustive is worse than no list.
+
+**Versioned Multilingual Parallel FAQ Corpus & Direct Native Match** (`faq_corpus.py`, `service.py`, `mt.py`):
+- High-frequency statutory FAQ CSVs in `Data/dataset/ura_*_faqs.csv` (e.g. VAT, Corporation Tax) contain canonical trilingual columns: `question`, `answer`, `question_lg`, `answer_lg`, `question_sw`, `answer_sw`.
+- During corpus compilation (`python -m app.faq_corpus`), `_validate_vernacular_figures` tests every localized answer with `mt.figures_survived`, enforcing statutory rates (18%, 30%), currency limits, and calendar deadlines at build time.
+- `_simple_search` in `service.py` executes a direct `_vernacular_pass` against the pre-indexed native terms when `locale in ("lg", "sw")`. Matched rows return pre-verified vernacular answers with `< 50 ms` latency, completely skipping runtime machine-translation round trips and eliminating figure drift under load.
+- When an exact native FAQ match is not found, queries fall back seamlessly to lazy translate-then-retrieve (`translate_query_for_retrieval`), ensuring comprehensive coverage.
 
 **Escalation** (`guardrails.py` → `OutputGuard.should_escalate()`):
 - Low faithfulness score (< 0.25)
@@ -272,7 +293,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (49 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (51 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -332,11 +353,17 @@ Three deterministic fast paths intercept BEFORE routing
    `tin_procedure_help` flow), then returns the matching curated template;
    typed asks answer immediately.
 2. **Calculator** (`calculator_router.py`): a message that already carries
-   the figures ("VAT on 1.5m") is answered instantly from the registered
-   calculator tool (`retrieval_mode="calculator"`, no LLM); missing figures
-   start the matching `calc_*` guided workflow pre-filled with everything
-   already extracted. Defaults applied (residency, VAT direction, landlord
-   type, annual→monthly conversion) are stated as visible assumptions.
+   the figures ("VAT on 1.5m", Luganda `vati`) is answered instantly from
+   the registered calculator tool through the MCP client
+   (`retrieval_mode="calculator"`, no LLM). The conversation remembers that
+   tool, so "what about 2 million?" recomputes the same tax. A bare amount
+   with no prior tool still shows PAYE, VAT, and services withholding, with
+   every figure taken from the rate table. Missing figures start the matching
+   `calc_*` guided workflow, or ask for the missing slot when workflows are
+   off. Defaults (residency, VAT direction, landlord type, annual→monthly)
+   are stated as assumptions. A withholding line that matches both services
+   and a management fee asks which rate applies. A tool result that fails
+   its output schema is not spoken.
 3. **Rate lookup** — "what is the current VAT rate?" answers with the real
    figure from the versioned FY rate table (gated on the authority-manifest
    freshness check) instead of retrieval passages.
@@ -494,10 +521,13 @@ All major subsystems are behind feature flags for progressive rollout:
 | `evaluator_optimizer` | off | Deterministic recomputation of money answers |
 | `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
+| `langgraph` | off | Route agentic requests through the graph orchestrator |
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
+| `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
+| `receptionist_language_detection` | off | Receptionist follows caller language (en, sw and lg all on the local engine: Whisper-SALT, Sunflower, Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**49** in total, including the per-phase switches for voice, offline and
+**51** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).
@@ -529,7 +559,7 @@ A subject the rollout does not target falls through to the flag's **default**,
 not to off — otherwise adding a 5% rollout would silently disable the flag for
 the other 95%. `variant_for()` labels each resolution for per-variant reporting.
 
-## Retrieval serving path (2026-08-17)
+## Retrieval serving path (updated 2026-09-29)
 
 Shared entry: `HybridRetriever.search_planned()` — used by REST `generate()`,
 SSE/stream, `search_ura_knowledge_base`, corrective RAG, LangGraph
@@ -539,6 +569,26 @@ applies the unbound-FAQ filter + exact-FAQ promote, and observes after
 tools: one retrieve hop when tools produce no evidence, then one
 reflect retry on low faithfulness or a reasoning miss. Soft “this fiscal
 year” boost follows `current_fiscal_year()`.
+
+The graph hit uses the same `rrf_fuse_ranked_lists()` combiner: fused RRF
+score determines order, calibrated relevance breaks ties, and duplicate IDs
+contribute at most once per retrieval leg. Its default fiscal year is resolved
+at request time through `current_fiscal_year()`, so year rollover and an
+explicit `CURRENT_FISCAL_YEAR` override are honored. Keep `tax_graph` and
+`graph_fusion` off until the unseen-question gate is expanded and passes; the
+authored/held-out shadow results are not sufficient production evidence.
+
+The `langgraph` flag selects the small synchronous, request-scoped
+LangGraph-shaped dispatcher only when `agentic_mode` is also enabled. It is not
+the upstream LangGraph runtime. Tool dispatch additionally requires
+`tool_use`; orchestration does not implicitly enable tools. The dispatcher
+enforces a step cap and records per-node outcomes, but has no checkpointer,
+durable resume, interrupts, or retry policy. It is appropriate only for a
+single chat turn; do not use it for long-running workflows. If replaced with
+durable LangGraph execution, tool side effects need idempotency before node
+replay is enabled. See the official [Graph API guidance](https://docs.langchain.com/oss/python/langgraph/graph-api)
+for bounded execution and replay semantics, and [Persistence guidance](https://docs.langchain.com/oss/python/langgraph/persistence)
+for checkpoint-backed recovery and state retention.
 
 The corpus is English. Non-English questions take a merged English
 translation pass (`FLAG_TRANSLATE_RETRIEVE`, default on). Generation is
@@ -577,11 +627,31 @@ asked for Luganda anyway returned a degenerate repetition loop rather than
 sentences. Two instructions pointing opposite ways, with the language of the
 question breaking the tie.
 
-Two guards sit on the translated text, both of which prefer the English answer
-to a bad localized one:
+Five guards sit on the translated text, every one of which prefers the English
+answer to a bad localized one. They exist because the answer was generated *and
+claim-verified* in English: everything `claim_verifier` concluded describes the
+draft, so each property it relied on has to be re-checked against the text
+actually shipped.
 
-* **Collapse** — a translation shorter than a tenth of the source is a degraded
-  model response, not an answer.
+* **Collapse** (`mt.length_plausible`) — a translation far shorter than its
+  source is a degraded model response, not an answer. The floor is **measured**:
+  across the 23,838 aligned human pairs in `Data/online_corpora/salt/`, one in a
+  thousand falls below 0.449 (en→lg) and 0.434 (en→sw), and below 0.4 lies
+  0.04%. `MT_MIN_LENGTH_RATIO` defaults to 0.35, under both. It was a tenth of
+  the source, which caught a *collapsed* response and not a *truncated* one — and
+  a truncated answer reads as complete while omitting the taxpayer's obligations.
+* **Units** (`mt.units_survived`) — `protect_figures` masks digits and leaves the
+  percent sign and currency code visible on purpose, so "18%" arriving as a bare
+  "18" kept every digit and passed everything below. Fires only on *total* loss
+  of a marker kind, because `figures()` pools categories precisely to tolerate
+  one rate rendering as a word.
+* **Citations** (`mt.citations_survived`) — `claim_verifier` keys off the `[n]`
+  markers to decide whether a claim was supported at all. A translation that
+  drops or renumbers one ships an answer whose provenance no longer matches the
+  report that approved it. Set equality, not order: a marker that moved with its
+  clause is still attached to the right claim.
+* **Sentinel residue** — a leftover `#NMBR…#` fragment is visible garbage in a
+  taxpayer's answer, so the round trip is spent whatever the figures say.
 * **Figures** (`mt.figures_survived`) — machine translation paraphrases, and a
   paraphrased amount is a different amount. A reply that said "UGX 235,000" and
   comes back saying "UGX 253,000" is indistinguishable from the assistant
@@ -589,6 +659,20 @@ to a bad localized one:
   before comparison, because the *category* does not survive translation even
   when the number does — Luganda states a rate as "ebitundu 18 ku buli kikumi",
   with no percent sign.
+  * **Spoken Percentages**: `entailment.py` supports both Swahili (`_SWAHILI_PCT_WORDS`, e.g. `asilimia kumi na nane` $\rightarrow$ 18) and Luganda (`_LUGANDA_PCT_WORDS`, e.g. `ebitundu kumi na munaana` $\rightarrow$ 18, `ebitundu mukaaga` $\rightarrow$ 6).
+  * **Vernacular Multipliers**: Recognizes East African singular forms (`akakadde` 1M, `omutwalo` 10k, `olukumi` 1k, `akawumbi` 1B) alongside plurals (`obukadde`, `emitwalo`, `enkumi`, `milioni`, `laki`).
+  * **Contact Line Exclusion**: Ugandan toll-free and mobile patterns (`0800 117 000`, `0772 140 000`) are stripped before currency extraction so helpdesk footers are not misread as hundred-million shilling tax figures.
+
+Each failure has its own metric and log line —
+`reply_localization_{figures_changed,units_dropped,citations_lost}_total` — rather
+than sharing one: right digits with a lost unit is a different fault from a
+paraphrased number and needs a different fix.
+
+**Not covered.** Semantic drift inside the translated prose — a flipped
+negation, a dropped condition — passes all five. Detecting it needs entailment
+over the localized text and a per-locale golden set to gate it (G58).
+
+* **Stream Transport Resilience**: `/v1/chat/stream` emits `Cache-Control: no-cache, no-transform` and `X-Accel-Buffering: no`, and Next.js standalone disables proxy compression (`compress: false`), preventing reverse proxies (ngrok, Cloudflare) from gzipping and buffering event streams.
 
 | Setting | Default | Effect |
 |---------|---------|--------|
@@ -596,6 +680,8 @@ to a bad localized one:
 | `REPLY_MT_BACKEND` | `local_first` | Answer → the taxpayer's language |
 | `MT_CACHE_SIZE` | 512 | Per-process translation memo (`app/mt.py`); 0 disables |
 | `MT_CACHE_MAX_CHARS` | 4000 | Longer text is translated but not memoised |
+| `MT_PROTECT_FIGURES` | `true` | Mask figures behind sentinels before translation and restore after (`app/mt.py`); kill switch only — a tier that cannot carry them is retried unprotected |
+| `MT_MIN_LENGTH_RATIO` | 0.35 | Shortest a translation may be, as a fraction of the source (`app/mt.py`). Measured from the 23,838 aligned pairs in `Data/online_corpora/salt/`: the one-in-a-thousand ratio is 0.449 (en→lg) and 0.434 (en→sw). Replaces a floor at one tenth, which passed a translation that had dropped nine tenths of the answer |
 
 The cache is why a non-English turn is no longer two to three times slower than
 the same question in English. One turn translated the same question **twice** —
@@ -634,6 +720,8 @@ Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17
 ## Configuration Reference
 
 All settings are configurable via environment variables. See [API Reference → Environment Variables](API_REFERENCE.md#environment-variables) for the complete list, or [PROJECT_SETUP.md](PROJECT_SETUP.md#5-environment-configuration) for a quick-start `.env` template.
+
+- `FLAG_ENTERPRISE_CONNECTORS` (default `false` in production, `true` in development): Gates default local mock system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). In production (`APP_ENV=production`), local mock connectors are blocked unless this flag is explicitly enabled.
 
 ## Dependencies
 

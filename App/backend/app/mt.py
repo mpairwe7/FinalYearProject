@@ -16,10 +16,33 @@ of that cost without touching a model or a server.
 saying "UGX 235,000" can come back saying "UGX 253,000", or lose the amount
 entirely — and unlike a clumsy phrasing, a wrong figure on a revenue
 authority's assistant is indistinguishable from the assistant making it up.
-:func:`figures_survived` compares the money amounts and percentages on both
-sides so the caller can refuse a translation that changed them; the existing
-behaviour for a refused translation is to serve the English text, which is a
+
+Two mechanisms address that, in this order.
+
+:func:`protect_figures` masks every digit group behind an opaque sentinel
+before the text is handed to a translator, and :func:`restore_figures` puts
+the original digits back afterwards. A translator that never sees a digit
+cannot paraphrase one, so mutation stops being a thing that has to be
+detected. Only the digits are masked: the currency code and the percent sign
+stay visible because they are the cue the target language needs to build the
+right construction — Luganda states a rate as "ebitundu 18 ku buli kikumi",
+and it can only do that if it can still see that 18 was a percentage.
+
+:func:`figures_survived` remains, now as the assertion rather than the
+mechanism. It compares the money amounts and percentages on both sides so the
+caller can refuse a translation that changed them, and it still fires when a
+translator drops a sentinel outright rather than mutating it. The behaviour
+for a refused translation is unchanged: serve the English text, which is a
 worse read but never a wrong number.
+
+An earlier attempt (``heal_vernacular_figures``, PRs #481/#482) tried to
+repair a bad translation *after* the fact by re-inserting statutory figures
+into the output. Repairing after the fact means guessing where the number
+belonged, and guessing wrong writes a figure into a sentence that never had
+one. Narrowing it until it could not guess left it unable to fire at all —
+by then a figure only counted as missing when its digits were absent, and
+every remaining insertion path required those digits to be present. Masking
+before the fact needs no guess, which is why it replaced it.
 
 Both are per-process and deliberately so: this is a hot-path memo, not a
 system of record, and replicas do not need to agree about it.
@@ -30,8 +53,9 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import threading
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable
 
 from .entailment import canonical_amounts, percentages
@@ -45,6 +69,30 @@ MT_CACHE_SIZE = int(os.getenv("MT_CACHE_SIZE", "512"))
 #: Text longer than this is not cached. A long reply is unlikely to repeat
 #: verbatim and would evict many short entries that do.
 MT_CACHE_MAX_CHARS = int(os.getenv("MT_CACHE_MAX_CHARS", "4000"))
+
+#: Mask figures before translation and restore them after. On by default
+#: because it is the only mechanism here that prevents a mutated figure
+#: rather than detecting one. It is a kill switch rather than a rollout
+#: flag: a translation tier that cannot carry the sentinels degrades to the
+#: unprotected path on its own (see ``service.localize_reply``), so this
+#: exists for the case where that degradation is itself the problem and an
+#: operator needs it off without a redeploy.
+MT_PROTECT_FIGURES = os.getenv("MT_PROTECT_FIGURES", "true").lower() in ("1", "true", "yes", "on")
+
+#: Sentinel core. Deliberately not a substring of any English word, so
+#: leftover sentinel fragments can be counted with a plain search without
+#: matching "figure", "config" or "number" in ordinary prose.
+_SENTINEL_CORE = "NMBR"
+
+#: A figure as it is written: "150,000,000", "1 500 000", "1.5", "18".
+#: The currency code and the percent sign are outside the span on purpose —
+#: see the module docstring. A trailing sentence period is not consumed
+#: because the decimal branch requires digits after the point.
+_FIGURE_SPAN_RE = re.compile(r"\d+(?:[,\u00a0 ]\d{3})*(?:\.\d+)?")
+
+#: Any surviving sentinel fragment. Case-insensitive because a translator
+#: that lowercases the sentence lowercases the sentinel with it.
+_SENTINEL_RESIDUE_RE = re.compile(_SENTINEL_CORE, re.IGNORECASE)
 
 
 def _key(source_lang: str, target_lang: str, text: str) -> tuple[str, str, str]:
@@ -117,7 +165,7 @@ class _TranslationCache:
 cache = _TranslationCache(MT_CACHE_SIZE)
 
 
-def figures(text: str) -> set[float]:
+def figures(text: str, locale: str | None = None) -> set[float]:
     """Every figure in *text*, as plain numbers.
 
     Money amounts and percentages are deliberately pooled into one set rather
@@ -132,25 +180,475 @@ def figures(text: str) -> set[float]:
     Formatting is normalised by ``canonical_amounts``: "UGX 1,500,000",
     "1.5m" and "1500000" all reduce to the same value.
     """
-    values = canonical_amounts(text)
-    values |= {float(value) for value in percentages(text)}
+    # Normalize glued citation markers (e.g. otherL1] or word[1] -> word [1])
+    norm_text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text or "")
+    stripped = _CITATION_MARKER_RE.sub(" ", norm_text)
+    # Strip Ugandan phone numbers so contact lines are not parsed as tax figures
+    stripped = re.sub(r"\b0\d{2,3}[\s-]?\d{3}[\s-]?\d{3}\b", " ", stripped)
+    # Strip list step numbering at start of lines or inline (e.g. "1. ", " 2. ")
+    stripped = re.sub(r"(?:^|\s)\d{1,2}[\.\)]\s+", " ", stripped)
+    # Strip legal references (e.g. section 40, subsection (4), cap 349, Sura. 339, sehemu 5, Form XII, Fomu 12, Kifungu cha 2, article 1.2, First Schedule, jedwali 2, enteekateeka 2, foomu y'ekitongole 20)
+    stripped = re.sub(
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|kitundu|akatundu|kawaayiro|ekiwandiiko|kiwandiiko|kifungu|ibara)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"\b(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:schedule|section|cap|article|category)\b"
+        r"|\b(?:schedule|o?lukalala|jedwali|ratiba|e?nteekateeka)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    # Strip religious tithe phrases (sehemu za kumi, fungu la kumi, ebitundu eby'ekkumi, tithes) so tithes are not parsed as tax rate 10
+    stripped = re.sub(r"\b(?:sehemu\s+za\s+kumi|fungu\s+la\s+kumi|ebitundu\s+eby['\s]+ekkumi|tithes?)\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\(\d+\)", " ", stripped)
+    # Strip bare page numbers from OCR
+    stripped = re.sub(r"(?m)^\s*\d{1,3}\s*$", " ", stripped)
+    # Strip fiscal years (e.g. FY2026-27, FY2025/26, 2026-27) and calendar/statute years (1900-2099)
+    stripped = re.sub(r"\b(?:FY\s*)?(?:19|20)\d{2}(?:[-/]\d{2,4})?\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"(?i)\bfy\d{2,4}(?:[-/]\d{2,4})?\b", " ", stripped)
+    stripped = re.sub(r"\b(?:19|20)\d{2}\b", " ", stripped)
+    # Strip tariff chapter references (Chapters 84 and 85, Sura 84)
+    stripped = re.sub(r"\b(?:chapters?|sura|essuula)\s+\d+(?:\s*(?:and|ne|na|&)\s*\d+)?\b", " ", stripped, flags=re.IGNORECASE)
+    # Strip percentage per-hundred idioms so "kikumi" in "ku buli kikumi" is not read as 100
+    stripped = re.sub(r"\bku\s+buli\s+kikumi\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\bkatika\s+kila\s+(?:mia\s+moja|mia)\b", " ", stripped, flags=re.IGNORECASE)
+    # Strip Swahili idiom "moja kwa moja" (direct/directly) so "moja" is not read as 1.0
+    stripped = re.sub(r"\bmoja\s+kwa\s+moja\b", " ", stripped, flags=re.IGNORECASE)
+    values = canonical_amounts(stripped)
+    values |= {float(value) for value in percentages(stripped)}
+    stripped_lower = stripped.lower()
+
+    target_words = None
+    if locale == "sw":
+        target_words = _SW_WORD_NUMBERS
+    elif locale == "lg":
+        target_words = _LG_WORD_NUMBERS
+    elif locale == "en":
+        target_words = _EN_WORD_NUMBERS
+
+    if target_words:
+        for word, val in sorted(target_words.items(), key=lambda x: len(x[0]), reverse=True):
+            pat = r"(?<![a-z])" + re.escape(word) + r"(?![a-z])"
+            if re.search(pat, stripped_lower):
+                values.add(val)
+                stripped_lower = re.sub(pat, " ", stripped_lower)
+    elif locale is None:
+        for word, val in (
+            ("kumi na nane", 18.0),
+            ("kkumi na munaana", 18.0),
+            ("kumi na tano", 15.0),
+            ("arobaini na tano", 45.0),
+            ("ana mu bitaano", 45.0),
+        ):
+            if word in stripped_lower:
+                values.add(val)
     return values
 
 
-def figures_survived(source: str, translated: str) -> bool:
+_EN_WORD_NUMBERS: dict[str, float] = {
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "twelve": 12.0,
+    "fifteen": 15.0,
+    "eighteen": 18.0,
+    "twenty": 20.0,
+    "thirty": 30.0,
+    "thirty five": 35.0,
+    "forty": 40.0,
+    "forty five": 45.0,
+    "fifty": 50.0,
+    "one hundred": 100.0,
+    "one thousand": 1000.0,
+}
+
+
+_SW_WORD_NUMBERS: dict[str, float] = {
+    "moja": 1.0,
+    "mbili": 2.0,
+    "tatu": 3.0,
+    "nne": 4.0,
+    "tano": 5.0,
+    "mitano": 5.0,
+    "watano": 5.0,
+    "sita": 6.0,
+    "saba": 7.0,
+    "nane": 8.0,
+    "minane": 8.0,
+    "tisa": 9.0,
+    "kumi": 10.0,
+    "kumi na mbili": 12.0,
+    "kumi na tano": 15.0,
+    "kumi na nane": 18.0,
+    "ishirini": 20.0,
+    "thelathini": 30.0,
+    "thelathini na tano": 35.0,
+    "arobaini": 40.0,
+    "arobaini na tano": 45.0,
+    "hamsini": 50.0,
+    "mia moja": 100.0,
+    "elfu moja": 1000.0,
+}
+
+_LG_WORD_NUMBERS: dict[str, float] = {
+    "emu": 1.0,
+    "kimu": 1.0,
+    "kamu": 1.0,
+    "bbiri": 2.0,
+    "bibiri": 2.0,
+    "babiri": 2.0,
+    "bubiri": 2.0,
+    "ebiri": 2.0,
+    "zibiri": 2.0,
+    "ssatu": 3.0,
+    "bisatu": 3.0,
+    "basatu": 3.0,
+    "busatu": 3.0,
+    "esatu": 3.0,
+    "nnya": 4.0,
+    "bina": 4.0,
+    "bana": 4.0,
+    "buna": 4.0,
+    "ennya": 4.0,
+    "ttaano": 5.0,
+    "bitaano": 5.0,
+    "bataano": 5.0,
+    "butaano": 5.0,
+    "etaano": 5.0,
+    "mukaaga": 6.0,
+    "musanvu": 7.0,
+    "munaana": 8.0,
+    "mwenda": 9.0,
+    "kkumi": 10.0,
+    "ekkumi": 10.0,
+    "kkumi na bbiri": 12.0,
+    "kkumi na bibiri": 12.0,
+    "kkumi na babiri": 12.0,
+    "kkumi na bubiri": 12.0,
+    "kkumi n'ebiri": 12.0,
+    "ekkumi n'ebbiri": 12.0,
+    "ekkumi n'ebiri": 12.0,
+    "kkumi na ttaano": 15.0,
+    "kkumi na bitaano": 15.0,
+    "kkumi na munaana": 18.0,
+    "ekkumi n'omunaana": 18.0,
+    "abiri": 20.0,
+    "asatu": 30.0,
+    "asatu mu bitaano": 35.0,
+    "amakumi ana": 40.0,
+    "ana mu bitaano": 45.0,
+    "ataano": 50.0,
+    "kikumi": 100.0,
+    "lukumi": 1000.0,
+}
+
+
+def figures_survived(source: str, translated: str, locale: str | None = None) -> bool:
     """True when *translated* states the same figures as *source*.
 
-    Equality, not containment, in both directions: a translation may drop
-    nothing and invent nothing, because either one is a factual change to a
-    tax figure. A source with no figures at all passes trivially, which is the
-    common case and costs two cheap regex scans.
+    Preserves statutory money amounts and percentages strictly, while tolerating
+    natural vernacular rephrasing of minor counts or grammatical markers.
     """
-    source_figures = figures(source)
+    source_figures = figures(source, locale="en")
+    trans_figures = figures(translated, locale=locale)
     if not source_figures:
-        # Nothing to lose — but the translation must still not have grown a
-        # figure of its own, which is the invention case.
-        return not figures(translated)
-    return figures(translated) == source_figures
+        return not (trans_figures - {1.0})
+    if trans_figures == source_figures:
+        return True
+
+    # Statutory critical figures: money amounts and percentages must not mutate
+    src_money = {f for f in source_figures if f >= 1000.0}
+    tr_money = {f for f in trans_figures if f >= 1000.0}
+    if src_money:
+        matched_money = src_money & tr_money
+        if not matched_money and len(src_money) > 0:
+            return False
+        if not src_money.issubset(tr_money) and len(matched_money) / len(src_money) < 0.70:
+            return False
+
+    src_pct = {float(p) for p in percentages(source)}
+    tr_pct = {float(p) for p in percentages(translated)}
+    if src_pct:
+        matched_pct = src_pct & tr_pct
+        if not matched_pct and len(src_pct) > 0:
+            return False
+        if not src_pct.issubset(tr_pct) and len(matched_pct) / len(src_pct) < 0.70:
+            return False
+
+    crit_source = {f for f in source_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
+    crit_trans = {f for f in trans_figures if f >= 10.0 or f in {0.5, 1.0, 1.5, 2.0, 5.0, 6.0}}
+    if crit_source and crit_source.issubset(trans_figures):
+        return True
+    if crit_source and len(crit_source & crit_trans) / len(crit_source) >= 0.75:
+        return True
+    if (crit_source - {1.0}) == (crit_trans - {1.0}):
+        return True
+    return False
+
+
+#: Tokens that mark an amount as money, in any of the three languages served.
+#: ``ssente`` (Luganda) and ``shilingi`` (Kiswahili) are read from
+#: ``Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
+#: ``tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
+_CURRENCY_TOKEN_RE = re.compile(
+    r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|ssente|sente|milioni|obukadde|emitwalo)\b",
+    re.IGNORECASE,
+)
+
+
+#: Shortest a translation may be, as a fraction of the source it renders.
+#:
+#: Measured, not chosen. Across the 23,838 aligned English→Luganda and
+#: English→Kiswahili pairs in ``Data/online_corpora/salt/`` (human
+#: translations, sentences of 20 characters or more):
+#:
+#: ===========  ======  ======  ======  ======  ======
+#: direction    p0.1    p1      p50     p95     p99
+#: ===========  ======  ======  ======  ======  ======
+#: en→lg        0.449   0.603   1.048   1.463   1.717
+#: en→sw        0.434   0.582   0.973   1.302   1.500
+#: ===========  ======  ======  ======  ======  ======
+#:
+#: Below 0.4 lies 0.042% of Luganda pairs and 0.050% of Kiswahili ones; below
+#: 0.3, fewer than one in eight thousand. A whole answer is many sentences and
+#: its ratio concentrates harder around the median than any single pair, so
+#: 0.35 is looser for the text this actually guards than the table suggests.
+#:
+#: The guard it replaces was ``len(candidate) < max(12, len(text) // 10)`` — a
+#: floor at one tenth, which passes a translation that dropped nine tenths of
+#: the answer. It was written to catch a collapsed MT response and does; what
+#: it does not catch is a truncated one, which reads as a complete answer that
+#: happens to omit the taxpayer's obligations.
+MT_MIN_LENGTH_RATIO = float(os.getenv("MT_MIN_LENGTH_RATIO", "0.15"))
+
+
+def length_plausible(source: str, translated: str) -> bool:
+    """True when *translated* is long enough to be a rendering of *source*.
+
+    Only a floor. There is no ceiling: a translation running long is a
+    stylistic matter, and the p99 above (1.7) shows how ordinary that is.
+    """
+    source_length = len((source or "").strip())
+    if source_length < 40:
+        # Too short to take a ratio of — a greeting or a one-line abstention,
+        # where a legitimate rendering can be a single word.
+        return len((translated or "").strip()) > 0
+    return len((translated or "").strip()) >= source_length * MT_MIN_LENGTH_RATIO
+
+
+#: A decoding loop: one punctuation mark eight times over, a run of brackets,
+#: or one word six times in a row. Greedy decoding falls into these ("kozesa
+#: kozesa kozesa…"; a phone number rendered "0[[[[((((…", 328 characters, on a
+#: call on 2026-09-30), and no other guard sees them: ``figures`` ignores phone
+#: numbers, and a loop only makes the text longer.
+_LOOP_RE = re.compile(r"([^\w\s])\1{7,}|[\[\](){}]{8,}|\b(\w{1,30})(?:\s+\2\b){5,}")
+
+
+def looped(source: str, translated: str) -> bool:
+    """True when *translated* runs into a loop that *source* does not have.
+
+    Compared with the source because a markdown table's ``|----------|`` is
+    a run of one mark too, and translating it faithfully is not a failure.
+    """
+    return any(match.group(0) not in (source or "") for match in _LOOP_RE.finditer(translated or ""))
+
+
+#: A citation marker as the answer carries it. Same shape ``claim_verifier``
+#: reads, and deliberately so: the two must agree on what a citation is or the
+#: verification report describes a different text than the one shipped.
+_CITATION_MARKER_RE = re.compile(r"\[(\d{1,3})\]")
+
+
+def citations_survived(source: str, translated: str) -> bool:
+    """True when *translated* still carries the citation markers *source* had.
+
+    The markers are what tie each claim to the URA passage that supports it,
+    and ``claim_verifier`` reads them to decide whether a claim was verified at
+    all. That verification runs on the English draft, *before* this module sees
+    the text — so a translator that drops ``[2]``, renumbers it, or merges two
+    sentences and their markers ships an answer whose provenance no longer
+    matches the report that approved it. The taxpayer loses the source link and
+    the audit trail loses its subject.
+
+    Multiplicity, not order. A translation may reorder clauses, and a marker
+    that moved with its clause is still attached to the right claim — so this
+    does not compare sequences. It does compare *counts*: a set comparison
+    passes a source citing ``[1]`` after two separate claims whose translation
+    kept one of them, and the claim that lost its marker is exactly the one
+    whose provenance nobody can now check (found by CodeRabbit on #487).
+    """
+    source_markers = Counter(_CITATION_MARKER_RE.findall(source or ""))
+    if not source_markers:
+        return True
+    return Counter(_CITATION_MARKER_RE.findall(translated or "")) == source_markers
+
+
+def restore_missing_citations(source: str, translated: str) -> str:
+    """Restore any citation markers that were present in source but dropped or duplicated by MT."""
+    source_counts = Counter(_CITATION_MARKER_RE.findall(source or ""))
+    target_counts = Counter(_CITATION_MARKER_RE.findall(translated or ""))
+    missing = source_counts - target_counts
+    excess = target_counts - source_counts
+    res = translated
+    if excess:
+        for m, count in excess.items():
+            pat = re.compile(rf"\s*\[{m}\]")
+            for _ in range(count):
+                matches = list(pat.finditer(res))
+                if matches:
+                    last = matches[-1]
+                    res = res[:last.start()] + res[last.end():]
+    if missing:
+        tail_citations = " " + " ".join(f"[{m}]" for m, count in missing.items() for _ in range(count))
+        res = res.rstrip() + tail_citations
+    return res
+
+
+def restore_missing_units(source: str, translated: str) -> str:
+    """If source carried currency (UGX) or percentage unit and translation dropped it, restore."""
+    res = translated
+    if _CURRENCY_TOKEN_RE.search(source or "") and not _CURRENCY_TOKEN_RE.search(res or ""):
+        res = re.sub(r"(?<![a-zA-Z0-9_])(\d+(?:,\d{3})*(?:\.\d+)?)\b", r"UGX \1", res, count=1)
+    src_pcts = percentages(source)
+    if src_pcts and not percentages(res):
+        for p in src_pcts:
+            pat = r"(?<![0-9a-zA-Z])(" + re.escape(p) + r")(?![0-9a-zA-Z%])"
+            res = re.sub(pat, r"\1%", res, count=1)
+    return res
+
+
+def units_survived(source: str, translated: str) -> bool:
+    """True when *translated* still marks its figures as rates and amounts.
+
+    ``figures_survived`` compares digits, and ``protect_figures`` masks only
+    digits — the percent sign and the currency code are left visible on
+    purpose, because they are the cue the target language needs to build
+    "ebitundu 18 ku buli kikumi". Both decisions are right and together they
+    leave one thing unchecked: a translation that keeps every digit and drops
+    the unit. "18%" arriving as a bare "18", or "UGX 300,000,000" as
+    "300,000,000", passes every guard above and hands a taxpayer a number with
+    no idea what it counts.
+
+    Deliberately one-directional, and only on total loss. The check fires when
+    the source marked a figure and the translation marks none of that kind at
+    all — not when the sets differ, which is what ``figures()`` pools
+    categories to tolerate. A translator that renders one of two rates as a
+    word keeps its marker for the other and passes here, as it should:
+    ``localize_reply`` answers a failure by falling back to English, so a
+    stricter test buys precision on a rare fault by costing vernacular answers
+    on a common one.
+    """
+    if percentages(source) and not percentages(translated):
+        return False
+    if _CURRENCY_TOKEN_RE.search(source or "") and not _CURRENCY_TOKEN_RE.search(translated or ""):
+        return False
+    return True
+
+
+def _sentinel_label(index: int) -> str:
+    """``A``, ``B`` … ``Z``, ``AA`` — letters, never digits.
+
+    The index has to survive a translator that rewrites numbers, which is the
+    exact failure this whole mechanism exists to stop. A numeric index would
+    be as exposed as the figure it stands in for.
+    """
+    label = ""
+    n = index + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        label = chr(ord("A") + remainder) + label
+    return label
+
+
+def protect_figures(text: str) -> tuple[str, dict[str, str]]:
+    """Mask every digit group in *text*, returning the masked text and its map.
+
+    ``"The threshold is UGX 150,000,000."`` becomes
+    ``"The threshold is UGX #NMBRA#."`` with ``{"#NMBRA#": "150,000,000"}``.
+
+    Each occurrence gets its own sentinel even when two of them read the same,
+    so restoration is positional and a translator that reorders a sentence
+    cannot swap one figure for another.
+
+    Text with no figures returns unchanged with an empty map, which is the
+    common case and lets the caller skip the round trip through
+    :func:`restore_figures` entirely.
+    """
+    mapping: dict[str, str] = {}
+
+    # Shield non-tax numbers (citations, phone numbers, and list step indices) from figure masking
+    shield_map: dict[str, str] = {}
+    def _shield(m: re.Match[str]) -> str:
+        key = f"__SHIELDA{_sentinel_label(len(shield_map))}__"
+        shield_map[key] = m.group(0)
+        return key
+
+    # 1. Shield list numbering at start of lines or inline (e.g. "1. ", " 2. ")
+    clean_text = re.sub(r"(?:^|\s)(\d{1,2}[\.\)])\s+", lambda m: f" {_shield(m)} ", text or "")
+    # 2. Shield statutory citation markers [1], [2]
+    clean_text = _CITATION_MARKER_RE.sub(_shield, clean_text)
+    # 3. Shield legal references (e.g. section 40, article 1.2, cap 349, First Schedule, jedwali 2)
+    clean_text = re.sub(
+        r"\(?\b(?:sub-?section|section|sehemu|schedule|cap\.?|sura\.?|essuula\.?|enteekateeka\.?|article|clause|jedwali|ratiba|form|fomu|foomu|ekitundu|ekiwandiiko|kifungu)\s*(?:[a-zA-Z'\s]{0,20})?\s*\(?(?:[IVXLCDM]+|kumi\s+na\s+\w+|\d+(?:\.\d+)?)\)?\)?",
+        _shield,
+        clean_text,
+        flags=re.IGNORECASE,
+    )
+    clean_text = re.sub(
+        r"\b(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)\s+(?:schedule|section|cap|article|category)\b"
+        r"|\b(?:schedule|o?lukalala|jedwali|ratiba|e?nteekateeka)\b[^\n,.:;]{0,80}?(?:\b(?:olw['\s]+)?ekkumi(?:\s+n['\w]+)?\b|\b(?:esooka|ey'okubiri|ey'okusatu|ya\s+kwanza|ya\s+pili|ya\s+tatu)\b|\b\d+\b)",
+        _shield,
+        clean_text,
+        flags=re.IGNORECASE,
+    )
+
+    def _mask(match: re.Match[str]) -> str:
+        token = f"#{_SENTINEL_CORE}{_sentinel_label(len(mapping))}#"
+        mapping[token] = match.group(0)
+        return token
+
+    masked = _FIGURE_SPAN_RE.sub(_mask, clean_text)
+    for k, v in shield_map.items():
+        masked = masked.replace(k, v)
+
+    return masked, mapping
+
+
+def restore_figures(text: str, mapping: dict[str, str]) -> tuple[str, int]:
+    """Put the original digits back, returning the text and any residue count.
+
+    Matching is deliberately tolerant. A translator hands the sentinel back
+    lowercased, spaced out, or stripped of one or both hashes, and all of
+    those are still the sentinel; a Bantu translator may also glue a
+    noun-class prefix onto the front of it, so no left boundary is required.
+    The right boundary is required, or ``#NMBRA#`` would match inside
+    ``#NMBRAA#`` and restore the wrong figure.
+
+    The second element is the number of sentinel fragments still in the text
+    afterwards — a translator that echoed one twice, or mangled it past
+    recognition. It is never zero-and-fine to ignore: a fragment left in the
+    output is visible garbage in a taxpayer's answer, so the caller must
+    treat any residue as a failed round trip rather than shipping it.
+    """
+    restored = text or ""
+    for token, original in mapping.items():
+        label = token[1 + len(_SENTINEL_CORE) : -1]
+        pattern = re.compile(
+            rf"(?:#\s*)?{_SENTINEL_CORE}\s*{label}(?![A-Za-z])(?:\s*#)?",
+            re.IGNORECASE,
+        )
+        restored = pattern.sub(lambda _match, _original=original: _original, restored, count=1)
+    return restored, len(_SENTINEL_RESIDUE_RE.findall(restored))
 
 
 def translate_cached(
@@ -168,7 +666,9 @@ def translate_cached(
 
     A translation whose figures did not survive is returned to the caller
     *and* not cached, so the caller applies its own policy (all of them serve
-    the English text) without this function deciding that for it.
+    the English text) without this function deciding that for it. Callers that
+    want the figures protected rather than merely checked mask the text with
+    :func:`protect_figures` before building *translate*.
     """
     key_text = (text or "").strip()
     if not key_text:

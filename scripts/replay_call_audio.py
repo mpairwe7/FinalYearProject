@@ -1,0 +1,510 @@
+"""End-to-end multilingual receptionist check: real audio through WS /v1/calls/stream.
+
+Plays each scenario's caller turns into a running backend the way the browser
+does (16 kHz PCM16 in 20 ms frames, in real time, silence between turns) and
+records what comes back: language events, the assistant's captions, status
+changes, and the time from the end of each caller turn to the first byte of
+reply audio. Checks each scenario against what the plan (§10) expects.
+
+The caller's voice is rendered by the Orpheus sidecar with speakers the
+receptionist itself never uses (a Ugandan-English SALT speaker, a WAXAL
+Luganda and a WAXAL Swahili speaker), so no recording is needed to rerun it.
+Synthetic speech is cleaner than a phone call — this checks the wiring and
+the latency budget, not recognition accuracy under noise.
+
+    python scripts/replay_call_audio.py --render-url http://127.0.0.1:18100 \\
+        --ws ws://127.0.0.1:8083/v1/calls/stream
+
+Writes ``evals/reports/call_replay_<date>.json``. Needs ``websockets`` and
+``numpy``; run inside app-api:gpu with ``--network host``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import datetime as dt
+import json
+import re
+import time
+import wave
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+ROOT = Path(__file__).resolve().parents[1]
+AUDIO_DIR = ROOT / "evals" / "call_replay" / "audio"
+FRAME_BYTES = 640  # 20 ms at 16 kHz mono PCM16
+
+try:  # the receptionist's own filler lines, to tell a filler from an answer
+    import sys
+
+    sys.path.insert(0, str(ROOT / "App" / "backend"))
+    from app.receptionist.phrases import fillers as _fillers
+
+    FILLERS = {f for lang in ("en", "lg", "sw") for f in _fillers(lang)}
+except Exception:  # noqa: BLE001 — timing still works, just without the split
+    FILLERS = set()
+
+SPEAKERS = {"en": "salt_eng_0002", "lg": "waxal_lug_0005", "sw": "waxal_swa_0007"}
+
+UTTERANCES: dict[str, tuple[str, str]] = {
+    "en_tin": ("en", "Hello. How do I register for a TIN number with URA?"),
+    "en_vat": ("en", "What is the standard VAT rate in Uganda?"),
+    "en_ask_sw": ("en", "Can we speak Swahili, please?"),
+    "lg_tin": ("lg", "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?"),
+    "lg_vat": ("lg", "VAT yange ntya okugisasula, era ebitundu bimeka?"),
+    "lg_person": ("lg", "Njagala okwogera n'omuntu, omukozi wa URA."),
+    "en_officer": ("en", "I would like to talk to an officer about my account balance, please."),
+    "sw_tin": ("sw", "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?"),
+    # Escalation: a worried caller is offered an officer; "officer" alone asks
+    # for one; a caller in crisis hears where to get help first.
+    "en_worried_tin": ("en", "I'm really worried about this. How do I register for a TIN number with URA?"),
+    "en_yes": ("en", "Yes, please."),
+    "en_no": ("en", "No, thank you."),
+    "en_officer_word": ("en", "Officer, please."),
+    "en_crisis": ("en", "I can't pay these taxes. I just want to end my life."),
+}
+
+
+@dataclass
+class Scenario:
+    name: str
+    turns: list[str]
+    expect_languages: list[str] | None  # language events in order, as the caller should see them; None: not checked
+    override: str | None = None
+    expect_status: str | None = None
+    expect_status_on: str | None = None  # the utterance that must trigger it
+    # Talk over the assistant: this turn starts ``barge_after_s`` into the
+    # greeting (0) or into the answer to the turn before it, and must stop it.
+    barge_turn: int | None = None
+    barge_after_s: float = 2.0
+    # Stay on the line, silent, this long after the last turn — long enough
+    # for a server-side timer (the officer wait) to run out — and expect this
+    # status to arrive meanwhile.
+    linger_s: float = 0.0
+    expect_after_linger: str | None = None
+    # The language each turn's answer must be in. A Swahili caller once passed
+    # every check here while being answered in English.
+    reply_languages: list[str] | None = None
+    # What the assistant must say, case-insensitively: per utterance, text its
+    # reply must contain; and text said while lingering.
+    expect_reply: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    expect_said_while_lingering: tuple[str, ...] = ()
+    # A status that must never arrive (a declined officer offer stays with the AI).
+    forbid_status: str | None = None
+    note: str = ""
+
+
+#: An answer this short may carry too few words to place its language.
+SHORT_PROMPT_WORDS = 8
+
+#: An answer that ran into a decoding loop: one mark eight times over, or a run
+#: of brackets. "...oba 0[[[[((((..." (328 characters) passed a Luganda TIN
+#: turn on 2026-09-30 because only the answer's language was checked. Kept
+#: separate from the service's own guard (mt.looped), so a gap in that guard
+#: fails the replay instead of hiding in it.
+RUNAWAY_RE = re.compile(r"([^\w\s])\1{7,}|[\[\](){}]{8,}")
+
+#: A barge-in passes when the assistant's audio stops within this long.
+BARGE_STOP_BUDGET_MS = 2000
+
+
+SCENARIOS = [
+    Scenario("1_english_stays_english", ["en_tin", "en_vat"], ["en"], reply_languages=["en", "en"],
+             note="English caller: locks English, never leaves it."),
+    Scenario("2_selected_english_speaks_luganda", ["lg_tin"], ["lg"], reply_languages=["lg"],
+             note="First answer in Luganda, same question, not repeated."),
+    Scenario("3_swahili_local", ["sw_tin"], ["sw"], reply_languages=["sw"], note="Answered in Swahili on the local engine."),
+    Scenario("4_luganda_then_english", ["lg_vat", "en_tin"], ["lg", "en"], reply_languages=["lg", "en"],
+             note="Mid-call switch followed within one turn."),
+    Scenario("5_code_switched_luganda_stays", ["lg_tin", "lg_vat"], ["lg"], reply_languages=["lg", "lg"],
+             note="Luganda with TIN/VAT: no flip-flop."),
+    Scenario("6_explicit_request", ["en_tin", "en_ask_sw"], ["en", "sw"], reply_languages=["en", "sw"], note="Immediate switch."),
+    Scenario("7_override_luganda_holds", ["en_vat"], ["lg"], override="lg", reply_languages=["lg"],
+             note="Pinned to Luganda on screen; English speech does not move it."),
+    # Opens on lg_vat: the synthetic lg_tin clip is heard as "ttiimu", which
+    # the knowledge base cannot answer and escalates on its own — the officer
+    # request would then land on a call that is already transferring.
+    Scenario("8_transfer_from_luganda", ["lg_vat", "lg_person"], ["lg"], expect_status="transferring", reply_languages=["lg", "lg"],
+             expect_status_on="lg_person",
+             note="Officer request in Luganda transfers; staff see a Luganda caller."),
+    Scenario("9_barge_in_greeting", ["en_vat"], ["en"], barge_turn=0, reply_languages=["en"],
+             note="Talking over the greeting stops it, and the question is answered."),
+    Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1, reply_languages=["lg", "lg"],
+             note="Talking over a Luganda answer stops it (Orpheus voice)."),
+    # The Call Desk's Phase 0 check: RECEPTIONIST_TRANSFER_TIMEOUT_S is 90 by default.
+    # The language is not what this checks: an English caller whose vote lands
+    # just under the lock threshold rightly stays unlocked, with no event.
+    Scenario("11_officer_request_times_out", ["en_officer"], None, expect_status="transferring", reply_languages=["en"],
+             expect_status_on="en_officer", linger_s=100.0, expect_after_linger="ai",
+             expect_said_while_lingering=("Thank you for holding", "an officer will call you back", "Your reference: TIC-"),
+             note="The receptionist queues the call with the packet's topic (account) and priority (high), "
+                  "tells the caller every 30 s that they are still holding; nobody answers, so it returns "
+                  "to the AI owing a callback, with a short reference on screen."),
+    # Says nothing after the greeting. RECEPTIONIST_IDLE_REPROMPT_S (12 s) after
+    # the assistant stops, it asks whether the caller is there; another 12 s of
+    # silence and it says goodbye and ends the call, freeing the call slot.
+    Scenario("12_silent_caller", [], None, linger_s=60.0, expect_after_linger="ended",
+             note="A silent caller is checked on once, then the call is ended."),
+    # Only calls the AI hands over reach an officer. A worried caller (the risk
+    # monitor's distress signal) is offered one, once, and decides.
+    Scenario("13_officer_offer_accepted", ["en_worried_tin", "en_yes"], None, expect_status="transferring",
+             expect_status_on="en_yes", reply_languages=["en", "en"],
+             expect_reply={"en_worried_tin": ("Would you like to speak to an officer",)},
+             note="The answer ends on the officer offer alone; yes transfers the call."),
+    Scenario("14_officer_offer_declined", ["en_worried_tin", "en_no"], None, forbid_status="transferring",
+             reply_languages=["en", "en"],
+             expect_reply={"en_worried_tin": ("Would you like to speak to an officer",),
+                           "en_no": ("What else can I help you with",)},
+             note="No keeps the AI on the call."),
+    Scenario("15_one_word_officer", ["en_officer_word"], None, expect_status="transferring",
+             expect_status_on="en_officer_word", reply_languages=["en"],
+             note="\"Officer, please\" alone is a request for a person, as the greeting says."),
+    Scenario("16_crisis_support", ["en_crisis", "en_yes"], None, expect_status="transferring",
+             expect_status_on="en_yes", reply_languages=["en", "en"],
+             expect_reply={"en_crisis": ("nine nine nine, or one one two", "0800 21 21 21",
+                                         "connect you to a URA officer as well")},
+             note="Crisis lines in full (emergency numbers in words, the counselling line on screen), "
+                  "then an urgent transfer on yes."),
+    # "Yes please" said over the answer, before its officer offer was heard,
+    # is a backchannel: the question is asked again and nobody is transferred.
+    Scenario("17_yes_over_the_answer_is_asked_again", ["en_worried_tin", "en_yes"], None, barge_turn=1,
+             forbid_status="transferring", reply_languages=["en", "en"],
+             expect_reply={"en_yes": ("Would you like to speak to an officer",)},
+             note="Talking over an answer never answers the question at its end."),
+]
+
+
+def reply_language(texts: list[str]) -> str | None:
+    """The language an answer is in, by the receptionist's own word lists; None if unsure."""
+    try:
+        from app.receptionist.language import lexical_hits
+    except ImportError:
+        return None
+    hits = lexical_hits(" ".join(texts))
+    best = max(hits.values())
+    leaders = [lang for lang, n in hits.items() if n == best]
+    return leaders[0] if best >= 2 and len(leaders) == 1 else None
+
+
+def barge_metrics(listener: "Listener", started: float) -> dict[str, Any]:
+    """How the assistant reacted to a caller who started talking at *started*.
+
+    Audio arrives paced in real time while the assistant talks, so the first
+    gap of 0.4 s after *started* is where it stopped.
+    """
+    talking = any(started - 0.3 <= t < started for t in listener.audio_times)
+    stop = started
+    for t in sorted(t for t in listener.audio_times if t >= started):
+        if t - stop > 0.4:
+            break
+        stop = t
+    interrupt = next((t for t, m in listener.messages if t >= started and m.get("type") == "interrupt"), None)
+    stop_ms = round((stop - started) * 1000)
+    return {
+        "talking_at_barge": talking,
+        "bot_stop_ms": stop_ms,
+        "interrupt_ms": round((interrupt - started) * 1000) if interrupt else None,
+        "stopped": talking and stop_ms <= BARGE_STOP_BUDGET_MS,
+    }
+
+
+def render(render_url: str) -> None:
+    """Synthesise any missing caller utterance (16 kHz WAV) with the sidecar."""
+    import httpx
+
+    AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+    for key, (lang, text) in UTTERANCES.items():
+        path = AUDIO_DIR / f"{key}.wav"
+        if path.exists():
+            continue
+        resp = httpx.post(f"{render_url}/v1/audio/speech",
+                          json={"input": text, "voice": SPEAKERS[lang], "response_format": "pcm", "seed": 3},
+                          timeout=60)
+        resp.raise_for_status()
+        pcm24 = np.frombuffer(resp.content, dtype="<i2").astype(np.float32)
+        idx = np.arange(0, len(pcm24), 1.5)  # 24 kHz → 16 kHz, linear
+        pcm16 = np.interp(idx, np.arange(len(pcm24)), pcm24).astype("<i2")
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(16000)
+            w.writeframes(pcm16.tobytes())
+        print(f"rendered {key} ({len(pcm16) / 16000:.1f}s)")
+
+
+def pcm_of(key: str, gain_db: float = 0.0) -> bytes:
+    with wave.open(str(AUDIO_DIR / f"{key}.wav"), "rb") as w:
+        pcm = w.readframes(w.getnframes())
+    if not gain_db:
+        return pcm
+    scaled = np.frombuffer(pcm, dtype="<i2").astype(np.float32) * (10 ** (gain_db / 20))
+    return np.clip(scaled, -32768, 32767).astype("<i2").tobytes()
+
+
+@dataclass
+class Listener:
+    messages: list[tuple[float, dict[str, Any]]] = field(default_factory=list)
+    audio_times: list[float] = field(default_factory=list)
+
+    def last_audio(self) -> float:
+        return self.audio_times[-1] if self.audio_times else 0.0
+
+
+async def pump(ws: Any, listener: Listener) -> None:
+    async for msg in ws:
+        now = time.monotonic()
+        if isinstance(msg, bytes):
+            listener.audio_times.append(now)
+        else:
+            try:
+                listener.messages.append((now, json.loads(msg)))
+            except ValueError:
+                pass
+
+
+async def wait_quiet(listener: Listener, since: float, quiet_s: float, timeout_s: float) -> None:
+    """Until reply audio that began after *since* has been silent for *quiet_s*.
+
+    Replies pause mid-way — a filler, then the answer once it is generated —
+    so *quiet_s* has to outlast that.
+    """
+    start = time.monotonic()
+    while time.monotonic() - start < timeout_s:
+        last = max(listener.last_audio(), since)
+        if time.monotonic() - last > quiet_s:
+            return
+        await asyncio.sleep(0.1)
+
+
+async def first_audio_after(listener: Listener, since: float, timeout_s: float) -> float | None:
+    deadline = since + timeout_s
+    while time.monotonic() < deadline:
+        after = [t for t in listener.audio_times if t > since]
+        if after:
+            return after[0]
+        await asyncio.sleep(0.05)
+    return None
+
+
+async def speak(ws: Any, pcm: bytes, trailing_silence_s: float = 1.5) -> float:
+    """Send speech then silence in real time; return when the speech ended."""
+    t = time.monotonic()
+    for i in range(0, len(pcm), FRAME_BYTES):
+        await ws.send(pcm[i : i + FRAME_BYTES].ljust(FRAME_BYTES, b"\x00"))
+        t += 0.02
+        await asyncio.sleep(max(0.0, t - time.monotonic()))
+    ended = time.monotonic()
+    silence = b"\x00" * FRAME_BYTES
+    for _ in range(int(trailing_silence_s / 0.02)):
+        await ws.send(silence)
+        t += 0.02
+        await asyncio.sleep(max(0.0, t - time.monotonic()))
+    return ended
+
+
+async def keep_silence(ws: Any, stop: asyncio.Event) -> None:
+    """A live mic never goes quiet on the wire; neither does this caller."""
+    from websockets.exceptions import ConnectionClosed
+
+    silence = b"\x00" * FRAME_BYTES
+    while not stop.is_set():
+        try:
+            await ws.send(silence)
+        except ConnectionClosed:
+            return  # the receptionist hung up (a silent caller's call ends)
+        await asyncio.sleep(0.02)
+
+
+async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_db: float = 0.0) -> dict[str, Any]:
+    import websockets
+
+    listener = Listener()
+    result: dict[str, Any] = {"name": sc.name, "note": sc.note, "turns": []}
+    async with websockets.connect(url, max_size=None) as ws:
+        await ws.send(json.dumps({"type": "call_start", "locale": "en", "preferred_locale": "en",
+                                  "voice_consent_accepted": True, "sample_rate": 16000}))
+        reader = asyncio.create_task(pump(ws, listener))
+        stop = asyncio.Event()
+        filler = asyncio.create_task(keep_silence(ws, stop))
+        # Let the greeting play out — or talk over it.
+        opened = time.monotonic()
+        if await first_audio_after(listener, opened, 20.0):
+            if sc.barge_turn == 0:
+                await asyncio.sleep(sc.barge_after_s)
+            else:
+                await wait_quiet(listener, opened, quiet_s=2.0, timeout_s=30)
+        ready = next((m for _, m in listener.messages if m.get("type") == "call_ready"), {})
+        result["call_id"] = ready.get("call_id")
+        result["language_detection"] = ready.get("language_detection")
+        if sc.override:
+            sent = time.monotonic()
+            await ws.send(json.dumps({"type": "set_language", "language": sc.override}))
+            if await first_audio_after(listener, sent, 15.0):
+                await wait_quiet(listener, sent, quiet_s=2.5, timeout_s=20)
+
+        for index, key in enumerate(sc.turns):
+            stop.set()
+            await filler
+            mark = len(listener.messages)
+            started = time.monotonic()
+            ended = await speak(ws, pcm_of(key, barge_gain_db if sc.barge_turn == index else 0.0))
+            stop = asyncio.Event()
+            filler = asyncio.create_task(keep_silence(ws, stop))
+            first_audio = await first_audio_after(listener, ended, reply_wait_s)
+            if first_audio is not None:
+                # Past the filler: until an answer (or a status change) arrives.
+                deadline = ended + reply_wait_s
+                while time.monotonic() < deadline:
+                    later = [m for _, m in listener.messages[mark:]]
+                    if any(m.get("type") == "status" for m in later) or any(
+                        m.get("type") == "caption" and m.get("speaker") == "assistant" and m.get("final")
+                        and m.get("text", "").strip() not in FILLERS for m in later
+                    ):
+                        break
+                    await asyncio.sleep(0.1)
+                if sc.barge_turn == index + 1:
+                    await asyncio.sleep(sc.barge_after_s)  # the next turn talks over this answer
+                else:
+                    await wait_quiet(listener, ended, quiet_s=3.0, timeout_s=reply_wait_s)
+            new = [m for _, m in listener.messages[mark:]]
+            timed = [(t, m) for t, m in listener.messages[mark:]]
+            said = [(t, m["text"]) for t, m in timed if m.get("type") == "caption"
+                    and m.get("speaker") == "assistant" and m.get("final")]
+            answer_at = next((t for t, text in said if text.strip() not in FILLERS), None)
+            filler_at = next((t for t, text in said if text.strip() in FILLERS), None)
+            result["turns"].append({
+                "utterance": key,
+                "said": UTTERANCES[key][1],
+                "first_audio_ms": round((first_audio - ended) * 1000) if first_audio else None,
+                "filler_caption_ms": round((filler_at - ended) * 1000) if filler_at else None,
+                "answer_caption_ms": round((answer_at - ended) * 1000) if answer_at else None,
+                "languages": [m for m in new if m.get("type") == "language"],
+                "assistant": [m["text"] for m in new if m.get("type") == "caption"
+                              and m.get("speaker") == "assistant" and m.get("final")],
+                "caller": [m["text"] for m in new if m.get("type") == "caption"
+                           and m.get("speaker") == "caller" and m.get("final")],
+                "status": [m.get("status") for m in new if m.get("type") == "status"],
+                **({"barge": barge_metrics(listener, started)} if sc.barge_turn == index else {}),
+            })
+        if sc.linger_s:
+            mark = len(listener.messages)
+            await asyncio.sleep(sc.linger_s)  # the silence filler keeps the line open
+            result["after_linger"] = [m.get("status") for _, m in listener.messages[mark:]
+                                      if m.get("type") == "status"]
+            result["said_while_lingering"] = [m["text"] for _, m in listener.messages[mark:]
+                                              if m.get("type") == "caption" and m.get("speaker") == "assistant"
+                                              and m.get("final")]
+        stop.set()
+        await filler
+        from websockets.exceptions import ConnectionClosed
+
+        try:
+            await ws.send(json.dumps({"type": "hangup"}))
+        except ConnectionClosed:
+            pass  # already ended by the receptionist
+        await asyncio.sleep(0.5)
+        reader.cancel()
+
+    seen: list[str] = []
+    for _, message in listener.messages:
+        if message.get("type") == "language" and (not seen or seen[-1] != message.get("language")):
+            seen.append(message["language"])
+    statuses = [s for t in result["turns"] for s in t["status"]]
+    status_ok = sc.expect_status is None or sc.expect_status in statuses
+    if sc.expect_status and sc.expect_status_on:
+        on = [t for t in result["turns"] if t["utterance"] == sc.expect_status_on]
+        before = result["turns"][: result["turns"].index(on[0])] if on else []
+        status_ok = bool(on) and sc.expect_status in on[0]["status"] and not any(
+            sc.expect_status in t["status"] for t in before
+        )
+    barge_ok = all(t["barge"]["stopped"] for t in result["turns"] if "barge" in t)
+    language_ok = True
+    for turn, expected in zip(result["turns"], sc.reply_languages or []):
+        answers = [text for text in turn["assistant"] if text.strip() not in FILLERS]
+        turn["reply_language"] = reply_language(answers)
+        turn["reply_language_expected"] = expected
+        # Unclassifiable passes only for a short prompt ("Nsonyiwa, ogambye TIN?"):
+        # an empty turn, or a long answer the word lists cannot place, fails.
+        words = len(" ".join(answers).split())
+        unsure_ok = turn["reply_language"] is None and 0 < words <= SHORT_PROMPT_WORDS
+        language_ok = language_ok and (turn["reply_language"] == expected or unsure_ok)
+    for turn in result["turns"]:
+        turn["runaway"] = any(RUNAWAY_RE.search(text) for text in turn["assistant"])
+    runaway_ok = not any(turn["runaway"] for turn in result["turns"])
+    linger_ok = sc.expect_after_linger is None or sc.expect_after_linger in result.get("after_linger", [])
+    for turn in result["turns"]:
+        wanted = sc.expect_reply.get(turn["utterance"], ())
+        said = " ".join(turn["assistant"]).lower()
+        turn["reply_missing"] = [text for text in wanted if text.lower() not in said]
+    reply_ok = not any(turn["reply_missing"] for turn in result["turns"])
+    lingered = " ".join(result.get("said_while_lingering", [])).lower()
+    result["lingering_missing"] = [text for text in sc.expect_said_while_lingering if text.lower() not in lingered]
+    forbidden_ok = sc.forbid_status is None or sc.forbid_status not in statuses
+    result["language_sequence"] = seen
+    result["passed"] = (
+        bool(result["language_detection"])
+        and (sc.expect_languages is None or seen == sc.expect_languages)
+        and status_ok and barge_ok
+        and linger_ok and language_ok and runaway_ok
+        and reply_ok and not result["lingering_missing"] and forbidden_ok
+    )
+    return result
+
+
+async def main_async(args: argparse.Namespace) -> None:
+    chosen = [s for s in SCENARIOS if not args.only or any(o in s.name for o in args.only.split(","))]
+    chosen = [s for s in chosen for _ in range(max(1, args.repeat))]
+    results = []
+    for sc in chosen:
+        print(f"== {sc.name}", flush=True)
+        try:
+            res = await run_scenario(args.ws, sc, args.reply_wait, args.barge_gain_db)
+        except Exception as exc:  # a crashed scenario is a result, not an abort
+            res = {"name": sc.name, "passed": False, "error": f"{type(exc).__name__}: {exc}"}
+        results.append(res)
+        print(json.dumps({k: res.get(k) for k in ("passed", "language_sequence", "error")}), flush=True)
+        for turn in res.get("turns", []):
+            print(f"   {turn['utterance']}: audio {turn['first_audio_ms']} ms, filler {turn['filler_caption_ms']} ms,"
+                  f" answer {turn['answer_caption_ms']} ms  langs={[e['language'] for e in turn['languages']]}"
+                  f"  status={turn['status']}  reply={[a[:90] for a in turn['assistant'][-1:]]}", flush=True)
+            if "barge" in turn:
+                print(f"      barge-in: {turn['barge']}", flush=True)
+        if "after_linger" in res:
+            print(f"   after lingering: status={res['after_linger']}", flush=True)
+    lat = [t["first_audio_ms"] for r in results for t in r.get("turns", []) if t.get("first_audio_ms") is not None]
+    report = {
+        "date": dt.date.today().isoformat(),
+        "ws": args.ws,
+        "passed": sum(bool(r.get("passed")) for r in results),
+        "scenarios": len(results),
+        "first_audio_ms_p50": float(np.percentile(lat, 50)) if lat else None,
+        "results": results,
+    }
+    out = ROOT / "evals" / "reports" / f"call_replay_{report['date']}{args.label}.json"
+    out.write_text(json.dumps(report, indent=1, ensure_ascii=False))
+    print(f"{report['passed']}/{report['scenarios']} scenarios passed — {out}")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
+    ap.add_argument("--ws", default="ws://127.0.0.1:8083/v1/calls/stream")
+    ap.add_argument("--render-url", default="", help="Orpheus sidecar, to render missing caller audio")
+    ap.add_argument("--only", default="", help="comma-separated substrings of scenario names")
+    ap.add_argument("--reply-wait", type=float, default=30.0)
+    ap.add_argument("--repeat", type=int, default=1, help="run each chosen scenario this many times")
+    ap.add_argument("--label", default="", help="appended to the report name, e.g. _flag_off")
+    ap.add_argument("--barge-gain-db", type=float, default=0.0,
+                    help="level of the barge-in turn, e.g. -15: a browser's echo canceller "
+                         "turns the caller down while the assistant is talking")
+    args = ap.parse_args()
+    if args.render_url:
+        render(args.render_url)
+    asyncio.run(main_async(args))
+
+
+if __name__ == "__main__":
+    main()

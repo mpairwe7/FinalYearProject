@@ -16,12 +16,11 @@ Supported Architectures:
 from __future__ import annotations
 
 import io
-import json
 import logging
 import os
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -363,6 +362,60 @@ def extract_tin_numbers(text: str) -> list[str]:
     return list(set(re.findall(r"\b1\d{9}\b", text)))
 
 
+def extract_nin_numbers(text: str) -> list[str]:
+    """Extract Ugandan 14-character National Identification Numbers (NIN)."""
+    matches = re.findall(r"\b[C][MFR][0-9A-Z]{12}\b", text.upper())
+    if not matches:
+        matches = [m for m in re.findall(r"\b[A-Z]{2}[0-9A-Z]{12}\b", text.upper()) if len(m) == 14]
+    return list(dict.fromkeys(matches))
+
+
+def extract_phone_numbers(text: str) -> list[str]:
+    """Extract Ugandan telephone numbers."""
+    raw_matches = re.findall(r"(?:\+?256|0)\s*(?:7[0-9]|3[1-9])(?:[\s\-]?[0-9]){7}\b", text)
+    cleaned = [re.sub(r"[\s\-]", "", m) for m in raw_matches]
+    return list(dict.fromkeys(cleaned))
+
+
+def extract_national_id_card_data(text: str) -> dict[str, Any]:
+    """Extract structured identity details from Ugandan National ID OCR text."""
+    nins = extract_nin_numbers(text)
+    phones = extract_phone_numbers(text)
+    dates = extract_dates(text)
+
+    name_match = re.search(r"(?:Name|Given Names?|Surname|Full Name)[:\s]+([^\n\r]{3,40})", text, re.I)
+    name = name_match.group(1).strip() if name_match else ""
+    if name:
+        name = re.sub(r"(?i)\s*(?:NIN|Card|DOB|Date|Sex|District).*$", "", name).strip()
+    if not name:
+        caps = re.findall(r"\b[A-Z][a-z]{2,15}\s+[A-Z][a-z]{2,15}\b", text)
+        for c in caps:
+            if not any(k in c.lower() for k in ("republic", "uganda", "national", "identity", "card", "nira")):
+                name = c
+                break
+
+    district_match = re.search(r"(?:District\s+of\s+Birth|Place\s+of\s+Birth|District)[:\s]+([A-Za-z\s]{3,20})", text, re.I)
+    district = district_match.group(1).strip() if district_match else None
+
+    dob_match = re.search(r"(?:Date\s+of\s+Birth|DOB|Birth\s+Date)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})", text, re.I)
+    if dob_match:
+        dob = dob_match.group(1).strip()
+    elif dates:
+        dob = dates[0]
+    else:
+        dob = None
+
+    return {
+        "nin": nins[0] if nins else None,
+        "nins": nins,
+        "full_name": name or None,
+        "date_of_birth": dob,
+        "district": district,
+        "phone": phones[0] if phones else None,
+        "is_national_id": bool(nins) or "national identity" in text.lower() or "republic of uganda" in text.lower(),
+    }
+
+
 def extract_prn_numbers(text: str) -> list[str]:
     """Extract Uganda Payment Registration Numbers (PRNs: 12-15 digits, typically starts with 2)."""
     matches = re.findall(r"(?:PRN[:\s#]*)?\b(2\d{11,14})\b", text, re.I)
@@ -377,9 +430,10 @@ def extract_efris_invoice_numbers(text: str) -> list[str]:
 
 def extract_ugx_amounts(text: str) -> list[str]:
     """Extract UGX and currency amounts from dense financial tables."""
-    amounts = re.findall(r"(?:UGX|Shs?\.?|USD)\s*[\d,]+(?:\.\d{1,2})?", text, re.I)
+    amounts = re.findall(r"(?:UGX|Shs?\.?|USD|UShs?\.?)\s*[\d,]+(?:\.\d{1,2})?", text, re.I)
     if not amounts:
-        amounts = re.findall(r"\b[\d,]{4,}(?:\.\d{1,2})?\b", text)
+        candidates = re.findall(r"\b\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?\b", text)
+        amounts = [c for c in candidates if not re.fullmatch(r"(?:19|20)\d{2}", c)]
     return amounts
 
 
@@ -389,8 +443,31 @@ def extract_dates(text: str) -> list[str]:
 
 
 def extract_reference_numbers(text: str) -> list[str]:
-    """Extract URA assessment, case, and transaction reference numbers."""
-    return list(set(re.findall(r"\b[A-Z]{2,6}(?:[-/][0-9A-Z]+)+\b|\b[A-Z]{2,6}[-/]?[0-9]{4,14}\b", text)))
+    """Extract URA assessment, case, and transaction reference numbers containing digits."""
+    raw_matches = re.findall(r"\b[A-Z]{2,6}(?:[-/][0-9A-Z]+)+\b|\b[A-Z]{2,6}[-/]?[0-9]{4,14}\b", text)
+    # Filter out plain English hyphenated words (e.g. ANTI-AVOIDANCE, NON-RESIDENTS) - require digits
+    return list({m for m in raw_matches if re.search(r"\d", m)})
+
+
+_TAX_HEAD_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("Value Added Tax (VAT)", re.compile(r"\b(?:V\.?A\.?T\.?|Value\s+Added\s+Tax)\b", re.I)),
+    ("Pay As You Earn (PAYE)", re.compile(r"\b(?:P\.?A\.?Y\.?E\.?|Pay\s+As\s+You\s+Earn)\b", re.I)),
+    ("Withholding Tax (WHT)", re.compile(r"\b(?:W\.?H\.?T\.?|Withholding\s+Tax)\b", re.I)),
+    ("Income Tax / Corporation Tax", re.compile(r"\b(?:Income\s+Tax|Corporation\s+Tax|Corporate\s+Income\s+Tax|CIT)\b", re.I)),
+    ("Customs & Import Duty", re.compile(r"\b(?:Customs\s+Duty|Import\s+Duty|East\s+African\s+Community\s+Customs|EACCMA)\b", re.I)),
+    ("Local Excise Duty (LED)", re.compile(r"\b(?:Excise\s+Duty|Local\s+Excise\s+Duty|LED)\b", re.I)),
+    ("Rental Income Tax", re.compile(r"\b(?:Rental\s+Income\s+Tax|Rental\s+Tax)\b", re.I)),
+    ("Stamp Duty", re.compile(r"\b(?:Stamp\s+Duty)\b", re.I)),
+]
+
+
+def extract_tax_heads(text: str) -> list[str]:
+    """Identify URA tax heads / regimes referenced in the document text."""
+    found: list[str] = []
+    for label, pat in _TAX_HEAD_PATTERNS:
+        if pat.search(text):
+            found.append(label)
+    return found
 
 
 def clean_ocr_text(raw_text: str) -> str:

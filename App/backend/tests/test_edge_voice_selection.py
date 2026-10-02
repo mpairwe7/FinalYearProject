@@ -125,7 +125,7 @@ class EdgeSynthesisForwardingTests(unittest.TestCase):
         seen: dict[str, str] = {}
 
         class _FakeCommunicate:
-            def __init__(self, text: str, voice_name: str):
+            def __init__(self, text: str, voice_name: str, *args, **kwargs):
                 seen["voice"] = voice_name
 
             async def stream(self):

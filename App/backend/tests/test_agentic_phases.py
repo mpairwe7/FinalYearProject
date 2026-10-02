@@ -157,6 +157,55 @@ class AgenticPhaseTests(unittest.TestCase):
         self.assertNotIn("[1]", judgment["revised_reply"])
         self.assertTrue(judgment["revised_reply"].startswith("Here's the most relevant guidance"))
 
+    def test_response_judge_keeps_well_grounded_reply_missing_markers(self) -> None:
+        # Regression: "What services does URA provide?" was answered correctly
+        # and then discarded. Claim verification reported 5/5 claims supported
+        # (score 1.0) but no [N] markers, and uncited-alone forced a revise —
+        # so the user got raw passages instead of the answer. Missing markers
+        # on an otherwise well-grounded reply are not worth that trade.
+        model = ChatModel.__new__(ChatModel)
+        judgment = model._evaluate_response_judge(
+            message="What services does URA provide?",
+            reply="URA is the central tax and customs authority.",
+            hits=[{"answer": "URA is the central tax and customs authority."}],
+            citations=[{"ref": "[1]"}],
+            faithfulness_score=1.0,
+            escalation_required=False,
+            escalation_reason="",
+            claim_report={
+                "decision": "revise",
+                "score": 1.0,
+                "uncited_claims": [{"text": "URA is the central tax and customs authority."}],
+                "unsupported_claims": [],
+            },
+        )
+
+        self.assertEqual(judgment["decision"], "approve")
+        self.assertEqual(judgment["revised_reply"], "")
+
+    def test_response_judge_still_revises_weakly_supported_claims(self) -> None:
+        model = ChatModel.__new__(ChatModel)
+        judgment = model._evaluate_response_judge(
+            message="What services does URA provide?",
+            reply="URA waives all penalties for first-time filers. [1]",
+            hits=[{"answer": "URA is the central tax and customs authority."}],
+            citations=[{"ref": "[1]"}],
+            faithfulness_score=1.0,
+            escalation_required=False,
+            escalation_reason="",
+            claim_report={
+                "decision": "revise",
+                "score": 0.5,
+                "uncited_claims": [],
+                "unsupported_claims": [{"text": "URA waives all penalties."}],
+            },
+        )
+
+        self.assertEqual(judgment["decision"], "revise")
+        self.assertIn(
+            "claim verification found weakly supported factual claims", judgment["reasons"]
+        )
+
     def test_ticket_roundtrip_preserves_handoff_and_judge_metadata(self) -> None:
         ticket = db.create_ticket(
             reason="Account-specific question",

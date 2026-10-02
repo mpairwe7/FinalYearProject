@@ -16,3 +16,6 @@ pnpm-lock.yaml
 
 # TypeScript incremental build cache — generated on every build
 *.tsbuildinfo
+
+# Lighthouse CI artifacts
+/.lighthouseci/

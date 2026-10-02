@@ -37,6 +37,7 @@ import SegmentComparisonChart from "../../../components/charts/SegmentComparison
 import ConfusionMatrix from "../../../components/charts/ConfusionMatrix";
 import { AlertTriangleIcon } from "../../../components/ops/icons";
 import { authHeaders } from "@/lib/authSession";
+import { queryKeys } from "@/lib/queryKeys";
 import "../analytics.css";
 
 // Sample eval data — rendered when no live run is available. Never presented
@@ -83,7 +84,7 @@ const CM_MATRIX = [
 
 function Evaluation() {
   const { data: liveEval, isFetching } = useQuery({
-    queryKey: ["evaluation"],
+    queryKey: queryKeys.admin.evaluation(),
     queryFn: async () => {
       const res = await fetch("/api/v1/evaluate", {
         method: "POST",

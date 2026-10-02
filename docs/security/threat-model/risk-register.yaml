@@ -38,7 +38,7 @@ risks:
     status: Accepted
     accepted_by: Engineering Lead
     accepted_date: "2026-03-24"
-    review_date: "2026-09-24"
+    review_date: "2027-03-24"
     justification: FastAPI backend enforces role-based access control (RBAC) independently of UI state
     owner: frontend-team
     cwe: "CWE-602"
@@ -352,3 +352,64 @@ risks:
     mitigation_target: Shipped
     owner: infra-team
     cwe: "CWE-250"
+
+  # ===========================================================================
+  # 8. Enterprise Connectors & Autonomous Agent Workflows
+  # ===========================================================================
+  - id: T-CON-01
+    element: Connectors Orchestrator
+    framework: STRIDE
+    stride_category: E
+    threat: Server-Side Request Forgery (SSRF) via remote MCP connector registration
+    severity: High
+    cvss: "8.6"
+    existing_controls: Strict URL validation blocking cloud metadata (169.254.169.254), private/loopback/multicast IP resolution checks in production, required_scopes RBAC
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-918"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0052"
+
+  - id: T-CON-02
+    element: Autonomous Vision Agent
+    framework: STRIDE
+    stride_category: T
+    threat: Indirect prompt injection in uploaded National ID OCR images manipulating TIN registration
+    severity: Medium
+    cvss: "6.8"
+    existing_controls: Strict regex-based entity isolation (14-char NIN, phone), document classification priority gate, input guard sanitization before tool dispatch
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: ai-team
+    cwe: "CWE-20"
+    owasp_llm: "LLM01"
+    mitre_atlas: "AML.T0051"
+
+  - id: T-CON-03
+    element: Standalone Portals
+    framework: STRIDE
+    stride_category: S
+    threat: Automated credential stuffing and unescaped database XSS on enterprise node web dashboards
+    severity: Medium
+    cvss: "6.5"
+    existing_controls: Mandatory Auth Gate on GET /, dynamic server-validated HTML5 canvas CAPTCHA with Bezier distortion curves, HTML entity escaping on all rendered fields, non-root appuser in Dockerfile.plugins
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: frontend-team
+    cwe: "CWE-79"
+    owasp_llm: "LLM05"
+
+  - id: T-CON-04
+    element: Enterprise Datastores
+    framework: STRIDE
+    stride_category: T
+    threat: State tampering via credit note over-crediting, unvalidated stamp activations, or unauthenticated stock releases
+    severity: High
+    cvss: "8.2"
+    existing_controls: Cumulative credited balance tracking, invoice status cancellation checks, order payment checks, exact matching on taxpayer lookups, non-idempotent tool flags
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-840"
+    owasp_llm: "LLM06"

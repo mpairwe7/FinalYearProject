@@ -22,7 +22,7 @@ logged as `SpeechModel warm-up: {'lg': 'error: …'}`.
 |---|---|---|
 | `SPEECH_WARMUP` | `true` | Set `false` where the extra boot traffic is unwanted — a metered egress, a cold HF Space |
 | `SPEECH_WARMUP_LOCALES` | `en,lg,sw` | Comma-separated; one synthesis each, sequentially |
-| `SPEECH_TTS_CACHE_SIZE` | `64` | Repeated short phrases skip the backend chain entirely |
+| `SPEECH_TTS_CACHE_SIZE` | `256` | Repeated short phrases skip the backend chain entirely; the receptionist pre-warms its fixed Luganda lines into it |
 
 Warming is sequential on purpose: three locales at once would contend for the
 same bounded speech executor that live requests use, which is the opposite of
@@ -38,6 +38,14 @@ docker logs <container> 2>&1 | grep 'SpeechModel warm-up'
 A locale reporting `error: …` here is the same failure a taxpayer would have
 hit on their first request — it is now visible at boot instead of in one
 person's session.
+
+`GET /v1/speech/health` says whether that boot is actually serving. `ready`
+means the local Whisper-SALT and Spark-TTS-SALT tiers are up. `degraded`
+means they are up but `ORPHEUS_TTS_URL` points at a sidecar that is not
+accepting connections: Luganda falls through to Spark on this GPU, and the
+call path does not open a stream to Orpheus again until the 30 second
+cooldown ends. `orpheus: up` is the streaming Luganda voice. A health check
+that only looks at HTTP 200 cannot tell these apart; read `status`.
 
 ## ASR — `Sunbird/asr-whisper-large-v3-salt`
 
@@ -113,6 +121,21 @@ model card's framing of these ids either (that was never the right framing
 to begin with — the ids work despite it, not because of it).
 
 ### Faster inference in production (2026-08-20)
+
+> **Superseded 2026-09-04 — the driver was never the ceiling.** Everything
+> below is accurate about `torch==2.12.1`, but its conclusion ("the fix is a
+> newer NVIDIA driver on the host … not a build-time flag") is wrong, and the
+> torch downgrade it rejects is what actually shipped. CUDA *minor-version
+> compatibility* means any cu12x wheel runs on any >=525 driver, so pinning a
+> matched `torch`/`torchaudio` **2.11.0+cu128** pair in `Dockerfile.gpu` (GPU
+> image only — `requirements.txt` is untouched) fixes it with no driver
+> change. Measured in the built image on this same host:
+> `torch 2.11.0+cu128`, `cuda_available True`, `NVIDIA RTX A6000`. Both SALT
+> tiers now load on `cuda:0`; see the 2026-09-04 section at the end of this
+> file for end-to-end numbers. The `docker run … torch.cuda.is_available()`
+> check below is still the right thing to run against a new host — only its
+> "if False, upgrade the driver" remedy is superseded.
+
 
 The in-process path (`_transcribe_whisper_salt` in `speech_service.py`) is
 not the bottleneck — it already does the right things (`torch.no_grad()`,
@@ -276,7 +299,20 @@ export SPARK_TTS_REPO_DIR=/opt/spark-tts
 normal `huggingface_hub.snapshot_download` at load time — no extra step
 needed for that half.
 
-### The torchaudio/CUDA mismatch, and why `Dockerfile.gpu` deletes a file to fix it
+### HISTORICAL — the torchaudio/CUDA mismatch and its old `.so` fix
+
+> **Superseded 2026-09-04 — `Dockerfile.gpu` no longer deletes that file.**
+> The mismatch analysed below is real, but it only arises when torchaudio is
+> installed *unpinned* next to `torch==2.12.1`. `Dockerfile.gpu` now strips
+> requirements.txt's torch line and installs `torch==2.11.0`/
+> `torchaudio==2.11.0` together from the cu128 index, so both halves come from
+> one source at one CUDA generation and there is nothing to reconcile. The
+> `rm … _torchaudio*.so` line is gone; verified in the current image that the
+> compiled extension is present and `sparktts.models.bicodec` /
+> `BiCodecTokenizer` both import cleanly with it in place. Keep this section
+> for the failure signature — `OSError: libcudart.so.12` or "PyTorch and
+> TorchAudio were compiled with different CUDA versions" means something has
+> reintroduced an unpinned torchaudio.
 
 Only relevant if you install sparktts's dependencies *alongside* this
 project's own pinned `torch==2.12.1` instead of following spark-tts's own
@@ -464,3 +500,245 @@ verified in isolation as in the two runs above. Full record, including the
 new `App/docker-compose.gpu-salt.yml` overlay and a real (not dummy-token)
 Spark-TTS-SALT `/v1/tts` request's timing under CPU fallback:
 `App/docs/traceability/local-gpu-salt-ngrok-2026-08-22.md`.
+
+### Both SALT tiers on GPU, end to end (2026-09-04)
+
+The CPU fallback the 2026-08-22 run accepted is gone. With `Dockerfile.gpu`'s
+matched cu128 torch/torchaudio pin, `docker-compose.gpu-salt.yml` runs
+Whisper-SALT, Spark-TTS-SALT, `bge-m3` and the reranker all on the pinned
+card. Brought up on GPU 7 and exercised over the public tunnel; full record in
+`App/docs/traceability/local-gpu-salt-ngrok-2026-09-04.md`.
+
+Container log at startup — every tier on `cuda:0`, nothing degraded:
+
+```text
+HybridRetriever ready (… dense_device=cuda:0 rerank=True reranker_device=cuda:0)
+ChatModel initialised – hybrid (Qdrant) mode, LLM (Sunbird/Sunflower-14B-FP8) gen
+Loading Whisper-SALT 'Sunbird/asr-whisper-large-v3-salt' (device=cuda:0)
+Loading Spark-TTS-SALT 'Sunbird/spark-tts-salt' (device=cuda:0)
+SpeechModel warm-up: {'en': 'edge_tts', 'lg': 'spark_tts_salt', 'sw': 'spark_tts_salt'}
+```
+
+Measured through ngrok, warm:
+
+| Call | Backend | Latency |
+| --- | --- | --- |
+| `/v1/tts` Luganda, 2.7s of audio | `spark_tts_salt` (GPU) | **4.3s** (was ~150s on CPU) |
+| `/v1/tts` English | `edge_tts` | 0.4s |
+| `/v1/asr` Luganda, 2.7s of audio | `whisper_salt` (GPU) | **0.72s**, RTF 0.27 |
+| `/v1/chat` hybrid-retrieval answer | Sunflower-14B-FP8 | 2.6–3.8s |
+
+**A TTS→ASR round trip closes cleanly**, which is the first evidence in this
+file that Spark-TTS-SALT's Luganda output is intelligible rather than merely
+well-formed — the perceptual gap flagged under "Still not done" is now
+partially closed by machine transcription, though still not by a human
+listener. Synthesized `"Omusolo gwa EFRIS gusasulwa gutya?"`, fed the
+resulting PCM straight back to Whisper-SALT, and got
+`"Omusolo gwa eifalisi kusasulwa gutya?"` with `language: "lg"` — the only
+drift is the acronym EFRIS coming back phonetically, which is what a speaker
+saying it aloud sounds like.
+
+**Calling `/v1/asr` correctly.** It is not a multipart file upload — the
+audio goes in the **request body** and `sample_rate`/`language` are **query
+parameters**. The decoder sniffs magic bytes, so a bare WAV body is fine
+(verified: byte-identical transcripts from `--data-binary @speech.wav` and
+from raw PCM). What breaks is wrapping it — a `-F file=@speech.wav` multipart
+envelope makes the boundary lines and part headers get read as audio, and
+Whisper hallucinates a fluent sentence out of the noise instead of failing:
+
+```bash
+curl -X POST "$BASE/api/v1/asr?language=lg" \
+  -H 'Content-Type: audio/wav' --data-binary @speech.wav
+```
+
+`language` is genuinely optional — auto-detect returned the same transcript.
+Note `/v1/tts` returns **MP3** for English (`edge_tts`, 24 kHz) and **RIFF
+WAV** for the SALT locales (16 kHz); don't assume one container for both.
+
+## Language identification — `SpeechModel.identify_language`
+
+The multilingual receptionist asks Whisper-SALT *which* language an utterance is
+in, not what it says: one encoder pass and one decoder step from
+`<|startoftranscript|>`, reading the logits only at the candidates' ids in
+`SALT_LANGUAGE_TOKEN_IDS` (en 50259, sw 50318, lg 50355) and softmaxing over those
+alone. Tens of milliseconds on an A6000 — cheap enough to run on every caller
+utterance. It never raises: a missing model, too little audio (< 0.3 s), a
+timeout (`SPEECH_LID_DEADLINE_S`, 2 s) or an open `speech.lid` breaker all come
+back as a result with `error` set and no vote.
+
+Accuracy is measured, not assumed — `scripts/eval_language_id.py` over
+`evals/language_id/` (FLEURS, SALT, AfriSpeech accented English; built by
+`evals/language_id/build_dataset.py`). Results: `evals/reports/language_id_*.md`.
+
+## Raw PCM and the format sniffer
+
+`_decode_audio_bytes` guesses the container from the first bytes. Raw 16-bit PCM
+that starts `FF Ex` passes for an MPEG frame sync, and a quiet sample of −1 is
+`FF FF`. On the language-id set 7% of real clips start that way. libsndfile used
+to "decode" MP3 garbage out of such speech. The sniffer now calls it MP3 only
+with an ID3 tag, or with a second frame header exactly one frame after the first
+(`_looks_like_mp3`, G93). A headerless body that could be float32 or int16 is
+read the way that sounds like audio: speech changes little from one sample to
+the next, and bytes read in the wrong format come out as noise (`_roughness`).
+Amplitude is not the test, since float32 speech can have long near-silent
+stretches. A caller that knows its raw format names it (`/v1/asr?encoding=
+pcm_s16le|pcm_f32le`) and is not guessed. Sending a header is still the rule: the receptionist's STT, live partials, the language
+sentinel and the officer leg wrap raw PCM with `speech_service.pcm16_to_wav`, and
+the chat uploads WAV (`pcm16ToWav` in `voiceService.ts`). `identify_language`
+itself reads raw PCM16 directly.
+
+## TTS — Orpheus-3B (`Sunbird/orpheus-3b-tts-multilingual`)
+
+The receptionist's Luganda voice, and the first tier of `_synthesize_uncached` for
+any language listed in `ORPHEUS_TTS_LANGUAGES` (default `lg`) when
+`ORPHEUS_TTS_URL` is set — ahead of Spark-TTS-SALT (~4.3 s a sentence) and Sunbird
+cloud (~7.2 s), which remain the fallbacks. It runs as its own service
+(`App/backend/orpheus_sidecar`: vLLM + the SNAC 24 kHz codec, streaming PCM frame by
+frame) because vLLM pins its own torch/transformers.
+
+| Setting | Default | Effect |
+|---|---|---|
+| `ORPHEUS_TTS_URL` | unset | Unset = the tier does not exist |
+| `ORPHEUS_TTS_LANGUAGES` | `lg` | Languages it voices (`lg,sw` to add Swahili) |
+| `ORPHEUS_TTS_SPEAKER_LG` | `salt_lug_0001` | From the model card's table; `waxal_lug_0002…0008` also exist |
+| `ORPHEUS_TTS_SPEAKER_SW` | `waxal_swa_0006` | |
+| `ORPHEUS_QUANTIZATION` (sidecar) | unset / `fp8` in compose | Weight-only FP8 via Marlin on Ampere |
+
+Measured on one RTX A6000 (`scripts/bench_orpheus_tts.py`, 30 Luganda sentences ×
+4 speakers): bf16 — 355 ms to first audio, 0.96× real time; **FP8 — 234 ms, 0.63×**;
+FP8 with two callers at once — 265 ms, 0.69×. At bf16 generation barely keeps pace
+with playback, so FP8 is the compose default. Not measured: how natural it sounds —
+that needs Luganda listeners (`evals/orpheus_tts/listening_sheet.csv`).
+
+A connection failure puts the client in a 30 s cooldown, so a dead sidecar costs
+one timeout rather than one per sentence.
+
+## Figures in Luganda and Swahili speech (G98)
+
+Orpheus reads English digits well and Luganda and Swahili digits badly. A
+round trip through Whisper-SALT heard "ebitundu 18 ku buli kikumi" as
+"ebitundu e tini", "shilingi obukadde 10" as "kiringi obukadde" (the ten was
+dropped), and "asilimia 18" as "asilimia aching". Written as words, the same
+figures came back intact. So `clean_text_for_speech` now gives Luganda and
+Swahili figures as words (`app/number_words.py`):
+
+| Figure | Luganda | Swahili |
+|---|---|---|
+| 18% | ebitundu kkumi na munaana ku buli kikumi | asilimia kumi na nane |
+| 2% | ebitundu bibiri ku buli kikumi | asilimia mbili |
+| UGX 10,000,000 | shilingi obukadde kkumi | shilingi milioni kumi za Uganda |
+| UGX 335,000 | shilingi three hundred and thirty-five thousand | shilingi elfu mia tatu thelathini na tano za Uganda |
+| FY2026-27 | twenty twenty-six okutuuka ku twenty twenty-seven | elfu mbili ishirini na sita hadi elfu mbili ishirini na saba |
+
+* Swahili says every number in the standard forms.
+* Luganda says 0–100 and round millions in Luganda, with the units agreeing
+  with *ebitundu* and *obukadde* (bibiri, bubiri). Larger amounts and years
+  are said in English words, as Luganda speakers commonly say money. The
+  large Luganda numbers are not guessed: Sunflower-14B confirmed the small
+  ones and got the large ones wrong. The agreement forms need a native
+  speaker's review, like the rest of the Luganda text.
+* A figure the text already names is not named twice ("ku bitundu 18%", not
+  "ku bitundu ebitundu…"). The translated digit anchor "(eza 18%)" is not read,
+  a band's dash is read as "to" / "okutuuka ku" / "hadi", and "Withholding Tax
+  (WHT)" is not said as "Withholding Tax (Withholding Tax)".
+* Left as they are: TINs, PRNs and the toll-free number read digit by digit
+  (G84), numbers with a leading zero (phone numbers), times, dates, and form
+  names ("D-T 2027"). A section number is read in English ("Section fifteen").
+
+Measured on the GPU stack, 2026-09-30 (re-verified 2026-10-01), by voicing each figure and
+transcribing it back (`evals/reports/spoken_figures_2026-10-01.json`):
+
+```bash
+# Run host check against the local API gateway:
+PYTHONPATH=App/backend python3 scripts/bench_spoken_figures.py \
+  --api http://127.0.0.1:8083 --out-dir evals/reports
+```
+
+| Figures heard back | before | after (2026-09-30 & 2026-10-01) |
+|---|---|---|
+| Luganda percentages | 1/9 | 8/9 |
+| Luganda amounts | 3/7 | 7/7 |
+| Swahili percentages | 6/9 | 9/9 |
+| Swahili amounts | 4/7 | 7/7 |
+
+The one miss is Luganda 0% (acoustic boundary: "zeero" heard as "z'erokubuli"). All statutory amounts up to UGX 150,000,000 and tax rates (10%, 12%, 15%, 18%, 20%, 25%, 30%, 40%) recover at 100%.
+
+## Streamed reply speech — the chat's read-aloud (G95)
+
+The chat speaks a reply through `POST /v1/tts/stream` (API reference, "Stream
+Reply Speech"): NDJSON, one line per piece as soon as it is voiced. Before, the
+whole answer was synthesised into one WAV, and nothing was heard until all of
+it arrived. Voice mode now asks `/v1/voice/chat` for text only
+(`tts_enabled=false`), shows the answer, and speaks it through the stream when
+narration is on.
+
+* **Pieces grow.** Cut at sentence, clause, then word breaks: at most
+  `SPEECH_STREAM_FIRST_PIECE_CHARS` (60) characters for the first, 90 for the
+  second, then Orpheus's 120. A short first piece starts speech soonest; the
+  longer ones after it keep up with playback.
+* **Lookahead.** The first piece is voiced alone, then two pieces are always in
+  flight. The Orpheus sidecar batches concurrent requests, but not for free:
+  with two in flight from the start the first piece took 0.3–1.6 s longer, and
+  one at a time left pauses of up to 0.4 s.
+* **Opus.** `format: "opus"` encodes each WAV piece as Ogg/Opus with libsndfile
+  (already a dependency): about a tenth of the size, for ~5% of the audio's
+  length in CPU time. The client asks for it only where
+  `canPlayType('audio/ogg; codecs="opus"')` says it plays; any other browser
+  gets WAV. At the 24 kHz Orpheus rate Opus is about 4.5 KB per second of
+  speech, so voice mode keeps speaking under Data Saver.
+* **Client** (`speakStreamed` in `voiceService.ts`). Web Audio schedules each
+  piece to start where the one before ends, so there is no gap between pieces
+  that arrive in time. A tap on the speaker, or `stopPlayback()`, aborts the
+  request and silences what is queued. A piece that fails is skipped. If nothing
+  arrives for 20 s, speech ends after the audio already queued. Only when no
+  piece at all could be played does the chat fall back to one `/v1/tts` request.
+
+Measured on the GPU stack, 2026-09-30 (re-verified 2026-10-01), with `scripts/bench_chat_speech.py` on a
+freshly started api (no piece from the cache), for the TIN question in each
+language (`evals/reports/chat_speech_2026-10-01.json`):
+
+```bash
+# Run host benchmark against the live API:
+python3 scripts/bench_chat_speech.py --api http://127.0.0.1:8083
+```
+
+| | en | lg | sw |
+|---|---|---|---|
+| Answer text (voice chat, `tts_enabled=false`) | 0.47 s | 5.29 s | 4.91 s |
+| First audio, whole WAV (before) | 10.3 s | 17.2 s | 18.4 s |
+| **First audio, streamed** | **5.17 s** | **8.67 s** | **6.62 s** |
+| Size, whole WAV → streamed Opus | 1496 → 142 KB | 1612 → 158 KB | 1940 → 178 KB |
+| Bandwidth savings | 90.5% | 90.2% | 90.8% |
+| Silences between pieces | none (0.0 s) | none (0.0 s) | one of 2.0 s (filler wait) |
+
+The first piece took 2.7–4.9 s on its own. What remains of the Luganda and
+Swahili wait is mostly the answer's text (4.6–4.8 s), not speech.
+
+**Speech work runs off the event loop (G96).** The speech routes call
+`SpeechModel`, which is synchronous, through `asyncio.to_thread`. Called inline,
+one synthesis or transcription held up every other request for its duration:
+`/health` took 5.8 s during a 6.2 s `/v1/tts`. With the calls in threads it
+answered in 58 ms or less during a 7.5 s synthesis.
+`test_speech_work_does_not_hold_up_the_rest_of_the_api` fails on the old code.
+
+## Multilingual Speech & Translation Enhancements (September 2026)
+
+Verified against Sunbird AI's Sunflower v2 research release (September 2026):
+
+### 1. Domain-conditioned Whisper ASR (Prompt Conditioning)
+Whisper-SALT transcribers receive language-specific initial prompts (`prompt_text` via `get_prompt_ids`) to anchor phonetics onto Ugandan tax terminology:
+- **English (`en`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."`
+- **Luganda (`lg`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, omusolo, omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."`
+- **Swahili (`sw`)**: `"URA, EFRIS, VAT, TIN, PAYE, PRN, kodi, ushuru, forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."`
+
+The prompt steers common acronyms. It does not stop a confident mishear: the live GPU pass of `evals/call_replay/audio/lg_tin.wav` still returned `ttiimu` and `okuva mu ora`. ClarifyGate asks before answering those, and `repair_asr_entities` rewrites them to `TIN` and `mu URA` before the Qdrant search. Bare `era` stays the Luganda word for "and".
+
+### 2. Statutory Compound Figure & Orthography Normalization
+Statutory tax percentages and rates must survive translation without distortion whether spoken in digits or written in vernacular prose:
+- **Luganda**: Dual orthography (`kkumi`/`kumi`) for 18% (`kkumi na munaana` / `kumi na munaana ku buli kikumi`), 12% (`kkumi na bbiri`), 15% (`kkumi na ttaano`), and 30% (`asatu`). Idiomatic "ku buli kikumi" ("per hundred") is protected from false 100.0 extractions.
+- **Swahili**: Support for compound rate words: 18% (`kumi na nane`), 12% (`kumi na mbili`), 15% (`kumi na tano`), 30% (`thelathini`), 35% (`thelathini na tano`), and 40% (`arobaini`).
+
+### 3. Cross-Lingual RAG Bridge Architecture
+Aligning with Sunflower v2 benchmarks, single-hop cross-lingual RAG replaces legacy 4-hop cascade translation (ASR → MT to English → LLM → MT to vernacular → TTS). Sunflower-14B / Gemini natively synthesizes concise vernacular answers grounded on English statutory retrieval passages in a single inference pass, eliminating translation latency and compound figure drift.
+
+

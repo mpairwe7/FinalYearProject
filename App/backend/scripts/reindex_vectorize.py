@@ -200,6 +200,8 @@ def to_ndjson(docs: list[dict], vectors: list[list[float]], path: Path) -> int:
                 "values": vec,
                 "metadata": {
                     "text": (doc.get("text") or "")[:2000],
+                    "question": str(doc.get("question") or "")[:500],
+                    "answer": str(doc.get("answer") or "")[:1500],
                     "source": doc.get("source", ""),
                     "page": str(doc.get("page", "")),
                     "section": doc.get("section", ""),

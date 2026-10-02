@@ -15,6 +15,7 @@ import StaffGuard from "../../../components/StaffGuard";
 import { OpsPage, OpsPanel, TableScroll } from "../../../components/ops/OpsPage";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
 import { analyticsApi } from "../../../services/analyticsApi";
+import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
 
 const FAILED = new Set(["failed", "error", "bounced"]);
@@ -28,7 +29,7 @@ function statusTone(status: string): string {
 
 function OutboxBoard() {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["adminOutbox"],
+    queryKey: queryKeys.admin.outbox(),
     queryFn: () => analyticsApi.outbox(),
     staleTime: 10_000,
   });

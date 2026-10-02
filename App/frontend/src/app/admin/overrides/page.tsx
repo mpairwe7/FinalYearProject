@@ -16,12 +16,13 @@ import StaffGuard, { type StaffIdentity } from "../../../components/StaffGuard";
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
 import { analyticsApi } from "../../../services/analyticsApi";
+import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
 
 function OverridesBoard({ who }: { who: StaffIdentity }) {
   const client = useQueryClient();
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["adminOverrides"],
+    queryKey: queryKeys.admin.overrides(),
     queryFn: () => analyticsApi.overrides(),
     staleTime: 10_000,
   });
@@ -35,14 +36,14 @@ function OverridesBoard({ who }: { who: StaffIdentity }) {
     onSuccess: () => {
       setQuery("");
       setReply("");
-      client.invalidateQueries({ queryKey: ["adminOverrides"] });
+      client.invalidateQueries({ queryKey: queryKeys.admin.overrides() });
     },
   });
   const remove = useMutation({
     mutationFn: (id: string) => analyticsApi.deleteOverride(id),
     onSuccess: () => {
       setConfirming(null);
-      client.invalidateQueries({ queryKey: ["adminOverrides"] });
+      client.invalidateQueries({ queryKey: queryKeys.admin.overrides() });
     },
   });
   const canEdit = who.role === "ura_admin";

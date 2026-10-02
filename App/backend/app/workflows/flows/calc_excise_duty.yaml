@@ -1,0 +1,31 @@
+id: calc_excise_duty
+name: Excise Duty Calculator
+version: "1"
+description: Calculate statutory excise duty under Uganda's Excise Duty Act 2014.
+requires_auth: false
+trigger_phrases: []
+
+steps:
+  - id: ask_type
+    question: "Which excisable item or service is this for — **mobile_money_withdrawal**, **telecom_data**, **telecom_voice**, **fuel_petrol**, **fuel_diesel**, or **beer_malt**?"
+    slot: excise_type
+    validator: "enum[mobile_money_withdrawal,telecom_data,telecom_voice,fuel_petrol,fuel_diesel,fuel_kerosene,beer_malt]"
+
+  - id: ask_amount
+    question: "What is the transaction amount in UGX (or volume in litres for fuel)?"
+    slot: amount
+    validator: number
+
+  - id: run_calc
+    slot: ""
+    tool: calculate_excise_duty
+    args:
+      excise_type: "{excise_type}"
+      amount: "{amount}"
+
+  - id: done
+    question: >-
+      That calculation uses the statutory rates under the Excise Duty Act 2014
+      (as amended) from the official URA rate table.
+    slot: ""
+    validator: text

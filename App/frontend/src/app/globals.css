@@ -306,6 +306,7 @@ a:hover { color: var(--ura-teal-light); }
    -------------------------------------------------------------------------- */
 main {
   position: relative;
+  max-width: 100%;
 }
 
 /* Legacy card-based layout (analytics pages) */
@@ -789,6 +790,128 @@ main {
 @keyframes pulse-border {
   0%, 100% { box-shadow: 0 0 0 0 rgba(251, 113, 133, 0.4); }
   50%      { box-shadow: 0 0 0 6px rgba(251, 113, 133, 0); }
+}
+
+/* -----------------------------------------------------------------------------
+   Statutory Deadline Calendar Sync Card
+   -------------------------------------------------------------------------- */
+.deadline-sync-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.65rem 0.9rem;
+  background: rgba(220, 38, 38, 0.06);
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  border-radius: var(--radius-sm, 8px);
+}
+
+.deadline-sync-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.deadline-sync-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+}
+
+.deadline-sync-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary, inherit);
+}
+
+.deadline-sync-date {
+  font-size: 0.75rem;
+  color: var(--text-muted, #a1a1aa);
+}
+
+.deadline-sync-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.deadline-sync-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.75rem;
+  min-height: 32px;
+  background: var(--ura-red, #dc2626);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-xs, 6px);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+}
+
+.deadline-sync-btn:hover {
+  opacity: 0.9;
+}
+
+.deadline-sync-link {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted, #a1a1aa);
+  text-decoration: underline;
+  padding: 0.35rem 0.5rem;
+}
+
+.deadline-sync-link:hover {
+  color: var(--text-primary, inherit);
+}
+
+/* -----------------------------------------------------------------------------
+   Suggested Next Action Chips
+   -------------------------------------------------------------------------- */
+.chat-action-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border-subtle, rgba(255, 255, 255, 0.1));
+}
+
+.chat-action-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  min-height: 36px;
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  border-radius: 9999px;
+  color: var(--text-primary, inherit);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 160ms cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: left;
+}
+
+.chat-action-chip:hover {
+  background: var(--ura-red-subtle, rgba(220, 38, 38, 0.1));
+  border-color: var(--ura-red, #dc2626);
+  color: var(--ura-red, #dc2626);
+  transform: translateY(-1px);
+}
+
+.chat-action-chip:active {
+  transform: translateY(0);
+}
+
+.chat-action-chip-arrow {
+  color: var(--ura-red, #dc2626);
+  font-weight: 600;
 }
 
 /* -----------------------------------------------------------------------------
@@ -2151,6 +2274,7 @@ main {
 }
 
 .md-list {
+  list-style-type: disc;
   margin: 0.65em 0;
   padding-left: 1.4em;
   max-width: 70ch;
@@ -2448,6 +2572,9 @@ main {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  max-width: 1920px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 /* ── Landing state (empty / pre-chat) ── */
@@ -2879,8 +3006,11 @@ summary {
     box-shadow: var(--shadow-lg);
     pointer-events: auto;
   }
-  .chat-dock .composer-hint,
-  .landing-composer .composer-hint {
+  /* The standing disclaimer is dropped for room on a phone. A notice about
+     what the mic just did, and the hint while recording, stay: without them
+     a mic that closed itself, or a turn that sent itself, says nothing. */
+  .chat-dock .composer-hint:not(.composer-hint-notice):not(.composer-hint-rec),
+  .landing-composer .composer-hint:not(.composer-hint-notice):not(.composer-hint-rec) {
     display: none;
   }
   .landing-composer .composer {

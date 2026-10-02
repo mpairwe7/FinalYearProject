@@ -1,0 +1,434 @@
+"""Performance and operational metrics for phone receptionist calls."""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from typing import Any
+
+from .. import database as db
+from .state import CallState
+from .store import get_call, list_turns, update_call
+
+logger = logging.getLogger(__name__)
+
+
+def _percentile(values: list[float], pct: float) -> float:
+    """Compute empirical percentile."""
+    if not values:
+        return 0.0
+    sorted_v = sorted(values)
+    k = (len(sorted_v) - 1) * (pct / 100.0)
+    f = int(k)
+    c = min(f + 1, len(sorted_v) - 1)
+    d = k - f
+    return round(sorted_v[f] + d * (sorted_v[c] - sorted_v[f]), 1)
+
+
+def compute_call_metrics(
+    state: CallState | None,
+    call: dict[str, Any],
+    turns: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Compute comprehensive performance metrics for one call."""
+    started_at = call.get("started_at", time.time())
+    ended_at = call.get("ended_at") or time.time()
+    duration_s = max(0.0, round(ended_at - started_at, 1))
+
+    caller_turns = sum(1 for t in turns if t.get("speaker") == "caller")
+    ai_answers = sum(1 for t in turns if t.get("speaker") == "assistant" and t.get("kind") == "answer")
+
+    clarify_turns = [t for t in turns if t.get("kind") in ("clarify", "confirm")]
+    clarifications_asked = len(clarify_turns)
+    clarification_failures = state.clarification_failures if state else 0
+    clarified_first_try = state.clarified_first_try if state else max(0, clarifications_asked - clarification_failures)
+
+    low_conf_words = sum(len(t.get("low_conf_words", [])) for t in turns)
+    probs: list[float] = []
+    if state and state.word_probs:
+        probs = state.word_probs
+    else:
+        for t in turns:
+            m = t.get("mean_word_prob")
+            if m is not None:
+                probs.append(float(m))
+    mean_word_prob = round(sum(probs) / len(probs), 3) if probs else 1.0
+
+    barge_ins = state.barge_in_count if state else 0
+
+    # Faithfulness
+    f_scores: list[float] = []
+    if state and state.faithfulness_scores:
+        f_scores = state.faithfulness_scores
+    else:
+        for t in turns:
+            fs = t.get("faithfulness")
+            if fs is not None:
+                f_scores.append(float(fs))
+    faithfulness_mean = round(sum(f_scores) / len(f_scores), 3) if f_scores else None
+    faithfulness_min = round(min(f_scores), 3) if f_scores else None
+
+    # Transfer metrics
+    transferred = bool(call.get("transferred"))
+    transfer_reason = call.get("transfer_reason") or ""
+    time_to_transfer_s = None
+    officer_wait_s = None
+    if transferred and state and state.transfer_requested_at:
+        time_to_transfer_s = max(0.0, round(state.transfer_requested_at - started_at, 1))
+        # Officer wait time
+        officer_joined_at = None
+        for t in turns:
+            if t.get("speaker") == "officer":
+                officer_joined_at = t.get("created_at")
+                break
+        if officer_joined_at:
+            officer_wait_s = max(0.0, round(officer_joined_at - state.transfer_requested_at, 1))
+
+    # Phase 2–3 metrics
+    bridged_at = call.get("bridged_at") or (state.bridged_at if state else None)
+    transfer_requested_at = call.get("transfer_requested_at") or (state.transfer_requested_at if state else None)
+    time_to_answer_s = max(0.0, round(bridged_at - transfer_requested_at, 1)) if bridged_at and transfer_requested_at else None
+    handle_time_s = max(0.0, round(ended_at - bridged_at, 1)) if bridged_at else None
+    hold_total_s = float(call.get("hold_total_s") or (state.hold_total_s if state else 0.0))
+    wrapup_at = call.get("wrapup_at")
+    wrapup_time_s = max(0.0, round(wrapup_at - ended_at, 1)) if wrapup_at and ended_at else None
+    abandoned_while_waiting = bool(call.get("needs_callback") and call.get("callback_reason") == "caller_left_waiting")
+    callback_created = bool(call.get("needs_callback"))
+
+    # This is an operational routing outcome, not evidence that the caller's
+    # issue was resolved. Resolution needs an explicit caller/staff signal.
+    end_reason = call.get("end_reason", "")
+    ai_only_completion = bool(ai_answers >= 1 and not transferred and end_reason not in ("timeout", "error"))
+
+    # Latencies
+    stt_latencies: list[float] = []
+    brain_latencies: list[float] = []
+    tts_latencies: list[float] = []
+    turn_to_audio_latencies: list[float] = []
+
+    for t in turns:
+        lat = t.get("latencies", {})
+        if "stt_ms" in lat:
+            stt_latencies.append(float(lat["stt_ms"]))
+        if "brain_ms" in lat:
+            brain_latencies.append(float(lat["brain_ms"]))
+        if "tts_first_ms" in lat:
+            tts_latencies.append(float(lat["tts_first_ms"]))
+        if "total_ms" in lat:
+            turn_to_audio_latencies.append(float(lat["total_ms"]))
+        elif "brain_ms" in lat and "stt_ms" in lat:
+            turn_to_audio_latencies.append(float(lat["brain_ms"]) + float(lat["stt_ms"]))
+
+    lang_info = _language_metrics(state, call)
+    is_lg = (state and state.locale == "lg") or call.get("locale") == "lg" or "lg" in lang_info.get("used", [])
+    luganda_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_lg else None
+
+    is_sw = (state and state.locale == "sw") or call.get("locale") == "sw" or "sw" in lang_info.get("used", [])
+    swahili_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_sw else None
+
+    metrics_obj = {
+        "language": lang_info,
+        "duration_s": duration_s,
+        "caller_turns": caller_turns,
+        "ai_answers": ai_answers,
+        "clarifications_asked": clarifications_asked,
+        "clarified_first_try": clarified_first_try,
+        "clarification_failures": clarification_failures,
+        "low_conf_words": low_conf_words,
+        "mean_word_prob": mean_word_prob,
+        "barge_ins": barge_ins,
+        "faithfulness_mean": faithfulness_mean,
+        "faithfulness_min": faithfulness_min,
+        "transferred": transferred,
+        "transfer_reason": transfer_reason,
+        "time_to_transfer_s": time_to_transfer_s,
+        "officer_wait_s": officer_wait_s,
+        "time_to_answer_s": time_to_answer_s,
+        "handle_time_s": handle_time_s,
+        "hold_total_s": hold_total_s,
+        "wrapup_time_s": wrapup_time_s,
+        "abandoned_while_waiting": abandoned_while_waiting,
+        "callback_created": callback_created,
+        "ai_only_completion": ai_only_completion,
+        "luganda_turn_latency_ms": luganda_turn_latency_ms,
+        "swahili_turn_latency_ms": swahili_turn_latency_ms,
+        "latency": {
+            "stt_ms_p50": _percentile(stt_latencies, 50),
+            "stt_ms_p95": _percentile(stt_latencies, 95),
+            "brain_ms_p50": _percentile(brain_latencies, 50),
+            "brain_ms_p95": _percentile(brain_latencies, 95),
+            "tts_first_ms_p50": _percentile(tts_latencies, 50),
+            "tts_first_ms_p95": _percentile(tts_latencies, 95),
+            "turn_to_audio_ms_p50": _percentile(turn_to_audio_latencies, 50),
+            "turn_to_audio_ms_p95": _percentile(turn_to_audio_latencies, 95),
+        },
+    }
+    return metrics_obj
+
+
+def _language_metrics(state: CallState | None, call: dict[str, Any]) -> dict[str, Any]:
+    """Which language(s) the call was in, and what detecting them cost.
+
+    On a single-engine call most of these stay at their defaults: one
+    language, no switches, no detection latency.
+    """
+    locale = call.get("locale") or "en"
+    if state is None:
+        return {"initial": locale, "final": locale, "used": [locale], "switches": 0, "overrides": 0}
+    confidences = state.lid_confidences
+    return {
+        "initial": state.initial_locale or locale,
+        "final": state.locale or locale,
+        "used": list(state.languages_used or [state.locale or locale]),
+        "preferred": state.preferred_locale or None,
+        "source": state.language_source,
+        "switches": state.language_switches,
+        "overrides": state.language_overrides,
+        "detection_latency_ms_p50": _percentile(state.lid_latencies_ms, 50),
+        "detection_latency_ms_p95": _percentile(state.lid_latencies_ms, 95),
+        "detection_confidence_mean": round(sum(confidences) / len(confidences), 3) if confidences else None,
+    }
+
+
+def record_call_end_metrics(call_id: str, state: CallState | None = None) -> dict[str, Any]:
+    """Calculate and save final metrics JSON for a call."""
+    call = get_call(call_id)
+    if not call:
+        return {}
+
+    turns = list_turns(call_id)
+    metrics = compute_call_metrics(state, call, turns)
+    fields: dict[str, Any] = {"metrics_json": metrics}
+    if state is not None and state.locale:
+        # The row ends on the language the call ended in, not the one it
+        # opened in (every multilingual call opens in English).
+        fields["locale"] = state.locale
+    update_call(call_id, **fields)
+    return metrics
+
+
+def _is_ai_only_completion(metrics: dict[str, Any], call: dict[str, Any]) -> bool:
+    """Read the current outcome metric, or derive it from a legacy snapshot.
+
+    Older calls stored this operational routing outcome as ``contained``.
+    Their snapshots also include ``ai_answers``; derive from those fields so
+    old and new calls use the same stricter timeout/error definition.
+    """
+    if "ai_only_completion" in metrics:
+        return bool(metrics["ai_only_completion"])
+
+    end_reason = call.get("end_reason") or ""
+    transferred = call.get("transferred", metrics.get("transferred", False))
+    ai_answers = metrics.get("ai_answers")
+    if ai_answers is None:
+        # Very early or partially migrated snapshots may only have the old
+        # boolean. Keep it readable, while honoring the current exclusions.
+        ai_answers = 1 if metrics.get("contained") else 0
+    try:
+        answer_count = int(ai_answers)
+    except (TypeError, ValueError):
+        answer_count = 0
+    return bool(answer_count >= 1 and not transferred and end_reason not in ("timeout", "error"))
+
+
+def get_aggregate_metrics(days: int = 7, *, tenant_id: str | None = None) -> dict[str, Any]:
+    """Compute aggregate call performance across the specified day window."""
+    cutoff = time.time() - (max(1, days) * 86400)
+    if tenant_id is None:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE started_at >= ? ORDER BY started_at DESC",
+            (cutoff,),
+        )
+    else:
+        rows = db.query_all(
+            "SELECT * FROM voice_calls WHERE tenant_id = ? AND started_at >= ? ORDER BY started_at DESC",
+            (tenant_id, cutoff),
+        )
+
+    total_calls = len(rows)
+    if total_calls == 0:
+        return {
+            "period_days": days,
+            "total_calls": 0,
+            "ai_only_completion_rate": 0.0,
+            "transfer_rate": 0.0,
+            "transfers_by_reason": {},
+            "clarification_rate": 0.0,
+            "clarification_first_try_rate": 0.0,
+            "mean_word_prob": 1.0,
+            "avg_duration_s": 0.0,
+            "avg_officer_rating": 0.0,
+            "latency_p50_ms": 0.0,
+            "latency_p95_ms": 0.0,
+            "luganda_total_calls": 0,
+            "luganda_ai_only_completion_rate": 0.0,
+            "luganda_transfer_rate": 0.0,
+            "luganda_turn_latency_ms": 0.0,
+            "swahili_total_calls": 0,
+            "swahili_ai_only_completion_rate": 0.0,
+            "swahili_transfer_rate": 0.0,
+            "swahili_turn_latency_ms": 0.0,
+        }
+
+    ai_only_count = 0
+    transferred_count = 0
+    transfers_by_reason: dict[str, int] = {}
+    clarify_calls = 0
+    first_try_total = 0
+    clarify_total = 0
+    word_probs: list[float] = []
+    durations: list[float] = []
+    turn_latencies: list[float] = []
+    ratings: list[int] = []
+
+    luganda_calls_count = 0
+    luganda_ai_only_count = 0
+    luganda_transferred_count = 0
+    luganda_turn_latencies: list[float] = []
+
+    swahili_calls_count = 0
+    swahili_ai_only_count = 0
+    swahili_transferred_count = 0
+    swahili_turn_latencies: list[float] = []
+
+    time_to_answers: list[float] = []
+    handle_times: list[float] = []
+    abandoned_count = 0
+    callbacks_created_count = 0
+    callbacks_closed_count = 0
+    per_officer_counts: dict[str, int] = {}
+
+    for r in rows:
+        d = dict(r)
+        m = {}
+        if d.get("metrics_json"):
+            try:
+                m = json.loads(d["metrics_json"])
+            except Exception:
+                pass
+
+        is_ai_only_completion = _is_ai_only_completion(m, d)
+        if is_ai_only_completion:
+            ai_only_count += 1
+        if d.get("transferred"):
+            transferred_count += 1
+            reason = d.get("transfer_reason") or "unspecified"
+            transfers_by_reason[reason] = transfers_by_reason.get(reason, 0) + 1
+
+        # Luganda-specific tracking (Pillar 2 / Phase B.2)
+        locale = d.get("locale") or (m.get("language") or {}).get("final") or ""
+        used_langs = (m.get("language") or {}).get("used") or []
+        if locale == "lg" or "lg" in used_langs:
+            luganda_calls_count += 1
+            if is_ai_only_completion:
+                luganda_ai_only_count += 1
+            if d.get("transferred"):
+                luganda_transferred_count += 1
+            lg_lat = m.get("luganda_turn_latency_ms") or (m.get("latency") or {}).get("turn_to_audio_ms_p50")
+            if lg_lat:
+                luganda_turn_latencies.append(float(lg_lat))
+
+        # Swahili-specific tracking (Pillar 4 Multilingual Parity)
+        if locale == "sw" or "sw" in used_langs:
+            swahili_calls_count += 1
+            if is_ai_only_completion:
+                swahili_ai_only_count += 1
+            if d.get("transferred"):
+                swahili_transferred_count += 1
+            sw_lat = m.get("swahili_turn_latency_ms") or (m.get("latency") or {}).get("turn_to_audio_ms_p50")
+            if sw_lat:
+                swahili_turn_latencies.append(float(sw_lat))
+
+        c_asked = m.get("clarifications_asked", 0)
+        if c_asked > 0:
+            clarify_calls += 1
+            clarify_total += c_asked
+            first_try_total += m.get("clarified_first_try", 0)
+
+        if m.get("mean_word_prob") is not None:
+            word_probs.append(float(m["mean_word_prob"]))
+        if m.get("duration_s") is not None:
+            durations.append(float(m["duration_s"]))
+
+        lat_p50 = (m.get("latency") or {}).get("turn_to_audio_ms_p50")
+        if lat_p50:
+            turn_latencies.append(float(lat_p50))
+
+        if d.get("officer_rating"):
+            ratings.append(int(d["officer_rating"]))
+
+        # Phase 3 metrics
+        if m.get("time_to_answer_s") is not None:
+            time_to_answers.append(float(m["time_to_answer_s"]))
+        if m.get("handle_time_s") is not None:
+            handle_times.append(float(m["handle_time_s"]))
+        if m.get("abandoned_while_waiting") or d.get("callback_reason") == "caller_left_waiting":
+            abandoned_count += 1
+        if d.get("needs_callback"):
+            callbacks_created_count += 1
+        if d.get("callback_done_at"):
+            callbacks_closed_count += 1
+        officer = d.get("officer_id")
+        if officer:
+            per_officer_counts[officer] = per_officer_counts.get(officer, 0) + 1
+
+    ai_only_completion_rate = round(ai_only_count / total_calls, 3)
+    transfer_rate = round(transferred_count / total_calls, 3)
+    clarification_rate = round(clarify_calls / total_calls, 3)
+    clarification_first_try_rate = (
+        round(first_try_total / clarify_total, 3) if clarify_total > 0 else 1.0
+    )
+    mean_word_prob = round(sum(word_probs) / len(word_probs), 3) if word_probs else 1.0
+    avg_duration_s = round(sum(durations) / len(durations), 1) if durations else 0.0
+    avg_officer_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+
+    luganda_ai_only_completion_rate = (
+        round(luganda_ai_only_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
+    )
+    luganda_transfer_rate = (
+        round(luganda_transferred_count / luganda_calls_count, 3) if luganda_calls_count > 0 else 0.0
+    )
+    luganda_turn_latency_ms = (
+        _percentile(luganda_turn_latencies, 50) if luganda_turn_latencies else 0.0
+    )
+
+    swahili_ai_only_completion_rate = (
+        round(swahili_ai_only_count / swahili_calls_count, 3) if swahili_calls_count > 0 else 0.0
+    )
+    swahili_transfer_rate = (
+        round(swahili_transferred_count / swahili_calls_count, 3) if swahili_calls_count > 0 else 0.0
+    )
+    swahili_turn_latency_ms = (
+        _percentile(swahili_turn_latencies, 50) if swahili_turn_latencies else 0.0
+    )
+
+    return {
+        "period_days": days,
+        "total_calls": total_calls,
+        "ai_only_completion_rate": ai_only_completion_rate,
+        "transfer_rate": transfer_rate,
+        "transfers_by_reason": transfers_by_reason,
+        "clarification_rate": clarification_rate,
+        "clarification_first_try_rate": clarification_first_try_rate,
+        "mean_word_prob": mean_word_prob,
+        "avg_duration_s": avg_duration_s,
+        "avg_officer_rating": avg_officer_rating,
+        "latency_p50_ms": _percentile(turn_latencies, 50),
+        "latency_p95_ms": _percentile(turn_latencies, 95),
+        "median_time_to_answer_s": _percentile(time_to_answers, 50),
+        "p90_time_to_answer_s": _percentile(time_to_answers, 90),
+        "median_handle_time_s": _percentile(handle_times, 50),
+        "abandonment_rate": round(abandoned_count / total_calls, 3),
+        "callbacks_created": callbacks_created_count,
+        "callbacks_closed": callbacks_closed_count,
+        "per_officer_counts": per_officer_counts,
+        "luganda_total_calls": luganda_calls_count,
+        "luganda_ai_only_completion_rate": luganda_ai_only_completion_rate,
+        "luganda_transfer_rate": luganda_transfer_rate,
+        "luganda_turn_latency_ms": luganda_turn_latency_ms,
+        "swahili_total_calls": swahili_calls_count,
+        "swahili_ai_only_completion_rate": swahili_ai_only_completion_rate,
+        "swahili_transfer_rate": swahili_transfer_rate,
+        "swahili_turn_latency_ms": swahili_turn_latency_ms,
+    }

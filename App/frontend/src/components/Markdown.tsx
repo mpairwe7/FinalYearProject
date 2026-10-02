@@ -148,7 +148,7 @@ interface Block {
  * while breaking up LLM walls-of-text.
  */
 function splitLongParagraph(text: string): string[] {
-  if (text.length < 200) return [text];
+  if (text.length < 200 || asNumberedProcedure(text) !== null) return [text];
 
   // Split on sentence boundaries: period/question/exclamation followed by space + capital
   const sentences: string[] = [];
@@ -256,30 +256,37 @@ function asEnumeration(text: string): { lead: string; items: string[] } | null {
  * merely mentions "2)" cannot trigger it and a mis-numbered list is left
  * alone rather than silently renumbered.
  */
-function asNumberedProcedure(text: string): string[] | null {
-  const marker = /(?:^|\s)(\d{1,2})[).]\s+/g;
+function asNumberedProcedure(text: string): { lead: string; items: string[] } | null {
+  const marker = /(?:^|[\s:;.,!?])(\d{1,2})[).]\s*/g;
   const found: { n: number; start: number; end: number }[] = [];
   let m: RegExpExecArray | null;
   while ((m = marker.exec(text)) !== null) {
-    found.push({ n: Number(m[1]), start: m.index, end: m.index + m[0].length });
+    const digitMatch = m[0].match(/\d{1,2}/);
+    const digitOffset = digitMatch?.index ?? 0;
+    found.push({
+      n: Number(m[1]),
+      start: m.index + digitOffset,
+      end: m.index + m[0].length,
+    });
   }
   if (found.length < 3) return null;
   if (found[0].n !== 1) return null;
   for (let i = 1; i < found.length; i++) {
     if (found[i].n !== found[i - 1].n + 1) return null;
   }
-  // Text before "1)" is a lead-in, not an item; this only handles the case
-  // where the paragraph IS the procedure.
-  if (text.slice(0, found[0].start).trim()) return null;
+  const lead = text.slice(0, found[0].start).trim();
 
   const items: string[] = [];
   for (let i = 0; i < found.length; i++) {
     const stop = i + 1 < found.length ? found[i + 1].start : text.length;
-    const item = text.slice(found[i].end, stop).trim().replace(/[.;]$/, "");
+    let item = text.slice(found[i].end, stop).trim();
+    if (i + 1 < found.length) {
+      item = item.replace(/[.;,]+$/, "").trim();
+    }
     if (!item) return null;
     items.push(item);
   }
-  return items;
+  return { lead, items };
 }
 
 /**
@@ -291,7 +298,9 @@ function asNumberedProcedure(text: string): string[] | null {
  * both left alone.
  */
 function tidyTypography(text: string): string {
-  return text.replace(/(\s)--(\s)/g, "$1—$2");
+  return text
+    .replace(/(\s)--(\s)/g, "$1—$2")
+    .replace(/\bCustomary Services\b/g, "Customs Services");
 }
 
 function isHeading(line: string) {
@@ -403,27 +412,46 @@ function parseBlocks(src: string): Block[] {
     // Unordered list
     if (isUnorderedListItem(line)) {
       const items: string[] = [];
-      while (i < lines.length && isUnorderedListItem(lines[i])) {
-        items.push(lines[i].trimStart().replace(/^([-*+]|\u2022)\s+/, ""));
-        i++;
+      while (i < lines.length) {
+        if (isUnorderedListItem(lines[i])) {
+          items.push(lines[i].trimStart().replace(/^([-*+]|\u2022)\s+/, ""));
+          i++;
+        } else if (!lines[i].trim()) {
+          let next = i + 1;
+          while (next < lines.length && !lines[next].trim()) next++;
+          if (next < lines.length && isUnorderedListItem(lines[next])) {
+            i = next;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
       }
       blocks.push({ type: "ul", items });
       continue;
     }
 
-    // Ordered list
+    // Ordered list — supports both tight lists and loose lists with blank lines
     if (isOrderedListItem(line)) {
       const items: string[] = [];
-      while (i < lines.length && isOrderedListItem(lines[i])) {
-        items.push(tidyTypography(lines[i].trimStart()));
-        i++;
+      while (i < lines.length) {
+        if (isOrderedListItem(lines[i])) {
+          items.push(tidyTypography(lines[i].trimStart()));
+          i++;
+        } else if (!lines[i].trim()) {
+          let next = i + 1;
+          while (next < lines.length && !lines[next].trim()) next++;
+          if (next < lines.length && isOrderedListItem(lines[next])) {
+            i = next;
+          } else {
+            break;
+          }
+        } else {
+          break;
+        }
       }
-      // A whole procedure written on one line ("1) … 2) … 3) …") matches the
-      // marker test once and would otherwise become a single several-hundred
-      // character item: numbered on screen, still a wall to read, and worse
-      // than a paragraph because it looks like it was formatted. Expand it,
-      // then strip the leading marker from whatever remains.
-      const expanded = items.flatMap((it) => asNumberedProcedure(it) ?? [it]);
+      const expanded = items.flatMap((it) => asNumberedProcedure(it)?.items ?? [it]);
       blocks.push({
         type: "ol",
         items: expanded.map((it) => it.replace(/^\d+[.)]\s+/, "")),
@@ -464,7 +492,8 @@ function parseBlocks(src: string): Block[] {
       // stays the paragraph it was.
       const procedure = asNumberedProcedure(chunk);
       if (procedure) {
-        blocks.push({ type: "ol", items: procedure });
+        if (procedure.lead) blocks.push({ type: "paragraph", text: procedure.lead });
+        blocks.push({ type: "ol", items: procedure.items });
         continue;
       }
       const enumerated = asEnumeration(chunk);

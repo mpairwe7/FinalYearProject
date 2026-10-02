@@ -1,0 +1,781 @@
+{
+  "meta": {
+    "timestamp": "2026-09-28T21:31:52.767643+00:00",
+    "total_faqs": 2000,
+    "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
+    "duration_seconds": 549.87,
+    "throughput_qps": 3.64
+  },
+  "performance": {
+    "p50_ms": 1599.2,
+    "p90_ms": 47675.6,
+    "p95_ms": 53067.4,
+    "p99_ms": 83445.1,
+    "mean_ms": 17146.3,
+    "min_ms": 305.2,
+    "max_ms": 109117.4
+  },
+  "accuracy": {
+    "overall_accuracy_pct": 93.05,
+    "accurate_count": 1861,
+    "total_count": 2000
+  },
+  "resilience": {
+    "http_200_count": 1914,
+    "http_availability_pct": 95.7,
+    "structured_formatting_pct": 98.65,
+    "emotional_intelligence_pct": 100.0,
+    "zero_false_redactions": true
+  },
+  "retrieval_modes": {
+    "calculator": 233,
+    "escalated": 1,
+    "hybrid": 1210,
+    "faq_priority": 222,
+    "abstained": 8,
+    "education": 206,
+    "conversational": 2,
+    "blocked": 1,
+    "false_premise_rejected": 22,
+    "out_of_jurisdiction": 2,
+    "contact_channels": 5,
+    "workflow": 2,
+    "unknown": 86
+  },
+  "languages": {
+    "en": {
+      "count": 800,
+      "accuracy_pct": 93.88,
+      "figure_fidelity_pct": 64.12,
+      "mean_latency_ms": 13089.0,
+      "p50_latency_ms": 394.1,
+      "status_200_pct": 94.62
+    },
+    "lg": {
+      "count": 600,
+      "accuracy_pct": 91.5,
+      "figure_fidelity_pct": 62.83,
+      "mean_latency_ms": 20657.7,
+      "p50_latency_ms": 7570.1,
+      "status_200_pct": 96.17
+    },
+    "sw": {
+      "count": 600,
+      "accuracy_pct": 93.5,
+      "figure_fidelity_pct": 62.0,
+      "mean_latency_ms": 19044.5,
+      "p50_latency_ms": 4969.9,
+      "status_200_pct": 96.67
+    }
+  },
+  "domains": {
+    "customs": {
+      "count": 450,
+      "accuracy_pct": 85.11,
+      "mean_latency_ms": 27056.2,
+      "p50_latency_ms": 32365.3
+    },
+    "domestic": {
+      "count": 550,
+      "accuracy_pct": 90.91,
+      "mean_latency_ms": 17445.4,
+      "p50_latency_ms": 3421.2
+    },
+    "efris": {
+      "count": 350,
+      "accuracy_pct": 100.0,
+      "mean_latency_ms": 4768.6,
+      "p50_latency_ms": 367.7
+    },
+    "tax_education": {
+      "count": 300,
+      "accuracy_pct": 92.67,
+      "mean_latency_ms": 32994.7,
+      "p50_latency_ms": 36699.0
+    },
+    "transport": {
+      "count": 350,
+      "accuracy_pct": 100.0,
+      "mean_latency_ms": 2728.1,
+      "p50_latency_ms": 353.4
+    }
+  },
+  "gpu_telemetry": {
+    "pre_benchmark": {
+      "gpu_index": 2,
+      "name": "NVIDIA RTX A6000",
+      "memory_total_mb": 49140.0,
+      "memory_used_mb": 15660.0,
+      "memory_free_mb": 33015.0,
+      "utilization_pct": 0.0,
+      "temperature_c": 61.0,
+      "power_draw_w": 84.46
+    },
+    "post_benchmark": {
+      "gpu_index": 2,
+      "name": "NVIDIA RTX A6000",
+      "memory_total_mb": 49140.0,
+      "memory_used_mb": 339.0,
+      "memory_free_mb": 48336.0,
+      "utilization_pct": 100.0,
+      "temperature_c": 60.0,
+      "power_draw_w": 87.54
+    }
+  },
+  "sample_evaluations": [
+    {
+      "faq_id": "FAQ2K-0854",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "en",
+      "query": "What is the environmental levy rate on vehicles older than 8 years?",
+      "status_code": 200,
+      "latency_s": 1.174569956958294,
+      "reply_text": "**The environmental levy on used motor vehicles aged 5 to 8 years is 35%** of the CIF value (FY2026-27) under the East African Community Customs Management Act.\n\n- Statutory Basis: EACCMA / Traffic and Road Safety Act\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "environmental levy",
+        "percent",
+        "environmental",
+        "levy",
+        "rate",
+        "vehicles",
+        "years"
+      ],
+      "missing_kws": [
+        "age"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0846",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "lg",
+      "query": "What is the environmental levy rate on vehicles older than 8 years?",
+      "status_code": 200,
+      "latency_s": 1.7584188506007195,
+      "reply_text": "**Omusolo ku mmotoka ezikozeseddwa okuva ku myaka 5 okutuuka ku 8 guli ebitundu 35%** eby'omuwendo gwa CIF (FY2026-27) wansi w'etteeka ly'obusuubuzi mu mawanga ga Afirika agali mu buvanjuba bwa Afirika.\n\n- Ensibuko y'Amateeka: EACCMA / Etteeka ly'Ebyentambula n'Obukuumi bw'Enguudo\n\nEkyo kiva mu lukalala lwa URA olw'emisolo egya buli mwaka 2026-27.\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.",
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo"
+      ],
+      "missing_kws": [
+        "environmental levy"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1871",
+      "domain": "tax_education",
+      "topic": "delegated_competent_authority",
+      "locale": "sw",
+      "query": "Who are the Authorized Contact Persons for Exchange of Information (EOI) at URA?",
+      "status_code": 200,
+      "latency_s": 6.662614017724991,
+      "reply_text": "**Unastahili jibu la kina juu ya hili**, kwa hiyo nimeandika tikiti kwa ofisa wa URA ili aipitie (tiketi namba 25e727d) \u2014 wakati huo huo, unaweza pia kuwasiliana na URA moja kwa moja kwenye https://ura.go.ug au kupitia Kituo cha Mawasiliano.",
+      "retrieval_mode": "escalated",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "Contact"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1866",
+      "domain": "tax_education",
+      "topic": "debt_collections",
+      "locale": "en",
+      "query": "What is Temporary Closure of Business Premises under Section 42 of the TPCA?",
+      "status_code": 200,
+      "latency_s": 7.041383855044842,
+      "reply_text": "Here's the most relevant guidance I found in official URA sources:\n\nUnder Section 42 TPCA, where a taxpayer fails to pay tax or file returns after receiving notice:\n\n1. An authorized URA officer, accompanied by Uganda Police officers, may enter the taxpayer's business premises and affix official revenue seals or padlocks;\n\n2. The premises remain closed for up to fourteen (14) days;\n\n3. Obstructing an officer or breaking URA seals constitutes a criminal offence punishable by heavy fines or imprisonment;\n\n4. Premises are de-sealed only upon full payment of the tax debt or execution of an approved instalment payment agreement.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "Section",
+        "TPCA",
+        "taxpayer",
+        "business",
+        "premises",
+        "under",
+        "section",
+        "tpca"
+      ],
+      "missing_kws": [
+        "Temporary",
+        "Closure"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1867",
+      "domain": "tax_education",
+      "topic": "debt_collections",
+      "locale": "lg",
+      "query": "How does URA apply Departure Prohibition Orders (DPO) under Section 45 of the TPCA?",
+      "status_code": 200,
+      "latency_s": 7.65645619481802,
+      "reply_text": "**Okusinziira ku Kawaayiro 45 ak'etteeka erifuga emisolo mu Uganda**, Omukulu w'ekitongole ky'emisolo asobola okuwa ekiragiro ekiyitibwa **Departure Prohibition Order (DPO)** ekiziyiza omuntu aba alemereddwa okusasula omusolo okuva mu Uganda ng'ayita ku kisaawe ky'ennyonyi Entebbe oba ku nsalo okutuusa ng'omusolo gusasuddwa.\n\nEkyo kiva mu kitabo kya URA eky'emiwendo gy'emisolo egya buli mwaka.\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.",
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo",
+        "URA"
+      ],
+      "missing_kws": [
+        "TPCA"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0858",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "lg",
+      "query": "Can I register the motor vehicle in my company name using its corporate TIN?",
+      "status_code": 200,
+      "latency_s": 1.9066245555877686,
+      "reply_text": "Okwewandiisa ng'ekitongole (kampuni, ekibiina ky'obwannakyewa, omukago) okufuna nnamba ya TIN:\n\n1. Genda ku ura.go.ug\n2. Londa engeri eya bulijjo ey'okuwandiisa TIN etali ya muntu kinnoomu\n3. Jjuza ebikwata ku kitongole\n4. Teeka ebiwandiiko ebiraga nti kyetongodde oba nti kiwandiisiddwa\n5. Waayo nnamba za TIN ez'abakulira ekitongole\n6. Waayo okusaba kw'okwekenneenya kwa URA\n\nWeetegereze: Okuwandiisa TIN okw'amangu kukozesebwa bantu ssekinnoomu abalina NIN[1]\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "corporate tin",
+        "company",
+        "registration"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1869",
+      "domain": "tax_education",
+      "topic": "delegated_competent_authority",
+      "locale": "en",
+      "query": "What is the Delegated Competent Authority section on the URA portal?",
+      "status_code": 200,
+      "latency_s": 8.99413712322712,
+      "reply_text": "**Official Guidance**:\n\nHere's the most relevant guidance I found in official URA sources:\n\nHosted at https://ura.go.ug/en/category/legal-policy/delegated-competent-authority/ and https://ura.go.ug/en/delegated-competent-authorities/ (published August 30, 2023 by Charles Male), this section provides the official designated directory of authorized officials in Uganda empowered to execute international tax treaties, handle Exchange of Information (EOI), and conduct Mutual Agreement Procedures (MAP).",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "Delegated",
+        "Competent",
+        "Hosted",
+        "https",
+        "category",
+        "delegated",
+        "competent",
+        "authority",
+        "section"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1860",
+      "domain": "tax_education",
+      "topic": "customs_systems",
+      "locale": "en",
+      "query": "What is the Bonded Warehouse Information Management System (BWIMS)?",
+      "status_code": 200,
+      "latency_s": 9.782848745584488,
+      "reply_text": "The Bonded Warehouse Information Management System (BWIMS) is a digital inventory tracking and management system designed under the Domestic [1] Revenue Mobilization Strategy (DRMS) to monitor goods in all licensed private and public customs bonded warehouses. It tracks cargo in real-time from receipt under the IM7 regime to storage, internal movement, and final release under IM4 (home consumption) or re-export.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What is the maximum period goods can remain in a customs bonded warehouse?",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "Bonded",
+        "Warehouse",
+        "what",
+        "bonded",
+        "warehouse",
+        "information",
+        "management",
+        "system",
+        "bwims"
+      ],
+      "missing_kws": [
+        "Published",
+        "June",
+        "Sandra"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0850",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "sw",
+      "query": "Can I register the motor vehicle in my company name using its corporate TIN?",
+      "status_code": 200,
+      "latency_s": 12.608847878873348,
+      "reply_text": "Kusajili **shirika** (kampuni, shirika lisilo la kiserikali, ushirika) kwa ajili ya TIN:\n\n1. Nenda kwenye ura.go.ug\n2. Chagua chaguo la kawaida la usajili wa **TIN isiyo ya mtu binafsi**\n3. Jaza maelezo ya shirika\n4. Weka nyaraka za usajili\n5. Andaa TIN za wakurugenzi\n6. Wasilisha maombi ya uchunguzi wa URA\n\nMuhimu: TIN ya papo hapo inapatikana tu kwa watu binafsi wenye NIN.\n\nIkiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000.",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "corporate tin",
+        "company",
+        "registration"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-0851",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "en",
+      "query": "How do I renew or revalidate my motor vehicle registration logbook online?",
+      "status_code": 200,
+      "latency_s": 13.966384828090668,
+      "reply_text": "To renew or re validate your motor vehicle registration logbook online, follow these steps:\n\n1. **Access the Portal**: Visit [portal.ura.go.ug](http://portal.ura.go.ug) and log in with your TIN and password.\n2. **Select Service**: Choose \"Motor Vehicle Registration\" from the menu.\n3. **Add Vehicle Details**: Fill in the required fields and submit.\n4. **Print Acknowledgement**: Print the e-acknowledgement form.\n5. **Wait for Approval**: Receive an approval notice via email or the portal.\n6. **Obtain New Logbook**: Once approved, print or collect your new logbook. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "portal",
+        "logbook",
+        "ura.go.ug",
+        "renew",
+        "motor",
+        "vehicle",
+        "registration",
+        "logbook",
+        "online"
+      ],
+      "missing_kws": [
+        "revalidation"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0845",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "en",
+      "query": "How are import taxes calculated on a used motor vehicle imported from Japan?",
+      "status_code": 200,
+      "latency_s": 14.747913837432861,
+      "reply_text": "To calculate import taxes on a used motor vehicle imported from Japan:\n\n1. **Determine the Customs Value (CIF)**: This is the declared value of the vehicle at the port of entry into Uganda, including freight costs and insurance. If you don't have the exact CIF, you can use the URA Used Motor Vehicle Valuation Database to find a similar vehicle's CIF based on make, model, engine capacity, and condition.\n\n2. **Import Duty**: 25% of the CIF.\n\n3. **VAT (Value Added Tax)**: 18% of (CIF + Import Duty).\n\n4. ** [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.8,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "customs value",
+        "import duty",
+        "vat",
+        "import",
+        "taxes",
+        "calculated",
+        "used",
+        "motor",
+        "vehicle",
+        "imported",
+        "japan"
+      ],
+      "missing_kws": [
+        "withholding",
+        "environmental levy"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0848",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "en",
+      "query": "What documents must I present to clear my vehicle at the border post?",
+      "status_code": 200,
+      "latency_s": 16.96220215409994,
+      "reply_text": "The standard **VAT** rate in Uganda is 18%. This applies to most goods and services, including imports. However, certain items are exempt from **VAT**, such as fresh agricultural products, medical supplies, education materials, and religious articles.\n\n---\n*Note: This response may not be fully supported by the retrieved documents. Please verify with official URA sources at https://ura.go.ug.* [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What documents must the winner present to claim auctioned items?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "what",
+        "documents",
+        "present"
+      ],
+      "missing_kws": [
+        "bill of lading",
+        "export certificate",
+        "invoice",
+        "inspection"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0861",
+      "domain": "customs",
+      "topic": "customs_offences",
+      "locale": "lg",
+      "query": "Ni makosa gani ya forodha yanayotozwa faini?",
+      "status_code": 200,
+      "latency_s": 7.182222791016102,
+      "reply_text": "Omugatte gw'omusolo ogw'ebweru ku bintu ebikoleddwa guli ebitundu 25% (FY2026-27). Omusolo omutuufu gukwatagana n'ekika ky'omusolo ekya EAC ku bintu ebyo.\n\n- Etteeka erifuga: Etteeka ly'Obukulembeze bw'Ekitundu kya Afirika ekya East African Community Customs Management Act (EACCMA)\n\nOmusolo ogwo guva mu tteeka lya URA erya FY2026-27.\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.",
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1876",
+      "domain": "tax_education",
+      "topic": "double_taxation_agreements",
+      "locale": "lg",
+      "query": "What are the key terms and rates of the India - Uganda Income Tax Treaty (2004)?",
+      "status_code": 200,
+      "latency_s": 6.675884388387203,
+      "reply_text": "Sirina mmeeza ya URA etongole eya 2004. Emmeeza esembyeyo gye nsobola okukakasa y'eya FY2026-27, okutuuka mu 30 Ogwomukaaga 2027. Emisolo giyinza okukyuka, n'olwekyo sisobola kukozesa misolo egiriwo kuteebereza. Bambi kebera amateeka agaafulumizibwa oluvannyuma oba obulagirizi bwa URA nga weebuli.",
+      "retrieval_mode": "abstained",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1878",
+      "domain": "tax_education",
+      "topic": "double_taxation_agreements",
+      "locale": "en",
+      "query": "What are the key terms and rates of the Mauritius - Uganda Income Tax Treaty (2003)?",
+      "status_code": 200,
+      "latency_s": 0.35012737661600113,
+      "reply_text": "I do not have an official URA rate table for 2003. The latest table I can confirm is FY2026-27, through 30 June 2027. Tax rates can change, so I should not use the current rate as a prediction. Please check the later gazetted law or URA guidance when it is available.",
+      "retrieval_mode": "abstained",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "rates"
+      ],
+      "missing_kws": [
+        "key",
+        "terms",
+        "Concluded",
+        "September",
+        "entered"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0855",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "lg",
+      "query": "Is there a ban on importing motor vehicles older than 15 years into Uganda?",
+      "status_code": 200,
+      "latency_s": 21.412079080939293,
+      "reply_text": "**Yee**: waliwo okuwera ku kuyingiza mu Uganda emmotoka ezisussa emyaka 15 egy'obukulu. Okusinziira ku mateeka, emmotoka ezisussa emyaka 15 tezikkirizibwa kuyingizibwa mu ggwanga, okuggyako ezo ezitambuza ebintu nga ziri n'obuzito obusukka tani ennya. [1]\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.\n\nOyinz'okwagala okumanya: Bintu ki ebirina okukolebwa ku mmere etwalibwa mu Uganda?",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "15 years"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-0847",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "sw",
+      "query": "Is there a ban on importing motor vehicles older than 15 years into Uganda?",
+      "status_code": 200,
+      "latency_s": 21.496204286813736,
+      "reply_text": "**Ndio**: kuna marufuku ya kuagiza magari ya zamani zaidi ya miaka 15 nchini Uganda. Kizuizi hiki kinatumika kwa sababu za usalama wa taifa na usalama wa umma. [1]\n\nIkiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000.\n\nUnaweza pia kutaka kujua: Muda wa kuhifadhiwa unategemea na bidhaa za chakula zinazouzwa nchini Uganda.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "15 years"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1863",
+      "domain": "tax_education",
+      "topic": "debt_collections",
+      "locale": "en",
+      "query": "What statutory enforcement powers does URA use to recover tax arrears under the Tax Procedures Code Act 2014?",
+      "status_code": 200,
+      "latency_s": 22.625037863850594,
+      "reply_text": "Under the Tax Procedures Code Act 2014, the Uganda Revenue Authority (URA) uses several statutory enforcement powers to recover tax arrears, including:\n\n1. **Demand Notice**: Requires payment within 14 days.  \n2. **Distress Proceedings**: Authorizes court bailiffs to seize and sell goods, chattels, and movable property.  \n3. **Temporary Closure of Business Premises**: Permits closure for up to 14 days until tax liabilities are settled.  \n4. **Agency Notices (Garnishee Orders)**: Directs commercial banks, employers, or debtors to freeze and remit funds held for the taxpayer to URA.  \n5. **Charge over Immovable Property**: Places official caveats on land titles.  \n6. **Departure Prohibition Orders (DPO)**: Bars defaulting taxpayers from traveling abroad. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "retrieval_mode": "hybrid",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "statutory",
+        "enforcement",
+        "Procedures",
+        "statutory",
+        "enforcement",
+        "powers",
+        "recover",
+        "arrears",
+        "under",
+        "procedures",
+        "code"
+      ],
+      "missing_kws": [
+        "Part",
+        "VIII"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1864",
+      "domain": "tax_education",
+      "topic": "debt_collections",
+      "locale": "lg",
+      "query": "How does an Agency Notice (Garnishee Order) work under Section 43 of the TPCA?",
+      "status_code": 200,
+      "latency_s": 24.21169725060463,
+      "reply_text": "I'm sorry you're going through this \u2014 let's look at what options you have.\n\n**Okusinziira ku Kawaayiro 40 ak'etteeka erikwata ku misolo**, Omukulu w'Ekitongole ky'Eby'emisolo asobola okuwa omuntu yenna oba bbanka yonna ekiragiro eky'okusasula emisolo gya URA nga bayita mu kifo kyabwe. \n\nKino kiva mu tteeka lya URA erya FY2026-27 rate table.\n\nBw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000.",
+      "retrieval_mode": "calculator",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": true,
+      "figure_fidelity": false,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo"
+      ],
+      "missing_kws": [
+        "TPCA"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1877",
+      "domain": "tax_education",
+      "topic": "double_taxation_agreements",
+      "locale": "sw",
+      "query": "What are the key terms and rates of the South Africa - Uganda Income Tax Treaty (1997)?",
+      "status_code": 200,
+      "latency_s": 7.945193357765675,
+      "reply_text": "Sina jedwali rasmi la kiwango cha ushuru wa URA kwa 1997+. Jedwali la hivi karibuni ninaloweza kuthibitisha ni kipindi cha mwaka wa fedha 2026-27, hadi Juni 30 2027. Kiwango cha ushuru kinaweza kubadilika, kwa hiyo siwezi kutumia kiwango cha sasa kama utabiri. Tafadhali angalia sheria iliyotangazwa baadaye au mwongozo wa URA unapopatikana.",
+      "retrieval_mode": "abstained",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1881",
+      "domain": "tax_education",
+      "topic": "double_taxation_agreements",
+      "locale": "en",
+      "query": "What are the key terms and rates of the Norway - Uganda Income Tax Treaty (1999)?",
+      "status_code": 200,
+      "latency_s": 0.34404051303863525,
+      "reply_text": "I do not have an official URA rate table for 1999. The latest table I can confirm is FY2026-27, through 30 June 2027. Tax rates can change, so I should not use the current rate as a prediction. Please check the later gazetted law or URA guidance when it is available.",
+      "retrieval_mode": "abstained",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "rates"
+      ],
+      "missing_kws": [
+        "key",
+        "terms",
+        "Concluded",
+        "September",
+        "entered"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-0856",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "sw",
+      "query": "What documents must I present to clear my vehicle at the border post?",
+      "status_code": 200,
+      "latency_s": 26.41261626780033,
+      "reply_text": "Kiwango cha kodi ya ongezeko la thamani (**VAT**) nchini Tanzania ni asilimia 18 kwa bidhaa zinazouzwa ndani ya nchi na asilimia 0 kwa huduma za utalii. Hata hivyo, **VAT** haipaswi kutolewa kwa bidhaa zinazotumiwa katika uzalishaji wa bidhaa au huduma zinazohusiana na biashara ya kimataifa. Kwa habari zaidi, tafadhali tembelea tovuti ya TRA au wasiliana na mtoa huduma wako wa ushuru.\n\n---\n*Tahadhari: Jibu hili huenda halijaungwa mkono kikamilifu na nyaraka zilizotumika. Tafadhali thibitisha na vyanzo rasmi vya URA kwenye https://ura.go.ug.* [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What documents must the winner present to claim auctioned items?",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 0.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "kodi"
+      ],
+      "missing_kws": [
+        "bill of lading",
+        "export certificate",
+        "invoice"
+      ]
+    },
+    {
+      "faq_id": "FAQ2K-1879",
+      "domain": "tax_education",
+      "topic": "double_taxation_agreements",
+      "locale": "lg",
+      "query": "What are the key terms and rates of the Denmark - Uganda Income Tax Treaty (2000)?",
+      "status_code": 200,
+      "latency_s": 6.193692371249199,
+      "reply_text": "Sirina mmeeza ya URA etongole eya 2000. Emmeeza esembyeyo gye nsobola okukakasa y'eya FY2026-27, okutuuka mu 30 Ogwomukaaga 2027. Emisolo giyinza okukyuka, n'olwekyo sisobola kukozesa misolo egiriwo kuteebereza. Bambi kebera amateeka agaafulumizibwa oluvannyuma oba obulagirizi bwa URA nga weebuli.",
+      "retrieval_mode": "abstained",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker",
+        "omusolo"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-0857",
+      "domain": "customs",
+      "topic": "used_motor_vehicle_importation",
+      "locale": "en",
+      "query": "How is the number plate and motor vehicle registration fee paid in Uganda?",
+      "status_code": 200,
+      "latency_s": 30.128706887364388,
+      "reply_text": "Here's the most relevant guidance I found in official URA sources:\n\nTo pay motor vehicle registration fees and number plate fees in Uganda:\n\n1. Generate a Payment Registration Number (PRN) on the URA web portal (ura.go.ug) under e-Services > Motor Vehicle Registration;\n\n2. Take the PRN to any commercial bank or pay via mobile money / bank agent;\n\n3. Once payment reflects, present the receipt and vehicle for inspection at URA Nakawa to receive the registration plates.",
+      "retrieval_mode": "faq_priority",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": 1.0,
+      "is_accurate": true,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "registration fee",
+        "prn",
+        "number plate",
+        "ura",
+        "number",
+        "plate",
+        "motor",
+        "vehicle",
+        "registration",
+        "uganda"
+      ],
+      "missing_kws": []
+    },
+    {
+      "faq_id": "FAQ2K-1880",
+      "domain": "tax_education",
+      "topic": "double_taxation_agreements",
+      "locale": "sw",
+      "query": "What are the key terms and rates of the Netherlands - Uganda Income Tax Treaty (2004)?",
+      "status_code": 200,
+      "latency_s": 9.062513284385204,
+      "reply_text": "Sina jedwali rasmi la kiwango cha ushuru wa URA kwa 2004+. Jedwali la hivi karibuni ninaloweza kuthibitisha ni kipindi cha mwaka wa fedha 2026-27, hadi Juni 30 2027. Kiwango cha ushuru kinaweza kubadilika, kwa hiyo siwezi kutumia kiwango cha sasa kama utabiri. Tafadhali angalia sheria iliyotangazwa baadaye au mwongozo wa URA unapopatikana.",
+      "retrieval_mode": "abstained",
+      "model": "Sunbird/Sunflower-14B-FP8",
+      "faithfulness_score": null,
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "formatting_ok": true,
+      "eq_ok": true,
+      "matched_kws": [
+        "domain_marker"
+      ],
+      "missing_kws": []
+    }
+  ]
+}

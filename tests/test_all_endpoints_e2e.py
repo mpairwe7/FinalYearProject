@@ -87,6 +87,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/chat"),
     ("POST", "/v1/chat/stream"),
     ("POST", "/v1/escalate"),
+    ("GET", "/v1/escalate/{ticket_id}"),
+    ("POST", "/v1/escalate/{ticket_id}/reply"),
     # --- Classification + knowledge (public) ---
     ("POST", "/classify"),
     ("POST", "/classify/batch"),
@@ -95,6 +97,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Speech / voice ---
     ("POST", "/v1/asr"),
     ("POST", "/v1/tts"),
+    ("POST", "/v1/tts/stream"),
     ("POST", "/v1/translate"),
     ("GET", "/v1/speech/health"),
     ("GET", "/v1/speech/voices"),
@@ -108,6 +111,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/analytics/event"),
     ("GET", "/v1/analytics/dashboard"),
     ("GET", "/v1/analytics/comparison"),
+    ("GET", "/v1/analytics/journeys"),
     # --- Admin: tickets / audit / authority ---
     ("GET", "/v1/authority/status"),
     ("GET", "/v1/admin/tickets"),
@@ -124,6 +128,9 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("PUT", "/v1/admin/overrides"),
     ("DELETE", "/v1/admin/overrides/{override_id}"),
     ("GET", "/v1/admin/outbox"),
+    ("GET", "/v1/admin/audit/events"),
+    ("GET", "/v1/admin/audit/verify"),
+    ("POST", "/v1/admin/audit/seal"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -142,7 +149,9 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     # --- Document attachments ---
     ("POST", "/v1/documents/analyze"),
     ("GET", "/v1/documents/{document_id}/report"),
+    ("GET", "/v1/documents/{document_id}/status"),
     # --- Identity / consent (/v1/me) ---
+    ("POST", "/v1/auth/dev-token"),
     ("GET", "/v1/me"),
     ("DELETE", "/v1/me"),
     ("GET", "/v1/me/reminders"),
@@ -159,10 +168,34 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/offline/status"),
     ("POST", "/v1/offline/sync"),
     ("GET", "/v1/offline/bundle"),
+    # --- System connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments, External) ---
+    ("GET", "/v1/connectors"),
+    ("POST", "/v1/connectors/{name}/toggle"),
+    ("GET", "/v1/connectors/{name}/records"),
+    ("POST", "/v1/connectors/register"),
+    # --- Receptionist (simulated phone calls) ---
+    ("GET", "/v1/admin/calls"),
+    ("GET", "/v1/admin/calls/metrics"),
+    ("GET", "/v1/admin/calls/{call_id}"),
+    ("POST", "/v1/admin/calls/{call_id}/review"),
+    ("GET", "/v1/admin/calls/{call_id}/brief"),
+    ("POST", "/v1/admin/calls/{call_id}/claim"),
+    ("POST", "/v1/admin/calls/{call_id}/release"),
+    ("POST", "/v1/admin/calls/{call_id}/end"),
+    ("POST", "/v1/admin/calls/{call_id}/hold"),
+    ("POST", "/v1/admin/calls/{call_id}/transfer"),
+    ("POST", "/v1/admin/calls/{call_id}/wrapup"),
+    ("POST", "/v1/admin/calls/{call_id}/callback-done"),
+    ("GET", "/v1/admin/calls/{call_id}/caller-history"),
+    ("PUT", "/v1/admin/officers/me/presence"),
+    ("GET", "/v1/admin/officers/presence"),
     # --- WebSocket ---
     ("WS", "/v1/voice/chat/stream"),
     ("WS", "/v2/chat/stream"),
     ("WS", "/v2/voice/chat/stream"),
+    ("WS", "/v1/calls/stream"),
+    ("WS", "/v1/admin/calls/stream"),
+    ("WS", "/v1/admin/calls/{call_id}/audio"),
 }
 
 # Where each endpoint is exercised end-to-end over HTTP/WS. Keys MUST equal
@@ -174,6 +207,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/index/freshness"): "this:test_index_freshness",
     ("POST", "/v1/chat"): "this:test_chat_happy_path + test_api_endpoints.ChatEndpoints",
     ("POST", "/v1/escalate"): "this:test_answer_integrity_integration + App/backend/tests/test_taxpayer_escalation.py",
+    ("GET", "/v1/escalate/{ticket_id}"): "App/backend/tests/test_taxpayer_escalation.py",
+    ("POST", "/v1/escalate/{ticket_id}/reply"): "App/backend/tests/test_taxpayer_escalation.py",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/classify/batch"): "test_api_endpoints.ClassificationKnowledge",
@@ -181,6 +216,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/faq/{tag}"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/v1/asr"): "this:test_asr_transcribes_audio",
     ("POST", "/v1/tts"): "this:test_tts_synthesizes_audio",
+    ("POST", "/v1/tts/stream"): "this:test_tts_stream_sends_pieces_in_order",
     ("POST", "/v1/translate"): "this:test_translate_passthrough + test_translate_en_to_lg",
     ("GET", "/v1/speech/health"): "test_api_endpoints.SpeechEndpoints",
     ("GET", "/v1/speech/voices"): "this:test_speech_voices_catalogue",
@@ -192,6 +228,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/analytics/event"): "test_api_endpoints.AnalyticsEndpoints",
     ("GET", "/v1/analytics/dashboard"): "test_api_endpoints.AnalyticsEndpoints",
     ("GET", "/v1/analytics/comparison"): "test_api_endpoints.AnalyticsEndpoints",
+    ("GET", "/v1/analytics/journeys"): "test_guided_journeys_integration:test_journey_funnel_endpoint",
     ("GET", "/v1/authority/status"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/tickets"): "test_api_endpoints.AdminEndpoints",
     ("GET", "/v1/admin/tickets/stats"): "test_api_endpoints.AdminEndpoints",
@@ -216,6 +253,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/export/tax-summary"): "this:test_export_tax_summary_pdf",
     ("POST", "/v1/documents/analyze"): "test_documents.DocumentEndpointsTest",
     ("GET", "/v1/documents/{document_id}/report"): "test_documents.DocumentEndpointsTest",
+    ("GET", "/v1/documents/{document_id}/status"): "test_documents.DocumentEndpointsTest",
+    ("POST", "/v1/auth/dev-token"): "this:test_auth_dev_token",
     ("GET", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("DELETE", "/v1/me"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("GET", "/v1/me/reminders"): "tests.agents.test_reminders",
@@ -225,6 +264,9 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("PUT", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
     ("DELETE", "/v1/admin/overrides/{override_id}"): "App.backend.tests.test_remaining_gaps",
     ("GET", "/v1/admin/outbox"): "App.backend.tests.test_remaining_gaps",
+    ("GET", "/v1/admin/audit/events"): "test_auditor_controls:test_auditor_reads_the_trail_and_filters_it",
+    ("GET", "/v1/admin/audit/verify"): "test_auditor_controls:test_verify_detects_a_tampered_row",
+    ("POST", "/v1/admin/audit/seal"): "test_auditor_controls:test_sealing_is_for_audit_readers_and_catches_a_rewrite",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("PUT", "/v1/me/profile"): "test_me_endpoints",
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -235,9 +277,31 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/offline/status"): "this:test_offline_status_flag_on",
     ("POST", "/v1/offline/sync"): "test_api_endpoints.OfflineModelEndpoints",
     ("GET", "/v1/offline/bundle"): "test_api_endpoints.OfflineModelEndpoints",
+    ("GET", "/v1/connectors"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/toggle"): "this:test_connectors_endpoints",
+    ("GET", "/v1/connectors/{name}/records"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/register"): "this:test_connectors_endpoints",
+    ("GET", "/v1/admin/calls"): "App.backend.tests.test_receptionist_ws",
+    ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
+    ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
+    ("POST", "/v1/admin/calls/{call_id}/review"): "App.backend.tests.test_receptionist_ws",
+    ("GET", "/v1/admin/calls/{call_id}/brief"): "App.backend.tests.test_receptionist_brief",
+    ("POST", "/v1/admin/calls/{call_id}/claim"): "App.backend.tests.test_receptionist_claims",
+    ("POST", "/v1/admin/calls/{call_id}/release"): "App.backend.tests.test_receptionist_claims",
+    ("POST", "/v1/admin/calls/{call_id}/end"): "App.backend.tests.test_receptionist_claims",
+    ("POST", "/v1/admin/calls/{call_id}/hold"): "App.backend.tests.test_receptionist_officer_actions",
+    ("POST", "/v1/admin/calls/{call_id}/transfer"): "App.backend.tests.test_receptionist_officer_actions",
+    ("POST", "/v1/admin/calls/{call_id}/wrapup"): "App.backend.tests.test_receptionist_officer_actions",
+    ("POST", "/v1/admin/calls/{call_id}/callback-done"): "App.backend.tests.test_receptionist_officer_actions",
+    ("GET", "/v1/admin/calls/{call_id}/caller-history"): "App.backend.tests.test_receptionist_history",
+    ("PUT", "/v1/admin/officers/me/presence"): "App.backend.tests.test_receptionist_presence",
+    ("GET", "/v1/admin/officers/presence"): "App.backend.tests.test_receptionist_presence",
     ("WS", "/v1/voice/chat/stream"): "test_voice_ws_hardening",
     ("WS", "/v2/chat/stream"): "test_chat_ws_lifecycle",
     ("WS", "/v2/voice/chat/stream"): "test_native_voice",
+    ("WS", "/v1/calls/stream"): "App.backend.tests.test_receptionist_ws",
+    ("WS", "/v1/admin/calls/stream"): "App.backend.tests.test_receptionist_ws",
+    ("WS", "/v1/admin/calls/{call_id}/audio"): "App.backend.tests.test_receptionist_ws",
 }
 
 
@@ -366,11 +430,11 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (66 HTTP + 4 WS)."""
+    """Lock the surface size so additions are deliberate (94 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 66, f"expected 66 HTTP endpoints, found {len(http)}"
-    assert len(ws) == 4, f"expected 4 WS endpoints, found {len(ws)}"
+    assert len(http) == 94, f"expected 94 HTTP endpoints, found {len(http)}"
+    assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
 # ---------------------------------------------------------------------------
@@ -488,7 +552,27 @@ def test_asr_transcribes_audio():
     assert body["backend"] == "stub-asr"
 
 
-def test_tts_synthesizes_audio():
+def test_asr_repairs_tax_terms_when_the_chat_dictates():
+    """The composer's dictation (domain=tax) gets the voice chat's TIN/URA repair."""
+    c = _client(speech=True)
+    c.app.state.speech.transcribe.return_value = TranscribeResult(
+        text="namba ya timu kutoka mu era", backend="stub-asr"
+    )
+    plain = c.post("/v1/asr?sample_rate=16000&language=sw", content=_AUDIO)
+    repaired = c.post("/v1/asr?sample_rate=16000&language=sw&domain=tax", content=_AUDIO)
+    assert plain.json()["text"] == "namba ya timu kutoka mu era"
+    assert repaired.json()["text"] == "namba ya TIN kutoka mu URA"
+
+
+def test_asr_takes_a_declared_raw_format_as_wav():
+    """encoding=pcm_f32le: the recogniser gets WAV, not bytes to guess about."""
+    c = _client(speech=True)
+    r = c.post("/v1/asr?sample_rate=16000&language=en&encoding=pcm_f32le", content=b"\x00\x00\x00\x00" * 16)
+    assert r.status_code == 200
+    assert c.app.state.speech.transcribe.call_args.args[0][:4] == b"RIFF"
+    assert c.post("/v1/asr?sample_rate=16000&encoding=mulaw", content=_AUDIO).status_code == 400
+
+
     c = _client(speech=True)
     r = c.post("/v1/tts", json={"text": "the vat rate is eighteen percent"})
     assert r.status_code == 200
@@ -496,6 +580,64 @@ def test_tts_synthesizes_audio():
     assert body["audio_base64"] == base64.b64encode(b"RIFFstub-wav-bytes").decode("ascii")
     assert body["backend"] == "stub-tts"
     assert body["sample_rate"] == 22050
+
+
+def test_speech_work_does_not_hold_up_the_rest_of_the_api():
+    """G96: synthesis ran on the event loop, so /health waited for it (5.8 s on the GPU stack)."""
+    import asyncio
+    import time as _time
+
+    import httpx
+
+    c = _client(speech=True)
+
+    def slow_synthesize(**_kw):
+        _time.sleep(0.6)
+        return SynthesizeResult(audio=b"RIFFstub-wav-bytes", sample_rate=22050, num_samples=0,
+                                duration_s=1.0, latency_s=0.6, backend="stub-tts", voice="v")
+
+    c.app.state.speech.synthesize.side_effect = slow_synthesize
+
+    async def health_while_synthesising() -> tuple[int, float]:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://api") as client:
+            started = _time.perf_counter()
+            tts = asyncio.create_task(client.post("/v1/tts", json={"text": "slow", "language": "en"}))
+            await asyncio.sleep(0.1)  # the synthesis is under way
+            health = await client.get("/health")
+            answered = _time.perf_counter() - started
+            assert (await tts).status_code == 200
+            return health.status_code, answered
+
+    status, answered = asyncio.run(health_while_synthesising())
+    assert status == 200
+    # Blocked, /health could not even be sent until the 0.6 s synthesis ended.
+    assert answered < 0.45, f"/health answered {answered:.2f}s in, behind a synthesis"
+
+
+def test_tts_stream_sends_pieces_in_order():
+    """Streamed speech: one NDJSON line per piece, in speaking order, then a done line."""
+    import json as _json
+
+    c = _client(speech=True)
+    speech = c.app.state.speech
+    voiced = SynthesizeResult(audio=b"RIFFstub-wav-bytes", sample_rate=22050, num_samples=0,
+                              duration_s=1.0, latency_s=0.1, backend="stub-tts", voice="v")
+    failed = SynthesizeResult(audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
+                              latency_s=0.0, backend="stub-tts", voice="v", error="voice down")
+    speech.synthesize.side_effect = lambda text, **_kw: failed if "Third" in text else voiced
+    text = "First, a short opening. " + "Second sentence that runs on for a while about VAT. " * 3 + "Third one fails."
+    r = c.post("/v1/tts/stream", json={"text": text, "language": "en", "format": "wav"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    lines = [_json.loads(line) for line in r.text.splitlines()]
+    pieces, done = lines[:-1], lines[-1]
+    assert [p["seq"] for p in pieces] == list(range(len(pieces)))
+    assert len(pieces) >= 3
+    assert len(pieces[0]["text"]) <= 60  # a short first piece
+    assert pieces[0]["audio_base64"] == base64.b64encode(b"RIFFstub-wav-bytes").decode("ascii")
+    assert pieces[-1]["error"] == "voice down"
+    assert "audio_base64" not in pieces[-1]
+    assert done == {"done": True, "pieces": len(pieces), "failed": 1}
 
 
 def test_voice_chat_asr_branch():
@@ -634,6 +776,54 @@ def test_export_tax_summary_pdf():
     assert r.status_code == 200
     assert r.headers["content-type"] == "application/pdf"
     assert r.content.startswith(b"%PDF")
+
+
+def test_auth_dev_token():
+    """POST /v1/auth/dev-token mints a valid JWT for non-production access without python CLI."""
+    r = _client().post("/v1/auth/dev-token", json={"role": "ura_staff", "email": "officer@ura.go.ug"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["authenticated"] is True
+    assert body["role"] == "ura_staff"
+    assert body["email"] == "officer@ura.go.ug"
+    assert "token" in body and body["token"].startswith("eyJ")
+
+
+def test_connectors_endpoints():
+    """Verify GET /v1/connectors, POST /v1/connectors/{name}/toggle, GET /v1/connectors/{name}/records."""
+    c = _client()
+    r1 = c.get("/v1/connectors")
+    assert r1.status_code == 200
+    data = r1.json()
+    assert data["ok"] is True
+    assert len(data["connectors"]) >= 2
+
+    # Toggle connector
+    r2 = c.post("/v1/connectors/efris/toggle", json={"enable": True})
+    assert r2.status_code == 200
+    assert r2.json()["ok"] is True
+
+    # Inspect records from independent database
+    r3 = c.get("/v1/connectors/efris/records?limit=3")
+    assert r3.status_code == 200
+    assert r3.json()["ok"] is True
+    assert "invoices" in r3.json()
+
+    # Register external API/MCP connector
+    r4 = c.post(
+        "/v1/connectors/register",
+        json={
+            "name": "stripe_payments",
+            "endpoint_url": "http://127.0.0.1:8200",
+            "api_key": "sec_test_stripe_token",  # pragma: allowlist secret
+            "system_type": "external_payment",
+            "display_name": "Stripe Gateway",
+            "description": "External payment processor",
+        },
+    )
+    assert r4.status_code == 200
+    assert r4.json()["ok"] is True
+    assert r4.json()["status"] == "connected"
 
 
 if __name__ == "__main__":

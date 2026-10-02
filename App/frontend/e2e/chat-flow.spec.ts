@@ -46,6 +46,20 @@ test.describe("Agentic chat flow", () => {
     });
   });
 
+  test("falls back to the regular chat endpoint when the SSE connection breaks", async ({ page }) => {
+    const faqReply = "URA provides domestic tax, customs, taxpayer registration, and online services.";
+    await mockBackend(page, { reply: faqReply });
+    // Added after mockBackend so this request deliberately fails while the
+    // normal /v1/chat response remains available for recovery.
+    await page.route("**/api/v1/chat/stream", (route) => route.abort("failed"));
+    await page.goto("/");
+    await sendMessage(page, "What services does URA provide?");
+
+    const reply = page.locator(".message-row-assistant").last();
+    await expect(reply).toContainText(faqReply, { timeout: 15_000 });
+    await expect(reply).not.toContainText("could not reach the URA knowledge base");
+  });
+
   test("a starter prompt seeds the conversation", async ({ page }) => {
     await mockBackend(page);
     await page.goto("/");

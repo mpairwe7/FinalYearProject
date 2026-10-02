@@ -442,15 +442,24 @@ class MCPClient:
             # Already retried with responses; do not loop.
             raw = required
         raw.setdefault("policy", policy)
+        # An elicitation is not a finished calculation, so it is not checked
+        # against the tool's output schema.
+        drift: list[str] = []
+        if raw.get("resultType") != "input_required":
+            drift = result_matches_schema(descriptor.get("outputSchema"), raw)
+        if drift:
+            logger.warning("MCP result for %s does not match its outputSchema: %s", name, drift[:3])
+            raw = {
+                "ok": False,
+                "error": "tool result did not match its output schema",
+                "validation_errors": drift[:8],
+                "policy": policy,
+            }
         ok = bool(raw.get("ok", True))
         if ok:
             breaker.record_success()
-        # Tool-level ok=false (bad args, missing figures) is not a sick
-        # dependency. Only transport exceptions trip the breaker.
-
-        drift = result_matches_schema(descriptor.get("outputSchema"), raw)
-        if drift:
-            logger.warning("MCP result for %s does not match its outputSchema: %s", name, drift[:3])
+        # Tool-level ok=false (bad args, missing figures, schema drift) is
+        # not a sick dependency. Only transport exceptions trip the breaker.
 
         if replay_key is not None and ok:
             self._replay_store(replay_key, raw)
@@ -514,6 +523,19 @@ class MCPClient:
                 for namespace, transport in sorted(self._transports.items())
             },
         }
+
+    def ping(self, namespace: str = "tax_calculator", timeout_s: float = 5.0) -> bool:
+        """Diagnostic reachability probe for an MCP namespace."""
+        transport = self._transport_for(namespace)
+        if isinstance(transport, InProcessTransport):
+            return True
+        if hasattr(transport, "ping"):
+            return transport.ping(timeout_s=timeout_s)
+        try:
+            res = transport._request("ping", {}, timeout_s=timeout_s)
+            return isinstance(res, dict)
+        except Exception:
+            return False
 
 
 # ---------------------------------------------------------------------------

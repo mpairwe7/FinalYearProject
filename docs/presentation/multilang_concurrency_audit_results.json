@@ -1,0 +1,170 @@
+[
+  {
+    "name": "Load Test (Sustained)",
+    "total_requests": 60,
+    "successful_requests": 60,
+    "failed_requests": 0,
+    "error_rate_pct": 0.0,
+    "duration_s": 30.43,
+    "throughput_qps": 1.97,
+    "p50_ms": 342.0,
+    "p90_ms": 12104.2,
+    "p95_ms": 14180.5,
+    "p99_ms": 17695.4,
+    "min_ms": 314.7,
+    "max_ms": 17695.4,
+    "mean_ms": 2956.9,
+    "per_locale": {
+      "en": {
+        "total": 21,
+        "ok": 21,
+        "success_rate": 100.0,
+        "p50_ms": 326.1,
+        "p95_ms": 716.1,
+        "mean_chars": 641.0
+      },
+      "lg": {
+        "total": 21,
+        "ok": 21,
+        "success_rate": 100.0,
+        "p50_ms": 1525.0,
+        "p95_ms": 16513.0,
+        "mean_chars": 652.0
+      },
+      "sw": {
+        "total": 18,
+        "ok": 18,
+        "success_rate": 100.0,
+        "p50_ms": 374.0,
+        "p95_ms": 11862.5,
+        "mean_chars": 638.0
+      }
+    }
+  },
+  {
+    "name": "Volume Test (Heavy Multi-clause)",
+    "total_requests": 45,
+    "successful_requests": 45,
+    "failed_requests": 0,
+    "error_rate_pct": 0.0,
+    "duration_s": 15.96,
+    "throughput_qps": 2.82,
+    "p50_ms": 411.6,
+    "p90_ms": 12912.3,
+    "p95_ms": 13153.9,
+    "p99_ms": 14101.9,
+    "min_ms": 323.7,
+    "max_ms": 14101.9,
+    "mean_ms": 2750.5,
+    "per_locale": {
+      "en": {
+        "total": 11,
+        "ok": 11,
+        "success_rate": 100.0,
+        "p50_ms": 408.8,
+        "p95_ms": 983.3,
+        "mean_chars": 511.0
+      },
+      "lg": {
+        "total": 19,
+        "ok": 19,
+        "success_rate": 100.0,
+        "p50_ms": 414.5,
+        "p95_ms": 14101.9,
+        "mean_chars": 410.0
+      },
+      "sw": {
+        "total": 15,
+        "ok": 15,
+        "success_rate": 100.0,
+        "p50_ms": 396.2,
+        "p95_ms": 8282.0,
+        "mean_chars": 396.0
+      }
+    }
+  },
+  {
+    "name": "Stress Test (Ramped Concurrency)",
+    "total_requests": 52,
+    "successful_requests": 52,
+    "failed_requests": 0,
+    "error_rate_pct": 0.0,
+    "duration_s": 5.09,
+    "throughput_qps": 10.21,
+    "p50_ms": 680.0,
+    "p90_ms": 792.4,
+    "p95_ms": 925.6,
+    "p99_ms": 1332.2,
+    "min_ms": 351.0,
+    "max_ms": 1332.2,
+    "mean_ms": 650.5,
+    "per_locale": {
+      "en": {
+        "total": 18,
+        "ok": 18,
+        "success_rate": 100.0,
+        "p50_ms": 720.6,
+        "p95_ms": 828.5,
+        "mean_chars": 747.0
+      },
+      "lg": {
+        "total": 22,
+        "ok": 22,
+        "success_rate": 100.0,
+        "p50_ms": 720.5,
+        "p95_ms": 1176.9,
+        "mean_chars": 859.0
+      },
+      "sw": {
+        "total": 12,
+        "ok": 12,
+        "success_rate": 100.0,
+        "p50_ms": 545.3,
+        "p95_ms": 684.5,
+        "mean_chars": 632.0
+      }
+    }
+  },
+  {
+    "name": "Spike Test (Instantaneous Burst)",
+    "total_requests": 32,
+    "successful_requests": 32,
+    "failed_requests": 0,
+    "error_rate_pct": 0.0,
+    "duration_s": 5.09,
+    "throughput_qps": 6.29,
+    "p50_ms": 727.4,
+    "p90_ms": 834.6,
+    "p95_ms": 5046.7,
+    "p99_ms": 5070.4,
+    "min_ms": 384.1,
+    "max_ms": 5070.4,
+    "mean_ms": 973.5,
+    "per_locale": {
+      "en": {
+        "total": 10,
+        "ok": 10,
+        "success_rate": 100.0,
+        "p50_ms": 725.3,
+        "p95_ms": 834.6,
+        "mean_chars": 417.0
+      },
+      "lg": {
+        "total": 11,
+        "ok": 11,
+        "success_rate": 100.0,
+        "p50_ms": 727.4,
+        "p95_ms": 1531.4,
+        "mean_chars": 791.0
+      },
+      "sw": {
+        "total": 11,
+        "ok": 11,
+        "success_rate": 100.0,
+        "p50_ms": 755.1,
+        "p95_ms": 5070.4,
+        "mean_chars": 705.0
+      }
+    }
+  }
+]

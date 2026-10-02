@@ -31,6 +31,13 @@ Macro-enabled Office (`.xlsm`, `.docm`, `.pptm`) is rejected.
   values retain a bounded source pointer (page, OCR box, and region score)
   when they can be matched to OCR text. The classifier score is a keyword
   heuristic, not a probability.
+- Automated tax reconciliation audits commercial documents (invoices, receipts,
+  assessments): extracts taxable subtotal, VAT @ 18.0% standard rate, and grand
+  total payable, detecting arithmetic variances, non-standard tax rates, and
+  validating 10-digit Uganda TINs, 12-15 digit PRNs, and EFRIS fiscal references.
+- Interactive taxpayer and officer inspection modal allows inline verification of
+  extracted tax fields, arithmetic breakdown, audit notes, and quick suggested
+  questions in English, Luganda, and Swahili without requiring a raw PDF download.
 
 Index-time handbook export uses the same PDF inspector in best-effort mode:
 a file that opens and fails a guard is skipped rather than embedded.

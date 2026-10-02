@@ -1,3 +1,4 @@
+# checkov:skip=CKV_DOCKER_3:Container runs supervisord as PID 1 to supervise multi-service stack (nginx, redis, qdrant, uvicorn, next.js)
 # Hugging Face Docker Space — second deployment pipeline for the URA Chatbot,
 # independent of Crane Cloud. It reuses the SAME prebuilt image that Crane Cloud
 # runs (built by .github/workflows/ura-chatbot-build-push.yml and pushed to
@@ -786,7 +787,7 @@
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-bc4d715
+FROM landwind/ura-chatbot:sha-f82eef7
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
@@ -834,4 +835,5 @@ ENV QDRANT_ENABLED=true \
 
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
+# checkov:skip=CKV_DOCKER_3:Container runs supervisord as PID 1 to supervise multi-service stack (nginx, redis, qdrant, uvicorn, next.js)
 EXPOSE 8080

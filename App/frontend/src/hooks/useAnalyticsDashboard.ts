@@ -3,10 +3,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { analyticsApi } from "../services/analyticsApi";
 import type { TicketPatch } from "../services/analyticsApi";
+import { queryKeys } from "../lib/queryKeys";
 
 export function useDashboard(days = 30) {
   return useQuery({
-    queryKey: ["dashboard", days],
+    queryKey: queryKeys.analytics.dashboard(days),
     queryFn: () => analyticsApi.dashboard(days),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -17,8 +18,18 @@ export function useDashboard(days = 30) {
 
 export function useFeedbackSummary(days = 30) {
   return useQuery({
-    queryKey: ["feedbackSummary", days],
+    queryKey: queryKeys.analytics.feedbackSummary(days),
     queryFn: () => analyticsApi.feedbackSummary(days),
+    staleTime: 30_000,
+    gcTime: 5 * 60_000,
+    retry: 1,
+  });
+}
+
+export function useJourneyFunnel(days = 30) {
+  return useQuery({
+    queryKey: queryKeys.analytics.journeys(days),
+    queryFn: () => analyticsApi.journeys(days),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
     retry: 1,
@@ -27,7 +38,7 @@ export function useFeedbackSummary(days = 30) {
 
 export function useTicketStats(days = 30) {
   return useQuery({
-    queryKey: ["ticketStats", days],
+    queryKey: queryKeys.tickets.stats(days),
     queryFn: () => analyticsApi.ticketStats(days),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -37,7 +48,7 @@ export function useTicketStats(days = 30) {
 
 export function useTicketQueue(status = "open", limit = 8) {
   return useQuery({
-    queryKey: ["ticketQueue", status, limit],
+    queryKey: queryKeys.tickets.queue(status, limit),
     queryFn: () => analyticsApi.tickets(status, limit),
     staleTime: 30_000,
     gcTime: 5 * 60_000,
@@ -57,11 +68,11 @@ export function useTicketQueueFull(
   limit = 50,
 ) {
   return useQuery({
-    queryKey: ["ticketQueueFull", status, priority, team, limit],
+    queryKey: queryKeys.tickets.queueFull(status, priority, team, limit),
     queryFn: () => analyticsApi.tickets(status, limit, priority, team),
-    staleTime: 10_000,
+    staleTime: 3_000,
     gcTime: 5 * 60_000,
-    refetchInterval: 20_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 }
@@ -69,18 +80,18 @@ export function useTicketQueueFull(
 /** One ticket, including the transcript snapshot taken at escalation. */
 export function useTicket(id: string | null) {
   return useQuery({
-    queryKey: ["ticket", id],
+    queryKey: queryKeys.tickets.detail(id || ""),
     queryFn: () => analyticsApi.ticket(id as string),
     enabled: Boolean(id),
-    staleTime: 5_000,
-    refetchInterval: 10_000,
+    staleTime: 2_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 }
 
 export function useTicketSla(days = 30) {
   return useQuery({
-    queryKey: ["ticketSla", days],
+    queryKey: queryKeys.tickets.sla(days),
     queryFn: () => analyticsApi.ticketSla(days),
     staleTime: 30_000,
     retry: 1,
@@ -99,10 +110,10 @@ export function useUpdateTicket() {
     mutationFn: ({ id, patch }: { id: string; patch: TicketPatch }) =>
       analyticsApi.updateTicket(id, patch),
     onSuccess: (_data, variables) => {
-      client.invalidateQueries({ queryKey: ["ticketQueueFull"] });
-      client.invalidateQueries({ queryKey: ["ticket", variables.id] });
-      client.invalidateQueries({ queryKey: ["ticketSla"] });
-      client.invalidateQueries({ queryKey: ["ticketStats"] });
+      client.invalidateQueries({ queryKey: queryKeys.tickets.all() });
+      if (variables?.id) {
+        client.invalidateQueries({ queryKey: queryKeys.tickets.detail(variables.id) });
+      }
     },
   });
 }

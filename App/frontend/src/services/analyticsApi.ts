@@ -78,6 +78,9 @@ export interface TicketQueueItem {
   priority: string;
   reason: string;
   user_query: string;
+  user_query_en?: string;
+  locale?: string;
+  modality?: "text" | "voice";
   bot_reply: string;
   created_at: number;
   updated_at: number;
@@ -87,6 +90,7 @@ export interface TicketQueueItem {
   first_response_at?: number;
   reply_at?: number;
   officer_reply?: string;
+  officer_reply_localized?: string;
   viewers?: string[];
   handoff?: {
     summary?: string;
@@ -116,6 +120,7 @@ export interface TicketQueueItem {
 /** One turn of the conversation captured when the ticket was raised. */
 export interface TicketTranscriptTurn {
   user_message: string;
+  user_message_en?: string;
   bot_reply: string;
   created_at: number;
   sources?: string[];
@@ -134,6 +139,7 @@ export interface TicketDetail extends TicketQueueItem {
   transcript?: TicketTranscriptTurn[];
   /** Shown to the taxpayer on their next turn. Distinct from staff_note. */
   officer_reply?: string;
+  officer_reply_localized?: string;
   /** Internal. Never reaches the taxpayer. */
   staff_note?: string;
   assignee?: string;
@@ -141,6 +147,38 @@ export interface TicketDetail extends TicketQueueItem {
   first_response_at?: number;
   resolved_at?: number;
   reply_delivered_at?: number;
+}
+
+export interface EscalationCaseDetail {
+  ok: boolean;
+  ticket_id: string;
+  reference: string;
+  status: string;
+  status_label: string;
+  priority: string;
+  team: string;
+  team_label: string;
+  assignee: string;
+  assignee_display: string;
+  reason: string;
+  user_query: string;
+  user_query_en?: string;
+  locale?: string;
+  modality?: string;
+  officer_reply: string;
+  officer_reply_localized?: string;
+  reply_at: number;
+  reply_delivered: boolean;
+  created_at: number;
+  resolved_at: number;
+  transcript: Array<{
+    user_message?: string;
+    user_message_en?: string;
+    bot_reply?: string;
+    created_at?: number;
+    sender?: string;
+  }>;
+  can_reply: boolean;
 }
 
 export interface TicketSla {
@@ -167,6 +205,8 @@ export interface TicketPatch {
   staff_note?: string;
   priority?: string;
   officer_reply?: string;
+  officer_reply_localized?: string;
+  locale?: string;
 }
 
 export interface TicketQueueResponse {
@@ -195,6 +235,96 @@ export interface FeedbackSummary {
   }[];
 }
 
+/** GET /v1/analytics/journeys — one row per guided journey. */
+export interface JourneyStepStats {
+  step_id: string;
+  title: string;
+  /** Journeys cancelled or abandoned while waiting on this step. */
+  stopped: number;
+  helpful: number;
+  not_helpful: number;
+}
+
+export interface JourneyStats {
+  workflow_id: string;
+  name: string;
+  started: number;
+  completed: number;
+  cancelled: number;
+  abandoned: number;
+  in_progress: number;
+  completion_pct: number;
+  steps: JourneyStepStats[];
+}
+
+export interface JourneyFunnel {
+  period_days: number;
+  abandon_after_hours: number;
+  journeys: JourneyStats[];
+}
+
+/** GET /v1/admin/audit/events — one row of the tamper-evident audit trail. */
+export interface AuditEvent {
+  seq: number;
+  event_id: string;
+  event_type: string;
+  /** The acting user's id; "operator-key" for the break-glass key. */
+  actor: string;
+  ts: number;
+  payload: Record<string, unknown>;
+  row_hash: string;
+}
+
+export interface AuditEventsPage {
+  /** Whether this deployment records new events (the audit_ledger flag). */
+  ledger_enabled: boolean;
+  events: AuditEvent[];
+  next_before_seq: number | null;
+}
+
+/** A seal: the Merkle root of a range of events and the chain head at its end. */
+export interface AuditAnchor {
+  anchor_id: string;
+  first_seq: number;
+  last_seq: number;
+  merkle_root: string;
+  /** Empty on seals made before seals recorded the chain head. */
+  head_hash: string;
+  created_at: number;
+}
+
+export interface AuditVerification {
+  ledger_enabled: boolean;
+  valid: boolean;
+  /** "full" walked every event and seal; "since_seal" the newest seal and what follows it. */
+  scope: "full" | "since_seal";
+  rows_checked: number;
+  first_seq: number;
+  last_seq: number;
+  head_hash: string;
+  breaks: { seq: number; event_id: string; reason: string }[];
+  anchors_checked: number;
+  anchor_breaks: { anchor_id: string; first_seq: number; last_seq: number; reason: string }[];
+  latest_anchor: AuditAnchor | null;
+  /** Events written after the newest seal. */
+  unsealed_rows: number;
+  verified_at: number;
+}
+
+export interface AuditSealResult {
+  /** False when there was nothing new to seal. */
+  sealed: boolean;
+  anchor: AuditAnchor | null;
+}
+
+export interface AuditQuery {
+  eventType?: string;
+  actor?: string;
+  since?: number;
+  beforeSeq?: number | null;
+  limit?: number;
+}
+
 export interface FlagRecord {
   name: string;
   default: boolean;
@@ -217,27 +347,63 @@ export interface AnswerOverride {
 const BASE = "/api";
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(15000);
+  const signal = init.signal && typeof AbortSignal.any === "function"
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : (init.signal || timeoutSignal);
+
   const res = await fetch(`${BASE}${url}`, {
     ...init,
     headers: authHeaders(init.headers as Record<string, string> | undefined),
-    signal: AbortSignal.timeout(15000),
+    signal,
   });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
 export const analyticsApi = {
   dashboard: (days = 30) => fetchJson<DashboardData>(`/v1/analytics/dashboard?days=${days}`),
   feedbackSummary: (days = 30) => fetchJson<FeedbackSummary>(`/v1/feedback/summary?days=${days}`),
+  journeys: (days = 30) => fetchJson<JourneyFunnel>(`/v1/analytics/journeys?days=${days}`),
   ticketStats: (days = 30) => fetchJson<TicketStats>(`/v1/admin/tickets/stats?days=${days}`),
-  tickets: (status = "open", limit = 8, priority = "", team = "") =>
+  tickets: (status = "open", limit = 8, priority = "", team = "", q?: string, locale?: string, modality?: string) =>
     fetchJson<TicketQueueResponse>(
       // "any" is a UI token; the API takes an absent status to mean all
       // statuses and 400s on anything outside the four real ones.
       `/v1/admin/tickets?status=${encodeURIComponent(status === "any" ? "" : status)}` +
         `&limit=${limit}&offset=0` +
         (priority ? `&priority=${encodeURIComponent(priority)}` : "") +
-        (team ? `&team=${encodeURIComponent(team)}` : ""),
+        (team ? `&team=${encodeURIComponent(team)}` : "") +
+        (locale ? `&locale=${encodeURIComponent(locale)}` : "") +
+        (modality ? `&modality=${encodeURIComponent(modality)}` : "") +
+        (q ? `&q=${encodeURIComponent(q)}` : ""),
+    ),
+  translate: (text: string, sourceLang = "en", targetLang = "lg") =>
+    fetchJson<{
+      text: string;
+      source_lang: string;
+      target_lang: string;
+      latency_s: number;
+      backend: string;
+      error?: string | null;
+      figures_survived?: boolean;
+    }>("/v1/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, source_lang: sourceLang, target_lang: targetLang }),
+    }),
+  publicTicketStatus: (ticketId: string) =>
+    fetchJson<EscalationCaseDetail>(`/v1/escalate/${encodeURIComponent(ticketId)}`),
+  replyToPublicTicket: (ticketId: string, message: string, locale = "en") =>
+    fetchJson<{ ok: boolean; ticket_id: string; status: string; message: string }>(
+      `/v1/escalate/${encodeURIComponent(ticketId)}/reply`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, locale }),
+      },
     ),
   ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
   ticketSla: (days = 30) => fetchJson<TicketSla>(`/v1/admin/tickets/sla?days=${days}`),
@@ -272,15 +438,25 @@ export const analyticsApi = {
     fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
       "/v1/admin/outbox",
     ),
+  auditEvents: ({ eventType = "", actor = "", since, beforeSeq, limit = 50 }: AuditQuery = {}) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (eventType) params.set("event_type", eventType);
+    if (actor) params.set("actor", actor);
+    if (since != null) params.set("since", String(Math.floor(since)));
+    if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
+    return fetchJson<AuditEventsPage>(`/v1/admin/audit/events?${params.toString()}`);
+  },
+  auditVerify: () => fetchJson<AuditVerification>("/v1/admin/audit/verify"),
+  auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
-    // The backend takes these as query parameters, not a JSON body.
-    const params = new URLSearchParams();
-    for (const [key, value] of Object.entries(patch)) {
-      if (value !== undefined && value !== "") params.set(key, String(value));
-    }
     const res = await fetch(
-      `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}?${params.toString()}`,
-      { method: "PATCH", headers: authHeaders(), signal: AbortSignal.timeout(15000) },
+      `${BASE}/v1/admin/tickets/${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify(patch),
+        signal: AbortSignal.timeout(15000),
+      },
     );
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return res.json();

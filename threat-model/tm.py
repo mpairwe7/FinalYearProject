@@ -202,12 +202,28 @@ vector_index = Datastore("Qdrant Vector Index")
 vector_index.inBoundary = backend_container
 vector_index.isEncrypted = False
 
+# Ephemeral document spool
 document_spool = Datastore("Ephemeral document spool (TTL)")
 document_spool.inBoundary = backend_container
 document_spool.isEncrypted = False
 document_spool.isSQL = False
 document_spool.storesPII = True
 document_spool.storesLogData = False
+
+# Enterprise Connectors & Standalone Systems
+orchestrator_server = Server("Plugins & Connectors Orchestrator")
+orchestrator_server.inBoundary = backend_container
+orchestrator_server.sanitizesInput = True
+orchestrator_server.hasAccessControl = True
+
+enterprise_db = Datastore("Isolated Enterprise SQLite DBs (data_store/*.db)")
+enterprise_db.inBoundary = data_layer
+enterprise_db.isSQL = True
+enterprise_db.storesPII = True
+
+remote_connector_endpoint = ExternalEntity("Remote MCP Connector Endpoint")
+remote_connector_endpoint.inBoundary = internet
+remote_connector_endpoint.protocol = "HTTPS"
 
 # =============================================================================
 # Lambdas (Serverless / CI Functions)
@@ -330,6 +346,13 @@ pdf_guards_to_spool.storesPII = True
 spool_to_retriever = Dataflow(document_spool, retriever, "Attachment passages (LLM01-scrubbed)")
 spool_to_retriever.sanitizesInput = True
 
+# --- Enterprise Systems & Connectors ---
+api_to_orchestrator = Dataflow(fastapi, orchestrator_server, "Agent tool dispatch & connector queries")
+orchestrator_to_db = Dataflow(orchestrator_server, enterprise_db, "Scoped CRUD operations on isolated DBs")
+orchestrator_to_remote = Dataflow(orchestrator_server, remote_connector_endpoint, "Validated MCP proxy call (HTTPS only)")
+orchestrator_to_remote.protocol = "HTTPS"
+orchestrator_to_remote.isEncrypted = True
+
 # --- ML Pipeline ---
 admin_to_github = Dataflow(admin, github, "Git push (signed commits)")
 admin_to_github.protocol = "HTTPS"
@@ -396,6 +419,8 @@ tm.assumptions = [
     "PDF JavaScript, Launch, embedded files, and encryption are rejected before extract/OCR",
     "GitHub Actions runners are ephemeral and GitHub-hosted (not self-hosted)",
     "Rate limiting is enforced at the FastAPI application layer (slowapi)",
+    "Enterprise connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments) run on isolated SQLite datastores and are gated behind FLAG_ENTERPRISE_CONNECTORS in production",
+    "Remote MCP connector registrations validate endpoint URLs against SSRF and prohibit access to private IPs and cloud metadata",
 ]
 
 # =============================================================================

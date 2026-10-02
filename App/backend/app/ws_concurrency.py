@@ -80,6 +80,26 @@ def release(pool: str, user_key: str) -> None:
             _per_user[key] = u - 1
 
 
+def rekey_slot(pool: str, old_key: str, new_key: str, *, per_user_cap: int) -> bool:
+    """Atomically associate a reserved slot with an authenticated identity."""
+    with _lock:
+        old = (pool, old_key)
+        new = (pool, new_key)
+        old_count = _per_user.get(old, 0)
+        if old_count <= 0:
+            return False
+        if old == new:
+            return True
+        if _per_user.get(new, 0) >= per_user_cap:
+            return False
+        if old_count == 1:
+            _per_user.pop(old, None)
+        else:
+            _per_user[old] = old_count - 1
+        _per_user[new] = _per_user.get(new, 0) + 1
+        return True
+
+
 def active(pool: str) -> int:
     """Return the current number of active slots in *pool* (for tests/metrics)."""
     with _lock:
@@ -91,3 +111,24 @@ def reset() -> None:
     with _lock:
         _per_user.clear()
         _global.clear()
+
+
+def is_ws_origin_allowed(origin: str | None) -> bool:
+    """Validate WebSocket Origin header against configured allowed CORS origins (CSWSH mitigation)."""
+    if not origin:
+        return os.getenv("APP_ENV", "development").lower() != "production"
+    allowed_raw = os.getenv("CORS_ORIGINS", "http://localhost:3300")
+    allowed = {o.strip().rstrip("/") for o in allowed_raw.split(",") if o.strip()}
+    clean_origin = origin.strip().rstrip("/")
+    if clean_origin in allowed:
+        return True
+    if os.getenv("APP_ENV", "development").lower() != "production":
+        if clean_origin in (
+            "http://localhost",
+            "http://127.0.0.1",
+            "http://localhost:3000",
+            "http://localhost:3300",
+            "http://localhost:8080",
+        ):
+            return True
+    return False

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   formatDuration,
+  isVoiceTicket,
+  ticketLocaleFlag,
+  ticketLocaleLabel,
   ticketMatchesQuery,
   waitingFor,
   waitTone,
@@ -49,6 +52,27 @@ describe("ticketUi", () => {
     expect(ticketMatchesQuery(row, "TIN")).toBe(true);
     expect(ticketMatchesQuery(row, "officer@")).toBe(true);
     expect(ticketMatchesQuery(row, "customs")).toBe(false);
+  });
+
+  it("matches queue search against English translation and locale", () => {
+    const row = ticket({
+      locale: "lg",
+      user_query: "Njagala okusasula omusolo",
+      user_query_en: "I want to pay my tax assessment",
+    });
+    expect(ticketMatchesQuery(row, "assessment")).toBe(true);
+    expect(ticketMatchesQuery(row, "Luganda")).toBe(true);
+    expect(ticketMatchesQuery(row, "Njagala")).toBe(true);
+  });
+
+  it("identifies voice tickets and locale flags accurately", () => {
+    expect(isVoiceTicket({ modality: "voice" })).toBe(true);
+    expect(isVoiceTicket({ modality: "text" })).toBe(false);
+    expect(ticketLocaleFlag("lg")).toBe("🇺🇬");
+    expect(ticketLocaleFlag("sw")).toBe("🇰🇪");
+    expect(ticketLocaleFlag("en")).toBe("🌐");
+    expect(ticketLocaleLabel("lg")).toBe("Luganda");
+    expect(ticketLocaleLabel("sw")).toBe("Swahili");
   });
 
   it("renders SLA durations without raw second counts", () => {

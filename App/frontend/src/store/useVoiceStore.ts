@@ -53,6 +53,10 @@ interface VoiceState {
 
   // Settings (persisted)
   autoBargeIn: boolean;
+  /**
+   * Voice mode ends the turn after this much silence following speech, in ms;
+   * 0 means the turn is sent only by a tap. Voice agents use 0.8–1.2 s.
+   */
   silenceTimeout: number;
   /**
    * Chosen narration speaker per locale, e.g. `{ lg: "waxal_lug_0004" }`.
@@ -125,6 +129,9 @@ interface VoiceActions {
 // Store
 // ---------------------------------------------------------------------------
 
+/** The pause after which voice mode sends a turn by itself: the top of the 0.8–1.2 s range. */
+export const DEFAULT_SILENCE_TIMEOUT_MS = 1200;
+
 /** Exactly what `partialize` keeps — the shape `migrate` must return. */
 type PersistedVoiceState = Pick<
   VoiceState,
@@ -181,7 +188,7 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(
 
       // ── Settings ──
       autoBargeIn: false,
-      silenceTimeout: 2000,
+      silenceTimeout: DEFAULT_SILENCE_TIMEOUT_MS,
       voiceByLocale: {},
       accentProfile: '',
       setAutoBargeIn: (autoBargeIn) => set({ autoBargeIn }),
@@ -220,7 +227,7 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(
     }),
     {
       name: 'ura-voice-store',
-      version: 2,
+      version: 3,
       skipHydration: true,
       /**
        * v1 stored a single `voiceId` for every language. Carrying it forward
@@ -229,21 +236,26 @@ export const useVoiceStore = create<VoiceState & VoiceActions>()(
        * chosen for. In practice that is English: it is the only language whose
        * voice selection worked before this version, because the Sunbird path
        * ignored the caller's voice entirely.
+       *
+       * Before v3, `silenceTimeout` was stored but nothing read it and nothing
+       * could set it, so a stored value is the old 2000 ms default, not a
+       * choice: it becomes the new default.
        */
       migrate: (persisted, version) => {
-        const state = (persisted ?? {}) as Record<string, unknown>;
-        if (version >= 2 || state.voiceByLocale) {
-          return state as PersistedVoiceState;
+        let state = (persisted ?? {}) as Record<string, unknown>;
+        if (version < 2 && !state.voiceByLocale) {
+          const legacy = typeof state.voiceId === 'string' ? state.voiceId : '';
+          const rest = { ...state };
+          delete rest.voiceId;
+          state = {
+            ...rest,
+            // Only edge-tts English names were ever honoured, and they are the
+            // only ids that identify themselves as English.
+            voiceByLocale: legacy.startsWith('en-') ? { en: legacy } : {},
+          };
         }
-        const legacy = typeof state.voiceId === 'string' ? state.voiceId : '';
-        const rest = { ...state };
-        delete rest.voiceId;
-        return {
-          ...rest,
-          // Only edge-tts English names were ever honoured, and they are the
-          // only ids that identify themselves as English.
-          voiceByLocale: legacy.startsWith('en-') ? { en: legacy } : {},
-        } as PersistedVoiceState;
+        if (version < 3) state = { ...state, silenceTimeout: DEFAULT_SILENCE_TIMEOUT_MS };
+        return state as PersistedVoiceState;
       },
       // Only persist settings + offline queue
       partialize: (state) => ({

@@ -13,6 +13,7 @@ export function useVoiceWebSocket() {
   const wsRef = useRef<VoiceWebSocket | null>(null);
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
   const playingRef = useRef(false);
+  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
 
   const wsState = useVoiceStore((s) => s.wsState);
   const setWsState = useVoiceStore((s) => s.setWsState);
@@ -53,11 +54,17 @@ export function useVoiceWebSocket() {
         // Server sends WAV/audio bytes — decode and play via AudioContext
         const audioBuffer = await ctx.decodeAudioData(chunk.slice(0));
         const source = ctx.createBufferSource();
+        currentSourceRef.current = source;
         source.buffer = audioBuffer;
         source.connect(ctx.destination);
 
         await new Promise<void>((resolve) => {
-          source.onended = () => resolve();
+          source.onended = () => {
+            if (currentSourceRef.current === source) {
+              currentSourceRef.current = null;
+            }
+            resolve();
+          };
           source.start(0);
         });
       } catch {
@@ -156,6 +163,14 @@ export function useVoiceWebSocket() {
   );
 
   const disconnect = useCallback(() => {
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop();
+      } catch {
+        // already stopped
+      }
+      currentSourceRef.current = null;
+    }
     wsRef.current?.disconnect();
     wsRef.current = null;
     setWsState('disconnected');
@@ -169,6 +184,14 @@ export function useVoiceWebSocket() {
   }, []);
 
   const bargeIn = useCallback(() => {
+    if (currentSourceRef.current) {
+      try {
+        currentSourceRef.current.stop();
+      } catch {
+        // already stopped
+      }
+      currentSourceRef.current = null;
+    }
     wsRef.current?.bargeIn();
     audioQueueRef.current = [];
     playingRef.current = false;

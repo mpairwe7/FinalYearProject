@@ -47,9 +47,12 @@ from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .vision.document_classifier import classify_document
 from .vision.ocr import (
     clean_ocr_text,
-    extract_ocr_result,
     extract_dates,
+    extract_efris_invoice_numbers,
+    extract_ocr_result,
+    extract_prn_numbers,
     extract_reference_numbers,
+    extract_tax_heads,
     extract_tin_numbers,
     extract_ugx_amounts,
 )
@@ -136,20 +139,26 @@ _KIND_BY_CONTENT_TYPE: dict[str, str] = {
 _DOC_TYPE_LABELS: dict[str, str] = {
     "receipt": "Payment receipt",
     "tin_card": "TIN registration document",
+    "national_id": "National Identity Card",
     "assessment": "Tax assessment notice",
     "customs_declaration": "Customs declaration",
     "filing_form": "Tax return / filing form",
     "invoice": "Invoice",
+    "statutory_act": "Tax Law Compendium / Act",
+    "portal_screenshot": "URA Portal Screenshot",
     "generic": "General document",
 }
 
 _DOC_TYPE_HINTS: dict[str, str] = {
     "receipt": "You can ask the assistant to verify totals, payment dates, or EFRIS details from this receipt.",
     "tin_card": "You can ask the assistant about TIN obligations, updates, or what this registration covers.",
+    "national_id": "You can ask the assistant to apply for a TIN, verify your NIN, or register for taxes using this National ID.",
     "assessment": "You can ask the assistant to explain the assessed amounts, deadlines, or objection procedure.",
     "customs_declaration": "You can ask the assistant about duty calculations, HS codes, or clearance steps.",
     "filing_form": "You can ask the assistant to explain fields on this return or the filing deadlines.",
     "invoice": "You can ask the assistant about VAT treatment, EFRIS invoicing rules, or the amounts shown.",
+    "statutory_act": "You can ask the assistant to summarize tax laws, find specific sections, or explain rates and legal compliance rules.",
+    "portal_screenshot": "You can ask the assistant to diagnose errors, identify click targets, or guide you through this URA portal screen.",
     "generic": "You can ask the assistant questions about the content extracted from this document.",
 }
 
@@ -280,6 +289,8 @@ class DocumentRecord:
     session_id: str = ""
     user_id: str = ""
     field_evidence: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    tax_reconciliation: dict[str, Any] = field(default_factory=dict)
+    screenshot_guidance: dict[str, Any] = field(default_factory=dict)
 
     def _provenance_payload(self) -> dict[str, Any]:
         """Expose bounded evidence metadata without retaining source file bytes."""
@@ -313,6 +324,8 @@ class DocumentRecord:
             "text_preview": self.text[:600],
             "truncated": self.truncated,
             "summary": self.summary,
+            "tax_reconciliation": dict(self.tax_reconciliation),
+            "screenshot_guidance": dict(self.screenshot_guidance),
             "warnings": self.warnings,
             "expires_in_seconds": max(
                 0, int(self.created_at + DOCUMENT_TTL_SECONDS - time.time())
@@ -339,6 +352,8 @@ class DocumentRecord:
             "text": self.text,
             "truncated": self.truncated,
             "summary": self.summary,
+            "tax_reconciliation": dict(self.tax_reconciliation),
+            "screenshot_guidance": dict(self.screenshot_guidance),
             "warnings": self.warnings,
             "analyzed_at": self.created_at,
         }
@@ -352,9 +367,23 @@ class DocumentRecord:
         ]
         if self.summary:
             lines.append(f"Summary: {self.summary}")
+        if self.screenshot_guidance and self.screenshot_guidance.get("is_screenshot"):
+            sg = self.screenshot_guidance
+            lines.append(f"Portal: {sg.get('detected_portal', 'URA Web Portal')} ({sg.get('portal_url', '')})")
+            if sg.get("detected_state"):
+                lines.append(f"Screen State: {sg.get('detected_state')}")
+            if sg.get("issues_detected"):
+                lines.append(f"Detected Issues: {'; '.join(sg.get('issues_detected', []))}")
+            if sg.get("steps"):
+                lines.append("Interactive Resolution Steps:")
+                for step in sg.get("steps", []):
+                    lines.append(f"- {step}")
         field_bits = []
         for key, title in (
             ("tins", "TINs"),
+            ("prns", "PRNs"),
+            ("efris_invoices", "EFRIS Invoices"),
+            ("tax_heads", "Tax Regimes"),
             ("amounts", "Amounts"),
             ("dates", "Dates"),
             ("references", "References"),
@@ -364,6 +393,11 @@ class DocumentRecord:
                 field_bits.append(f"{title}: {', '.join(values[:5])}")
         if field_bits:
             lines.append("Key fields — " + "; ".join(field_bits))
+        if self.tax_reconciliation:
+            recon_status = self.tax_reconciliation.get("status")
+            recon_notes = self.tax_reconciliation.get("notes") or []
+            if recon_status in ("verified", "discrepancy_detected") and recon_notes:
+                lines.append(f"Tax Reconciliation ({recon_status}): {recon_notes[0]}")
         for table in self.tables[:3]:
             headers = ", ".join(table.headers[:8]) or "no headers"
             lines.append(
@@ -372,7 +406,9 @@ class DocumentRecord:
             )
         header = "\n".join(lines)
         remaining = max(200, char_budget - len(header) - 80)
-        body = self.text[:remaining]
+        cleaned_text = re.sub(r"(?:DOMESTIC TAX LAWS OF UGANDA\s+)?\d+\s*\|\s*P\s*a\s*g\s*e", "", self.text)
+        cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text).strip()
+        body = cleaned_text[:remaining]
         if not body:
             return header
         return (
@@ -1017,6 +1053,9 @@ def _build_summary(
     counts = []
     for key, singular, plural in (
         ("tins", "TIN", "TINs"),
+        ("prns", "PRN", "PRNs"),
+        ("efris_invoices", "EFRIS invoice number", "EFRIS invoice numbers"),
+        ("tax_heads", "tax head", "tax heads"),
         ("amounts", "UGX amount", "UGX amounts"),
         ("dates", "date", "dates"),
         ("references", "reference number", "reference numbers"),
@@ -1089,6 +1128,430 @@ def _field_evidence(
     return evidence
 
 
+def _parse_currency_amount(raw: str) -> float | None:
+    """Extract float value from currency strings like 'UGX 1,180,000.00' or '1,250,000'."""
+    cleaned = re.sub(r"[^\d.]", "", raw.replace(",", ""))
+    try:
+        val = float(cleaned)
+        return val if val > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def reconcile_tax_document(
+    text: str,
+    doc_type: str,
+    fields: dict[str, list[str]],
+    tables: list[TableSummary],
+) -> dict[str, Any]:
+    """Perform automated financial arithmetic reconciliation & statutory tax checks.
+
+    Verifies:
+    1. TIN format & presence (10-digit Uganda TIN starting with 1).
+    2. PRN format & status (12-15 digit Payment Registration Number starting with 2).
+    3. EFRIS fiscal invoice/receipt indicators.
+    4. Arithmetic integrity: Subtotal + Tax == Total (with tolerance for rounding).
+    5. Statutory tax rate compliance: Standard VAT rate is 18.0% (FY2026-27).
+    """
+    notes: list[str] = []
+
+    # 1. Tax Identifiers
+    tins = fields.get("tins") or []
+    for tin in tins:
+        if re.fullmatch(r"1\d{9}", str(tin).strip()):
+            notes.append(f"Uganda TIN {tin} verified (valid 10-digit format).")
+        else:
+            notes.append(f"TIN {tin} has non-standard format (expected 10 digits starting with 1).")
+
+    prns = fields.get("prns") or []
+    for prn in prns:
+        notes.append(f"Payment Registration Number (PRN) {prn} verified for e-Tax / bank payment.")
+
+    efris = fields.get("efris_invoices") or []
+    if efris:
+        notes.append(f"EFRIS fiscal device / invoice record identified ({', '.join(efris[:3])}).")
+
+    # 2. Extract financial figures associated with tax lines
+    subtotal_match = re.search(
+        r"(?:Sub-?total|Taxable\s+Value|Taxable\s+Amount|Net\s+Amount|Total\s+Exclusive)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+    vat_match = re.search(
+        r"(?:V\.?A\.?T\.?|Value\s+Added\s+Tax|Tax\s+Amount)\s*(?:\(18%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+    total_match = re.search(
+        r"(?:Total\s+Payable|Grand\s+Total|Total\s+Amount|Gross\s+Amount|Total\s+Due|Amount\s+Paid|Paid\s+Amount)\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+    wht_match = re.search(
+        r"(?:Withholding\s+Tax|W\.?H\.?T\.?)\s*(?:\([0-9.]+%\))?\s*[:=\-]?\s*(?:UGX|Shs?\.?|USD)?\s*([\d,]+(?:\.\d{1,2})?)",
+        text,
+        re.I,
+    )
+
+    subtotal_val = _parse_currency_amount(subtotal_match.group(1)) if subtotal_match else None
+    vat_val = _parse_currency_amount(vat_match.group(1)) if vat_match else None
+    total_val = _parse_currency_amount(total_match.group(1)) if total_match else None
+    wht_val = _parse_currency_amount(wht_match.group(1)) if wht_match else None
+
+    # Fallback to table numeric totals if present
+    if not subtotal_val and tables:
+        for t in tables:
+            for header, tot in t.numeric_totals.items():
+                hl = header.lower()
+                if "subtotal" in hl or "taxable" in hl or "net" in hl:
+                    subtotal_val = tot
+                elif "vat" in hl or "tax" in hl:
+                    vat_val = tot
+                elif "total" in hl or "gross" in hl:
+                    total_val = tot
+
+    status = "informational_only"
+    variance = 0.0
+    effective_rate: float | None = None
+
+    if subtotal_val is not None and vat_val is not None and total_val is not None:
+        expected_total = subtotal_val + vat_val
+        diff = abs(total_val - expected_total)
+        tolerance = max(2.0, total_val * 0.002)
+        effective_rate = round(vat_val / subtotal_val, 4) if subtotal_val > 0 else 0.0
+
+        if diff <= tolerance:
+            variance = 0.0
+            if abs(effective_rate - 0.18) <= 0.005:
+                status = "verified"
+                notes.append(
+                    f"Arithmetic balanced: Subtotal (UGX {subtotal_val:,.0f}) + 18% VAT (UGX {vat_val:,.0f}) "
+                    f"= Total (UGX {total_val:,.0f}). Statutory rate verified."
+                )
+            else:
+                status = "discrepancy_detected"
+                notes.append(
+                    f"Arithmetic balanced (Total UGX {total_val:,.0f}), but effective VAT rate "
+                    f"is {effective_rate:.1%} instead of standard 18.0%."
+                )
+        else:
+            variance = round(total_val - expected_total, 2)
+            status = "discrepancy_detected"
+            notes.append(
+                f"Arithmetic discrepancy detected: Subtotal (UGX {subtotal_val:,.0f}) + "
+                f"VAT (UGX {vat_val:,.0f}) = UGX {expected_total:,.0f}, but document states "
+                f"Total UGX {total_val:,.0f} (variance: UGX {abs(variance):,.0f})."
+            )
+    elif subtotal_val is not None and total_val is not None and vat_val is None:
+        implied_tax = total_val - subtotal_val
+        if implied_tax > 0 and subtotal_val > 0:
+            effective_rate = round(implied_tax / subtotal_val, 4)
+            if abs(effective_rate - 0.18) <= 0.005:
+                status = "verified"
+                notes.append(
+                    f"Standard 18.0% VAT implied: Total UGX {total_val:,.0f} on Subtotal "
+                    f"UGX {subtotal_val:,.0f} matches standard VAT rate."
+                )
+            else:
+                status = "unreconciled_partial"
+                notes.append(
+                    f"Implied tax rate is {effective_rate:.1%} between Subtotal "
+                    f"UGX {subtotal_val:,.0f} and Total UGX {total_val:,.0f}."
+                )
+        else:
+            status = "unreconciled_partial"
+            notes.append("Partial financial amounts extracted; full line-item tax equation could not be constructed.")
+    elif total_val is not None or (fields.get("amounts")):
+        if doc_type in {"receipt", "invoice", "assessment"}:
+            status = "unreconciled_partial"
+            notes.append("Financial amounts extracted, but explicit subtotal/tax line breakdown was not detected.")
+        else:
+            status = "informational_only"
+            notes.append("General document; arithmetic reconciliation not applicable.")
+    else:
+        status = "informational_only"
+        notes.append("Non-financial or administrative text; no numeric tax variance.")
+
+    if wht_val is not None:
+        notes.append(f"Withholding tax (WHT) of UGX {wht_val:,.0f} noted on this record.")
+
+    return {
+        "status": status,
+        "subtotal_ugx": subtotal_val,
+        "tax_ugx": vat_val,
+        "total_ugx": total_val,
+        "effective_rate": effective_rate,
+        "variance_ugx": variance,
+        "notes": notes,
+    }
+
+
+#: Document types that get verification guidance even without portal signals.
+_GUIDED_DOC_TYPES = frozenset(
+    {"receipt", "invoice", "tin_card", "assessment", "customs_declaration", "filing_form"}
+)
+#: Text that only appears on a portal *screen* — a login, an error page, a menu.
+_PORTAL_SCREEN_TERMS = (
+    "portal.ura.go.ug",
+    "e-services",
+    "eservices",
+    "ura web portal",
+    "e-tax",
+    "generate prn",
+    "search prn",
+    "login to e-services",
+    "internal server error",
+    "error 500",
+    "session expired",
+    "taxpayer dashboard",
+    "error code",
+)
+#: Portal vocabulary that printed documents carry too (receipts, slips, SADs).
+_PORTAL_DOCUMENT_TERMS = ("efris", "asycuda", "payment registration number", "customs entry")
+#: "tin" as a word — not the one inside "printing" or "meeting".
+_TIN_WORD_RE = re.compile(r"(?<![a-z])tin(?![a-z])")
+
+
+def diagnose_portal_screenshot(
+    *,
+    text: str,
+    filename: str,
+    fields: dict[str, list[str]],
+    meta: dict[str, Any],
+    doc_type: str,
+    kind: str = "",
+) -> dict[str, Any]:
+    """Diagnose URA portal screenshots, captured receipts, and document images with interactive navigation steps."""
+    clean_fn = (filename or "").lower()
+    text_lower = (text or "").lower()
+    is_shot_named = any(k in clean_fn for k in ("screenshot", "screen", "portal", "error", "capture", "snip"))
+    is_image = kind == "image" or any(clean_fn.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"))
+    shows_screen = any(term in text_lower for term in _PORTAL_SCREEN_TERMS)
+
+    is_portal = (
+        doc_type == "portal_screenshot"
+        or is_shot_named
+        or shows_screen
+        or any(term in text_lower for term in _PORTAL_DOCUMENT_TERMS)
+    )
+
+    # An unrecognised photo is not a URA screen: guidance needs portal signals
+    # or a tax document type the classifier is sure of.
+    if not is_portal and doc_type not in _GUIDED_DOC_TYPES:
+        return {}
+    # Any screen capture or visual document image gets a visual layout map.
+    is_screen_capture = doc_type == "portal_screenshot" or is_image
+
+    # 1. Identify specific portal or tax verification domain
+    if "efris" in text_lower or "efris" in clean_fn or doc_type in ("receipt", "invoice"):
+        detected_portal = "URA EFRIS Invoicing & Fiscal Portal"
+        portal_url = "https://efris.ura.go.ug"
+        portal_category = "efris"
+    elif "asycuda" in text_lower or "customs" in text_lower or "bill of entry" in text_lower or doc_type == "customs_declaration":
+        detected_portal = "URA Customs ASYCUDA World Portal"
+        portal_url = "https://ura.go.ug/en/customs-systems/"
+        portal_category = "customs"
+    elif (
+        _TIN_WORD_RE.search(clean_fn)
+        or ("registration" in text_lower and _TIN_WORD_RE.search(text_lower))
+        or doc_type == "tin_card"
+    ):
+        detected_portal = "URA e-Services Taxpayer Registration"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "tin"
+    elif "prn" in text_lower or "payment" in text_lower or any(k in text_lower for k in ("momo", "airtel money", "mtn money", "stanbic", "centenary")):
+        detected_portal = "URA e-Services PRN & Payments Portal"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "prn"
+    elif doc_type == "assessment":
+        detected_portal = "URA Assessment & Dispute Management"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "e_services"
+    else:
+        detected_portal = "URA e-Services Web Portal"
+        portal_url = "https://portal.ura.go.ug"
+        portal_category = "e_services"
+
+    # 2. Identify issues & error states
+    issues_detected: list[str] = []
+    steps: list[str] = []
+
+    if any(k in text_lower for k in ("error 500", "internal server error", "server error")):
+        detected_state = "Server Error (HTTP 500)"
+        issues_detected.append("The URA web service encountered an unexpected internal server fault.")
+        steps = [
+            "Step 1: Wait 60 seconds and refresh the page (Ctrl+F5) to clear expired session headers.",
+            "Step 2: Try accessing in a Private / Incognito browser window to bypass stale cookie state.",
+            "Step 3: If submitting a payment or return, ensure numeric fields do not contain commas or currency codes.",
+        ]
+    elif any(k in text_lower for k in ("session expired", "timed out", "timeout", "unauthorized")):
+        detected_state = "Session Timeout / Re-Authentication Required"
+        issues_detected.append("Your portal session timed out due to security inactivity.")
+        steps = [
+            "Step 1: Click 'Back to Login' on the URA e-Services homepage.",
+            "Step 2: Enter your 10-digit TIN and password. If prompted, verify the SMS OTP.",
+            "Step 3: Once authenticated, re-open the filing or PRN form directly.",
+        ]
+    elif doc_type in ("receipt", "invoice"):
+        detected_state = "EFRIS Invoice & Fiscal Receipt Validation"
+        if not fields.get("tins"):
+            issues_detected.append("Seller TIN is not clearly identifiable on the image.")
+        if not fields.get("efris_invoices"):
+            issues_detected.append("Fiscal Document Number (FDN) or QR verification code not detected.")
+        steps = [
+            "Step 1: Check that the Fiscal Document Number (FDN) and QR code are visible.",
+            "Step 2: Verify authenticity at https://ura.go.ug/en/efris/fdn-validation/ or with the URA Kakasa mobile app.",
+            "Step 3: Retain this document for input tax credit reconciliation in your next VAT return.",
+        ]
+    elif doc_type == "tin_card":
+        detected_state = "Taxpayer Identification Certificate Verification"
+        steps = [
+            "Step 1: Confirm the TIN at https://ura.go.ug/en/domestic-taxes/tin-application/search-tin/.",
+            "Step 2: Log in to e-Services to check active tax account registrations.",
+            "Step 3: Ensure registered contact details (email and phone) are current for OTP authentication.",
+        ]
+    elif doc_type == "assessment":
+        detected_state = "Statutory Assessment Review & Payment Notice"
+        # 45 days: Tax Procedures Code Act s.24, as URA's own "Object to a Tax
+        # Assessment" page and the objections FAQ corpus both state it.
+        steps = [
+            "Step 1: Check the amount assessed and the payment due date printed on the notice.",
+            "Step 2: If you accept the assessment, register the payment for a PRN at https://ura.go.ug/en/domestic-taxes/make-a-payment/.",
+            "Step 3: If you dispute it, lodge an objection within 45 days of receiving the notice (Tax Procedures Code Act, section 24).",
+        ]
+    elif "prn" in text_lower or "payment" in text_lower:
+        detected_state = "PRN Generation & Bank Selection"
+        if "bank" in text_lower or "mode" in text_lower:
+            issues_detected.append("Payment mode or commercial bank gateway requires explicit selection.")
+        steps = [
+            "Step 1: Verify the selected Tax Head (e.g., '0010 - Value Added Tax' or '0011 - Income Tax').",
+            "Step 2: In the 'Payment Mode' dropdown, select your bank (e.g. Stanbic, Absa, Centenary) or Mobile Money (MTN/Airtel).",
+            "Step 3: Click the green 'Generate PRN' button, note the 12-digit number, and settle payment.",
+        ]
+    elif "efris" in text_lower and any(k in text_lower for k in ("offline", "sync", "24")):
+        detected_state = "EFRIS Synchronization Window Exceeded"
+        issues_detected.append("Offline invoice synchronization has exceeded the mandatory 24-hour limit.")
+        steps = [
+            "Step 1: Verify active internet connectivity on your fiscal device or point-of-sale system.",
+            "Step 2: In the EFRIS client application, click 'System Management' > 'Offline Sync'.",
+            "Step 3: Transmit queued fiscal receipts to restore live URA receipting.",
+        ]
+    elif any(k in text_lower for k in ("mandatory", "required", "missing")):
+        detected_state = "Missing Mandatory Input Field"
+        issues_detected.append("One or more mandatory form fields marked with red asterisks (*) are empty.")
+        steps = [
+            "Step 1: Review the fields bordered in red on the portal screen.",
+            "Step 2: Fill in the missing required entries (e.g. Tax Period, Assessment Year, or Contact).",
+            "Step 3: Click 'Validate & Submit'.",
+        ]
+    else:
+        detected_state = f"{detected_portal} - Navigation & Verification Screen"
+        steps = [
+            "Step 1: Confirm your 10-digit TIN is correctly populated in the taxpayer banner.",
+            "Step 2: Choose the corresponding statutory flow under e-Services.",
+            "Step 3: Follow the guided prompts and save your submission reference code.",
+        ]
+
+    # 3. Configure bounding boxes and DOM selectors based on screen state
+    if "Server Error" in detected_state:
+        error_bbox = [10, 8, 24, 92]
+        error_selector = "#error-banner, .alert-danger, .server-error"
+        action_bbox = [28, 40, 38, 60]
+        action_selector = "button#btnBack, button#btnRefresh"
+        action_instruction = "Click 'Refresh' or re-authenticate via Incognito browser"
+    elif "Session Timeout" in detected_state:
+        error_bbox = [15, 12, 28, 88]
+        error_selector = ".session-expired-notice, .login-prompt"
+        action_bbox = [34, 38, 44, 62]
+        action_selector = "a#loginLink, button#btnLogin"
+        action_instruction = "Click 'Back to Login' on the URA e-Services header"
+    elif "Invoice & Fiscal Receipt" in detected_state:
+        error_bbox = [12, 10, 26, 90]
+        error_selector = ".seller-tin, .fiscal-header"
+        action_bbox = [65, 55, 78, 88]
+        action_selector = ".total-amount, .vat-breakdown"
+        action_instruction = "Check the VAT charged and the total amount"
+    elif "Taxpayer Identification Certificate" in detected_state:
+        error_bbox = [18, 15, 32, 85]
+        error_selector = ".tin-number, #txtTIN"
+        action_bbox = [55, 30, 68, 70]
+        action_selector = ".taxpayer-name, .entity-status"
+        action_instruction = "Review registered taxpayer name and legal category"
+    elif "Statutory Assessment" in detected_state:
+        error_bbox = [16, 12, 30, 88]
+        error_selector = ".assessment-notice-ref, .tax-period"
+        action_bbox = [62, 50, 74, 85]
+        action_selector = "button#btnPayPRN, a#lodgeObjection"
+        action_instruction = "Click to generate PRN or lodge formal objection"
+    elif "PRN Generation" in detected_state:
+        error_bbox = [36, 18, 48, 82]
+        error_selector = "select#ddlPaymentMode, select#bankSelect"
+        action_bbox = [65, 62, 76, 88]
+        action_selector = "button#btnGeneratePRN, input#btnSubmit"
+        action_instruction = "Click the green 'Generate PRN' button after selecting bank"
+    elif "EFRIS Synchronization" in detected_state:
+        error_bbox = [12, 10, 24, 90]
+        error_selector = ".sync-alert-banner, .offline-warning"
+        action_bbox = [46, 35, 56, 65]
+        action_selector = "button#btnOfflineSync, #menu_offline_sync"
+        action_instruction = "Click 'Sync All Pending Records' in System Management"
+    elif "Missing Mandatory" in detected_state:
+        error_bbox = [34, 20, 52, 80]
+        error_selector = ".field-required.has-error, input:required:invalid"
+        action_bbox = [68, 62, 78, 88]
+        action_selector = "button#btnValidateSubmit, input#btnValidate"
+        action_instruction = "Click 'Validate & Submit' after entering required inputs"
+    else:
+        error_bbox = [8, 12, 18, 88]
+        error_selector = ".taxpayer-banner, #top-nav"
+        action_bbox = [58, 55, 68, 85]
+        action_selector = "button.btn-primary, .action-link"
+        action_instruction = "Click the highlighted action button or input field to advance"
+
+    # The boxes are where this screen's elements usually sit ([top, left,
+    # bottom, right] in percent), not a detection on the uploaded image —
+    # hence bbox_basis, and no confidence score to imply otherwise.
+    hotspots = (
+        [
+            {
+                "id": "spot-error",
+                "type": "error" if issues_detected else "target",
+                "label": "Notice / Target Area",
+                "instruction": issues_detected[0] if issues_detected else "Primary action target region on screen",
+                "bbox": error_bbox,
+                "bbox_basis": "typical_layout",
+                "dom_selector": error_selector,
+            },
+            {
+                "id": "spot-action",
+                "type": "action",
+                "label": "Next Click Target",
+                "instruction": action_instruction,
+                "bbox": action_bbox,
+                "bbox_basis": "typical_layout",
+                "dom_selector": action_selector,
+            },
+        ]
+        if is_screen_capture
+        else []
+    )
+
+    return {
+        "is_screenshot": True,
+        "detected_portal": detected_portal,
+        "portal_url": portal_url,
+        "portal_category": portal_category,
+        "detected_state": detected_state,
+        "issues_detected": issues_detected,
+        "steps": steps,
+        "hotspots": hotspots,
+        "direct_action": {
+            "label": f"Open {detected_portal} ↗",
+            "url": portal_url,
+        },
+    }
+
+
 def analyze_document(
     data: bytes,
     filename: str,
@@ -1145,11 +1608,20 @@ def analyze_document(
     classification = classify_document(text)
     fields = {
         "tins": extract_tin_numbers(text)[:_MAX_FIELD_ITEMS],
+        "prns": extract_prn_numbers(text)[:_MAX_FIELD_ITEMS],
+        "efris_invoices": extract_efris_invoice_numbers(text)[:_MAX_FIELD_ITEMS],
         "amounts": extract_ugx_amounts(text)[:_MAX_FIELD_ITEMS],
         "dates": extract_dates(text)[:_MAX_FIELD_ITEMS],
         "references": extract_reference_numbers(text)[:_MAX_FIELD_ITEMS],
+        "tax_heads": extract_tax_heads(text)[:_MAX_FIELD_ITEMS],
     }
     field_evidence = _field_evidence(fields, extraction.meta)
+    tax_reconciliation = reconcile_tax_document(
+        text=text,
+        doc_type=classification.doc_type.value,
+        fields=fields,
+        tables=extraction.tables,
+    )
     summary = _build_summary(
         kind,
         classification.doc_type.value,
@@ -1158,6 +1630,14 @@ def analyze_document(
         extraction.tables,
         extraction.meta,
         text,
+    )
+    screenshot_guidance = diagnose_portal_screenshot(
+        text=text,
+        filename=filename,
+        fields=fields,
+        meta=extraction.meta,
+        doc_type=classification.doc_type.value,
+        kind=kind,
     )
 
     record = DocumentRecord(
@@ -1175,11 +1655,21 @@ def analyze_document(
         tables=extraction.tables,
         meta=extraction.meta,
         summary=summary,
+        tax_reconciliation=tax_reconciliation,
+        screenshot_guidance=screenshot_guidance,
         warnings=extraction.warnings,
         created_at=time.time(),
         session_id=session_id or "",
         user_id=user_id or "",
     )
+    try:
+        from .hitl_routing import assess_document_for_human_review
+        hitl_assessment = assess_document_for_human_review(record)
+        record.meta["hitl_requires_review"] = hitl_assessment.requires_review
+        record.meta["hitl_reasons"] = hitl_assessment.reasons
+        record.meta["hitl_priority"] = hitl_assessment.priority
+    except Exception as hitl_err:
+        logger.debug("HITL assessment skipped: %s", hitl_err)
     _store(record)
     logger.info(
         "document analyzed: id=%s kind=%s type=%s conf=%.2f chars=%d warnings=%d",

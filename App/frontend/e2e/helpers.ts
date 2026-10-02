@@ -103,6 +103,15 @@ function sseReply(text: string, opts: { escalate?: boolean } = {}): string {
   ].join("\n");
 }
 
+/** A `/v1/tts/stream` body: one decodable piece, then the closing line. */
+export function speechStreamBody(): string {
+  return [
+    JSON.stringify({ seq: 0, text: "stub", format: "wav", audio_base64: TINY_WAV_B64, duration_s: 0.05, backend: "stub" }),
+    JSON.stringify({ done: true, pieces: 1, failed: 0 }),
+    "",
+  ].join("\n");
+}
+
 /**
  * Mock the backend. Registers a catch-all FIRST so the specific routes added
  * afterwards take precedence (Playwright matches most-recently-added first).
@@ -128,8 +137,8 @@ export async function mockBackend(
     }),
   );
   // --- Voice/speech endpoints (STT/TTS/MT) ------------------------------------
-  // The real client posts raw audio to /v1/voice/chat and /v1/asr, and JSON to
-  // /v1/tts and /v1/translate. TTS payloads must be a *decodable* WAV (the client
+  // The real client posts WAV to /v1/voice/chat and /v1/asr, and JSON to
+  // /v1/tts/stream, /v1/tts and /v1/translate. TTS payloads must be a *decodable* WAV (the client
   // runs AudioContext.decodeAudioData), hence TINY_WAV_B64.
   await page.route("**/api/v1/voice/chat**", (route) =>
     route.fulfill({
@@ -170,6 +179,10 @@ export async function mockBackend(
         error: null,
       },
     }),
+  );
+  // The read-aloud streams its speech: NDJSON, one line per piece, then done.
+  await page.route("**/api/v1/tts/stream", (route) =>
+    route.fulfill({ contentType: "application/x-ndjson", body: speechStreamBody() }),
   );
   await page.route("**/api/v1/asr**", (route) =>
     route.fulfill({

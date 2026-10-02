@@ -71,7 +71,7 @@ jobs:
           : "${HF_TOKEN:?HF_TOKEN repo secret is missing — the Space cannot be rolled without it}"
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4.2.2
         with:
           # The pin is committed back, so check out a real branch rather than
           # the detached SHA a dispatch would otherwise give us.
@@ -131,6 +131,7 @@ jobs:
           # It cannot hide a real change: this workflow only ever edits this file,
           # and the image it points at was already built and scanned.
           git commit -m "chore(hf-space): roll to ${TAG} [skip ci]"
+          git pull --rebase origin "${GITHUB_REF_NAME}" || true
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Push the Dockerfile to the Space

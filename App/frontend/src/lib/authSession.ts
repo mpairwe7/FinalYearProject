@@ -88,10 +88,52 @@ export function looksLikeJwt(token: string): boolean {
   const parts = token.split('.');
   return parts.length === 3 && parts[0].length > 0 && parts[1].length > 0;
 }
+
+/** Check if a JWT token has expired based on its exp claim, with proactive skew tolerance. */
+export function isJwtExpired(token: string, skewSeconds = 10): boolean {
+  if (!looksLikeJwt(token)) return false;
+  try {
+    const payloadPart = token.split('.')[1];
+    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+    const decoded = atob(padded);
+    const parsed = JSON.parse(decoded);
+    if (typeof parsed.exp === 'number') {
+      // Proactive expiry buffer: treat token as expired if it expires within skewSeconds
+      return parsed.exp * 1000 <= Date.now() + skewSeconds * 1000;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/** Handle 401 Unauthorized by evicting stale credentials across all tabs. */
+export function handleUnauthorized(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY);
+    if (current) {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      window.localStorage.removeItem(AUTH_METHOD_STORAGE_KEY);
+      notify();
+    }
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export function getAuthToken(): string {
   if (typeof window === 'undefined') return '';
   try {
-    return window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+    const token = window.localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || '';
+    if (token && isJwtExpired(token)) {
+      window.localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      window.localStorage.removeItem(AUTH_METHOD_STORAGE_KEY);
+      notify();
+      return '';
+    }
+    return token;
   } catch {
     return '';
   }
@@ -158,8 +200,12 @@ export function clearAuthToken(): void {
 
 export function authHeaders(base: Record<string, string> = {}): Record<string, string> {
   const token = getAuthToken();
-  if (!token) return { ...base };
-  return { ...base, Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = {
+    'ngrok-skip-browser-warning': 'true',
+    ...base,
+  };
+  if (!token) return headers;
+  return { ...headers, Authorization: `Bearer ${token}` };
 }
 
 export function appendAuthToken(url: string): string {

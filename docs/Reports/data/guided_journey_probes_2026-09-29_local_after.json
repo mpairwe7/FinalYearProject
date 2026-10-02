@@ -1,0 +1,723 @@
+{
+ "base": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
+ "run_at": "2026-09-29T07:22:23+0900",
+ "results": [
+  {
+   "name": "how-to return answered with guide offer",
+   "turns": [
+    "How do I file my return?"
+   ],
+   "workflow": null,
+   "offer": "Guide me step by step through Return Filing",
+   "retrieval_mode": null,
+   "escalated": false,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.7,
+   "observed": {
+    "retrieval_mode": "faq_priority",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Guide me step by step through Return Filing"
+    ],
+    "reply_start": "To file your annual tax return:\n\n1. Login ura.go.ug with TIN/password → e-services → e-returns → select return type and download template\n2. Enable macros, fill"
+   }
+  },
+  {
+   "name": "help-me return starts flow, no stress opener",
+   "turns": [
+    "Help me file my return"
+   ],
+   "workflow": "Return Filing",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [
+    "I understand this can feel stressful"
+   ],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Return Filing",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Return Filing process step by step.\n\nAre you filing as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "VAT walkthrough starts return flow",
+   "turns": [
+    "Walk me through filing my VAT return"
+   ],
+   "workflow": "Return Filing",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Return Filing",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Return Filing process step by step.\n\nAre you filing as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "help-me TIN starts flow, no stress opener",
+   "turns": [
+    "Help me register for a TIN"
+   ],
+   "workflow": "TIN Registration",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [
+    "I understand this can feel stressful"
+   ],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "TIN Registration",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the TIN Registration process step by step.\n\nAre you registering as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "PRN guide starts payment flow",
+   "turns": [
+    "Guide me to generate a PRN"
+   ],
+   "workflow": "Payment Assistance",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Payment Assistance",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Payment Assistance process step by step.\n\nWhich tax type or liability are you paying for?\n"
+   }
+  },
+  {
+   "name": "customs guide starts flow",
+   "turns": [
+    "Guide me through customs clearance"
+   ],
+   "workflow": "Customs Clearance",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Customs Clearance",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Customs Clearance process step by step.\n\nIs this an **import** or an **export** clearance?\n"
+   }
+  },
+  {
+   "name": "objection help starts flow",
+   "turns": [
+    "Help me file an objection"
+   ],
+   "workflow": "Objection or Dispute",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Objection or Dispute",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Objection or Dispute process step by step.\n\nWhat is the assessment, objection, or notice reference number?\n"
+   }
+  },
+  {
+   "name": "PAYE calculator",
+   "turns": [
+    "How much PAYE will I pay?"
+   ],
+   "workflow": "PAYE Calculator",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "PAYE Calculator",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can work that out for you — I just need a detail or two.\n\n_I'll assume: resident employee (say “non-resident” if not) — correct me if that's wrong._\n\nWhat is "
+   }
+  },
+  {
+   "name": "TCC need answered with guide offer",
+   "turns": [
+    "I need a tax clearance certificate"
+   ],
+   "workflow": null,
+   "offer": "Guide me step by step through Tax Clearance Certificate",
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 5.2,
+   "observed": {
+    "retrieval_mode": "faq_priority",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Guide me step by step through Tax Clearance Certificate"
+    ],
+    "reply_start": "Here's the most relevant guidance I found in official URA sources:\n\nTo verify a return filing acknowledgement or document:\n\n1. Go to portal.ura.go.ug > e-Servic"
+   }
+  },
+  {
+   "name": "TCC guide starts journey",
+   "turns": [
+    "Guide me through getting a tax clearance certificate"
+   ],
+   "workflow": "Tax Clearance Certificate",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Tax Clearance Certificate",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Tax Clearance Certificate process step by step.\n\nIs the certificate for an **individual**, a **company** or a **partnership**?\n"
+   }
+  },
+  {
+   "name": "vehicle how-to answered with guide offer",
+   "turns": [
+    "How do I register my motor vehicle?"
+   ],
+   "workflow": null,
+   "offer": "Guide me step by step through Motor Vehicle Registration",
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 4.3,
+   "observed": {
+    "retrieval_mode": "hybrid",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Guide me step by step through Motor Vehicle Registration"
+    ],
+    "reply_start": "To register your motor vehicle, follow these steps:\n\n1. **Access the Portal**: Log in to ura.go.ug with your TIN and password to access e-services.\n2. **Motor V"
+   }
+  },
+  {
+   "name": "imported car guide starts journey",
+   "turns": [
+    "Guide me through registering my imported car"
+   ],
+   "workflow": "Motor Vehicle Registration",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Motor Vehicle Registration",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Motor Vehicle Registration process step by step.\n\nIs this a **first registration** (a vehicle entering Uganda, or never registered h"
+   }
+  },
+  {
+   "name": "expired PRN answered, not escalated",
+   "turns": [
+    "My PRN has expired, what do I do?"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": false,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 3.8,
+   "observed": {
+    "retrieval_mode": "faq_priority",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [],
+    "reply_start": "Here's the most relevant guidance I found in official URA sources:\n\nIf your **PRN** has expired after its 21-day validity: Go to ura.go.ug > e-Services > Make a"
+   }
+  },
+  {
+   "name": "explicit human request escalates",
+   "turns": [
+    "I want to talk to a person"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": true,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.6,
+   "observed": {
+    "retrieval_mode": "escalated",
+    "workflow": null,
+    "escalation_required": true,
+    "locale": "en",
+    "next_actions": [
+     "Prepare the listed reference details before speaking to a URA officer.",
+     "Use the URA Contact Centre if you need immediate human assistance."
+    ],
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket fbde0fea) — meanwhile, you can also reach URA directly at https:"
+   }
+  },
+  {
+   "name": "account-state question escalates",
+   "turns": [
+    "What is my balance?"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": true,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "escalated",
+    "workflow": null,
+    "escalation_required": true,
+    "locale": "en",
+    "next_actions": [
+     "Prepare the listed reference details before speaking to a URA officer.",
+     "Use the URA Contact Centre if you need immediate human assistance."
+    ],
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 869bcd15) — meanwhile, you can also reach URA directly at https:"
+   }
+  },
+  {
+   "name": "crisis gets crisis lines",
+   "turns": [
+    "I can't pay this tax, I want to kill myself"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": "crisis_support",
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [
+    "999",
+    "0800 21 21 21"
+   ],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "crisis_support",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Talk to an officer"
+    ],
+    "reply_start": "I'm really sorry you're feeling this way. You don't have to face this alone, and your safety matters more than any tax matter.\n\n- If you are in danger right now"
+   }
+  },
+  {
+   "name": "feeling-only turn gets a clarifying question",
+   "turns": [
+    "This is useless"
+   ],
+   "workflow": null,
+   "offer": "File a return",
+   "retrieval_mode": "clarification",
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "clarification",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "File a return",
+     "Make a payment",
+     "Register for a TIN",
+     "Talk to an officer"
+    ],
+    "reply_start": "I'm sorry for the trouble — let's get this sorted out together.\n\nWhat are you trying to do: file a return, make a payment, register for a TIN, or something else"
+   }
+  },
+  {
+   "name": "contraction still reads as a feeling",
+   "turns": [
+    "I'm confused"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": "clarification",
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "clarification",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "File a return",
+     "Make a payment",
+     "Register for a TIN",
+     "Talk to an officer"
+    ],
+    "reply_start": "What are you trying to do: file a return, make a payment, register for a TIN, or something else? Tell me where it stops and I'll take it from there."
+   }
+  },
+  {
+   "name": "a past event does not start a flow",
+   "turns": [
+    "I filed my return yesterday but the portal shows an error"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [
+    "I can guide you through the Return Filing process"
+   ],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "escalated",
+    "workflow": null,
+    "escalation_required": true,
+    "locale": "en",
+    "next_actions": [
+     "Prepare the listed reference details before speaking to a URA officer.",
+     "Use the URA Contact Centre if you need immediate human assistance."
+    ],
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket cd1d3fed) — meanwhile, you can also reach URA directly at https:"
+   }
+  },
+  {
+   "name": "nil return starts return filing",
+   "turns": [
+    "Help me submit the nil return for my company"
+   ],
+   "workflow": "Return Filing",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Return Filing",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Return Filing process step by step.\n\nAre you filing as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "asking for another flow inside one switches to it",
+   "turns": [
+    "Guide me through getting a tax clearance certificate",
+    "help me file my return"
+   ],
+   "workflow": "Return Filing",
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 1.0,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "Return Filing",
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "I can guide you through the Return Filing process step by step.\n\nAre you filing as an **individual**, a **company**, or an **NGO**?\n"
+   }
+  },
+  {
+   "name": "account-locked plea still escalates",
+   "turns": [
+    "Please help me, my account is locked"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": true,
+   "locale": null,
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 0.5,
+   "observed": {
+    "retrieval_mode": "escalated",
+    "workflow": null,
+    "escalation_required": true,
+    "locale": "en",
+    "next_actions": [
+     "Prepare the listed reference details before speaking to a URA officer.",
+     "Use the URA Contact Centre if you need immediate human assistance."
+    ],
+    "reply_start": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 1ecc33a5) — meanwhile, you can also reach URA directly at https:"
+   }
+  },
+  {
+   "name": "sustained frustration brings in an officer",
+   "turns": [
+    "This is useless",
+    "It still does not work",
+    "It still does not work"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": null,
+   "officer": true,
+   "reply_contains": [],
+   "reply_lacks": [],
+   "passed": true,
+   "misses": [],
+   "seconds": 1.5,
+   "observed": {
+    "retrieval_mode": "clarification",
+    "workflow": null,
+    "escalation_required": false,
+    "locale": "en",
+    "next_actions": [
+     "Talk to an officer",
+     "File a return",
+     "Make a payment",
+     "Register for a TIN"
+    ],
+    "reply_start": "It sounds like this still isn't working for you. An officer can look at it with you: tap **Talk to an officer**. Or tell me the task and the step where it stops"
+   }
+  },
+  {
+   "name": "Luganda TIN question answered in Luganda",
+   "turns": [
+    "Nnina okwewandiisa otya okufuna TIN mu Uganda?"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": "lg",
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [
+    "Happy to help"
+   ],
+   "passed": true,
+   "misses": [],
+   "seconds": 5.3,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "TIN Registration Help",
+    "escalation_required": false,
+    "locale": "lg",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "Ndi musanyufu okukuyamba okwewandiisa ofune nnamba ya TIN!\n\nOkusobola okwewandiisa ofune nnamba ya TIN ne URA mu Uganda:\n\n1. Genda ku mukutu gwa URA ogwa yintan"
+   }
+  },
+  {
+   "name": "Kiswahili TIN question answered in Kiswahili",
+   "turns": [
+    "Nitasajili vipi ili kupata namba ya TIN nchini Uganda?"
+   ],
+   "workflow": null,
+   "offer": null,
+   "retrieval_mode": null,
+   "escalated": null,
+   "locale": "sw",
+   "officer": null,
+   "reply_contains": [],
+   "reply_lacks": [
+    "Happy to help"
+   ],
+   "passed": false,
+   "misses": [
+    "reply contains 'Happy to help'"
+   ],
+   "seconds": 1.5,
+   "observed": {
+    "retrieval_mode": "workflow",
+    "workflow": "TIN Registration Help",
+    "escalation_required": false,
+    "locale": "sw",
+    "next_actions": [
+     "Reply with the requested detail to continue the guided process.",
+     "Send 'cancel' if you want to leave this workflow and ask a different question."
+    ],
+    "reply_start": "Happy to help you register for a TIN!\n\nTo register for a TIN with URA in Uganda: 1. Visit the official URA web portal at https://ura.go.ug 2. Navigate to **eSer"
+   }
+  }
+ ]
+}

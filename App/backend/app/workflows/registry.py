@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .loader import WorkflowDefinition, WorkflowStep, load_workflow
+from .loader import WorkflowDefinition, WorkflowStep, default_step_title, load_workflow
 from .slots import SlotResolver, validate_slot
 
 logger = logging.getLogger(__name__)
@@ -29,6 +29,15 @@ class WorkflowTurn:
     tool_call: dict[str, Any] | None = None
     slot_name: str = ""
     slot_value: object = None
+    step_id: str = ""
+    step_title: str = ""
+    step_index: int = 0
+    total_steps: int = 0
+    ui_widget: str = "text"
+    options: list[str] = field(default_factory=list)
+    portal_action: dict[str, Any] | None = None
+    all_steps: list[dict[str, Any]] = field(default_factory=list)
+    resources: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -75,6 +84,120 @@ def _interpolate_args(template: dict[str, Any], slots: dict[str, Any]) -> dict[s
     return args
 
 
+def compute_workflow_progress(
+    wf: WorkflowDefinition,
+    session: WorkflowSession,
+    current_step_id: str = "",
+) -> tuple[int, int, list[dict[str, str]]]:
+    """Where the session stands: ``(1-based index, applicable steps, track)``.
+
+    Only steps whose ``when`` holds for the slots so far are counted, so the
+    total can grow once an answer opens a branch (choosing *individual* adds
+    the NIN step). Without *current_step_id* the current step is the one the
+    session is parked on. Track entries are ``{id, title, status}`` only — a
+    step's options, links and portal button travel once, on the turn itself.
+    """
+    applicable = [s for s in wf.steps if _eval_condition(s.when, session.slots)]
+    total = len(applicable)
+    if total == 0:
+        return 0, 0, []
+
+    if not current_step_id and not session.completed:
+        current_step_id = next(
+            (s.id for s in wf.steps[session.current_step_idx :] if _eval_condition(s.when, session.slots)),
+            "",
+        )
+    current = None if session.completed else next(
+        (i for i, s in enumerate(applicable) if s.id == current_step_id), None
+    )
+
+    track: list[dict[str, str]] = []
+    for i, s in enumerate(applicable):
+        if current is None or i < current:
+            status = "completed"
+        elif i == current:
+            status = "current"
+        elif s.slot and session.slots.get(s.slot) not in ("", None):
+            status = "completed"  # prefilled from the taxpayer's profile
+        else:
+            status = "pending"
+        track.append({"id": s.id, "title": s.title or default_step_title(s.id), "status": status})
+
+    return (total if current is None else current + 1), total, track
+
+
+def _make_turn(
+    wf: WorkflowDefinition,
+    session: WorkflowSession,
+    step: WorkflowStep | None = None,
+    *,
+    question: str = "",
+    is_complete: bool = False,
+    validation_error: str = "",
+    tool_call: dict[str, Any] | None = None,
+    slot_name: str = "",
+) -> WorkflowTurn:
+    """A :class:`WorkflowTurn` carrying *step*'s stepper metadata and the progress track."""
+    step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
+    return WorkflowTurn(
+        question=question,
+        is_complete=is_complete,
+        validation_error=validation_error,
+        tool_call=tool_call,
+        slot_name=slot_name or (step.slot if step else ""),
+        step_id=step.id if step else "",
+        step_title=(step.title or default_step_title(step.id)) if step else "",
+        step_index=step_index,
+        total_steps=total_steps,
+        ui_widget=step.ui_widget if step else "text",
+        options=list(step.options) if step else [],
+        portal_action=dict(step.portal_action) if step and step.portal_action else None,
+        all_steps=all_steps,
+        resources=list(step.resources) if step else [],
+    )
+
+
+#: The "-ing" forms people use for the task a trigger names. Triggers are
+#: written with the base verb ("file a return"), so "filing my VAT return"
+#: never matched, and an explicit "walk me through filing my VAT return" fell
+#: through to a VAT explainer instead of the Return Filing flow (measured on
+#: the local stack, 2026-09-29).
+#:
+#: Past tense is deliberately NOT folded. "I filed my return yesterday but the
+#: portal shows an error" and "I registered for a TIN and lost the
+#: certificate" report something already done; folding them to "file my
+#: return" / "register for a tin" started a fresh guided flow instead of
+#: answering the problem (code review, 2026-09-29).
+_VERB_FORMS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bfiling\b"), "file"),
+    (re.compile(r"\bregistering\b"), "register"),
+    (re.compile(r"\bsubmitting\b"), "submit"),
+    (re.compile(r"\bpaying\b"), "pay"),
+    (re.compile(r"\bgenerating\b"), "generate"),
+    (re.compile(r"\bclearing\b"), "clear"),
+    (re.compile(r"\bobjecting\b"), "object"),
+    (re.compile(r"\bgetting\b"), "get"),
+    (re.compile(r"\bapplying\b"), "apply"),
+)
+
+#: A tax-type word between the determiner and "return" — "my VAT return" is
+#: still "my return" for the purpose of finding the filing flow. "nil" is not
+#: folded: "nil return" is itself a trigger phrase, and folding it away left
+#: "submit the nil return" matching nothing.
+_RETURN_QUALIFIER_RE = re.compile(
+    r"\b(my|a|the|our)\s+(?:vat|paye|income\s+tax|corporation\s+tax|withholding\s+tax"
+    r"|rental(?:\s+income)?\s+tax|annual|monthly|provisional)\s+return\b"
+)
+
+
+def _normalise_for_triggers(text: str) -> str:
+    """Lower-case, collapse spaces, base verbs, drop the tax type before "return"."""
+    q = " ".join((text or "").lower().split())
+    for pattern, base in _VERB_FORMS:
+        q = pattern.sub(base, q)
+    return _RETURN_QUALIFIER_RE.sub(r"\1 return", q)
+
+
 class WorkflowRegistry:
     """Global workflow registry (module-level singleton)."""
 
@@ -95,11 +218,22 @@ class WorkflowRegistry:
 
     @classmethod
     def match_trigger(cls, query: str) -> WorkflowDefinition | None:
-        """Return the first workflow whose trigger phrases match *query*."""
-        q = query.lower()
+        """Return the first workflow whose trigger phrases match *query*.
+
+        Both sides are normalised (:func:`_normalise_for_triggers`), and a
+        flow's own name counts as a trigger — "guide me through Return
+        Filing" is the most explicit way to ask for it, and it is the text
+        the guided-mode offer puts on its button. Flows with no trigger
+        phrases (the calculators) are started programmatically only, and a
+        name match does not change that.
+        """
+        q = _normalise_for_triggers(query)
         for wf in cls._workflows.values():
-            for phrase in wf.trigger_phrases:
-                if phrase.lower() in q:
+            phrases = list(wf.trigger_phrases)
+            if phrases and wf.name:
+                phrases.append(wf.name)
+            for phrase in phrases:
+                if _normalise_for_triggers(phrase) in q:
                     return wf
         return None
 
@@ -129,6 +263,14 @@ class WorkflowRegistry:
         return None
 
     @classmethod
+    def current_turn(cls, session: WorkflowSession) -> WorkflowTurn | None:
+        """Stepper metadata for the step *session* is parked on, without advancing it."""
+        wf = cls._workflows.get(session.workflow_id)
+        if wf is None:
+            return None
+        return _make_turn(wf, session, cls.pending_step(session), is_complete=session.completed)
+
+    @classmethod
     def advance(
         cls,
         session: WorkflowSession,
@@ -147,7 +289,7 @@ class WorkflowRegistry:
         """
         wf = cls._workflows.get(session.workflow_id)
         if not wf or session.completed:
-            return WorkflowTurn(is_complete=True)
+            return _make_turn(wf, session, is_complete=True) if wf else WorkflowTurn(is_complete=True)
 
         # Find the next applicable step (skip steps whose condition is false)
         step: WorkflowStep | None = None
@@ -160,7 +302,7 @@ class WorkflowRegistry:
 
         if step is None:
             session.completed = True
-            return WorkflowTurn(is_complete=True)
+            return _make_turn(wf, session, is_complete=True)
 
         # Prefilled slots from profile / consented memory should skip the
         # question entirely so guided flows feel stateful rather than repetitive.
@@ -174,18 +316,21 @@ class WorkflowRegistry:
         # extra dummy user turn.
         if step.question and not step.slot and not step.tool:
             session.current_step_idx += 1
-            session.completed = session.current_step_idx >= len(wf.steps)
-            return WorkflowTurn(question=step.question, is_complete=session.completed)
+            session.completed = step.ends_flow or session.current_step_idx >= len(wf.steps)
+            return _make_turn(wf, session, step, question=step.question, is_complete=session.completed)
 
         # First call for this step (no user input yet) — emit the question
         if not user_input and step.question and step.slot:
-            return WorkflowTurn(question=step.question, slot_name=step.slot)
+            return _make_turn(wf, session, step, question=step.question, slot_name=step.slot)
 
         # Tool step (no slot to fill, just dispatch)
         if step.tool and not step.slot:
             args = _interpolate_args(step.args, session.slots)
             session.current_step_idx += 1
-            return WorkflowTurn(
+            return _make_turn(
+                wf,
+                session,
+                step,
                 tool_call={"name": step.tool, "arguments": args},
                 slot_name=step.id,
             )
@@ -194,7 +339,10 @@ class WorkflowRegistry:
         if step.slot and step.validator:
             is_valid, normalised, error = validate_slot(user_input, step.validator, resolver)
             if not is_valid:
-                return WorkflowTurn(
+                return _make_turn(
+                    wf,
+                    session,
+                    step,
                     question=f"{error}\n\n{step.question}",
                     validation_error=error,
                     slot_name=step.slot,
@@ -215,22 +363,25 @@ class WorkflowRegistry:
             if nxt.tool and not nxt.slot:
                 args = _interpolate_args(nxt.args, session.slots)
                 session.current_step_idx += 1
-                return WorkflowTurn(
+                return _make_turn(
+                    wf,
+                    session,
+                    nxt,
                     tool_call={"name": nxt.tool, "arguments": args},
                     slot_name=nxt.id,
                 )
 
             if nxt.question and not nxt.slot and not nxt.tool:
                 session.current_step_idx += 1
-                session.completed = session.current_step_idx >= len(wf.steps)
-                return WorkflowTurn(question=nxt.question, is_complete=session.completed)
+                session.completed = nxt.ends_flow or session.current_step_idx >= len(wf.steps)
+                return _make_turn(wf, session, nxt, question=nxt.question, is_complete=session.completed)
 
             if nxt.question:
-                return WorkflowTurn(question=nxt.question, slot_name=nxt.slot)
+                return _make_turn(wf, session, nxt, question=nxt.question, slot_name=nxt.slot)
             break
 
         session.completed = True
-        return WorkflowTurn(is_complete=True)
+        return _make_turn(wf, session, is_complete=True)
 
 
 def auto_load_flows(flows_dir: Path) -> int:

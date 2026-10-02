@@ -1,0 +1,85 @@
+{
+ "date": "2026-09-24",
+ "ws": "ws://127.0.0.1:8083/v1/calls/stream",
+ "passed": 2,
+ "scenarios": 2,
+ "first_audio_ms_p50": 4144.5,
+ "results": [
+  {
+   "name": "9_barge_in_greeting",
+   "note": "Talking over Gemini's greeting stops it, and the question is answered.",
+   "turns": [
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 2782,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 7481,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "The standard Value Added Tax (VAT) rate in Uganda is 18%."
+     ],
+     "caller": [],
+     "status": [],
+     "barge": {
+      "talking_at_barge": true,
+      "bot_stop_ms": 939,
+      "interrupt_ms": 961,
+      "stopped": true
+     }
+    }
+   ],
+   "call_id": "call_d76e98e9e1b7",
+   "language_detection": true,
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "9_barge_in_greeting",
+   "note": "Talking over Gemini's greeting stops it, and the question is answered.",
+   "turns": [
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 5507,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 12336,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "The standard Value Added Tax (VAT) rate in Uganda is 18%. Is there anything else I can help you with today?"
+     ],
+     "caller": [],
+     "status": [],
+     "barge": {
+      "talking_at_barge": true,
+      "bot_stop_ms": 975,
+      "interrupt_ms": 1009,
+      "stopped": true
+     }
+    }
+   ],
+   "call_id": "call_7b5f59ecc11f",
+   "language_detection": true,
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  }
+ ]
+}

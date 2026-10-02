@@ -42,6 +42,7 @@ _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
 _FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
 _SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 _TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
+_WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "365")))
 
 _pool: Any = None
 
@@ -156,6 +157,10 @@ def init_db() -> None:
         resolved_at         DOUBLE PRECISION DEFAULT 0,
         assignee            TEXT DEFAULT '',
         staff_note          TEXT DEFAULT '',
+        locale              TEXT DEFAULT 'en',
+        modality            TEXT DEFAULT 'text',
+        user_query_en       TEXT DEFAULT '',
+        officer_reply_localized TEXT DEFAULT '',
         created_at          DOUBLE PRECISION NOT NULL,
         updated_at          DOUBLE PRECISION NOT NULL
     );
@@ -265,6 +270,7 @@ def init_db() -> None:
         status           TEXT NOT NULL DEFAULT 'active'
                          CHECK(status IN ('active','completed','cancelled')),
         current_step_idx INTEGER NOT NULL DEFAULT 0,
+        user_id          TEXT NOT NULL DEFAULT '',
         slots_json       TEXT DEFAULT '{}',
         last_prompt      TEXT DEFAULT '',
         created_at       DOUBLE PRECISION NOT NULL,
@@ -294,9 +300,32 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contexts TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            # Sessions from before the column existed take their owner from
+            # the conversation, once: new rows are written with it.
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+                "AND table_name = 'workflow_sessions' AND column_name = 'user_id'"
+            )
+            workflow_owner_missing = cur.fetchone() is None
+            cur.execute("ALTER TABLE workflow_sessions ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT ''")
+            if workflow_owner_missing:
+                cur.execute(
+                    """UPDATE workflow_sessions AS ws SET user_id = c.user_id
+                       FROM (
+                         SELECT DISTINCT ON (conversation_id) conversation_id, user_id
+                         FROM conversations WHERE user_id != ''
+                         ORDER BY conversation_id, created_at DESC
+                       ) AS c
+                       WHERE ws.conversation_id = c.conversation_id AND ws.user_id = ''"""
+                )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            # Which route / journey step produced a rated reply (journey analytics).
+            for _col in ("retrieval_mode", "workflow_id", "step_id"):
+                cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} TEXT DEFAULT ''")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
             cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
@@ -308,6 +337,10 @@ def init_db() -> None:
                 ("first_response_at", "DOUBLE PRECISION DEFAULT 0"),
                 ("resolved_at", "DOUBLE PRECISION DEFAULT 0"),
                 ("team", "TEXT DEFAULT ''"),
+                ("locale", "TEXT DEFAULT 'en'"),
+                ("modality", "TEXT DEFAULT 'text'"),
+                ("user_query_en", "TEXT DEFAULT ''"),
+                ("officer_reply_localized", "TEXT DEFAULT ''"),
             ):
                 cur.execute(f"ALTER TABLE tickets ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
             cur.execute(
@@ -336,6 +369,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
         ("conversation_topics", _CONVERSATION_TTL_DAYS, "updated_at"),
         ("ticket_presence", 1, "updated_at"),
+        ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS, "updated_at"),
     ]
     deleted: dict[str, int] = {}
     with pool.connection() as conn:
@@ -344,7 +378,7 @@ def cleanup_expired_data() -> dict[str, int]:
             try:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"DELETE FROM {table} WHERE {col} < %s",  # noqa: S608 whitelist
+                        f"DELETE FROM {table} WHERE {col} < %s",  # nosec B608 # noqa: S608 whitelist
                         (cutoff,),
                     )
                     deleted[table] = cur.rowcount
@@ -353,8 +387,25 @@ def cleanup_expired_data() -> dict[str, int]:
                 conn.rollback()
                 logger.exception("TTL cleanup failed for %s", table)
                 deleted[table] = 0
+        # As on SQLite: a journey's outcome stays for the funnel, the answers
+        # it collected go when the conversation does.
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE workflow_sessions SET slots_json = '{}', last_prompt = '' "
+                    "WHERE updated_at < %s AND (slots_json != '{}' OR last_prompt != '')",
+                    (now - _CONVERSATION_TTL_DAYS * 86400,),
+                )
+                deleted["workflow_session_content"] = cur.rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            logger.exception("TTL cleanup failed for workflow session content")
+            deleted["workflow_session_content"] = 0
         ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
         try:
+            from .voice_consent import retention_policy
+            voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
             with conn.cursor() as cur:
                 cur.execute(
                     "DELETE FROM tickets WHERE status IN ('resolved', 'wontfix') "
@@ -362,10 +413,26 @@ def cleanup_expired_data() -> dict[str, int]:
                     (ticket_cutoff,),
                 )
                 deleted["tickets"] = cur.rowcount
+
+                # Voice receptionist tables retention
+                cur.execute(
+                    "DELETE FROM voice_call_turns WHERE created_at < %s",
+                    (voice_transcript_cutoff,),
+                )
+                deleted["voice_call_turns"] = cur.rowcount
+
+                conv_cutoff = voice_transcript_cutoff
+                cur.execute(
+                    """DELETE FROM voice_calls
+                       WHERE ((ticket_id IS NULL OR ticket_id = '') AND started_at < %s)
+                          OR (ticket_id IS NOT NULL AND ticket_id != '' AND started_at < %s)""",
+                    (conv_cutoff, ticket_cutoff),
+                )
+                deleted["voice_calls"] = cur.rowcount
             conn.commit()
         except Exception:
             conn.rollback()
-            logger.exception("TTL cleanup failed for tickets")
+            logger.exception("TTL cleanup failed for tickets and voice calls")
             deleted["tickets"] = 0
     return deleted
 
@@ -381,6 +448,9 @@ def save_feedback(
     user_query: str = "",
     bot_reply: str = "",
     user_id: str = "",
+    retrieval_mode: str = "",
+    workflow_id: str = "",
+    step_id: str = "",
 ) -> dict[str, Any]:
     pool = _get_pool()
     if pool is None:
@@ -396,9 +466,12 @@ def save_feedback(
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO feedback (id, message_id, session_id, user_id, rating,
-                    comment, user_query, bot_reply, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now),
+                    comment, user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (
+                    fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
+                    retrieval_mode or "", workflow_id or "", step_id or "",
+                ),
             )
         conn.commit()
     return {"id": fb_id, "message_id": message_id, "rating": rating, "created_at": now}
@@ -424,6 +497,39 @@ def update_feedback_comment(message_id: str, comment: str, user_id: str = "") ->
             rowcount = cur.rowcount
         conn.commit()
     return rowcount > 0
+
+
+def get_journey_funnel(days: int = 30, abandon_after_s: float = 86400.0) -> dict[str, Any]:
+    """Postgres twin of ``database.get_journey_funnel`` (same shape)."""
+    pool = _get_pool()
+    if pool is None:
+        return {"sessions": [], "feedback": []}
+    now = time.time()
+    cutoff = now - days * 86400
+    stale_before = now - abandon_after_s
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT workflow_id, status, current_step_idx,
+                      CASE WHEN status = 'active' AND updated_at < %s THEN 1 ELSE 0 END AS stale,
+                      COUNT(*)
+               FROM workflow_sessions WHERE created_at >= %s
+               GROUP BY workflow_id, status, current_step_idx, stale""",
+            (stale_before, cutoff),
+        )
+        sessions = [
+            {"workflow_id": r[0], "status": r[1], "step_idx": r[2], "stale": r[3], "n": r[4]}
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            """SELECT workflow_id, step_id, rating, COUNT(*)
+               FROM feedback WHERE created_at >= %s AND workflow_id <> ''
+               GROUP BY workflow_id, step_id, rating""",
+            (cutoff,),
+        )
+        feedback = [
+            {"workflow_id": r[0], "step_id": r[1], "rating": r[2], "n": r[3]} for r in cur.fetchall()
+        ]
+    return {"sessions": sessions, "feedback": feedback}
 
 
 def get_feedback_summary(days: int = 30) -> dict[str, Any]:
@@ -646,26 +752,69 @@ def get_recent_turns(
     session_id: str | None = None,
     conversation_id: str | None = None,
     limit: int = 5,
+    user_id: str | None = None,
 ) -> list[dict[str, str]]:
     pool = _get_pool()
     if pool is None:
         return []
     if conversation_id:
-        sql = """SELECT user_message, bot_reply FROM conversations
-                   WHERE conversation_id = %s
-                   ORDER BY created_at DESC LIMIT %s"""
-        args: tuple[str, int] = (conversation_id, limit)
+        if user_id:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                       WHERE conversation_id = %s AND user_id = %s
+                       ORDER BY created_at DESC LIMIT %s"""
+            args: tuple[Any, ...] = (conversation_id, user_id, limit)
+        else:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                       WHERE conversation_id = %s
+                       ORDER BY created_at DESC LIMIT %s"""
+            args = (conversation_id, limit)
     elif session_id:
-        sql = """SELECT user_message, bot_reply FROM conversations
-                   WHERE session_id = %s
-                   ORDER BY created_at DESC LIMIT %s"""
-        args = (session_id, limit)
+        if user_id:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                       WHERE session_id = %s AND user_id = %s
+                       ORDER BY created_at DESC LIMIT %s"""
+            args = (session_id, user_id, limit)
+        else:
+            sql = """SELECT user_message, bot_reply FROM conversations
+                       WHERE session_id = %s
+                       ORDER BY created_at DESC LIMIT %s"""
+            args = (session_id, limit)
     else:
         return []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, args)
         rows = cur.fetchall()
     return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
+
+
+def get_conversation_context(
+    session_id: str | None = None,
+    conversation_id: str | None = None,
+    recent_limit: int = 6,
+    max_history: int = 25,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Retrieve multi-turn conversation history and build rolling context & summary."""
+    from .context_manager import RollingContextManager, context_manager
+
+    turns = get_recent_turns(
+        session_id=session_id,
+        conversation_id=conversation_id,
+        limit=max_history,
+        user_id=user_id,
+    )
+    mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
+    ctx = mgr.build_context(
+        turns,
+        conversation_id=conversation_id or session_id or "",
+    )
+    return {
+        "recent_turns": ctx.recent_turns,
+        "context_summary": ctx.context_summary,
+        "active_entities": ctx.active_entities,
+        "total_turns": ctx.total_turns,
+        "all_turns": ctx.all_turns,
+    }
 
 
 def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
@@ -835,7 +984,8 @@ _TICKET_COLUMNS = (
     "id, conversation_id, session_id, status, priority, reason, "
     "user_query, bot_reply, handoff_json, response_judge_json, "
     "assignee, staff_note, created_at, updated_at, user_id, team, "
-    "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at"
+    "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at, "
+    "locale, modality, user_query_en, officer_reply_localized"
 )
 #: Detail view — the transcript is the point of the ticket.
 _TICKET_COLUMNS_FULL = _TICKET_COLUMNS + ", transcript_json"
@@ -846,7 +996,7 @@ def _row_to_ticket(row: tuple[Any, ...], columns: str = _TICKET_COLUMNS) -> dict
     ticket = dict(zip(columns.replace(" ", "").split(","), row, strict=True))
     from .database import _redact_ticket_value
 
-    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply"):
+    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply", "user_query_en", "officer_reply_localized"):
         if field in ticket:
             ticket[field] = _redact_ticket_value(ticket[field])
     ticket["handoff"] = _redact_ticket_value(_loads(ticket.pop("handoff_json", "{}"), {}))
@@ -878,6 +1028,10 @@ def create_ticket(
     transcript: list[dict[str, Any]] | None = None,
     user_id: str = "",
     team: str = "",
+    locale: str = "en",
+    modality: str = "text",
+    user_query_en: str = "",
+    officer_reply_localized: str = "",
 ) -> dict[str, Any]:
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r -> 'normal'", priority)
@@ -886,6 +1040,8 @@ def create_ticket(
 
     reason = _redact_ticket_value(reason)
     user_query = _redact_ticket_value(user_query)
+    user_query_en = _redact_ticket_value(user_query_en)
+    officer_reply_localized = _redact_ticket_value(officer_reply_localized)
     bot_reply = _redact_ticket_value(bot_reply)
     handoff = _redact_ticket_value(handoff or {})
     response_judge = _redact_ticket_value(response_judge or {})
@@ -902,8 +1058,9 @@ def create_ticket(
                                         reason, user_query, bot_reply,
                                         handoff_json, response_judge_json, transcript_json,
                                         user_id, team, assignee, staff_note,
+                                        locale, modality, user_query_en, officer_reply_localized,
                                         created_at, updated_at)
-                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s)""",
+                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s,%s,%s,%s,%s)""",
                 (
                     ticket_id,
                     conversation_id,
@@ -917,6 +1074,10 @@ def create_ticket(
                     json.dumps(transcript),
                     user_id,
                     team,
+                    locale or "en",
+                    modality or "text",
+                    user_query_en or "",
+                    officer_reply_localized or "",
                     now,
                     now,
                 ),
@@ -932,6 +1093,10 @@ def create_ticket(
         "response_judge": response_judge,
         "transcript": transcript,
         "team": team,
+        "locale": locale or "en",
+        "modality": modality or "text",
+        "user_query_en": user_query_en or "",
+        "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
     }
 
@@ -942,13 +1107,17 @@ def list_tickets(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    locale: str | None = None,
+    modality: str | None = None,
+    q: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
     if pool is None:
         return []
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
-    sql = f"SELECT {_TICKET_COLUMNS} FROM tickets"
+    sql = f"SELECT {_TICKET_COLUMNS} FROM tickets"  # nosec B608 # noqa: S608
     params: list[Any] = []
     if status:
         sql += " WHERE status = %s"
@@ -959,6 +1128,23 @@ def list_tickets(
     if team:
         sql += " AND team = %s" if (status or params) else " WHERE team = %s"
         params.append(team)
+    if locale:
+        sql += " AND locale = %s" if (status or params) else " WHERE locale = %s"
+        params.append(locale)
+    if modality:
+        sql += " AND modality = %s" if (status or params) else " WHERE modality = %s"
+        params.append(modality)
+    if q and q.strip():
+        term = q.strip().lstrip("#")
+        if term.upper().startswith("TIC-"):
+            term = term[4:]
+        q_like = f"%{term}%"
+        clause = "(id ILIKE %s OR reason ILIKE %s OR user_query ILIKE %s OR assignee ILIKE %s OR team ILIKE %s OR staff_note ILIKE %s OR officer_reply ILIKE %s OR transcript_json ILIKE %s)"
+        sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
+        params.extend([q_like] * 8)
+    if user_id:
+        sql += " AND user_id = %s" if (" WHERE " in sql) else " WHERE user_id = %s"
+        params.append(user_id)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
@@ -971,6 +1157,33 @@ def list_tickets(
         return [_row_to_ticket(r) for r in cur.fetchall()]
 
 
+def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
+    """Postgres mirror of :func:`database.append_taxpayer_reply`."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return None
+    transcript = list(ticket.get("transcript") or [])
+    now = time.time()
+    turn = {
+        "user_message": message.strip()[:2000],
+        "bot_reply": "",
+        "created_at": now,
+        "sender": "taxpayer",
+    }
+    transcript.append(turn)
+    transcript_json = json.dumps(transcript)
+    pool = _get_pool()
+    if pool is None:
+        return None
+    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE tickets SET transcript_json = %s, status = %s, updated_at = %s WHERE id = %s",
+            (transcript_json, new_status, now, ticket_id),
+        )
+    return get_ticket(ticket_id)
+
+
 def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
     """Postgres mirror of :func:`database.find_open_ticket`."""
     pool = _get_pool()
@@ -980,7 +1193,7 @@ def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
         cur.execute(
             f"""SELECT {_TICKET_COLUMNS_FULL} FROM tickets
                 WHERE conversation_id = %s AND status IN ('open','assigned')
-                ORDER BY created_at DESC LIMIT 1""",
+                ORDER BY created_at DESC LIMIT 1""",  # nosec B608 # noqa: S608
             (conversation_id,),
         )
         row = cur.fetchone()
@@ -992,7 +1205,7 @@ def get_ticket(ticket_id: str) -> dict[str, Any] | None:
     if pool is None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT {_TICKET_COLUMNS_FULL} FROM tickets WHERE id = %s", (ticket_id,))
+        cur.execute(f"SELECT {_TICKET_COLUMNS_FULL} FROM tickets WHERE id = %s", (ticket_id,))  # nosec B608 # noqa: S608
         row = cur.fetchone()
     return _row_to_ticket(row, _TICKET_COLUMNS_FULL) if row else None
 
@@ -1004,6 +1217,8 @@ def update_ticket(
     staff_note: str | None = None,
     priority: str | None = None,
     officer_reply: str | None = None,
+    officer_reply_localized: str | None = None,
+    locale: str | None = None,
 ) -> bool:
     pool = _get_pool()
     if pool is None:
@@ -1030,6 +1245,14 @@ def update_ticket(
         params.append(_redact_ticket_value(officer_reply)[:4000])
         sets.append("reply_at = %s")
         params.append(now)
+    if officer_reply_localized is not None:
+        from .database import _redact_ticket_value
+
+        sets.append("officer_reply_localized = %s")
+        params.append(_redact_ticket_value(officer_reply_localized)[:4000])
+    if locale is not None:
+        sets.append("locale = %s")
+        params.append(locale[:16])
     if status is not None:
         sets.append("status = %s")
         params.append(status)
@@ -1050,7 +1273,7 @@ def update_ticket(
     params.extend([now, ticket_id])
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s", params)
+            cur.execute(f"UPDATE tickets SET {', '.join(sets)} WHERE id = %s", params)  # nosec B608 # noqa: S608
             touched = cur.rowcount > 0
         conn.commit()
     return touched
@@ -1113,7 +1336,7 @@ def get_conversation_transcript(
     limit = max(1, min(int(limit), 1000))
     sql = (
         "SELECT user_message, bot_reply, created_at, sources, topic_tag "
-        f"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT %s"
+        f"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT %s"  # nosec B608 # noqa: S608
     )
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, (key, limit))
@@ -1137,7 +1360,7 @@ def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            """SELECT id, officer_reply, reply_at, assignee, status FROM tickets
+            """SELECT id, officer_reply, officer_reply_localized, locale, reply_at, assignee, status FROM tickets
                WHERE conversation_id = %s AND officer_reply != ''
                  AND reply_delivered_at = 0
                ORDER BY reply_at ASC LIMIT 1""",
@@ -1147,7 +1370,7 @@ def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
     if not row:
         return None
     return dict(
-        zip(("id", "officer_reply", "reply_at", "assignee", "status"), row, strict=True)
+        zip(("id", "officer_reply", "officer_reply_localized", "locale", "reply_at", "assignee", "status"), row, strict=True)
     )
 
 
@@ -1555,7 +1778,7 @@ _CONSENT_COLUMNS = (
     "receipt_id, user_id, purpose, version, granted_at, withdrawn_at, legal_basis"
 )
 _WORKFLOW_COLUMNS = (
-    "conversation_id, workflow_id, status, current_step_idx, slots_json, "
+    "conversation_id, workflow_id, status, current_step_idx, user_id, slots_json, "
     "last_prompt, created_at, updated_at"
 )
 
@@ -1576,17 +1799,19 @@ def upsert_user(
     if pool is None:
         raise RuntimeError("postgres unavailable")
     now = time.time()
+    valid_roles = {"public", "verified_taxpayer", "ura_staff", "ura_admin", "ura_auditor"}
+    clean_role = role if role in valid_roles else "public"
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"SELECT {_USER_COLUMNS} FROM users "
-                "WHERE tenant_id = %s AND external_id = %s",
+                "WHERE tenant_id = %s AND external_id = %s",  # nosec B608 # noqa: S608
                 (tenant_id, external_id),
             )
             existing = _as_dict(_USER_COLUMNS, cur.fetchone())
             if existing is not None:
                 merged_email = email or existing["email"]
-                merged_role = role or existing["role"]
+                merged_role = clean_role or existing["role"]
                 cur.execute(
                     "UPDATE users SET last_seen_at = %s, email = %s, role = %s WHERE id = %s",
                     (now, merged_email, merged_role, existing["id"]),
@@ -1596,8 +1821,8 @@ def upsert_user(
                         "last_seen_at": now}
             user_id = str(uuid.uuid4())
             cur.execute(
-                f"INSERT INTO users ({_USER_COLUMNS}) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (user_id, tenant_id, external_id, email, role, now, now),
+                f"INSERT INTO users ({_USER_COLUMNS}) VALUES (%s,%s,%s,%s,%s,%s,%s)",  # nosec B608 # noqa: S608
+                (user_id, tenant_id, external_id, email, clean_role, now, now),
             )
         conn.commit()
     return {
@@ -1605,7 +1830,7 @@ def upsert_user(
         "tenant_id": tenant_id,
         "external_id": external_id,
         "email": email,
-        "role": role,
+        "role": clean_role,
         "created_at": now,
         "last_seen_at": now,
     }
@@ -1616,7 +1841,7 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     if pool is None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id = %s", (user_id,))
+        cur.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id = %s", (user_id,))  # nosec B608 # noqa: S608
         return _as_dict(_USER_COLUMNS, cur.fetchone())
 
 
@@ -1626,7 +1851,7 @@ def get_user_profile(user_id: str) -> dict[str, Any] | None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",
+            f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",  # nosec B608 # noqa: S608
             (user_id,),
         )
         profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
@@ -1670,7 +1895,7 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
                 }
                 defaults.update(updates)
                 cur.execute(
-                    f"INSERT INTO user_profiles ({_PROFILE_COLUMNS}) "
+                    f"INSERT INTO user_profiles ({_PROFILE_COLUMNS}) "  # nosec B608 # noqa: S608
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                     (
                         user_id,
@@ -1687,7 +1912,7 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
             elif updates:
                 sets = ", ".join(f"{k} = %s" for k in updates) + ", updated_at = %s"
                 cur.execute(
-                    f"UPDATE user_profiles SET {sets} WHERE user_id = %s",  # noqa: S608
+                    f"UPDATE user_profiles SET {sets} WHERE user_id = %s",  # nosec B608 # noqa: S608
                     [*updates.values(), now, user_id],
                 )
         conn.commit()
@@ -1706,7 +1931,7 @@ def grant_consent(
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "
+                f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "  # nosec B608 # noqa: S608
                 "WHERE user_id = %s AND purpose = %s AND version = %s "
                 "AND withdrawn_at IS NULL",
                 (user_id, purpose, version),
@@ -1717,7 +1942,7 @@ def grant_consent(
             receipt_id = str(uuid.uuid4())
             now = time.time()
             cur.execute(
-                f"INSERT INTO consent_receipts ({_CONSENT_COLUMNS}) "
+                f"INSERT INTO consent_receipts ({_CONSENT_COLUMNS}) "  # nosec B608 # noqa: S608
                 "VALUES (%s,%s,%s,%s,%s,NULL,%s)",
                 (receipt_id, user_id, purpose, version, now, legal_basis),
             )
@@ -1755,7 +1980,7 @@ def get_active_consents(user_id: str) -> list[dict[str, Any]]:
         return []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "
+            f"SELECT {_CONSENT_COLUMNS} FROM consent_receipts "  # nosec B608 # noqa: S608
             "WHERE user_id = %s AND withdrawn_at IS NULL ORDER BY granted_at DESC",
             (user_id,),
         )
@@ -1817,7 +2042,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",
+            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",  # nosec B608 # noqa: S608
             (conversation_id,),
         )
         row = _as_dict(_WORKFLOW_COLUMNS, cur.fetchone())
@@ -1829,6 +2054,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
+        "user_id": row["user_id"] or "",
         "slots": slots if isinstance(slots, dict) else {},
         "last_prompt": row["last_prompt"] or "",
         "created_at": row["created_at"],
@@ -1844,6 +2070,7 @@ def upsert_workflow_session(
     *,
     status: str = "active",
     last_prompt: str = "",
+    user_id: str = "",
 ) -> None:
     pool = _get_pool()
     if pool is None or not conversation_id or not workflow_id:
@@ -1855,19 +2082,21 @@ def upsert_workflow_session(
         with conn.cursor() as cur:
             cur.execute(
                 f"""INSERT INTO workflow_sessions ({_WORKFLOW_COLUMNS})
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (conversation_id) DO UPDATE SET
                       workflow_id = EXCLUDED.workflow_id,
                       status = EXCLUDED.status,
                       current_step_idx = EXCLUDED.current_step_idx,
+                      user_id = CASE WHEN EXCLUDED.user_id != '' THEN EXCLUDED.user_id ELSE workflow_sessions.user_id END,
                       slots_json = EXCLUDED.slots_json,
                       last_prompt = EXCLUDED.last_prompt,
-                      updated_at = EXCLUDED.updated_at""",
+                      updated_at = EXCLUDED.updated_at""",  # nosec B608 # noqa: S608
                 (
                     conversation_id,
                     workflow_id,
                     status,
                     max(0, int(current_step_idx)),
+                    user_id or "",
                     json.dumps(slots or {}, ensure_ascii=True),
                     last_prompt[:2000],
                     now,

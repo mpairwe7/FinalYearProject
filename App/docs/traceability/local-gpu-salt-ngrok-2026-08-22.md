@@ -1,5 +1,15 @@
 # Local GPU stack + SALT speech + ngrok — verified 2026-08-22
 
+> **Historical record — two conclusions below have since been overturned.**
+> §3 accepts CPU fallback for both SALT tiers and §7 calls GPU execution
+> "blocked on this host's driver ceiling". That diagnosis was wrong: it was a
+> wheel problem, not a driver problem. `Dockerfile.gpu` now pins a matched
+> `torch`/`torchaudio` 2.11.0+cu128 pair and both tiers run on the GPU on this
+> same host. `docker-compose.gpu-salt.yml` sets `cuda:0`, not `cpu`. See
+> `local-gpu-salt-ngrok-2026-09-04.md` for the current bring-up and numbers.
+> Everything else here — the overlay's purpose, the read-write NAS cache fix,
+> the tunnel recipe — still holds.
+
 Traceability for the single-GPU local deployment that bakes in both
 Sunbird SALT speech backends (`Sunbird/asr-whisper-large-v3-salt`,
 `Sunbird/spark-tts-salt`) alongside the local `Sunflower-14B-FP8` LLM,

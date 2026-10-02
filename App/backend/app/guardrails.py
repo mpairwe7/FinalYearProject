@@ -116,6 +116,10 @@ _REASONING_PREFIX_REGEX = re.compile(
     r"|the\s+key\s+detail\s+here\s+is"
     r"|i\s+should\s+(?:combine|answer|respond|cite|use)"
     r"|the\s+passages?\s+(?:say|show|mention|indicate)"
+    r"|first,\s+(?:i\s+need|let's|i\s+will|let\s+me|understand)"
+    r"|planning\s+(?:the\s+)?response"
+    r"|intent\s+analysis"
+    r"|scratchpad"
     r")\b",
     re.IGNORECASE,
 )
@@ -193,7 +197,8 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
     for p in [
         # Direct fraud/evasion requests
         r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
-        r"(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
+        r"(?:help|teach)\s+me\s+(?:to\s+)?(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
+        r"\b(?:schemes?|tricks?|tactics?|strategies)\s+(?:to|for)\s+(?:evade|dodge|cheat\s+on)\s+(?:tax|VAT|income|revenue)",
         r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
         r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
@@ -243,10 +248,8 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
 _PII_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
     ("ug_phone", re.compile(r"(?:^|(?<=\s))(?:\+256|0)(?:7[0-9]{8}|4[0-9]{8})\b")),
-    # Standard contiguous TIN
-    ("ug_tin", re.compile(r"\b1\d{9}\b")),
-    # Spaced / hyphenated TIN variants (e.g. "100 012 3456" or "100-012-3456")
-    ("ug_tin", re.compile(r"\b1\d{2}[\s-]\d{3}[\s-]\d{4}\b")),
+    # Standard contiguous TIN, context-bound TIN, or spaced/hyphenated variants
+    ("ug_tin", re.compile(r"(?i)(?:\bTIN\s*[:#-]?\s*|\bTax Identification Number\s*[:#-]?\s*)(1\d{9})\b|\b1\d{2}[\s-]\d{3}[-\s]\d{4}\b|\b1\d{9}\b")),
     ("ug_nid", re.compile(r"\bC[MF]\d{2}[A-Z]{5}\d{5}[A-Z]\b")),
     # Spaced NID variant (e.g. "CM 89 ABCDE 12345 F")
     ("ug_nid", re.compile(r"\bC[MF]\s?\d{2}\s?[A-Z]{5}\s?\d{5}\s?[A-Z]\b")),
@@ -341,21 +344,177 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
     return scrubbed, was_scrubbed
 
 
+def is_official_ura_email(email: str) -> bool:
+    """Return True if email is an official public contact address for URA or Uganda gov."""
+    addr = email.strip().strip(".,;:\"'").lower()
+    return (
+        "ura.go.ug" in addr
+        or "go.ug" in addr
+        or addr.endswith("@ura.go.ug")
+        or addr.endswith(".ura.go.ug")
+        or addr.endswith("@go.ug")
+        or addr.endswith(".go.ug")
+    )
+
+
+_CURRENCY_INDICATORS_BEFORE = re.compile(r"(?i)\b(?:ugx|ush|shs|usd|eur|gbp|\$|€|£)\s*$")
+_CURRENCY_INDICATORS_AFTER = re.compile(r"(?i)^\s*(?:ugx|ush|shs|usd|shillings?|/=|per\b|annum\b|month\b|year\b)")
+
+
+def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
+    """Return True if 10-digit number is surrounded by currency markers (e.g. 1000000000 UGX)."""
+    matched = match.group(0)
+    if re.search(r"(?i)\btin\b", matched) or "-" in matched or " " in matched:
+        return False
+    start, end = match.span()
+    before = text[max(0, start - 20) : start]
+    after = text[end : min(len(text), end + 20)]
+    return bool(_CURRENCY_INDICATORS_BEFORE.search(before) or _CURRENCY_INDICATORS_AFTER.search(after))
+
+
 def redact_pii_text(text: str) -> str:
     """Replace detected PII with redaction markers.
 
     Shared utility used by both OutputGuard (response side) and
     database writes (storage side) to prevent PII persistence.
+    Public official URA/government contact addresses (e.g. services@ura.go.ug,
+    info@ura.go.ug) are exempt so taxpayers receive valid contact channels.
     """
     result = text
     for pii_type, pattern in _PII_PATTERNS:
-        result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
+        if pii_type == "email":
+            def _replace_email(m: re.Match[str]) -> str:
+                addr = m.group(0)
+                if is_official_ura_email(addr):
+                    return addr
+                return "[REDACTED_EMAIL]"
+
+            result = pattern.sub(_replace_email, result)
+        elif pii_type == "ug_tin":
+            def _replace_tin(m: re.Match[str]) -> str:
+                if _is_currency_boundary(m, result):
+                    return m.group(0)
+                return "[REDACTED_UG_TIN]"
+
+            result = pattern.sub(_replace_tin, result)
+        else:
+            result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
     return result
 
 
 def contains_pii(text: str) -> bool:
-    """Return True if *text* contains any PII pattern."""
-    return any(pattern.search(text) for _, pattern in _PII_PATTERNS)
+    """Return True if *text* contains any PII pattern (excluding official public URA emails)."""
+    for pii_type, pattern in _PII_PATTERNS:
+        if pii_type == "email":
+            for m in pattern.finditer(text):
+                if not is_official_ura_email(m.group(0)):
+                    return True
+        elif pii_type == "ug_tin":
+            for m in pattern.finditer(text):
+                if not _is_currency_boundary(m, text):
+                    return True
+        elif pattern.search(text):
+            return True
+    return False
+
+
+_LISTISH_VERB_RE = re.compile(
+    r"\b(?:is|are|was|were|must|should|will|shall|means|applies)\b",
+    re.IGNORECASE,
+)
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[a-z][.!?])\s+(?=[A-Z])")
+_GLUED_STEP_RE = re.compile(
+    r"(?i)(?<![A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|"
+    r"paragraph|ekitundu|kifungu|ibarra|vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent|percentage)\d)"
+    r"([A-Za-z]{3,})((?:[1-9]|1[0-2]))[\.\)][ \t]*(\*{0,2}[A-Za-z])"
+)
+
+
+def _items_are_a_list(parts: list[str], *, word_limit: int) -> bool:
+    """True when every piece is a short label, not a clause."""
+    return all(1 <= len(part.split()) <= word_limit and "." not in part[:-1] for part in parts)
+
+
+def _split_marked_list(line: str, separator: str, *, word_limit: int) -> list[str] | None:
+    """Turn a colon-led or short label run into bullets. Leave prose alone."""
+    if line.strip().startswith(("-", "*", "1.", "2.")):
+        return None
+    parts = [part.strip() for part in line.split(separator) if part.strip()]
+    if len(parts) < 3:
+        return None
+    if _LISTISH_VERB_RE.search(line) and ":" not in parts[0]:
+        return None
+    lead, sep, rest = parts[0].partition(":")
+    if sep and lead.strip():
+        items = ([rest.strip()] if rest.strip() else []) + parts[1:]
+        items = [item for item in items if item]
+        if len(items) < 2 or not _items_are_a_list(items, word_limit=word_limit):
+            return None
+        return [f"{lead.strip()}:", *[f"- {item}" for item in items]]
+    if not _items_are_a_list(parts, word_limit=word_limit):
+        return None
+    return [f"- {part}" for part in parts]
+
+
+def _break_long_paragraphs(text: str) -> str:
+    """A wall of four or more sentences becomes paragraphs of at most three.
+
+    List lines, headings, and a period after a digit ("Section 18. The Act")
+    stay as they are.
+    """
+    blocks = re.split(r"\n\s*\n", text)
+    rebuilt: list[str] = []
+    for block in blocks:
+        stripped = block.strip()
+        if not stripped or re.search(r"(?m)^\s*(?:\d{1,2}[.)]|[-*]\s|#{1,4}\s)", stripped):
+            rebuilt.append(block.strip())
+            continue
+        sentences = [part.strip() for part in _SENTENCE_BREAK_RE.split(stripped) if part.strip()]
+        if len(sentences) < 4:
+            rebuilt.append(stripped)
+            continue
+        chunks = [" ".join(sentences[i : i + 3]) for i in range(0, len(sentences), 3)]
+        rebuilt.append("\n\n".join(chunks))
+    return "\n\n".join(part for part in rebuilt if part)
+
+
+def _renumber_ordered_lines(lines: list[str]) -> list[str]:
+    """Continue 1, 1, 1 into 1, 2, 3 without absorbing a later section number.
+
+    A jump such as step 2 followed by "18. The Act" ends the list. A deeper
+    indent is its own list, so a nested "1." does not become the parent's 3.
+    """
+    stacks: list[list[int]] = []
+    new_lines: list[str] = []
+    for line in lines:
+        matched = re.match(r"^(\s*)(\d{1,2})([.)])(\s+.*)$", line)
+        if matched is None:
+            if line.strip():
+                stacks.clear()
+            new_lines.append(line)
+            continue
+        indent, num_s, delim, rest = matched.groups()
+        indent_len = len(indent.replace("\t", "    "))
+        raw = int(num_s)
+        while stacks and stacks[-1][0] > indent_len:
+            stacks.pop()
+        if not stacks or stacks[-1][0] != indent_len:
+            stacks.append([indent_len, raw])
+            new_lines.append(line)
+            continue
+        last = stacks[-1][1]
+        if raw == last + 1:
+            nxt = raw
+        elif raw <= last:
+            nxt = last + 1
+        else:
+            stacks.clear()
+            stacks.append([indent_len, raw])
+            new_lines.append(line)
+            continue
+        stacks[-1][1] = nxt
+        new_lines.append(f"{indent}{nxt}{delim}{rest}")
+    return new_lines
 
 
 class OutputGuard:
@@ -391,16 +550,37 @@ class OutputGuard:
     @staticmethod
     def sanitize(text: str) -> str:
         """Strip potentially dangerous output content (LLM05)."""
-        # Remove explicit hidden reasoning blocks first.
-        text = re.sub(r"<think[^>]*>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        # Remove explicit hidden reasoning and scratchpad blocks (closed or unclosed)
+        text = re.sub(
+            r"<(?:think|thought|reasoning|scratchpad)[^>]*>.*?(?:</(?:think|thought|reasoning|scratchpad)\s*>|$)",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        text = re.sub(r"```(?:thought|thinking).*?```", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove script tags
-        text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<script[^>]*>.*?</script\s*>", "", text, flags=re.DOTALL | re.IGNORECASE)
         # Remove HTML tags
         text = re.sub(r"<[^>]+>", "", text)
+        # Normalize glued/malformed citation markers like otherL1] or word[1] -> word [1]
+        text = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", text)
+        text = re.sub(r"(?<=\d)\[(\d+)\]", r" [\1]", text)
         # Remove markdown image links to non-URA domains
         text = re.sub(
             r"!\[.*?\]\((?!https?://ura\.go\.ug).*?\)",
             "[link removed]",
+            text,
+        )
+        # Restore official public URA contact channels if an upstream redaction caught them
+        text = re.sub(
+            r"Email:\s*\[REDACTED_EMAIL\](?:\s*;\s*\[REDACTED_EMAIL\])?",
+            "Email: services@ura.go.ug; info@ura.go.ug",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"\b(?:Email|email|e-mail):\s*\[REDACTED_EMAIL\]\b",
+            "Email: services@ura.go.ug",
             text,
         )
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
@@ -420,7 +600,179 @@ class OutputGuard:
                 return ""
             text = text[split.end() :].lstrip()
 
-        return OutputGuard._strip_reasoning_preamble(text)
+        text = OutputGuard._strip_reasoning_preamble(text)
+        return OutputGuard.normalize_structure(text)
+
+    @staticmethod
+    def normalize_structure(text: str) -> str:
+        """Format lists, enumerations, and paragraph breaks into clean Markdown.
+
+        Normalizes smashed list numbering (e.g. 'including:1.Foo' -> 'including:\\n\\n1. Foo',
+        'laws.2.Bar' -> 'laws.\\n\\n2. Bar'), inline numbered procedures, and tokenization
+        drift such as 'Customary Services' -> 'Customs Services'. A rate or a section
+        number ('VAT 18. File', 'Section 5. The Act') is not promoted into a step.
+        A wall of four or more sentences is broken into paragraphs of three.
+        """
+        if not text:
+            return text
+        # Correct tokenization / completion drift in URA domain terminology
+        text = re.sub(r"\bCustomary Services\b", "Customs Services", text)
+
+        # Strip rogue stream event markers from prose
+        text = re.sub(r"\b(?:translation|retrieval|generation|iteration|tool_call)\.(?:started|completed)\b[ \t]*", "", text)
+
+        # Correct Tanzania / .tz hallucination drift in Swahili translations (URA is Uganda Revenue Authority)
+        text = re.sub(r"\bMamlaka ya Mapato (?:ya )?Tanzania\b", "Mamlaka ya Mapato Uganda (URA)", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b(?:huduma|services)@ura\.go\.tz\b", "services@ura.go.ug", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bura\.go\.tz\b", "ura.go.ug", text, flags=re.IGNORECASE)
+
+        # Remove digit bracket glitches, intra-word bracket artifacts, and rogue language tags
+        # Negative lookahead (?!\d+\]) protects statutory citations like [1] or [2]
+        text = re.sub(r"(\d+)\s*\[+(?!\d+\])[^0-9\n\]]+\s*(\d+)", r"\1\2", text)
+        text = re.sub(r"(?<=[a-zA-Z])\[(?=[a-zA-Z])", "", text)
+        text = re.sub(r"\[+(?:Luganda|Swahili|English|Runyankole|Acholi)[^\]\n]*\]*", "", text, flags=re.IGNORECASE)
+
+        # Standardize exotic bullet glyphs (, ►, ▪, ▫, •, –, —) and standalone line asterisks to clean Markdown lists
+        text = re.sub(r"^[ \t]*[►▪▫•–—][ \t]*", "- ", text, flags=re.MULTILINE)
+        text = re.sub(r"([;:\.!?])[ \t]*[►▪▫•–—][ \t]*", r"\1\n\n- ", text)
+        text = re.sub(r"(?m)^[ \t]*\*[ \t]+", "- ", text)
+        text = re.sub(r"(?m)^[ \t]*\(?(\d{1,2})\)[ \t]*", r"\1. ", text)
+
+        # Multilingual procedural step unsmashing (English, Swahili, Luganda)
+        # English: Step 1: -> 1.
+        text = re.sub(r"(?:^|\n)[ \t]*Step\s+(\d{1,2})[:\.]?[ \t]*", r"\n\1. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*Step\s+(\d{1,2})[:\.]?[ \t]*", r"\1\n\n\2. ", text, flags=re.IGNORECASE)
+
+        # Swahili step & ordinal unsmashing: Hatua ya 1 / Kwanza / Pili / Tatu
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Hatua\s+ya\s+(\d{1,2})|Hatua\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Hatua\s+ya\s+(\d{1,2})|Hatua\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Kwanza|Hatua\s+ya\s+kwanza)[:\.]?[ \t]*", "\n1. **Kwanza**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Pili|Hatua\s+ya\s+pili)[:\.]?[ \t]*", "\n2. **Pili**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Tatu|Hatua\s+ya\s+tatu)[:\.]?[ \t]*", "\n3. **Tatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Nne|Hatua\s+ya\s+nne)[:\.]?[ \t]*", "\n4. **Nne**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Tano|Hatua\s+ya\s+tano)[:\.]?[ \t]*", "\n5. **Tano**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Kwanza|Hatua\s+ya\s+kwanza)[:\.]?[ \t]*", r"\1\n\n1. **Kwanza**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Pili|Hatua\s+ya\s+pili)[:\.]?[ \t]*", r"\1\n\n2. **Pili**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Tatu|Hatua\s+ya\s+tatu)[:\.]?[ \t]*", r"\1\n\n3. **Tatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Nne|Hatua\s+ya\s+nne)[:\.]?[ \t]*", r"\1\n\n4. **Nne**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Tano|Hatua\s+ya\s+tano)[:\.]?[ \t]*", r"\1\n\n5. **Tano**: ", text, flags=re.IGNORECASE)
+
+        # Luganda step & ordinal unsmashing: Omutendera 1 / Okusooka / Eky'okubiri / Eky'okusatu
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Omutendera\s+ogwa\s+(\d{1,2})|Omutendera\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Omutendera\s+ogwa\s+(\d{1,2})|Omutendera\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Okusooka|Omutendera\s+ogusooka)[:\.]?[ \t]*", "\n1. **Okusooka**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okubiri|Omutendera\s+ogw['’]okubiri)[:\.]?[ \t]*", "\n2. **Eky'okubiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okusatu|Omutendera\s+ogw['’]okusatu)[:\.]?[ \t]*", "\n3. **Eky'okusatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okuna|Omutendera\s+ogw['’]okuna)[:\.]?[ \t]*", "\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]okutaano|Omutendera\s+ogw['’]okutaano)[:\.]?[ \t]*", "\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Okusooka|Omutendera\s+ogusooka)[:\.]?[ \t]*", r"\1\n\n1. **Okusooka**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okubiri|Omutendera\s+ogw['’]okubiri)[:\.]?[ \t]*", r"\1\n\n2. **Eky'okubiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okusatu|Omutendera\s+ogw['’]okusatu)[:\.]?[ \t]*", r"\1\n\n3. **Eky'okusatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okuna|Omutendera\s+ogw['’]okuna)[:\.]?[ \t]*", r"\1\n\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okutaano|Omutendera\s+ogw['’]okutaano)[:\.]?[ \t]*", r"\1\n\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
+
+        # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
+        text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
+
+        # Separate lead-in from first numbered item if smashed on same line (e.g. 'offered:1.Tax' or 'services:1.**')
+        # Requires (?<!\d) before punctuation so decimal numbers like 1.5% or Section 5.1 are not split
+        text = re.sub(
+            r"(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])",
+            r"\1\n\n\2. \3",
+            text,
+        )
+        # A word glued to a step ('template2. Enable'). A rate or a section
+        # ('VAT 18. File', 'Section5. The Act') does not match.
+        text = _GLUED_STEP_RE.sub(r"\1.\n\n\2. \3", text)
+        # Unsmash web domain names glued to capitalized words (e.g. '.ugThese' -> '.ug\n\nThese')
+        text = re.sub(r"(\.(?:ug|go\.ug|com|org|net))([A-Z])", r"\1\n\n\2", text)
+
+        # Hyphen and semicolon runs become bullets only when they are labels.
+        # "PAYE - the tax on employment - is deducted monthly" stays a sentence.
+        lines = text.split("\n")
+        formatted_lines: list[str] = []
+        for line in lines:
+            split = None
+            if " - " in line:
+                split = _split_marked_list(line, " - ", word_limit=4)
+            formatted_lines.extend(split if split is not None else [line])
+        text = "\n".join(formatted_lines)
+
+        # Three or more portal hops are a procedure. "18% -> see the table" is not.
+        if " → " in text or " -> " in text:
+            arrow = " → " if " → " in text else " -> "
+            lines = text.split("\n")
+            formatted_lines = []
+            for line in lines:
+                if arrow in line and not line.strip().startswith(("-", "*", "1.", "2.")):
+                    parts = [part.strip() for part in line.split(arrow) if part.strip()]
+                    if len(parts) >= 3 and not _LISTISH_VERB_RE.search(line):
+                        formatted_lines.extend(
+                            f"{index}. {part}" for index, part in enumerate(parts, 1)
+                        )
+                        continue
+                formatted_lines.append(line)
+            text = "\n".join(formatted_lines)
+
+        lines = text.split("\n")
+        formatted_lines = []
+        for line in lines:
+            split = None
+            if ";" in line and not any(
+                key in line.lower() for key in ("http", "0800", "whatsapp", "services@")
+            ):
+                split = _split_marked_list(line, ";", word_limit=6)
+            formatted_lines.extend(split if split is not None else [line])
+        text = "\n".join(formatted_lines)
+
+        # Bold affirmative/negative opening statutory verdicts in EN, LG, SW
+        text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana)[,\.][ \t]*", r"**\1**: ", text)
+        text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana)[,\.][ \t]*", r"\1**\2**: ", text)
+
+        # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded
+        if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d+\.\s|\n-\s", text)):
+            text = re.sub(r"\b(Section\s+\d+[A-Za-z]?|Ekitundu\s+\d+|Kifungu\s+cha\s+\d+)\b", r"**\1**", text, flags=re.IGNORECASE)
+            text = re.sub(r"\b(Income Tax Act|Value Added Tax Act|Tax Procedures Code Act|East African Community Customs Management Act|Excise Duty Act|EACCMA)\b", r"**\1**", text, flags=re.IGNORECASE)
+            text = re.sub(r"\b(TIN|VAT|PAYE|EFRIS|WHT|CIT|PIT|LED|AEO|AEOI|MAAC|CRS|FATCA|WCO|ASYCUDA|DTS|PRN|NIN|URSB)\b", r"**\1**", text)
+            if "**" not in text:
+                text = re.sub(
+                    r"^(Here's the most relevant guidance I found in official URA sources:)",
+                    r"**Official Guidance**:\n\nHere's the most relevant guidance I found in official URA sources:",
+                    text,
+                )
+                text = re.sub(
+                    r"^(Hapa kuna mwongozo muhimu zaidi niliyopata kutoka vyanzo rasmi vya URA:)",
+                    r"**Mwongozo Rasmi**:\n\nHapa kuna mwongozo muhimu zaidi niliyopata kutoka vyanzo rasmi vya URA:",
+                    text,
+                )
+                text = re.sub(
+                    r"^(Bino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:)",
+                    r"**Obulagirizi obw'obutongole**:\n\nBino bye biragiro ebisinga okuba eby'omugaso bye nazuula mu nsibuko za URA entongole:",
+                    text,
+                )
+            if "**" not in text and not re.search(r"\d+\.\s|\n-\s", text):
+                text = re.sub(r"^([A-Z][a-zA-Z0-9 \'\-]{3,35}?)([:,\.][ \t]+)", r"**\1**\2", text)
+
+        # Bold numbered list headers if followed by a colon on the same line (e.g. '\n1. Tax Administration:' -> '\n1. **Tax Administration**:')
+        text = re.sub(r"(?:^|\n)(\s*\d{1,2}\.\s+)(?!\*\*)([A-Za-z0-9 /&,-]+?):([ \t]+)", r"\n\1**\2**:\3", text)
+        # Separate smashed bullet items (e.g. 'including:* Item' or 'laws.- Item')
+        text = re.sub(
+            r"([;:])\s*([*\-•])(?!\*)\s*([A-Za-z])",
+            r"\1\n\n\2 \3",
+            text,
+        )
+        text = re.sub(
+            r"([a-z0-9\)])\.\s*([*\-•])(?!\*)\s*([A-Za-z])",
+            r"\1.\n\n\2 \3",
+            text,
+        )
+        # Ensure blank line before and after markdown headings
+        text = re.sub(r"([^\n])\n(#{1,4}\s+)", r"\1\n\n\2", text)
+        text = re.sub(r"(#{1,4}\s+[^\n]+)\n([^\n#])", r"\1\n\n\2", text)
+        # Normalize excessive blank lines, then paragraph a remaining wall of text.
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = _break_long_paragraphs(text)
+        return "\n".join(_renumber_ordered_lines(text.split("\n"))).strip()
 
     @staticmethod
     def check_prompt_leakage(text: str) -> GuardResult:
@@ -443,15 +795,46 @@ class OutputGuard:
             flags=["prompt_leakage"],
         )
 
+    # Appended to the user's own reply, so it has to be in the user's own
+    # language. While this was English-only it put an English paragraph on the
+    # end of every low-faithfulness Luganda and Kiswahili answer — which is
+    # both a UX failure and enough English to flip an automated
+    # reply-language check on an otherwise correct answer (measured
+    # 2026-09-04). Keyed by the same short locale codes the chat API uses;
+    # anything not listed falls back to English.
+    #
+    # NOTE: the lg/sw strings have not been reviewed by a native speaker;
+    # they are a correctness improvement over emitting English, not a
+    # substitute for a translation pass.
+    _GROUNDING_WARNINGS: dict[str, str] = {
+        "en": (
+            "\n\n---\n*Note: This response may not be fully supported by "
+            "the retrieved documents. Please verify with official URA sources "
+            "at https://ura.go.ug.*"
+        ),
+        "lg": (
+            "\n\n---\n*Okulabula: Eky'okuddamu kino kiyinza obutaba nga "
+            "kiwagirwa mu bujjuvu ebiwandiiko ebikozeseddwa. Kakasa n'ensonda "
+            "za URA entongole ku https://ura.go.ug.*"
+        ),
+        "sw": (
+            "\n\n---\n*Tahadhari: Jibu hili huenda halijaungwa mkono "
+            "kikamilifu na nyaraka zilizotumika. Tafadhali thibitisha na "
+            "vyanzo rasmi vya URA kwenye https://ura.go.ug.*"
+        ),
+    }
+
     @staticmethod
     def check_grounding(
         answer: str,
         contexts: list[str],
         threshold: float = 0.3,
+        locale: str = "en",
     ) -> GuardResult:
         """Verify answer is grounded in retrieved contexts (LLM09).
 
-        When faithfulness falls below *threshold*, a disclaimer is appended.
+        When faithfulness falls below *threshold*, a disclaimer is appended
+        in *locale* — the language the answer itself is in.
         """
         if not contexts:
             return GuardResult(allowed=True, sanitized_text=answer)
@@ -460,10 +843,8 @@ class OutputGuard:
 
         score = HybridRetriever.compute_faithfulness(answer, contexts)
         if score < threshold:
-            warning = (
-                "\n\n---\n*Note: This response may not be fully supported by "
-                "the retrieved documents. Please verify with official URA sources "
-                "at https://ura.go.ug.*"
+            warning = OutputGuard._GROUNDING_WARNINGS.get(
+                (locale or "en").lower(), OutputGuard._GROUNDING_WARNINGS["en"]
             )
             return GuardResult(
                 allowed=True,
@@ -475,7 +856,11 @@ class OutputGuard:
         return GuardResult(allowed=True, sanitized_text=answer)
 
     @staticmethod
-    def should_abstain(hits: list[dict], threshold: float = ABSTENTION_THRESHOLD_NORM) -> bool:
+    def should_abstain(
+        hits: list[dict],
+        threshold: float = ABSTENTION_THRESHOLD_NORM,
+        locale: str = "en",
+    ) -> bool:
         """Return True if the best retrieval relevance is too low to answer from.
 
         Prefers the normalized [0,1] reranker score (P1-5). Failing that, uses the
@@ -483,26 +868,19 @@ class OutputGuard:
         Failing both, relevance is unknown and we do not abstain on an
         incomparable raw score.
 
-        The middle tier exists because "no comparable score" used to mean "answer
-        anyway", and the sparse-only sidecar has no cross-encoder. Over 7,000+ raw
-        document chunks that let BM25's always-something result be served for
-        off-domain questions — "What is the capital of France?" answered from a
-        chunk about Thales Las France (Tanzania Branch).
-
-        Only *stamped* hits are judged this way, deliberately. Keyword/FAQ hits
-        arrive unstamped and already carry their own authorization gate
-        (``service._faq_match_score`` scores the FAQ's own question against the
-        query, and ``_retain_faq_candidates`` applies a relative cutoff). Scoring
-        them again here double-gates them and re-breaks distress-framed questions,
-        whose wording overlaps an FAQ answer weakly — the bug PR #167 fixed.
+        For cross-lingual queries (Luganda or Swahili), reranker logits against
+        an English corpus are systematically lower due to cross-lingual embedding
+        geometry; a calibrated threshold of 0.02 is used.
         """
         if not hits:
             return True
         from .retriever import LEXICAL_RELEVANCE_FLOOR, hit_relevance
 
+        eff_threshold = threshold if locale in ("", "en") else min(threshold, 0.02)
+
         scores = [r for h in hits if (r := hit_relevance(h)) is not None]
         if scores:
-            return max(scores) < threshold
+            return max(scores) < eff_threshold
 
         stamped: list[float] = []
         for hit in hits:

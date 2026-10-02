@@ -313,6 +313,41 @@ _LEXICAL_TOKEN_RE = re.compile(r"[a-z0-9]+")
 LEXICAL_RELEVANCE_FLOOR = float(os.getenv("RETRIEVER_LEXICAL_FLOOR", "0.50"))
 
 
+def active_retrieval_mode(retriever: object | None, *, ready: bool) -> str:
+    """The retrieval mode actually in force, not the one that was configured.
+
+    ``/ready`` resolved this correctly while every chat response reported a
+    flat ``"hybrid"`` whenever the search returned anything.  On a CPU-only
+    image — Crane Cloud, the HF Space — ``__init__`` drops the embedder and
+    the reranker and serves BM25 alone, so "hybrid" was the one field a
+    reader would have used to notice, and it said everything was fine.
+
+    Ordering matches ``/ready``: Vectorize is checked before ``_sparse_only``
+    because a Vectorize deployment keeps its sparse-only Qdrant state as a
+    fallback and would otherwise under-report as ``"sparse"``.
+    """
+    if not ready or retriever is None:
+        return "keyword"
+    if getattr(retriever, "_vectorize_mode", False):
+        return "vector"
+    if getattr(retriever, "_sparse_only", False):
+        return "sparse"
+    if not getattr(retriever, "_sparse_ok", True):
+        # BM25 disabled at runtime — an invalid state file, or a corpus-hash
+        # mismatch against Qdrant's sentinel, which would make the sparse leg
+        # return results from a different index run. Dense still serves, so
+        # this is neither "hybrid" nor "sparse".
+        #
+        # Deliberately not folded into "vector": that means Vectorize, which is
+        # dense-only with a client-side lexical re-score against a remote index.
+        # This is local Qdrant dense with the cross-encoder still in play, and
+        # an operator reading the field should be able to tell a desynced BM25
+        # from an egress fallback.
+        return "dense"
+    return "hybrid"
+
+
+
 def _lexical_terms(text: str) -> set[str]:
     return {
         token
@@ -356,13 +391,29 @@ def lexical_relevance(
     if not present:
         return 0.0
     if encoder is None:
-        return len(terms & present) / len(terms)
+        score = len(terms & present) / len(terms)
+    else:
+        weights = {term: encoder.term_idf(term) for term in terms}
+        total = sum(weights.values())
+        if total <= 0:
+            score = 0.0
+        else:
+            score = sum(w for term, w in weights.items() if term in present) / total
 
-    weights = {term: encoder.term_idf(term) for term in terms}
-    total = sum(weights.values())
-    if total <= 0:
-        return 0.0
-    return sum(w for term, w in weights.items() if term in present) / total
+    # Check question span if query contains a conditional or situational preamble
+    from .query import extract_question_span
+    q_span = extract_question_span(query)
+    if q_span and q_span != query:
+        span_terms = _lexical_terms(q_span)
+        if span_terms:
+            span_score = len(span_terms & present) / len(span_terms)
+            score = max(score, span_score)
+
+    matched_count = len(terms & present)
+    if matched_count >= 3 and score < LEXICAL_RELEVANCE_FLOOR:
+        score = max(score, LEXICAL_RELEVANCE_FLOOR)
+
+    return score
 
 
 def apply_preference_boost(
@@ -437,16 +488,29 @@ def rrf_fuse_ranked_lists(
     statutory graph is a third leg rather than an unconditional prepend.
     """
     k = RRF_K if k is None else k
+    if isinstance(k, bool) or not isinstance(k, int) or k <= 0:
+        raise ValueError("k must be a positive integer")
+    if top_k is not None and (
+        isinstance(top_k, bool) or not isinstance(top_k, int) or top_k < 0
+    ):
+        raise ValueError("top_k must be a non-negative integer or None")
+
     scores: dict[str, float] = {}
     kept: dict[str, dict[str, Any]] = {}
     for ranked in lists:
         if not ranked:
             continue
-        for rank, hit in enumerate(ranked):
-            hid = hit_identity(hit)
-            if not hid:
+        seen_in_leg: set[str] = set()
+        rank = 0
+        for hit in ranked:
+            if not isinstance(hit, dict):
                 continue
+            hid = hit_identity(hit)
+            if not hid or hid in seen_in_leg:
+                continue
+            seen_in_leg.add(hid)
             scores[hid] = scores.get(hid, 0.0) + 1.0 / (k + rank)
+            rank += 1
             incoming = dict(hit)
             existing = kept.get(hid)
             if existing is None or incoming.get("doc_type") == "graph":
@@ -455,14 +519,18 @@ def rrf_fuse_ranked_lists(
     for hid, hit in kept.items():
         hit["score_rrf"] = scores[hid]
         fused.append(hit)
-    fused.sort(
-        key=lambda h: (
-            1 if hit_relevance(h) is not None else 0,
-            hit_relevance(h) or 0.0,
-            float(h.get("score_rrf") or 0.0),
-        ),
-        reverse=True,
-    )
+
+    def _sort_key(hit: dict[str, Any]) -> tuple[float, float, str]:
+        relevance = hit_relevance(hit)
+        if relevance is None or not math.isfinite(relevance):
+            relevance = 0.0
+        return (
+            -float(hit.get("score_rrf") or 0.0),
+            -relevance,
+            hit_identity(hit),
+        )
+
+    fused.sort(key=_sort_key)
     if top_k is not None:
         fused = fused[:top_k]
     return fused
@@ -1086,25 +1154,34 @@ class HybridRetriever:
             rrf[i] += 1.0 / (k + lex_rank)
 
         order = sorted(range(len(hits)), key=lambda i: rrf[i], reverse=True)
-        candidates = [
-            {
-                "id": str(hits[i].get("id", "")),
-                "text": hits[i].get("text", ""),
-                "question": "",
-                "answer": "",
-                "source": hits[i].get("source", ""),
-                "chunk_id": str(hits[i].get("id", "")),
-                "page": hits[i].get("page", ""),
-                "section": hits[i].get("section", ""),
-                "doc_type": hits[i].get("doc_type", ""),
-                "fiscal_year": hits[i].get("fiscal_year", ""),
-                "tax_type": hits[i].get("tax_type", ""),
-                "tag": hits[i].get("tag", ""),
-                **_provenance_fields(hits[i]),
-                "score_rrf": float(rrf[i]),
-            }
-            for i in order
-        ]
+        candidates = []
+        for i in order:
+            hit = hits[i]
+            text = hit.get("text", "")
+            q = hit.get("question", "")
+            a = hit.get("answer", "")
+            if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
+                parts = text[len("Question: ") :].split("\nAnswer: ", 1)
+                q = q or parts[0].strip()
+                a = a or parts[1].strip()
+            candidates.append(
+                {
+                    "id": str(hit.get("id", "")),
+                    "text": text,
+                    "question": q,
+                    "answer": a,
+                    "source": hit.get("source", ""),
+                    "chunk_id": str(hit.get("id", "")),
+                    "page": hit.get("page", ""),
+                    "section": hit.get("section", ""),
+                    "doc_type": hit.get("doc_type", ""),
+                    "fiscal_year": hit.get("fiscal_year", ""),
+                    "tax_type": hit.get("tax_type", ""),
+                    "tag": hit.get("tag", ""),
+                    **_provenance_fields(hit),
+                    "score_rrf": float(rrf[i]),
+                }
+            )
         # Same near-duplicate collapse the Qdrant path applies: this fallback
         # serves the same multi-edition corpus, so without it one passage can
         # occupy most of top_k and a superseded edition can outrank the current
@@ -1276,23 +1353,50 @@ class HybridRetriever:
             self._query_vec_cache.popitem(last=False)
         return vector
 
-    def _rerank(self, query: str, candidates: list[dict[str, Any]]) -> None:
+    def _rerank(
+        self,
+        query: str,
+        candidates: list[dict[str, Any]],
+        english_query: str | None = None,
+    ) -> None:
         """Score *candidates* with the cross-encoder, in place.
 
         Passages are truncated for scoring only.  A cross-encoder is
         quadratic in sequence length and its own input window is far
         shorter than a full chunk, so feeding untruncated text costs
         latency to produce a score the model derived from the head of the
-        passage anyway.
+        passage anyway. When an English translation is supplied, dual-scores
+        and preserves the higher relevance across both representations.
         """
         pairs = [
             (query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
             for c in candidates
         ]
         scores = self._reranker.predict(pairs)
+        if english_query and english_query.casefold() != query.casefold():
+            en_pairs = [
+                (english_query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
+                for c in candidates
+            ]
+            en_scores = self._reranker.predict(en_pairs)
+            scores = [max(float(s), float(es)) for s, es in zip(scores, en_scores)]
+
         for i, s in enumerate(scores):
             candidates[i]["score_rerank"] = float(s)
             candidates[i]["score_norm"] = normalize_rerank_score(float(s))
+
+        # Stale-year penalty for rate/duty tables: if a chunk explicitly cites superseded
+        # years (e.g. 2020, 2021, 2022) and the query is not asking for that historical year,
+        # discount its score so modern guidance and current rate tables outrank it.
+        query_years = set(re.findall(r"\b(20[0-2][0-9])\b", query))
+        for c in candidates:
+            doc_src = str(c.get("source", "")).lower()
+            doc_txt = str(c.get("text", "")).lower()
+            if any(y in doc_src or f"rates {y}" in doc_txt or f"fy {y}" in doc_txt for y in ("2020", "2021", "2022")):
+                if not any(y in query_years for y in ("2020", "2021", "2022")):
+                    c["score_rerank"] = float(c.get("score_rerank", 0.0)) - 0.25
+                    c["score_norm"] = max(0.0, float(c.get("score_norm", 0.0)) - 0.15)
+
         candidates.sort(key=lambda x: x.get("score_rerank", 0.0), reverse=True)
 
     def search(
@@ -1303,6 +1407,7 @@ class HybridRetriever:
         filters: dict[str, Any] | None = None,
         *,
         subject: str | None = None,
+        locale: str | None = None,
     ) -> list[dict[str, Any]]:
         """Hybrid search with RRF fusion + optional cross-encoder rerank.
 
@@ -1437,12 +1542,19 @@ class HybridRetriever:
                 p = pt.payload or {}
                 if p.get("_meta") == "bm25_binding":
                     continue  # internal corpus-hash sentinel, not a document
+                text = p.get("text", "")
+                q = p.get("question", "")
+                a = p.get("answer", "")
+                if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
+                    parts = text[len("Question: ") :].split("\nAnswer: ", 1)
+                    q = q or parts[0].strip()
+                    a = a or parts[1].strip()
                 candidates.append(
                     {
                         "id": str(pt.id),
-                        "text": p.get("text", ""),
-                        "question": p.get("question", ""),
-                        "answer": p.get("answer", ""),
+                        "text": text,
+                        "question": q,
+                        "answer": a,
                         "source": p.get("source", ""),
                         "chunk_id": p.get("chunk_id", ""),
                         "page": p.get("page", ""),
@@ -1468,7 +1580,10 @@ class HybridRetriever:
 
             # Cross-encoder reranking
             if self._reranker and candidates:
-                self._rerank(query, candidates)
+                from .query import english_retrieval_query
+
+                en_query = english_retrieval_query(query, locale) if locale and locale not in ("en", "") else None
+                self._rerank(query, candidates, english_query=en_query)
 
             self._circuit.record_success()
             self._ready = True  # ensure readiness restored on success
@@ -1520,6 +1635,7 @@ class HybridRetriever:
                     prefetch_limit=prefetch_limit,
                     filters=merged_filters or None,
                     subject=subject,
+                    locale=locale,
                 )
                 for sub in subqueries
             ]
@@ -1531,6 +1647,7 @@ class HybridRetriever:
                 prefetch_limit=prefetch_limit,
                 filters=merged_filters or None,
                 subject=subject,
+                locale=locale,
             )
         hits = apply_preference_boost(hits, plan["prefer"])
         return self._merge_translated_leg(

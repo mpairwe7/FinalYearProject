@@ -22,7 +22,9 @@ import hmac
 import json
 import logging
 import os
+import threading
 import time
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -30,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 AUTH_ALG = os.getenv("AUTH_ALG", "HS256").upper()  # HS256 | RS256
 AUTH_DEV_SECRET = os.getenv("AUTH_DEV_SECRET", "dev-insecure-change-me")
-OIDC_ISSUER = os.getenv("OIDC_ISSUER", "")
-OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "ura-chatbot")
-OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL", "")
+OIDC_ISSUER = os.getenv("OIDC_ISSUER", "https://dev-s16d7m00eyrksjy2.us.auth0.com/")
+OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "https://ura-chatbot/api")
+OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL", "https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/jwks.json")
 OIDC_JWKS_CACHE_TTL_S = int(os.getenv("OIDC_JWKS_CACHE_TTL_S", "3600"))
 OIDC_JWKS_TIMEOUT_S = float(os.getenv("OIDC_JWKS_TIMEOUT_S", "5"))
 APP_ENV = os.getenv("APP_ENV", "development").lower()
@@ -123,12 +125,35 @@ def _rsa_public_key_from_jwk(jwk: dict[str, Any]) -> Any:
         raise JWTAuthError(f"invalid RSA JWK: {err}") from err
 
 
+class _JWKSRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject any redirect that downgrades HTTPS to HTTP or switches to an unsafe scheme."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        parsed = urllib.parse.urlparse(newurl)
+        if APP_ENV == "production" and parsed.scheme != "https":
+            raise urllib.error.HTTPError(
+                newurl, code, f"Insecure redirect to non-https URL in production: {newurl}", headers, fp
+            )
+        if parsed.scheme not in ("https", "http"):
+            raise urllib.error.HTTPError(
+                newurl, code, f"Disallowed scheme in JWKS redirect: {parsed.scheme}", headers, fp
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _fetch_jwks(url: str, timeout_s: float) -> dict[str, Any]:
     if not url:
         raise JWTAuthError("OIDC_JWKS_URL is required for RS256 verification")
+    if APP_ENV == "production":
+        if not url.startswith("https://"):
+            raise JWTAuthError("OIDC_JWKS_URL must start with https:// in production")
+    elif not (url.startswith("https://") or url.startswith("http://")):
+        raise JWTAuthError("OIDC_JWKS_URL must start with https:// or http://")
 
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as resp:
+        opener = urllib.request.build_opener(_JWKSRedirectHandler())
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with opener.open(req, timeout=timeout_s) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as err:
         raise JWTAuthError(f"failed to fetch JWKS: {err}") from err
@@ -148,6 +173,18 @@ class JWTVerifier:
     into an :class:`AuthUser`.  Keeping claim translation separate
     from token verification lets us test both sides in isolation.
     """
+
+    _shared_jwks_cache: dict[str, dict[str, dict[str, Any]]] = {}
+    _shared_jwks_fetched_at: dict[str, float] = {}
+    _shared_last_forced_refresh_at: dict[str, float] = {}
+    _shared_lock = threading.Lock()
+
+    @classmethod
+    def reset_shared_jwks_cache(cls) -> None:
+        with cls._shared_lock:
+            cls._shared_jwks_cache.clear()
+            cls._shared_jwks_fetched_at.clear()
+            cls._shared_last_forced_refresh_at.clear()
 
     def __init__(
         self,
@@ -174,27 +211,49 @@ class JWTVerifier:
         )
         self._jwks_by_kid: dict[str, dict[str, Any]] = {}
         self._jwks_fetched_at = 0.0
+        self._last_forced_refresh_at = 0.0
         if self.alg not in ("HS256", "RS256"):
             raise JWTAuthError(f"unsupported alg {self.alg}")
 
     def _refresh_jwks(self, *, force: bool = False) -> None:
-        if self.alg != "RS256":
+        if not self.jwks_url:
             return
-        now = time.time()
-        if (
-            not force
-            and self._jwks_by_kid
-            and (now - self._jwks_fetched_at) < self.jwks_cache_ttl_s
-        ):
-            return
+        cache_key = self.jwks_url or ""
+        with self._shared_lock:
+            now = time.time()
+            cached_by_kid = self._shared_jwks_cache.get(cache_key, {})
+            fetched_at = self._shared_jwks_fetched_at.get(cache_key, 0.0)
+            last_forced = self._shared_last_forced_refresh_at.get(cache_key, 0.0)
 
-        jwks = _fetch_jwks(self.jwks_url, self.jwks_timeout_s)
-        self._jwks_by_kid = {
-            str(key.get("kid")): key
-            for key in jwks["keys"]
-            if isinstance(key, dict) and key.get("kid")
-        }
-        self._jwks_fetched_at = now
+            if (
+                not force
+                and cached_by_kid
+                and (now - fetched_at) < self.jwks_cache_ttl_s
+            ):
+                self._jwks_by_kid = cached_by_kid
+                self._jwks_fetched_at = fetched_at
+                return
+            if force and (now - last_forced) < 10.0 and cached_by_kid:
+                # Rate-limit forced refreshes to prevent JWKS cache stampede / outbound DoS
+                self._jwks_by_kid = cached_by_kid
+                self._jwks_fetched_at = fetched_at
+                return
+
+            jwks = _fetch_jwks(self.jwks_url, self.jwks_timeout_s)
+            by_kid = {
+                str(key.get("kid")): key
+                for key in jwks["keys"]
+                if isinstance(key, dict) and key.get("kid")
+            }
+            self._shared_jwks_cache[cache_key] = by_kid
+            self._shared_jwks_fetched_at[cache_key] = now
+            if force:
+                self._shared_last_forced_refresh_at[cache_key] = now
+
+            self._jwks_by_kid = by_kid
+            self._jwks_fetched_at = now
+            if force:
+                self._last_forced_refresh_at = now
 
     def _get_jwk(self, kid: str) -> dict[str, Any]:
         self._refresh_jwks()
@@ -237,12 +296,18 @@ class JWTVerifier:
         if not token:
             raise JWTAuthError("empty token")
 
-        if self.alg == "HS256":
-            claims = _hs256_verify(token, self.dev_secret)
-        elif self.alg == "RS256":
+        header, _, _, _ = _decode_unverified(token)
+        token_alg = (header.get("alg") or "").upper()
+
+        if token_alg != self.alg:
+            raise JWTAuthError(f"unexpected alg: {token_alg}")
+
+        if self.alg == "RS256":
             claims = self._rs256_verify(token)
+        elif self.alg == "HS256" and self.dev_secret:
+            claims = _hs256_verify(token, self.dev_secret)
         else:
-            raise JWTAuthError(f"unsupported alg {self.alg}")
+            raise JWTAuthError(f"unexpected alg: {token_alg}")
 
         # Temporal claims
         now = time.time()
@@ -254,14 +319,20 @@ class JWTVerifier:
             raise JWTAuthError("token not yet valid")
 
         # Issuer / audience (only checked if configured — empty = skip)
-        if self.issuer and claims.get("iss") != self.issuer:
-            raise JWTAuthError(f"issuer mismatch: expected {self.issuer}")
+        if self.issuer:
+            token_iss = str(claims.get("iss", "")).rstrip("/")
+            expected_iss = self.issuer.rstrip("/")
+            if token_iss != expected_iss:
+                raise JWTAuthError(f"issuer mismatch: expected {self.issuer}, got {claims.get('iss')}")
+
         if self.audience:
             aud = claims.get("aud", [])
             if isinstance(aud, str):
                 aud = [aud]
-            if self.audience not in aud:
-                raise JWTAuthError(f"audience mismatch: expected {self.audience}")
+            # Match audience against configured audience, API audience, or Auth0 SPA client ID
+            valid_auds = {self.audience, "https://ura-chatbot/api", "ura-chatbot", "jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX"}
+            if not any(a in valid_auds for a in aud):
+                raise JWTAuthError(f"audience mismatch: expected {self.audience}, got {aud}")
 
         return claims
 

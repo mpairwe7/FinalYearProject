@@ -131,6 +131,72 @@ class VoiceStreamEvent:
 
 
 # ---------------------------------------------------------------------------
+# EnergyVAD
+# ---------------------------------------------------------------------------
+
+
+class EnergyVAD:
+    """Energy-based Voice Activity Detection with hysteresis."""
+
+    def __init__(
+        self,
+        energy_threshold: float = _VAD_ENERGY_THRESHOLD,
+        silence_duration_ms: int = _VAD_SILENCE_MS,
+        max_utterance_s: float = _VAD_MAX_UTTERANCE_S,
+        sample_rate: int = 16_000,
+    ) -> None:
+        self.energy_threshold = energy_threshold
+        self.silence_duration_ms = silence_duration_ms
+        self.max_utterance_s = max_utterance_s
+        self.sample_rate = sample_rate
+
+        self.is_speaking = False
+        self.silence_samples = 0
+        self.utterance_start: float | None = None
+        self.audio_buffer = bytearray()
+
+    def reset(self) -> None:
+        self.is_speaking = False
+        self.silence_samples = 0
+        self.utterance_start = None
+        self.audio_buffer.clear()
+
+    def detect(self, pcm_chunk: bytes) -> tuple[bool, bool]:
+        """Detect speech and utterance completion on a PCM16 LE chunk.
+
+        Returns (is_speech, utterance_complete).
+        """
+        n_samples = len(pcm_chunk) // 2
+        if n_samples == 0:
+            return False, False
+
+        samples = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32) / 32768.0
+        rms = float(np.sqrt(np.mean(samples ** 2)))
+        is_speech = rms > self.energy_threshold
+
+        if is_speech:
+            if not self.is_speaking:
+                self.is_speaking = True
+                self.utterance_start = time.perf_counter()
+            self.silence_samples = 0
+            self.audio_buffer.extend(pcm_chunk)
+        else:
+            if self.is_speaking:
+                self.silence_samples += n_samples
+                self.audio_buffer.extend(pcm_chunk)
+                silence_ms = (self.silence_samples / self.sample_rate) * 1000
+                if silence_ms >= self.silence_duration_ms:
+                    return False, True
+
+        if self.utterance_start is not None:
+            elapsed = time.perf_counter() - self.utterance_start
+            if elapsed >= self.max_utterance_s:
+                return is_speech, True
+
+        return is_speech, False
+
+
+# ---------------------------------------------------------------------------
 # VoiceSession
 # ---------------------------------------------------------------------------
 
@@ -170,10 +236,12 @@ class VoiceSession:
         self.tenant_id = tenant_id or "default"
 
         # VAD state
-        self._audio_buffer = bytearray()
-        self._is_speaking = False
-        self._silence_samples = 0
-        self._utterance_start: float | None = None
+        self._vad = EnergyVAD(
+            energy_threshold=self.vad.energy_threshold,
+            silence_duration_ms=self.vad.silence_duration_ms,
+            max_utterance_s=self.vad.max_utterance_s,
+            sample_rate=self.vad.sample_rate,
+        )
 
         # Barge-in
         self._cancelled = asyncio.Event()
@@ -272,10 +340,14 @@ class VoiceSession:
             return
 
         detected_lang = asr_result.language or self.language
+        from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
+
+        clean_asr_text = repair_asr_entities(asr_result.text)
+
         yield VoiceStreamEvent(
             type="transcript_final",
             data={
-                "text": asr_result.text,
+                "text": clean_asr_text,
                 "language": detected_lang,
                 "latency_s": timings["asr_ms"] / 1000,
                 "backend": asr_result.backend,
@@ -286,29 +358,38 @@ class VoiceSession:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 2: MT (lg->en) ─────────────────────────────────────
-        query_text = asr_result.text
+        query_text = clean_asr_text
         llm_locale = "en"
         timings["mt_ms"] = 0.0
         mt_backend = ""
         mt_degraded: list[str] = []
 
+        # ── Stage 2: MT (lg/sw -> en) ─────────────────────────────────
         if detected_lang == "lg":
+            query_text = normalize_luganda_tax_query(clean_asr_text)
             t0 = time.perf_counter()
-            mt_result = await _translate_with_retry(self._speech, asr_result.text, "lg", "en")
+            mt_result = await _translate_with_retry(self._speech, query_text, "lg", "en")
             if mt_result is not None:
                 query_text = mt_result.text
                 mt_backend = mt_result.backend
             else:
-                # Degraded: send the original Luganda to the LLM and tell it
-                # so (multilingual prompt rule) rather than mislabel it as
-                # English; surface the degradation to the client.
                 llm_locale = detected_lang
                 mt_degraded.append("lg-en")
                 yield VoiceStreamEvent(
                     type="mt_degraded",
                     data={"direction": "lg-en", "detail": "translation unavailable"},
                 )
+            timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang == "sw":
+            query_text = normalize_swahili_tax_query(clean_asr_text)
+            t0 = time.perf_counter()
+            mt_result = await _translate_with_retry(self._speech, query_text, "sw", "en")
+            if mt_result is not None:
+                query_text = mt_result.text
+                mt_backend = mt_result.backend
+            else:
+                llm_locale = detected_lang
+                mt_degraded.append("sw-en")
             timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if self._cancelled.is_set():
@@ -356,7 +437,7 @@ class VoiceSession:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 4: MT (en->lg) ─────────────────────────────────────
+        # ── Stage 4: MT (en -> lg / sw) ───────────────────────────────
         reply_for_tts = reply_text
         tts_lang = detected_lang
         if detected_lang == "lg" and "lg-en" not in mt_degraded:
@@ -366,8 +447,6 @@ class VoiceSession:
                 reply_for_tts = mt_back.text
                 mt_backend = mt_back.backend
             else:
-                # Degraded: speak the English reply with an English voice —
-                # intelligible English beats a Luganda voice mangling it.
                 tts_lang = "en"
                 mt_degraded.append("en-lg")
                 yield VoiceStreamEvent(
@@ -375,11 +454,27 @@ class VoiceSession:
                     data={"direction": "en-lg", "detail": "translation unavailable"},
                 )
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
-        elif detected_lang == "lg":
-            # Inbound MT already degraded — the reply is whatever language
-            # the LLM answered in; keep the detected voice only if the reply
-            # was generated for that locale.
-            tts_lang = detected_lang
+        elif detected_lang == "sw" and "sw-en" not in mt_degraded:
+            t0 = time.perf_counter()
+            mt_back = await _translate_with_retry(self._speech, reply_text, "en", "sw")
+            if mt_back is not None:
+                reply_for_tts = mt_back.text
+                mt_backend = mt_back.backend
+            else:
+                tts_lang = "en"
+                mt_degraded.append("en-sw")
+            timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang in ("lg", "sw"):
+            # generate() localised the reply itself; it is English if that failed.
+            tts_lang = str(llm_result.get("reply_locale") or detected_lang)
+
+        # Clean speech text for natural phonetics and pacing
+        try:
+            from .speech_normalization import clean_text_for_speech
+
+            reply_for_tts = clean_text_for_speech(reply_for_tts, locale=tts_lang)
+        except Exception:
+            pass
 
         if self._cancelled.is_set():
             return
@@ -511,8 +606,40 @@ class VoiceSession:
         )
 
     # ------------------------------------------------------------------
-    # VAD
+    # VAD & Backward Compatibility Properties
     # ------------------------------------------------------------------
+
+    @property
+    def _audio_buffer(self) -> bytearray:
+        return self._vad.audio_buffer
+
+    @_audio_buffer.setter
+    def _audio_buffer(self, val: bytearray) -> None:
+        self._vad.audio_buffer = val
+
+    @property
+    def _is_speaking(self) -> bool:
+        return self._vad.is_speaking
+
+    @_is_speaking.setter
+    def _is_speaking(self, val: bool) -> None:
+        self._vad.is_speaking = val
+
+    @property
+    def _silence_samples(self) -> int:
+        return self._vad.silence_samples
+
+    @_silence_samples.setter
+    def _silence_samples(self, val: int) -> None:
+        self._vad.silence_samples = val
+
+    @property
+    def _utterance_start(self) -> float | None:
+        return self._vad.utterance_start
+
+    @_utterance_start.setter
+    def _utterance_start(self, val: float | None) -> None:
+        self._vad.utterance_start = val
 
     def _vad_detect(self, pcm_chunk: bytes) -> tuple[bool, bool]:
         """Energy-based Voice Activity Detection with hysteresis.
@@ -524,46 +651,41 @@ class VoiceSession:
             (is_speech, utterance_complete) — True/True means the user
             finished speaking and the accumulated buffer is ready for ASR.
         """
-        # Convert PCM16 LE to float32
-        n_samples = len(pcm_chunk) // 2
-        if n_samples == 0:
-            return False, False
-
-        samples = np.frombuffer(pcm_chunk, dtype=np.int16).astype(np.float32) / 32768.0
-
-        # RMS energy
-        rms = float(np.sqrt(np.mean(samples ** 2)))
-        is_speech = rms > self.vad.energy_threshold
-
-        if is_speech:
-            if not self._is_speaking:
-                self._is_speaking = True
-                self._utterance_start = time.perf_counter()
-            self._silence_samples = 0
-            self._audio_buffer.extend(pcm_chunk)
-        else:
-            if self._is_speaking:
-                self._silence_samples += n_samples
-                # Still accumulate audio during silence hysteresis
-                self._audio_buffer.extend(pcm_chunk)
-
-                silence_ms = (self._silence_samples / self.vad.sample_rate) * 1000
-                if silence_ms >= self.vad.silence_duration_ms:
-                    # Utterance complete
-                    return False, True
-
-        # Check max utterance duration
-        if self._utterance_start is not None:
-            elapsed = time.perf_counter() - self._utterance_start
-            if elapsed >= self.vad.max_utterance_s:
-                return is_speech, True
-
-        return is_speech, False
+        return self._vad.detect(pcm_chunk)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+_LIST_MARKER_RE = re.compile(r"(?:^|(?<=\s))(\d{1,3})\.\s+")
+
+
+def _mark_list_steps(text: str) -> str:
+    """Rewrite numbered-list markers ("1. ", "2. ") as "Step 1:" so each stays with its clause.
+
+    Only markers: a "1." opening a line or following a colon, then the next
+    number of that list. A number that ends a sentence is left alone, so "Your
+    reference number is 123. Keep it safe." is not read as "Step 123".
+    """
+    out: list[str] = []
+    cursor = 0
+    expected: int | None = None
+    for match in _LIST_MARKER_RE.finditer(text):
+        number = int(match.group(1))
+        before = text[: match.start()]
+        opens = number == 1 and (
+            not before.strip() or before.rstrip(" \t").endswith("\n") or before.rstrip().endswith(":")
+        )
+        if not opens and number != expected:
+            continue
+        out.append(text[cursor : match.start()])
+        out.append(f"Step {number}:\x02 ")
+        cursor = match.end()
+        expected = number + 1
+    out.append(text[cursor:])
+    return "".join(out)
 
 
 def _split_sentences(text: str) -> list[str]:
@@ -599,14 +721,39 @@ def _split_sentences(text: str) -> list[str]:
         protected,
     )
 
+    # Protect numbered list steps (e.g. "1. ", "2. ") so they remain with their clause
+    protected = _mark_list_steps(protected)
+
     parts = _SENTENCE_RE.split(protected.strip())
 
-    # Restore protected tokens
+    # Maximum character limit to respect Spark-TTS-SALT ~8s training limit
+    max_chunk_chars = 140
+    clause_re = re.compile(r"(?<=[;:,—–])\s+")
+
+    # Restore protected tokens and split oversized sentences on clause boundaries
     result: list[str] = []
     for part in parts:
-        part = part.replace("\x00", ".").replace("\x01", ".").strip()
+        part = part.replace("\x00", ".").replace("\x01", ".").replace("\x02", "").strip()
         if not part:
             continue
+
+        # If sentence exceeds safe TTS limit, subdivide along clause boundaries
+        if len(part) > max_chunk_chars:
+            clauses = clause_re.split(part)
+            current_sub = ""
+            for clause in clauses:
+                clause = clause.strip()
+                if not clause:
+                    continue
+                if current_sub and (len(current_sub) + len(clause) + 1 > max_chunk_chars):
+                    result.append(current_sub)
+                    current_sub = clause
+                else:
+                    current_sub = (current_sub + " " + clause).strip() if current_sub else clause
+            if current_sub:
+                result.append(current_sub)
+            continue
+
         # Merge tiny non-sentence fragments, but keep short complete sentences.
         if result and len(part) < 15 and not re.search(r"[.!?]$", part):
             result[-1] = result[-1] + " " + part

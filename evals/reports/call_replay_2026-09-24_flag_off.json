@@ -1,0 +1,210 @@
+{
+ "date": "2026-09-24",
+ "ws": "ws://127.0.0.1:8083/v1/calls/stream",
+ "passed": 0,
+ "scenarios": 6,
+ "first_audio_ms_p50": 7710.0,
+ "results": [
+  {
+   "name": "1_english_stays_english",
+   "note": "English caller: locks English, never leaves it.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 2721,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 17544,
+     "languages": [],
+     "assistant": [
+      "To register for a TIN, please visit the official URA web portal at ura.go.ug, navigate to **eServices**, then **TIN Registration**, and complete the online application. Are you registering as an individual or an organisation?"
+     ],
+     "caller": [],
+     "status": []
+    },
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 4789,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 13765,
+     "languages": [],
+     "assistant": [
+      "The standard Value Added Tax (VAT) rate in Uganda is 18%. VAT-registered businesses collect this from customers and remit it to URA."
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_6f027d8fbe01",
+   "language_detection": false,
+   "language_sequence": [],
+   "passed": false
+  },
+  {
+   "name": "1_english_stays_english",
+   "note": "English caller: locks English, never leaves it.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 7617,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 27916,
+     "languages": [],
+     "assistant": [
+      "To register for a TIN with URA, visit the official URA web portal at https://ura.go.ug and navigate to **eServices** > **TIN Registration**. You will need to complete the online application form. Are you registering as an individual or an organisation?"
+     ],
+     "caller": [],
+     "status": []
+    },
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 9299,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 17923,
+     "languages": [],
+     "assistant": [
+      "The standard Value Added Tax (VAT) rate in Uganda is 18%. This is charged on taxable supplies of goods and services."
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_bc9e68e85897",
+   "language_detection": false,
+   "language_sequence": [],
+   "passed": false
+  },
+  {
+   "name": "1_english_stays_english",
+   "note": "English caller: locks English, never leaves it.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 7710,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 26332,
+     "languages": [],
+     "assistant": [
+      "To register for a TIN, visit the official URA web portal at https://ura.go.ug, then navigate to eServices > TIN Registration. You'll need to complete and submit the online form. Are you registering as an individual or an organisation?"
+     ],
+     "caller": [],
+     "status": []
+    },
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 6853,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 14669,
+     "languages": [],
+     "assistant": [
+      "The standard rate of Value Added Tax (VAT) is 18%. This is charged on taxable supplies of goods and services."
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_c409bad820f3",
+   "language_detection": false,
+   "language_sequence": [],
+   "passed": false
+  },
+  {
+   "name": "3_swahili_on_gemini",
+   "note": "Answered in Swahili by Gemini Live.",
+   "turns": [
+    {
+     "utterance": "sw_tin",
+     "said": "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+     "first_audio_ms": 10226,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 34645,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "auto"
+      }
+     ],
+     "assistant": [
+      "Karibu. Ili kujisajili kwa TIN na URA: 1. Tembelea tovuti rasmi ya URA https://ura.go.ug 2. Nenda kwenye **eServices** kisha **TIN Registration** 3. Jaza fomu ya maombi ya mtandaoni na utume. Je, unajisajili kama **mtu binafsi** (unahitaji kitambulisho chako cha Taifa/NIN) au **Shirika** (unahitaji Hati ya Uandikishaji)?"
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_aaf0ce441fb5",
+   "language_detection": false,
+   "language_sequence": [
+    "sw"
+   ],
+   "passed": false
+  },
+  {
+   "name": "3_swahili_on_gemini",
+   "note": "Answered in Swahili by Gemini Live.",
+   "turns": [
+    {
+     "utterance": "sw_tin",
+     "said": "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+     "first_audio_ms": 12709,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 29129,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "auto"
+      }
+     ],
+     "assistant": [
+      "Ili kujiandikisha kupata TIN na URA, tembelea tovuti ya URA https://ura.go.ug kisha nenda kwa eServices > TIN Registration. Jaza fomu ya maombi mtandaoni na utume. Je, unajisajili kama mtu binafsi au shirika?"
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_6f56a9cd203f",
+   "language_detection": false,
+   "language_sequence": [
+    "sw"
+   ],
+   "passed": false
+  },
+  {
+   "name": "3_swahili_on_gemini",
+   "note": "Answered in Swahili by Gemini Live.",
+   "turns": [
+    {
+     "utterance": "sw_tin",
+     "said": "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+     "first_audio_ms": 8077,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 32655,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "auto"
+      }
+     ],
+     "assistant": [
+      "Ili kujiandikisha kupata TIN na URA: 1. Tembelea tovuti rasmi ya URA https://ura.go.ug 2. Nenda kwenye **eServices** > **TIN Registration** 3. Jaza fomu ya maombi ya mtandaoni na utume. Je, unajisajili kama **mtu binafsi** (unahitaji kitambulisho cha Taifa/NIN) au **shirika** (unahitaji cheti cha usajili)?"
+     ],
+     "caller": [],
+     "status": []
+    }
+   ],
+   "call_id": "call_0beb63016c86",
+   "language_detection": false,
+   "language_sequence": [
+    "sw"
+   ],
+   "passed": false
+  }
+ ]
+}

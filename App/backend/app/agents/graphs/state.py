@@ -25,10 +25,10 @@ class GraphOutcome(str, Enum):
 class AgentGraphState:
     """State dict threaded through every node in the graph.
 
-    Unlike LangGraph's TypedDict approach, this is a mutable
-    dataclass so nodes can mutate fields in place.  Every mutation
-    is snapshotted into the audit ledger if ``FLAG_AUDIT_LEDGER``
-    is on.
+    This mutable dataclass is request-scoped and is not checkpointed or
+    snapshotted into the audit ledger. ``trace`` records only node names,
+    durations, and bounded status metadata; the surrounding service writes a
+    separate privacy-minimized turn audit record.
 
     Keep the field set small — it's logged on every transition.
     """
@@ -38,6 +38,8 @@ class AgentGraphState:
     rewritten_query: str = ""
     locale: str = "en"
     top_k: int = 4
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
+    context_summary: str = ""
 
     # -- Auth --
     tenant_id: str = "default"
@@ -85,6 +87,7 @@ class AgentGraphState:
     clarification_question: str = ""
     escalation_reason: str = ""
     ticket_id: str = ""
+    agent_role: str = "graph_agent"
 
     # -- Telemetry --
     trace: list[dict[str, Any]] = field(default_factory=list)  # (node, duration_ms)

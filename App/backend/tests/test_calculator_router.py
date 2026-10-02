@@ -6,12 +6,14 @@ from __future__ import annotations
 import unittest
 import uuid
 
+from app.query import rewrite as rewrite_query
 from app.calculator_router import (
     _INFO_ONLY_RE,
     _PAYE_THRESHOLD_ASK_RE,
     extract_amounts,
     parse_ugx_amount,
     plan_calculation,
+    rate_lookup_calendar_years,
     plan_rate_lookup,
 )
 from app.workflows.slots import validate_slot
@@ -131,6 +133,25 @@ class PlanCalculationTests(unittest.TestCase):
         self.assertEqual(plan.params["payment_type"], "services")
         self.assertEqual(plan.params["amount"], 3_000_000.0)
 
+    def test_management_consultancy_asks_which_rate(self) -> None:
+        plan = plan_calculation("how much withholding tax on a 3m management consultancy")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_withholding")
+        self.assertIn("payment_type", plan.missing)
+        self.assertNotIn("payment_type", plan.params)
+
+    def test_luganda_vati_registration_reaches_the_calculator(self) -> None:
+        plan = plan_calculation("Ninza okwewandiisa vati, omusolo 350000000")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "check_vat_registration")
+        self.assertEqual(plan.params["annual_turnover"], 350_000_000.0)
+
+    def test_luganda_okubala_vati_is_a_vat_calculation(self) -> None:
+        plan = plan_calculation("okubala vati ku 1500000")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_vat")
+        self.assertEqual(plan.params["amount"], 1_500_000.0)
+
     def test_capital_gains_keyword_mapping(self) -> None:
         plan = plan_calculation("calculate capital gains: bought at 20m, sold for 50m")
         self.assertEqual(plan.missing, [])
@@ -231,6 +252,83 @@ class ServiceCalculatorPathTests(unittest.TestCase):
             self.assertNotIn("provisional", reply.lower())
         else:
             self.assertIn("provisional", reply.lower())
+
+    def test_followup_amount_stays_on_the_same_tax(self) -> None:
+        from app.tools import ToolRegistry
+
+        thread = str(uuid.uuid4())
+        first = self.model.generate_retrieval_only(
+            message="Calculate VAT on 1,000,000",
+            conversation_id=thread,
+        )
+        self.assertEqual(first["retrieval_mode"], "calculator")
+        second = self.model.generate_retrieval_only(
+            message="what about 2,000,000",
+            conversation_id=thread,
+        )
+        expected = ToolRegistry.call("calculate_vat", {"amount": 2_000_000})
+        self.assertEqual(second["retrieval_mode"], "calculator")
+        self.assertIn(f"{expected['vat']:,.0f}", second["reply"])
+        self.assertNotIn("PAYE", second["reply"])
+
+    def test_bare_amount_reads_vat_from_the_rate_table(self) -> None:
+        from app.tools import ToolRegistry
+
+        out = self.model.generate_retrieval_only(
+            message="1000000",
+            conversation_id=str(uuid.uuid4()),
+        )
+        vat = ToolRegistry.call("calculate_vat", {"amount": 1_000_000, "direction": "add"})
+        self.assertEqual(out["retrieval_mode"], "calculator")
+        self.assertIn(f"{float(vat['vat']):,.0f}", out["reply"])
+        self.assertIn("services", out["reply"].lower())
+
+    def test_workflows_off_asks_for_the_missing_figure(self) -> None:
+        from app.tools import ToolRegistry
+
+        self._flags.set("workflows", False)
+        try:
+            thread = str(uuid.uuid4())
+            asked = self.model.generate_retrieval_only(
+                message="How much PAYE will I pay?",
+                conversation_id=thread,
+            )
+            self.assertEqual(asked["retrieval_mode"], "calculator")
+            self.assertIn("gross monthly salary", asked["reply"].lower())
+            answered = self.model.generate_retrieval_only(
+                message="1.5m",
+                conversation_id=thread,
+            )
+            expected = ToolRegistry.call("calculate_paye", {"monthly_gross": 1_500_000})
+            self.assertIn(f"{expected['paye']:,.0f}", answered["reply"])
+            self.assertNotIn("primary tax heads", answered["reply"].lower())
+        finally:
+            self._flags.set("workflows", True)
+
+    def test_a_tax_figure_is_not_small_talk(self) -> None:
+        from app.conversational import handle_conversational_turn
+
+        self.assertIsNone(handle_conversational_turn("why do we pay VAT on 350000000"))
+        civic = handle_conversational_turn("why do we pay taxes?")
+        self.assertIsNotNone(civic)
+        self.assertEqual(civic.intent_type, "civic_philosophy")
+
+    def test_schema_drift_is_not_spoken_as_a_figure(self) -> None:
+        from unittest.mock import patch
+
+        from app.mcp import get_client
+
+        client = get_client()
+        healthy = client.call_tool("calculate_vat", {"amount": 1000}, user_role="public")
+        self.assertTrue(healthy.ok)
+        self.assertIn("vat", healthy.result)
+        with patch(
+            "app.mcp.client.result_matches_schema",
+            return_value=["ok: not a boolean"],
+        ):
+            drifted = client.call_tool("calculate_vat", {"amount": 1000}, user_role="public")
+        self.assertFalse(drifted.ok)
+        self.assertNotIn("vat", drifted.result)
 
     def test_invalid_slot_answer_reprompts(self) -> None:
         thread = str(uuid.uuid4())
@@ -371,6 +469,16 @@ class FigureLookupIsNotACalculationTests(unittest.TestCase):
                 self.assertEqual(plan.tool, tool)
 
 
+class RateLookupCalendarYearTests(unittest.TestCase):
+    def test_extracts_explicit_years_without_treating_them_as_amounts(self) -> None:
+        self.assertEqual(rate_lookup_calendar_years("What will Uganda's VAT rate be in 2031?"), (2031,))
+        self.assertEqual(
+            rate_lookup_calendar_years("Compare FY2025-26 with FY2026-27 PAYE rates"),
+            (2025, 2026, 2026, 2027),
+        )
+        self.assertEqual(rate_lookup_calendar_years("What is the VAT rate?"), ())
+
+
 class SalaryThresholdIsARateLookupTests(unittest.TestCase):
     """Plain-language PAYE threshold questions must read the rate table.
 
@@ -477,3 +585,176 @@ class SalaryThresholdIsARateLookupTests(unittest.TestCase):
         """A stray ``|`` here would route every message to the PAYE bands."""
         self.assertIsNone(_PAYE_THRESHOLD_ASK_RE.search(""))
         self.assertIsNone(_PAYE_THRESHOLD_ASK_RE.search("hello"))
+
+
+class VatRegistrationScopeTests(unittest.TestCase):
+    """The registration check must own only questions *about* registering.
+
+    Measured against the live Space (issue #430): "my business is registered
+    for vat, do i have to use efris" returned the turnover-elicitation
+    workflow.  "vat" and "registered" co-occurred and an obligation word
+    appeared somewhere in the sentence, which was the whole gate — so a
+    declarative premise plus a question about a different obligation was
+    indistinguishable from "must I register?".
+    """
+
+    def test_an_already_registered_premise_does_not_claim_the_question(self) -> None:
+        for message in (
+            "my business is registered for vat, do i have to use efris",
+            "i am registered for vat, do i need to file monthly returns",
+            "i'm vat registered, what is efris",
+            "we are already registered for vat, must we issue e-invoices",
+            "our company has been registered for vat, do we need a tax agent",
+            # A possessive subject is not always one word.
+            "my small business is registered for vat, do i have to use efris",
+        ):
+            with self.subTest(message=message):
+                plan = plan_calculation(message)
+                if plan is not None:
+                    self.assertNotEqual(plan.tool, "check_vat_registration")
+
+    def test_the_guard_survives_abbreviation_expansion(self) -> None:
+        """`_maybe_handle_calculator` falls back to `plan_calculation(rewritten)`.
+
+        The rewriter expands abbreviations, so "registered for vat" reaches the
+        router as "registered for Value Added Tax (VAT)". The guard matched only
+        the short spelling, so it passed on the raw message and was bypassed on
+        the rewritten one — the live Space still returned the turnover workflow
+        with every unit test here green, because they all asked in raw wording.
+        """
+        for message in (
+            "my business is registered for vat, do i have to use efris",
+            "my small business is registered for vat, do i have to use efris",
+            "i am registered for vat, do i need to keep records in english",
+            "our firm has been registered for vat since 2023, must we issue e-invoices",
+            "i'm vat registered, what is efris",
+        ):
+            rewritten = rewrite_query(message, history=None)
+            # Without this the loop can check the abbreviated spelling twice and
+            # prove nothing — which is the exact shape of the blind spot that
+            # let the original bug ship.
+            self.assertIn("value added tax", rewritten.lower(), rewritten)
+            for form in (message, rewritten):
+                with self.subTest(form=form):
+                    plan = plan_calculation(form)
+                    if plan is not None:
+                        self.assertNotEqual(plan.tool, "check_vat_registration")
+
+    def test_genuine_questions_route_in_both_spellings(self) -> None:
+        for message in (
+            "do i have to register for vat",
+            "am i required to be registered for vat",
+            "my business is registered, do i have to register for vat",
+        ):
+            rewritten = rewrite_query(message, history=None)
+            self.assertIn("value added tax", rewritten.lower(), rewritten)
+            for form in (message, rewritten):
+                with self.subTest(form=form):
+                    plan = plan_calculation(form)
+                    self.assertIsNotNone(plan, form)
+                    self.assertEqual(plan.tool, "check_vat_registration")
+
+    def test_genuine_registration_questions_still_route(self) -> None:
+        """The premise guard keys on subject-then-copula, so a question that
+        merely contains "registered" is untouched."""
+        for message in (
+            "do i have to register for vat",
+            "must i register for vat if my turnover is 200m",
+            "am i required to be registered for vat",
+            "should my company register for vat",
+            "when do i need to register for vat",
+            # The premise names a registration that is not the VAT one, and the
+            # real question follows it. Suppressing here answered nothing at all.
+            "my business is registered, do i have to register for vat",
+        ):
+            with self.subTest(message=message):
+                plan = plan_calculation(message)
+                self.assertIsNotNone(plan, message)
+                self.assertEqual(plan.tool, "check_vat_registration")
+
+
+class NewRateLookupsTests(unittest.TestCase):
+    def test_mobile_money_cash_withdrawal_excise_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the excise duty rate on mobile money cash withdrawals?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "excise_duty_mobile_money_withdrawal")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("0.5%", reply)
+        self.assertIn("Excise Duty Act", reply)
+
+    def test_penal_tax_late_filing_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the penalty for late filing of an income tax return?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "penal_tax_late_filing")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("UGX 200,000", reply)
+        self.assertIn("2%", reply)
+        self.assertIn("Tax Procedures Code Act", reply)
+
+    def test_presumptive_tax_threshold_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the turnover threshold for small businesses using presumptive tax?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "presumptive_tax_threshold")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("150,000,000", reply)
+        self.assertIn("10,000,000", reply)
+
+    def test_vehicle_environmental_levy_lookup(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        plan = plan_rate_lookup("What is the environmental levy rate on imported motor vehicles aged 6 years?")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tax_type, "environmental_levy_used_vehicles_5_to_8_years")
+        reply, _actions = format_rate_reply(plan, get_table())
+        self.assertIn("35%", reply)
+
+    def test_fuel_and_telecom_excise_lookups(self) -> None:
+        from app.calculator_router import format_rate_reply, plan_rate_lookup
+        from app.tax.tables import get_table
+
+        table = get_table()
+        plan_petrol = plan_rate_lookup("What is the excise duty rate on petrol?")
+        self.assertIsNotNone(plan_petrol)
+        self.assertEqual(plan_petrol.tax_type, "excise_duty_fuel_petrol_per_litre")
+        reply, _ = format_rate_reply(plan_petrol, table)
+        self.assertIn("1,450", reply)
+
+        plan_data = plan_rate_lookup("What is the excise duty rate on internet data?")
+        self.assertIsNotNone(plan_data)
+        self.assertEqual(plan_data.tax_type, "excise_duty_telecom_data")
+        reply, _ = format_rate_reply(plan_data, table)
+        self.assertIn("12%", reply)
+
+
+class ExciseAndCustomsPlanningTests(unittest.TestCase):
+    def test_mobile_money_cash_withdrawal_plan(self) -> None:
+        plan = plan_calculation("Calculate excise duty on 500,000 mobile money cash withdrawal")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_excise_duty")
+        self.assertEqual(plan.params["excise_type"], "mobile_money_withdrawal")
+        self.assertEqual(plan.params["amount"], 500_000.0)
+
+    def test_customs_raw_materials_plan(self) -> None:
+        plan = plan_calculation("Calculate customs duty on 10,000,000 raw materials CIF")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_customs_duty")
+        self.assertEqual(plan.params["goods_category"], "raw_materials")
+        self.assertEqual(plan.params["cif_value"], 10_000_000.0)
+
+    def test_customs_used_vehicle_plan(self) -> None:
+        plan = plan_calculation("Calculate import duty for a 6 years old car CIF 15m with withholding tax")
+        self.assertIsNotNone(plan)
+        self.assertEqual(plan.tool, "calculate_customs_duty")
+        self.assertEqual(plan.params["goods_category"], "used_vehicle_5_to_8_years")
+        self.assertTrue(plan.params["include_wht"])
+        self.assertEqual(plan.params["cif_value"], 15_000_000.0)

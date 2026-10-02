@@ -124,6 +124,37 @@ function downsampleToPCM16(
   return result.buffer;
 }
 
+/**
+ * Wrap 16-bit mono PCM in a 44-byte WAV header for upload.
+ *
+ * The server sniffs a headerless body to guess its format, and a recording
+ * whose first sample is -1 starts FF FF, which is an MP3 frame sync: a
+ * Luganda question was decoded as MP3 noise that way and heard as "e e e e".
+ * With a RIFF header there is nothing to guess.
+ */
+export function pcm16ToWav(pcm16: ArrayBuffer, sampleRate: number): ArrayBuffer {
+  const out = new ArrayBuffer(44 + pcm16.byteLength);
+  const view = new DataView(out);
+  const ascii = (offset: number, text: string) => {
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i));
+  };
+  ascii(0, 'RIFF');
+  view.setUint32(4, 36 + pcm16.byteLength, true);
+  ascii(8, 'WAVE');
+  ascii(12, 'fmt ');
+  view.setUint32(16, 16, true); // fmt chunk size
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, 1, true); // mono
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true); // byte rate
+  view.setUint16(32, 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  ascii(36, 'data');
+  view.setUint32(40, pcm16.byteLength, true);
+  new Uint8Array(out, 44).set(new Uint8Array(pcm16));
+  return out;
+}
+
 // ---------------------------------------------------------------------------
 // Audio recorder (MediaRecorder → PCM16 at 16 kHz)
 // ---------------------------------------------------------------------------
@@ -137,6 +168,10 @@ export class AudioRecorder {
 
   get isRecording(): boolean {
     return this._recording;
+  }
+
+  getStream(): MediaStream | null {
+    return this.stream;
   }
 
   /** Check if MediaRecorder + microphone are available. */
@@ -227,21 +262,24 @@ export class AudioRecorder {
    */
   async startStreaming(
     onChunk: (pcm16: ArrayBuffer) => void,
+    options?: { echoCancellation?: boolean; noiseSuppression?: boolean },
   ): Promise<() => void> {
     const ctx = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+    if (ctx.state === 'suspended') {
+      await ctx.resume().catch(() => {});
+    }
 
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         sampleRate: { ideal: TARGET_SAMPLE_RATE },
         channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
+        echoCancellation: options?.echoCancellation ?? true,
+        noiseSuppression: options?.noiseSuppression ?? true,
       },
     });
 
-    const source = ctx.createMediaStreamSource(this.stream);
-
     try {
+      const source = ctx.createMediaStreamSource(this.stream);
       // Prefer AudioWorklet (modern browsers)
       await ctx.audioWorklet.addModule('/audio-worklet-processor.js');
       const workletNode = new AudioWorkletNode(ctx, 'pcm16-processor');
@@ -264,6 +302,7 @@ export class AudioRecorder {
       };
     } catch {
       // Fallback: ScriptProcessorNode (deprecated but widely supported)
+      const source = ctx.createMediaStreamSource(this.stream);
       const bufSize = 4096;
       const processor = ctx.createScriptProcessor(bufSize, 1, 1);
       processor.onaudioprocess = (e: AudioProcessingEvent) => {
@@ -342,7 +381,7 @@ export function closePlaybackContext(): void {
   }
 }
 
-/** Stop any currently playing audio. */
+/** Stop any currently playing audio, including a streamed reply and what it has queued. */
 export function stopPlayback(): void {
   if (_currentSource) {
     try {
@@ -352,11 +391,184 @@ export function stopPlayback(): void {
     }
     _currentSource = null;
   }
+  if (_speechStream) {
+    _speechStream.abort();
+    _speechStream = null;
+  }
+  for (const source of _streamSources) {
+    try {
+      source.stop();
+    } catch {
+      // already stopped
+    }
+  }
+  _streamSources.clear();
 }
 
-/** Returns true if audio is currently playing. */
+/** Returns true if audio is currently playing (or a streamed reply is still arriving). */
 export function isPlaying(): boolean {
-  return _currentSource !== null;
+  return _currentSource !== null || _speechStream !== null || _streamSources.size > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Streamed speech (/v1/tts/stream)
+// ---------------------------------------------------------------------------
+
+/** One piece of a streamed reply, in speaking order. `error` instead of audio when it could not be voiced. */
+export interface SpeechPiece {
+  seq: number;
+  text: string;
+  format?: 'ogg_opus' | 'wav' | 'mp3';
+  audio_base64?: string;
+  duration_s?: number;
+  backend?: string;
+  error?: string;
+}
+
+export interface SpokenOutcome {
+  /** From asking to the first sound, in ms; null when nothing played. */
+  firstAudioMs: number | null;
+  pieces: number;
+  failed: number;
+  /** Stopped by stopPlayback() before the end. */
+  stopped: boolean;
+}
+
+let _speechStream: AbortController | null = null;
+const _streamSources = new Set<AudioBufferSourceNode>();
+
+/** 'opus' where this browser plays Ogg/Opus (about a tenth of WAV's size), else 'wav'. */
+export function speechFormat(): 'opus' | 'wav' {
+  try {
+    return typeof Audio !== 'undefined' && new Audio().canPlayType('audio/ogg; codecs="opus"') ? 'opus' : 'wav';
+  } catch {
+    return 'wav';
+  }
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/** The pieces of speech for `text`, in speaking order, as the server finishes each one. */
+export async function* streamSpeech(
+  text: string,
+  opts: { language?: string; voice?: string; signal?: AbortSignal } = {},
+): AsyncGenerator<SpeechPiece> {
+  const res = await fetch(`${API_URL}/v1/tts/stream`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ text, language: opts.language ?? 'en', voice: opts.voice, format: speechFormat() }),
+    signal: opts.signal,
+  });
+  if (!res.ok || !res.body) throw new Error(`TTS stream failed: ${res.status}`);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (value) buffered += decoder.decode(value, { stream: true });
+      for (let nl = buffered.indexOf('\n'); nl >= 0; nl = buffered.indexOf('\n')) {
+        const line = buffered.slice(0, nl).trim();
+        buffered = buffered.slice(nl + 1);
+        if (!line) continue;
+        const message = JSON.parse(line) as SpeechPiece & { done?: boolean };
+        if (message.done) return;
+        yield message;
+      }
+      if (done) return;
+    }
+  } finally {
+    // A caller that stops listening early closes the request, so the server
+    // stops voicing the rest.
+    reader.cancel().catch(() => {});
+  }
+}
+
+/**
+ * Speak `text` as it is synthesised. Each piece of /v1/tts/stream is decoded
+ * when it arrives and scheduled to start as the one before ends, so a long
+ * answer is heard after its first sentence, not after all of it (9–20 s on
+ * the GPU stack before, the whole reply as one WAV).
+ *
+ * Throws only when nothing could be played: the caller then asks /v1/tts for
+ * the whole reply once. A failure part-way, or a server that stops sending
+ * for `stallMs`, ends quietly after what is already queued: the answer is on
+ * screen.
+ */
+export async function speakStreamed(
+  text: string,
+  opts: { language?: string; voice?: string; onFirstAudio?: () => void; stallMs?: number } = {},
+): Promise<SpokenOutcome> {
+  stopPlayback();
+  const controller = new AbortController();
+  _speechStream = controller;
+  const ctx = getPlaybackContext();
+  if (ctx.state === 'suspended') await ctx.resume();
+  const started = performance.now();
+  const stallMs = opts.stallMs ?? 20_000;
+  let stalled = false;
+  let watchdog = setTimeout(() => ((stalled = true), controller.abort()), stallMs);
+  let nextStart = 0;
+  let firstAudioMs: number | null = null;
+  let pieces = 0;
+  let failed = 0;
+  let lastEnded: Promise<void> = Promise.resolve();
+  try {
+    for await (const piece of streamSpeech(text, { ...opts, signal: controller.signal })) {
+      clearTimeout(watchdog);
+      watchdog = setTimeout(() => ((stalled = true), controller.abort()), stallMs);
+      if (!piece.audio_base64) {
+        failed += 1;
+        continue;
+      }
+      let buffer: AudioBuffer;
+      try {
+        buffer = await ctx.decodeAudioData(base64ToArrayBuffer(piece.audio_base64));
+      } catch (err) {
+        // Before anything has played, the format is the likely fault: give up
+        // at once so the caller falls back to one WAV. After, skip the piece.
+        if (pieces === 0) throw err;
+        failed += 1;
+        continue;
+      }
+      if (controller.signal.aborted) break;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      const startAt = Math.max(ctx.currentTime + 0.02, nextStart);
+      source.start(startAt);
+      nextStart = startAt + buffer.duration;
+      pieces += 1;
+      _streamSources.add(source);
+      lastEnded = new Promise<void>((resolve) => {
+        source.onended = () => {
+          _streamSources.delete(source);
+          resolve();
+        };
+      });
+      if (firstAudioMs === null) {
+        firstAudioMs = Math.round(performance.now() - started);
+        opts.onFirstAudio?.();
+      }
+    }
+  } catch (err) {
+    if (pieces === 0 && !(controller.signal.aborted && !stalled)) {
+      if (_speechStream === controller) _speechStream = null;
+      throw err;
+    }
+  } finally {
+    clearTimeout(watchdog);
+  }
+  const stopped = controller.signal.aborted && !stalled;
+  if (_speechStream === controller) _speechStream = null;
+  if (pieces === 0 && !stopped) throw new Error(failed ? 'No piece of the reply could be voiced' : 'Empty speech stream');
+  if (!stopped) await lastEnded;
+  return { firstAudioMs, pieces, failed, stopped };
 }
 
 // ---------------------------------------------------------------------------
@@ -383,22 +595,29 @@ export async function checkSpeechHealth(): Promise<SpeechHealthStatus> {
   }
 }
 
-/** Send raw PCM16 audio to /v1/asr for server-side transcription. */
+/**
+ * Send PCM16 audio to /v1/asr for server-side transcription, as WAV.
+ *
+ * `domain: 'tax'` asks for Whisper's TIN/URA mishears to be repaired
+ * ("namba ya timu" → "namba ya TIN"), as the voice chat already does.
+ */
 export async function transcribe(
   pcm16: ArrayBuffer,
   language?: string,
-  sampleRate = TARGET_SAMPLE_RATE
+  sampleRate = TARGET_SAMPLE_RATE,
+  opts: { domain?: 'tax' } = {},
 ): Promise<TranscribeResult> {
   const params = new URLSearchParams({ sample_rate: String(sampleRate) });
   if (language) params.set('language', language);
+  if (opts.domain) params.set('domain', opts.domain);
 
   const res = await fetch(`${API_URL}/v1/asr?${params}`, {
     method: 'POST',
     headers: authHeaders({
-      'Content-Type': 'application/octet-stream',
+      'Content-Type': 'audio/wav',
       'X-Voice-Consent': 'true',
     }),
-    body: pcm16,
+    body: pcm16ToWav(pcm16, sampleRate),
     signal: withTimeout(FETCH_TIMEOUT_MS),
   });
   if (!res.ok) {
@@ -476,7 +695,7 @@ export async function voiceChat(
   if (opts.conversationId) params.set('conversation_id', opts.conversationId);
 
   const headers: Record<string, string> = authHeaders({
-    'Content-Type': 'application/octet-stream',
+    'Content-Type': 'audio/wav',
     'X-Voice-Consent': 'true',
   });
   if (opts.sessionId) headers['X-Session-ID'] = opts.sessionId;
@@ -484,7 +703,7 @@ export async function voiceChat(
   const res = await fetch(`${API_URL}/v1/voice/chat?${params}`, {
     method: 'POST',
     headers,
-    body: pcm16,
+    body: pcm16ToWav(pcm16, opts.sampleRate ?? TARGET_SAMPLE_RATE),
     signal: withTimeout(60_000), // voice chat is multi-stage, allow 60s
   });
   if (!res.ok) {

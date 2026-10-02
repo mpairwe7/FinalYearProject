@@ -1,17 +1,20 @@
-import React, { lazy, memo, Suspense, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
 import { formatDocType } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
+import { useTranslation } from '../lib/i18n';
 import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
 import { authHeaders } from '../lib/authSession';
+import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon } from './Icons';
-import LoadingState, { formatElapsed } from './LoadingState';
-
-const Markdown = lazy(() => import('./Markdown'));
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon } from './Icons';
+import LoadingState from './LoadingState';
+import Markdown from './Markdown';
+import WorkflowStepper from './WorkflowStepper';
+import ResourceCards from './ResourceCards';
 
 /** Copy an assistant reply to the clipboard with a brief confirmation. */
 function CopyButton({ text, noun = 'reply' }: { text: string; noun?: string }) {
@@ -95,6 +98,8 @@ interface ChatMessageProps {
   phaseLabel?: string;
   phaseVariant?: string;
   phaseStartedAt?: number;
+  onInspectAttachment?: (attachment: ChatAttachment) => void;
+  onActionClick?: (action: string) => void;
 }
 
 /**
@@ -131,9 +136,16 @@ function ChatMessageInner({
   phaseLabel,
   phaseVariant,
   phaseStartedAt,
+  onInspectAttachment,
+  onActionClick,
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
+  const t = useTranslation();
+  const deadlineEvent = useMemo(
+    () => (isAssistant && !isGreeting ? detectDeadlineInMessage(turn.content) : null),
+    [isAssistant, isGreeting, turn.content]
+  );
 
   return (
     <article className={`message-row message-row-${turn.role}`}>
@@ -147,16 +159,21 @@ function ChatMessageInner({
         {isAssistant && phaseLabel && phaseStartedAt != null && (
           <LoadingState label={phaseLabel} variant={phaseVariant} startedAt={phaseStartedAt} />
         )}
-        {isAssistant && !isGreeting && !phaseLabel && turn.thoughtForMs != null && (
-          <span className="thought-for">Thought for {formatElapsed(turn.thoughtForMs)}</span>
-        )}
         <div className="msg-content">
           {isAssistant ? (
-            <Suspense fallback={turn.content}><Markdown content={turn.content} /></Suspense>
+            <Markdown content={isGreeting ? t('chat.greeting') : turn.content} />
           ) : (
             turn.content
           )}
         </div>
+
+        {isAssistant && turn.workflow && (
+          <WorkflowStepper workflow={turn.workflow} onSelectOption={onActionClick} />
+        )}
+
+        {isAssistant && turn.resources && turn.resources.length > 0 && !turn.workflow && (
+          <ResourceCards resources={turn.resources} />
+        )}
 
         {!isAssistant && turn.content && (
           <div className="bubble-actions bubble-actions-user">
@@ -170,10 +187,73 @@ function ChatMessageInner({
               <div className="attachment-chip attachment-chip-sent" key={a.id}>
                 <FileIcon />
                 <span className="attachment-name" title={a.name}>{a.name}</span>
-                <span className="attachment-meta">{formatDocType(a.docType)}</span>
+                <span className="attachment-meta">{formatDocType(a.docType, locale)}</span>
+                {onInspectAttachment && (
+                  <button
+                    type="button"
+                    className="attachment-report-btn"
+                    onClick={() => onInspectAttachment(a)}
+                    title="Inspect extracted fields & tax audit"
+                    aria-label={`Inspect ${a.name}`}
+                  >
+                    <EyeIcon /> Inspect
+                  </button>
+                )}
                 <ReportDownloadButton attachment={a} />
               </div>
             ))}
+            {turn.attachments.map((a) =>
+              a.analysis?.screenshot_guidance?.is_screenshot ? (
+                <div className="portal-guidance-card" key={`guidance-${a.id}`} role="region" aria-label="URA Portal Guidance">
+                  <div className="portal-guidance-badge-row">
+                    <span className="portal-guidance-badge">
+                      🌐 {a.analysis.screenshot_guidance.detected_portal}
+                    </span>
+                    {a.analysis.screenshot_guidance.detected_state ? (
+                      <span className="portal-guidance-state">
+                        {a.analysis.screenshot_guidance.detected_state}
+                      </span>
+                    ) : null}
+                  </div>
+                  {a.analysis.screenshot_guidance.issues_detected && a.analysis.screenshot_guidance.issues_detected.length > 0 ? (
+                    <p className="portal-guidance-issue">
+                      ⚠️ <strong>Identified:</strong> {a.analysis.screenshot_guidance.issues_detected.join(' ')}
+                    </p>
+                  ) : null}
+                  {a.analysis.screenshot_guidance.steps && a.analysis.screenshot_guidance.steps.length > 0 ? (
+                    <div className="portal-guidance-steps-wrap">
+                      <span className="portal-guidance-steps-title">Recommended Resolution Steps:</span>
+                      <ol className="portal-guidance-steps-list">
+                        {a.analysis.screenshot_guidance.steps.map((step, idx) => (
+                          <li key={idx}>{step}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
+                  <div className="portal-guidance-actions">
+                    {a.analysis.screenshot_guidance.portal_url ? (
+                      <a
+                        href={a.analysis.screenshot_guidance.portal_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="portal-action-btn is-primary"
+                      >
+                        {a.analysis.screenshot_guidance.direct_action?.label || 'Open URA Portal ↗'}
+                      </a>
+                    ) : null}
+                    {onInspectAttachment ? (
+                      <button
+                        type="button"
+                        className="portal-action-btn is-ghost"
+                        onClick={() => onInspectAttachment(a)}
+                      >
+                        <EyeIcon /> Inspect Click Guidance
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null,
+            )}
           </div>
         )}
 
@@ -218,13 +298,27 @@ function ChatMessageInner({
         {/* chatv2: grounding sits outside the citations block — a low-confidence
             answer often has no citations, and that is exactly when the reader
             most needs the warning. */}
-        {isAssistant && !isGreeting && !phaseLabel && turn.content && turn.faithfulnessScore != null && (
+        {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="grounding-row">
-            <span
-              className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
-            >
-              {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
-            </span>
+            {turn.retrievalMode === 'calculator' ? (
+              <span className="grounding-badge grounding-ok" title="Deterministic arithmetic against official URA statutory rate tables">
+                ✓ Official Statutory Calculator
+              </span>
+            ) : turn.retrievalMode === 'education' ? (
+              <span className="grounding-badge grounding-ok" title="Scaffolded curriculum verified against URA taxpayer handbooks">
+                📚 Verified Taxpayer Education
+              </span>
+            ) : turn.retrievalMode === 'contact_channels' ? (
+              <span className="grounding-badge grounding-ok" title="Official URA toll-free, WhatsApp, email and portal channels">
+                📞 Official URA Helpdesk
+              </span>
+            ) : turn.faithfulnessScore != null ? (
+              <span
+                className={`grounding-badge ${turn.faithfulnessScore >= 0.6 ? 'grounding-ok' : 'grounding-warn'}`}
+              >
+                {turn.faithfulnessScore >= 0.6 ? 'Well grounded' : 'Verify with URA'}
+              </span>
+            ) : null}
           </div>
         )}
 
@@ -267,18 +361,85 @@ function ChatMessageInner({
           </details>
         )}
 
+        {isAssistant && !isGreeting && !phaseLabel && deadlineEvent && (
+          <div className="deadline-sync-banner" role="region" aria-label="Statutory Tax Deadline Sync">
+            <span className="deadline-sync-icon" aria-hidden="true">📅</span>
+            <div className="deadline-sync-info">
+              <span className="deadline-sync-title">{deadlineEvent.title}</span>
+              <span className="deadline-sync-date">
+                Due: {deadlineEvent.startDate.toLocaleDateString(locale === 'lg' ? 'en-UG' : locale, {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
+              </span>
+            </div>
+            <div className="deadline-sync-actions">
+              <button
+                type="button"
+                className="deadline-sync-btn"
+                onClick={() => downloadCalendarEvent(deadlineEvent)}
+                title="Download iCalendar (.ics) reminder file with 1-day alert"
+                aria-label={`Download calendar reminder for ${deadlineEvent.title}`}
+              >
+                Add to Calendar (.ics)
+              </button>
+              <a
+                className="deadline-sync-link"
+                aria-label="Open in Google Calendar"
+                href={getGoogleCalendarUrl(deadlineEvent)}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open in Google Calendar"
+              >
+                Google Calendar ↗
+              </a>
+            </div>
+          </div>
+        )}
+
+        {isAssistant && !isGreeting && !phaseLabel && turn.nextActions && turn.nextActions.length > 0 && onActionClick && (
+          <div className="chat-action-chips" role="group" aria-label="Suggested follow-up actions">
+            {turn.nextActions.map((action, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="chat-action-chip"
+                onClick={() => onActionClick(action)}
+                title={`Ask: ${action}`}
+              >
+                <span className="chat-action-chip-arrow" aria-hidden="true">↳</span>
+                <span>{action}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="bubble-actions">
+            {/* Live while loading: a tap then cancels the read-aloud, rather
+                than leaving a disabled button until the audio arrives. */}
             <button
               className={`listen-btn ${playingTurnId === turn.id ? 'listen-btn-active' : ''}`}
               onClick={() => onListen(turn.id, stripCitationMarkers(turn.content))}
-              disabled={ttsLoading === turn.id || isTransitioning}
-              aria-label={playingTurnId === turn.id ? 'Stop listening' : `Listen in ${localeLabel(locale)}`}
+              disabled={isTransitioning}
+              aria-label={
+                playingTurnId === turn.id || ttsLoading === turn.id
+                  ? 'Stop listening'
+                  : `Listen in ${localeLabel(locale)}`
+              }
             >
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
             <CopyButton text={stripCitationMarkers(turn.content)} />
-            <FeedbackButtons messageId={turn.id} userQuery={userQuery} botReply={turn.content} />
+            <FeedbackButtons
+              messageId={turn.id}
+              userQuery={userQuery}
+              botReply={turn.content}
+              retrievalMode={turn.retrievalMode}
+              workflowId={turn.workflow?.id}
+              stepId={turn.workflow?.step_id}
+            />
           </div>
         )}
         {isAssistant && isGreeting && (
@@ -301,6 +462,10 @@ function attachmentSignature(attachments: ChatAttachment[] | undefined): string 
   return (attachments ?? []).map((a) => `${a.id}${a.docType ?? ''}`).join('|');
 }
 
+function actionsSignature(actions: string[] | undefined): string {
+  return (actions ?? []).join('|');
+}
+
 const ChatMessage = memo(ChatMessageInner, (prev, next) => {
   return (
     prev.turn.id === next.turn.id &&
@@ -314,12 +479,17 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&
     prev.turn.escalationReason === next.turn.escalationReason &&
+    prev.turn.workflow?.status === next.turn.workflow?.status &&
+    prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
+    actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&
+    prev.onActionClick === next.onActionClick &&
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
     citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
     prev.userQuery === next.userQuery &&
     prev.playingTurnId === next.playingTurnId &&
     prev.ttsLoading === next.ttsLoading &&
     prev.locale === next.locale &&
+    prev.onInspectAttachment === next.onInspectAttachment &&
     prev.isTransitioning === next.isTransitioning
   );
 });

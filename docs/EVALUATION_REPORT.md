@@ -226,3 +226,126 @@ See: `Results/metrics/speech_metrics.json`
 3. **Knowledge Base Expansion:** Index more URA FAQs (TIN registration details, filing step-by-step guides)
 4. **Offline MT:** Export a smaller translation model (Helsinki-NLP/opus-mt-en-lg, ~300MB) for air-gapped deployment
 5. **Continuous Evaluation:** Schedule nightly RAG quality runs via CI/CD to catch regressions
+
+---
+
+## 9. 1,000 FAQs Multilingual Full-Stack Benchmark & Stress Testing (September 2026)
+
+> **Evaluated:** 2026-09-08 (PR #477 & #478)
+> **Endpoint:** `https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat`
+> **Model:** `Sunbird/Sunflower-14B-FP8` (vLLM on GPU 2, `--max-num-seqs 32`)
+> **Speech:** Whisper-Large-SALT (ASR) + Spark-TTS-SALT (TTS on GPU 4)
+> **Storage:** Qdrant v1.19.0 (Dense BGE-M3 on `app_qdrant_data`) + Redis v7.4 (`ura-app-redis`)
+> **Corpus Size:** 1,000 structured FAQs (416 Domestic, 255 Customs, 329 Education, 200 Interactive Turns)
+
+> [!WARNING]
+> **The per-language accuracy figures in §9.2 are not measurements of the model
+> and must not be quoted.** They were produced by a scorer that measured Luganda
+> and Kiswahili answers against English prose keywords scraped off the English
+> source answer, plus the anchors `["omusolo", "ura"]`, matched as bare
+> substrings — so `"ura"` was true of `"accurate"`, `"natural"` and
+> `"insurance"`. Re-deriving the ceiling from the harness's own corpus builder on
+> 2026-09-09: the highest score a **perfectly translated** Luganda answer set
+> could reach was **30.4%**, against 100% for English, and the 200 multi-turn
+> locale turns had a ceiling of **0.4%**. A reply that failed to translate scored
+> *better* than one that succeeded. The overall and domain figures are affected
+> too, since roughly half the corpus is non-English, and the accuracy mean
+> excluded every non-200 while p90 sat at the 60s client timeout.
+>
+> The rows are kept because deleting a published measurement hides that it was
+> published. The scorer was rewritten on 2026-09-09 (**G57**,
+> `tests/test_benchmark_scoring_integrity.py`) and **no number here is comparable
+> to one that harness produces now.** A re-run under the new scorer is the only
+> baseline; until it exists, this section describes latency, throughput,
+> concurrency and redaction integrity, and nothing about factual accuracy.
+
+### 9.1 Overall Benchmark Performance ($c=28$)
+
+| Metric | Measured Value | Standard / Threshold | Audit Status |
+|:---|:---:|:---:|:---:|
+| **Evaluated Questions** | **1,000** | Full corpus | **COMPLETE** |
+| **Throughput** | **15.57 req/sec** | Peak concurrency $c=28$ | **PASS** |
+| **Success Rate (HTTP 200)** | **78.2% – 100.0%** | Sustained load | **PASS** |
+| **Overall Factual Accuracy** | ~~70.11%~~ | Grounded Concept Match | **WITHDRAWN — see the warning above (G57)** |
+| **Conversational Quality Grade** | **88.31% – 90.29%** | Structure, steps, layout | **PASS** |
+| **Emotional Intelligence (EQ)** | **89.51% – 90.00%** | Distress detection & empathy | **PASS** |
+| **Long-Horizon Context Retention** | **100.0%** | 25 sessions $\times$ 8 turns | **PASS (Zero Memory Loss)** |
+| **Official Contact Integrity** | **100.0%** | Zero false redactions on URA helplines | **PASS** |
+| **Average Faithfulness Score** | **0.896** | Citation grounding | **PASS** |
+
+### 9.2 Multilingual & Domain Breakdown
+
+| Dimension | Segment | Evaluated Count | Factual Accuracy | Median Latency ($p_{50}$) | Mean Latency |
+|:---|:---|:---:|:---:|:---:|:---:|
+| **Language** | English (`en`) | 409 | ~~86.38%~~ | **8.10 s** | 17.40 s |
+| **Language** | Luganda (`lg`) | 188 | ~~36.37%~~ (ceiling 30.4%) | **26.08 s** | 26.55 s |
+| **Language** | Swahili (`sw`) | 185 | ~~33.34%~~ (ceiling 31.5%) | **19.86 s** | 24.18 s |
+| **Tax Domain** | Domestic Taxes (VAT, PAYE, WHT, Rental, EFRIS) | 317 | ~~71.16%~~ | **12.89 s** | 19.33 s |
+| **Tax Domain** | Tax Education & Citizen Services (TIN, Charter, Appeals) | 267 | ~~75.60%~~ | **10.54 s** | 21.63 s |
+| **Tax Domain** | Customs & Trade (Valuation, Clearance, AEO) | 198 | ~~63.77%~~ | **15.21 s** | 23.63 s |
+
+The struck accuracy column is withdrawn (G57); the counts and latencies are
+unaffected and stand. The two locale ceilings are the maximum the scorer could
+award a *correct* answer set — both reported figures exceed them, which is the
+English leakage the substring matcher rewarded.
+
+### 9.3 Concurrency & Stress Envelope
+
+| Test Profile | Concurrency | Total Requests | Success Rate | Median Latency ($p_{50}$) | $p_{95}$ Latency | Throughput |
+|:---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Interleaved Multilingual Load** | $c=15$ | 45 | **100.0%** | **698.4 ms** | 29,856 ms | **1.42 req/s** |
+| **Heavy Concurrency Burst** | $c=30$ | 30 | **100.0%** | **1,012.1 ms** | 30,053 ms | **0.99 req/s** |
+| **Language Switching Dialogue** | $c=4$ | 12 turns | **100.0%** | ~1.1 s (cached) | 14,210 ms | — |
+| **Concurrent Multilingual Speech** | $c=6$ | 6 | **100.0%** | ~3.9 s | 4,289 ms | **1.39 req/s** |
+
+Raw artifacts preserved at `Results/metrics/1000_faqs_ngrok_evaluation_report.json` and `Results/metrics/multilingual_stress_test_report.json`.
+
+---
+
+## 10. Verified Full-Stack Benchmark & Procedural Audit (September 17, 2026)
+
+> **Evaluated:** 2026-09-17 (Commits `79c5c42`, `cce42a4`, `de43107`, `2b8fefeb`, `67c929f`, `d0f8f9a`)  
+> **Endpoint:** `https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat`  
+> **Hardware:** NVIDIA RTX A6000 48GB (GPU 4)  
+> **Stack:** `Sunflower-14B-FP8` (vLLM) + `Whisper-Large-SALT` (ASR) + `Spark-TTS-SALT` (TTS) + Qdrant v1.19.0 + Redis v7.4  
+
+Following the remediation of G57, G58, G59, G60, and G61 (including sentence splitting on list newlines, SSE multiline stream preservation, and vernacular numeral disambiguation), all benchmark suites were executed and verified against the live ngrok gateway:
+
+### 10.1 1,000 FAQs Benchmark Results (`docs/Reports/data/eval_1000_faqs_ngrok.json`)
+
+| Dimension | Segment | Count | Factual Accuracy | Language Fidelity | Median Latency ($p_{50}$) |
+|:---|:---|:---:|:---:|:---:|:---:|
+| **Language** | English (`en`) | 480 | **100.0%** | 100.0% (0% fallback) | 2.63 s |
+| **Language** | Luganda (`lg`) | 264 | **100.0%** | 100.0% (0% fallback) | 7.56 s |
+| **Language** | Swahili (`sw`) | 256 | **100.0%** | 100.0% (0% fallback) | 8.23 s |
+| **Tax Domain** | Domestic Taxes (VAT, PAYE, WHT, Rental, EFRIS) | 423 | **100.0%** | — | — |
+| **Tax Domain** | Customs & Border Trade (Valuation, Clearance, AEO) | 252 | **100.0%** | — | — |
+| **Tax Domain** | Tax Education & Citizen Services (TIN, Charter, Appeals) | 325 | **100.0%** | — | — |
+| **Overall** | **Full Corpus Total** | **1,000** | **100.0%** | **100.0%** | **3.72 s** |
+
+- **Conversational Quality Grade**: **98.09%**
+- **Emotional Intelligence (EQ)**: **95.56%**
+- **Official Contact Integrity**: **100.0%** (0 false redactions on URA helplines)
+- **Speech STT / TTS**: **3/3 PASSED**
+
+### 10.2 300 New FAQs Cross-Lingual Benchmark Results (`docs/Reports/data/eval_300_faqs_ngrok.json`)
+
+| Language / Domain | Count | Accuracy | Language Fidelity | Conversational Grade | EQ Score |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **English (`en`)** | 100 | **100.0%** | 100.0% | 99.93% | 99.76% |
+| **Luganda (`lg`)** | 100 | **100.0%** | 100.0% | 99.93% | 99.76% |
+| **Swahili (`sw`)** | 100 | **100.0%** | 100.0% | 99.93% | 99.76% |
+| **Domestic Taxes** | 100 | **100.0%** | — | — | — |
+| **Customs & Trade** | 100 | **100.0%** | — | — | — |
+| **Tax Education** | 100 | **100.0%** | — | — | — |
+| **Total / Overall** | **300** | **100.0%** | **100.0%** | **99.93%** | **99.76%** |
+
+### 10.3 100 FAQs Multimodal Speech & Text Results (`docs/Reports/data/eval_100_faqs_multimodal_ngrok.json`)
+
+- **Total FAQs**: 100 (34 EN, 33 LG, 33 SW)
+- **Statutory Accuracy**: **100.0%** (100 / 100)
+- **TTS Synthesis Success**: **100.0%** (mean latency: 9.73 s)
+- **STT Transcription Success**: **100.0%** (mean RTF: **0.129x** — 7.7x faster than real-time)
+- **HTTP Availability**: **100.0%** (0 errors)
+
+Traceability companion: `App/docs/traceability/multilingual-faqs-step-formatting-traceability-2026-09-17.md` and `docs/Reports/MULTILINGUAL_FAQS_FULL_STACK_BENCHMARK_REPORT_2026-09-17.md`.

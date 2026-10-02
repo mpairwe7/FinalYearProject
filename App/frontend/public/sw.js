@@ -5,9 +5,8 @@
  * to keep the bundle minimal and avoid build-tool coupling.
  */
 
-// v6: the manifest now points at PNG icons, so the SVG-only precache list
-// warmed files nothing asks for and missed the ones the install prompt reads.
-const CACHE_NAME = 'ura-v6';
+// v7: enhanced trilingual offline portal with emergency tax directory and client-side calculators.
+const CACHE_NAME = 'ura-v7';
 const OFFLINE_PAGE = '/offline.html';
 const STATIC_ASSETS = [
   '/',

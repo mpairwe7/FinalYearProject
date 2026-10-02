@@ -76,21 +76,32 @@ _EFRIS_HIT = {
 
 
 class FilterUnboundFaqHitsDistressTest(unittest.TestCase):
-    """A third occurrence of the same root cause, found after the first two
-    fixes still left distress-framed EFRIS questions abstaining: hits from
-    hybrid search (already on the clean question) reached
-    _filter_unbound_faq_hits, which re-scored them against the RAW message
-    (still carrying the distress preamble) and filtered every hit out —
-    should_abstain then saw 0 hits regardless of how good retrieval was.
+    """A third occurrence of the same root cause, and where it was finally cut.
+
+    After the first two fixes, distress-framed EFRIS questions still abstained:
+    hits from hybrid search — already on the clean question — reached
+    ``_filter_unbound_faq_hits``, which re-scored them against the RAW message
+    still carrying the preamble and filtered every hit out. ``should_abstain``
+    then saw 0 hits regardless of how good retrieval was. The fix at the time
+    was to pass ``binding_query``, the extracted span, and that wiring stands.
+
+    G35 has since cut the root cause itself: ``_faq_match_score`` no longer
+    divides coverage by terms the question never contained, so the raw message
+    keeps the hit on its own. The first test below asserted the opposite — it
+    was a characterisation of the defect, and is now the guard that it is gone.
+    Passing ``binding_query`` remains correct and remains tested.
     """
 
-    def test_raw_distress_message_filters_out_the_hit(self) -> None:
+    def test_raw_distress_message_no_longer_filters_out_the_hit(self) -> None:
+        """This asserted `== []`, with the message "should dilute the match score"."""
         raw_message = (
             "I have tried three times and it still doesnt work!! "
             "What is EFRIS and who must use it?"
         )
         filtered = _filter_unbound_faq_hits(raw_message, [dict(_EFRIS_HIT)])
-        self.assertEqual(filtered, [], "raw distress message should dilute the match score")
+        self.assertEqual(
+            len(filtered), 1, "the preamble must not cost a bound hit its place"
+        )
 
     def test_extracted_question_span_keeps_the_hit(self) -> None:
         binding_query = extract_question_span(

@@ -1,0 +1,217 @@
+{
+ "date": "2026-09-24",
+ "manifest": "evals/language_id/manifest_mixed_synthetic.jsonl",
+ "clips": 120,
+ "policy": {
+  "min_speech_s": 1.5,
+  "switch_confidence": 0.9,
+  "hysteresis_confidence": 0.7
+ },
+ "notes": {
+  "C_latency": "C is reported at A's latency: the runtime only decodes text when A is unsure; that decode costs B's latency (p50 544.0 ms, p95 687.7 ms)."
+ },
+ "methods": {
+  "A": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.7917,
+   "accuracy_ge_3s": 0.75,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.7917
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.75
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.8136,
+    "1.5-4s/8k": 0.7627,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.7833,
+    "orpheus_waxal_lug_0005": 0.8
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 95,
+     "sw": 21,
+     "en": 4
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.7917,
+   "latency_ms_p50": 55.3,
+   "latency_ms_p95": 109.3
+  },
+  "B": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.6083,
+   "accuracy_ge_3s": 0.65,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.6083
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.65
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.6102,
+    "1.5-4s/8k": 0.5932,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.6167,
+    "orpheus_waxal_lug_0005": 0.6
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 73,
+     "en": 36,
+     "sw": 11
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.6083,
+   "latency_ms_p50": 544.0,
+   "latency_ms_p95": 687.7
+  },
+  "C": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.8167,
+   "accuracy_ge_3s": 0.825,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.8167
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.825
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.8305,
+    "1.5-4s/8k": 0.7966,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.8167,
+    "orpheus_waxal_lug_0005": 0.8167
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 98,
+     "sw": 18,
+     "en": 4
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.8167,
+   "latency_ms_p50": 55.3,
+   "latency_ms_p95": 109.3
+  },
+  "D": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.9,
+   "accuracy_ge_3s": 0.875,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.9
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.875
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.8814,
+    "1.5-4s/8k": 0.9153,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.9167,
+    "orpheus_waxal_lug_0005": 0.8833
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 108,
+     "en": 3,
+     "sw": 9
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.9,
+   "latency_ms_p50": 34.2,
+   "latency_ms_p95": 64.7
+  },
+  "E": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.6083,
+   "accuracy_ge_3s": 0.625,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.6083
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.625
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.6441,
+    "1.5-4s/8k": 0.5593,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.55,
+    "orpheus_waxal_lug_0005": 0.6667
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 73,
+     "en": 29,
+     "sw": 18
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.6083,
+   "latency_ms_p50": 1435.2,
+   "latency_ms_p95": 1782.5
+  }
+ },
+ "gate": {
+  "A": "FAIL",
+  "B": "FAIL",
+  "C": "FAIL",
+  "D": "FAIL",
+  "E": "FAIL"
+ }
+}

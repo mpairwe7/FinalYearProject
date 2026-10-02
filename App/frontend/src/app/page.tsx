@@ -20,18 +20,24 @@ import {
   AudioRecorder,
   closePlaybackContext,
   playAudioBase64,
+  speakStreamed,
   stopPlayback,
   isPlaying,
   transcribe,
   voiceChat,
 } from '../services/voiceService';
-import { authHeaders } from '../lib/authSession';
+import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
+import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   PendingAttachment,
+  type DocumentAnalysisData,
 } from '../lib/attachments';
+import { cleanMarkdownForSpeech } from '../lib/answerText';
+import { audioSignifiers } from '../lib/audioSignifiers';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
@@ -40,6 +46,11 @@ import ConversationSearch from '../components/ConversationSearch';
 import LoadingState from '../components/LoadingState';
 import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import ChatHeader from '../components/ChatHeader';
+import { CallScreen } from '../components/call/CallScreen';
+import { useCallStore } from '../store/useCallStore';
+import { DocumentInspectionModal } from '../components/DocumentInspectionModal';
+import { SupportCaseModal } from '../components/SupportCaseModal';
+import { ConnectorsModal } from '../components/ConnectorsModal';
 import { useIdentity } from '../hooks/useIdentity';
 
 // ---------------------------------------------------------------------------
@@ -172,6 +183,7 @@ export default function Page() {
   const addTurns = useChatStore((s) => s.addTurns);
   const updateLastTurn = useChatStore((s) => s.updateLastTurn);
   const reset = useChatStore((s) => s.reset);
+  const openCall = useCallStore((s) => s.openCall);
   // Session management
   const conversations = useChatStore((s) => s.conversations);
   const activeConversationId = useChatStore((s) => s.activeConversationId);
@@ -182,6 +194,9 @@ export default function Page() {
   const togglePinSession = useChatStore((s) => s.togglePinSession);
   const ensureActiveConversationId = useChatStore((s) => s.ensureActiveConversationId);
   const saveCurrentSession = useChatStore((s) => s.saveCurrentSession);
+  const activeTicketId = useChatStore((s) => s.activeTicketId);
+  const supportCaseOpen = useChatStore((s) => s.supportCaseOpen);
+  const setSupportCaseOpen = useChatStore((s) => s.setSupportCaseOpen);
 
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   // Live-dictation bookkeeping — see the recognition effect below.
@@ -303,9 +318,17 @@ export default function Page() {
   // Signed-in state drives the landing call to action; the token is verified by
   // the backend, so this is not "someone has a token in localStorage".
   const { status: identityStatus, name: identityName } = useIdentity();
+  const { isOffline: _isOffline, isLowBandwidth } = useNetworkStatus();
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [inspectingDoc, setInspectingDoc] = useState<{
+    id: string;
+    name: string;
+    sizeBytes?: number;
+    docType?: string;
+    analysis?: DocumentAnalysisData;
+  } | null>(null);
 
   // Voice state
   const [autoNarrate, setAutoNarrate] = useState(false);
@@ -314,9 +337,89 @@ export default function Page() {
   const [voiceMode, setVoiceMode] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [audioLevels, setAudioLevels] = useState<number[] | undefined>(undefined);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const animFrameRef = useRef<number | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
   const userStoppedRef = useRef(false);
+  // Voice mode sends a turn by itself after this much quiet (0: only a tap does).
+  const silenceTimeout = useVoiceStore((s) => s.silenceTimeout);
+  // What the end-of-turn watcher does with an event; set below, once the
+  // handlers it calls exist, so it never calls a stale one.
+  const onTurnEventRef = useRef<(event: TurnEvent) => void>(() => {});
+  // Hands-free voice mode opens the mic again once a reply has been read.
+  const listenAgainRef = useRef<() => void>(() => {});
+
+  // Live microphone frequency analyser for responsive composer waveform, and
+  // in voice mode the end-of-turn watcher, on the same audio graph.
+  useEffect(() => {
+    if (!isRecording) {
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        void audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+      setAudioLevels(undefined);
+      return;
+    }
+
+    const stream = recorderRef.current?.getStream();
+    if (!stream) return;
+
+    let stopWatching: (() => void) | null = null;
+    try {
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      if (voiceMode && silenceTimeout > 0) {
+        stopWatching = watchEndOfTurn(ctx, source, {
+          silenceMs: silenceTimeout,
+          onEvent: (event) => onTurnEventRef.current(event),
+        });
+      }
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const update = () => {
+        if (!recorderRef.current?.isRecording) return;
+        analyser.getByteFrequencyData(dataArray);
+        const bands = [
+          dataArray[1] / 255,
+          dataArray[3] / 255,
+          dataArray[6] / 255,
+          dataArray[10] / 255,
+          dataArray[15] / 255,
+        ].map((v) => Math.min(1.0, Math.max(0.15, (v || 0) * 1.6)));
+        setAudioLevels(bands);
+        animFrameRef.current = requestAnimationFrame(update);
+      };
+      animFrameRef.current = requestAnimationFrame(update);
+    } catch {
+      setAudioLevels(undefined);
+    }
+
+    return () => {
+      stopWatching?.();
+      if (animFrameRef.current !== null) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        void audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+    };
+  }, [isRecording, voiceMode, silenceTimeout]);
 
   // TanStack Query — cached speech health (auto-refreshes every 60s)
   const { data: speechHealth } = useSpeechHealth();
@@ -581,20 +684,34 @@ export default function Page() {
       recognitionRef.current.abort();
       recognitionRef.current = null;
     }
+    // A recording made for the previous language is dropped. Luganda and
+    // Swahili dictation record, and switching to English would otherwise
+    // leave the mic open under a browser recogniser that the next tap goes to.
+    const recording = recorderRef.current;
+    if (recording?.isRecording) {
+      recorderRef.current = null;
+      recording.cancel();
+      setIsRecording(false);
+      setSpeechState('idle');
+    }
     const win = typeof window !== 'undefined' ? window as Window & { SpeechRecognition?: new () => SpeechRecognition; webkitSpeechRecognition?: new () => SpeechRecognition } : null;
-    const Impl = win && (win.SpeechRecognition || win.webkitSpeechRecognition);
+    // Luganda and Swahili are dictated by the local SALT model (the recorder
+    // path below), never the browser engine: see LocaleOption.dictation.
+    const option = LOCALE_OPTIONS.find((l) => l.value === locale);
+    const Impl = option?.dictation === 'browser' && win ? win.SpeechRecognition || win.webkitSpeechRecognition : undefined;
     if (!Impl) {
       if (!hasMediaRecorder) setSpeechState('unavailable');
       return;
     }
     const recog: SpeechRecognition = new Impl();
-    recog.lang = LOCALE_OPTIONS.find((l) => l.value === locale)?.speechLang ?? 'en-US';
+    recog.lang = option?.speechLang ?? 'en-US';
     recog.continuous = true;
     recog.interimResults = true;
     recog.onstart = () => {
       dictationStartedAtRef.current = Date.now();
       disarmMic();
       setSpeechState('listening');
+      audioSignifiers.playMicStart();
     };
     recog.onerror = (event) => {
       // "no-speech" is a pause, not a failure: the engine gives up on silence
@@ -603,6 +720,7 @@ export default function Page() {
       if (event.error === 'no-speech' || event.error === 'aborted') return;
       disarmMic();
       dictationActiveRef.current = false;
+      audioSignifiers.playError();
       // Say which failure it was. "not-allowed" is a permission the person can
       // grant, and telling them so is the difference between a fixable state
       // and a mic that is simply red.
@@ -659,35 +777,70 @@ export default function Page() {
 
   // Auto-narrate new assistant messages
   const lastChatLength = useRef(chat.length);
-  const handleListenToReply = useCallback(async (turnId: string, text: string) => {
-    if (playingTurnId === turnId) {
-      stopPlayback();
-      setPlayingTurnId(null);
-      return;
+  // The current read-aloud request. A stop, or a newer request, makes an older
+  // one stale: its whole-reply fallback must not start playing when it lands.
+  const listenRequestRef = useRef(0);
+  /** Silence the reply being read aloud, and cancel one still loading. */
+  const stopReading = useCallback(() => {
+    listenRequestRef.current += 1;
+    stopPlayback();
+    setPlayingTurnId(null);
+    setTtsLoading(null);
+  }, []);
+  /** Read a reply aloud. Resolves when it has ended, or was stopped. */
+  const handleListenToReply = useCallback(async (turnId: string, text: string): Promise<'ended' | 'stopped'> => {
+    // A second tap stops it, whether it is playing or still fetching its first piece.
+    if (playingTurnId === turnId || ttsLoading === turnId) {
+      stopReading();
+      return 'stopped';
     }
+    const request = ++listenRequestRef.current;
     stopPlayback();
     setTtsLoading(turnId);
     try {
-      const result = await ttsMutation.mutateAsync({
-        text,
-        language: locale,
-        voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
-      });
+      const speechText = cleanMarkdownForSpeech(text);
+      if (!speechText) {
+        setTtsLoading(null);
+        return 'ended';
+      }
+      const voice = useVoiceStore.getState().voiceByLocale[locale] || undefined;
+      try {
+        // Streamed: speaking starts after the first sentence is synthesised,
+        // in Opus where the browser plays it (a tenth of WAV's size).
+        const outcome = await speakStreamed(speechText, {
+          language: locale,
+          voice,
+          onFirstAudio: () => {
+            setTtsLoading(null);
+            setPlayingTurnId(turnId);
+          },
+        });
+        if (outcome.failed) trackErrorOccurred('tts_failed');
+        return outcome.stopped ? 'stopped' : 'ended';
+      } catch {
+        // Nothing of the stream could be played: ask for the whole reply once.
+      }
+      if (request !== listenRequestRef.current) return 'stopped';
+      const result = await ttsMutation.mutateAsync({ text: speechText, language: locale, voice });
+      if (request !== listenRequestRef.current) return 'stopped';
       setTtsLoading(null);
       if (result.error || !result.audio_base64) {
         if (result.error) trackErrorOccurred('tts_failed');
-        return;
+        return 'ended';
       }
       setPlayingTurnId(turnId);
       await playAudioBase64(result.audio_base64);
+      return request === listenRequestRef.current ? 'ended' : 'stopped';
     } catch {
       // TTS unavailable — degrade to text, but record it
       trackErrorOccurred('tts_failed');
+      return 'ended';
     } finally {
-      setTtsLoading(null);
+      // A stale request leaves the loading state to the one that replaced it.
+      if (request === listenRequestRef.current) setTtsLoading(null);
       setPlayingTurnId((prev) => (prev === turnId ? null : prev));
     }
-  }, [playingTurnId, locale, ttsMutation]);
+  }, [playingTurnId, ttsLoading, locale, ttsMutation, stopReading]);
 
   useEffect(() => {
     if (!autoNarrate || chat.length <= lastChatLength.current) {
@@ -722,9 +875,32 @@ export default function Page() {
         throw new Error(detail);
       }
       const analysis = await res.json();
+      const analysisData: DocumentAnalysisData = {
+        documentId: analysis.document_id,
+        filename: analysis.filename,
+        kind: analysis.kind,
+        sizeBytes: analysis.size_bytes,
+        docType: analysis.doc_type,
+        confidence: analysis.confidence,
+        matchedKeywords: analysis.matched_keywords,
+        fields: analysis.fields,
+        tables: analysis.tables,
+        textPreview: analysis.text_preview,
+        truncated: analysis.truncated,
+        summary: analysis.summary,
+        taxReconciliation: analysis.tax_reconciliation,
+        warnings: analysis.warnings,
+        expiresInSeconds: analysis.expires_in_seconds,
+      };
       setPendingAttachments((prev) => prev.map((a) => (
         a.clientId === clientId
-          ? { ...a, status: 'ready', documentId: analysis.document_id, docType: analysis.doc_type }
+          ? {
+              ...a,
+              status: 'ready',
+              documentId: analysis.document_id,
+              docType: analysis.doc_type,
+              analysis: analysisData,
+            }
           : a
       )));
     } catch (err) {
@@ -779,10 +955,28 @@ export default function Page() {
     }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
-      .map((a) => ({ id: a.documentId as string, name: a.name, docType: a.docType }));
+      .map((a) => ({
+        id: a.documentId as string,
+        name: a.name,
+        docType: a.docType,
+        analysis: a.analysis,
+      }));
     const conversationId = activeConversationId ?? ensureActiveConversationId();
     shouldStickToBottomRef.current = true;
     setShowScrollToLatest(false);
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const offlineMsg = t('handoff.offline') || 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.';
+      addTurns([
+        createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
+        createTurn('assistant', offlineMsg, { offlineMode: true }),
+      ]);
+      setMessage('');
+      setPendingAttachments([]);
+      setChatLiveStatus('Offline mode. Please reconnect to submit questions.');
+      return;
+    }
+
     addTurns([
       createTurn('user', text, sentAttachments.length ? { attachments: sentAttachments } : undefined),
       // The empty assistant turn used to be added only once the stream
@@ -803,7 +997,7 @@ export default function Page() {
     const ac = new AbortController();
     streamAbortRef.current = ac;
     userStoppedRef.current = false;
-    const timeout = setTimeout(() => ac.abort(), 120_000);
+    const timeout = setTimeout(() => ac.abort(), isLowBandwidth ? 180_000 : 120_000);
     const requestBody = JSON.stringify({
       message: text,
       conversation_id: conversationId,
@@ -814,18 +1008,33 @@ export default function Page() {
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
       'X-Session-ID': getAnalyticsSessionId(),
+      'ngrok-skip-browser-warning': 'true',
     });
 
-    const applySyncReply = async () => {
-      const sync = await fetch(`${API_URL}/v1/chat`, {
+    const applySyncReply = async (signal = ac.signal) => {
+      let sync = await fetch(`${API_URL}/v1/chat`, {
         method: 'POST',
         headers: requestHeaders,
         body: requestBody,
-        signal: ac.signal,
+        signal,
       });
+      if (sync.status === 401 && getAuthToken()) {
+        clearAuthToken();
+        const anonHeaders = { ...requestHeaders };
+        delete anonHeaders['Authorization'];
+        sync = await fetch(`${API_URL}/v1/chat`, {
+          method: 'POST',
+          headers: anonHeaders,
+          body: requestBody,
+          signal,
+        });
+      }
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
       if (d.conversation_id) sessionIdRef.current = d.conversation_id;
+      if (d.locale && d.locale !== useChatStore.getState().locale) {
+        useChatStore.getState().setLocale(d.locale);
+      }
       const content = cleanResponse(d.reply ?? '');
       const meta = {
         citations: d.citations ?? [],
@@ -833,6 +1042,9 @@ export default function Page() {
         retrievalMode: d.retrieval_mode ?? 'keyword',
         escalationRequired: d.escalation_required ?? false,
         escalationReason: d.escalation_reason ?? '',
+        nextActions: d.next_actions ?? [],
+        workflow: d.workflow ?? undefined,
+        resources: d.resources ?? (d.workflow?.resources ?? []),
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -844,14 +1056,39 @@ export default function Page() {
       trackChatReceived(Date.now() - t0, (d.sources?.length ?? 0) > 0);
     };
 
+    // A browser, proxy, or network can interrupt an otherwise healthy SSE
+    // response. The regular chat endpoint carries the same answer, so retry it
+    // once with a new controller: `ac` may already have timed out or aborted.
+    const recoverFromStreamFailure = async () => {
+      revealQueueRef.current?.stop();
+      revealQueueRef.current = null;
+      const fallbackAbort = new AbortController();
+      streamAbortRef.current = fallbackAbort;
+      const fallbackTimeout = setTimeout(() => fallbackAbort.abort(), 120_000);
+      try {
+        await applySyncReply(fallbackAbort.signal);
+        return true;
+      } finally {
+        clearTimeout(fallbackTimeout);
+      }
+    };
+
     try {
       const res = await fetch(`${API_URL}/v1/chat/stream`, {
         method: 'POST',
-        headers: requestHeaders,
+        headers: {
+          ...requestHeaders,
+          Accept: 'text/event-stream',
+          'ngrok-skip-browser-warning': 'true',
+        },
         body: requestBody,
         signal: ac.signal,
       });
       if (!res.ok) {
+        if (res.status === 401 && getAuthToken()) {
+          clearAuthToken();
+          delete requestHeaders['Authorization'];
+        }
         await applySyncReply();
         setChatLiveStatus('URA response ready.');
         return;
@@ -860,6 +1097,139 @@ export default function Page() {
       if (!reader) throw new Error('No body');
       const dec = new TextDecoder();
       let buf = '', meta: Record<string, unknown> = {}, evt = 'token';
+      let currentDataLines: string[] = [];
+
+      const dispatchEvent = (eventName: string, dataLines: string[]) => {
+        if (dataLines.length === 0) return;
+
+        // Separate phase / telemetry lines from prose lines so phase tags never leak into chat
+        const cleanLines: string[] = [];
+        for (const line of dataLines) {
+          const tLine = line.trim();
+          if (
+            tLine === 'translation.started' ||
+            tLine === 'translation.completed' ||
+            tLine === 'retrieval.started' ||
+            tLine === 'retrieval.completed' ||
+            tLine.startsWith('generation.') ||
+            tLine.startsWith('iteration.') ||
+            tLine.startsWith('tool_call.')
+          ) {
+            if (tLine === 'retrieval.started') setTurnPhase('searching');
+            else if (tLine === 'translation.started') setTurnPhase('translating');
+            else if (tLine === 'translation.completed') setTurnPhase('churning');
+            continue;
+          }
+          if (
+            tLine.startsWith('{"sources":') ||
+            tLine.startsWith('{"faithfulness_score":') ||
+            tLine.startsWith('[{"type":') ||
+            (tLine.startsWith('{') && (tLine.includes('"retrieval_mode"') || tLine.includes('"workflow":')))
+          ) {
+            try {
+              const p = JSON.parse(tLine);
+              if (p && typeof p === 'object' && !Array.isArray(p)) {
+                meta = { ...meta, ...p };
+                if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+                if (p.locale && p.locale !== useChatStore.getState().locale) {
+                  useChatStore.getState().setLocale(p.locale);
+                }
+                if (typeof p.reply === 'string' && p.reply.trim()) {
+                  reveal.set(cleanResponse(p.reply));
+                }
+                updateLastTurn((t) => ({
+                  ...t,
+                  citations: p.citations ?? t.citations,
+                  faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                  retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                  escalationRequired: p.escalation_required ?? t.escalationRequired,
+                  escalationReason: p.escalation_reason ?? t.escalationReason,
+                  workflow: p.workflow ?? t.workflow,
+                  resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+                }));
+              }
+            } catch {}
+            continue;
+          }
+          cleanLines.push(line);
+        }
+
+        if (cleanLines.length === 0) return;
+        const data = cleanLines.join('\n');
+        const trimmedData = data.trim();
+
+        if (eventName === 'error') {
+          updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' }));
+          return;
+        }
+        if (eventName === 'done') {
+          if (trimmedData) {
+            try {
+              const p = JSON.parse(trimmedData);
+              meta = { ...meta, ...p };
+              if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+              if (p.locale && p.locale !== useChatStore.getState().locale) {
+                useChatStore.getState().setLocale(p.locale);
+              }
+              if (typeof p.reply === 'string' && p.reply.trim()) {
+                reveal.set(cleanResponse(p.reply));
+              }
+              updateLastTurn((t) => ({
+                ...t,
+                citations: p.citations ?? t.citations,
+                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                escalationRequired: p.escalation_required ?? t.escalationRequired,
+                escalationReason: p.escalation_reason ?? t.escalationReason,
+                nextActions: p.next_actions ?? t.nextActions,
+                workflow: p.workflow ?? t.workflow,
+                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+              }));
+            } catch {}
+          }
+          return;
+        }
+        if (eventName === 'revision') {
+          reveal.set(cleanResponse(data));
+          return;
+        }
+        if (eventName === 'metadata' || eventName === 'grounding') {
+          if (eventName === 'metadata') setTurnPhase('churning');
+          try {
+            const p = JSON.parse(data);
+            meta = { ...meta, ...p };
+            if (p.conversation_id) sessionIdRef.current = p.conversation_id;
+              updateLastTurn((t) => ({
+                ...t,
+                citations: p.citations ?? t.citations,
+                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+                escalationRequired: p.escalation_required ?? t.escalationRequired,
+                escalationReason: p.escalation_reason ?? t.escalationReason,
+                nextActions: p.next_actions ?? t.nextActions,
+                workflow: p.workflow ?? t.workflow,
+                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+              }));
+          } catch {}
+          return;
+        }
+        if (eventName === 'phase') {
+          const name = trimmedData;
+          if (name === 'retrieval.started') setTurnPhase('searching');
+          else if (name === 'translation.started') setTurnPhase('translating');
+          else if (name === 'translation.completed') setTurnPhase('churning');
+          return;
+        }
+        if (eventName === 'agent_trace') {
+          return;
+        }
+        // Token event — preserves exact multiline formatting, paragraph breaks, and numbered lists
+        if (data || eventName === 'token') {
+          setTurnPhase('churning');
+          reveal.push(data || '\n');
+        }
+      };
+
       /* Tokens go through the reveal queue rather than straight into the store,
          so the answer types itself out at a steady rate no matter how bursty
          the stream is. `reveal.getTarget()` is everything that has arrived —
@@ -874,74 +1244,40 @@ export default function Page() {
           const { done, value } = await reader.read();
           if (done) break;
           buf += dec.decode(value, { stream: true });
-          const lines = buf.split('\n');
+          const normalized = buf.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+          const lines = normalized.split('\n');
           buf = lines.pop() || '';
           for (const ln of lines) {
-            if (ln.startsWith('event: ')) { evt = ln.slice(7).trim(); continue; }
-            if (!ln.startsWith('data: ')) continue;
-            const data = ln.slice(6);
-            if (evt === 'error') { updateLastTurn((t) => ({ ...t, content: 'Sorry, an error occurred. Please try again.' })); evt = 'token'; continue; }
-            if (evt === 'done') {
-              const trimmed = data.trim();
-              if (trimmed) {
-                try {
-                  const p = JSON.parse(trimmed);
-                  meta = { ...meta, ...p };
-                  if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-                  if (typeof p.reply === 'string' && p.reply.trim()) {
-                    reveal.set(cleanResponse(p.reply));
-                  }
-                  updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason }));
-                } catch {
-                  reveal.push(data);
-                }
+            if (ln === '') {
+              // Empty line signals end of an SSE event
+              if (currentDataLines.length > 0) {
+                dispatchEvent(evt, currentDataLines);
+                currentDataLines = [];
               }
               evt = 'token';
               continue;
             }
-            if (evt === 'revision') {
-              reveal.set(cleanResponse(data));
-              evt = 'token';
+            if (ln.startsWith('event: ')) {
+              if (currentDataLines.length > 0) {
+                dispatchEvent(evt, currentDataLines);
+                currentDataLines = [];
+              }
+              evt = ln.slice(7).trim();
               continue;
             }
-            if (evt === 'metadata' || evt === 'grounding') {
-              // Retrieval is finished by the time metadata lands and the model
-              // is about to start writing, so this is the churning boundary.
-              if (evt === 'metadata') setTurnPhase('churning');
-              try { const p = JSON.parse(data); meta = { ...meta, ...p }; if (p.conversation_id) sessionIdRef.current = p.conversation_id; updateLastTurn((t) => ({ ...t, citations: p.citations ?? t.citations, faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore, retrievalMode: p.retrieval_mode ?? t.retrievalMode, escalationRequired: p.escalation_required ?? t.escalationRequired, escalationReason: p.escalation_reason ?? t.escalationReason })); } catch {}
-              evt = 'token'; continue;
-            }
-            if (evt === 'phase') {
-              // Live retrieval boundaries (main.py). This needs its own branch
-              // for the same reason agent_trace does — see the note below: an
-              // unhandled event falls through to the token branch and its raw
-              // data is appended straight into the visible reply.
-              const name = data.trim();
-              if (name === 'retrieval.started') setTurnPhase('searching');
-              // Localization runs after the English answer is complete, so
-              // this arrives last and is the only phase that can follow
-              // churning.
-              else if (name === 'translation.started') setTurnPhase('translating');
-              else if (name === 'translation.completed') setTurnPhase('churning');
-              evt = 'token';
+            if (ln.startsWith('data: ')) {
+              currentDataLines.push(ln.slice(6));
               continue;
             }
-            if (evt === 'agent_trace') {
-              // Buffered retrieval/iteration/tool-call trace, emitted just before
-              // `grounding` (see chat_stream in main.py). Nothing in this UI
-              // visualizes it yet; without this case it fell through to the
-              // token branch below and the raw JSON trace was appended straight
-              // into the visible reply, right where the citation marker sits.
-              evt = 'token'; continue;
+            if (ln === 'data:' || ln === 'data: ') {
+              currentDataLines.push('');
+              continue;
             }
-            if (data || evt === 'token') {
-              // A token arriving before any metadata frame — the short-circuit
-              // branches do exactly that — still means the answer has started.
-              setTurnPhase('churning');
-              reveal.push(data || '\n');
-            }
-            evt = 'token';
           }
+        }
+        if (currentDataLines.length > 0) {
+          dispatchEvent(evt, currentDataLines);
+          currentDataLines = [];
         }
         dec.decode();
         const arrived = reveal.getTarget();
@@ -954,27 +1290,40 @@ export default function Page() {
         await reveal.finish();
       } finally { reader.releaseLock(); }
       if (!useChatStore.getState().chat.at(-1)?.content.trim()) {
-        await applySyncReply();
+        await recoverFromStreamFailure();
         setChatLiveStatus('URA response ready.');
         return;
       }
       trackChatReceived(Date.now() - t0, (Array.isArray(meta.sources) && meta.sources.length > 0));
       setChatLiveStatus('URA response ready.');
     } catch {
+      let recovered = false;
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
+      if (!userStoppedRef.current && last?.role === 'assistant' && !last.content.trim()) {
+        try {
+          recovered = await recoverFromStreamFailure();
+        } catch {
+          // The user-facing error below is reserved for failure of both paths.
+        }
+      }
+      const currentLast = useChatStore.getState().chat.at(-1);
       if (userStoppedRef.current) {
-        if (last?.role === 'assistant' && !last.content.trim()) {
+        if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
           updateLastTurn((t) => ({ ...t, content: 'Stopped.' }));
         }
-      } else if (last?.role === 'assistant' && last?.content === '') {
-        updateLastTurn((t) => ({ ...t, content: 'Sorry, I could not reach the URA knowledge base. Please try again shortly.' }));
-      } else if (!userStoppedRef.current) {
-        addTurns([createTurn('assistant', 'Sorry, I could not reach the URA knowledge base. Please try again shortly.')]);
+      } else if (recovered) {
+        setChatLiveStatus('URA response ready.');
+      } else if (currentLast?.role === 'assistant' && !currentLast.content.trim()) {
+        const isOff = typeof navigator !== 'undefined' && !navigator.onLine;
+        const fallbackText = isOff
+          ? (t('handoff.offline') || 'You appear to be offline. Try again when you reconnect, or call URA toll-free on 0800 117 000.')
+          : (t('handoff.failed') || 'Sorry, I could not reach the URA knowledge base. Please try again shortly.');
+        updateLastTurn((t) => ({ ...t, content: fallbackText, offlineMode: isOff }));
       }
       if (userStoppedRef.current) {
         setChatLiveStatus('Response stopped.');
-      } else {
+      } else if (!recovered) {
         trackErrorOccurred('chat_fetch_failed');
         setChatLiveStatus('URA response unavailable. Please try again.');
       }
@@ -997,7 +1346,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, activeConversationId, pendingAttachments, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, activeConversationId, pendingAttachments, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1016,6 +1365,9 @@ export default function Page() {
     // read as a failure. The button is disabled in this state, so this only
     // catches the keyboard shortcut and a synthetic event.
     if (speechState === 'starting') return;
+    // Opening the mic silences the reply: it would talk over the speaker and
+    // be recorded along with them.
+    if (!isRecording && speechState !== 'listening') stopReading();
     if (voiceMode && hasMediaRecorder) {
       setIsTransitioning(true);
       try {
@@ -1026,6 +1378,7 @@ export default function Page() {
           recorderRef.current = null;
           setIsRecording(false);
           setSpeechState('idle');
+          audioSignifiers.playMicStop();
           const pcm16 = await rec.stop();
           if (pcm16.byteLength === 0) return;
           setIsLoading(true);
@@ -1035,10 +1388,14 @@ export default function Page() {
           const conversationId = activeConversationId ?? ensureActiveConversationId();
           trackChatSent(0);
           try {
+            // Text first, then speech: the answer is on screen as soon as it is
+            // known (0.4 s in English, ~4.6 s in Luganda on the GPU stack), and
+            // is spoken as a stream, instead of both waiting for the whole
+            // reply to be synthesised (9–20 s).
             const r = await voiceChat(pcm16, {
               language: locale,
               conversationId,
-              ttsEnabled: autoNarrate,
+              ttsEnabled: false,
               voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
               sessionId: getAnalyticsSessionId(),
             });
@@ -1048,12 +1405,10 @@ export default function Page() {
               addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);
               trackChatReceived(Date.now() - t0, (r.sources?.length ?? 0) > 0);
               const tid = useChatStore.getState().chat[useChatStore.getState().chat.length - 1]?.id;
-              if (r.reply_audio_base64) {
-                if (tid) { setPlayingTurnId(tid); try { await playAudioBase64(r.reply_audio_base64); } finally { setPlayingTurnId((p) => p === tid ? null : p); } }
-              } else if (autoNarrate && tid) {
-                // Server skipped inline narration (time budget) — the text is
-                // already on screen; fetch the audio as its own request.
-                void handleListenToReply(tid, r.reply);
+              if (autoNarrate && tid) {
+                void handleListenToReply(tid, r.reply).then((how) => {
+                  if (how === 'ended') listenAgainRef.current();
+                });
               }
             }
           } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
@@ -1082,10 +1437,12 @@ export default function Page() {
             disarmMic();
             setIsRecording(true);
             setSpeechState('listening');
+            audioSignifiers.playMicStart();
             trackVoiceUsed();
           } catch {
             disarmMic();
             recorderRef.current = null;
+            audioSignifiers.playError();
             setDictationNotice(
               'The microphone did not open. Check your browser’s microphone permission, or type instead.',
             );
@@ -1154,11 +1511,12 @@ export default function Page() {
         recorderRef.current = null;
         setIsRecording(false);
         setSpeechState('idle');
+        audioSignifiers.playMicStop();
         const pcm16 = await rec.stop();
         if (pcm16.byteLength === 0) return;
         setSpeechState('processing');
         try {
-          const r = await transcribe(pcm16, locale);
+          const r = await transcribe(pcm16, locale, undefined, { domain: 'tax' });
           // Append rather than replace: dictation is a way to fill the
           // composer, and someone who typed half a question then tapped the
           // mic means to finish it, not to lose it. Read from the store, not
@@ -1205,10 +1563,12 @@ export default function Page() {
           disarmMic();
           setIsRecording(true);
           setSpeechState('listening');
+          audioSignifiers.playMicStart();
           trackVoiceUsed();
         } catch {
           disarmMic();
           recorderRef.current = null;
+          audioSignifiers.playError();
           setDictationNotice(
             'The microphone did not open. Check your browser’s microphone permission, or type instead.',
           );
@@ -1218,7 +1578,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, armMic, disarmMic]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, stopReading, armMic, disarmMic]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
@@ -1230,6 +1590,40 @@ export default function Page() {
     setSpeechState('idle');
     setIsTransitioning(false);
   }, [disarmMic, setSpeechState]);
+
+  // Voice mode's end of turn. A pause after speech, or a turn that reached
+  // its limit, is sent as the checkmark sends it. A mic that heard nothing
+  // closes and says so: left open, it would listen to the room indefinitely.
+  useEffect(() => {
+    onTurnEventRef.current = (event) => {
+      if (event === 'speech' || !recorderRef.current?.isRecording) return;
+      if (event === 'no-speech') {
+        handleCancelRecording();
+        audioSignifiers.playMicStop();
+        setDictationNotice(t('composer.noSpeechHeard'));
+        return;
+      }
+      void handleMicClick();
+    };
+    // Only when the turn also ends by itself: a mic that opens on its own but
+    // needs a tap to send is half a conversation. The silent-mic rule closes
+    // it again if nobody speaks.
+    listenAgainRef.current = () => {
+      if (!voiceMode || silenceTimeout <= 0 || isRecording || recorderRef.current) return;
+      void handleMicClick();
+    };
+  }, [handleCancelRecording, handleMicClick, t, voiceMode, silenceTimeout, isRecording]);
+
+  // Leaving the page stops playback. That must not read as a reply that
+  // ended: listen-again would then open the mic with no page to show it.
+  useEffect(
+    () => () => {
+      listenRequestRef.current += 1;
+      listenAgainRef.current = () => {};
+      onTurnEventRef.current = () => {};
+    },
+    [],
+  );
 
   const handleStarterPrompt = useCallback((prompt: string) => {
     trackStarterPromptUsed(prompt);
@@ -1307,15 +1701,37 @@ export default function Page() {
     return map;
   }, [chat]);
 
+  const handleDownloadReport = useCallback(async (docId: string, docName: string) => {
+    try {
+      const res = await fetch(`/api/v1/documents/${docId}/report`, {
+        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+      });
+      if (!res.ok) throw new Error(`report ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `ura_analysis_${docName.replace(/\.[^.]+$/, '')}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Failed or expired
+    }
+  }, []);
+
   // ---- Shared composer props ----
   const composerProps = {
     message,
     isLoading,
     isRecording,
+    audioLevels,
     isTransitioning,
     speechUnavailable: speechState === 'unavailable' && !hasMediaRecorder,
     speechState,
     voiceMode,
+    autoSend: silenceTimeout > 0,
     onMessageChange: setMessage,
     onSend: sendMessage,
     onMicClick: handleMicClick,
@@ -1327,6 +1743,14 @@ export default function Page() {
     attachments: pendingAttachments,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
+    onInspectAttachment: (att: PendingAttachment) =>
+      setInspectingDoc({
+        id: att.documentId || att.clientId,
+        name: att.name,
+        sizeBytes: att.sizeBytes,
+        docType: att.docType,
+        analysis: att.analysis,
+      }),
     // Voice mode is the composer's only conversation-level control. Language
     // is session-level and lives in the header instead — see <ChatHeader />.
     //
@@ -1418,7 +1842,23 @@ export default function Page() {
         locale={locale}
         localeOptions={LOCALE_OPTIONS}
         onLocaleChange={setLocale}
+        onStartCall={openCall}
       />
+
+      {activeTicketId && (
+        <div className="chat-case-banner">
+          <button
+            type="button"
+            className="chat-case-pill"
+            onClick={() => setSupportCaseOpen(true)}
+            title="Open URA Officer Support Case Room"
+          >
+            <span className="chat-case-pulse" aria-hidden="true" />
+            <span className="chat-case-text">Support Case #TIC-{activeTicketId.slice(0, 8).toUpperCase()}</span>
+            <span className="chat-case-action">Open Case Room ↗</span>
+          </button>
+        </div>
+      )}
 
       <main id="main-content" className="app-content" tabIndex={-1}>
         {!hasStartedChat ? (
@@ -1498,6 +1938,8 @@ export default function Page() {
                     phaseLabel={isPending ? t(PHASE_UI[turnPhase].label) : undefined}
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
+                    onInspectAttachment={(att) => setInspectingDoc(att)}
+                    onActionClick={(action) => sendMessage(action)}
                   />
                 );
               })}
@@ -1579,6 +2021,30 @@ export default function Page() {
         speechReady={Boolean(serverReady)}
         blogUrl={BLOG_URL}
       />
+
+      <DocumentInspectionModal
+        isOpen={inspectingDoc !== null}
+        onClose={() => setInspectingDoc(null)}
+        document={inspectingDoc}
+        onSelectPrompt={(p) => {
+          setMessage(p);
+          window.setTimeout(() => {
+            document.getElementById('composer-input')?.focus();
+          }, 80);
+        }}
+        onDownloadReport={handleDownloadReport}
+      />
+
+      <SupportCaseModal
+        isOpen={supportCaseOpen}
+        onClose={() => setSupportCaseOpen(false)}
+        ticketId={activeTicketId}
+        conversationId={activeConversationId}
+      />
+
+      <ConnectorsModal />
+
+      <CallScreen />
 
       </div>{/* end .app-main-col */}
     </div>{/* end .app-shell.chatv2 */}

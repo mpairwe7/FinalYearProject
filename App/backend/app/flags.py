@@ -333,6 +333,12 @@ _REGISTRY: dict[str, Flag] = {
             "and adds an agentic event surface (tool_call.*, retrieval.*, "
             "response.cancel). SSE endpoint /v1/chat/stream stays unchanged.",
         ),
+        Flag(
+            "enterprise_connectors",
+            False,
+            "Enable enterprise system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). "
+            "In production (APP_ENV=production), local mock connectors are disabled unless this flag is on.",
+        ),
         # Phase 30 (2026) — next-generation architecture increments.
         # All default off and all subject-addressable, so each lands on a
         # cohort before it lands on taxpayers.  See
@@ -391,6 +397,17 @@ _REGISTRY: dict[str, Flag] = {
             "Expose the tasks MCP namespace for long-running work "
             "(filing submission, OCR batches, graph extraction) with durable "
             "state and task.progress events over the WebSocket transport.",
+        ),
+        Flag(
+            "voice_receptionist",
+            False,
+            "Simulated phone receptionist: Pipecat call socket, staff Calls page, audio bridge",
+        ),
+        Flag(
+            "receptionist_language_detection",
+            False,
+            "Receptionist answers in the language the caller speaks (en/sw on Gemini Live, "
+            "lg on the cascaded engine), detected per utterance; needs voice_receptionist",
         ),
     ]
 }

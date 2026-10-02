@@ -27,7 +27,14 @@ def _system_for(role: str) -> str:
 class TestSpecialistSelection:
     def test_the_routed_specialists_all_have_instructions(self):
         # These are the roles service.py actually routes to.
-        for role in ("tax_specialist", "customs_specialist", "tool_specialist"):
+        for role in (
+            "tax_specialist",
+            "customs_specialist",
+            "tool_specialist",
+            "document_audit_specialist",
+            "dispute_specialist",
+            "compliance_specialist",
+        ):
             assert specialist_prompt(role), f"{role} has no instructions"
 
     def test_non_specialist_roles_get_nothing_extra(self):
@@ -47,6 +54,9 @@ class TestSpecialistSelection:
             "tax_specialist",
             "customs_specialist",
             "tool_specialist",
+            "document_audit_specialist",
+            "dispute_specialist",
+            "compliance_specialist",
         }
 
 
@@ -74,6 +84,9 @@ class TestPromptComposition:
             ("customs_specialist", "CIF"),
             ("tax_specialist", "fiscal year"),
             ("tool_specialist", "tools"),
+            ("document_audit_specialist", "audit"),
+            ("dispute_specialist", "objection"),
+            ("compliance_specialist", "compliance"),
         ],
     )
     def test_the_domain_guidance_is_present(self, role, marker):

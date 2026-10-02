@@ -207,3 +207,40 @@ class TestEscalateTool:
         result = fresh_registry.call("escalate_to_human", {"reason": "should not persist"})
         assert result["ok"] is False
         assert tmp_db.list_tickets(status="open") == []
+
+    def test_multilingual_and_modality_ticket_persistence(self, tmp_db):
+        t = tmp_db.create_ticket(
+            reason="Taxpayer wants assistance registering in Luganda",
+            user_query="Nnyamba ku nsonga y'okusasula omusolo gwange ogwa VAT",
+            locale="lg",
+            modality="voice",
+            user_query_en="Help me with paying my VAT tax",
+        )
+        assert t["locale"] == "lg"
+        assert t["modality"] == "voice"
+        assert t["user_query_en"] == "Help me with paying my VAT tax"
+
+        # Check queue listing and filtering by locale and modality
+        lg_rows = tmp_db.list_tickets(locale="lg")
+        assert len(lg_rows) == 1
+        assert lg_rows[0]["id"] == t["id"]
+        assert lg_rows[0]["user_query_en"] == "Help me with paying my VAT tax"
+
+        voice_rows = tmp_db.list_tickets(modality="voice")
+        assert len(voice_rows) == 1
+        assert voice_rows[0]["id"] == t["id"]
+
+        sw_rows = tmp_db.list_tickets(locale="sw")
+        assert len(sw_rows) == 0
+
+        # Update with officer English reply and localized Luganda reply
+        ok = tmp_db.update_ticket(
+            t["id"],
+            officer_reply="Please visit the URA portal and submit form DT-1001.",
+            officer_reply_localized="Nsaba ogende ku mukutu gwa URA owaire foomu DT-1001.",
+        )
+        assert ok is True
+
+        fetched = tmp_db.get_ticket(t["id"])
+        assert fetched["officer_reply"] == "Please visit the URA portal and submit form DT-1001."
+        assert fetched["officer_reply_localized"] == "Nsaba ogende ku mukutu gwa URA owaire foomu DT-1001."

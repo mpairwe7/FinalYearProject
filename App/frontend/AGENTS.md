@@ -6,7 +6,7 @@ Taxpayer chat and staff workbench. App Router under `src/app`.
 
 ```bash
 cd App/frontend
-bun test
+bun run test
 bun run lint
 ```
 

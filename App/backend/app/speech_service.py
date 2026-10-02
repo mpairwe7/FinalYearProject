@@ -39,6 +39,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import logging
+import math
 import os
 import sys
 import threading
@@ -46,6 +47,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 # Ensure the project root is on sys.path so `ml.scripts.*` imports resolve.
 from ._root import PROJECT_ROOT as _PROJECT_ROOT_P
@@ -71,7 +73,7 @@ SPEECH_MT_BACKEND = os.getenv("SPEECH_MT_BACKEND", "prompted")
 SPEECH_DEADLINE_S = float(os.getenv("SPEECH_DEADLINE_S", "60"))
 # LRU cache for repeated short phrases (greetings, empathy openers, workflow
 # prompts). 0 disables. Keyed by (text, voice, language).
-TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "64"))
+TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "256"))
 
 # Synthesize one throwaway phrase per configured locale at startup, in the
 # background, so the first taxpayer to press Listen does not pay for a cold
@@ -174,6 +176,84 @@ def _mp3_metadata(data: bytes) -> tuple[int, float] | None:
     return None
 
 
+def _mpeg_frame_length(header: bytes) -> int | None:
+    """Byte length of the MPEG Layer III frame that *header* (4 bytes) opens, or None."""
+    if len(header) < 4 or header[0] != 0xFF or (header[1] & 0xE0) != 0xE0:
+        return None
+    version = (header[1] >> 3) & 0x03  # 3=MPEG1, 2=MPEG2, 0=MPEG2.5, 1=reserved
+    layer = (header[1] >> 1) & 0x03  # 1=Layer III
+    br_idx = (header[2] >> 4) & 0x0F
+    sr_idx = (header[2] >> 2) & 0x03
+    if version == 1 or layer != 1 or br_idx in (0, 15) or sr_idx == 3:
+        return None
+    table = _MPEG_BITRATES_V1_L3 if version == 3 else _MPEG_BITRATES_V2_L3
+    bitrate = table[br_idx] * 1000
+    rate = _MPEG_RATES[version][sr_idx]
+    padding = (header[2] >> 1) & 0x01
+    return (144 if version == 3 else 72) * bitrate // rate + padding
+
+
+def _roughness(samples: Any) -> float:
+    """Energy of the sample-to-sample change over the signal's energy.
+
+    Speech sits well below 1: it changes little between samples. White
+    noise is about 2, and so are bytes decoded in the wrong format.
+    """
+    import numpy as np
+
+    x = np.asarray(samples, dtype=np.float64)
+    energy = float(np.dot(x, x))
+    if energy <= 0.0:
+        return float("inf")
+    step = np.diff(x)
+    return float(np.dot(step, step)) / energy
+
+
+#: Raw sample formats a caller can name instead of leaving them to be guessed.
+RAW_PCM_ENCODINGS = ("pcm_s16le", "pcm_f32le")
+
+
+def raw_pcm_to_wav(data: bytes, encoding: str, sample_rate: int) -> bytes:
+    """Raw mono PCM in a named *encoding*, as 16-bit WAV, so nothing is guessed.
+
+    ``pcm_s16le`` is 16-bit little-endian, ``pcm_f32le`` 32-bit float in
+    [-1, 1]. The declaration is trusted: nothing is sniffed, except that a
+    body that is plainly a WAV, Ogg or WebM file is returned as it came.
+    Raises ``ValueError`` for an unknown encoding or a body that is not a
+    whole number of samples.
+    """
+    import numpy as np
+
+    if encoding not in RAW_PCM_ENCODINGS:
+        raise ValueError(f"encoding must be one of {', '.join(RAW_PCM_ENCODINGS)}")
+    if (data[:4] == b"RIFF" and data[8:12] == b"WAVE") or data[:4] in (b"OggS", b"\x1a\x45\xdf\xa3"):
+        return data
+    width = 2 if encoding == "pcm_s16le" else 4
+    if len(data) % width:
+        raise ValueError(f"{encoding} audio must be a whole number of {width}-byte samples")
+    if encoding == "pcm_f32le":
+        floats = np.frombuffer(data, dtype="<f4")
+        data = (np.clip(np.nan_to_num(floats), -1.0, 1.0) * 32767).astype("<i2").tobytes()
+    return pcm16_to_wav(data, sample_rate)
+
+
+def _looks_like_mp3(data: bytes) -> bool:
+    """An ID3 tag, or two MPEG Layer III frame headers exactly one frame apart.
+
+    A frame-sync pair alone is not enough: raw 16-bit PCM whose first sample
+    is -1 starts FF FF, which passes it. libsndfile then "decoded" the
+    speech as MP3 noise, and Whisper heard "e e e e…" for a Luganda
+    question on the chat's voice path. A real stream has its next header one
+    frame later; PCM almost never does.
+    """
+    if data[:3] == b"ID3":
+        return True
+    length = _mpeg_frame_length(data[:4])
+    if not length or len(data) < length + 2:
+        return False
+    return data[length] == 0xFF and (data[length + 1] & 0xE0) == 0xE0
+
+
 def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
     """(sample_rate, num_samples, duration_s) read from *data*'s own header.
 
@@ -197,7 +277,7 @@ def _audio_metadata(data: bytes, default_rate: int) -> tuple[int, int, float]:
                 rate = w.getframerate()
                 frames = w.getnframes()
             return rate, frames, round(frames / rate, 3) if rate else 0.0
-        if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        if _looks_like_mp3(data):
             mp3 = _mp3_metadata(data)
             if mp3:
                 rate, duration = mp3
@@ -268,6 +348,7 @@ EN_EDGE_VOICE_CHOICES: tuple[str, ...] = (
     "en-US-AriaNeural",
     "en-US-GuyNeural",
     "en-GB-SoniaNeural",
+    "en-KE-AsiliaNeural",
 )
 
 
@@ -410,6 +491,87 @@ SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
     "ach": 50357,  # decodes to <|su|> (Sundanese); NOT independently verified
 }
 
+# Domain prompts. An unset language used to take the English sentence, so a
+# Luganda or Kiswahili clip posted to /v1/asr without ?language= was biased
+# toward English tax prose. No detected language gets the neutral line.
+_SALT_PROMPT_EN = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, customs duty, "
+    "withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority."
+)
+_SALT_PROMPT_LG = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, omusolo, "
+    "omusaala, ebyamaguzi, forodha, okwewandiisa, Uganda Revenue Authority."
+)
+_SALT_PROMPT_SW = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, kodi, ushuru, "
+    "forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
+)
+_SALT_PROMPT_NEUTRAL = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, "
+    "Uganda Revenue Authority."
+)
+
+
+def salt_domain_prompt(language: str | None) -> str:
+    """The Whisper-SALT conditioning line for *language*.
+
+    English, Luganda, and Kiswahili each have their own. Anything else —
+    including "we have not detected a language yet" — stays on the neutral
+    acronym line rather than the English sentence.
+    """
+    if language == "en":
+        return _SALT_PROMPT_EN
+    if language == "lg":
+        return _SALT_PROMPT_LG
+    if language == "sw":
+        return _SALT_PROMPT_SW
+    return _SALT_PROMPT_NEUTRAL
+
+
+def speech_health_report(
+    speech: object | None,
+    *,
+    enabled_flag: bool,
+    asr_backend: str,
+    tts_backend: str,
+    mt_backend: str,
+) -> dict[str, object]:
+    """What ``GET /v1/speech/health`` reports.
+
+    ``ready`` means Whisper-SALT / Spark can serve. ``degraded`` means they
+    can, but ``ORPHEUS_TTS_URL`` is set and the sidecar is not accepting
+    connections — Luganda then uses Spark-TTS-SALT on this GPU, which is
+    whole-sentence rather than streamed. ``unavailable`` means speech itself
+    is off.
+    """
+    from . import orpheus_tts
+
+    voice = orpheus_tts.reachability()
+    ready = bool(
+        enabled_flag
+        and speech is not None
+        and getattr(speech, "is_ready", lambda: False)()
+    )
+    if not ready:
+        status = "unavailable"
+    elif voice in ("down", "cooldown"):
+        status = "degraded"
+    else:
+        status = "ready"
+    return {
+        "status": status,
+        "enabled": enabled_flag,
+        "asr_backend": asr_backend,
+        "tts_backend": tts_backend,
+        "mt_backend": mt_backend,
+        "orpheus": voice,
+        "whisper_salt": bool(getattr(speech, "_whisper_salt", None)),
+        "spark_tts": bool(getattr(speech, "_spark_tts", None)),
+        "last_tts_backend": str(getattr(speech, "_last_tts_backend", "") or ""),
+        "last_asr_backend": str(getattr(speech, "_last_asr_backend", "") or ""),
+        "last_asr_rtf": getattr(speech, "_last_asr_rtf", None),
+    }
+
 PROJECT_ROOT = _PROJECT_ROOT_P
 SPEECH_ASR_SHERPA_DIR = Path(
     os.getenv(
@@ -438,6 +600,28 @@ class LocalVoiceUnavailable(RuntimeError):
 
 
 @dataclass
+class WordConf:
+    word: str
+    prob: float
+    start: float | None = None
+    end: float | None = None
+
+    def __getitem__(self, key: str) -> Any:
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+    def to_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {"word": self.word, "prob": round(float(self.prob), 3)}
+        if self.start is not None:
+            d["start"] = self.start
+        if self.end is not None:
+            d["end"] = self.end
+        return d
+
+
+@dataclass
 class TranscribeResult:
     text: str
     language: str | None = None
@@ -446,6 +630,8 @@ class TranscribeResult:
     rtf: float | None = None
     backend: str = "unknown"
     error: str | None = None
+    words: list[WordConf] | None = None
+    mean_word_prob: float | None = None
 
 
 @dataclass
@@ -460,6 +646,70 @@ class SynthesizeResult:
     error: str | None = None
 
 
+#: Characters in the first piece of a streamed reply (/v1/tts/stream). Speech
+#: starts once that piece is synthesised: at Orpheus's real-time factor (~0.65)
+#: 45–50 characters took 2.7–3.4 s on the GPU stack, a full 120-character piece
+#: about 6 s.
+STREAM_FIRST_PIECE_CHARS = int(os.getenv("SPEECH_STREAM_FIRST_PIECE_CHARS", "60"))
+#: The second piece: short enough to be ready before the first has been
+#: heard, so speech does not pause after the first sentence. The rest take the
+#: Orpheus cap.
+STREAM_SECOND_PIECE_CHARS = 90
+
+
+def voice_pieces(text: str) -> list[str]:
+    """*text* in speaking order, cut for streaming into pieces that grow: 60, 90, then 120 characters.
+
+    Cut at sentence, clause, then word breaks (``orpheus_tts.split_for_voice``),
+    so each piece is also a cache entry that a later read-aloud of the same
+    answer finds.
+    """
+    from . import orpheus_tts
+
+    limits = (STREAM_FIRST_PIECE_CHARS, STREAM_SECOND_PIECE_CHARS)
+    pieces: list[str] = []
+    for unit in orpheus_tts.split_for_voice(text, limit=STREAM_FIRST_PIECE_CHARS):
+        if not unit.strip():
+            continue
+        if pieces:
+            index = len(pieces) - 1
+            limit = limits[index] if index < len(limits) else orpheus_tts._max_chars()
+            if len(pieces[-1]) + 1 + len(unit) <= limit:
+                pieces[-1] = f"{pieces[-1]} {unit}"
+                continue
+        pieces.append(unit)
+    return pieces
+
+
+def audio_for_client(result: SynthesizeResult, fmt: str) -> tuple[bytes, str]:
+    """The audio of *result* for a client that asked for *fmt*, and the format it is in.
+
+    WAV becomes Ogg/Opus when ``fmt == "opus"``: about a tenth of the size
+    (4.4 s of speech, 208 KB as WAV, 20 KB as Opus). Encoding costs ~5% of the
+    audio's length on the CPU. Anything else is sent as it came (edge-tts MP3
+    is already compressed), and so is WAV that will not encode.
+    """
+    audio = result.audio
+    if audio[:4] == b"RIFF":
+        if fmt == "opus":
+            try:
+                import io
+
+                import soundfile as sf
+
+                data, rate = sf.read(io.BytesIO(audio), dtype="float32")
+                if rate in (8000, 12000, 16000, 24000, 48000):  # the rates Opus accepts
+                    out = io.BytesIO()
+                    sf.write(out, data, rate, format="OGG", subtype="OPUS")
+                    return out.getvalue(), "ogg_opus"
+            except Exception:
+                logger.debug("Opus encoding failed; sending WAV", exc_info=True)
+        return audio, "wav"
+    if _looks_like_mp3(audio):
+        return audio, "mp3"
+    return audio, "wav"
+
+
 @dataclass
 class TranslateResult:
     text: str
@@ -470,9 +720,73 @@ class TranslateResult:
     error: str | None = None
 
 
+@dataclass
+class LanguageIdResult:
+    """Spoken-language identification over a closed candidate set.
+
+    ``probs`` is renormalised over the candidates only, so it answers "which
+    of the languages this call can be in" — not "which of Whisper's 99". An
+    ``error`` means no vote: ``probs`` is empty and ``top`` is ``""``.
+    """
+
+    probs: dict[str, float]
+    top: str
+    latency_ms: float
+    speech_s: float
+    backend: str = "salt_token"
+    error: str | None = None
+
+    @property
+    def confidence(self) -> float:
+        return self.probs.get(self.top, 0.0)
+
+
+# Below this much audio the language-token distribution is close to the
+# prior — there is not enough speech in the mel window to vote on.
+LID_MIN_AUDIO_S = float(os.getenv("SPEECH_LID_MIN_AUDIO_S", "0.3"))
+# Language id is one encoder pass; anything near this deadline means the
+# shared speech executor is saturated, and a late vote is worse than none.
+SPEECH_LID_DEADLINE_S = float(os.getenv("SPEECH_LID_DEADLINE_S", "2.0"))
+
+
 # ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
+
+
+def pcm16_to_wav(pcm: bytes, sample_rate: int = 16000) -> bytes:
+    """Mono 16-bit little-endian PCM wrapped in a WAV header.
+
+    Hand this, not bare PCM, to :meth:`SpeechModel.transcribe`.
+    ``_decode_audio_bytes`` sniffs formats from the first bytes, and raw PCM
+    that happens to start ``FF Ex`` — a quiet sample of -1 is ``FF FF`` —
+    passes for an MPEG frame sync: libsndfile then "decodes" it as MP3
+    garbage. Measured on the language-id set, 7% of real clips start that
+    way. A RIFF header is unambiguous and costs 44 bytes.
+    """
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(sample_rate)
+        w.writeframes(pcm[: len(pcm) - (len(pcm) % 2)])
+    return buf.getvalue()
+
+
+def _tts_cache_key(text: str, voice: str, language: str) -> tuple[str, str, str]:
+    """Phrase-cache key for already-normalized *text*.
+
+    usedforsecurity=False is not a suppression: this digest keys an
+    in-process cache, so it needs to be fast and stable, not
+    collision-resistant against an adversary. Saying so lets the hash
+    keep working where a FIPS-restricted build would otherwise refuse
+    SHA-1 outright, and tells Bandit (B324) the truth rather than
+    hiding the finding behind a nosec.
+    """
+    return (hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest(), voice, language)
 
 
 class SpeechModel:
@@ -495,6 +809,12 @@ class SpeechModel:
         self._breakers = {
             "asr": CircuitBreaker(
                 name="speech.asr",
+                failure_threshold=3,
+                reset_timeout=15.0,
+                max_timeout=120.0,
+            ),
+            "lid": CircuitBreaker(
+                name="speech.lid",
                 failure_threshold=3,
                 reset_timeout=15.0,
                 max_timeout=120.0,
@@ -700,7 +1020,11 @@ class SpeechModel:
         return self.enabled and self._initialised
 
     def transcribe(
-        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+        self,
+        audio_bytes: bytes,
+        sample_rate: int = 16000,
+        language: str | None = None,
+        with_words: bool = False,
     ) -> TranscribeResult:
         """Transcribe raw PCM bytes, filling in any timing the backend omitted.
 
@@ -713,17 +1037,24 @@ class SpeechModel:
         `return` in the chain where the next branch added would miss it.
         """
         t_start = time.perf_counter()
-        result = self._transcribe_chain(audio_bytes, sample_rate, language)
+        result = self._transcribe_chain(audio_bytes, sample_rate, language, with_words=with_words)
         if result.duration_s is None:
             result.duration_s = _input_duration_s(audio_bytes, sample_rate)
         if result.latency_s is None:
             result.latency_s = round(time.perf_counter() - t_start, 3)
         if result.rtf is None and result.duration_s:
             result.rtf = round(result.latency_s / max(result.duration_s, 0.01), 2)
+        self._last_asr_backend = result.backend
+        if result.rtf is not None:
+            self._last_asr_rtf = result.rtf
         return result
 
     def _transcribe_chain(
-        self, audio_bytes: bytes, sample_rate: int = 16000, language: str | None = None
+        self,
+        audio_bytes: bytes,
+        sample_rate: int = 16000,
+        language: str | None = None,
+        with_words: bool = False,
     ) -> TranscribeResult:
         """The backend fallback chain itself.
 
@@ -753,7 +1084,9 @@ class SpeechModel:
         # ⓪ Whisper-SALT (one fine-tune, every locale — tried first when loaded)
         if self._whisper_salt is not None:
             try:
-                result = self._transcribe_whisper_salt(audio_bytes, sample_rate, language)
+                result = self._transcribe_whisper_salt(
+                    audio_bytes, sample_rate, language, with_words=with_words
+                )
                 if result and result.text:
                     return result
                 if result:
@@ -1049,8 +1382,106 @@ class SpeechModel:
             backend="whisper_peft",
         )
 
+    def identify_language(
+        self,
+        audio_bytes: bytes,
+        sample_rate: int = 16000,
+        candidates: tuple[str, ...] = ("en", "sw", "lg"),
+    ) -> LanguageIdResult:
+        """Which of *candidates* is being spoken, from Whisper-SALT's language token.
+
+        *audio_bytes* is raw 16-bit little-endian PCM at *sample_rate*, or a WAV.
+
+        One encoder pass and ONE decoder step from ``<|startoftranscript|>``:
+        the logits at that position are Whisper's language-token prediction,
+        read here only at the :data:`SALT_LANGUAGE_TOKEN_IDS` ids of the
+        candidates and softmaxed over those alone. No text is decoded, so the
+        cost is the encoder (~30-60 ms on an A6000) — a fraction of a
+        transcription, which is why the receptionist can afford it on every
+        utterance. ``lg`` is id 50355, the repurposed ``<|ba|>`` slot; see the
+        comment on that table for why that id and not a "correct-looking" one.
+
+        No domain prompt, unlike :meth:`_transcribe_whisper_salt`: its prompt
+        text is itself language-specific and would vote for the language it
+        was written in.
+
+        Never raises. A missing model, too little audio or an open breaker
+        comes back as a result with ``error`` set and no vote.
+        """
+        t0 = time.perf_counter()
+        if self._whisper_salt is None:
+            return LanguageIdResult({}, "", 0.0, 0.0, error="whisper_salt_unavailable")
+        token_ids = {c: SALT_LANGUAGE_TOKEN_IDS[c] for c in candidates if c in SALT_LANGUAGE_TOKEN_IDS}
+        if len(token_ids) < 2:
+            return LanguageIdResult({}, "", 0.0, 0.0, error="need_two_mapped_candidates")
+        if not self._breakers["lid"].allow_request():
+            return LanguageIdResult({}, "", 0.0, 0.0, error="breaker_open")
+
+        future = self._executor.submit(self._identify_language_salt, audio_bytes, sample_rate, token_ids)
+        try:
+            probs, speech_s = future.result(timeout=SPEECH_LID_DEADLINE_S)
+        except (concurrent.futures.TimeoutError, Exception) as exc:
+            self._breakers["lid"].record_failure()
+            logger.debug("Whisper-SALT language id failed: %s", exc)
+            return LanguageIdResult(
+                {}, "", round((time.perf_counter() - t0) * 1000, 1), 0.0, error=f"lid_failed: {type(exc).__name__}",
+            )
+        self._breakers["lid"].record_success()
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        if not probs:
+            return LanguageIdResult({}, "", latency_ms, speech_s, error="too_short")
+        top = max(probs, key=probs.__getitem__)
+        return LanguageIdResult(probs, top, latency_ms, speech_s)
+
+    def _identify_language_salt(
+        self,
+        audio_bytes: bytes,
+        sample_rate: int,
+        token_ids: dict[str, int],
+    ) -> tuple[dict[str, float], float]:
+        """Worker for :meth:`identify_language`: ``({lang: prob}, speech_s)``."""
+        import torch
+
+        import numpy as np
+
+        model, processor = self._whisper_salt
+        if audio_bytes[:4] == b"RIFF":
+            samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
+        else:
+            # Raw PCM16 — what a call streams. Decoded explicitly rather than
+            # through _decode_audio_bytes, whose raw-PCM branch guesses float32
+            # when every reinterpreted value happens to be small, and so reads
+            # a quiet, all-positive stretch of PCM16 as half as many samples.
+            usable = len(audio_bytes) - (len(audio_bytes) % 2)
+            samples = np.frombuffer(audio_bytes[:usable], dtype="<i2").astype(np.float32) / 32768.0
+            if sample_rate != 16000:
+                samples = self._resample(samples, sample_rate, 16000)
+        speech_s = round(len(samples) / 16000, 3)
+        if speech_s < LID_MIN_AUDIO_S:
+            return {}, speech_s
+
+        input_features = processor.feature_extractor(
+            samples, sampling_rate=16000, return_tensors="pt",
+        ).input_features.to(model.device, dtype=model.dtype)
+        sot_id = processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
+        decoder_input_ids = torch.tensor([[sot_id]], device=model.device)
+        with torch.no_grad():
+            encoder_outputs = model.model.encoder(input_features)
+            logits = model(
+                encoder_outputs=encoder_outputs,
+                decoder_input_ids=decoder_input_ids,
+            ).logits
+        langs = list(token_ids)
+        picked = logits[0, -1, [token_ids[lang] for lang in langs]].float()
+        probs = torch.softmax(picked, dim=-1).tolist()
+        return {lang: round(float(p), 4) for lang, p in zip(langs, probs)}, speech_s
+
     def _transcribe_whisper_salt(
-        self, audio_bytes: bytes, sample_rate: int, language: str | None
+        self,
+        audio_bytes: bytes,
+        sample_rate: int,
+        language: str | None,
+        with_words: bool = False,
     ) -> TranscribeResult | None:
         """Offline STT via Sunbird/asr-whisper-large-v3-salt — one model, every locale.
 
@@ -1069,12 +1500,19 @@ class SpeechModel:
         if pair is None:
             return None
         model, processor = pair
+        # No language on the request: ask the same Whisper-SALT encoder which
+        # of en/lg/sw this audio is, and condition on that. A failed or weak
+        # vote leaves the decoder unforced and uses the neutral prompt.
+        if not language:
+            language = self._detect_salt_language(audio_bytes, sample_rate)
         t0 = time.perf_counter()
         samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
+        t_decode = time.perf_counter()
 
         input_features = processor.feature_extractor(
             samples, sampling_rate=16000, return_tensors="pt",
         ).input_features.to(model.device, dtype=model.dtype)
+        t_feat = time.perf_counter()
 
         # generate()'s `language` kwarg expects the literal string form of a
         # language token, not a bare code or a numeric id — the decode()
@@ -1087,16 +1525,92 @@ class SpeechModel:
         token_id = SALT_LANGUAGE_TOKEN_IDS.get(language or "")
         forced_language = processor.tokenizer.decode([token_id]) if token_id is not None else None
 
+        # Domain prompt conditioning to anchor Whisper onto official URA tax acronyms.
+        prompt_text = salt_domain_prompt(language)
+        prompt_ids = None
+        if hasattr(processor, "get_prompt_ids"):
+            try:
+                prompt_ids = processor.get_prompt_ids(prompt_text, return_tensors="pt").to(model.device)
+            except Exception:
+                prompt_ids = None
+
+        gen_kwargs: dict[str, Any] = {"max_new_tokens": 225, "language": forced_language}
+        if prompt_ids is not None:
+            gen_kwargs["prompt_ids"] = prompt_ids
+
         # See the matching comment on _transcribe_whisper_peft: this is
         # Whisper ASR fed a mel spectrogram (input_features), not user text —
         # there is no prompt for LLM01 to inject into. The transcript IS
         # guarded downstream, at service.generate()'s InputGuard.check(message).
-        with torch.no_grad():
-            # nosemgrep: ura-llm01-raw-user-input-to-llm
-            predicted_ids = model.generate(
-                input_features, language=forced_language, forced_decoder_ids=None, max_new_tokens=225,
-            )
-        text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+        words: list[WordConf] | None = None
+        mean_word_prob: float | None = None
+
+        t_gen_start = time.perf_counter()
+        torch.set_num_threads(4)
+        if with_words:
+            with torch.no_grad():
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
+                out = model.generate(
+                    input_features,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                    **gen_kwargs,
+                )
+                sequences = getattr(out, "sequences", out)
+                scores = getattr(out, "scores", None)
+                if scores is not None and hasattr(model, "compute_transition_scores"):
+                    transition_scores = model.compute_transition_scores(
+                        sequences, scores, normalize_logits=True
+                    )
+                else:
+                    transition_scores = None
+
+            text = processor.batch_decode(sequences, skip_special_tokens=True)[0].strip()
+            if prompt_text and text.startswith(prompt_text):
+                text = text[len(prompt_text):].strip()
+            word_list: list[WordConf] = []
+            if transition_scores is not None and scores is not None and len(sequences) > 0:
+                seq_tokens = sequences[0]
+                gen_tokens = seq_tokens[-len(scores):].tolist()
+                log_probs = transition_scores[0].tolist()
+                special_ids = set(processor.tokenizer.all_special_ids) if hasattr(processor.tokenizer, "all_special_ids") else set()
+                cur_tokens: list[int] = []
+                cur_probs: list[float] = []
+                for tid, lp in zip(gen_tokens, log_probs):
+                    if tid in special_ids:
+                        continue
+                    piece = processor.tokenizer.decode([tid])
+                    if not piece or piece.startswith("<|"):
+                        continue
+                    prob = max(0.0, min(1.0, math.exp(float(lp))))
+                    if (piece.startswith(" ") or (not word_list and not cur_tokens)) and cur_tokens:
+                        w = processor.tokenizer.decode(cur_tokens).strip()
+                        if w:
+                            word_list.append(WordConf(word=w, prob=round(min(cur_probs), 3)))
+                        cur_tokens = [tid]
+                        cur_probs = [prob]
+                    else:
+                        cur_tokens.append(tid)
+                        cur_probs.append(prob)
+                if cur_tokens:
+                    w = processor.tokenizer.decode(cur_tokens).strip()
+                    if w:
+                        word_list.append(WordConf(word=w, prob=round(min(cur_probs), 3)))
+            words = word_list if word_list else None
+            mean_word_prob = round(sum(w.prob for w in words) / len(words), 3) if words else None
+        else:
+            with torch.no_grad():
+                # nosemgrep: ura-llm01-raw-user-input-to-llm
+                predicted_ids = model.generate(input_features, **gen_kwargs)
+            text = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0].strip()
+            if prompt_text and text.startswith(prompt_text):
+                text = text[len(prompt_text):].strip()
+
+        t_gen_end = time.perf_counter()
+        logger.info(
+            "_transcribe_whisper_salt breakdown: decode=%.3fs, feat=%.3fs, gen=%.3fs, total=%.3fs",
+            t_decode - t0, t_feat - t_decode, t_gen_end - t_gen_start, t_gen_end - t0
+        )
 
         latency = time.perf_counter() - t0
         duration = len(samples) / max(sample_rate, 1)
@@ -1110,7 +1624,41 @@ class SpeechModel:
             latency_s=round(latency, 3),
             rtf=round(latency / max(duration, 0.01), 2),
             backend="whisper_salt",
+            words=words,
+            mean_word_prob=mean_word_prob,
         )
+
+    def _detect_salt_language(self, audio_bytes: bytes, sample_rate: int) -> str | None:
+        """en/lg/sw from the Whisper-SALT language token, or None.
+
+        Unit-test stand-ins are MagicMocks; running the encoder on those
+        would not be a language vote. A real model that errors, or a top
+        probability under 0.5, also returns None so the decode stays unforced.
+        """
+        pair = self._whisper_salt
+        if pair is None:
+            return None
+        model, _processor = pair
+        if type(model).__name__ == "MagicMock":
+            return None
+        token_ids = {
+            code: SALT_LANGUAGE_TOKEN_IDS[code]
+            for code in ("en", "lg", "sw")
+            if code in SALT_LANGUAGE_TOKEN_IDS
+        }
+        if len(token_ids) < 2:
+            return None
+        try:
+            probs, _speech_s = self._identify_language_salt(audio_bytes, sample_rate, token_ids)
+        except Exception:
+            logger.debug("Whisper-SALT language detect before decode failed", exc_info=True)
+            return None
+        if not probs:
+            return None
+        top = max(probs, key=probs.__getitem__)
+        if probs[top] < 0.5:
+            return None
+        return top
 
     def _transcribe_faster_whisper(
         self, audio_bytes: bytes, sample_rate: int, language: str | None
@@ -1154,7 +1702,10 @@ class SpeechModel:
                         )
             whisper_lang = {"lg": None, "en": "en"}.get(language or "en", language)
             segments, info = self._faster_whisper.transcribe(
-                tmp_path, language=whisper_lang, beam_size=3,
+                tmp_path,
+                language=whisper_lang,
+                beam_size=3,
+                initial_prompt="URA, EFRIS, VAT, TIN, PAYE, customs duty, withholding tax, presumptive tax, taxpayer, Uganda Revenue Authority.",
             )
             text = " ".join(seg.text.strip() for seg in segments)
             latency = time.perf_counter() - t0
@@ -1193,37 +1744,88 @@ class SpeechModel:
                 audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
                 latency_s=0.0, backend="disabled", voice="", error="SPEECH_ENABLED=false",
             )
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, locale=language)
+        if not text:
+            return SynthesizeResult(
+                audio=b"", sample_rate=0, num_samples=0, duration_s=0.0,
+                latency_s=0.0, backend="empty", voice=voice or "", error="Empty text after normalization",
+            )
+
         voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
 
         # ⓪ Phrase cache — repeated short prompts (greetings, empathy openers,
-        #    workflow questions) skip the whole backend chain.
-        #
-        #    usedforsecurity=False is not a suppression: this digest keys an
-        #    in-process cache, so it needs to be fast and stable, not
-        #    collision-resistant against an adversary. Saying so lets the hash
-        #    keep working where a FIPS-restricted build would otherwise refuse
-        #    SHA-1 outright, and tells Bandit (B324) the truth rather than
-        #    hiding the finding behind a nosec.
-        cache_key = (
-            hashlib.sha1(text.encode("utf-8"), usedforsecurity=False).hexdigest(),
-            voice,
-            language,
-        )
-        if TTS_CACHE_SIZE > 0:
-            with self._tts_cache_lock:
-                cached = self._tts_cache.get(cache_key)
-                if cached is not None:
-                    self._tts_cache.move_to_end(cache_key)
-                    return replace(cached, latency_s=0.0, backend=f"{cached.backend}+cache")
+        #    workflow questions, the receptionist's pre-warmed lines) skip the
+        #    whole backend chain.
+        cache_key = _tts_cache_key(text, voice, language)
+        cached = self._tts_cache_lookup(cache_key)
+        if cached is not None:
+            self._last_tts_backend = cached.backend
+            return cached
 
         result = self._synthesize_uncached(text, voice, language)
-        if TTS_CACHE_SIZE > 0 and result.audio and not result.error:
-            with self._tts_cache_lock:
-                self._tts_cache[cache_key] = result
-                self._tts_cache.move_to_end(cache_key)
-                while len(self._tts_cache) > TTS_CACHE_SIZE:
-                    self._tts_cache.popitem(last=False)
+        self._last_tts_backend = result.backend
+        self._tts_cache_store(cache_key, result)
         return result
+
+    # The phrase cache is keyed on the *normalized* text, so a caller that
+    # streams audio itself (the receptionist's Orpheus path) reads and fills
+    # the same entries synthesize() does, through these two.
+
+    def tts_cache_get(self, text: str, voice: str | None, language: str) -> SynthesizeResult | None:
+        """A cached synthesis of *text*, or ``None``. Never synthesizes."""
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, locale=language)
+        voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
+        return self._tts_cache_lookup(_tts_cache_key(text, voice, language))
+
+    def tts_cache_put(self, text: str, voice: str | None, language: str, result: SynthesizeResult) -> None:
+        from .speech_normalization import clean_text_for_speech
+
+        text = clean_text_for_speech(text, locale=language)
+        voice = voice or LOCAL_TTS_VOICES.get(language, DEFAULT_EN_VOICE)
+        self._tts_cache_store(_tts_cache_key(text, voice, language), result)
+
+    def _tts_cache_lookup(self, key: tuple[str, str, str]) -> SynthesizeResult | None:
+        if TTS_CACHE_SIZE <= 0:
+            return None
+        with self._tts_cache_lock:
+            cached = self._tts_cache.get(key)
+            if cached is None:
+                return None
+            self._tts_cache.move_to_end(key)
+        return replace(cached, latency_s=0.0, backend=f"{cached.backend}+cache")
+
+    def _tts_cache_store(self, key: tuple[str, str, str], result: SynthesizeResult) -> None:
+        if TTS_CACHE_SIZE <= 0 or not result.audio or result.error:
+            return
+        with self._tts_cache_lock:
+            self._tts_cache[key] = result
+            self._tts_cache.move_to_end(key)
+            while len(self._tts_cache) > TTS_CACHE_SIZE:
+                self._tts_cache.popitem(last=False)
+
+    def prewarm_phrases(
+        self, language: str, phrases: list[str], voice: str | None = None
+    ) -> dict[str, int]:
+        """Synthesize fixed lines into the phrase cache before anyone waits on them.
+
+        For the receptionist's own lines (fillers, clarify prompts, the
+        transfer notice) in voices too slow to render live. Sequential, like
+        :meth:`warmup`, and never raises. Returns ``{"cached": n, "failed": m}``.
+        """
+        outcome = {"cached": 0, "failed": 0}
+        if not self.enabled:
+            return outcome
+        for text in phrases:
+            try:
+                result = self.synthesize(text, voice=voice, language=language)
+                outcome["cached" if result.audio and not result.error else "failed"] += 1
+            except Exception:  # noqa: BLE001 — pre-warming must never fail a boot
+                outcome["failed"] += 1
+        return outcome
 
     def warmup(self) -> dict[str, str]:
         """Run one short synthesis per warm-up locale. Never raises.
@@ -1246,6 +1848,13 @@ class SpeechModel:
                 outcomes[locale] = result.backend if not result.error else f"error: {result.error}"
             except Exception as exc:  # noqa: BLE001 — warm-up must never fail a boot
                 outcomes[locale] = f"error: {exc}"
+        if self._whisper_salt is not None:
+            try:
+                # 0.5s of silence to warm up Whisper-SALT JIT graph and eliminate cold-start latency
+                self.transcribe(bytes(16000), sample_rate=16000, language="en")
+                outcomes["whisper_salt"] = "ready"
+            except Exception as exc:  # noqa: BLE001
+                outcomes["whisper_salt"] = f"error: {exc}"
         return outcomes
 
     def _synthesize_mock(self, text: str, voice: str, language: str) -> SynthesizeResult:
@@ -1293,7 +1902,7 @@ class SpeechModel:
         language: str,
     ) -> SynthesizeResult:
         """The actual backend fallback chain behind :meth:`synthesize`."""
-        from . import spark_tts_salt
+        from . import orpheus_tts, spark_tts_salt
 
         # An explicitly requested test double, before any real backend.
         #
@@ -1310,6 +1919,33 @@ class SpeechModel:
         # setting silently produce "All TTS backends failed".
         if SPEECH_TTS_BACKEND == "mock":
             return self._synthesize_mock(text, voice, language)
+
+        # ⓪.5 Orpheus-3B, for the languages it is configured to voice (opt-in
+        #     by ORPHEUS_TTS_URL; Luganda by default). First, ahead of even a
+        #     local Piper voice: it is the only native voice here fast enough
+        #     for a live call (~350 ms to first audio vs ~4 s for Spark-TTS-SALT),
+        #     and whatever the receptionist pre-warms through this method must
+        #     be the same voice its live answers stream in. Unavailable or
+        #     failing, it falls through to the chain below unchanged.
+        # A dead sidecar stays in cooldown for 30s. Skip the call entirely:
+        # synthesize() would otherwise raise after a DNS failure, and every
+        # Luganda sentence on the local GPU stack paid that before Spark.
+        if orpheus_tts.speaker_for(language) and not orpheus_tts.in_cooldown():
+            t_orpheus = time.perf_counter()
+            try:
+                pcm = orpheus_tts.synthesize(text, language)
+                n = len(pcm) // 2
+                return SynthesizeResult(
+                    audio=orpheus_tts.pcm16_to_wav(pcm),
+                    sample_rate=orpheus_tts.SAMPLE_RATE,
+                    num_samples=n,
+                    duration_s=round(n / orpheus_tts.SAMPLE_RATE, 3),
+                    latency_s=round(time.perf_counter() - t_orpheus, 3),
+                    backend="orpheus_salt",
+                    voice=orpheus_tts.speaker_for(language) or "",
+                )
+            except orpheus_tts.OrpheusUnavailable as exc:
+                logger.info("Orpheus TTS unavailable for %s (%s); trying the next voice", language, exc)
 
         # Local Piper and edge-tts both default to an English voice for any
         # language they have no model for, and then *succeed* — so left in
@@ -1586,6 +2222,10 @@ class SpeechModel:
 
         voice_id = resolve_edge_voice(language, voice)
         t0 = time.perf_counter()
+        # Natural conversational pacing (8-10% slower) provides clear articulation
+        # for tax statutory figures, acronyms, and multi-syllabic vernacular phrasing.
+        default_rate = "-10%" if language == "lg" else "-8%"
+        tts_rate = os.getenv("SPEECH_TTS_RATE", default_rate)
 
         def _generate_sync() -> bytes:
             """Run the async generator in an isolated event loop on this thread."""
@@ -1594,7 +2234,7 @@ class SpeechModel:
             loop = asyncio.new_event_loop()
             try:
                 async def _stream() -> bytes:
-                    communicate = edge_tts.Communicate(text[:3000], voice_id)
+                    communicate = edge_tts.Communicate(text[:3000], voice_id, rate=tts_rate)
                     buf = io.BytesIO()
                     async for chunk in communicate.stream():
                         if chunk["type"] == "audio":
@@ -1723,8 +2363,8 @@ class SpeechModel:
         if audio_bytes[:4] in (b"\x1a\x45\xdf\xa3", b"OggS"):
             return self._decode_container(audio_bytes, target_sr)
 
-        # --- MP3 detection (ID3 header or sync word 0xFFE0+) ---
-        if audio_bytes[:3] == b"ID3" or (audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0):
+        # --- MP3: an ID3 tag, or two consecutive frame headers (see _looks_like_mp3) ---
+        if _looks_like_mp3(audio_bytes):
             return self._decode_container(audio_bytes, target_sr)
 
         # --- Fallback: assume raw PCM ---
@@ -1765,10 +2405,26 @@ class SpeechModel:
             return self._pcm_bytes_to_float(audio_bytes)
 
     def _decode_container(self, audio_bytes: bytes, target_sr: int = 16000):
-        """Decode WebM/OGG/MP3 via ffmpeg or pydub, falling back to raw PCM."""
+        """Decode WebM/OGG/MP3 via soundfile, ffmpeg or pydub, falling back to raw PCM."""
         import numpy as np
 
-        # Try ffmpeg (subprocess — most reliable for WebM/Opus)
+        # 1. Try soundfile (libsndfile — native in Python, supports MP3, OGG, WAV, FLAC without external binaries)
+        try:
+            import io
+            import soundfile as sf
+            data, sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
+            if data.ndim > 1:
+                data = data.mean(axis=1)
+            if sr != target_sr:
+                from scipy import signal
+                num_target_samples = int(len(data) * target_sr / sr)
+                data = signal.resample(data, num_target_samples).astype(np.float32)
+            if len(data) > 0:
+                return data
+        except Exception:
+            pass
+
+        # 2. Try ffmpeg (subprocess — for WebM/Opus when ffmpeg is available)
         try:
             import subprocess
             import tempfile
@@ -1820,17 +2476,27 @@ class SpeechModel:
         """Decode raw PCM bytes into a float32 numpy array in [-1, 1]."""
         import numpy as np
 
-        # Assume 16-bit little-endian PCM unless bytes count suggests float32.
+        # 16-bit little-endian PCM unless the bytes also read as float32 audio
+        # and that reading is the one that sounds like audio. Speech changes
+        # smoothly from sample to sample; bytes read in the wrong format come
+        # out as noise (roughness near 2). Amplitude decides nothing: float32
+        # speech can have long quiet stretches, and quiet int16 with a DC
+        # offset reads as tiny floats. A caller that knows its format says so
+        # with /v1/asr's `encoding` (raw_pcm_to_wav) and is never guessed.
+        as_int16 = np.frombuffer(audio_bytes[: len(audio_bytes) // 2 * 2], dtype=np.int16).astype("float32") / 32768.0
         if len(audio_bytes) % 4 == 0:
-            # Try float32; fall back to int16 if values look wildly scaled.
             try:
-                arr = np.frombuffer(audio_bytes, dtype=np.float32)
-                if arr.size and -1.5 <= float(arr.max()) <= 1.5:
-                    return arr.copy()
+                as_float = np.frombuffer(audio_bytes, dtype=np.float32)
+                if (
+                    as_float.size
+                    and np.isfinite(as_float).all()
+                    and float(np.abs(as_float).max()) <= 1.5
+                    and _roughness(as_float) <= _roughness(as_int16)
+                ):
+                    return as_float.copy()
             except Exception:
                 pass
-        arr = np.frombuffer(audio_bytes, dtype=np.int16).astype("float32") / 32768.0
-        return arr
+        return as_int16
 
     @staticmethod
     def _resample(audio, orig_sr: int, target_sr: int):

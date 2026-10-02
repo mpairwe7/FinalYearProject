@@ -1,0 +1,95 @@
+{
+ "date": "2026-09-24",
+ "manifest": "evals/language_id/manifest_mixed_synthetic.jsonl",
+ "clips": 120,
+ "policy": {
+  "min_speech_s": 1.5,
+  "switch_confidence": 0.9,
+  "hysteresis_confidence": 0.7
+ },
+ "notes": {},
+ "methods": {
+  "A": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.7917,
+   "accuracy_ge_3s": 0.75,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.7917
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.75
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.8136,
+    "1.5-4s/8k": 0.7627,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.7833,
+    "orpheus_waxal_lug_0005": 0.8
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 95,
+     "sw": 21,
+     "en": 4
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.7917,
+   "latency_ms_p50": 56.8,
+   "latency_ms_p95": 71.3
+  },
+  "R": {
+   "n": 120,
+   "accuracy_ge_1_5s": 0.8167,
+   "accuracy_ge_3s": 0.8,
+   "per_class_ge_1_5s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.8167
+   },
+   "per_class_ge_3s": {
+    "en": null,
+    "sw": null,
+    "lg": 0.8
+   },
+   "per_bucket_channel": {
+    "<1.5s/16k": null,
+    "<1.5s/8k": null,
+    "1.5-4s/16k": 0.8136,
+    "1.5-4s/8k": 0.8136,
+    ">4s/16k": 1.0,
+    ">4s/8k": 1.0
+   },
+   "per_source_ge_1_5s": {
+    "orpheus_salt_lug_0001": 0.8333,
+    "orpheus_waxal_lug_0005": 0.8
+   },
+   "confusion_ge_1_5s": {
+    "lg": {
+     "lg": 98,
+     "sw": 8,
+     "en": 14
+    }
+   },
+   "en_to_lg_false_switch_raw": null,
+   "en_to_lg_false_switch_policy_gated": null,
+   "mixed_to_lg": 0.8167,
+   "latency_ms_p50": 413.2,
+   "latency_ms_p95": 541.0
+  }
+ },
+ "gate": {
+  "A": "FAIL",
+  "R": "FAIL"
+ }
+}

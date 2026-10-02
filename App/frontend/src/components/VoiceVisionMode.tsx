@@ -185,7 +185,7 @@ function VoiceVisionModeInner({ onClose, locale = "en" }: VoiceVisionModeProps) 
     async (audioBlob: Blob) => {
       if (!capturedImage) return;
 
-      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+      const API_BASE = process.env.NEXT_PUBLIC_API_URL || "/api";
       const formData = new FormData();
       formData.append("audio", audioBlob, "recording.webm");
       formData.append("image", capturedImage, "document.jpg");

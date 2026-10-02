@@ -45,9 +45,9 @@ class TestJWTVerifier:
             JWTVerifier().verify("not.a.jwt.really")
 
     def test_invalid_signature_rejected(self):
-        token = make_dev_token("alice", secret="secret-a")
+        token = make_dev_token("alice", secret="secret-a")  # pragma: allowlist secret
         with pytest.raises(JWTAuthError, match="signature"):
-            JWTVerifier(dev_secret="secret-b").verify(token)
+            JWTVerifier(dev_secret="secret-b").verify(token)  # pragma: allowlist secret
 
     def test_expired_token_rejected(self):
         token = make_dev_token("alice", ttl_seconds=-10)
@@ -70,6 +70,16 @@ class TestJWTVerifier:
     def test_unsupported_alg_raises(self):
         with pytest.raises(JWTAuthError, match="unsupported"):
             JWTVerifier(alg="ES256")
+
+    def test_rs256_alg_header_detection(self):
+        import base64
+        v = JWTVerifier()
+        h = base64.urlsafe_b64encode(b'{"alg":"RS256","kid":"test-kid"}').decode("ascii").rstrip("=")
+        p = base64.urlsafe_b64encode(b'{"sub":"test-user"}').decode("ascii").rstrip("=")
+        s = base64.urlsafe_b64encode(b"test-sig").decode("ascii").rstrip("=")
+        fake_rs256 = f"{h}.{p}.{s}"
+        with pytest.raises(JWTAuthError):
+            v.verify(fake_rs256)
 
 
 class TestClaimsToUser:

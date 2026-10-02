@@ -57,7 +57,8 @@
   align-items: center;
   gap: 6px;
   max-width: min(48vw, 420px);
-  min-height: 34px;
+  min-height: 40px;
+  min-width: 40px;
   padding: 0 8px;
   border: none;
   border-radius: 8px;
@@ -131,6 +132,13 @@
   color: var(--text-0);
 }
 
+@media (max-width: 480px) {
+  .chatv2 .hdrv2 .top-bar-title,
+  .top-bar-title {
+    display: none !important;
+  }
+}
+
 .chatv2 .hdrv2-spacer {
   flex: 1;
   min-width: 0;
@@ -153,8 +161,9 @@
      painting on desktop. It went unnoticed while it was a hamburger next to
      other header icons; now it is a second copy of the panel toggle beside a
      rail that is already docked. Out-specify rather than reorder globals. */
-  .chatv2 .hdrv2 .sidebar-toggle-btn {
-    display: none;
+  .chatv2 .hdrv2 .sidebar-toggle-btn,
+  .sidebar-toggle-btn {
+    display: none !important;
   }
 }
 

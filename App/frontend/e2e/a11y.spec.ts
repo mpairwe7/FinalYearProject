@@ -59,6 +59,8 @@ async function prepareStaffSession(page: Page) {
   // this test hermetic: a mocked route represents an idle, healthy stream
   // without repeatedly attempting to reach a developer's local API process.
   await page.routeWebSocket("**/api/v1/admin/tickets/stream**", () => {});
+  // …and the call layer's lobby socket (the call bar on every staff page).
+  await page.routeWebSocket("**/api/v1/admin/calls/stream**", () => {});
 
   // Register the catch-all first: Playwright gives later routes precedence.
   await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
@@ -241,11 +243,15 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
       await visitInTheme(page, "/signin", theme);
       await expect(page.getByRole("heading", { name: "Sign in", exact: true })).toBeVisible();
       await expectNoSeriousOrCritical(page, `sign-in (${theme})`);
+
+      await visitInTheme(page, "/signup", theme);
+      await expect(page.getByRole("heading", { name: "Create an account", exact: true })).toBeVisible();
+      await expectNoSeriousOrCritical(page, `sign-up (${theme})`);
     }
   });
 
   test("has no serious or critical axe violations on every required staff surface in both themes", async ({ page }) => {
-    // Sixteen navigations and sixteen axe passes: eight console routes in two
+    // Eighteen navigations and eighteen axe passes: nine console routes in two
     // themes. That is inherently past the 30s default, and was already close to
     // it at four routes.
     test.slow();
@@ -263,6 +269,7 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
       ["/admin/outbox", "Notification outbox"],
       ["/analytics", "Analytics Dashboard"],
       ["/analytics/evaluation", "Answer evaluation"],
+      ["/calls", "Phone Calls"],
     ] as const;
 
     for (const theme of ["light", "dark"] as const) {

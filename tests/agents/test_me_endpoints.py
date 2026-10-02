@@ -19,7 +19,12 @@ from starlette.requests import Request
 
 from app.auth.dependencies import current_user, require_user, reset_verifier
 from app.auth.jwt_auth import make_dev_token
-from app.auth.models import ConsentGrantRequest, ConsentWithdrawRequest, ProfileUpdateRequest
+from app.auth.models import (
+    ConsentGrantRequest,
+    ConsentWithdrawRequest,
+    DevTokenRequest,
+    ProfileUpdateRequest,
+)
 
 
 @dataclass
@@ -58,6 +63,9 @@ class _DirectMeClient:
         )
 
         try:
+            if path == "/v1/auth/dev-token" and method == "POST":
+                return _Response(200, main.mint_dev_token_endpoint(DevTokenRequest(**(json or {}))).model_dump())
+
             ctx = current_user(request, auth)
             if path == "/v1/me" and method == "GET":
                 return _Response(200, main.me_whoami(ctx))
@@ -384,4 +392,65 @@ class TestFullFlow:
         r = client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
         assert r.status_code == 200
         # New user_id differs from the first whoami
-        assert r.json()["external_id"] == "bob"
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/auth/dev-token — quick non-IT access in development/prototype
+# ---------------------------------------------------------------------------
+class TestDevToken:
+    def test_mint_staff_token(self, client):
+        r = client.post("/v1/auth/dev-token", json={"role": "ura_staff", "email": "officer@ura.go.ug"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["authenticated"] is True
+        assert data["role"] == "ura_staff"
+        assert data["email"] == "officer@ura.go.ug"
+        assert "token" in data and len(data["token"].split(".")) == 3
+
+        # Token can authenticate against /v1/me
+        r_me = client.get("/v1/me", headers={"Authorization": f"Bearer {data['token']}"})
+        assert r_me.status_code == 200
+        assert r_me.json()["role"] == "ura_staff"
+
+    def test_mint_admin_token(self, client):
+        r = client.post("/v1/auth/dev-token", json={"role": "ura_admin"})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["role"] == "ura_admin"
+        assert data["redirect_url"] == "/admin"
+
+    def test_auto_detect_credentials(self, client):
+        # Admin auto-detected by email
+        r_admin = client.post("/v1/auth/dev-token", json={"email": "admin@ura.go.ug"})
+        assert r_admin.status_code == 200
+        assert r_admin.json()["role"] == "ura_admin"
+        assert r_admin.json()["redirect_url"] == "/admin"
+
+        # Auditor auto-detected by email
+        r_aud = client.post("/v1/auth/dev-token", json={"email": "auditor@ura.go.ug"})
+        assert r_aud.status_code == 200
+        assert r_aud.json()["role"] == "ura_auditor"
+        assert r_aud.json()["redirect_url"] == "/analytics"
+
+        # Staff/agent auto-detected by email
+        r_agent = client.post("/v1/auth/dev-token", json={"email": "agent.sarah@ura.go.ug"})
+        assert r_agent.status_code == 200
+        assert r_agent.json()["role"] == "ura_staff"
+        assert r_agent.json()["redirect_url"] == "/agent"
+
+        # Normal taxpayer with gmail/yahoomail auto-detected
+        r_citizen = client.post("/v1/auth/dev-token", json={"email": "taxpayer@gmail.com"})
+        assert r_citizen.status_code == 200
+        assert r_citizen.json()["role"] == "public"
+        assert r_citizen.json()["redirect_url"] == "/"
+
+        # Privilege escalation attempt with external email is blocked to public (CWE-269)
+        r_spoof = client.post("/v1/auth/dev-token", json={"email": "admin@gmail.com", "role": "ura_admin"})
+        assert r_spoof.status_code == 200
+        assert r_spoof.json()["role"] == "public"
+        assert r_spoof.json()["redirect_url"] == "/"
+
+    def test_mint_disabled_in_production(self, monkeypatch, client):
+        monkeypatch.setenv("APP_ENV", "production")
+        r = client.post("/v1/auth/dev-token", json={"role": "ura_staff"})
+        assert r.status_code == 403

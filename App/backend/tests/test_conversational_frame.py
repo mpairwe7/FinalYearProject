@@ -195,3 +195,52 @@ class TestSuggestionSurvivesAMissingBm25State(FrameTestCase):
         finally:
             svc._BM25_ENCODER, svc._BM25_LOAD_ATTEMPTED = saved_enc, saved_flag
         self.assertIn("You might also want to know:", out)
+
+
+class TestMultiTurnLocaleAndAttachedMetadataLocalization(FrameTestCase):
+    def test_multi_turn_locale_continuity(self):
+        # 1. Turn 1 Luganda query
+        hist: list[dict[str, str]] = []
+        loc1 = ChatModel._resolve_conversation_locale("Nnyinza ntya okwewandiisa ku TIN?", "en", hist)
+        self.assertEqual(loc1, "lg")
+
+        # 2. Turn 2 follow-up inquiry with numbers / English tokens preserves Luganda
+        hist.append({
+            "user_message": "Nnyinza ntya okwewandiisa ku TIN?",
+            "bot_reply": "Osobola okwewandiisa ku mukutu gwa URA.",
+        })
+        loc2 = ChatModel._resolve_conversation_locale("What about 150m?", "en", hist)
+        self.assertEqual(loc2, "lg")
+
+        # 3. Explicit switch to English is honored
+        loc3 = ChatModel._resolve_conversation_locale("Speak in English please", "en", hist)
+        self.assertEqual(loc3, "en")
+
+        # 4. Swahili thread preserves Swahili on follow-up
+        hist_sw = [{
+            "user_message": "Habari, ninawezaje kupata TIN?",
+            "bot_reply": "Unaweza kujisajili kupitia tovuti ya URA.",
+        }]
+        loc4 = ChatModel._resolve_conversation_locale("Je kuhusu VAT?", "en", hist_sw)
+        self.assertEqual(loc4, "sw")
+
+    def test_localize_next_actions(self):
+        actions = ["Speak to a URA officer", "Learn about VAT", "File a tax return"]
+        lg_actions = ChatModel._localize_next_actions(actions, "lg")
+        self.assertEqual(lg_actions, ["Yogera n'omukozi wa URA", "Yiga ku musolo gwa VAT", "Waayo alipoota y'omusolo"])
+
+        sw_actions = ChatModel._localize_next_actions(actions, "sw")
+        self.assertEqual(sw_actions, ["Ongea na afisa wa URA", "Jifunze kuhusu VAT", "Wasilisha marejesho ya kodi"])
+
+    def test_localize_resource(self):
+        res = {
+            "title": "URA e-Services Web Portal",
+            "description": "Online tax portal",
+            "url": "https://ura.go.ug",
+            "type": "online_form",
+        }
+        loc_res_lg = ChatModel._localize_resource(res, "lg")
+        self.assertEqual(loc_res_lg["title"], "Omukutu gwa URA ogwa e-Services")
+
+        loc_res_sw = ChatModel._localize_resource(res, "sw")
+        self.assertEqual(loc_res_sw["title"], "Tovuti ya Huduma za URA Mtandaoni")

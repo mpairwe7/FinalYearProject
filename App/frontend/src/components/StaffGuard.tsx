@@ -49,12 +49,14 @@ import {
   InboxIcon,
   ListIcon,
   PanelLeftIcon,
+  PhoneIcon,
   SendIcon,
   SlidersIcon,
 } from "./ops/icons";
 import SettingsDialog, { type SettingsTab } from "./settings/SettingsDialog";
 import { useSidebarMode } from "../hooks/useSidebarMode";
 import { TicketLiveBanner } from "./staff/TicketLiveBanner";
+import { StaffCallLayer } from "./staff/calls/console/StaffCallLayer";
 import "./staffGuard.css";
 
 export interface StaffIdentity {
@@ -86,7 +88,11 @@ function signOut() {
   // The provider's logout already redirects to /signin (OIDC_POST_LOGOUT_PATH),
   // so this only lands us there when there was nothing to log out of; issuing
   // both would cancel the logout navigation with a same-tab assign.
-  if (method === "dev" || !endOidcSession()) window.location.assign("/signin");
+  if (method === "dev" || !endOidcSession()) {
+    // Top-level navigation to signin page on auth session termination
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign("/signin");
+  }
 }
 
 /**
@@ -100,6 +106,7 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
   "/admin": GaugeIcon,
   "/agent": InboxIcon,
   "/admin/tickets": ListIcon,
+  "/calls": PhoneIcon,
   "/admin/flags": FlagIcon,
   "/admin/overrides": SlidersIcon,
   "/admin/outbox": SendIcon,
@@ -404,6 +411,9 @@ export default function StaffGuard({
       {/* The rail is fixed, so everything else lives in a column that is
           offset by the rail's current width. */}
       <div className="staff-shell-content">
+        {/* Phone calls on every staff page: the call bar, transfer alerts and
+            the officer's own call, which outlives navigation (Call Desk §8.2). */}
+        <StaffCallLayer role={state.who.role} who={state.who} />
         <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
         {children(state.who)}
       </div>

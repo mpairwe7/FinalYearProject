@@ -62,10 +62,127 @@ class LocalizeReplyTest(unittest.TestCase):
         with mock.patch("app.sunbird.translate_from_english", return_value="Yee"):
             self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), self.ENGLISH)
 
+    def test_a_translation_that_loops_serves_english(self) -> None:
+        """Sunflower rendered a phone number as "0[[[[((((…" on a call (2026-09-30)."""
+        english = "Contact URA on 0800 117 000 or 0800 217 000 about VAT at 18%."
+        whole = "Tuukirira URA ku 0800 117 000 oba 0800 217 000 ku VAT ebitundu 18 ku buli kikumi."
+        looping = "Tuukirira URA ku 0800 117 000 oba 0" + "[" * 16 + "(" * 312 + " ku VAT ebitundu 18 ku buli kikumi."
+        with mock.patch("app.sunbird.translate_from_english", return_value=whole):
+            self.assertEqual(service.localize_reply(english, "lg"), whole)  # every other guard passes it
+        mt.cache.clear()
+        with mock.patch("app.sunbird.translate_from_english", return_value=looping):
+            self.assertEqual(service.localize_reply(english, "lg"), english)
+
+    def test_only_a_loop_the_english_lacks_counts(self) -> None:
+        table = "| Tax | Rate |\n|----------|------|\n| VAT | 18% |"
+        self.assertFalse(mt.looped(table, "| Omusolo | Ebitundu |\n|----------|------|\n| VAT | 18% |"))
+        self.assertTrue(mt.looped("EFRIS is required.", "EFRIS kye ki kati kozesa kozesa kozesa kozesa kozesa kozesa."))
+        self.assertTrue(mt.looped("Call 0800 217 000.", "Kuba 0" + "(" * 20))
+        self.assertFalse(mt.looped("Call 0800 217 000.", "Kuba ku 0800 217 000."))
+
     def test_blank_reply_is_not_sent_for_translation(self) -> None:
         with mock.patch("app.sunbird.translate_from_english") as translate:
             self.assertEqual(service.localize_reply("", "lg"), "")
             translate.assert_not_called()
+
+    def test_swahili_translation_with_prefix_percentage_survives(self) -> None:
+        """'asilimia 18' in Swahili must survive figures_survived check against '18%'."""
+        swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia 18 kwa bidhaa."
+        with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
+            self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
+
+    def test_swahili_word_percentage_survives(self) -> None:
+        """'asilimia kumi na nane' in Swahili must survive figures_survived check against '18%'."""
+        swahili = "Kiwango cha kawaida cha ushuru wa thamani nchini Uganda ni asilimia kumi na nane kwa bidhaa."
+        with mock.patch("app.sunbird.translate_from_english", return_value=swahili):
+            self.assertEqual(service.localize_reply(self.ENGLISH, "sw"), swahili)
+
+
+class ProtectedLocalizationTest(unittest.TestCase):
+    """End to end: what the taxpayer actually receives when MT touches a figure."""
+
+    ENGLISH = "The standard VAT rate in Uganda is 18% on taxable supplies."
+    THRESHOLD = "The VAT registration threshold is UGX 150,000,000 a year."
+
+    def setUp(self) -> None:
+        mt.cache.clear()
+
+    def test_a_digit_mangling_translator_no_longer_costs_the_figure(self):
+        """The headline change.
+
+        This translator transposes every digit it is shown — the "UGX 235,000
+        comes back as UGX 253,000" failure. Before protection it produced a
+        wrong figure, the guard caught it, and the taxpayer got English.
+        Now it is never shown a digit, so there is nothing to transpose and
+        the taxpayer gets Luganda with the right number.
+        """
+
+        def _transposing(text: str, locale: str) -> str:
+            swapped = text.replace("18", "81").replace("150,000,000", "105,000,000")
+            return f"Omusolo gwa VAT mu Uganda guli {swapped} ku bintu ebiguzibwa."
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_transposing):
+            out = service.localize_reply(self.ENGLISH, "lg")
+        self.assertNotEqual(out, self.ENGLISH)
+        self.assertIn("18%", out)
+        self.assertTrue(mt.figures_survived(self.ENGLISH, out))
+
+    def test_a_translator_that_echoes_a_sentinel_never_ships_the_fragment(self):
+        """Residue is visible garbage; English is the honest answer instead."""
+
+        def _echoing(text: str, locale: str) -> str:
+            return f"Omusolo gwa VAT guli {text} ne {text} ku bintu ebiguzibwa."
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_echoing):
+            out = service.localize_reply(self.ENGLISH, "lg")
+        self.assertNotIn("NMBR", out)
+
+    def test_a_translator_that_drops_the_sentinel_falls_back_unprotected(self):
+        """Protection can only add coverage, never remove it.
+
+        This tier cannot carry a sentinel — it drops unknown tokens, as an NMT
+        model does — but translates the plain sentence correctly. The protected
+        pass fails its guards, the unprotected retry succeeds, and the taxpayer
+        gets the vernacular answer they would have got before this change.
+        """
+        luganda = "Omusolo gwa VAT mu Uganda guli ebitundu 18 ku buli kikumi."
+
+        def _drops_sentinels(text: str, locale: str) -> str:
+            if "NMBR" in text:
+                return "Omusolo gwa VAT mu Uganda guli ebitundu ku buli kikumi."
+            return luganda
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_drops_sentinels):
+            self.assertEqual(service.localize_reply(self.ENGLISH, "lg"), luganda)
+
+    def test_the_kill_switch_restores_the_unprotected_path(self):
+        """``MT_PROTECT_FIGURES=false`` means the translator sees the digits."""
+        seen: list[str] = []
+
+        def _record(text: str, locale: str) -> str:
+            seen.append(text)
+            return "Ekkomo ly'okwewandiisa VAT liri obukadde 150 buli mwaka."
+
+        with mock.patch.object(mt, "MT_PROTECT_FIGURES", False), mock.patch(
+            "app.sunbird.translate_from_english", side_effect=_record
+        ):
+            service.localize_reply(self.THRESHOLD, "lg")
+        self.assertEqual(len(seen), 1)
+        self.assertIn("150,000,000", seen[0])
+        self.assertNotIn("NMBR", seen[0])
+
+    def test_a_reply_without_figures_is_never_masked(self):
+        """No sentinels, no retry, no extra round trip on the common case."""
+        english = "Visit any URA office or call the contact centre for help."
+        seen: list[str] = []
+
+        def _record(text: str, locale: str) -> str:
+            seen.append(text)
+            return "Genda mu ofiisi ya URA yonna oba okube essimu."
+
+        with mock.patch("app.sunbird.translate_from_english", side_effect=_record):
+            service.localize_reply(english, "lg")
+        self.assertEqual(seen, [english])
 
 
 class GenerationLanguageTest(unittest.TestCase):
@@ -85,6 +202,72 @@ class GenerationLanguageTest(unittest.TestCase):
             self.assertTrue(llm.can_generate_in_locale("lg"))
             self.assertFalse(llm.can_generate_in_locale("nyn"))
 
+
+
+class ParagraphLocalizationTest(unittest.TestCase):
+    """Long replies are translated one paragraph at a time (measured 2026-09-30)."""
+
+    # The guided TIN reply a Swahili caller got back in English: Sunflower
+    # translated its opening line and stopped.
+    TIN_REPLY = (
+        "Happy to help you register for a TIN!\n\n"
+        "To register for a TIN with URA in Uganda: 1. Visit the official URA web portal "
+        "2. Navigate to **eServices** > **TIN Registration** 3. Complete the online "
+        "application form and submit."
+    )
+
+    def setUp(self) -> None:
+        mt.cache.clear()
+
+    def test_each_paragraph_is_translated_separately(self) -> None:
+        seen: list[str] = []
+
+        def sunflower(text: str, _locale: str) -> str:
+            seen.append(text)
+            return f"SW {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
+            out = service.localize_reply(self.TIN_REPLY, "sw")
+        # Paragraphs are translated concurrently: which runs first is not fixed.
+        self.assertCountEqual(seen, self.TIN_REPLY.split("\n\n"))
+        self.assertTrue(out.startswith("SW Happy to help"))
+        self.assertIn("\n\nSW To register", out)
+
+    def test_a_model_that_stops_after_the_first_paragraph_no_longer_loses_the_rest(self) -> None:
+        opening = "Ninafurahi kukusaidia kujisajili kwa ajili ya TIN!"
+
+        def sunflower(text: str, _locale: str) -> str:
+            # Whole reply: the opening line only. One paragraph: all of it.
+            return opening if "\n\n" in text else f"[sw] {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=sunflower):
+            out = service.localize_reply(self.TIN_REPLY, "sw")
+        self.assertIn("[sw] To register for a TIN", out)
+
+    def test_a_truncated_paragraph_serves_the_english_answer(self) -> None:
+        def truncating(text: str, _locale: str) -> str:
+            return "Ndiyo." if text.startswith("To register") else f"[sw] {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=truncating):
+            self.assertEqual(service.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
+
+    def test_one_failed_paragraph_fails_the_whole_reply(self) -> None:
+        def failing(text: str, _locale: str) -> str | None:
+            return None if text.startswith("To register") else f"[sw] {text}"
+
+        with mock.patch.object(service, "_translate_reply", side_effect=failing):
+            self.assertEqual(service.localize_reply(self.TIN_REPLY, "sw"), self.TIN_REPLY)
+
+
+class PromptedTranslationInputTest(unittest.TestCase):
+    def test_nothing_to_translate_never_reaches_the_model(self) -> None:
+        """Given empty text, Sunflower translated its own instructions instead."""
+        from app import llm
+
+        with mock.patch.object(llm, "LLM_BACKEND", "vllm"), mock.patch.object(llm, "_vllm_generate") as generate:
+            for blank in ("", "   ", "\n\n"):
+                self.assertEqual(llm.translate_text(blank, source_lang="en", target_lang="sw"), "")
+        generate.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

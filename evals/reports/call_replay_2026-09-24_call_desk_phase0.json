@@ -1,0 +1,37 @@
+{
+ "date": "2026-09-24",
+ "ws": "ws://api:8000/v1/calls/stream",
+ "passed": 1,
+ "scenarios": 1,
+ "first_audio_ms_p50": 3079.0,
+ "results": [
+  {
+   "name": "11_officer_request_times_out",
+   "note": "Gemini queues the call with the packet's topic (account) and priority (high); nobody answers, so it returns to the AI owing a callback.",
+   "turns": [
+    {
+     "utterance": "en_officer",
+     "said": "I would like to talk to an officer about my account balance, please.",
+     "first_audio_ms": 3079,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 6663,
+     "languages": [],
+     "assistant": [
+      "One moment please, I am connecting you to a human officer now."
+     ],
+     "caller": [],
+     "status": [
+      "transferring"
+     ]
+    }
+   ],
+   "call_id": "call_3ad6b2135e04",
+   "language_detection": true,
+   "after_linger": [
+    "ai"
+   ],
+   "language_sequence": [],
+   "passed": true
+  }
+ ]
+}

@@ -8,18 +8,21 @@ Structure:
       ├─ clarify    → respond (early return)
       └─ escalate   → respond (early return + ticket)
 
-Every node is a pure function of ``AgentGraphState`` — this is
-required for LangGraph migration compatibility and makes replay
-from the audit ledger trivial.
+Nodes mutate a request-scoped ``AgentGraphState``. Retrieval and synthesis
+are bounded; ``node_act`` may invoke external tools and is therefore a side
+effect boundary. This runtime does not replay/checkpoint nodes. A future
+durable LangGraph migration must make those tool effects idempotent before
+enabling retries or resume.
 """
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
-from ...text_signals import ABSTENTION_REPLY
+from ...text_signals import ABSTENTION_REPLY, CLARIFICATION_PROMPT, NO_HITS_REPLY
 from ..state import AgentRoute
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
@@ -37,11 +40,16 @@ REFLECT_FAITHFULNESS_FLOOR = 0.50
 # ---------------------------------------------------------------------------
 def node_route(state: AgentGraphState) -> NodeResult:
     """Delegate routing to the existing Phase C supervisor."""
+    from ...flags import flags
     from ..supervisor import supervisor as _supervisor
 
+    if not flags.is_enabled("agentic_mode"):
+        return NodeResult(next_node="retrieve")
+
+    has_history = bool(state.conversation_history)
     decision = _supervisor.classify(
         state.rewritten_query or state.query,
-        has_conversation_history=False,
+        has_conversation_history=has_history,
         locale=state.locale,
     )
 
@@ -60,9 +68,19 @@ def node_route(state: AgentGraphState) -> NodeResult:
         AgentRoute.TAX_SPECIALIST,
         AgentRoute.CUSTOMS_SPECIALIST,
     ):
+        role_map = {
+            AgentRoute.TOOLS: "tool_specialist",
+            AgentRoute.TAX_SPECIALIST: "tax_specialist",
+            AgentRoute.CUSTOMS_SPECIALIST: "customs_specialist",
+        }
+        state.agent_role = role_map.get(decision.route, "graph_agent")
+        state.plan_reason = decision.reason
+        # The graph flag selects orchestration; it must not implicitly turn on
+        # registered-tool execution. Keep the independent side-effect gate.
+        if not flags.is_enabled("tool_use"):
+            return NodeResult(next_node="retrieve")
         # The supervisor already picked a whitelist — seed the plan
         state.plan = list(decision.suggested_tools)
-        state.plan_reason = decision.reason
         return NodeResult(next_node="tool_rag_select")
 
     # Default: factual retrieval
@@ -116,6 +134,8 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
 
     retriever = HybridRetriever()
     query = state.rewritten_query or state.query
+    hits: list[dict[str, Any]] = []
+    was_corrected = False
     if retriever.initialize():
         search = getattr(retriever, "search_planned", retriever.search)
         subject = state.user_id or None
@@ -130,12 +150,22 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
             hits, was_corrected = corrective_retrieve(
                 query, retriever, hits, top_k=state.top_k, subject=subject
             )
-            hits = _fuse_graph_leg(query, hits)
-            hits = _apply_faq_gates(query, hits)
-            state.hits = hits
-            state.retrieval_mode = "hybrid_corrected" if was_corrected else "hybrid"
-            state.sources = list({h.get("source", "") for h in hits if h.get("source")})
-            state.citations = HybridRetriever.build_citations(hits)
+
+    # The statutory leg can answer a rate query even when dense/keyword
+    # retrieval is down or empty, so always consult it while its flags are on.
+    hits = _fuse_graph_leg(query, hits)
+    graph_fused = any(hit.get("doc_type") == "graph" for hit in hits)
+    if hits:
+        hits = _apply_faq_gates(query, hits)
+        state.hits = hits
+        state.retrieval_mode = (
+            "graph_corrected" if graph_fused and was_corrected
+            else "graph" if graph_fused
+            else "hybrid_corrected" if was_corrected
+            else "hybrid"
+        )
+        state.sources = list(dict.fromkeys(h.get("source", "") for h in hits if h.get("source")))
+        state.citations = HybridRetriever.build_citations(hits)
     return NodeResult(next_node="synthesize")
 
 
@@ -176,13 +206,12 @@ _QUERY_ARG_NAMES = frozenset({"query", "question", "text", "message"})
 def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] | None:
     """Fill a tool's required arguments from graph state, or ``None``.
 
-    Driven by the tool's own JSON Schema rather than a hardcoded name
-    list, so a new tool needs no change here.  Only two bindings are
-    honest at this layer: a tool with no required parameters can be
-    called as-is, and a required free-text parameter is the user's
-    query.  Anything else — ``amount``, ``tax_type`` — is a value the
-    graph would have to invent, so it returns ``None`` and the caller
-    skips the tool.
+    Driven by structured parameter extraction and the tool's JSON Schema.
+    A tool with no required parameters is called as-is (e.g. get_current_date).
+    A tool with free-text parameter (e.g. search_ura_knowledge_base) takes the query.
+    Calculation and rate tools extract parameters via deterministic parsing.
+    If required arguments cannot be extracted from the query, returns None to
+    skip unfillable tools.
     """
     from ...tools import ToolRegistry
 
@@ -193,13 +222,47 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
     if not required:
         return {}
     query = state.rewritten_query or state.query
-    bound: dict[str, object] = {}
-    for param in required:
-        if param in _QUERY_ARG_NAMES and query:
-            bound[param] = query
-        else:
-            return None
-    return bound
+
+    # 1. Free-text query parameter binding (e.g. search_ura_knowledge_base)
+    if all(param in _QUERY_ARG_NAMES for param in required) and query:
+        return {param: query for param in required}
+
+    # 2. Structured calculation parameter extraction
+    try:
+        from ...calculator_router import plan_calculation
+
+        calc_plan = plan_calculation(query)
+        if (calc_plan is None or calc_plan.missing) and state.query and state.query != query:
+            raw_plan = plan_calculation(state.query)
+            if raw_plan and not raw_plan.missing:
+                calc_plan = raw_plan
+        if calc_plan and calc_plan.tool == tool_name:
+            if not calc_plan.missing and all(param in calc_plan.params for param in required):
+                return dict(calc_plan.params)
+    except Exception:
+        logger.debug("graph: plan_calculation binding failed for %s", tool_name, exc_info=True)
+
+    # 3. Structured rate lookup parameter extraction
+    if tool_name == "lookup_rate":
+        try:
+            from ...calculator_router import plan_rate_lookup
+
+            rate_plan = plan_rate_lookup(query)
+            if (rate_plan is None or not rate_plan.tax_type) and state.query and state.query != query:
+                raw_rate = plan_rate_lookup(state.query)
+                if raw_rate and raw_rate.tax_type:
+                    rate_plan = raw_rate
+            if rate_plan and rate_plan.tax_type:
+                return {"tax_type": rate_plan.tax_type}
+        except Exception:
+            logger.debug("graph: plan_rate_lookup binding failed", exc_info=True)
+
+    # 4. Authenticated taxpayer account parameter binding
+    if set(required) == {"taxpayer_id"} and state.user_id:
+        return {"taxpayer_id": state.user_id}
+
+    return None
+
 
 
 def node_act(state: AgentGraphState) -> NodeResult:
@@ -279,18 +342,38 @@ def node_observe(state: AgentGraphState) -> NodeResult:
     return NodeResult(next_node="synthesize")
 
 
-def node_synthesize(state: AgentGraphState) -> NodeResult:
-    """Produce the reply text.
+def _format_observation_prose(obs: dict[str, Any]) -> str:
+    """Format a tool observation dict into human-readable prose."""
+    for key in ("explanation", "summary", "message", "human_readable", "answer"):
+        val = obs.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
 
-    Phase 15 Lite: falls through to the existing service.py LLM
-    call path (non-agentic) or the tool-calling loop when
-    FLAG_TOOL_USE is on.  The graph here is a *control-flow
-    scaffold* — the actual LLM call still lives in service.py
-    for now.
-    """
-    # A failed tool call is not evidence.  Synthesising over the whole
-    # observation list would put "amount: required property is missing"
-    # in front of the user as if it were an answer.
+    # Rate lookup tool: {"tax_type": ..., "display_name": ..., "formatted": ..., "fiscal_year": ...}
+    if "tax_type" in obs and "formatted" in obs:
+        name = obs.get("display_name") or obs.get("tax_type")
+        fy = f" for {obs['fiscal_year']}" if obs.get("fiscal_year") else ""
+        return f"The official {name} rate{fy} is {obs['formatted']}."
+
+    # Calendar date tool: {"today": ..., "day_of_week": ..., "fiscal_year": ...}
+    if "today" in obs and "day_of_week" in obs:
+        fy = f" ({obs['fiscal_year']})" if obs.get("fiscal_year") else ""
+        return f"Today is {obs['day_of_week']}, {obs['today']}{fy}."
+
+    # Deadlines tool: {"deadlines": [...]}
+    if "deadlines" in obs and isinstance(obs["deadlines"], list):
+        items = [
+            f"- {d.get('name', 'Deadline')}: {d.get('date', '')} ({d.get('description', '')})"
+            for d in obs["deadlines"][:3]
+        ]
+        if items:
+            return "Upcoming statutory deadlines:\n" + "\n".join(items)
+
+    return ""
+
+
+def node_synthesize(state: AgentGraphState) -> NodeResult:
+    """Produce the reply text from retrieved passages or tool observations."""
     usable = [obs for obs in state.observations if isinstance(obs, dict) and obs.get("ok", True)]
 
     if not state.hits and not usable:
@@ -298,23 +381,30 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
         state.outcome = GraphOutcome.ABSTAINED
         return NodeResult(next_node="respond", outcome=GraphOutcome.ABSTAINED)
 
-    # Very lightweight synthesis — Phase 15 full replaces this with
-    # the actual LLM call + structured output.
     if state.hits:
-        best = state.hits[0]
-        state.reply = best.get("answer") or best.get("text", "")
+        from ... import llm as _llm_module
+        if _llm_module.is_available():
+            try:
+                llm_reply = _llm_module.generate(
+                    query=state.rewritten_query or state.query,
+                    passages=state.hits,
+                    conversation_history=state.conversation_history or None,
+                    locale=state.locale,
+                )
+                if llm_reply and llm_reply.strip():
+                    state.reply = llm_reply.strip()
+            except Exception:
+                logger.debug("graph: LLM synthesis failed, using best hit", exc_info=True)
+        if not state.reply:
+            best = state.hits[0]
+            state.reply = best.get("answer") or best.get("text", "")
     elif usable:
-        # Stitch tool observations into a brief summary — placeholder.
-        # Only prose keys are used: a raw dict repr is not an answer, and
-        # showing one is worse than abstaining.
         parts = []
         for obs in usable[:3]:
-            for key in ("explanation", "summary", "message", "human_readable", "answer"):
-                value = obs.get(key)
-                if isinstance(value, str) and value.strip():
-                    parts.append(value)
-                    break
-        state.reply = "\n".join(parts)
+            prose = _format_observation_prose(obs)
+            if prose:
+                parts.append(prose)
+        state.reply = "\n\n".join(parts)
 
     if not state.reply:
         state.reply = ABSTENTION_REPLY
@@ -381,9 +471,21 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
 
 
 def node_respond(state: AgentGraphState) -> NodeResult:
-    """Terminal node — marks the outcome and ends the graph."""
-    if state.outcome == GraphOutcome.ANSWERED and not state.reply:
+    """Ensure every controlled terminal route has a safe, non-empty reply."""
+    if state.reply and state.reply.strip():
+        return NodeResult(next_node=END, outcome=state.outcome)
+
+    if state.outcome == GraphOutcome.CLARIFY:
+        state.reply = state.clarification_question.strip() or CLARIFICATION_PROMPT
+    elif state.outcome == GraphOutcome.ESCALATED:
+        # Do not imply that a human handoff happened. The service boundary
+        # may create a ticket, subject to the ticket_queue feature flag.
+        state.reply = NO_HITS_REPLY
+    elif state.outcome == GraphOutcome.ANSWERED:
         state.outcome = GraphOutcome.ABSTAINED
+        state.reply = ABSTENTION_REPLY
+    else:
+        state.reply = ABSTENTION_REPLY
     return NodeResult(next_node=END, outcome=state.outcome)
 
 
@@ -391,12 +493,11 @@ def node_respond(state: AgentGraphState) -> NodeResult:
 # Factory
 # ---------------------------------------------------------------------------
 def build_main_graph() -> GraphRuntime:
-    """Return the compiled main agent graph.
+    """Construct the bounded main agent graph.
 
-    LangGraph migration note: every node above maps 1:1 to a
-    ``StateGraph.add_node(name, callable)``; the conditional
-    edges in NodeResult.next_node become
-    ``graph.add_conditional_edges(...)``.
+    Upstream LangGraph adoption needs an explicit state adapter, conditional
+    edge mapping, checkpointer configuration, and idempotent side effects; the
+    current mutable-state nodes are not directly replay-safe.
     """
     nodes: dict[str, GraphNode] = {
         "route": node_route,

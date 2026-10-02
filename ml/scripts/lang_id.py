@@ -65,29 +65,43 @@ class LanguageDetector:
             except Exception:
                 pass
 
-        # Heuristic fallback — Luganda digraphs
-        lg_patterns = re.compile(r"(nny|mw|kw|ww|bw|gy|ny|ng|gg|dd|ss|tt|nk|mp|mb|nd|nz)")
-        en_stops = {"the", "is", "are", "was", "and", "for", "that", "this", "with", "from"}
-        sw_stops = {
-            "ninaweza",
-            "ninawezaje",
-            "nifanye",
-            "nini",
-            "kwa",
-            "kupata",
-            "biashara",
-            "kodi",
-            "jinsi",
-            "vipi",
+        # Heuristic fallback — Lexical matching for Luganda, Swahili, and English
+        en_stops = {
+            "the", "is", "are", "was", "were", "and", "for", "that", "this", "with",
+            "from", "what", "how", "do", "does", "did", "i", "you", "your", "my",
+            "we", "our", "to", "in", "on", "at", "by", "of", "a", "an", "can",
+            "could", "will", "would", "should", "must", "have", "has", "had", "pay",
+            "tax", "taxes", "rate", "rates", "who", "when", "where", "why", "which",
+            "apply", "register", "registration", "penalty", "income", "file", "filing",
+            "return", "returns", "get", "need", "want", "help", "please", "or", "if",
+            "not", "no", "yes", "about", "there", "here", "any", "some", "all", "vat", "tin",
         }
-        words = set(text.lower().split())
-        lg_score = len(lg_patterns.findall(text.lower()))
+        lg_words = {
+            "omusolo", "emisolo", "ebitundu", "ssente", "sente", "alipoota", "abakozi",
+            "omukozi", "basasula", "okusasula", "sasula", "bwe", "era", "kye", "bye",
+            "kampuni", "okwewandiisa", "wandiisa", "musanyufu", "ebisaanyizo", "enkola",
+            "omusaala", "abakozesa", "ekitongole", "gyebaleko", "webale", "yee", "nedda",
+            "nsaba", "olina", "okukola", "kola", "ki", "ani", "lwaki", "ddi", "bangi",
+            "buli", "wa", "ku", "mu", "nga", "naye", "singa", "oba", "nze", "ffe", "gwe",
+            "ntya", "nkola", "gwa", "gya", "bbeeyi",
+        }
+        sw_stops = {
+            "ninaweza", "ninawezaje", "nifanye", "nini", "kwa", "kupata", "biashara",
+            "kodi", "jinsi", "vipi", "ushuru", "kujisajili", "asilimia", "thamani",
+            "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
+            "habari", "asante", "shukrani", "kiasi", "gani", "kulipa", "zaidi",
+        }
+        words = set(re.findall(r"[a-z']+", text.lower()))
         en_score = len(words & en_stops)
         sw_score = len(words & sw_stops)
-        if sw_score >= 2:
-            return LanguageResult(lang="sw", confidence=0.65, backend="heuristic")
-        if lg_score > en_score:
-            return LanguageResult(lang="lg", confidence=0.6, backend="heuristic")
+        lg_score = len(words & lg_words)
+
+        if sw_score >= 2 or (sw_score >= 1 and en_score == 0):
+            return LanguageResult(lang="sw", confidence=0.7, backend="heuristic")
+        if lg_score >= 2 or (lg_score >= 1 and en_score == 0):
+            return LanguageResult(lang="lg", confidence=0.7, backend="heuristic")
+        if en_score > 0:
+            return LanguageResult(lang="en", confidence=0.8, backend="heuristic")
         return LanguageResult(lang=self.default_lang, confidence=0.6, backend="heuristic")
 
     def detect_code_switching(self, text: str) -> list[tuple[str, str, float]]:

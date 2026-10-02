@@ -114,6 +114,21 @@ class HttpTransport:
         self._token = token
         self._tools: list[dict[str, Any]] | None = None
         self._tools_expires_at: float = 0.0
+        self._client: Any = None
+        self._client_timeout_s: float = 10.0
+
+    def _get_client(self, timeout_s: float = 10.0) -> Any:
+        import httpx
+
+        if self._client is None or getattr(self._client, "is_closed", True) or self._client_timeout_s != timeout_s:
+            if self._client is not None and not getattr(self._client, "is_closed", True):
+                try:
+                    self._client.close()
+                except Exception:
+                    pass
+            self._client = httpx.Client(timeout=timeout_s)
+            self._client_timeout_s = timeout_s
+        return self._client
 
     # -- wire ----------------------------------------------------------
     def _headers(self, method: str, tool_name: str = "") -> dict[str, str]:
@@ -138,7 +153,7 @@ class HttpTransport:
         timeout_s: float = 10.0,
     ) -> dict[str, Any]:
         try:
-            import httpx
+            import httpx  # noqa: F401
         except ImportError as exc:  # pragma: no cover - deployment shape
             raise TransportError("httpx is required for remote MCP servers") from exc
 
@@ -149,7 +164,8 @@ class HttpTransport:
             "params": params,
         }
         try:
-            response = httpx.post(
+            client = self._get_client(timeout_s)
+            response = client.post(
                 self.base_url,
                 json=body,
                 headers=self._headers(method, tool_name),
@@ -169,6 +185,23 @@ class HttpTransport:
         if not isinstance(result, dict):
             raise TransportError(f"{method} returned a malformed result envelope")
         return result
+
+    def ping(self, timeout_s: float = 5.0) -> bool:
+        """Send a standard MCP ping to verify server reachability."""
+        try:
+            result = self._request("ping", {}, timeout_s=timeout_s)
+            return isinstance(result, dict)
+        except Exception:
+            return False
+
+    def close(self) -> None:
+        """Close the underlying persistent HTTP client pool."""
+        if self._client is not None and not getattr(self._client, "is_closed", True):
+            try:
+                self._client.close()
+            except Exception:
+                pass
+            self._client = None
 
     # -- ToolTransport -------------------------------------------------
     def list_tools(self) -> list[dict[str, Any]]:

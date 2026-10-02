@@ -50,6 +50,10 @@ export function waitingSeconds(createdAt: number, now = Date.now()): number {
   return Math.max(0, now / 1000 - createdAt);
 }
 
+export function isRecentTicket(createdAt: number, maxAgeSeconds = 1800): boolean {
+  return waitingSeconds(createdAt) < maxAgeSeconds;
+}
+
 export function waitingFor(createdAt: number, now = Date.now()): string {
   const seconds = waitingSeconds(createdAt, now);
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
@@ -88,17 +92,59 @@ export function waitTone(
   return "ok";
 }
 
+export function ticketRef(ticketId: string): string {
+  if (!ticketId) return "";
+  const clean = ticketId.replace(/^TIC-/i, "").replace(/^#/i, "");
+  return `TIC-${clean.slice(0, 8).toUpperCase()}`;
+}
+
+export const LOCALE_LABELS: Record<string, string> = {
+  all: "All languages",
+  en: "English",
+  lg: "Luganda",
+  sw: "Swahili",
+  nyn: "Runyankole",
+  ach: "Acholi",
+};
+
+export function ticketLocaleFlag(locale?: string): string {
+  const loc = (locale || "en").toLowerCase();
+  if (loc.startsWith("lg")) return "🇺🇬";
+  if (loc.startsWith("sw")) return "🇰🇪";
+  if (loc.startsWith("nyn") || loc.startsWith("ach")) return "🇺🇬";
+  return "🌐";
+}
+
+export function ticketLocaleLabel(locale?: string): string {
+  const loc = (locale || "en").toLowerCase();
+  return LOCALE_LABELS[loc] || loc.toUpperCase();
+}
+
+export function isVoiceTicket(ticket: { modality?: string }): boolean {
+  return ticket.modality === "voice";
+}
+
 export function ticketMatchesQuery(ticket: TicketQueueItem, query: string): boolean {
-  const q = query.trim().toLowerCase();
+  let q = query.trim().toLowerCase();
   if (!q) return true;
+  if (q.startsWith("#")) q = q.slice(1).trim();
+  if (q.startsWith("tic-")) q = q.slice(4).trim();
+  const shortId = (ticket.id || "").slice(0, 8).toLowerCase();
+  const refCode = ticketRef(ticket.id).toLowerCase();
   const hay = [
     ticket.id,
+    shortId,
+    refCode,
     ticket.reason,
     ticket.user_query,
+    ticket.user_query_en,
+    ticket.locale,
+    ticketLocaleLabel(ticket.locale),
     ticket.assignee,
     ticket.team,
     ticket.handoff?.topic,
     ticket.handoff?.summary,
+    (ticket as { officer_reply?: string }).officer_reply,
   ]
     .filter(Boolean)
     .join(" ")
@@ -110,7 +156,7 @@ export function sortQueue(tickets: TicketQueueItem[]): TicketQueueItem[] {
   return [...tickets].sort(
     (a, b) =>
       (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) ||
-      a.created_at - b.created_at,
+      b.created_at - a.created_at,
   );
 }
 
@@ -132,6 +178,8 @@ export type QueueView = {
   status: string;
   priority: string;
   team: string;
+  locale: string;
+  modality: string;
   ticket: string;
   q: string;
   mine: boolean;
@@ -141,6 +189,8 @@ const DEFAULT_VIEW: QueueView = {
   status: "open",
   priority: "",
   team: "",
+  locale: "",
+  modality: "",
   ticket: "",
   q: "",
   mine: false,
@@ -153,6 +203,8 @@ function readView(): QueueView {
     status: p.get("status") || DEFAULT_VIEW.status,
     priority: p.get("priority") || "",
     team: p.get("team") || "",
+    locale: p.get("locale") || "",
+    modality: p.get("modality") || "",
     ticket: p.get("ticket") || "",
     q: p.get("q") || "",
     mine: p.get("mine") === "1",
@@ -165,6 +217,8 @@ function writeView(view: QueueView): void {
   if (view.status && view.status !== "open") p.set("status", view.status);
   if (view.priority) p.set("priority", view.priority);
   if (view.team) p.set("team", view.team);
+  if (view.locale) p.set("locale", view.locale);
+  if (view.modality) p.set("modality", view.modality);
   if (view.ticket) p.set("ticket", view.ticket);
   if (view.q) p.set("q", view.q);
   if (view.mine) p.set("mine", "1");
@@ -210,13 +264,16 @@ function queueViewEqual(a: QueueView, b: QueueView): boolean {
     a.status === b.status &&
     a.priority === b.priority &&
     a.team === b.team &&
+    a.locale === b.locale &&
+    a.modality === b.modality &&
     a.ticket === b.ticket &&
     a.q === b.q &&
     a.mine === b.mine
   );
 }
 
-function isTypingTarget(target: EventTarget | null): boolean {
+/** Keys pressed in a field belong to the field, not to a shortcut. */
+export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   const tag = target.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable;

@@ -1,0 +1,127 @@
+/**
+ * WebSocket client for the taxpayer Call URA phone simulation.
+ * Connects to /api/v1/calls/stream without auto-reconnect (dropped calls end like real phone calls).
+ */
+
+import { getAuthToken } from '@/lib/authSession';
+
+export interface CallStartPayload {
+  locale: string;
+  /** The chat's language: a hint only — a multilingual call opens in English. */
+  preferred_locale?: string;
+  voice_consent_accepted: boolean;
+  sample_rate?: number;
+}
+
+export interface CallSocketCallbacks {
+  onAudio: (pcmChunk: ArrayBuffer) => void;
+  onMessage: (msg: Record<string, unknown>) => void;
+  onError: (error: string) => void;
+  onClose: (code: number, reason: string) => void;
+}
+
+export class CallSocket {
+  private ws: WebSocket | null = null;
+  private callbacks: CallSocketCallbacks;
+  private isClosed = false;
+
+  constructor(callbacks: CallSocketCallbacks) {
+    this.callbacks = callbacks;
+  }
+
+  connect(startPayload: CallStartPayload): void {
+    if (typeof window === 'undefined') return;
+
+    this.isClosed = false;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const rawUrl = `${protocol}//${host}/api/v1/calls/stream`;
+
+    try {
+      this.ws = new WebSocket(rawUrl);
+      this.ws.binaryType = 'arraybuffer';
+
+      this.ws.onopen = () => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          const initMsg = {
+            type: 'call_start',
+            access_token: getAuthToken(),
+            locale: startPayload.locale,
+            preferred_locale: startPayload.preferred_locale ?? startPayload.locale,
+            voice_consent_accepted: startPayload.voice_consent_accepted,
+            sample_rate: startPayload.sample_rate || 16000,
+          };
+          this.ws.send(JSON.stringify(initMsg));
+        }
+      };
+
+      this.ws.onmessage = (event: MessageEvent) => {
+        if (event.data instanceof ArrayBuffer) {
+          this.callbacks.onAudio(event.data);
+        } else if (typeof event.data === 'string') {
+          try {
+            const data = JSON.parse(event.data);
+            this.dispatchMessage(data);
+          } catch {
+            // Non-JSON text message
+          }
+        }
+      };
+
+      this.ws.onerror = () => {
+        if (!this.isClosed) {
+          this.callbacks.onError('Connection error encountered during call.');
+        }
+      };
+
+      this.ws.onclose = (event: CloseEvent) => {
+        if (!this.isClosed) {
+          this.callbacks.onClose(event.code, event.reason);
+        }
+      };
+    } catch (err: unknown) {
+      this.callbacks.onError((err as Error)?.message || 'Failed to open call socket');
+    }
+  }
+
+  /** Route LiveKit reliable data messages through the same call event handler. */
+  dispatchMessage(message: Record<string, unknown>): void {
+    this.callbacks.onMessage(message);
+  }
+
+  sendAudio(pcmChunk: ArrayBuffer): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(pcmChunk);
+    }
+  }
+
+  requestOfficer(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'request_officer' }));
+    }
+  }
+
+  /** The caller chose the call's language on screen; it holds for the rest of the call. */
+  setLanguage(language: string): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'set_language', language }));
+    }
+  }
+
+  hangup(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'hangup' }));
+    }
+    this.close();
+  }
+
+  close(): void {
+    this.isClosed = true;
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+  }
+}

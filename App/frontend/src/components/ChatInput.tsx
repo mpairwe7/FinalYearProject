@@ -1,15 +1,27 @@
-import React, { memo, useLayoutEffect, useRef } from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
+import { useConnectorStore } from '../store/useConnectorStore';
+import { CameraCapture } from './CameraCapture';
 import {
   MicIcon,
   SendIcon,
   CloseIcon,
   CheckIcon,
-  PaperclipIcon,
   FileIcon,
   LoadingDots,
   VoiceWaveIcon,
   StopIcon,
+  DownloadIcon,
+  EyeIcon,
+  PlugIcon,
+  CameraIcon,
+  PlusIcon,
+  EfrisLogo,
+  DtsLogo,
+  UrsbLogo,
+  BwimsLogo,
+  TinLogo,
+  PaymentLogo,
 } from './Icons';
 import {
   ATTACHMENT_ACCEPT,
@@ -35,6 +47,7 @@ interface ChatInputProps {
   attachments?: PendingAttachment[];
   onAttachFiles?: (files: FileList) => void;
   onRemoveAttachment?: (clientId: string) => void;
+  onInspectAttachment?: (attachment: PendingAttachment) => void;
   /* Voice mode is the composer's only conversation-level control. It renders
      only when its handler is provided. Language is NOT here — it is a
      session-level setting and lives in the header (see ChatHeader).
@@ -53,15 +66,55 @@ interface ChatInputProps {
   dictationNotice?: string | null;
   /** Abort an in-flight reply. When set, the primary slot becomes Stop while loading. */
   onStop?: () => void;
+  /** Live audio frequency levels [0..1] for responsive waveform */
+  audioLevels?: number[];
+  /** Voice mode sends the turn by itself when the speaker pauses (Settings → Voice). */
+  autoSend?: boolean;
 }
 
-/** Inline waveform — 5 animated bars */
-function InlineWaveform() {
+/** Inline waveform — 5 bars responsive to live microphone levels when available */
+function InlineWaveform({ levels }: { levels?: number[] }) {
+  const hasLevels = levels && levels.length >= 5 && levels.some((v) => v > 0.05);
   return (
     <div className="composer-waveform" aria-hidden="true">
-      <span /><span /><span /><span /><span />
+      {Array.from({ length: 5 }).map((_, i) => {
+        const val = hasLevels ? Math.min(1.0, Math.max(0.15, levels[i] ?? 0.2)) : null;
+        return (
+          <span
+            key={i}
+            style={
+              val !== null
+                ? {
+                    transform: `scaleY(${val})`,
+                    animation: 'none',
+                    transition: 'transform 0.08s ease-out',
+                  }
+                : undefined
+            }
+          />
+        );
+      })}
     </div>
   );
+}
+
+function getSystemLogo(id: string, size = 18) {
+  switch (id) {
+    case 'efris':
+      return <EfrisLogo size={size} />;
+    case 'digital_tax_stamps':
+      return <DtsLogo size={size} />;
+    case 'ursb':
+      return <UrsbLogo size={size} />;
+    case 'bwims':
+      return <BwimsLogo size={size} />;
+    case 'tin_registration':
+      return <TinLogo size={size} />;
+    case 'payment_system':
+      return <PaymentLogo size={size} />;
+    default:
+      return <PlugIcon size={size} />;
+  }
 }
 
 function ChatInputInner({
@@ -80,20 +133,209 @@ function ChatInputInner({
   attachments,
   onAttachFiles,
   onRemoveAttachment,
+  onInspectAttachment,
   onVoiceModeChange,
   voiceModeDisabled,
   dictationNotice,
   onStop,
+  audioLevels,
+  autoSend = false,
 }: ChatInputProps) {
   const t = useTranslation();
+  const {
+    connectors,
+    activeConnectorIds,
+    connectedAccounts,
+    isConnecting,
+    connectViaPopup,
+    disconnectConnector,
+    openModal,
+  } = useConnectorStore();
+  const [isDragging, setIsDragging] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [addMenuView, setAddMenuView] = useState<'main' | 'connectors'>('main');
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
+  const dragCounterRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
+
+  const handleCameraCapture = (imageBase64: string) => {
+    setIsCameraActive(false);
+    if (!onAttachFiles) return;
+
+    try {
+      const arr = imageBase64.split(',');
+      const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+      const bstr = atob(arr[1]);
+      let n = bstr.length;
+      const u8arr = new Uint8Array(n);
+      while (n--) {
+        u8arr[n] = bstr.charCodeAt(n);
+      }
+      const file = new File(
+        [u8arr],
+        `ura_photo_capture_${Date.now().toString().slice(-4)}.jpg`,
+        { type: mime }
+      );
+      if (typeof DataTransfer !== 'undefined') {
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        onAttachFiles(dt.files);
+      }
+    } catch (err) {
+      console.error('Failed to process camera capture', err);
+    }
+  };
+
+  const [addMenuFocusIdx, setAddMenuFocusIdx] = useState<number | null>(null);
+  const addBtnRef = useRef<HTMLButtonElement>(null);
+  const addMenuPanelRef = useRef<HTMLDivElement>(null);
+  const addMenuOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const closeAddMenu = useCallback(() => {
+    setAddMenuFocusIdx(null);
+    setShowAttachMenu(false);
+    setAddMenuView('main');
+    addBtnRef.current?.focus();
+  }, []);
+
+  const handleTakePhotoClick = () => {
+    closeAddMenu();
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices && window.innerWidth >= 768) {
+      setIsCameraActive(true);
+    } else {
+      cameraInputRef.current?.click();
+    }
+  };
+
+  const addMenuRovingIdx = addMenuFocusIdx ?? 0;
+
+  // Focus active option on open; lock body scroll; trap Tab and Escape
+  useEffect(() => {
+    if (!showAttachMenu) return;
+    addMenuOptionRefs.current[addMenuRovingIdx]?.focus();
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAddMenu();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const focusables = addMenuPanelRef.current?.querySelectorAll<HTMLElement>(
+        'button:not([disabled])'
+      );
+      if (!focusables || focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [showAttachMenu, closeAddMenu, addMenuRovingIdx]);
+
+  const onAddMenuOptionKey = (e: React.KeyboardEvent, idx: number) => {
+    const totalOptions = 3;
+    const move = (next: number) => {
+      const clamped = (next + totalOptions) % totalOptions;
+      setAddMenuFocusIdx(clamped);
+      addMenuOptionRefs.current[clamped]?.focus();
+    };
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      move(idx + 1);
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      move(idx - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      move(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      move(totalOptions - 1);
+    }
+  };
   // Drives the morph in the primary slot: nothing typed yet -> offer voice
   // mode; the moment there is something to send -> offer send. Trimmed, so a
   // stray space does not present a send button that refuses to send.
   const hasText = message.trim().length > 0;
   const canSend = hasText && !isLoading && !isUploading;
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setIsDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current -= 1;
+    if (dragCounterRef.current <= 0) {
+      setIsDragging(false);
+      dragCounterRef.current = 0;
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    dragCounterRef.current = 0;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      onAttachFiles?.(e.dataTransfer.files);
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const files = e.clipboardData.files;
+      const fileList: File[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.type.startsWith('image/')) {
+          const name =
+            file.name && file.name !== 'image.png'
+              ? file.name
+              : `ura_portal_screenshot_${Date.now().toString().slice(-4)}.png`;
+          fileList.push(new File([file], name, { type: file.type }));
+        } else {
+          fileList.push(file);
+        }
+      }
+      if (fileList.length > 0 && typeof DataTransfer !== 'undefined') {
+        e.preventDefault();
+        const dt = new DataTransfer();
+        fileList.forEach((f) => dt.items.add(f));
+        onAttachFiles?.(dt.files);
+        if (!message.trim()) {
+          onMessageChange('Please inspect this URA portal screenshot and guide me on how to resolve the issue.');
+        }
+      }
+    }
+  };
 
   useLayoutEffect(() => {
     const input = inputRef.current;
@@ -121,7 +363,7 @@ function ChatInputInner({
             {t('composer.listening')}
           </div>
           <div className="composer-rec-controls">
-            <InlineWaveform />
+            <InlineWaveform levels={audioLevels} />
             <button
               className="composer-rec-cancel"
               data-testid="composer-rec-cancel"
@@ -142,9 +384,9 @@ function ChatInputInner({
             </button>
           </div>
         </div>
-        <p className="composer-hint">
+        <p className="composer-hint composer-hint-rec">
           {voiceMode
-            ? t('composer.recHintVoice')
+            ? t(autoSend ? 'composer.recHintVoiceAuto' : 'composer.recHintVoice')
             : t('composer.recHintDictation')}
         </p>
       </>
@@ -155,33 +397,68 @@ function ChatInputInner({
   const showAttachments = Boolean(onAttachFiles);
   return (
     <>
-      {showAttachments && attachments && attachments.length > 0 && (
-        <div className="composer-attachments" aria-label="Attached documents">
-          {attachments.map((a) => (
-            <div
-              key={a.clientId}
-              className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
-            >
-              <FileIcon />
-              <span className="attachment-name" title={a.name}>{a.name}</span>
-              <span className="attachment-meta">
-                {a.status === 'uploading' && <LoadingDots />}
-                {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
-                {a.status === 'error' && (a.error || 'Failed')}
-              </span>
-              <button
-                type="button"
-                className="attachment-remove"
-                onClick={() => onRemoveAttachment?.(a.clientId)}
-                aria-label={`Remove ${a.name}`}
+      <div
+        className={`composer cmpv2 ${isDragging ? 'composer-drag-active' : ''}`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDragging && (
+          <div className="composer-drop-overlay" aria-hidden="true">
+            <span>Drop documents here to analyze and attach (PDF, Word, Excel, CSV, or Image)</span>
+          </div>
+        )}
+        {showAttachments && attachments && attachments.length > 0 && (
+          <div className="composer-attachments" aria-label="Attached documents">
+            {attachments.map((a) => (
+              <div
+                key={a.clientId}
+                className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
               >
-                <CloseIcon />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-      <div className="composer cmpv2">
+                <FileIcon />
+                <span className="attachment-name" title={a.name}>{a.name}</span>
+                <span className="attachment-meta">
+                  {a.status === 'uploading' && <LoadingDots />}
+                  {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
+                  {a.status === 'error' && (a.error || 'Failed')}
+                </span>
+                {a.status === 'ready' && (
+                  <button
+                    type="button"
+                    className="attachment-report-link"
+                    onClick={() => onInspectAttachment?.(a)}
+                    title="Inspect extracted fields & tax audit"
+                    aria-label={`Inspect ${a.name}`}
+                  >
+                    <EyeIcon />
+                  </button>
+                )}
+                {a.status === 'ready' && a.documentId && (
+                  <a
+                    href={`/api/v1/documents/${a.documentId}/report`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="attachment-report-link"
+                    title="Download analysis report"
+                    aria-label={`Download analysis report for ${a.name}`}
+                  >
+                    <DownloadIcon />
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="attachment-remove"
+                  onClick={() => onRemoveAttachment?.(a.clientId)}
+                  aria-label={`Remove ${a.name}`}
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={inputRef}
           className="input"
@@ -195,6 +472,7 @@ function ChatInputInner({
           spellCheck
           onChange={(e) => onMessageChange(e.target.value)}
           onFocus={onFocus}
+          onPaste={handlePaste}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
@@ -219,15 +497,273 @@ function ChatInputInner({
                   e.target.value = '';
                 }}
               />
-              <button
-                className="composer-circle-btn attach-circle-btn"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
-                aria-label="Attach a document (PDF, Word, Excel, CSV, or image)"
-                data-tip="Attach a document"
-              >
-                <PaperclipIcon />
-              </button>
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="attachment-file-input"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(e) => {
+                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <div className="relative" ref={attachMenuRef}>
+                <button
+                  ref={addBtnRef}
+                  type="button"
+                  className={`composer-circle-btn add-circle-btn transition-all duration-200 ${
+                    showAttachMenu
+                      ? 'is-active bg-neutral-800 text-white border border-neutral-700 shadow-sm'
+                      : 'text-neutral-400 hover:text-white hover:bg-neutral-800/80'
+                  }`}
+                  onClick={() => setShowAttachMenu((prev) => !prev)}
+                  disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
+                  aria-label="Attach a document (PDF, Word, Excel, CSV, or image), take a photo, or add connector"
+                  aria-haspopup="dialog"
+                  aria-expanded={showAttachMenu}
+                  title="Add to conversation"
+                  data-tip="Add to conversation"
+                  data-testid="composer-add-btn"
+                >
+                  <PlusIcon
+                    size={18}
+                    className={`transition-transform duration-200 ease-out ${
+                      showAttachMenu ? 'rotate-45 text-white' : ''
+                    }`}
+                  />
+                </button>
+
+                {showAttachMenu && (
+                  <div
+                    className="lmv2-overlay addmenu-overlay"
+                    onMouseDown={(e) => {
+                      if (e.target === e.currentTarget) closeAddMenu();
+                    }}
+                  >
+                    <div
+                      ref={addMenuPanelRef}
+                      className="lmv2 addmenu-dialog"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-label={addMenuView === 'connectors' ? "Connect extra systems & apps" : "Add to conversation"}
+                    >
+                      {addMenuView === 'connectors' ? (
+                        <>
+                          <div className="lmv2-head addmenu-head">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setAddMenuView('main')}
+                                className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300 hover:text-white hover:bg-neutral-700 transition"
+                                aria-label="Back to add menu"
+                                title="Back"
+                              >
+                                ←
+                              </button>
+                              <h2>Connect extra systems</h2>
+                            </div>
+                            <button
+                              type="button"
+                              className="dlgv2-x lmv2-x"
+                              onClick={closeAddMenu}
+                              aria-label="Close add menu"
+                            >
+                              <CloseIcon />
+                            </button>
+                          </div>
+
+                          <div className="lmv2-list addmenu-list max-h-[360px] overflow-y-auto p-2 space-y-2" role="menu" aria-label="System connectors">
+                            {connectors.map((c) => {
+                              const isConnected = activeConnectorIds.includes(c.id);
+                              const isConn = isConnecting[c.id];
+                              const accountName = connectedAccounts[c.id];
+                              return (
+                                <div
+                                  key={c.id}
+                                  className="flex items-center justify-between p-2.5 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:border-neutral-700 transition"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
+                                    <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-neutral-800/80 border border-neutral-700/60">
+                                      {getSystemLogo(c.id, 20)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
+                                        <span>{c.name}</span>
+                                        {isConnected && (
+                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-neutral-400 truncate">
+                                        {isConnected ? (
+                                          <span className="text-emerald-400">Connected · {accountName || 'Active'}</span>
+                                        ) : (
+                                          c.description
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="shrink-0">
+                                    {isConnected ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => disconnectConnector(c.id)}
+                                        className="px-2.5 py-1 text-xs rounded-lg font-medium text-neutral-300 hover:text-red-400 hover:bg-red-500/10 border border-neutral-700 hover:border-red-500/30 transition"
+                                        aria-label={`Disconnect ${c.name}`}
+                                      >
+                                        Disconnect
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        disabled={isConn}
+                                        onClick={() => connectViaPopup(c.id)}
+                                        className="px-3 py-1 text-xs rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition flex items-center gap-1 shadow-sm"
+                                        aria-label={`Connect ${c.name}`}
+                                      >
+                                        <span>{isConn ? 'Opening...' : 'Connect'}</span>
+                                        <span className="text-[10px] opacity-75">↗</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="lmv2-foot addmenu-foot flex items-center justify-between text-[11px] text-neutral-400">
+                            <span>OAuth popup with CAPTCHA verification</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                closeAddMenu();
+                                openModal();
+                              }}
+                              className="text-blue-400 hover:text-blue-300 underline font-medium"
+                            >
+                              Manage DBs ↗
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="lmv2-head addmenu-head">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
+                                <PlusIcon size={14} />
+                              </div>
+                              <h2>Add to conversation</h2>
+                            </div>
+                            <button
+                              type="button"
+                              className="dlgv2-x lmv2-x"
+                              onClick={closeAddMenu}
+                              aria-label="Close add menu"
+                            >
+                              <CloseIcon />
+                            </button>
+                          </div>
+
+                          <div className="lmv2-list addmenu-list" role="menu" aria-label="Attachment and tool options">
+                            {/* Option 1: Upload a file */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[0] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
+                              onClick={() => {
+                                closeAddMenu();
+                                fileInputRef.current?.click();
+                              }}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition">
+                                  <FileIcon size={18} />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">Upload a file</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">PDF, Word, Excel, CSV, or high-res image</div>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                                File
+                              </span>
+                            </button>
+
+                            {/* Option 2: Take a photo */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[1] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
+                              onClick={handleTakePhotoClick}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20 transition">
+                                  <CameraIcon />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">Take a photo</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">Snap National ID, receipt, or physical doc</div>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                                Camera
+                              </span>
+                            </button>
+
+                            {/* Option 3: Add connector */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[2] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
+                              onClick={() => {
+                                setAddMenuView('connectors');
+                              }}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
+                                  <PlugIcon size={18} />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">Add connector</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments</div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  {activeConnectorIds.length}/{connectors.length} Connected
+                                </span>
+                                <span className="text-neutral-500 group-hover:text-neutral-300 text-xs">→</span>
+                              </div>
+                            </button>
+                          </div>
+
+                          <div className="lmv2-foot addmenu-foot">
+                            Snap a Ugandan National ID card for autonomous instant TIN issuance, or attach receipts for tax calculation.
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           )}
           <div className="cmpv2-spacer" />
@@ -333,6 +869,14 @@ function ChatInputInner({
             ? t('composer.voiceHint')
             : t('composer.disclaimer')}
       </p>
+
+      {isCameraActive && (
+        <CameraCapture
+          active={isCameraActive}
+          onCapture={handleCameraCapture}
+          onClose={() => setIsCameraActive(false)}
+        />
+      )}
     </>
   );
 }

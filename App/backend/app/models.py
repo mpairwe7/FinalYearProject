@@ -45,6 +45,21 @@ class Citation(BaseModel):
     title: str = Field("", description="Document title when present")
 
 
+class ResourceLink(BaseModel):
+    """An official URA page offered beside an answer (see ``app.verified_resources``)."""
+
+    id: str = Field(..., description="Registry id, stable across releases")
+    title: str
+    type: Literal["online_form", "downloadable_form", "statutory_source", "guide"]
+    format: Literal["web", "pdf"] = "web"
+    url: str = Field(..., description="https URL on an official URA host; never carries user data")
+    description: str = ""
+    citation: str = Field("", description="Statutory provision the page implements, when one applies")
+    checklist: list[str] = Field(default_factory=list, description="What to have ready, from URA's own page")
+    source_domain: str = Field(..., description="Host the link opens on")
+    verified_on: str = Field(..., description="ISO date the link was last confirmed live")
+
+
 class ChatResponse(BaseModel):
     reply: str
     sources: list[str] = Field(default_factory=list)
@@ -96,6 +111,10 @@ class ChatResponse(BaseModel):
     current_topic: str = Field(
         "",
         description="Persisted conversation task id (G6), empty when none is active",
+    )
+    resources: list[ResourceLink] = Field(
+        default_factory=list,
+        description="Official URA pages for this answer; empty for refusals, abstentions and small talk",
     )
 
 
@@ -173,6 +192,12 @@ class FeedbackRequest(BaseModel):
     session_id: str | None = Field(None, max_length=128)
     user_query: str = Field("", max_length=2000, description="Original user question")
     bot_reply: str = Field("", max_length=5000, description="Bot response that was rated")
+    # Where the rated reply came from, so a rating can be read against the
+    # journey step or route that produced it (the analytics journey panel).
+    # Identifiers only, never free text, so the pattern is strict.
+    retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Route that produced the reply")
+    workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Guided journey the reply belongs to")
+    step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Journey step the reply asked")
 
 
 class FeedbackResponse(BaseModel):
@@ -184,6 +209,110 @@ class FeedbackResponse(BaseModel):
 
 class FeedbackCommentRequest(BaseModel):
     comment: str = Field(..., min_length=1, max_length=1000, description="Follow-up comment text")
+
+
+# ---------------------------------------------------------------------------
+# Guided-journey funnel (staff analytics)
+# ---------------------------------------------------------------------------
+class JourneyStepStats(BaseModel):
+    step_id: str
+    title: str
+    #: Journeys cancelled or abandoned while waiting on this step.
+    stopped: int = 0
+    helpful: int = 0
+    not_helpful: int = 0
+
+
+class JourneyStats(BaseModel):
+    workflow_id: str
+    name: str
+    started: int = 0
+    completed: int = 0
+    cancelled: int = 0
+    #: Still active but untouched for longer than ``abandon_after_hours``.
+    abandoned: int = 0
+    in_progress: int = 0
+    completion_pct: float = 0.0
+    steps: list[JourneyStepStats] = Field(default_factory=list)
+
+
+class JourneyFunnelResponse(BaseModel):
+    period_days: int
+    abandon_after_hours: int
+    journeys: list[JourneyStats] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Audit trail (administrators and auditors)
+# ---------------------------------------------------------------------------
+class AuditEventOut(BaseModel):
+    seq: int
+    event_id: str
+    event_type: str
+    #: The acting user's id ("operator-key" for the break-glass key).
+    actor: str
+    ts: float
+    payload: dict[str, Any] = Field(default_factory=dict)
+    row_hash: str
+
+
+class AuditEventsResponse(BaseModel):
+    #: Whether this deployment is recording new events (``audit_ledger``).
+    ledger_enabled: bool
+    events: list[AuditEventOut] = Field(default_factory=list)
+    #: Pass as ``before_seq`` for the next (older) page; null when none.
+    next_before_seq: int | None = None
+
+
+class AuditChainBreak(BaseModel):
+    seq: int
+    event_id: str
+    reason: str
+
+
+class AuditAnchorOut(BaseModel):
+    """A seal: the Merkle root of a range of rows and the chain head at its end."""
+
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    merkle_root: str
+    #: ``row_hash`` at ``last_seq``; empty on seals made before it was recorded.
+    head_hash: str = ""
+    created_at: float
+
+
+class AuditAnchorBreak(BaseModel):
+    anchor_id: str
+    first_seq: int
+    last_seq: int
+    reason: str
+
+
+class AuditVerifyResponse(BaseModel):
+    ledger_enabled: bool
+    valid: bool
+    #: ``full`` walked every row and every seal; ``since_seal`` re-checked the
+    #: newest seal and the rows after it.
+    scope: Literal["full", "since_seal"]
+    rows_checked: int
+    first_seq: int
+    last_seq: int
+    head_hash: str
+    #: At most the first 20 breaks; ``valid`` is false when there are any.
+    breaks: list[AuditChainBreak] = Field(default_factory=list)
+    anchors_checked: int = 0
+    anchor_breaks: list[AuditAnchorBreak] = Field(default_factory=list)
+    latest_anchor: AuditAnchorOut | None = None
+    #: Rows written after the newest seal.
+    unsealed_rows: int = 0
+    verified_at: float
+
+
+class AuditSealResponse(BaseModel):
+    #: False when every row was already sealed (or another replica sealed first).
+    sealed: bool
+    anchor: AuditAnchorOut | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +355,7 @@ class EscalationRequest(BaseModel):
         pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
         description="Language to acknowledge in",
     )
+    modality: str = Field("text", description="Input modality: text or voice")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -238,6 +368,38 @@ class EscalationResponse(BaseModel):
         False, description="True when this conversation already had an open ticket"
     )
     message: str = Field(..., description="What happens next, in the taxpayer's language")
+
+
+class EscalationDetailResponse(BaseModel):
+    ok: bool = True
+    ticket_id: str
+    reference: str
+    status: str
+    status_label: str
+    priority: str
+    team: str
+    team_label: str
+    assignee: str
+    assignee_display: str
+    reason: str
+    user_query: str
+    user_query_en: str = ""
+    locale: str = "en"
+    modality: str = "text"
+    officer_reply: str
+    officer_reply_localized: str = ""
+    reply_at: float
+    reply_delivered: bool
+    created_at: float
+    resolved_at: float
+    transcript: list[dict[str, Any]] = Field(default_factory=list)
+    can_reply: bool = True
+
+
+class TaxpayerReplyRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    conversation_id: str | None = None
+    locale: str = Field("en", pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")
 
 
 class FeedbackSummary(BaseModel):
@@ -302,6 +464,9 @@ class SynthesizeRequest(BaseModel):
     )
     language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 language code")
     streaming: bool = Field(False, description="Emit audio as a sentence-chunked stream")
+    format: Literal["wav", "opus"] = Field(
+        "wav", description="/v1/tts/stream only: 'opus' for Ogg/Opus pieces, about a tenth the size of WAV"
+    )
 
 
 class SynthesizeResponse(BaseModel):
@@ -328,6 +493,7 @@ class TranslateResponse(BaseModel):
     latency_s: float
     backend: str
     error: str | None = None
+    figures_survived: bool = True
 
 
 class VoiceChatRequest(BaseModel):
@@ -381,6 +547,14 @@ class SpeechHealthResponse(BaseModel):
     asr_backend: str
     tts_backend: str
     mt_backend: str
+    # unconfigured | up | down | cooldown. cooldown and down mean Luganda
+    # is on Spark-TTS-SALT, not the streaming Orpheus sidecar.
+    orpheus: str = "unconfigured"
+    whisper_salt: bool = False
+    spark_tts: bool = False
+    last_tts_backend: str = ""
+    last_asr_backend: str = ""
+    last_asr_rtf: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -474,11 +648,14 @@ class DocumentFields(BaseModel):
     """URA-specific fields extracted from an attached document."""
 
     tins: list[str] = Field(default_factory=list, description="Uganda TIN numbers found")
+    prns: list[str] = Field(default_factory=list, description="Uganda Payment Registration Numbers (PRNs) found")
+    efris_invoices: list[str] = Field(default_factory=list, description="EFRIS fiscal invoice/receipt numbers found")
     amounts: list[str] = Field(default_factory=list, description="UGX currency amounts found")
     dates: list[str] = Field(default_factory=list, description="Date strings found")
     references: list[str] = Field(
         default_factory=list, description="URA reference/assessment numbers found"
     )
+    tax_heads: list[str] = Field(default_factory=list, description="Identified URA tax regimes/heads")
 
 
 class DocumentProvenance(BaseModel):
@@ -526,7 +703,7 @@ class DocumentAnalysisResponse(BaseModel):
         "generic",
         description=(
             "receipt | tin_card | assessment | customs_declaration | "
-            "filing_form | invoice | generic"
+            "filing_form | invoice | portal_screenshot | generic"
         ),
     )
     confidence: float = Field(
@@ -544,6 +721,14 @@ class DocumentAnalysisResponse(BaseModel):
     text_preview: str = Field("", description="First characters of the extracted text")
     truncated: bool = Field(False, description="Whether extracted text was truncated")
     summary: str = Field("", description="Heuristic analysis summary")
+    tax_reconciliation: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Automated financial reconciliation & rate compliance status",
+    )
+    screenshot_guidance: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Interactive screenshot navigation, error diagnostics, and resolution steps for URA sites",
+    )
     warnings: list[str] = Field(default_factory=list)
     expires_in_seconds: int = Field(0, ge=0, description="TTL until the document is purged")
 

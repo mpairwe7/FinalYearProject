@@ -4,7 +4,8 @@
  * Analytics dashboard — production observability for the URA Chatbot.
  *
  * Data source: GET /v1/analytics/dashboard, GET /v1/feedback/summary,
- * GET /v1/admin/tickets/stats — all proxied via /api/* rewrite.
+ * GET /v1/analytics/journeys, GET /v1/admin/tickets/stats — all proxied via
+ * /api/* rewrite.
  *
  * Standards: ISO/IEC 25010:2023 §4 (Interaction Capability),
  * EU AI Act Art. 13 (Transparency), ISO 42001 §9.1 (Monitoring)
@@ -40,9 +41,11 @@ import { EmptyState, ErrorState, Skeleton, SkeletonStats } from "../../component
 import {
   useDashboard,
   useFeedbackSummary,
+  useJourneyFunnel,
   useTicketQueue,
   useTicketStats,
 } from "../../hooks/useAnalyticsDashboard";
+import JourneyFunnelTable from "../../components/charts/JourneyFunnelTable";
 import SloGaugeCard from "../../components/charts/SloGaugeCard";
 import { plainSeconds } from "../../components/charts/chartTheme";
 import TopicBarChart from "../../components/charts/TopicBarChart";
@@ -96,6 +99,7 @@ function Dashboard() {
   const [days, setDays] = useState(30);
   const dash = useDashboard(days);
   const feedback = useFeedbackSummary(days);
+  const journeys = useJourneyFunnel(days);
   const tickets = useTicketStats(days);
   const ticketQueue = useTicketQueue("open", 6);
 
@@ -126,6 +130,7 @@ function Dashboard() {
   const refresh = () => {
     void dash.refetch();
     void feedback.refetch();
+    void journeys.refetch();
     void tickets.refetch();
     void ticketQueue.refetch();
   };
@@ -274,6 +279,16 @@ function Dashboard() {
               />
             ) : null}
           </section>
+
+          {journeys.isError ? (
+            <ErrorState
+              title="Guided journey figures did not load"
+              body="The rest of this page is current; the journey funnel is not. An empty panel would read as no journeys in this period."
+              onRetry={() => void journeys.refetch()}
+            />
+          ) : journeys.data && Array.isArray(journeys.data.journeys) ? (
+            <JourneyFunnelTable data={journeys.data} />
+          ) : null}
 
           {tickets.data && tickets.data.total > 0 ? (
             <section aria-label="Questions passed to an officer" className="ops-chart-grid is-2">

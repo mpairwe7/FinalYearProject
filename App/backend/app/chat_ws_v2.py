@@ -151,7 +151,7 @@ def _release_socket_slot(user_key: str) -> None:
 
 
 def _resolve_ws_principal(
-    websocket: WebSocket, *, required: bool = False
+    websocket: WebSocket, *, required: bool = False, token_override: str | None = None
 ) -> tuple[str, str, str, list[str]]:
     """Resolve ``(user_id, tenant_id, user_role, granted_purposes)`` from the socket.
 
@@ -163,22 +163,29 @@ def _resolve_ws_principal(
     """
     auth_header = websocket.headers.get("authorization", "")
     token = ""
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header.split(" ", 1)[1].strip()
-    if not token:
-        token = websocket.query_params.get("access_token", "")
+    if token_override is not None:
+        token = token_override.strip()
+    else:
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+        if not token:
+            token = websocket.query_params.get("access_token", "") or websocket.query_params.get("token", "")
     if not token:
         if required:
             raise JWTAuthError("authentication required")
         return "", "default", "public", []
 
-    claims = JWTVerifier().verify(token)
+    from .auth.dependencies import _get_verifier, resolve_role
+
+    verifier = _get_verifier()
+    claims = verifier.verify(token)
+    role = resolve_role(claims, verifier.audience)
     granted = claims.get("granted_purposes", [])
     purposes = [str(p) for p in granted] if isinstance(granted, list) else []
     return (
         str(claims.get("sub", "")),
         str(claims.get("tenant_id", "default")),
-        str(claims.get("role", "public")),
+        role,
         purposes,
     )
 
@@ -237,18 +244,31 @@ class WsChatSession:
         self.resume_attempted = True
         if not previous_response_id or not self.conversation_id:
             return False
+        # Reject resume for anonymous / unauthenticated sessions
+        if not self.user_id:
+            logger.debug("resume: rejected for unauthenticated session")
+            return False
         try:
             rows = db.get_recent_turns(
                 session_id=None,
                 conversation_id=self.conversation_id,
                 limit=10,
+                user_id=self.user_id,
             )
         except Exception:
             logger.debug("resume: get_recent_turns failed", exc_info=True)
             return False
         if not rows:
             return False
-        self.history = list(rows)
+        hydrated: list[dict[str, str]] = []
+        for r in rows:
+            u = r.get("user_message", "")
+            b = r.get("bot_reply", "")
+            if u:
+                hydrated.append({"role": "user", "content": u})
+            if b:
+                hydrated.append({"role": "assistant", "content": b})
+        self.history = hydrated
         self.last_response_id = previous_response_id
         self.resumed = True
         return True
@@ -679,6 +699,13 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         user_id, tenant_id, user_role, granted_purposes = _resolve_ws_principal(websocket)
     except JWTAuthError as exc:
         await websocket.close(code=1008, reason=f"authentication failed: {exc}")
+        return
+
+    from .ws_concurrency import is_ws_origin_allowed
+
+    origin = websocket.headers.get("origin")
+    if not is_ws_origin_allowed(origin):
+        await websocket.close(code=1008, reason="forbidden origin")
         return
 
     socket_user_key = user_id or f"anon::{websocket.client.host if websocket.client else 'unknown'}"

@@ -1,0 +1,53 @@
+# ONNX export + quantisation toolchain — NOT part of the runtime environment.
+#
+# Split out of the root requirements.txt on 2026-09-02 when remediating
+# CVE-2026-9856 (path traversal in transformers `save_pretrained()`, fixed only
+# in transformers 5.10.0). `optimum[onnxruntime]` cannot be installed alongside
+# transformers 5.x:
+#
+#   * optimum[onnxruntime] 1.24.0-1.27.0 pin `transformers<4.49` .. `<4.54`
+#   * optimum 2.x delegates the extra to `optimum-onnx`, whose newest release
+#     (0.1.0) pins `transformers<4.58.0`
+#
+# so there is no version pair that satisfies both. Rather than hold the whole
+# repo on a vulnerable transformers for an offline export path, the export
+# toolchain gets its own environment and stays on transformers 4.x.
+#
+# Nothing imports these at serving time. The four call sites
+# (scripts/quantize_models.py, ml/scripts/{asr,mt,tts}/export_*_onnx.py) all
+# import lazily inside try/except and already degrade to "skipping ONNX export"
+# when the package is absent, which is exactly what happens in the runtime env.
+#
+# Usage:
+#   python -m venv .venv-onnx && .venv-onnx/bin/pip install -r requirements-onnx-export.txt
+#   .venv-onnx/bin/python scripts/quantize_models.py ...
+#
+# RESIDUAL RISK — read before using this file.
+#
+# This environment is STILL EXPOSED to CVE-2026-9856. It pins transformers
+# <4.58.0, and the fix landed in 5.10.0; there is no version of transformers
+# that is both patched and installable with optimum[onnxruntime]. Splitting the
+# file removes the vulnerability from everything that runs in production and
+# CI — it does not remove it from here.
+#
+# That matters here specifically, because the vulnerability IS the thing these
+# scripts do: the flaw is arbitrary file write via `save_pretrained()` when
+# `chat_template` dict keys are used as filenames unvalidated, and exporting is
+# a `save_pretrained()` call. Treat it as: only run these scripts against
+# models you trust, on a machine where an arbitrary file write is recoverable.
+# Do not point them at an unvetted Hub repo.
+#
+# This file is deliberately NOT in the pip-audit matrix in
+# .github/workflows/devsecops-sast-dast.yml, which scans the two requirements
+# sets that describe deployed artifacts. Adding it would re-red the gate on a
+# finding with no available fix, which is what advisory-acceptance is for — and
+# that is a reviewed decision with a named owner, not one to make in passing.
+#
+# Revisit when optimum-onnx supports transformers 5.x; at that point these can
+# fold back into requirements.txt and this file can go away.
+
+optimum[onnxruntime]>=1.24.0,<2.0.0
+transformers>=4.36,<4.58.0
+onnx>=1.16.0
+onnxruntime>=1.20.0
+protobuf>=3.20.1

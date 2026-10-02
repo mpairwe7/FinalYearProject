@@ -194,6 +194,7 @@ def _base_tier(route: str, tool_count: int) -> tuple[ModelTier, str]:
 def select_tier(
     route: str,
     *,
+    query: str = "",
     confidence: float = 1.0,
     tool_count: int = 0,
     locale: str = "en",
@@ -236,6 +237,26 @@ def select_tier(
         return TierDecision(ModelTier.T1, f"{lang} is bound to the T1 LoRA adapters")
 
     promotions: list[tuple[ModelTier, str]] = []
+    if query:
+        import re
+        q_lower = query.lower()
+        statutory_concepts = sum(
+            1 for c in ("wht", "withholding", "vat", "paye", "income tax", "rental", "customs", "excise", "efris")
+            if re.search(rf"\b{c}\b", q_lower)
+        )
+        is_cross_border = bool(re.search(r"\b(cross[-\s]?border|non[-\s]?resident|foreign|abroad|imported\s+services?|reverse\s+charge|digital\s+services?)\b", q_lower))
+        is_dispute = bool(re.search(r"\b(dispute|disputed|objection|appeal|default\s+assessment|tribunal|tat)\b", q_lower))
+        has_complex_numbers = len(re.findall(r"\b\d+(?:[,\.]\d+)?\s*(?:m|million|bn|billion|k|thousand|ugx|usd|\$)\b", q_lower)) >= 2
+
+        if statutory_concepts >= 2:
+            promotions.append((ModelTier.T3, "multiple statutory concepts"))
+        elif is_cross_border:
+            promotions.append((ModelTier.T3, "cross-border / non-resident statutory transaction"))
+        elif is_dispute:
+            promotions.append((ModelTier.T3, "tax dispute / objection / assessment procedure"))
+        elif has_complex_numbers:
+            promotions.append((ModelTier.T3, "complex financial reconciliation"))
+
     if evaluator_rejected:
         promotions.append((ModelTier.T3, "evaluator rejected the previous draft"))
     if multi_hop:

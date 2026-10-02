@@ -42,8 +42,43 @@ def injected_dense_model() -> Any:
     return _injected_dense
 
 
+_MULTILINGUAL_TAX_SYNONYMS: dict[str, tuple[str, ...]] = {
+    # Luganda
+    "omusolo": ("tax",),
+    "emisolo": ("tax", "taxes"),
+    "okusasula": ("calculate", "pay"),
+    "sasula": ("calculate", "pay"),
+    "okubalirira": ("calculate",),
+    "balirira": ("calculate",),
+    "obupangisa": ("rental", "tax"),
+    "omusaala": ("salary", "paye"),
+    "emisaala": ("salary", "paye"),
+    "omwalo": ("customs", "duty"),
+    "ebyamagendo": ("customs",),
+    "ebyamawanga": ("customs",),
+    # Swahili
+    "kodi": ("tax",),
+    "ushuru": ("duty", "tax", "customs"),
+    "forodha": ("customs", "duty"),
+    "kulipa": ("calculate", "pay"),
+    "lipa": ("calculate", "pay"),
+    "kupiga": ("calculate",),
+    "hesabu": ("calculate",),
+    "mshahara": ("salary", "paye"),
+    "mishahara": ("salary", "paye"),
+    "mapato": ("income", "corporation"),
+    "ongezeko": ("value", "added", "vat"),
+    "zuio": ("withholding", "tax"),
+}
+
+
 def _tokenize(text: str) -> set[str]:
-    return {t for t in re.findall(r"\w+", text.lower()) if len(t) > 2}
+    raw_tokens = {t for t in re.findall(r"\w+", text.lower()) if len(t) > 2}
+    expanded = set(raw_tokens)
+    for t in raw_tokens:
+        if t in _MULTILINGUAL_TAX_SYNONYMS:
+            expanded.update(_MULTILINGUAL_TAX_SYNONYMS[t])
+    return expanded
 
 
 @dataclass

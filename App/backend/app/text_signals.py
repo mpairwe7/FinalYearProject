@@ -16,6 +16,10 @@ create an import cycle.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Superset of claim_verifier's historical stopword list; used to reduce
 # sentences to content tokens so function words cannot dominate overlap.
@@ -35,7 +39,7 @@ STOPWORDS: frozenset[str] = frozenset(
 )
 
 _WORD_RE = re.compile(r"\w+")
-_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+")
+_SENTENCE_SPLIT_RE = re.compile(r"[.!?]+|\n+")
 
 # The three official URA hotline numbers are the only digit sequences a
 # courtesy sentence may contain (contact footers quote them verbatim).
@@ -45,13 +49,14 @@ _FIGURE_RE = re.compile(r"\d|%|\bpercent\b|\bugx\b|\bshs\b|\bshillings?\b")
 _MD_MARKUP_RE = re.compile(r"[*_`#]+")
 _CHANNEL_TOKEN_RE = re.compile(
     r"ura\.go\.ug|0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000"
-    r"|whatsapp|contact cent(re|er)|toll[- ]?free"
+    r"|whatsapp|contact cent(re|er)|toll[- ]?free|services@ura|info@ura|\bemail\b"
 )
 # Sentence splitting breaks URLs ("ura.go.ug") apart, leaving contact-footer
 # fragments without their courtesy lead; strip channel vocabulary to see
 # whether anything contentful remains.
 _CHANNEL_STRIP_RE = re.compile(
     r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|https?://\S+|www\.\S+"
+    r"|[a-z0-9._%+-]+@ura(?:\.go)?(?:\.ug)?|\bemail\b|\bservices\b|\binfo\b"
     r"|ura\.go\.ug|\bura\b|\bgo\b|\bug\b|whatsapp|toll[- ]?free"
     r"|contact cent(?:re|er)|\bcall\b|\bvisit\b|\bportal\b|\bweb\b"
 )
@@ -61,8 +66,12 @@ _CHANNEL_STRIP_RE = re.compile(
 _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p)
     for p in (
-        # -- greetings / thanks / apologies ------------------------------
+        # -- greetings / thanks / apologies (English, Swahili, Luganda) --
         r"^(hello|hi there|hi|hey|greetings|good (morning|afternoon|evening|day))\b",
+        r"^(habari|hujambo|jambo|mambo|shikamoo|salaam|asante|ahsante|shukrani|karibu|kwaheri|tutaonana)\b",
+        r"\b(habari\s+(yako|za\s+asubuhi|za\s+mchana|za\s+jioni|gani|za\s+leo)|mambo\s+vipi|asante\s+sana|karibu\s+sana)\b",
+        r"^(oli\s+otya|wasuze\s+otya|osiibye\s+otya|mwasuze\s+mutya|ki\s+kati|gyebale|gyebaleko|weebale|webale|neeyanzizza|weraba|tunaalabagana)\b",
+        r"\b(weebale\s+nnyo|webale\s+nyo|tukwanirizza\s+nnyo)\b",
         r"^thank(s| you)\b",
         r"\bthank you for (asking|reaching out|your patience|getting in touch)\b",
         r"^(i am|i'm|we are|we're) (sorry|glad|happy|here)\b",
@@ -111,6 +120,8 @@ _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         # -- meta preambles / graceful fallbacks ---------------------------
         r"^based on the ura guidance i retrieved\b",
         r"^here('s| is) the most relevant guidance i found\b",
+        r"^here('s| is) (the )?official guidance\b",
+        r"^as the ura (intelligent |digital )?assistant\b",
         r"^i could(n't| not) find\b",
         r"^i (don't|do not) have enough (information|details)\b",
         r"^i('d| would) rather connect you\b",
@@ -132,19 +143,24 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"|still (can't|cannot|no|not)"
         ),
     ),
+    # "help me" and "lost my" used to be anxiety cues. They are how people ask
+    # for things — "help me register for a TIN", "I lost my TIN certificate" —
+    # and on 2026-09-29 every "Help me …" request to the live stack opened with
+    # "I understand this can feel stressful". A request is not distress; a
+    # worried request still carries a worry word, which stays below.
     (
         "anxiety",
         re.compile(
             r"worried|worry|worrying|scared|afraid|anxious|confus|stress"
-            r"|help me|don't know what|don't understand|do not understand|lost my"
+            r"|don't know what|don't understand|do not understand"
         ),
     ),
     (
         "urgency",
         re.compile(
             r"urgent|asap|as soon as possible|deadline|due (today|tomorrow)"
-            r"|penalt|\bfines?\b|\bfined\b|audit|enforcement|seiz|arrears"
-            r"|overdue|late fee"
+            r"|\b(?:under\s+audit|being\s+audited|facing\s+penalt\w*|incurred\s+penalt\w*|threatened\s+with|been\s+fined)\b"
+            r"|enforcement|seiz|arrears|overdue|late fee"
         ),
     ),
 )
@@ -158,7 +174,14 @@ _HARDSHIP_RE = re.compile(
     r"|lose (my|the) (business|shop|job|home|land)|losing (my|the) (business|job)"
     r"|shut(ting)? down|closed down|out of business"
     r"|struggling|hardship|desperate|nothing left"
-    r"|sick|ill|hospital|died|passed away|funeral)\b"
+    r"|(?:i am|i'm|we are|my (?:child|son|daughter|wife|husband|mother|father|parent|family))(?:\s+(?:is|are|was|were|fell|got))?\s+(?:very\s+)?(?:sick|ill|in hospital)"
+    r"|(?:my|our)\s+(?:mother|father|wife|husband|child|son|daughter|parent)(?:\s+(?:has|have|had|is|was))?\s+(?:died|passed away)"
+    r"|bereavement|bereaved"
+    r"|(?:account|bank)\s+(?:is\s+)?frozen|frozen\s+(?:my\s+)?(?:account|bank)"
+    r"|agency\s+notice|distress\s+warrant"
+    r"|sealed\s+(?:my\s+)?(?:shop|premises|business)"
+    r"|seized\s+(?:my\s+)?(?:goods|cargo|vehicle|truck|car)"
+    r"|lost\s+my\s+job|unemployed)\b"
 )
 
 #: Comprehension trouble — the explanation needs rebuilding, not
@@ -307,17 +330,49 @@ _FOREIGN_JURISDICTIONS: tuple[tuple[str, str], ...] = (
     ("Ghana", r"ghanaian?|\bghana\b"),
     ("Egypt", r"egyptian?|\begypt\b"),
     ("the United Kingdom", r"\buk\b|united\s+kingdom|britain|british"),
-    ("the United States", r"\busa?\b|united\s+states|american?"),
+    # "us" is the first-person plural pronoun far more often than it is the
+    # country, and this list is consulted on fast path 0, before retrieval — so
+    # a bare `\busa?\b` refused "can you help us with VAT registration" as a
+    # United States question, naming a country the taxpayer never mentioned.
+    #
+    # The country reading now needs evidence: an unambiguous spelling, a
+    # determiner ("the US"), or a following noun that the pronoun cannot take.
+    # `federal`/`irs`/`dollar`/`citizen` qualify; `tax` deliberately does not,
+    # because "give us tax advice" is ordinary English.
+    #
+    # That gives up "do i pay us tax". Accepted knowingly: the two failures are
+    # not symmetric. A missed foreign jurisdiction falls through to normal
+    # retrieval and is answered or abstained on; a false positive hard-refuses
+    # a legitimate taxpayer with a confident, specific untruth. Precision wins.
+    (
+        "the United States",
+        r"\busa\b|u\.s\.a\b|united\s+states|american?"
+        r"|the\s+us\b"
+        r"|\bus\s+(?:federal|irs|dollars?|citizens?|residents?|nationals?)\b",
+    ),
     ("India", r"\bindian?\b"),
     ("China", r"chinese|\bchina\b"),
 )
 
-_FOREIGN_JURISDICTION_RES: tuple[tuple[str, "re.Pattern[str]"], ...] = tuple(
+_FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
     (name, re.compile(rf"\b(?:{pattern})\b", re.IGNORECASE))
     for name, pattern in _FOREIGN_JURISDICTIONS
 )
 
-_UGANDA_RE = re.compile(r"\bugandan?\b|\bura\b|\bkampala\b", re.IGNORECASE)
+_UGANDA_RE = re.compile(
+    r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b",
+    re.IGNORECASE,
+)
+
+
+_EXPORT_TO_FOREIGN_RE = re.compile(
+    r"\b(?:\w*export\w*|\w*import\w*|\w*agiza\w*|\w*safirisha\w*|\w*ingiza\w*|\w*fulumya\w*)\b.*?\b(?:to|from|kutoka|okuva(?:\s+mu)?)\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|china|japan|uae|dubai|india|uk|usa|us)\b",
+    re.IGNORECASE,
+)
+_PURE_FOREIGN_TAX_RE = re.compile(
+    r"\b(in\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|uk|usa|the\s+us|united\s+states)|kenyan\s+(?:vat|tax|revenue|kra)|rwandan\s+(?:vat|tax|revenue|rra))\b",
+    re.IGNORECASE,
+)
 
 
 def detect_foreign_jurisdiction(message: str) -> str:
@@ -330,6 +385,10 @@ def detect_foreign_jurisdiction(message: str) -> str:
     """
     text = message or ""
     if not text.strip() or _UGANDA_RE.search(text):
+        return ""
+    # Cross-border export/import trade operations (e.g. "When we export goods to Kenya, what VAT applies?")
+    # are governed by URA's export/customs tax rules (zero-rated export) rather than foreign domestic tax law.
+    if _EXPORT_TO_FOREIGN_RE.search(text) and not _PURE_FOREIGN_TAX_RE.search(text):
         return ""
     for name, pattern in _FOREIGN_JURISDICTION_RES:
         if pattern.search(text):
@@ -401,6 +460,31 @@ def out_of_jurisdiction_reply(country: str) -> str:
     )
 
 
+_LOCAL_GOVERNMENT_TAX_RE = re.compile(
+    r"\b(local\s+service\s+tax|lst\b|local\s+hotel\s+tax|municipal\s+(?:tax|taxes|levy|levies|authorit\w+|policy)|city\s+council\s+(?:tax|taxes|dues|rates)|local\s+government\s+(?:tax|taxes|rates))\b",
+    re.IGNORECASE,
+)
+
+
+def detect_local_government_tax(message: str) -> bool:
+    """True when the message asks about local government/municipal levies rather than URA taxes."""
+    text = message or ""
+    return bool(_LOCAL_GOVERNMENT_TAX_RE.search(text))
+
+
+def local_government_tax_reply() -> str:
+    """Authoritative answer for Local Service Tax and municipal levies not administered by URA."""
+    return (
+        "**Local Service Tax (LST)** is a local government tax administered and collected "
+        "directly by local government authorities (such as City Councils including KCCA, "
+        "Municipalities, and District Local Governments) under the Local Governments (Amendment) "
+        "Act 2008, rather than the Uganda Revenue Authority (URA).\n\n"
+        "The URA does not assess, collect, or enforce Local Service Tax or municipal hotel taxes. "
+        "For policy guidelines, assessment schedules, and payment procedures for Local Service Tax, "
+        "please consult your respective city council, municipality, or local government authority office."
+    )
+
+
 def empathy_ack(kind: str) -> str:
     """One short, translation-friendly empathetic opener for a distress kind.
 
@@ -408,6 +492,170 @@ def empathy_ack(kind: str) -> str:
     acknowledgment never dilutes faithfulness or claim verification.
     """
     return _EMPATHY_ACKS.get(kind, "")
+
+
+def ack_already_given(kind: str, prior_replies: Sequence[str], lookback: int = 2) -> bool:
+    """Whether the opener for *kind* began one of the last *lookback* replies.
+
+    The openers are fixed sentences, so a taxpayer who stays worried for three
+    turns would read the same line three times — the formulaic empathy that
+    makes an assistant sound scripted. Callers that prepend an opener ask this
+    first; :func:`strip_repeated_ack` covers replies that already carry one.
+    """
+    ack = _EMPATHY_ACKS.get(kind, "")
+    if not ack:
+        return False
+    return any((r or "").lstrip().startswith(ack) for r in list(prior_replies)[-lookback:])
+
+
+def strip_repeated_ack(reply: str, prior_replies: Sequence[str], lookback: int = 2) -> str:
+    """Drop a leading empathy opener already used in the last *lookback* replies.
+
+    The first acknowledgement stays; repeats go, and the answer below them is
+    untouched.
+    """
+    text = reply or ""
+    stripped = text.lstrip()
+    for kind, ack in _EMPATHY_ACKS.items():
+        if stripped.startswith(ack) and ack_already_given(kind, prior_replies, lookback):
+            return stripped[len(ack):].lstrip()
+    return text
+
+
+#: Distress kinds that, repeated across turns, mean the conversation is not
+#: working for the person and a human should be offered.
+_SUSTAINED_KINDS = frozenset({"frustration", "confusion", "anxiety", "hardship"})
+
+
+def distress_trajectory(
+    current_kind: str, prior_user_messages: Sequence[str], window: int = 3
+) -> dict[str, Any]:
+    """Distress across the last *window* user turns, the current one included.
+
+    One upset message is handled by tone. The same upset over consecutive
+    turns means the answers are not landing, which is the moment to offer a
+    person rather than another rephrasing. ``sustained`` needs the current turn
+    to be negative too, so a taxpayer who has calmed down is not offered a
+    handoff for how they felt two messages ago.
+    """
+    # window == 1 is the current turn alone; [-0:] would be the whole history.
+    previous = list(prior_user_messages)[-(window - 1):] if window > 1 else []
+    earlier = [detect_user_distress(m) for m in previous]
+    kinds = [*earlier, current_kind or ""]
+    negative = sum(1 for k in kinds if k in _SUSTAINED_KINDS)
+    return {
+        "kinds": kinds,
+        "negative_turns": negative,
+        "sustained": negative >= 2 and (current_kind or "") in _SUSTAINED_KINDS,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Crisis
+#
+# A message about ending one's life is not a tax question and must not be
+# answered as one — least of all by retrieval, which would find a penalty
+# table for "I can't pay, I want to die". It is checked before routing, and the
+# reply points to people who can help now. English plus the Luganda
+# (okwetta) and Kiswahili (kujiua) verbs for killing oneself.
+# ---------------------------------------------------------------------------
+
+_CRISIS_RE = re.compile(
+    r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
+    r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
+    r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
+    r"|okwetta|kujiua)\b"
+)
+
+#: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency
+#: page (upf.go.ug); 0800 21 21 21 as published by Mental Health Uganda. Check
+#: both again before moving this date.
+CRISIS_LINES_VERIFIED_ON = "2026-09-29"
+
+
+def detect_crisis(message: str) -> bool:
+    """True when *message* expresses intent to self-harm."""
+    return bool(_CRISIS_RE.search(_normalise(message)))
+
+
+#: Conversational repair: a turn that is all feeling and no task ("This is
+#: useless", "It still does not work") gives retrieval nothing to search for.
+#: On the local stack (2026-09-29) exactly that turn retrieved a passage about
+#: URA's own funding problems and read it back to the taxpayer. Asking what they
+#: are trying to do is the repair a person at a counter would make.
+REPAIR_QUESTION = (
+    "What are you trying to do: file a return, make a payment, register for a TIN, "
+    "or something else? Tell me where it stops and I'll take it from there."
+)
+REPAIR_REPEAT_REPLY = (
+    "It sounds like this still isn't working for you. An officer can look at it with "
+    "you: tap **Talk to an officer**. Or tell me the task and the step where it stops."
+)
+REPAIR_NEXT_ACTIONS = ("File a return", "Make a payment", "Register for a TIN", "Talk to an officer")
+
+#: Words that carry how the taxpayer feels, not what they are doing. A message
+#: made only of these names no task. "The portal is not working" keeps
+#: "portal" and "I don't understand what chargeable income means" keeps
+#: "chargeable income", so both are still answered.
+_FEELING_WORDS = frozenset(
+    {
+        "useless", "ridiculous", "annoying", "annoyed", "frustrating", "frustrated", "angry",
+        "confused", "confusing", "lost", "understand", "still", "work", "works", "working",
+        "worked", "nothing", "again", "help", "please", "anything", "don", "doesn", "isn",
+        "won", "can", "cannot", "t", "s", "so", "really", "very", "totally", "completely",
+        "fed", "up", "same", "problem", "why", "going", "happening", "wrong", "had", "enough",
+        # Contraction fragments: the tokenizer splits "I'm" into "i" + "m", so
+        # without these "I'm confused" named a task called "m".
+        "i", "m", "ve", "re", "ll", "d",
+    }
+)
+
+
+def is_feeling_only(message: str) -> bool:
+    """True when *message* expresses a feeling but names nothing to act on."""
+    return not (content_tokens(message) - _FEELING_WORDS)
+
+
+#: Small talk that names no task either ("hello", "thanks, ok").
+_SMALL_TALK_WORDS = frozenset(
+    {"hello", "hi", "hey", "thanks", "thank", "good", "morning", "afternoon", "evening", "ok", "okay", "yes", "no"}
+)
+
+
+def names_a_task(message: str) -> bool:
+    """True when *message* carries something beyond feelings and small talk.
+
+    Used on the *previous* user turn: "I don't understand" after a real
+    question wants that answer re-explained, not a fresh "what are you trying
+    to do?"; after a greeting or another outburst it does.
+    """
+    return bool(content_tokens(message) - _FEELING_WORDS - _SMALL_TALK_WORDS)
+
+
+def repair_reply(kind: str, *, repeated: bool) -> str:
+    """Clarifying reply for a distressed turn that names no task.
+
+    Frustration is acknowledged. Confusion is not given its usual opener,
+    "Let me put that a different way.", because a repair has nothing to
+    rephrase — it asks what the taxpayer wants to do.
+    """
+    if repeated:
+        return REPAIR_REPEAT_REPLY
+    ack = empathy_ack(kind) if kind != "confusion" else ""
+    return f"{ack}\n\n{REPAIR_QUESTION}" if ack else REPAIR_QUESTION
+
+
+def crisis_support_reply() -> str:
+    """Supportive reply with Ugandan crisis lines. Never carries tax content."""
+    return (
+        "I'm really sorry you're feeling this way. You don't have to face this alone, "
+        "and your safety matters more than any tax matter.\n\n"
+        "- If you are in danger right now, call **999** or **112**.\n"
+        "- To talk to a trained counsellor for free, call Mental Health Uganda on "
+        "**0800 21 21 21** (Monday to Friday, 8:30am to 5pm).\n\n"
+        "The tax side can wait. When you're ready, a URA officer can talk through "
+        "your options with you, including paying in instalments."
+    )
 
 
 def tone_hint_for(kind: str) -> str:
@@ -428,15 +676,198 @@ GREETING_REPLY = (
     "I help you today?"
 )
 
+GREETING_REPLY_BY_LOCALE: dict[str, str] = {
+    "en": GREETING_REPLY,
+    "sw": (
+        "Habari, na karibu! Mimi ni Msaidizi wa Kidijitali wa URA. Ninaweza kukusaidia "
+        "kuhusu usajili wa kodi, kuwasilisha marejesho, malipo, forodha, na zaidi — "
+        "ninawezaje kukusaidia leo?"
+    ),
+    "lg": (
+        "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA. Nnyinza okukuyamba "
+        "ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo "
+        "gw'oku mwalo, n'ebirala — nnyinza kukuyamba ntya leero?"
+    ),
+}
+
 GRATITUDE_REPLY = (
     "You're welcome — I'm glad I could help! Is there anything else you'd "
     "like to know about URA services?"
 )
 
+GRATITUDE_REPLY_BY_LOCALE: dict[str, str] = {
+    "en": GRATITUDE_REPLY,
+    "sw": (
+        "Karibu sana — ninafurahi nimeweza kukusaidia! Je, kuna jambo lingine "
+        "ungependa kujua kuhusu huduma za URA?"
+    ),
+    "lg": (
+        "Tukwanirizza nnyo — nsomedde nti nnyinzizza okuyamba! Waliwo ekirala "
+        "ky'oyagala okumanya ku mpeereza za URA?"
+    ),
+}
+
 FAREWELL_REPLY = (
     "Thank you for chatting with the URA Digital Assistant — goodbye for "
     "now! Feel free to reach out any time, or visit https://ura.go.ug."
 )
+
+FAREWELL_REPLY_BY_LOCALE: dict[str, str] = {
+    "en": FAREWELL_REPLY,
+    "sw": (
+        "Asante kwa kuzungumza na Msaidizi wa Kidijitali wa URA — kwaheri kwa sasa! "
+        "Jisikie huru kuwasiliana nasi wakati wowote, au tembelea https://ura.go.ug."
+    ),
+    "lg": (
+        "Weebale kwogera n'Omuyambi wa Digito owa URA — weraba kwa kati! "
+        "Weeraba okutuukirira buli w'oyagalira, oba genda ku https://ura.go.ug."
+    ),
+}
+
+NEXT_ACTIONS_GREETING_BY_LOCALE: dict[str, list[str]] = {
+    "en": [
+        "Ask about TIN registration",
+        "Learn about VAT",
+        "File a tax return",
+    ],
+    "sw": [
+        "Uliza kuhusu usajili wa TIN",
+        "Jifunze kuhusu VAT",
+        "Wasilisha marejesho ya kodi",
+    ],
+    "lg": [
+        "Buuza ku kwewandiisa ku TIN",
+        "Yiga ku musolo gwa VAT",
+        "Waayo alipoota y'omusolo",
+    ],
+}
+
+
+def get_greeting_reply(locale: str = "en") -> str:
+    """Return localized greeting string."""
+    loc = (locale or "en").strip().lower()[:2]
+    return GREETING_REPLY_BY_LOCALE.get(loc, GREETING_REPLY)
+
+
+def get_gratitude_reply(locale: str = "en") -> str:
+    """Return localized gratitude response."""
+    loc = (locale or "en").strip().lower()[:2]
+    return GRATITUDE_REPLY_BY_LOCALE.get(loc, GRATITUDE_REPLY)
+
+
+def get_farewell_reply(locale: str = "en") -> str:
+    """Return localized farewell response."""
+    loc = (locale or "en").strip().lower()[:2]
+    return FAREWELL_REPLY_BY_LOCALE.get(loc, FAREWELL_REPLY)
+
+
+def get_greeting_next_actions(locale: str = "en") -> list[str]:
+    """Return localized next-action suggestions for a greeting turn."""
+    loc = (locale or "en").strip().lower()[:2]
+    return NEXT_ACTIONS_GREETING_BY_LOCALE.get(loc, NEXT_ACTIONS_GREETING_BY_LOCALE["en"])
+
+
+_SW_GREETING_WORDS = frozenset({
+    "habari", "hujambo", "jambo", "mambo", "shikamoo", "salaam", "salama",
+    "alamsiki", "marahaba", "hallow", "halo",
+})
+_SW_GREETING_PHRASES = frozenset({
+    "habari yako", "habari za asubuhi", "habari za mchana", "habari za jioni",
+    "habari gani", "mambo vipi", "shikamoo sana", "uhali gani", "habari za leo",
+    "hujambo bwana", "hujambo bibi", "jambo sana", "habari za kazi", "habari ya leo", "habari za kutwa",
+})
+_SW_GRATITUDE_PHRASES = frozenset({
+    "asante", "asante sana", "shukrani", "shukrani sana", "nashukuru",
+    "ahsante", "ahsante sana", "asante kwa msaada", "asante mno",
+})
+_SW_FAREWELL_PHRASES = frozenset({
+    "kwaheri", "kwaheri ya kuonana", "tutaonana", "baadaye", "usiku mwema",
+    "mchana mwema", "kwaheri sana", "siku njema", "tuonane", "kwa heri",
+})
+
+_LG_GREETING_WORDS = frozenset({"gyebale", "gyebaleko", "mwasuze"})
+_LG_GREETING_PHRASES = frozenset({
+    "oli otya", "oli otya nno", "wasuze otya", "wasuze otya nno",
+    "osiibye otya", "osiibye otya nno", "mwasuze mutya", "mwasiibye mutya",
+    "ki kati", "agafayo",
+})
+_LG_GRATITUDE_PHRASES = frozenset({
+    "webale nyo", "weebale nnyo", "weebale nyo", "webale nnyo",
+    "mwebale", "mwebale nyo", "webale ky'okoze", "neeyanzizza",
+})
+_LG_FAREWELL_PHRASES = frozenset({
+    "weeraba", "tunaalabagana", "siiba bulungi", "sula bulungi", "mpaka",
+})
+
+
+def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
+    """Identify the locale for a greeting or courtesy phrase."""
+    text = (message or "").strip().lower().strip("!.?, ")
+    words = set(text.split())
+    if (
+        words & _SW_GREETING_WORDS
+        or words & _SW_GRATITUDE_PHRASES
+        or any(p in text for p in _SW_GREETING_PHRASES | _SW_FAREWELL_PHRASES)
+    ):
+        return "sw"
+    if (
+        words & _LG_GREETING_WORDS
+        or words & _LG_GRATITUDE_PHRASES
+        or any(p in text for p in _LG_GREETING_PHRASES | _LG_FAREWELL_PHRASES)
+    ):
+        return "lg"
+    return current_locale or "en"
+
+
+_CONVERSATIONAL_PREFIX_RE = re.compile(
+    r"^(?:"
+    r"please(?:\s+tell\s+me|\s+explain|\s+clarify)?|"
+    r"could\s+you(?:\s+please)?(?:\s+tell\s+me|\s+explain|\s+clarify)?|"
+    r"can\s+you(?:\s+please)?(?:\s+tell\s+me|\s+explain|\s+clarify)?|"
+    r"i\s+(?:would\s+like|want|need)\s+to\s+know|"
+    r"i\s+need\s+to\s+understand|"
+    r"help\s+me\s+understand|"
+    r"kindly(?:\s+explain|\s+clarify|\s+tell\s+me)?|"
+    r"as\s+a\s+taxpayer|"
+    r"tell\s+me|"
+    r"bambi(?:\s+[ŋn]ŋamba|\s+mbulira)?|"
+    r"mwattu(?:\s+nnyonnyola|\s+[ŋn]ŋamba)?|"
+    r"nsaba(?:\s+onnyonnyole|\s+umbulire)?|"
+    r"njagala(?:\s+okumanya|\s+kumanya)?|"
+    r"mbadde(?:\s+njagala\s+okubuuza|\s+njagala\s+kumanya)?|"
+    r"tafadhali(?:\s+nijuze|\s+nieleze|\s+niambie)?|"
+    r"naomba(?:\s+kujua|\s+msaada|\s+kuelewa|\s+unijuze)?|"
+    r"ninataka(?:\s+kujua|\s+kuelewa)?|"
+    r"ningependa(?:\s+kujua|\s+kuelewa)?|"
+    r"nieleze\s+wazi|"
+    r"samahani(?:\s+naomba)?"
+    r")\s*[:,\-—]?\s*",
+    re.IGNORECASE,
+)
+
+
+def normalize_social_media_slang(text: str) -> str:
+    """Expand common WhatsApp and social media SMS abbreviations."""
+    t = " " + (text or "").strip() + " "
+    t = re.sub(r"\bhw\b", "how", t, flags=re.I)
+    t = re.sub(r"\bwat\b", "what", t, flags=re.I)
+    t = re.sub(r"\b(where|whr|wer|how|who|what|why)\s+a\s+(u|you)\b", r"\1 are you", t, flags=re.I)
+    t = re.sub(r"\b(where|whr|wer|how|who|what|why)\s+r\s+(u|you)\b", r"\1 are you", t, flags=re.I)
+    t = re.sub(r"\b(r|a)\s+(u|you)\b", r"are you", t, flags=re.I)
+    t = re.sub(r"\b(whr|wer)\s+(?:are\s+)?(you|u)\b", r"where are you", t, flags=re.I)
+    t = re.sub(r"\b(wat|wht)\s+(?:r|a|are)\s+(you|u)\b", r"what are you", t, flags=re.I)
+    t = re.sub(r"\bwho\s+(?:r|a)\s+(you|u)\b", r"who are you", t, flags=re.I)
+    t = re.sub(r"\bu\s+there\b", r"are you there", t, flags=re.I)
+    t = re.sub(r"\bur\b", r"your", t, flags=re.I)
+    t = re.sub(r"\bu\b", r"you", t, flags=re.I)
+    t = re.sub(r"\bgwe\s+ani\b", r"ggwe ani", t, flags=re.I)
+    return " ".join(t.split()).strip()
+
+
+def strip_conversational_prefix(text: str) -> str:
+    """Strip leading polite preambles and interrogative framing across EN, LG, and SW."""
+    cleaned = normalize_social_media_slang(text)
+    return _CONVERSATIONAL_PREFIX_RE.sub("", cleaned).strip()
 
 CLARIFICATION_PROMPT = (
     "Of course — I'd be happy to help. Could you share a little more detail? "
@@ -469,9 +900,24 @@ ESCALATION_REPLY_FOOTER = (
 
 CONTACT_FOOTER = (
     "If you get stuck at any step, URA is happy to help: visit "
-    "https://ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or "
+    "https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or "
     "WhatsApp 0772 140 000."
 )
+
+# CONTACT_FOOTER as localize_reply re-attaches it to a translated answer (the
+# footer itself never goes through MT, so its numbers cannot be mangled).
+LOCALIZED_CONTACT_FOOTERS = {
+    "lg": (
+        "Bw'oba ng'osanze obuzibu bwonna mu mitendera gyonna, URA yeesunga okuyamba: "
+        "genda ku https://ura.go.ug, email services@ura.go.ug, oba okukuba essimu ku "
+        "nnamba etali ya kusasulira 0800 117 000 / 0800 217 000, oba WhatsApp 0772 140 000."
+    ),
+    "sw": (
+        "Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari "
+        "kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu "
+        "bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000."
+    ),
+}
 
 GROUNDED_REVISION_PREAMBLE = (
     "Here's the most relevant guidance I found in official URA sources:"

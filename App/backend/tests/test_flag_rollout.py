@@ -241,7 +241,13 @@ class VariantAndDescribeTests(_FlagHarness):
 
 class ProtectedFlagTests(unittest.TestCase):
     def test_safety_flags_cannot_be_toggled_from_the_ui(self) -> None:
-        for name in ("auth_required", "multi_tenant", "audit_ledger", "voice_consent"):
+        for name in (
+            "auth_required",
+            "multi_tenant",
+            "audit_ledger",
+            "ticket_queue",
+            "voice_consent",
+        ):
             self.assertTrue(is_protected(name), name)
 
     def test_retrieval_flags_are_not_protected(self) -> None:

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { normalizeLocale } from '../lib/locales';
+import type { DocumentAnalysisData } from '../lib/attachments';
 
 export interface Citation {
   ref: string;
@@ -18,6 +19,55 @@ export interface ChatAttachment {
   id: string;
   name: string;
   docType?: string;
+  analysis?: DocumentAnalysisData;
+}
+
+export interface ContextResource {
+  id?: string;
+  title: string;
+  type: 'downloadable_form' | 'online_form' | 'statutory_source' | 'guide' | string;
+  format?: 'xlsx' | 'pdf' | 'docx' | 'web' | string;
+  size?: string;
+  url: string;
+  description?: string;
+  citation?: string;
+  tax_head?: string;
+  checklist?: string[];
+  is_verified?: boolean;
+  verification_badge?: string;
+  effective_year?: string;
+  source_domain?: string;
+}
+
+export interface WorkflowStepSummary {
+  id: string;
+  title: string;
+  status: 'completed' | 'current' | 'pending';
+  slot?: string;
+  ui_widget?: string;
+  options?: string[];
+  portal_action?: { label: string; url: string; selector?: string } | null;
+  resources?: ContextResource[];
+}
+
+export interface WorkflowState {
+  id: string;
+  name: string;
+  status: 'active' | 'completed' | 'cancelled';
+  current_step_idx?: number;
+  step_index?: number;
+  total_steps?: number;
+  step_id?: string;
+  step_title?: string;
+  ui_widget?: 'options' | 'boolean' | 'text' | 'number' | 'portal_action' | string;
+  options?: string[];
+  portal_action?: { label: string; url: string; selector?: string } | null;
+  all_steps?: WorkflowStepSummary[];
+  resources?: ContextResource[];
+  filled_slots?: string[];
+  masked_slots?: string[];
+  pending_slot?: string;
+  completed?: boolean;
 }
 
 export interface ChatTurn {
@@ -30,6 +80,12 @@ export interface ChatTurn {
   retrievalMode?: string;
   escalationRequired?: boolean;
   escalationReason?: string;
+  /** Suggested follow-up action chips offered by the assistant */
+  nextActions?: string[];
+  /** Active multi-step workflow status and interactive stepper state */
+  workflow?: WorkflowState;
+  /** Relevant downloadable forms, online portal links, and statutory sources */
+  resources?: ContextResource[];
   /** Whether this turn was answered from the offline RAG pipeline */
   offlineMode?: boolean;
   /** Documents attached to this (user) turn */
@@ -57,6 +113,8 @@ export interface Conversation {
    * Without this flag a rename survives only until the next turn is saved.
    */
   titleCustom?: boolean;
+  /** Active escalation ticket ID associated with this conversation */
+  activeTicketId?: string;
 }
 
 /**
@@ -92,10 +150,14 @@ interface ChatStore {
   // Session management
   conversations: Conversation[];
   activeConversationId: string | null;
+  activeTicketId: string | null;
+  supportCaseOpen: boolean;
   // Actions
   setMessage: (value: string) => void;
   setSpeechState: (state: SpeechState) => void;
   setLocale: (locale: string) => void;
+  setActiveTicketId: (ticketId: string | null) => void;
+  setSupportCaseOpen: (open: boolean) => void;
   addTurns: (turns: ChatTurn[]) => void;
   updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
   reset: () => void;
@@ -128,15 +190,7 @@ const GREETING: ChatTurn = {
 export function createTurn(
   role: 'user' | 'assistant',
   content: string,
-  meta?: {
-    citations?: Citation[];
-    faithfulnessScore?: number | null;
-    retrievalMode?: string;
-    escalationRequired?: boolean;
-    escalationReason?: string;
-    attachments?: ChatAttachment[];
-    thoughtForMs?: number;
-  },
+  meta?: Partial<Omit<ChatTurn, 'id' | 'role' | 'content' | 'timestamp'>>,
 ): ChatTurn {
   return { id: generateId(), role, content, timestamp: Date.now(), ...meta };
 }
@@ -233,6 +287,7 @@ function sanitizeConversation(value: unknown): Conversation | null {
   };
   if (value.pinned === true) conversation.pinned = true;
   if (value.titleCustom === true) conversation.titleCustom = true;
+  if (typeof value.activeTicketId === 'string' && value.activeTicketId) conversation.activeTicketId = value.activeTicketId;
   return conversation;
 }
 
@@ -352,21 +407,56 @@ function looksLikeThinking(block: string): boolean {
   return THINKING_SIGNALS.some((rx) => rx.test(trimmed));
 }
 
-export function normalizeAssistantResponse(text: string): string {
+/** Strip internal telemetry/metadata/agent trace JSON blobs and thinking blocks that leak into prose. */
+export function stripTelemetryJson(text: string): string {
+  if (!text) return '';
   return text
+    // Strip thinking and scratchpad tags (<think>...</think>, <thought>...</thought>, etc.), including unclosed
+    .replace(/<(?:think|thought|reasoning|scratchpad)[^>]*>[\s\S]*?(?:<\/(?:think|thought|reasoning|scratchpad)>|$)/gi, '')
+    // Strip ```thought / ```thinking code blocks
+    .replace(/```(?:thought|thinking)[\s\S]*?```/gi, '')
+    .replace(/\b(?:translation|retrieval|generation|iteration|tool_call)\.(?:started|completed)\b\s*/g, '')
+    .replace(/\{[^{}]*"(?:sources|workflow|retrieval_mode)"[^{}]*\{[^{}]*\}[^{}]*\}/g, '')
+    .replace(/\{[^{}]*"(?:sources|retrieval_mode|faithfulness_score)"[^{}]*\}/g, '')
+    .replace(/\[\s*\{\s*"type"\s*:\s*"(?:retrieval|iteration|tool_call)\.[^\]]*?\]/g, '')
+    .trim();
+}
+
+export function normalizeAssistantResponse(text: string): string {
+  const stripped = stripTelemetryJson(text);
+  return stripped
     .replace(/\r\n?/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
-    .replace(/(^|\n)\s*(\d+)\)\s+/g, '$1$2. ')
-    .replace(/(^|\n)\s*\u2022\s+/g, '$1- ')
-    .replace(/(^|\n)\s*([*+])\s+/g, '$1- ')
+    // Unsmash lead-ins into first numbered item (e.g. 'steps:1.**' or 'steps: 1.')
+    .replace(/(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[\.\)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
+    // A sentence boundary before a step ('taxes.2.**'). A rate ('VAT 18. File') has no boundary.
+    .replace(/(?<!\d)([;:\.!?])[ \t]*(\d{1,2})[.)][ \t]*(\*{0,2}[A-Za-z])/g, '$1\n\n$2. $3')
+    // A word glued to a step ('template2. Enable'), not a section or a rate ('Section5', 'VAT18').
+    .replace(
+      /(^|[^A-Za-z])(?!(?:section|article|schedule|form|act|rule|clause|paragraph|vat|paye|wht|tin|cit|pit|ugx|efris|rate|percent)\d)([A-Za-z]{3,})([1-9]|1[0-2])[.)][ \t]*(\*{0,2}[A-Za-z])/gi,
+      '$1$2.\n\n$3. $4',
+    )
+    // Separate closing/assistance paragraphs (e.g. 'month.For assistance' -> 'month.\n\nFor assistance')
+    .replace(/([a-z0-9\)])\.\s*(?=(?:For assistance|If you (?:need|get)|Contact URA|Please note|Note:))/gi, '$1.\n\n')
+    // Standardize numbered lists: "1) Item" or "1. Item" -> "1. Item"
+    .replace(/(^|\n)\s*(\d+)[\.)]\s+/g, '$1$2. ')
+    // Standardize unordered bullets: "*", "+", "•" -> "- "
+    .replace(/(^|\n)\s*[\u2022*+]\s+/g, '$1- ')
+    // Emphasize title before colon on bullet lists: "- Tax Administration: text" -> "- **Tax Administration**: text"
+    .replace(/(^|\n)-\s+([A-Z][A-Za-z0-9\s/&-]{1,60}):\s+/g, '$1- **$2**: ')
+    // Emphasize title before colon on numbered lists: "1. Registration: text" -> "1. **Registration**: text"
+    .replace(/(^|\n)(\d+\.)\s+([A-Z][A-Za-z0-9\s/&-]{1,60}):\s+/g, '$1$2 **$3**: ')
     .replace(/([.!?])\s+(?=(Note|Important|Tip|Warning|Caution|Summary):\s)/g, '$1\n\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
 export function cleanResponse(text: string): string {
-  let cleaned = text.trim();
+  let cleaned = stripTelemetryJson(text);
   if (!cleaned) return cleaned;
+
+  // Strip internal model scratchpad thoughts
+  cleaned = cleaned.replace(/<(?:thought|think)>[\s\S]*?<\/(?:thought|think)>\s*/gi, '').trim();
 
   // Split into paragraph blocks
   const blocks = cleaned.split('\n\n').filter((b) => b.trim());
@@ -408,6 +498,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   locale: 'en',
   conversations: [] as Conversation[],
   activeConversationId: null as string | null,
+  activeTicketId: null as string | null,
+  supportCaseOpen: false,
 
   setMessage: (value) => set({ message: value }),
   setSpeechState: (state) => set({ speechState: state }),
@@ -415,6 +507,21 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     set({ locale: normalizeLocale(locale) });
     writePersistedChatState(get());
   },
+  setActiveTicketId: (ticketId) => {
+    const cid = get().activeConversationId;
+    if (cid) {
+      set((state) => ({
+        activeTicketId: ticketId,
+        conversations: state.conversations.map((c) =>
+          c.id === cid ? { ...c, activeTicketId: ticketId || undefined } : c
+        ),
+      }));
+      get().saveCurrentSession();
+    } else {
+      set({ activeTicketId: ticketId });
+    }
+  },
+  setSupportCaseOpen: (open) => set({ supportCaseOpen: open }),
 
   addTurns: (turns) =>
     set((s) => {
@@ -437,6 +544,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       speechState: 'idle',
       locale: 'en',
       activeConversationId: null,
+      activeTicketId: null,
+      supportCaseOpen: false,
     });
     writePersistedChatState(get());
   },
@@ -491,7 +600,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   createNewSession: () => {
     const { saveCurrentSession } = get();
     saveCurrentSession();
-    set({ chat: [GREETING], message: '', activeConversationId: null });
+    set({
+      chat: [GREETING],
+      message: '',
+      activeConversationId: null,
+      activeTicketId: null,
+      supportCaseOpen: false,
+    });
     writePersistedChatState(get());
   },
 
@@ -501,7 +616,13 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     saveCurrentSession();
     const target = get().conversations.find((c) => c.id === id);
     if (!target) return;
-    set({ chat: target.turns, activeConversationId: id, message: '' });
+    set({
+      chat: target.turns,
+      activeConversationId: id,
+      message: '',
+      activeTicketId: target.activeTicketId || null,
+      supportCaseOpen: false,
+    });
     writePersistedChatState(get());
   },
 

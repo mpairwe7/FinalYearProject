@@ -335,6 +335,55 @@ class TestVoiceChatBudget(unittest.TestCase):
         speech.synthesize.assert_called_once()
 
 
+class TestVoiceChatReplyLanguage(unittest.TestCase):
+    """/v1/voice/chat speaks the reply in the language it is written in."""
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+
+        from app import database as db
+        from app import main as main_module
+
+        db.init_db()
+        cls.main = main_module
+        cls.client = TestClient(main_module.app)
+
+    def _speak_luganda_turn(self, reply: str, reply_locale: str) -> MagicMock:
+        speech = MagicMock()
+        speech.transcribe.return_value = TranscribeResult(
+            text="Omusolo gwa VAT guli ssente mmeka?", language="lg",
+            duration_s=1.0, latency_s=0.1, backend="mock",
+        )
+        speech.synthesize.return_value = SynthesizeResult(
+            audio=b"RIFF" + b"\x00" * 200, sample_rate=22050, num_samples=200,
+            duration_s=1.0, latency_s=0.1, backend="mock", voice="v",
+        )
+        model = MagicMock()
+        model.generate.return_value = {
+            "reply": reply, "reply_locale": reply_locale, "sources": [], "citations": [],
+            "faithfulness_score": None, "retrieval_mode": "calculator", "conversation_id": "vc2",
+        }
+        self.main.app.state.speech = speech
+        self.main.app.state.model = model
+        with patch.object(self.main, "VOICE_CHAT_BUDGET_S", 999.0):
+            resp = self.client.post(
+                "/v1/voice/chat?language=lg&sample_rate=16000&tts_enabled=true",
+                content=b"\x00\x01" * 800,
+                headers={"Content-Type": "application/octet-stream", "X-Voice-Consent": "true"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        return speech
+
+    def test_an_english_fallback_is_spoken_with_the_english_voice(self) -> None:
+        speech = self._speak_luganda_turn("The standard VAT rate in Uganda is 18%.", "en")
+        self.assertEqual(speech.synthesize.call_args.kwargs["language"], "en")
+
+    def test_a_translated_reply_keeps_the_callers_voice(self) -> None:
+        speech = self._speak_luganda_turn("Omusolo gwa VAT guli ebitundu 18 ku kikumi.", "lg")
+        self.assertEqual(speech.synthesize.call_args.kwargs["language"], "lg")
+
+
 class TestSunbirdRetry(unittest.TestCase):
     def _response(self, status: int, headers: dict | None = None):
         import httpx

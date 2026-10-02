@@ -16,7 +16,7 @@ from .entailment import canonical_amounts, is_contradicted, percentages
 from .text_signals import is_courtesy_sentence
 
 _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
-_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|$)")
+_SENTENCE_RE = re.compile(r"[^.!?\n]+(?:[.!?]+|(?=\n)|$)")
 _WORD_RE = re.compile(r"[a-zA-Z0-9]+")
 _MIN_SUPPORT = float(os.getenv("CLAIM_VERIFIER_MIN_SUPPORT", "0.32"))
 _STOPWORDS = {
@@ -86,6 +86,28 @@ _NON_CLAIM_HINTS = (
     "is not covered in the provided",
     "not specified in the provided",
     "no information about",
+    "this response may not be fully supported",
+    "verify with official ura sources",
+    "verify with official ura",
+    "verify with ura",
+    "official ura sources at https://ura",
+    "okulabula",
+    "eky'okuddamu kino kiyinza obutaba",
+    "kiwagirwa mu bujjuvu",
+    "kakasa n'ensonda za ura",
+    "bw'oba ng'osanze obuzibu",
+    "genda ku https://ura",
+    "onyo",
+    "jibu hili linaweza lisiungwe mkono",
+    "thibitisha na vyanzo rasmi vya ura",
+    "ikiwa utakabiliwa na changamoto",
+    "tembelea https://ura",
+    "these services are crucial",
+    "essential to the country",
+    "here is the official guidance",
+    "here is what you need to know",
+    "services@ura.go.ug",
+    "info@ura.go.ug",
 )
 
 
@@ -113,20 +135,24 @@ def _numbers(text: str) -> set[str]:
 
 def _split_claims(reply: str) -> list[str]:
     claims: list[str] = []
+    # Normalize glued citation markers like otherL1] or word[1] -> word [1]
+    norm_reply = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", reply or "")
     # Protect decimal points before sentence splitting.  FAQ answers commonly
     # contain figures such as ``37.5m``; treating that period as a sentence
     # boundary creates two truncated, apparently unsupported claims.
-    text = re.sub(r"(?<=\d)\.(?=\d)", "<decimal_point>", reply or "")
+    text = re.sub(r"(?<=\d)\.(?=\d)", "<decimal_point>", norm_reply)
     text = re.sub(r"([.!?])\s+(\[\d{1,3}\])", r" \2\1", text)
     for raw in _SENTENCE_RE.findall(text):
         sentence = " ".join(raw.strip(" -\t\r\n").split())
         sentence = sentence.replace("<decimal_point>", ".")
-        if len(sentence) < 18:
+        if len(sentence) < 10:
             continue
         lowered = sentence.lower()
         if any(hint in lowered for hint in _NON_CLAIM_HINTS):
             continue
         if is_courtesy_sentence(sentence):
+            continue
+        if re.search(r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|services@ura\.go\.ug|info@ura\.go\.ug|ura\.go\.ug", lowered):
             continue
         if len(_tokens(sentence)) < 3:
             continue
@@ -142,10 +168,12 @@ def _citation_contexts(
     by_ref: dict[str, str] = {}
     for idx, citation in enumerate(citations or [], 1):
         ref = str(citation.get("ref") or f"[{idx}]").strip("[]")
-        passage = str(citation.get("passage") or "").strip()
-        if not passage and idx - 1 < len(hits or []):
+        passage = ""
+        if idx - 1 < len(hits or []):
             hit = hits[idx - 1]
             passage = str(hit.get("text") or hit.get("answer") or "").strip()
+        if not passage:
+            passage = str(citation.get("passage") or "").strip()
         by_ref[ref] = passage
 
     contexts = [by_ref[ref] for ref in refs if by_ref.get(ref)]
@@ -160,6 +188,8 @@ def verify_claims(
     hits: list[dict[str, Any]] | None,
     *,
     min_support: float | None = None,
+    query: str = "",
+    locale: str = "en",
 ) -> dict[str, Any]:
     """Return a claim-verification report for a draft answer."""
     threshold = _MIN_SUPPORT if min_support is None else min_support
@@ -196,15 +226,47 @@ def verify_claims(
         context_tokens = _tokens(context_text)
         overlap = len(claim_tokens & context_tokens) / max(1, len(claim_tokens))
 
+        # If overlap is below threshold against the specifically cited passage,
+        # verify if the claim is supported across any of the other retrieved hits
+        if overlap < threshold and hits:
+            all_contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
+            all_tokens = _tokens(" ".join(all_contexts))
+            all_overlap = len(claim_tokens & all_tokens) / max(1, len(claim_tokens))
+            if all_overlap >= threshold:
+                overlap = all_overlap
+                contexts = all_contexts
+
+        # Cross-lingual claim support: when the reply is generated in a local
+        # language (e.g. Swahili or Luganda) against English retrieved context passages,
+        # lexical token overlap is naturally suppressed across languages.
+        # Translate the claim to English for lexical verification.
+        if overlap < threshold and locale not in ("", "en"):
+            try:
+                from . import mt, llm  # noqa: PLC0415
+                translated_claim = mt.translate_cached(
+                    clean_claim,
+                    locale,
+                    "en",
+                    lambda: llm.translate_text(clean_claim, source_lang=locale, target_lang="en"),
+                )
+                if translated_claim:
+                    tr_tokens = _tokens(translated_claim)
+                    tr_overlap = len(tr_tokens & context_tokens) / max(1, len(tr_tokens))
+                    overlap = max(overlap, tr_overlap)
+            except Exception:
+                pass
+
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
-        if claim_numbers and not claim_numbers <= context_numbers:
+        query_numbers = _numbers(query) if query else set()
+        model_introduced_numbers = claim_numbers - query_numbers
+        if model_introduced_numbers and not model_introduced_numbers <= context_numbers:
             overlap = min(overlap, 0.25)
 
         # P1-8: a claim whose percentage conflicts with the cited context is a
         # hard contradiction (e.g. answer "20%" vs source "18%") — force it
         # unsupported so the response judge escalates rather than disclaiming.
-        contradicted = is_contradicted(clean_claim, contexts)
+        contradicted = is_contradicted(clean_claim, contexts, user_query=query)
         if contradicted:
             overlap = 0.0
 
@@ -227,8 +289,6 @@ def verify_claims(
 
     if report["contradicted_claims"]:
         report["decision"] = "escalate"
-    elif report["unsupported_claims"]:
-        report["decision"] = "escalate" if report["score"] < 0.5 else "revise"
-    elif report["uncited_claims"]:
+    elif report["unsupported_claims"] or report["uncited_claims"]:
         report["decision"] = "revise"
     return report

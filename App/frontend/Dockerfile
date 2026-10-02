@@ -5,22 +5,22 @@
 # =============================================================================
 
 # Stage 1: Install dependencies
-FROM oven/bun:1.4.0-slim AS deps
+FROM oven/bun:1.4.2-slim AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Stage 2: Build the Next.js application
-FROM oven/bun:1.4.0-slim AS builder
+FROM oven/bun:1.4.2-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:8087
 ARG INTERNAL_API_URL=http://127.0.0.1:8887
-ARG NEXT_PUBLIC_OIDC_ISSUER=""
-ARG NEXT_PUBLIC_OIDC_CLIENT_ID=""
-ARG NEXT_PUBLIC_OIDC_AUDIENCE=""
+ARG NEXT_PUBLIC_OIDC_ISSUER="https://dev-s16d7m00eyrksjy2.us.auth0.com/"
+ARG NEXT_PUBLIC_OIDC_CLIENT_ID="jjOlcY4Td9AmmaQZIPkxEY6dLO60YagX"
+ARG NEXT_PUBLIC_OIDC_AUDIENCE="https://ura-chatbot/api"
 ARG NEXT_PUBLIC_OIDC_SCOPE=""
 # Must match a value registered at the provider (Auth0 "Allowed Logout URLs").
 # Those are matched exactly: our HF Space is registered with /signin, the ngrok
@@ -40,16 +40,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
 # Stage 3: Production runtime (minimal Node.js image)
-# Next.js 16 requires Node.js 20.9+ — pin to a specific 20 LTS patch to
-# guarantee the floor at build time and prevent silent downgrades.
-FROM node:20.18-slim AS runner
+# Next.js 16 requires Node.js 20.9+ — use actively-maintained Node.js LTS with latest security patches.
+FROM node:26-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Non-root user for security
-RUN groupadd --gid 10001 appuser && \
+# Security updates, strip unused build tools (npm/yarn/corepack) to eliminate CVEs in bundled CLI deps, and create non-root user
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* && \
+    rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn* /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/corepack && \
+    groupadd --gid 10001 appuser && \
     useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser
 
 # Copy standalone output from builder

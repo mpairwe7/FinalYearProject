@@ -30,10 +30,13 @@ from enum import Enum
 class DocumentType(str, Enum):
     RECEIPT = "receipt"
     TIN_CARD = "tin_card"
+    NATIONAL_ID = "national_id"
     ASSESSMENT = "assessment"
     CUSTOMS_DECLARATION = "customs_declaration"
     FILING_FORM = "filing_form"
     INVOICE = "invoice"
+    STATUTORY_ACT = "statutory_act"
+    PORTAL_SCREENSHOT = "portal_screenshot"
     GENERIC = "generic"
 
 
@@ -49,6 +52,46 @@ class ClassificationResult:
 # ---------------------------------------------------------------------------
 
 _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
+    # National Identity Card (NIRA Uganda)
+    (
+        DocumentType.NATIONAL_ID,
+        re.compile(
+            r"national\s+identity\s+card|republic\s+of\s+uganda.*identity|"
+            r"national\s+identification\s+registration\s+authority|\bnira\b|"
+            r"(?:given\s+names?|surname).*(?:date\s+of\s+birth|\bnin\b)|\b[C][MFR][0-9A-Z]{12}\b",
+            re.I,
+        ),
+        0.96,
+    ),
+    # Statutory Acts, Domestic Tax Laws, and Legal Compendiums
+    (
+        DocumentType.STATUTORY_ACT,
+        re.compile(
+            r"domestic\s+tax\s+laws|tax\s+laws\s+of\s+uganda|income\s+tax\s+act|"
+            r"value\s+added\s+tax\s+act|tax\s+procedures?\s+code\s+act|"
+            r"reprint\s+of\s+various\s+tax\s+laws|compendium.*tax\s+laws|"
+            r"statutory\s+act|acts\s+of\s+parliament|tax\s+statute|"
+            r"finance\s+acts?\s+20\d{2}",
+            re.I,
+        ),
+        0.96,
+    ),
+    # URA Web Portals, Error Screens, and Portal Screenshots
+    (
+        DocumentType.PORTAL_SCREENSHOT,
+        re.compile(
+            r"portal\.ura\.go\.ug|e-?services?\.ura\.go\.ug|efris\.ura\.go\.ug|"
+            r"ura\s+web\s+portal|login\s+to\s+e-?services|e-?tax\s+portal|"
+            r"generate\s+prn|search\s+prn|prn\s+generation|"
+            r"error\s+(code\s*)?500|error\s+(code\s*)?404|session\s+expired|"
+            r"internal\s+server\s+error|failed\s+to\s+submit|mandatory\s+field|"
+            r"payment\s+registration\s+number\s*\(prn\)|bank\s+selection|"
+            r"efris\s+web|stock\s+reconciliation|taxpayer\s+dashboard|"
+            r"browser\s+not\s+supported|connection\s+timed\s+out|invalid\s+tin\s+format",
+            re.I,
+        ),
+        0.95,
+    ),
     # EFRIS and electronic receipts are high-priority
     (
         DocumentType.RECEIPT,
@@ -80,6 +123,16 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
         ),
         0.88,
     ),
+    # Invoices (including Tax Invoices and E-Invoices)
+    (
+        DocumentType.INVOICE,
+        re.compile(
+            r"(commercial\s+|pro\s*forma\s+)?invoice|"
+            r"tax\s+invoice|vat\s+invoice|e-?invoice|fiscal\s+invoice",
+            re.I,
+        ),
+        0.88,
+    ),
     # Customs declarations
     (
         DocumentType.CUSTOMS_DECLARATION,
@@ -91,26 +144,17 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
         ),
         0.88,
     ),
-    # Filing forms and returns
+    # Filing forms, returns, and payroll schedules
     (
         DocumentType.FILING_FORM,
         re.compile(
             r"(tax\s+)?return\s+(form|filing)|annual\s+return|"
             r"vat\s+return|income\s+tax\s+return|"
-            r"paye\s+return|cit\s+return|excise\s+return",
+            r"paye\s+(return|schedule)|cit\s+return|excise\s+return|"
+            r"payroll\s+schedule",
             re.I,
         ),
         0.86,
-    ),
-    # Invoices
-    (
-        DocumentType.INVOICE,
-        re.compile(
-            r"(commercial\s+|pro\s*forma\s+)?invoice|"
-            r"tax\s+invoice|vat\s+invoice",
-            re.I,
-        ),
-        0.82,
     ),
     # Generic receipt fallback (lower priority)
     (

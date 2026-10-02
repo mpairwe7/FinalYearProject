@@ -4,7 +4,8 @@
  * Exercises the browser side of the STT/TTS surface against a fully stubbed
  * `/api/*` (see helpers.ts): the real getUserMedia → MediaRecorder → AudioContext
  * capture pipeline runs against Chromium's fake media device, and the captured
- * audio is POSTed to the stubbed `/v1/voice/chat` and `/v1/tts`. We assert the UI
+ * audio is POSTed to the stubbed `/v1/voice/chat`, and replies are read from the
+ * stubbed `/v1/tts/stream` (or `/v1/tts`, its fallback). We assert the UI
  * state machine and the *request contract* (raw-audio body, consent header,
  * sample-rate query) rather than transcription accuracy (the fake mic is silent).
  *
@@ -15,8 +16,10 @@
  * are CSS-hidden below 720px and skip on mobile-chrome, where the equivalent
  * flow lives in the composer (see voice.mobile.spec.ts).
  */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
+import { silentWavB64 } from "./audio";
+import { TINY_WAV_B64 } from "./fixtures";
 import { clearChatStore, mockBackend, seedConsent, sendMessage } from "./helpers";
 
 // Desktop-only: some composer controls are hidden <720px.
@@ -58,6 +61,31 @@ async function assertNoSpeechApi(page: import("@playwright/test").Page) {
   expect(visible, "Speech API still reachable — the fallback branch was not exercised").toBe(false);
 }
 
+/**
+ * A microphone that says something for 1.5 s, then goes quiet.
+ *
+ * A 500 Hz tone, in the band the end-of-turn meter listens to, at about
+ * -23 dBFS. Chromium's own fake device only beeps, which is not speech.
+ */
+async function speakThenPause(page: Page) {
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const ac = new AudioContext();
+      const voice = ac.createOscillator();
+      voice.frequency.value = 500;
+      const level = ac.createGain();
+      level.gain.value = 0;
+      const out = ac.createMediaStreamDestination();
+      voice.connect(level).connect(out);
+      voice.start();
+      const at = ac.currentTime + 0.5;
+      level.gain.setValueAtTime(0.1, at);
+      level.gain.setValueAtTime(0, at + 1.5);
+      return out.stream;
+    };
+  });
+}
+
 test.describe("Voice STT/TTS (mocked)", () => {
   test.beforeEach(async ({ page }) => {
     await seedConsent(page);
@@ -92,7 +120,7 @@ test.describe("Voice STT/TTS (mocked)", () => {
     await expect(page.getByRole("button", { name: "Start speaking" })).toBeEnabled();
   });
 
-  test("recording a turn POSTs raw audio + consent to /v1/voice/chat and renders transcript + reply", async ({
+  test("recording a turn POSTs WAV audio + consent to /v1/voice/chat and renders transcript + reply", async ({
     page,
   }, testInfo) => {
     test.skip(testInfo.project.name === "mobile-chrome", HEADER_ONLY);
@@ -114,7 +142,9 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
     const req = await voiceReq;
     expect(req.method()).toBe("POST");
-    expect((req.headers()["content-type"] || "")).toContain("application/octet-stream");
+    // WAV, not headerless PCM: a recording starting on sample -1 (FF FF) was sniffed as MP3 (G93).
+    expect((req.headers()["content-type"] || "")).toContain("audio/wav");
+    expect(req.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
     expect(req.headers()["x-voice-consent"]).toBe("true");
     expect(req.url()).toContain("sample_rate=");
 
@@ -127,8 +157,29 @@ test.describe("Voice STT/TTS (mocked)", () => {
     });
   });
 
-  test("listening to a reply calls /v1/tts with the reply text", async ({ page }) => {
+  test("listening to a reply streams its speech from /v1/tts/stream", async ({ page }) => {
     await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+
+    const streamReq = page.waitForRequest("**/api/v1/tts/stream");
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    const req = await streamReq;
+    expect(req.method()).toBe("POST");
+    const body = req.postDataJSON();
+    expect(body.language).toBe("en");
+    expect(typeof body.text).toBe("string");
+    expect(body.text.length).toBeGreaterThan(0);
+    // Opus where the browser plays it, else WAV.
+    expect(["opus", "wav"]).toContain(body.format);
+  });
+
+  test("listening falls back to /v1/tts when the stream is unavailable", async ({ page }) => {
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.route("**/api/v1/tts/stream", (route) => route.fulfill({ status: 503, body: "down" }));
     await page.goto("/");
     await sendMessage(page, "What is the VAT rate?");
     await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
@@ -137,12 +188,139 @@ test.describe("Voice STT/TTS (mocked)", () => {
 
     const ttsReq = page.waitForRequest("**/api/v1/tts");
     await page.getByRole("button", { name: /Listen in English/ }).last().click();
-    const req = await ttsReq;
-    expect(req.method()).toBe("POST");
-    const body = req.postDataJSON();
+    const body = (await ttsReq).postDataJSON();
     expect(body.language).toBe("en");
-    expect(typeof body.text).toBe("string");
     expect(body.text.length).toBeGreaterThan(0);
+  });
+
+  test("stopping a read-aloud while it loads also stops its whole-reply fallback", async ({ page }) => {
+    await page.addInitScript(() => {
+      const start = AudioBufferSourceNode.prototype.start;
+      AudioBufferSourceNode.prototype.start = function (...args) {
+        const w = window as unknown as { __played?: number };
+        w.__played = (w.__played ?? 0) + 1;
+        return start.apply(this, args);
+      };
+    });
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.route("**/api/v1/tts/stream", (route) => route.fulfill({ status: 503, body: "down" }));
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/tts", async (route) => {
+      await held;
+      await route.fulfill({
+        json: { sample_rate: 22050, num_samples: 1102, duration_s: 0.05, latency_s: 0.1,
+                backend: "stub", voice: "stub", audio_base64: TINY_WAV_B64, error: null },
+      });
+    });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+
+    // The stream fails, so the whole reply is fetched; the reader stops it meanwhile.
+    const fallback = page.waitForRequest("**/api/v1/tts");
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    await fallback;
+    await page.getByRole("button", { name: "Stop listening" }).last().click();
+    release();
+    await page.waitForTimeout(1000);
+    expect(await page.evaluate(() => (window as unknown as { __played?: number }).__played ?? 0)).toBe(0);
+    await expect(page.getByRole("button", { name: /Listen in English/ }).last()).toBeEnabled();
+  });
+
+  test("voice mode sends the turn by itself when the speaker pauses", async ({ page }) => {
+    test.slow(); // a real recording window, then the pause
+    await speakThenPause(page);
+    await mockBackend(page);
+    await page.goto("/");
+
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    const voiceReq = page.waitForRequest("**/api/v1/voice/chat**", { timeout: 15_000 });
+    await page.locator('[data-testid="composer-mic"]').click();
+    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Sends when you pause.", { exact: false })).toBeVisible();
+
+    // No tap on the checkmark: 1.5 s of sound, then 1.2 s of quiet sends it.
+    const req = await voiceReq;
+    expect(req.postDataBuffer()?.subarray(0, 4).toString("ascii")).toBe("RIFF");
+    await expect(page.locator('[data-testid="composer-rec-confirm"]')).toBeHidden();
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+  });
+
+  test("voice mode closes a mic that heard nothing, and sends nothing", async ({ page }) => {
+    test.slow(); // waits out the 8 s of silence
+    await mockBackend(page);
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/v1/voice/chat")) sent.push(r.url());
+    });
+    await page.goto("/");
+
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    await page.locator('[data-testid="composer-mic"]').click();
+    const confirm = page.locator('[data-testid="composer-rec-confirm"]');
+    await expect(confirm).toBeVisible({ timeout: 10_000 });
+
+    // Chromium's fake device is silence with a short beep every 500 ms: nothing
+    // a person said, so after 8 s the mic closes by itself and says why.
+    await expect(confirm).toBeHidden({ timeout: 15_000 });
+    await expect(page.getByText("I didn’t hear anything", { exact: false })).toBeVisible();
+    expect(sent).toEqual([]);
+  });
+
+  test("voice mode listens again once the reply has been read", async ({ page }) => {
+    test.slow(); // two spoken turns
+    await speakThenPause(page);
+    await mockBackend(page);
+    const sent: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/v1/voice/chat")) sent.push(r.url());
+    });
+    await page.goto("/");
+
+    await page.locator('[data-testid="composer-voicemode"]').click();
+    await page.locator('[data-testid="composer-mic"]').click();
+    // The first turn sends itself; its reply is read (one short piece); then the
+    // mic opens again with no tap, and the second turn sends itself too.
+    await expect.poll(() => sent.length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
+  });
+
+  test("opening the mic silences a reply being read aloud", async ({ page }) => {
+    await page.addInitScript(() => {
+      const stop = AudioBufferSourceNode.prototype.stop;
+      AudioBufferSourceNode.prototype.stop = function (...args) {
+        const w = window as unknown as { __stopped?: number };
+        w.__stopped = (w.__stopped ?? 0) + 1;
+        return stop.apply(this, args);
+      };
+    });
+    await withoutSpeechApi(page);
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    // A reply that takes 20 s to read.
+    await page.route("**/api/v1/tts/stream", (route) =>
+      route.fulfill({
+        contentType: "application/x-ndjson",
+        body: `${JSON.stringify({ seq: 0, text: "long", format: "wav", audio_base64: silentWavB64(20), duration_s: 20 })}\n${JSON.stringify({ done: true, pieces: 1, failed: 0 })}\n`,
+      }),
+    );
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", {
+      timeout: 15_000,
+    });
+    await page.getByRole("button", { name: /Listen in English/ }).last().click();
+    await expect(page.getByRole("button", { name: "Stop listening" }).last()).toBeVisible();
+
+    // Dictate over it: the reply stops at once, rather than being recorded too.
+    await page.getByRole("button", { name: "Start speaking" }).click();
+    await expect(page.getByRole("button", { name: "Stop and insert text" })).toBeVisible({ timeout: 10_000 });
+    expect(await page.evaluate(() => (window as unknown as { __stopped?: number }).__stopped ?? 0)).toBeGreaterThan(0);
   });
 
   test("dictation still works with no browser Speech API", async ({ page }) => {

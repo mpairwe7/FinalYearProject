@@ -298,9 +298,7 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
     REDIS_MAXMEMORY=192mb \
     FLAG_WS_CHAT=false \
     FLAG_TOOL_USE=false \
-    FLAG_AGENTIC_MODE=false \
-    FLAG_AUTH_REQUIRED=false \
-    AUTH_ALG=HS256
+    FLAG_AGENTIC_MODE=false
 
 # Both embedded stores are verified here, at build time, against the ENV set
 # above. Neither is fail-closed at runtime by design — wait-for-qdrant.sh starts

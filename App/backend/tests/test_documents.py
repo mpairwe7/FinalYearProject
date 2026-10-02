@@ -28,11 +28,10 @@ os.environ.setdefault("QDRANT_ENABLED", "false")
 os.environ.setdefault("ANALYTICS_BACKEND", "sqlite")
 os.environ.setdefault("OTEL_ENABLED", "false")
 
-from fastapi.testclient import TestClient  # noqa: E402
-
 from app import database as db  # noqa: E402
 from app import documents  # noqa: E402
 from app.main import app  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 
 def setUpModule() -> None:
@@ -97,6 +96,43 @@ class TextAnalysisTest(_RegistryIsolation):
         self.assertRegex(record.meta["source_sha256"], r"^[a-f0-9]{64}$")
         self.assertEqual(record.field_evidence["tins"][0]["value"], "1001234567")
         self.assertEqual(record.field_evidence["tins"][0]["source"], "text")
+
+    def test_reconcile_tax_document_verified_vat(self):
+        invoice = (
+            "TAX INVOICE - URA EFRIS\n"
+            "TIN: 1009876543\n"
+            "PRN: 202699887766554\n"
+            "Invoice No: INV000011112222\n"
+            "Tax Head: Value Added Tax (VAT)\n"
+            "Subtotal: UGX 1,000,000\n"
+            "VAT (18%): UGX 180,000\n"
+            "Total Amount: UGX 1,180,000\n"
+        )
+        record = documents.analyze_document(invoice.encode(), "efris_invoice.txt")
+        self.assertIn(record.doc_type, ("invoice", "receipt"))
+        self.assertIn("1009876543", record.fields["tins"])
+        self.assertIn("202699887766554", record.fields["prns"])
+        self.assertIn("INV000011112222", record.fields["efris_invoices"])
+        self.assertIn("Value Added Tax (VAT)", record.fields["tax_heads"])
+        self.assertEqual(record.tax_reconciliation["status"], "verified")
+        self.assertEqual(record.tax_reconciliation["subtotal_ugx"], 1000000.0)
+        self.assertEqual(record.tax_reconciliation["tax_ugx"], 180000.0)
+        self.assertEqual(record.tax_reconciliation["total_ugx"], 1180000.0)
+        self.assertEqual(record.tax_reconciliation["effective_rate"], 0.18)
+        self.assertEqual(record.tax_reconciliation["variance_ugx"], 0.0)
+        self.assertIn("verified", record.passage_text(4000).lower())
+
+    def test_reconcile_tax_document_discrepancy(self):
+        invoice_bad = (
+            "TAX INVOICE\n"
+            "TIN: 1009876543\n"
+            "Subtotal: UGX 1,000,000\n"
+            "VAT (18%): UGX 180,000\n"
+            "Total Amount: UGX 1,500,000\n"  # 1M + 180k != 1.5M
+        )
+        record = documents.analyze_document(invoice_bad.encode(), "invoice_error.txt")
+        self.assertEqual(record.tax_reconciliation["status"], "discrepancy_detected")
+        self.assertGreater(abs(record.tax_reconciliation["variance_ugx"]), 0.0)
 
     def test_empty_and_oversized_rejected(self):
         with self.assertRaises(ValueError):
@@ -342,7 +378,7 @@ class PdfAnalysisTest(_RegistryIsolation):
             "total": 1350000.0,
         }
         pdf_bytes = generate_tax_summary_pdf(calc_data, taxpayer_ref="TIN-1001234567")
-        
+
         # Test extraction via documents.analyze_document (pypdfium2 / pdfplumber)
         record = documents.analyze_document(pdf_bytes, "summary.pdf", "application/pdf")
         self.assertEqual(record.kind, "pdf")
@@ -517,6 +553,26 @@ class ServiceInjectionTest(_RegistryIsolation):
         model._cache.get.assert_not_called()
         model._cache.put.assert_not_called()
 
+    def test_attachment_fallback_reply_structure_and_no_scaffolding(self):
+        from app.service import ChatModel
+
+        compendium_text = (
+            "DOMESTIC TAX LAWS OF UGANDA 1 | P a g e\n"
+            "THE REPUBLIC OF UGANDA\n"
+            "TABLE OF CONTENTS\n"
+            "1. THE INCOME TAX ACT, CAP 340\n"
+            "2. VALUE ADDED TAX ACT, CAP 349\n"
+            "3. TAX PROCEDURES CODE ACT, 2014\n"
+        )
+        record = documents.analyze_document(compendium_text.encode(), "10580_DT_LAWS_JULY_2021.txt")
+        reply = ChatModel._format_attachment_fallback_reply([record])
+        self.assertIn("### Document Analysis: 10580_DT_LAWS_JULY_2021.txt", reply)
+        self.assertIn("The Income Tax Act, Cap 340", reply)
+        self.assertIn("The Value Added Tax Act, Cap 349", reply)
+        self.assertNotIn("<untrusted_user_document>", reply)
+        self.assertNotIn("The block above is taxpayer-uploaded evidence", reply)
+        self.assertNotIn("[User-attached document:", reply)
+
     def test_contexts_json_redacts_attachment_text(self):
         from app.service import ChatModel
 
@@ -633,9 +689,39 @@ class DocumentEndpointsTest(_RegistryIsolation):
         self.assertEqual(ok.headers["content-type"], "application/pdf")
         self.assertIn("ura_document_report_", ok.headers["content-disposition"])
         self.assertTrue(ok.content.startswith(b"%PDF"))
+        self.assertIn("etag", ok.headers)
+
+        # 304 Not Modified with matching ETag
+        etag = ok.headers["etag"]
+        cached = client.get(
+            f"/v1/documents/{doc_id}/report",
+            headers={"X-Session-ID": "sess-a", "If-None-Match": etag},
+        )
+        self.assertEqual(cached.status_code, 304)
 
         stranger = client.get(
             f"/v1/documents/{doc_id}/report", headers={"X-Session-ID": "sess-b"}
+        )
+        self.assertEqual(stranger.status_code, 404)
+
+    def test_document_status_endpoint(self):
+        client = _client()
+        up = self._upload(client, headers={"X-Session-ID": "sess-status"})
+        doc_id = up.json()["document_id"]
+
+        st = client.get(
+            f"/v1/documents/{doc_id}/status", headers={"X-Session-ID": "sess-status"}
+        )
+        self.assertEqual(st.status_code, 200)
+        body = st.json()
+        self.assertEqual(body["document_id"], doc_id)
+        self.assertEqual(body["status"], "ready")
+        self.assertEqual(body["doc_type"], "receipt")
+        self.assertGreater(body["expires_in_seconds"], 0)
+
+        # Stranger session gets 404
+        stranger = client.get(
+            f"/v1/documents/{doc_id}/status", headers={"X-Session-ID": "sess-stranger"}
         )
         self.assertEqual(stranger.status_code, 404)
 
@@ -682,6 +768,28 @@ class DocumentEndpointsTest(_RegistryIsolation):
             json={"message": "hi there", "attachment_ids": ["../../etc/passwd"]},
         )
         self.assertEqual(r.status_code, 422)
+
+    def test_portal_screenshot_diagnosis_and_interactive_guidance(self):
+        sample_screenshot_text = (
+            "URA Web Portal - portal.ura.go.ug\n"
+            "Generate PRN - Domestic Taxes\n"
+            "Taxpayer TIN: 1001234567\n"
+            "Error: Mandatory field required - Payment Mode not selected\n"
+            "Please select commercial bank gateway before generating PRN.\n"
+        )
+        guidance = documents.diagnose_portal_screenshot(
+            text=sample_screenshot_text,
+            filename="ura_prn_error_screenshot.png",
+            fields={"tins": ["1001234567"], "prns": []},
+            meta={},
+            doc_type="portal_screenshot",
+        )
+        self.assertTrue(guidance.get("is_screenshot"))
+        self.assertIn("PRN", guidance.get("detected_portal", ""))
+        self.assertIn("https://portal.ura.go.ug", guidance.get("portal_url", ""))
+        self.assertTrue(len(guidance.get("steps", [])) >= 3)
+        self.assertTrue(any("Payment Mode" in s or "bank" in s.lower() for s in guidance.get("steps", [])))
+        self.assertTrue(len(guidance.get("hotspots", [])) > 0)
 
 
 if __name__ == "__main__":

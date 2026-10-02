@@ -102,11 +102,16 @@ services:
       - SPEECH_ENABLED=true
       - SPEECH_ASR_BACKEND=auto
       - SPEECH_TTS_BACKEND=auto
+      - SPEECH_WARMUP=true
       # --- Phase 28: Native voice-to-voice + Vision ---
       - FLAG_VOICE_STREAMING=true
       - FLAG_NATIVE_VOICE=true
       - FLAG_STREAMING_TTS_V2=true
       - FLAG_VOICE_VISION_V2=true
+      - FLAG_VOICE_RECEPTIONIST=true
+      - FLAG_RECEPTIONIST_LANGUAGE_DETECTION=${FLAG_RECEPTIONIST_LANGUAGE_DETECTION:-true}
+      - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-http://orpheus-tts:8100}
+      - WORKERS=1
       - FLAG_SPECULATIVE_PREFETCH=true
     env_file:
       - ../.env
@@ -127,6 +132,7 @@ services:
       - ../artifacts:/app/artifacts:ro
       - ../fine-tuning/adapters:/app/adapters:ro
       - ../ml:/app/ml:ro
+      - ../plugins:/app/plugins:ro
       - api_logs:/app/logs
       - ../data_store:/app/data_store
       - /mnt/nas1/caches/huggingface_cache:/app/hf_cache:ro

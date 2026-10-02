@@ -116,6 +116,43 @@ describe("ChatInput attachments", () => {
     expect(screen.queryByLabelText(/Attach a document/)).not.toBeInTheDocument();
   });
 
+  it("renders the Add button and opens Grok-style dropdown with Upload, Photo, and Connector options", async () => {
+    render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
+    const addBtn = screen.getByTestId("composer-add-btn");
+    expect(addBtn).toBeInTheDocument();
+
+    await userEvent.click(addBtn);
+
+    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+    expect(screen.getByText("Take a photo")).toBeInTheDocument();
+    expect(screen.getByText("Add connector")).toBeInTheDocument();
+  });
+
+  it("navigates to connectors view and allows popup connect", async () => {
+    render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
+    const addBtn = screen.getByTestId("composer-add-btn");
+    await userEvent.click(addBtn);
+
+    const connectorOpt = screen.getByText("Add connector");
+    await userEvent.click(connectorOpt);
+
+    expect(screen.getByText("Connect extra systems")).toBeInTheDocument();
+    expect(screen.getByText(/Electronic Fiscal Receipting/)).toBeInTheDocument();
+
+    const disconnectButtons = screen.getAllByRole("button", { name: /Disconnect/ });
+    expect(disconnectButtons.length).toBeGreaterThan(0);
+
+    // Clicking back returns to main menu
+    const backBtn = screen.getByLabelText("Back to add menu");
+    await userEvent.click(backBtn);
+    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+  });
+
+  it("does not render any composer-connector-bar keeping prompt area clean", () => {
+    const { container } = render(<ChatInput {...defaults} />);
+    expect(container.querySelector(".composer-connector-bar")).toBeNull();
+  });
+
   it("renders ready chips with doc type and fires remove", async () => {
     const onRemove = vi.fn();
     render(
@@ -253,15 +290,15 @@ describe("ChatInput attachments", () => {
       expect(screen.queryByText(/can make mistakes/)).not.toBeInTheDocument();
     });
 
-    it("has no mic button while recording, in either flow", () => {
-      for (const voiceMode of [true, false]) {
-        const { unmount } = render(
-          <ChatInput {...defaults} isRecording speechState="listening" voiceMode={voiceMode} />,
-        );
-        expect(screen.queryByLabelText("Stop listening")).not.toBeInTheDocument();
-        expect(screen.queryByLabelText("Start speaking")).not.toBeInTheDocument();
-        unmount();
-      }
+    it("renders responsive waveform when audioLevels are provided", () => {
+      const { container } = render(
+        <ChatInput {...defaults} isRecording audioLevels={[0.3, 0.6, 0.8, 0.4, 0.2]} />,
+      );
+      const waveform = container.querySelector(".composer-waveform");
+      expect(waveform).toBeInTheDocument();
+      const bars = waveform?.querySelectorAll("span");
+      expect(bars).toHaveLength(5);
+      expect(bars?.[2]?.style.transform).toContain("scaleY(0.8)");
     });
   });
 });

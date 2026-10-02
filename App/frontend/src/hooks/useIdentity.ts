@@ -14,6 +14,7 @@
 
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../lib/queryKeys";
 import {
   clearAuthToken,
   getAuthMethod,
@@ -76,7 +77,7 @@ export function useIdentity(): IdentityState {
     // The token is part of the key so switching accounts refetches instead of
     // serving the previous identity from cache. This cache is in-memory for the
     // life of the tab — it is never persisted, logged, or sent anywhere.
-    queryKey: ["me", token],
+    queryKey: queryKeys.auth.me(token),
     queryFn: accountApi.me,
     enabled: Boolean(token),
     staleTime: 60_000,
@@ -86,7 +87,7 @@ export function useIdentity(): IdentityState {
   });
 
   const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["me"] });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.auth.all() });
   }, [queryClient]);
 
   const signOut = useCallback(() => {
@@ -95,9 +96,7 @@ export function useIdentity(): IdentityState {
     clearAuthToken();
     // Drop the identity and everything derived from it, so no panel keeps
     // rendering the previous person's data until its own staleTime expires.
-    queryClient.removeQueries({ queryKey: ["me"] });
-    queryClient.removeQueries({ queryKey: ["profile"] });
-    queryClient.removeQueries({ queryKey: ["consents"] });
+    queryClient.removeQueries({ queryKey: queryKeys.auth.all() });
     // Then end the session at the provider, which is the half that was
     // missing. Dropping the token here only made THIS APPLICATION forget who
     // you were; the provider's own cookie survived, so the next sign-in was

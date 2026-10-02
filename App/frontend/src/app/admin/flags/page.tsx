@@ -23,20 +23,21 @@ import { Switch } from "../../../components/ops/Controls";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
 import { AlertTriangleIcon } from "../../../components/ops/icons";
 import { analyticsApi, type FlagRecord } from "../../../services/analyticsApi";
+import { queryKeys } from "../../../lib/queryKeys";
 import "../admin.css";
 
 function FlagsBoard({ who }: { who: StaffIdentity }) {
   const client = useQueryClient();
   const [query, setQuery] = useState("");
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["adminFlags"],
+    queryKey: queryKeys.admin.flags(),
     queryFn: () => analyticsApi.flags(),
     staleTime: 10_000,
   });
   const toggle = useMutation({
     mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
       analyticsApi.setFlag(name, enabled),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["adminFlags"] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.flags() }),
   });
   // The way back out. An override beats FLAG_* and is replayed on every boot,
   // so flipping a flag to its default value is not the same as removing the
@@ -44,7 +45,7 @@ function FlagsBoard({ who }: { who: StaffIdentity }) {
   // this existed the page could pin a flag and never unpin it.
   const reset = useMutation({
     mutationFn: (name: string) => analyticsApi.clearFlag(name),
-    onSuccess: () => client.invalidateQueries({ queryKey: ["adminFlags"] }),
+    onSuccess: () => client.invalidateQueries({ queryKey: queryKeys.admin.flags() }),
   });
   const canToggle = who.role === "ura_admin";
 

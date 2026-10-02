@@ -56,11 +56,13 @@ repos:
         exclude: >
           (?x)^(
             .*\.lock$|
+            .*pnpm-lock\.ya?ml$|
             package-lock\.json$|
             bun\.lockb$|
             .*\.ipynb$|
             Data/.*|
             Results/.*|
+            evals/language_id/manifest.*\.jsonl|
             test_env/.*
           )$
         stages: [pre-commit]

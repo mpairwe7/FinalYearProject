@@ -20,8 +20,10 @@ abandoning the flow.
 
 from __future__ import annotations
 
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.service import ChatModel
 from app.workflows.loader import load_workflow
@@ -140,6 +142,29 @@ class WorkflowTopicChangeTest(unittest.TestCase):
                 self.assertFalse(
                     self.model._workflow_input_changes_subject(session, answer)
                 )
+
+    def test_refused_flow_switch_keeps_the_current_flow_active(self) -> None:
+        persisted = {
+            "workflow_id": "tax_clearance",
+            "status": "active",
+            "current_step_idx": 0,
+            "slots": {},
+            "updated_at": time.time(),
+        }
+        with (
+            patch("app.service.flags.is_enabled", return_value=True),
+            patch("app.service.db.get_workflow_session", return_value=persisted),
+            patch("app.service.db.complete_workflow_session") as complete,
+            patch("app.service.WorkflowRegistry.create_session", return_value=None),
+        ):
+            result = self.model._maybe_handle_workflow(
+                message="help me file my return",
+                rewritten="",
+                thread_id="switch-thread",
+                locale="en",
+            )
+        self.assertIsNone(result)
+        complete.assert_not_called()
 
     def test_cancel_words_are_left_to_the_cancel_path(self) -> None:
         # Cancellation is handled before this check and ends the flow with its

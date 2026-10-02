@@ -190,6 +190,75 @@ class RunChatTurnShortCircuitTest(unittest.TestCase):
         token = [p for (t, p) in events if t == "token"][0]
         self.assertIn("1. Go to ura.go.ug", token)
 
+    def test_abstained_result_streams_grounding_event(self) -> None:
+        from app import service
+
+        class _AbstainedFakeModel:
+            name = "test_model"
+
+            def generate_retrieval_only(self, **kwargs):
+                return {
+                    "reply": "I could not find authoritative URA guidance on that.",
+                    "sources": [],
+                    "citations": [],
+                    "faithfulness_score": None,
+                    "retrieval_mode": "abstained",
+                    "model": "test_model",
+                    "conversation_id": "c1",
+                    "locale": "en",
+                    "escalation_required": True,
+                    "escalation_reason": "confidence below threshold",
+                    "agent_role": "rag_answerer",
+                    "handoff": {"reason": "confidence below threshold"},
+                    "response_judge": {
+                        "decision": "escalate",
+                        "final_decision": "escalate",
+                        "applied_revision": False,
+                        "reasons": ["confidence below threshold"],
+                        "confidence_band": "low",
+                    },
+                    "next_actions": [],
+                    "ticket_id": "TICK-123",
+                    "_hits": [],
+                    "_history": [],
+                    "_rewritten": kwargs.get("message", ""),
+                }
+
+        model = _AbstainedFakeModel()
+
+        async def _collect():
+            out = []
+            async for ev in service.run_chat_turn(
+                model,
+                message="obscure tax question",
+                conversation_id="c1",
+                top_k=4,
+                locale="en",
+                session_id="s",
+                request_id="r",
+                user_id=None,
+                tenant_id="default",
+            ):
+                out.append(ev)
+            return out
+
+        events = _run_async(_collect())
+        kinds = [t for (t, _) in events]
+        self.assertIn("token", kinds)
+        self.assertIn("grounding", kinds)
+        self.assertIn("done", kinds)
+
+        grounding_idx = kinds.index("grounding")
+        token_idx = kinds.index("token")
+        done_idx = kinds.index("done")
+        self.assertTrue(token_idx < grounding_idx < done_idx)
+
+        grounding = [p for (t, p) in events if t == "grounding"][0]
+        self.assertIsNone(grounding["faithfulness_score"])
+        self.assertTrue(grounding["escalation_required"])
+        self.assertEqual(grounding["escalation_reason"], "confidence below threshold")
+        self.assertEqual(grounding["ticket_id"], "TICK-123")
+
 
 def _run_async(coro):
     return asyncio.run(coro)

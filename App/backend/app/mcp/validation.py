@@ -123,9 +123,9 @@ def validate_arguments(schema: dict[str, Any] | None, arguments: dict[str, Any])
 def result_matches_schema(schema: dict[str, Any] | None, result: Any) -> list[str]:
     """Validate a tool result against its declared ``outputSchema``.
 
-    Mismatches are reported to the caller to log, never raised: a server
-    that adds a field should not break a working answer, but the drift
-    must be visible.
+    Mismatches are returned, never raised. The MCP client refuses to speak
+    a drifted payload. A server that adds a field still passes when the
+    schema allows additional properties.
     """
     if not schema or not _HAVE_JSONSCHEMA:
         return []

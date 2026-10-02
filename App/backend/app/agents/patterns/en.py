@@ -109,6 +109,7 @@ _LEARN_TOPIC = re.compile(
     r"tax\s+brackets?|tax\s+bands?|progressive|marginal|"
     r"rental\s+tax|corporation\s+tax|corporate\s+tax|company\s+tax|"
     r"capital\s+gains?|customs|import\s+duty|landed\s+cost|"
+    r"excise|presumptive|stamp\s+duty|customs\s+valuation|objections?|appeals?|"
     r"fiscal\s+year|tax\s+year|filing|taxation|tax)\b",
     re.IGNORECASE,
 )
@@ -140,7 +141,7 @@ _TEMPORAL = (
     ),
     (
         re.compile(
-            r"\b(deadline|due\s+date|when\s+is.*\s+due|next\s+filing|when\s+do\s+i\s+file)\b",
+            r"\b(next\s+deadlines?|upcoming\s+deadlines?|filing\s+deadline|due\s+date|when\s+is.*\s+due|next\s+filing\s+(?:date|deadline)|deadlines?\s+this\s+month|upcoming\s+filing)\b",
             re.IGNORECASE,
         ),
         "Needs upcoming deadlines",
@@ -189,6 +190,22 @@ _CUSTOMS = (
 )
 
 # Escalation triggers — sensitive topics or explicit human requests.
+#: How-to phrasing. A question asking *how* to do something with one's own
+#: return or TIN has a public, procedural answer; only a question about the
+#: account's current state needs an authenticated lookup or a person. Shared
+#: with the answer judge in ``service.py`` so the two cannot disagree.
+#:
+#: "help me" is not here: it opens account-state requests as often as how-to
+#: ones — "Please help me, my account is locked" must still reach a person.
+#: "how to" is, because "How to file my return" is the same question as "How
+#: do I file my return?" (both found in code review, 2026-09-29).
+HOW_TO_QUESTION_RE = re.compile(
+    r"\b(?:how\s+(?:do|does|can|should|would)\s+(?:i|we|one)|how\s+to|what\s+are\s+the\s+steps"
+    r"|where\s+(?:do|can)\s+i|guide\s+me|walk\s+me\s+through|steps\s+to"
+    r"|procedure|process\s+(?:to|for|of))\b",
+    re.IGNORECASE,
+)
+
 _ESCALATE = (
     (
         re.compile(
@@ -199,15 +216,20 @@ _ESCALATE = (
     ),
     (
         re.compile(
-            r"\b(dispute|objection|audit|assessment\s+is\s+wrong|appeal|court|lawyer|fraud)\b",
+            r"\b(?:(?:want|like|need)\s+to\s+(?:dispute|appeal)|can\s+i\s+appeal|customs\s+dispute|dispute\s+my|appeal\s+my|assessment\s+is\s+wrong|lawyer\s+i\s+can\s+speak\s+to|speak\s+to\s+(?:a\s+)?lawyer|court\s+action|report\s+fraud)\b",
             re.IGNORECASE,
         ),
         "Legal / dispute context needs human handling",
     ),
     (
+        # Measured 2026-09-29 on the local GPU stack: without the how-to
+        # exemption, "How do I file my return?" opened an officer ticket in
+        # 0.5 s instead of getting the published filing steps. The lookahead is
+        # anchored, so the pattern still scans the query once.
         re.compile(
-            r"\b(my\s+tin|my\s+filing|my\s+return|my\s+account|my\s+balance)\b",
-            re.IGNORECASE,
+            r"^(?!.*" + HOW_TO_QUESTION_RE.pattern + r")"
+            r".*\b(my\s+tin|my\s+filing|my\s+return|my\s+account|my\s+balance)\b",
+            re.IGNORECASE | re.DOTALL,
         ),
         "Account-specific query — needs authenticated lookup or human",
     ),

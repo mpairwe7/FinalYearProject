@@ -17,24 +17,28 @@ trigger_phrases:
 
 steps:
   - id: collect_movement_type
+    title: "Import or export"
     question: >
       Is this an **import** or an **export** clearance?
     slot: movement_type
     validator: "enum[import,export]"
 
   - id: collect_declaration
+    title: "Declaration number"
     question: >
       What is the declaration, entry, or customs reference number?
     slot: declaration_number
     validator: text
 
   - id: collect_goods
+    title: "Goods"
     question: >
       Briefly describe the goods or consignment.
     slot: goods_description
     validator: text
 
   - id: collect_transport_ref
+    title: "Transport reference"
     question: >
       What is the transport or shipping reference, such as the bill of
       lading, airway bill, or consignment note number?
@@ -42,6 +46,7 @@ steps:
     validator: text
 
   - id: collect_valuation
+    title: "Valuation evidence"
     question: >
       Do you already have the customs value, invoice, and supporting
       valuation details ready? (yes/no)
@@ -49,12 +54,14 @@ steps:
     validator: boolean
 
   - id: collect_documents
+    title: "Documents"
     question: >
       Do you have the supporting customs documents ready for review? (yes/no)
     slot: documents_ready
     validator: boolean
 
   - id: valuation_warning
+    title: "Valuation check"
     question: >
       Before clearance, make sure the invoice, valuation evidence, and any
       transport costs needed for customs value assessment are available.
@@ -63,6 +70,7 @@ steps:
     validator: text
 
   - id: documents_warning
+    title: "Gather documents"
     question: >
       Before engaging URA or your clearing agent, gather the declaration,
       transport document, invoice, and any permits tied to the goods.
@@ -71,9 +79,14 @@ steps:
     validator: text
 
   - id: summary
+    title: "Clear the goods"
     question: >
       Next step: validate the declaration details, make sure valuation and
       shipping references are complete, and proceed through the customs
       clearance process with the supporting documentation ready for review.
     slot: ""
     validator: text
+    # Ids in app/verified_resources.py — every link there was checked live.
+    portal_action: single_window
+    resources:
+      - customs_systems

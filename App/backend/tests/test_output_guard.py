@@ -53,6 +53,192 @@ class OutputGuardSanitizerTests(unittest.TestCase):
         self.assertIn("18%", sanitized)
         self.assertNotIn("Okay, the user", sanitized)
 
+    def test_official_ura_emails_are_not_redacted(self) -> None:
+        raw = "You can contact URA via services@ura.go.ug or info@ura.go.ug. Do not email user@gmail.com."
+        redacted = OutputGuard.redact_pii(raw)
+        self.assertIn("services@ura.go.ug", redacted)
+        self.assertIn("info@ura.go.ug", redacted)
+        self.assertNotIn("user@gmail.com", redacted)
+        self.assertIn("[REDACTED_EMAIL]", redacted)
+
+    def test_sanitize_restores_legacy_redacted_ura_email(self) -> None:
+        raw = "Email:[REDACTED_EMAIL]; [REDACTED_EMAIL] | https://ura.go.ug"
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("services@ura.go.ug", sanitized)
+        self.assertNotIn("[REDACTED_EMAIL]", sanitized)
+
+    def test_normalize_structure_replaces_customary_services_and_formats_smashed_lists(self) -> None:
+        raw = (
+            "The URA provides services, including:1.**Tax Administration**: collects taxes."
+            "2.**Customary Services**: clears goods.3.**Digital Solutions**: EFRIS."
+        )
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("Customs Services", sanitized)
+        self.assertNotIn("Customary Services", sanitized)
+        self.assertIn("including:\n\n1. **Tax Administration**", sanitized)
+        self.assertIn("taxes.\n\n2. **Customs Services**", sanitized)
+        self.assertIn("goods.\n\n3. **Digital Solutions**", sanitized)
+
+    def test_normalize_structure_preserves_decimal_numbers_and_rates(self) -> None:
+        raw = "The rate is 1.5% for stamp duty and 2.5% for withholding tax under Section 122.1(a)."
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertEqual(sanitized, raw)
+
+    def test_normalize_structure_renumbers_repeated_ones_sequentially(self) -> None:
+        raw = "Key services:\n\n1. Registration\n\n1. Filing\n\n1. Payments"
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertIn("1. Registration", sanitized)
+        self.assertIn("2. Filing", sanitized)
+        self.assertIn("3. Payments", sanitized)
+
+    def test_a_rate_or_section_number_is_not_a_step(self) -> None:
+        raw = "The VAT rate is 18. File the return under Section 5. The Act also covers exports."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("18. File the return", sanitized)
+        self.assertIn("Section 5. The Act", sanitized)
+        self.assertNotIn("\n18. File", sanitized)
+
+    def test_a_glued_step_splits_but_a_glued_section_does_not(self) -> None:
+        steps = OutputGuard.normalize_structure("Download the template2. Enable macros before upload.")
+        self.assertIn("template.\n\n2. Enable macros", steps)
+        section = OutputGuard.normalize_structure("Read Section5. The Act sets the due date.")
+        self.assertIn("Section5. The Act", section)
+        self.assertNotIn("\n5. The Act", section)
+
+    def test_a_later_section_number_does_not_join_the_step_list(self) -> None:
+        raw = "1. Register online\n\n2. File the return\n\n18. The VAT Act applies to taxable supplies."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. Register online", sanitized)
+        self.assertIn("2. File the return", sanitized)
+        self.assertIn("18. The VAT Act applies", sanitized)
+
+    def test_a_nested_repeated_one_stays_in_its_own_list(self) -> None:
+        raw = "1. Register\n  1. Create a TIN\n  1. Verify the email\n2. File"
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. Register", sanitized)
+        self.assertIn("  1. Create a TIN", sanitized)
+        self.assertIn("  2. Verify the email", sanitized)
+        self.assertIn("2. File", sanitized)
+
+    def test_prose_dashes_stay_a_sentence_and_labels_become_bullets(self) -> None:
+        prose = "PAYE - the tax on employment - is deducted monthly."
+        self.assertEqual(OutputGuard.normalize_structure(prose), prose)
+        labels = OutputGuard.normalize_structure("Services: PAYE - VAT - Customs")
+        self.assertIn("Services:", labels)
+        self.assertIn("- PAYE", labels)
+        self.assertIn("- VAT", labels)
+        self.assertIn("- Customs", labels)
+
+    def test_a_long_answer_is_split_into_paragraphs(self) -> None:
+        raw = (
+            "Register for a TIN before you trade. "
+            "File the return by the fifteenth. "
+            "Pay the assessed tax through the portal. "
+            "Keep the acknowledgement for five years."
+        )
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertEqual(sanitized.count("\n\n"), 1)
+        self.assertTrue(sanitized.startswith("Register for a TIN"))
+        self.assertIn("Keep the acknowledgement", sanitized.split("\n\n")[1])
+
+    def test_a_swahili_procedure_starts_at_kwanza(self) -> None:
+        raw = "Kwanza fungua akaunti. Pili weka TIN. Tatu wasilisha rile."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. **Kwanza**:", sanitized)
+        self.assertIn("2. **Pili**:", sanitized)
+        self.assertIn("3. **Tatu**:", sanitized)
+
+    def test_a_luganda_procedure_starts_at_okusooka(self) -> None:
+        raw = "Okusooka weewandiise. Eky’okubiri osasule."
+        sanitized = OutputGuard.normalize_structure(raw)
+        self.assertIn("1. **Okusooka**:", sanitized)
+        self.assertIn("2. **Eky'okubiri**:", sanitized)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GroundingWarningLocaleTests(unittest.TestCase):
+    """The low-faithfulness disclaimer is appended to the user's own reply.
+
+    It was English-only, so a Luganda or Kiswahili answer that tripped the
+    grounding threshold got an English paragraph stapled to the end of it.
+    """
+
+    # Deliberately unrelated to the answer so faithfulness is low and the
+    # disclaimer actually fires.
+    CONTEXTS = ["The VAT registration threshold in Uganda is 150 million shillings."]
+    ANSWER = "Omusolo gwa EFRIS gusasulwa buli mwezi."
+
+    def _warned(self, locale: str) -> str:
+        result = OutputGuard.check_grounding(
+            self.ANSWER, self.CONTEXTS, threshold=0.99, locale=locale
+        )
+        self.assertIn("low_faithfulness", result.flags)
+        return result.sanitized_text
+
+    def test_luganda_reply_gets_a_luganda_disclaimer(self) -> None:
+        text = self._warned("lg")
+        self.assertIn("Okulabula", text)
+        self.assertNotIn("may not be fully supported", text)
+
+    def test_kiswahili_reply_gets_a_kiswahili_disclaimer(self) -> None:
+        text = self._warned("sw")
+        self.assertIn("Tahadhari", text)
+        self.assertNotIn("may not be fully supported", text)
+
+    def test_english_and_unknown_locales_keep_the_english_disclaimer(self) -> None:
+        for locale in ("en", "fr", ""):
+            with self.subTest(locale=locale):
+                self.assertIn("may not be fully supported", self._warned(locale))
+
+    def test_every_disclaimer_points_at_the_official_source(self) -> None:
+        for locale in OutputGuard._GROUNDING_WARNINGS:
+            with self.subTest(locale=locale):
+                self.assertIn("https://ura.go.ug", self._warned(locale))
+
+    def test_well_grounded_answer_gets_no_disclaimer_in_any_locale(self) -> None:
+        grounded = self.CONTEXTS[0]
+        for locale in ("en", "lg", "sw"):
+            with self.subTest(locale=locale):
+                result = OutputGuard.check_grounding(
+                    grounded, self.CONTEXTS, threshold=0.3, locale=locale
+                )
+                self.assertEqual(result.sanitized_text, grounded)
+                self.assertEqual(result.flags, [])
+
+
+class ThoughtSuppressionTests(unittest.TestCase):
+    def test_sanitize_strips_thinking_and_scratchpad_tags(self) -> None:
+        raw = (
+            "<think>1. Analyze user query.\n2. Check VAT threshold in passage 1.</think>\n"
+            "<thought>Calculation: 18% of 1,000,000.</thought>\n"
+            "<reasoning>Present in structured bullet points.</reasoning>\n"
+            "The standard VAT rate in Uganda is 18%."
+        )
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertEqual(sanitized, "The standard VAT rate in Uganda is 18%.")
+        self.assertNotIn("<think>", sanitized)
+        self.assertNotIn("<thought>", sanitized)
+        self.assertNotIn("<reasoning>", sanitized)
+
+    def test_sanitize_strips_unclosed_thinking_blocks(self) -> None:
+        raw = "<think>The model ran out of tokens before closing this reasoning block"
+        sanitized = OutputGuard.sanitize(raw)
+        self.assertEqual(sanitized, "")
+
+    def test_filter_thought_stream_suppresses_thinking_tokens(self) -> None:
+        from app.llm import filter_thought_stream
+
+        def _mock_stream():
+            yield "<th"
+            yield "ink>"
+            yield "Internal reasoning step 1."
+            yield "</th"
+            yield "ink>\n\n"
+            yield "VAT is "
+            yield "18%."
+
+        filtered = "".join(filter_thought_stream(_mock_stream()))
+        self.assertEqual(filtered, "VAT is 18%.")

@@ -40,10 +40,19 @@ def vectorize_query(
     hits: list[dict[str, Any]] = []
     for m in matches:
         meta = m.get("metadata") or {}
+        text = meta.get("text", "")
+        q = meta.get("question", "")
+        a = meta.get("answer", "")
+        if (not q or not a) and text.startswith("Question: ") and "\nAnswer: " in text:
+            parts = text[len("Question: ") :].split("\nAnswer: ", 1)
+            q = q or parts[0].strip()
+            a = a or parts[1].strip()
         hits.append(
             {
                 "id": m.get("id"),
-                "text": meta.get("text", ""),
+                "text": text,
+                "question": q,
+                "answer": a,
                 "source": meta.get("source", ""),
                 "page": meta.get("page"),
                 "section": meta.get("section", ""),

@@ -12,7 +12,12 @@ from unittest.mock import patch
 from fastapi import HTTPException, Request
 
 from app.auth.dependencies import current_user, optional_user
-from app.main import _validate_production_env
+from app.flags import flags
+from app.main import (
+    _apply_persisted_flag_overrides,
+    _initialize_analytics_database,
+    _validate_production_env,
+)
 
 
 SECURE_PROD_ENV = {
@@ -110,6 +115,56 @@ class ProductionHardeningTests(unittest.TestCase):
         with patch.dict(os.environ, self.secure_env, clear=True):
             _validate_production_env()
 
+    def test_production_rejects_persisted_disabled_safety_flag(self) -> None:
+        """Overrides load after environment validation, so they need their own gate."""
+        with patch.dict(os.environ, self.secure_env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _apply_persisted_flag_overrides({"auth_required": False})
+
+        self.assertIn("Persisted flag override", str(raised.exception))
+        self.assertIn("auth_required", str(raised.exception))
+
+    def test_production_allows_enabled_or_non_safety_persisted_flags(self) -> None:
+        try:
+            with patch.dict(os.environ, self.secure_env, clear=True):
+                _apply_persisted_flag_overrides(
+                    {"auth_required": True, "ticket_queue": True, "hyde": False}
+                )
+                # Surviving the gate is only half the contract: the
+                # overrides still have to reach the registry.
+                self.assertTrue(flags.is_enabled("auth_required"))
+                self.assertTrue(flags.is_enabled("ticket_queue"))
+                self.assertFalse(flags.is_enabled("hyde"))
+        finally:
+            for name in ("auth_required", "ticket_queue", "hyde"):
+                flags.clear(name)
+
+    def test_production_refuses_to_start_when_overrides_are_unreadable(self) -> None:
+        """An unreadable override table is a persistence failure, not an empty set."""
+        with (
+            patch.dict(os.environ, self.secure_env, clear=True),
+            patch("app.main.db.init_db"),
+            patch("app.main._should_seed", return_value=False),
+            patch(
+                "app.main.db.load_flag_overrides",
+                side_effect=RuntimeError("flag_overrides unreadable"),
+            ),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            _initialize_analytics_database()
+
+        self.assertIn("analytics database is unavailable", str(raised.exception))
+
+    def test_production_refuses_to_start_without_analytics_database(self) -> None:
+        with (
+            patch.dict(os.environ, self.secure_env, clear=True),
+            patch("app.main.db.init_db", side_effect=RuntimeError("database unavailable")),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            _initialize_analytics_database()
+
+        self.assertIn("analytics database is unavailable", str(raised.exception))
+
     def test_external_qdrant_required_in_prod(self) -> None:
         # P0-4: an in-container / localhost Qdrant is not durable.
         env = {**self.secure_env, "QDRANT_URL": "http://localhost:6333"}
@@ -176,6 +231,50 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertIn(
             "FLAG_NATIVE_VOICE=true requires FLAG_AUTH_REQUIRED", str(raised.exception)
         )
+
+    def test_receptionist_in_production_needs_the_g36_livekit_gate(self) -> None:
+        env = {**self.secure_env, "FLAG_VOICE_RECEPTIONIST": "true"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(SystemExit) as raised:
+                _validate_production_env()
+        message = str(raised.exception)
+        self.assertIn("G36: LIVEKIT_URL must be a secure wss:// URL", message)
+        self.assertIn("G36: RECEPTIONIST_MEDIA_TRANSPORT=livekit is required", message)
+        self.assertIn("G36: VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK=true is required", message)
+
+    def test_receptionist_in_production_starts_once_g36_passes(self) -> None:
+        """The runbook's rollout enables the flag after the G36 gate passes; startup must agree."""
+        env = {
+            **self.secure_env,
+            "FLAG_VOICE_RECEPTIONIST": "true",
+            "RECEPTIONIST_MEDIA_TRANSPORT": "livekit",
+            "LIVEKIT_URL": "wss://rtc.example.test",
+            "LIVEKIT_API_KEY": "production-key",  # pragma: allowlist secret
+            "LIVEKIT_API_SECRET": "production-secret-value-that-is-long-enough",  # pragma: allowlist secret
+            "WORKERS": "1",
+            "VOICE_RECEPTIONIST_REPLICAS": "1",
+            "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
+            # Every call runs on the local engine: the Orpheus voice for all languages.
+            "ORPHEUS_TTS_URL": "http://orpheus-tts:8100",
+            "ORPHEUS_TTS_LANGUAGES": "lg,sw,en",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            _validate_production_env()
+
+    def test_receptionist_in_production_refuses_to_start_without_the_local_voice(self) -> None:
+        env = {
+            **self.secure_env,
+            "FLAG_VOICE_RECEPTIONIST": "true",
+            "RECEPTIONIST_MEDIA_TRANSPORT": "livekit",
+            "LIVEKIT_URL": "wss://rtc.example.test",
+            "LIVEKIT_API_KEY": "production-key",  # pragma: allowlist secret
+            "LIVEKIT_API_SECRET": "production-secret-value-that-is-long-enough",  # pragma: allowlist secret
+            "WORKERS": "1",
+            "VOICE_RECEPTIONIST_REPLICAS": "1",
+            "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
+        }
+        with patch.dict(os.environ, env, clear=True), self.assertRaises(SystemExit):
+            _validate_production_env()
 
     # ── Cloudflare/Gemini fallback validation (explicit-on flag) ──────────
     _CF_ENV = {

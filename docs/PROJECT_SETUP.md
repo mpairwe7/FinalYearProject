@@ -256,7 +256,7 @@ screen: Keycloak → Realm settings → Login → *User registration*; Auth0 →
 Authentication → Database → *Disable Sign Ups* must be off.
 
 After the exchange, the callback sends staff to the tool their role can open
-(`ura_staff` → `/agent`, admin/auditor → `/admin`). Everyone else goes to the
+(`ura_staff` → `/agent`, `ura_admin` → `/admin`, `ura_auditor` → `/analytics`). Everyone else goes to the
 `returnTo` the flow recorded, which only `/signup` sets — so a taxpayer who
 registers from the assistant lands back in the assistant, and a non-staff
 sign-in, which records nothing, falls back to `/` rather than a dashboard that
@@ -384,10 +384,11 @@ AUTH_ALG=HS256                # backend
 AUTH_DEV_SECRET=<shared secret>
 ```
 
-```bash
-cd App/backend && python -c \
-  "from app.auth.jwt_auth import make_dev_token; print(make_dev_token('dev-user', role='ura_admin'))"
-```
+Non-IT staff, tax officers, and evaluators can simply click the 1-Click Role buttons on `/signin` (or register on `/signup`), which automatically fetches a token via `POST /v1/auth/dev-token`:
+- **Tax Agent / Staff**: Work the escalation queue & view query flows
+- **Administrator**: Full operations overview
+- **Auditor**: Read-only oversight
+- **Taxpayer**: Citizen profile with multi-turn memory
 
 ## Settings
 
@@ -399,7 +400,7 @@ preferences stored for their own sake:
 | Tab | Controls | Written to |
 | --- | --- | --- |
 | General | Theme, response language | `lib/theme` (`ura-theme`), `useChatStore.locale` — the same values the header's theme button and language menu use |
-| Voice | Narrate replies; a narration voice **per language**, each with its own preview | page narration state, `useVoiceStore.voiceByLocale` (read by every `/v1/tts` call site, keyed on the active locale) |
+| Voice | Narrate replies; when voice mode sends a turn by itself (after a 0.8, 1.2 or 2 s pause, or Off); a narration voice **per language**, each with its own preview | page narration state, `useVoiceStore.silenceTimeout`, `useVoiceStore.voiceByLocale` (read by every `/v1/tts` call site, keyed on the active locale) |
 | Tax profile | Display name, taxpayer type, industry, answer detail, record language, registered tax heads | `GET`/`PUT /v1/me/profile` — needs an account, and says so when signed out |
 | Privacy & data | Anonymous analytics; consent receipts; download or delete local conversations; export or erase account data | `ura_analytics_consent`, `/v1/me/consents` (grant/withdraw), `useChatStore`, `GET /v1/me/export`, `DELETE /v1/me` |
 | Account | Identity, role, tenant, provider subject; sign in / sign up / sign out; operations links for staff | `GET /v1/me`, the token store |
@@ -471,6 +472,28 @@ the mic shows a distinct *Transcribing* state while the audio is in flight
 rather than pretending to still be listening. It is not the red recording pulse
 and it does not accept taps: the audio is already uploaded, so a second tap
 would cancel nothing.
+
+**Voice mode ends the turn itself.** A spoken conversation that needs a tap
+after every sentence is not hands-free, so voice mode sends a turn once the
+speaker has paused for `useVoiceStore.silenceTimeout`: 1.2 s by default, the top
+of the 0.8–1.2 s that voice agents use, with 0.8 s, 2 s and Off (tap only) in
+Settings → Voice. The checkmark still sends at once. The decision is made in
+the browser from the microphone's level (`services/endOfTurn.ts`): speech is
+sound 12 dB above the room's own level in the 250–3800 Hz band, the floor is the
+quiet end of the last 4 s, so it follows a noisy room (and holds still once a
+turn starts, so a long, even voice is never taken for the room), and a turn needs 300 ms
+of speech before a pause can end it, so a click or a cough does not start one. A
+mic that heard nothing for 8 s closes and says so, rather than listening to the
+room indefinitely. Sound that never passed for speech keeps the mic open for a
+tap, since it may be a quiet speaker. Every turn ends at 60 s. It is a level
+detector, not a speech model: a loud noise that lasts can pass for speech (G97).
+With the pause on, the conversation is hands-free both ways: once a reply has
+been read aloud, the mic opens again for the next turn. A reply stopped by the
+listener does not reopen it. Opening the mic, by a tap or by itself, silences a
+reply still being read, so it neither talks over the speaker nor ends up in
+their recording.
+On a phone, the composer's hint line hid everything, including these notices;
+it now hides only the standing disclaimer.
 
 **Hearing nothing is not an outage.** The ASR chain advances on a non-empty
 transcript, so a backend that ran fine and heard silence used to be
@@ -569,9 +592,9 @@ it left `VoiceChat.tsx` with no entry point; `VoiceFirstChat.tsx` and
 `VoiceVisionMode.tsx` never had one. All three still exist on disk but are no
 longer mounted.
 
-Two deliberate omissions: `useVoiceStore` also persists `autoBargeIn`,
-`silenceTimeout` and `accentProfile`, which nothing currently reads, so they are
-not offered — a switch that changes nothing is worse than a missing one. And
+Two deliberate omissions: `useVoiceStore` also persists `autoBargeIn` and
+`accentProfile`, which nothing currently reads, so they are not offered — a
+switch that changes nothing is worse than a missing one. And
 withdrawing `personalization` consent purges the memory built under it
 server-side (UDPA 2019: a withdrawal must stop the processing), which is why that
 row warns before it is used.

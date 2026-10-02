@@ -41,24 +41,123 @@ export const VOICE_SAMPLES: Record<string, string> = {
   ach: "Wabedo. Mucoro me VAT i Uganda tye i wi 18.",
 };
 
+export interface VoicePersona {
+  name: string;
+  role: string;
+  tone: string;
+  avatar: string;
+}
+
+export const VOICE_PERSONAS: Record<string, VoicePersona> = {
+  // English Personas
+  "en-US-AriaNeural": {
+    name: "Aria",
+    role: "Senior Taxpayer Services Specialist",
+    tone: "Professional, Empathetic & Clear",
+    avatar: "👩‍💼",
+  },
+  "en-US-GuyNeural": {
+    name: "Guy",
+    role: "Senior Compliance & Revenue Officer",
+    tone: "Authoritative, Structured & Crisp",
+    avatar: "👨‍💼",
+  },
+  "en-GB-SoniaNeural": {
+    name: "Sonia",
+    role: "International Trade & Customs Specialist",
+    tone: "Polished, Measured & Articulate",
+    avatar: "👩‍⚖️",
+  },
+  "salt_eng_0001": {
+    name: "Mugisha",
+    role: "National Tax Education Officer",
+    tone: "Ugandan Accent, Engaging & Natural",
+    avatar: "👨‍🎓",
+  },
+
+  // Luganda Personas
+  "salt_lug_0001": {
+    name: "Nakato",
+    role: "Omubuulirizi w'Emisolo (Lead Luganda Advisor)",
+    tone: "Mpolamu, Ntegeevu era Ntuufu (Gentle & Authoritative)",
+    avatar: "👩‍🌾",
+  },
+  "waxal_lug_0002": {
+    name: "Kato",
+    role: "Omukugu w'Emmotoka n'Ebyobusuubuzi (Trade Officer)",
+    tone: "Mwangu era Ayanguya (Direct & Expressive)",
+    avatar: "👨‍💼",
+  },
+  "waxal_lug_0003": {
+    name: "Babirye",
+    role: "Omuweereza w'Ebyemisolo (Tax Services Specialist)",
+    tone: "Ntegeevu era Ennyonnyola (Articulate & Clear)",
+    avatar: "👩‍💻",
+  },
+  "waxal_lug_0004": {
+    name: "Nalubega",
+    role: "Omuweereza w'Abasuubuzi Abalala (Vendor Support)",
+    tone: "Wadde nga Mukwano (Patient & Engaging)",
+    avatar: "👩‍💼",
+  },
+  "waxal_lug_0005": {
+    name: "Mukasa",
+    role: "Omukebezi w'Ebyensimbi (Financial Auditor)",
+    tone: "Mwangu era Omukakafu (Firm & Accurate)",
+    avatar: "👨‍⚖️",
+  },
+
+  // Swahili Personas
+  "waxal_swa_0006": {
+    name: "Baraka",
+    role: "Afisa Ushuru na Forodha (EAC Customs Officer)",
+    tone: "Rasmi, Fasaha na Rafiki (Official & Fluent)",
+    avatar: "👨‍✈️",
+  },
+  "waxal_swa_0007": {
+    name: "Amina",
+    role: "Mshauri wa Biashara Mpakani (Cross-Border Advisor)",
+    tone: "Mpole na Mwenye Kuelekeza (Supportive & Articulate)",
+    avatar: "👩‍💼",
+  },
+
+  // Runyankole / Rukiga Personas
+  "salt_nyn_0001": {
+    name: "Tumusiime",
+    role: "Omwegyesa w'Emisoro (Regional Advisor)",
+    tone: "Ow'oburinganiza (Clear & Accessible)",
+    avatar: "👨‍💼",
+  },
+
+  // Acholi Personas
+  "salt_ach_0001": {
+    name: "Laker",
+    role: "Lapony me Culu Mucoro (Community Outreach)",
+    tone: "Maber dok Maleng (Clear & Direct)",
+    avatar: "👩‍🏫",
+  },
+};
+
 /**
- * Display name for a speaker.
- *
- * Deliberately neutral. The catalog gives opaque tags (`waxal_lug_0004`) and
- * nothing about the person behind them — inventing "Nakato, warm and friendly"
- * would be asserting a gender and a character this app cannot know. Numbering
- * them and letting the preview button do the describing is honest, and it is
- * what the person actually chooses on: how it sounds.
+ * Display name for a speaker with human persona role branding.
  */
 export function voiceDisplayName(locale: string, voice: VoiceOption, index: number): string {
+  const persona = VOICE_PERSONAS[voice.id];
+  const prefix = voice.provider === "edge_tts" ? "" : `Voice ${index + 1}: `;
+  if (persona) {
+    return `${prefix}${persona.avatar} ${persona.name} — ${persona.role}`;
+  }
   if (voice.provider === "edge_tts") {
-    // edge-tts names are self-describing: en-GB-SoniaNeural -> "Sonia (en-GB)".
     const parts = voice.id.split("-");
     const name = parts[2]?.replace(/Neural$/, "") ?? voice.id;
     const region = parts.slice(0, 2).join("-");
     return `${name} (${region})`;
   }
   return `Voice ${index + 1}`;
+}
+
+export function voicePersonaInfo(voiceId: string): VoicePersona | null {
+  return VOICE_PERSONAS[voiceId] || null;
 }
 
 export async function fetchVoiceCatalogue(): Promise<VoiceCatalogue> {

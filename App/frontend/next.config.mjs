@@ -7,7 +7,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // (not from the browser).  The rewrite below proxies /api/* to this URL
 // so the browser only ever talks to the frontend origin — no CORS, no
 // hardcoded host:port baked into the client bundle.
-const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://127.0.0.1:8887";
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL || "http://ura-app-api:8000";
 const isDev = process.env.NODE_ENV !== "production";
 
 // Origin of the OIDC provider, if one is configured.
@@ -36,12 +36,21 @@ const OIDC_ORIGIN = (() => {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  compress: true,
   reactStrictMode: true,
   // Pin the Turbopack workspace root to this directory so Next.js 16
   // doesn't walk up the filesystem and mis-detect an unrelated lockfile
   // (e.g. ~/package-lock.json) as the workspace root.
-  // Allow dev access from 127.0.0.1 / IP (VS Code port-forward, SSH tunnel)
-  allowedDevOrigins: ["127.0.0.1", "localhost", "192.168.3.51"],
+  // Allow dev access from 127.0.0.1 / IP, ngrok, local ports, and Auth0 allowed web origins
+  allowedDevOrigins: [
+    "127.0.0.1",
+    "localhost",
+    "192.168.3.51",
+    "localhost:3100",
+    "struttingly-nongeological-briella.ngrok-free.dev",
+    "landwind22-ura-chatbot.hf.space",
+    "ura-chatbot-6318a1b5.renu-01.cranecloud.io",
+  ],
   turbopack: {
     root: __dirname,
   },
@@ -70,6 +79,10 @@ const nextConfig = {
   // without any client-side code changes.
   async rewrites() {
     return [
+      {
+        source: "/api/speech/:path*",
+        destination: `${INTERNAL_API_URL}/v1/speech/:path*`,
+      },
       {
         source: "/api/:path*",
         destination: `${INTERNAL_API_URL}/:path*`,

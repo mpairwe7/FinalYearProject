@@ -41,6 +41,20 @@ _ANALYTICS_TTL_DAYS = int(os.getenv("ANALYTICS_TTL_DAYS", "365"))
 _FEEDBACK_TTL_DAYS = int(os.getenv("FEEDBACK_TTL_DAYS", "90"))
 _SESSION_TTL_DAYS = int(os.getenv("SESSION_TTL_DAYS", "30"))
 _TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
+# A guided journey's outcome (flow, status, the step it stopped at) is kept for
+# the journey funnel's longest window; what the taxpayer answered is blanked
+# once their conversation expires (CONVERSATION_TTL_DAYS).
+_WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "365")))
+
+
+def conversation_ttl_seconds() -> float:
+    """How long a conversation (and what a journey collected in it) is kept."""
+    return _CONVERSATION_TTL_DAYS * 86400.0
+
+
+def workflow_session_ttl_days() -> int:
+    """How long journey outcomes are kept for the funnel."""
+    return _WORKFLOW_SESSION_TTL_DAYS
 
 # Thread-local storage for connections with a lock for init safety
 _local = threading.local()
@@ -166,8 +180,8 @@ def _ensure_column(
     table: str,
     column: str,
     ddl: str,
-) -> None:
-    """Add *column* to *table* if it is missing.
+) -> bool:
+    """Add *column* to *table* if it is missing; True when it was added.
 
     SQLite only gained ``ADD COLUMN IF NOT EXISTS`` recently, so we do
     the compatibility check ourselves to support older runtimes.
@@ -175,9 +189,10 @@ def _ensure_column(
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()  # noqa: S608 - fixed table name
     names = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in rows}
     if column in names:
-        return
+        return False
     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")  # noqa: S608 - fixed identifiers
     logger.info("Added missing column %s.%s", table, column)
+    return True
 
 
 def consent_purposes() -> tuple[str, ...]:
@@ -314,6 +329,7 @@ def init_db() -> None:
                             CHECK(status IN ('active','completed','cancelled'))
                             DEFAULT 'active',
             current_step_idx INTEGER NOT NULL DEFAULT 0,
+            user_id          TEXT NOT NULL DEFAULT '',
             slots_json      TEXT DEFAULT '{}',
             last_prompt     TEXT DEFAULT '',
             created_at      REAL NOT NULL,
@@ -423,6 +439,10 @@ def init_db() -> None:
             resolved_at        REAL DEFAULT 0,
             assignee       TEXT DEFAULT '',
             staff_note     TEXT DEFAULT '',
+            locale         TEXT DEFAULT 'en',
+            modality       TEXT DEFAULT 'text',
+            user_query_en  TEXT DEFAULT '',
+            officer_reply_localized TEXT DEFAULT '',
             created_at     REAL NOT NULL,
             updated_at     REAL NOT NULL
         );
@@ -563,7 +583,8 @@ def init_db() -> None:
             seq          INTEGER NOT NULL,
             prev_hash    TEXT NOT NULL,
             payload_hash TEXT NOT NULL,
-            row_hash     TEXT NOT NULL
+            row_hash     TEXT NOT NULL,
+            hash_version INTEGER NOT NULL DEFAULT 1
         );
 
         CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_events(ts);
@@ -577,8 +598,13 @@ def init_db() -> None:
             first_seq    INTEGER NOT NULL,
             last_seq     INTEGER NOT NULL,
             merkle_root  TEXT NOT NULL,
-            created_at   REAL NOT NULL
+            created_at   REAL NOT NULL,
+            head_hash    TEXT NOT NULL DEFAULT ''
         );
+        -- The unique (tenant_id, seq) and (tenant_id, first_seq) indexes are
+        -- created by audit/ledger.py, guarded: an older ledger may already
+        -- hold a fork, and that must be reported by the verifier, not stop
+        -- the service from starting.
 
         CREATE INDEX IF NOT EXISTS idx_audit_anchors_created
             ON audit_anchors(created_at);
@@ -618,6 +644,15 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "first_response_at", "REAL DEFAULT 0")
     _ensure_column(conn, "tickets", "resolved_at", "REAL DEFAULT 0")
     _ensure_column(conn, "tickets", "team", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "locale", "TEXT DEFAULT 'en'")
+    _ensure_column(conn, "tickets", "modality", "TEXT DEFAULT 'text'")
+    _ensure_column(conn, "tickets", "user_query_en", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "officer_reply_localized", "TEXT DEFAULT ''")
+    # Which route / journey step produced a rated reply (journey analytics).
+    _ensure_column(conn, "feedback", "retrieval_mode", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "workflow_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "step_id", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
     _ensure_column(conn, "conversations", "contexts", "TEXT DEFAULT '[]'")
@@ -625,6 +660,18 @@ def init_db() -> None:
     # /v1/me export + erasure can reach it.  Empty string for anonymous turns.
     _ensure_column(conn, "conversations", "user_id", "TEXT DEFAULT ''")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
+    # Sessions from before the column existed take their owner from the
+    # conversation, once: new rows are written with it.
+    if _ensure_column(conn, "workflow_sessions", "user_id", "TEXT NOT NULL DEFAULT ''"):
+        conn.execute(
+            """UPDATE workflow_sessions SET user_id = COALESCE(
+                   (SELECT c.user_id FROM conversations c
+                    WHERE c.conversation_id = workflow_sessions.conversation_id
+                      AND c.user_id != ''
+                    ORDER BY c.created_at DESC LIMIT 1), '')
+               WHERE user_id = ''"""
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
     _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
@@ -660,7 +707,7 @@ def cleanup_expired_data() -> dict[str, int]:
         ("analytics_events", _ANALYTICS_TTL_DAYS),
         ("feedback", _FEEDBACK_TTL_DAYS),
         ("sessions", _SESSION_TTL_DAYS),
-        ("workflow_sessions", _CONVERSATION_TTL_DAYS),
+        ("workflow_sessions", _WORKFLOW_SESSION_TTL_DAYS),
         ("conversation_topics", _CONVERSATION_TTL_DAYS),
         ("ticket_presence", 1),
         ("tickets", _TICKET_TTL_DAYS),
@@ -688,7 +735,7 @@ def cleanup_expired_data() -> dict[str, int]:
                 )
             else:
                 cursor = conn.execute(
-                    f"DELETE FROM {table} WHERE {col} < ?",  # noqa: S608 — table/col are hardcoded above
+                    f"DELETE FROM {table} WHERE {col} < ?",  # nosec B608 # noqa: S608 — table/col are hardcoded above
                     (cutoff,),
                 )
             conn.commit()
@@ -701,6 +748,44 @@ def cleanup_expired_data() -> dict[str, int]:
             logger.exception("TTL cleanup failed for %s", table)
             conn.rollback()
             deleted[table] = 0
+
+    # Journey sessions outlive their conversation only as outcomes: blank the
+    # answers they collected once the conversation itself has expired.
+    try:
+        cur = conn.execute(
+            "UPDATE workflow_sessions SET slots_json = '{}', last_prompt = '' "
+            "WHERE updated_at < ? AND (slots_json != '{}' OR last_prompt != '')",
+            (now - conversation_ttl_seconds(),),
+        )
+        conn.commit()
+        deleted["workflow_session_content"] = cur.rowcount
+    except Exception:
+        logger.exception("TTL cleanup failed for workflow session content")
+        conn.rollback()
+        deleted["workflow_session_content"] = 0
+
+    # Voice receptionist tables retention
+    try:
+        from .voice_consent import retention_policy
+        voice_transcript_cutoff = now - (retention_policy.transcript_ttl_days * 86400)
+        cur = conn.execute(
+            "DELETE FROM voice_call_turns WHERE created_at < ?",
+            (voice_transcript_cutoff,),
+        )
+        deleted["voice_call_turns"] = cur.rowcount
+
+        conv_cutoff = voice_transcript_cutoff
+        ticket_cutoff = now - (_TICKET_TTL_DAYS * 86400)
+        cur = conn.execute(
+            """DELETE FROM voice_calls
+               WHERE ((ticket_id IS NULL OR ticket_id = '') AND started_at < ?)
+                  OR (ticket_id IS NOT NULL AND ticket_id != '' AND started_at < ?)""",
+            (conv_cutoff, ticket_cutoff),
+        )
+        deleted["voice_calls"] = cur.rowcount
+        conn.commit()
+    except Exception:
+        conn.rollback()
 
     return deleted
 
@@ -716,8 +801,16 @@ def save_feedback(
     user_query: str = "",
     bot_reply: str = "",
     user_id: str = "",
+    retrieval_mode: str = "",
+    workflow_id: str = "",
+    step_id: str = "",
 ) -> dict[str, Any]:
-    """Persist a feedback entry and return it."""
+    """Persist a feedback entry and return it.
+
+    *retrieval_mode*, *workflow_id* and *step_id* say which route or journey
+    step produced the rated reply; they are identifiers validated at the API
+    boundary (``FeedbackRequest``), never free text.
+    """
     from .guardrails import redact_pii_text
 
     comment = redact_pii_text(comment)
@@ -729,9 +822,12 @@ def save_feedback(
     try:
         conn.execute(
             """INSERT INTO feedback (id, message_id, session_id, user_id, rating, comment,
-               user_query, bot_reply, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now),
+               user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
+                retrieval_mode or "", workflow_id or "", step_id or "",
+            ),
         )
         conn.commit()
     except Exception:
@@ -799,6 +895,38 @@ def get_feedback_summary(days: int = 30) -> dict[str, Any]:
         "satisfaction_pct": satisfaction,
         "recent": [dict(r) for r in recent],
     }
+
+
+def get_journey_funnel(days: int = 30, abandon_after_s: float = 86400.0) -> dict[str, Any]:
+    """Raw guided-journey counts for the last *days*, from durable tables.
+
+    Read from ``workflow_sessions`` rather than the in-process
+    ``journey_events_total`` counter, which is per replica and resets on
+    restart. Aggregated in SQL, so the result is bounded by journeys x
+    statuses x steps however many sessions exist. A session still ``active``
+    whose last update is older than *abandon_after_s* is marked ``stale``
+    (abandoned). ``app.journey_analytics.build_journey_funnel`` turns this
+    into the per-journey view.
+    """
+    conn = _get_connection()
+    now = time.time()
+    cutoff = now - days * 86400
+    stale_before = now - abandon_after_s
+    sessions = conn.execute(
+        """SELECT workflow_id, status, current_step_idx AS step_idx,
+                  CASE WHEN status = 'active' AND updated_at < ? THEN 1 ELSE 0 END AS stale,
+                  COUNT(*) AS n
+           FROM workflow_sessions WHERE created_at >= ?
+           GROUP BY workflow_id, status, current_step_idx, stale""",
+        (stale_before, cutoff),
+    ).fetchall()
+    feedback = conn.execute(
+        """SELECT workflow_id, step_id, rating, COUNT(*) AS n
+           FROM feedback WHERE created_at >= ? AND workflow_id != ''
+           GROUP BY workflow_id, step_id, rating""",
+        (cutoff,),
+    ).fetchall()
+    return {"sessions": [dict(r) for r in sessions], "feedback": [dict(r) for r in feedback]}
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +1035,7 @@ def delete_user_analytics(user_id: str) -> dict[str, int]:
     for table in ("analytics_events", "sessions", "feedback"):
         try:
             counts[table] = execute(
-                f"DELETE FROM {table} WHERE user_id = ?",  # noqa: S608 — fixed table names
+                f"DELETE FROM {table} WHERE user_id = ?",  # nosec B608 # noqa: S608 — fixed table names
                 (user_id,),
             )
         except Exception:
@@ -981,6 +1109,7 @@ def get_recent_turns(
     session_id: str | None = None,
     conversation_id: str | None = None,
     limit: int = 5,
+    user_id: str | None = None,
 ) -> list[dict[str, str]]:
     """Retrieve the most recent conversation turns for a session (multi-turn memory).
 
@@ -988,15 +1117,27 @@ def get_recent_turns(
     ordered oldest-first (chronological) for prompt injection.
     """
     if conversation_id:
-        sql = """SELECT user_message, bot_reply FROM conversations
-                 WHERE conversation_id = ?
-                 ORDER BY created_at DESC LIMIT ?"""
-        args: tuple[str, int] = (conversation_id, limit)
+        if user_id:
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
+                     WHERE conversation_id = ? AND user_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args: tuple[Any, ...] = (conversation_id, user_id, limit)
+        else:
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
+                     WHERE conversation_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args = (conversation_id, limit)
     elif session_id:
-        sql = """SELECT user_message, bot_reply FROM conversations
-                 WHERE session_id = ?
-                 ORDER BY created_at DESC LIMIT ?"""
-        args = (session_id, limit)
+        if user_id:
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
+                     WHERE session_id = ? AND user_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args = (session_id, user_id, limit)
+        else:
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
+                     WHERE session_id = ?
+                     ORDER BY created_at DESC LIMIT ?"""
+            args = (session_id, limit)
     else:
         return []
 
@@ -1004,8 +1145,43 @@ def get_recent_turns(
     rows = conn.execute(sql, args).fetchall()
     # Reverse to chronological order
     return [
-        {"user_message": r["user_message"], "bot_reply": r["bot_reply"]} for r in reversed(rows)
+        {
+            "user_message": r["user_message"],
+            "bot_reply": r["bot_reply"],
+            "locale": r["locale"] if "locale" in r.keys() else "",
+        }
+        for r in reversed(rows)
     ]
+
+
+def get_conversation_context(
+    session_id: str | None = None,
+    conversation_id: str | None = None,
+    recent_limit: int = 6,
+    max_history: int = 25,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Retrieve multi-turn conversation history and build rolling context & summary."""
+    from .context_manager import RollingContextManager, context_manager
+
+    turns = get_recent_turns(
+        session_id=session_id,
+        conversation_id=conversation_id,
+        limit=max_history,
+        user_id=user_id,
+    )
+    mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
+    ctx = mgr.build_context(
+        turns,
+        conversation_id=conversation_id or session_id or "",
+    )
+    return {
+        "recent_turns": ctx.recent_turns,
+        "context_summary": ctx.context_summary,
+        "active_entities": ctx.active_entities,
+        "total_turns": ctx.total_turns,
+        "all_turns": ctx.all_turns,
+    }
 
 
 def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
@@ -1092,7 +1268,7 @@ def get_conversation_transcript(
     rows = conn.execute(
         f"""SELECT user_message, bot_reply, created_at, sources, topic_tag
             FROM conversations WHERE {where}
-            ORDER BY created_at DESC LIMIT ?""",  # noqa: S608 - `where` is a fixed literal
+            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 # noqa: S608 - `where` is a fixed literal
         (key, limit),
     ).fetchall()
     return [
@@ -1113,7 +1289,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT conversation_id, workflow_id, status, current_step_idx,
+        """SELECT conversation_id, workflow_id, status, current_step_idx, user_id,
                   slots_json, last_prompt, created_at, updated_at
            FROM workflow_sessions WHERE conversation_id = ?""",
         (conversation_id,),
@@ -1131,6 +1307,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
+        "user_id": row["user_id"] or "",
         "slots": slots,
         "last_prompt": row["last_prompt"] or "",
         "created_at": row["created_at"],
@@ -1146,6 +1323,7 @@ def upsert_workflow_session(
     *,
     status: str = "active",
     last_prompt: str = "",
+    user_id: str = "",
 ) -> None:
     """Create or update a durable workflow session."""
     if not conversation_id or not workflow_id:
@@ -1158,13 +1336,14 @@ def upsert_workflow_session(
     try:
         conn.execute(
             """INSERT INTO workflow_sessions
-               (conversation_id, workflow_id, status, current_step_idx,
+               (conversation_id, workflow_id, status, current_step_idx, user_id,
                 slots_json, last_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(conversation_id) DO UPDATE SET
                  workflow_id = excluded.workflow_id,
                  status = excluded.status,
                  current_step_idx = excluded.current_step_idx,
+                 user_id = CASE WHEN excluded.user_id != '' THEN excluded.user_id ELSE workflow_sessions.user_id END,
                  slots_json = excluded.slots_json,
                  last_prompt = excluded.last_prompt,
                  updated_at = excluded.updated_at""",
@@ -1173,6 +1352,7 @@ def upsert_workflow_session(
                 workflow_id,
                 status,
                 max(0, int(current_step_idx)),
+                user_id or "",
                 slots_json,
                 last_prompt[:2000],
                 now,
@@ -1332,7 +1512,7 @@ def _redact_ticket_value(value: Any) -> Any:
 
 def _hydrate_ticket(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     ticket = dict(row)
-    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply"):
+    for field in ("reason", "user_query", "bot_reply", "staff_note", "officer_reply", "user_query_en", "officer_reply_localized"):
         if field in ticket:
             ticket[field] = _redact_ticket_value(ticket[field])
     ticket["handoff"] = _redact_ticket_value(_json_loads(ticket.pop("handoff_json", "{}"), {}))
@@ -1355,6 +1535,10 @@ def create_ticket(
     transcript: list[dict[str, Any]] | None = None,
     user_id: str = "",
     team: str = "",
+    locale: str = "en",
+    modality: str = "text",
+    user_query_en: str = "",
+    officer_reply_localized: str = "",
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -1368,6 +1552,8 @@ def create_ticket(
         priority = "normal"
     reason = _redact_ticket_value(reason)
     user_query = _redact_ticket_value(user_query)
+    user_query_en = _redact_ticket_value(user_query_en)
+    officer_reply_localized = _redact_ticket_value(officer_reply_localized)
     bot_reply = _redact_ticket_value(bot_reply)
     handoff = _redact_ticket_value(handoff or {})
     response_judge = _redact_ticket_value(response_judge or {})
@@ -1381,8 +1567,9 @@ def create_ticket(
                                     reason, user_query, bot_reply,
                                     handoff_json, response_judge_json, transcript_json,
                                     user_id, team, assignee, staff_note,
+                                    locale, modality, user_query_en, officer_reply_localized,
                                     created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)""",
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -1396,6 +1583,10 @@ def create_ticket(
                 _json_dumps(transcript, "[]"),
                 user_id,
                 team,
+                locale or "en",
+                modality or "text",
+                user_query_en or "",
+                officer_reply_localized or "",
                 now,
                 now,
             ),
@@ -1415,6 +1606,10 @@ def create_ticket(
         "response_judge": response_judge,
         "transcript": transcript,
         "team": team,
+        "locale": locale or "en",
+        "modality": modality or "text",
+        "user_query_en": user_query_en or "",
+        "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
     }
 
@@ -1425,6 +1620,10 @@ def list_tickets(
     offset: int = 0,
     priority: str | None = None,
     team: str | None = None,
+    locale: str | None = None,
+    modality: str | None = None,
+    q: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
 
@@ -1446,7 +1645,8 @@ def list_tickets(
         "       user_query, bot_reply, handoff_json, response_judge_json, "
         "       assignee, staff_note, created_at, updated_at, user_id, team, "
         "       officer_reply, reply_at, reply_delivered_at, "
-        "       first_response_at, resolved_at "
+        "       first_response_at, resolved_at, "
+        "       locale, modality, user_query_en, officer_reply_localized "
         "FROM tickets"
     )
     params: list[Any] = []
@@ -1459,6 +1659,23 @@ def list_tickets(
     if team:
         sql += " AND team = ?" if (status or params) else " WHERE team = ?"
         params.append(team)
+    if locale:
+        sql += " AND locale = ?" if (status or params) else " WHERE locale = ?"
+        params.append(locale)
+    if modality:
+        sql += " AND modality = ?" if (status or params) else " WHERE modality = ?"
+        params.append(modality)
+    if q and q.strip():
+        term = q.strip().lstrip("#")
+        if term.upper().startswith("TIC-"):
+            term = term[4:]
+        q_like = f"%{term}%"
+        clause = "(id LIKE ? OR reason LIKE ? OR user_query LIKE ? OR assignee LIKE ? OR team LIKE ? OR staff_note LIKE ? OR officer_reply LIKE ? OR transcript_json LIKE ?)"
+        sql += " AND " + clause if (status or priority or team or " WHERE " in sql) else " WHERE " + clause
+        params.extend([q_like] * 8)
+    if user_id:
+        sql += " AND user_id = ?" if (" WHERE " in sql) else " WHERE user_id = ?"
+        params.append(user_id)
     sql += (
         " ORDER BY CASE priority"
         "   WHEN 'urgent' THEN 0 WHEN 'high' THEN 1"
@@ -1468,6 +1685,31 @@ def list_tickets(
     params.extend([limit, offset])
     rows = conn.execute(sql, params).fetchall()
     return [_hydrate_ticket(r) for r in rows]
+
+
+def append_taxpayer_reply(ticket_id: str, message: str) -> dict[str, Any] | None:
+    """Append a taxpayer follow-up message to the ticket transcript."""
+    ticket = get_ticket(ticket_id)
+    if not ticket:
+        return None
+    transcript = list(ticket.get("transcript") or [])
+    now = time.time()
+    turn = {
+        "user_message": message.strip()[:2000],
+        "bot_reply": "",
+        "created_at": now,
+        "sender": "taxpayer",
+    }
+    transcript.append(turn)
+    transcript_json = json.dumps(transcript)
+    conn = _get_connection()
+    new_status = "assigned" if ticket.get("status") in ("assigned", "resolved") else "open"
+    conn.execute(
+        "UPDATE tickets SET transcript_json = ?, status = ?, updated_at = ? WHERE id = ?",
+        (transcript_json, new_status, now, ticket_id),
+    )
+    conn.commit()
+    return get_ticket(ticket_id)
 
 
 def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
@@ -1482,7 +1724,7 @@ def pending_officer_reply(conversation_id: str) -> dict[str, Any] | None:
         return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT id, officer_reply, reply_at, assignee, status FROM tickets
+        """SELECT id, officer_reply, officer_reply_localized, locale, reply_at, assignee, status FROM tickets
            WHERE conversation_id = ?
              AND officer_reply != ''
              AND reply_delivered_at = 0
@@ -1679,11 +1921,17 @@ def list_ticket_viewers(ticket_id: str, max_age: float = PRESENCE_TTL_SECONDS) -
 
 
 def load_flag_overrides() -> dict[str, bool]:
+    """Durable flag overrides, propagating a failure to read them.
+
+    A query error here is a persistence failure, not an empty override
+    set.  Returning ``{}`` made the two indistinguishable, so startup
+    replayed nothing and still reported success — a production replica
+    whose override state was unreadable looked exactly like one that had
+    no overrides.  The Postgres backend already propagates; both must
+    fail closed the same way.
+    """
     conn = _get_connection()
-    try:
-        rows = conn.execute("SELECT name, enabled FROM flag_overrides").fetchall()
-    except Exception:
-        return {}
+    rows = conn.execute("SELECT name, enabled FROM flag_overrides").fetchall()
     out: dict[str, bool] = {}
     for row in rows:
         name = str(row["name"] if not isinstance(row, tuple) else row[0])
@@ -2158,6 +2406,8 @@ def update_ticket(
     staff_note: str | None = None,
     priority: str | None = None,
     officer_reply: str | None = None,
+    officer_reply_localized: str | None = None,
+    locale: str | None = None,
 ) -> bool:
     """Update mutable ticket fields.  Returns True if a row was touched.
 
@@ -2194,6 +2444,12 @@ def update_ticket(
         params.append(_redact_ticket_value(officer_reply)[:4000])
         sets.append("reply_at = ?")
         params.append(now)
+    if officer_reply_localized is not None:
+        sets.append("officer_reply_localized = ?")
+        params.append(_redact_ticket_value(officer_reply_localized)[:4000])
+    if locale is not None:
+        sets.append("locale = ?")
+        params.append(locale[:16])
     if status is not None:
         if status not in ("open", "assigned", "resolved", "wontfix"):
             return False
@@ -2217,7 +2473,7 @@ def update_ticket(
     params.append(ticket_id)
     try:
         cursor = conn.execute(
-            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?",  # noqa: S608
+            f"UPDATE tickets SET {', '.join(sets)} WHERE id = ?",  # nosec B608 # noqa: S608
             params,
         )
         conn.commit()
@@ -2387,7 +2643,7 @@ def upsert_user_profile(user_id: str, updates: dict[str, Any]) -> dict[str, Any]
         params = list(updates.values()) + [now, user_id]
         try:
             conn.execute(
-                f"UPDATE user_profiles SET {sets} WHERE user_id = ?",  # noqa: S608
+                f"UPDATE user_profiles SET {sets} WHERE user_id = ?",  # nosec B608 # noqa: S608
                 params,
             )
             conn.commit()
@@ -2521,14 +2777,15 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
 
     ``user_id`` is the internal UUID (users/profiles/consents); ``external_id`` is
     the OIDC ``sub`` that chat history is keyed by. Conversations (and their
-    escalation tickets, linked by ``conversation_id``) are returned under it.
-    ``facts`` is filled by the caller from the memory service.
+    escalation tickets, linked by ``conversation_id``), and workflow sessions
+    are returned under it. ``facts`` is filled by the caller from the memory service.
     """
     conversations: list[dict[str, Any]] = []
     tickets: list[dict[str, Any]] = []
     analytics_events: list[dict[str, Any]] = []
     sessions: list[dict[str, Any]] = []
     feedback: list[dict[str, Any]] = []
+    workflow_sessions: list[dict[str, Any]] = []
     if external_id:
         conversations = query_all(
             "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
@@ -2538,7 +2795,7 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         if conv_ids:
             ph = ",".join("?" * len(conv_ids))
             tickets = query_all(
-                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
                 tuple(conv_ids),
             )
         analytics_events = query_all(
@@ -2553,6 +2810,16 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
             "SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
             (external_id,),
         )
+        workflow_where = "user_id = ?"
+        workflow_params: tuple[Any, ...] = (external_id,)
+        if conv_ids:
+            placeholders = ",".join("?" * len(conv_ids))
+            workflow_where += f" OR conversation_id IN ({placeholders})"
+            workflow_params += tuple(conv_ids)
+        workflow_sessions = query_all(
+            f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608 — identifiers are fixed; values are bound parameters
+            workflow_params,
+        )
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
@@ -2562,6 +2829,7 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         "analytics_events": analytics_events,
         "sessions": sessions,
         "feedback": feedback,
+        "workflow_sessions": workflow_sessions,
         "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
@@ -2600,7 +2868,7 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             if conv_ids:
                 ph = ",".join("?" * len(conv_ids))
                 deleted += execute(
-                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # noqa: S608 — ?-placeholders
+                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
                     tuple(conv_ids),
                 )
             counts["tickets"] = deleted
@@ -2611,11 +2879,25 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             if conv_ids:
                 ph = ",".join("?" * len(conv_ids))
                 execute(
-                    f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # noqa: S608
+                    f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
                     tuple(conv_ids),
                 )
         except Exception:
             logger.exception("delete_user_cascade: conversation_topics")
+        try:
+            workflow_deleted = execute(
+                "DELETE FROM workflow_sessions WHERE user_id = ?", (external_id,)
+            )
+            if conv_ids:
+                ph = ",".join("?" * len(conv_ids))
+                workflow_deleted += execute(
+                    f"DELETE FROM workflow_sessions WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
+                    tuple(conv_ids),
+                )
+            counts["workflow_sessions"] = workflow_deleted
+        except Exception:
+            logger.exception("delete_user_cascade: workflow_sessions")
+            counts["workflow_sessions"] = -1
         try:
             counts["conversations"] = execute(
                 "DELETE FROM conversations WHERE user_id = ?", (external_id,)
@@ -2628,7 +2910,7 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     for table, col in (("consent_receipts", "user_id"), ("user_profiles", "user_id"), ("users", "id")):
         try:
             counts[table] = execute(
-                f"DELETE FROM {table} WHERE {col} = ?",  # noqa: S608 — hardcoded list
+                f"DELETE FROM {table} WHERE {col} = ?",  # nosec B608 # noqa: S608 — hardcoded list
                 (user_id,),
             )
         except Exception:
@@ -2683,12 +2965,14 @@ if ANALYTICS_BACKEND == "postgres":
         save_feedback = _pg.save_feedback  # type: ignore
         update_feedback_comment = _pg.update_feedback_comment  # type: ignore
         get_feedback_summary = _pg.get_feedback_summary  # type: ignore
+        get_journey_funnel = _pg.get_journey_funnel  # type: ignore
         track_event = _pg.track_event  # type: ignore
         get_event_counts = _pg.get_event_counts  # type: ignore
         upsert_session = _pg.upsert_session  # type: ignore
         get_session_stats = _pg.get_session_stats  # type: ignore
         log_conversation = _pg.log_conversation  # type: ignore
         get_recent_turns = _pg.get_recent_turns  # type: ignore
+        get_conversation_context = _pg.get_conversation_context  # type: ignore
         get_conversation_topic = _pg.get_conversation_topic  # type: ignore
         upsert_conversation_topic = _pg.upsert_conversation_topic  # type: ignore
         clear_conversation_topic = _pg.clear_conversation_topic  # type: ignore
@@ -2708,6 +2992,7 @@ if ANALYTICS_BACKEND == "postgres":
         find_open_ticket = _pg.find_open_ticket  # type: ignore
         pending_officer_reply = _pg.pending_officer_reply  # type: ignore
         mark_reply_delivered = _pg.mark_reply_delivered  # type: ignore
+        append_taxpayer_reply = _pg.append_taxpayer_reply  # type: ignore
         sla_stats = _pg.sla_stats  # type: ignore
         heartbeat_ticket_presence = _pg.heartbeat_ticket_presence  # type: ignore
         list_ticket_viewers = _pg.list_ticket_viewers  # type: ignore

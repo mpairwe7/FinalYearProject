@@ -41,12 +41,12 @@ os.environ.setdefault("SPEECH_ENABLED", "false")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from App.backend.app import database  # noqa: E402
-from App.backend.app import service as service_module  # noqa: E402
-from App.backend.app.flags import flags  # noqa: E402
-from App.backend.app.main import app  # noqa: E402
-from App.backend.app.providers import breakers, budget, gateway  # noqa: E402
-from App.backend.app.providers import config as cloud_config  # noqa: E402
+from app import database  # noqa: E402
+from app import service as service_module  # noqa: E402
+from app.flags import flags  # noqa: E402
+from app.main import app  # noqa: E402
+from app.providers import breakers, budget, gateway  # noqa: E402
+from app.providers import config as cloud_config  # noqa: E402
 
 CLOUD_REPLY = "According to the cloud fallback, the standard VAT rate in Uganda is 18% [1]."
 
@@ -100,7 +100,7 @@ def cloud_fallback_env():
         "CLOUDFLARE_API_TOKEN": "cf-it-token",
         "CF_AIG_GATEWAY": "ura-gw",
         "CF_AIG_TOKEN": "aig-it-token",
-        "GEMINI_API_KEY": "AIza-it",
+        "GEMINI_API_KEY": "AIza-it",  # pragma: allowlist secret
         "LLM_FALLBACK_BACKEND": "gemini",
     }
     os.environ.update(env)
@@ -133,6 +133,7 @@ def deterministic_pipeline(client):
          mock.patch.object(service_module.ChatModel, "_priority_faq_hits", return_value=[]), \
          mock.patch.object(service_module.ChatModel, "_evaluate_response_judge",
                            return_value=dict(_APPROVE_JUDGE)), \
+         mock.patch.object(service_module, "detect_language", return_value="en"), \
          mock.patch.object(model._output_guard, "should_abstain", return_value=False), \
          mock.patch.object(model._cache, "get", return_value=None), \
          mock.patch.object(model._cache, "put"):

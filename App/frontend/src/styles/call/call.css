@@ -1,0 +1,678 @@
+/* =============================================================================
+ * Call URA — pre-call card and the live call sheet.
+ *
+ * The sheet follows the chat's own theme rather than inventing a palette: it
+ * mounts inside `.app-shell.chatv2`, so every token below resolves to the
+ * chatv2 values (white / #212121 canvas, URA navy accent) and re-themes with
+ * the rest of the app. Fallbacks keep it legible if it is ever mounted
+ * outside that scope.
+ *
+ * Layout: a centred sheet, not a full-screen takeover — the caller can still
+ * see the chat they came from behind the backdrop. Inside, three rows:
+ * header / scrolling thread / dock. The dock is where the orb lives, with the
+ * call controls either side of it.
+ * ========================================================================== */
+
+.call-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 18, 24, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 1rem;
+  animation: callFadeIn 0.2s ease-out;
+}
+
+:root[data-theme='dark'] .call-backdrop {
+  background: rgba(0, 0, 0, 0.66);
+}
+
+@keyframes callFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.call-card {
+  width: 100%;
+  background: var(--bg-0, #ffffff);
+  border: 1px solid var(--border-0, #e6e6e6);
+  border-radius: 20px;
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, 0.14));
+  color: var(--text-0, #0d0d0d);
+  position: relative;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------------ pre-call */
+
+.call-card--pre {
+  max-width: 380px;
+  padding: 1.75rem 1.5rem 1.375rem;
+  text-align: center;
+}
+
+.call-pre-avatar {
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 0.875rem;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Flat URA navy: the old gradient-plus-glow avatar was the single most
+     "generated" thing on the screen. The glyph takes the accent's own
+     contrast colour, because chatv2 inverts the accent in dark mode (a light
+     pill with a dark glyph) — a hardcoded white icon disappears there. */
+  background: var(--cv2-accent, #003087);
+  color: var(--cv2-accent-contrast, #ffffff);
+}
+
+.call-pre-title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.call-pre-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-2, #6e6e6e);
+  font-variant-numeric: tabular-nums;
+}
+
+.call-pre-consent {
+  margin: 0.875rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-2, #6e6e6e);
+}
+
+.call-pre-actions {
+  display: flex;
+  gap: 0.625rem;
+  margin-top: 1.25rem;
+}
+
+/* --------------------------------------------------------------- shared btns */
+
+.call-btn {
+  flex: 1;
+  min-height: 42px;
+  padding: 0 1rem;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.call-btn--ghost {
+  background: transparent;
+  color: var(--text-1, #3f3f3f);
+  border: 1px solid var(--border-1, #d2d2d2);
+}
+
+.call-btn--ghost:hover {
+  background: var(--surface-1, #f7f7f7);
+}
+
+.call-btn--primary {
+  background: var(--cv2-accent, #003087);
+  color: var(--cv2-accent-contrast, #ffffff);
+  border: 1px solid transparent;
+}
+
+.call-btn--primary:hover {
+  background: var(--cv2-accent-hover, #06246b);
+}
+
+.call-btn--block {
+  width: 100%;
+  flex: none;
+}
+
+.call-btn:focus-visible,
+.call-ctl:focus-visible,
+.call-jump:focus-visible {
+  outline: 2px solid var(--cv2-focus, #0b57d0);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------- live sheet */
+
+.call-card--live {
+  max-width: 560px;
+  height: min(78vh, 720px);
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  padding: 0;
+}
+
+.call-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.875rem 1.125rem;
+  border-bottom: 1px solid var(--border-0, #e6e6e6);
+}
+
+.call-header-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.call-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-1, #3f3f3f);
+}
+
+.call-status-pill--active {
+  background: var(--cv2-success-soft, #dcfae6);
+  color: var(--success, #067647);
+}
+
+.call-status-pill--transferring {
+  background: var(--cv2-warning-soft, #fef0c7);
+  color: var(--warning, #b54708);
+}
+
+.call-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.call-status-pill--active .call-status-dot {
+  animation: callDotPulse 1.6s infinite;
+}
+
+@keyframes callDotPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(1.3); }
+}
+
+.call-ticket-chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 8px;
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-2, #6e6e6e);
+  border: 1px solid var(--border-0, #e6e6e6);
+}
+
+/* Language chip — "English · auto" — and its three-item menu. Same tokens as
+ * the ticket chip; the menu hangs below it, right-aligned to the header. */
+.call-lang {
+  position: relative;
+}
+
+.call-lang-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3125rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 8px;
+  background: var(--surface-1, #f7f7f7);
+  color: var(--text-1, #3f3f3f);
+  border: 1px solid var(--border-0, #e6e6e6);
+  cursor: pointer;
+}
+
+.call-lang-chip:hover {
+  background: var(--surface-2, #efefef);
+}
+
+.call-lang-chip:focus-visible,
+.call-lang-option:focus-visible {
+  outline: 2px solid var(--cv2-accent, #1d3a70);
+  outline-offset: 2px;
+}
+
+.call-lang-chip--pinned {
+  color: var(--cv2-accent, #1d3a70);
+  border-color: currentColor;
+}
+
+.call-lang-menu {
+  position: absolute;
+  top: calc(100% + 0.375rem);
+  right: 0;
+  z-index: 2;
+  min-width: 13rem;
+  max-width: min(16rem, calc(100vw - 2rem));
+  padding: 0.375rem;
+  background: var(--bg-0, #ffffff);
+  border: 1px solid var(--border-0, #e6e6e6);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg, 0 8px 28px rgba(0, 0, 0, 0.14));
+}
+
+.call-lang-menu-hint {
+  margin: 0.25rem 0.5rem 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-2, #6e6e6e);
+}
+
+.call-lang-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.5rem;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--text-0, #0d0d0d);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.call-lang-option:hover,
+.call-lang-option--active {
+  background: var(--surface-1, #f7f7f7);
+}
+
+.call-timer {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-2, #6e6e6e);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------- thread */
+
+.call-thread-wrap {
+  position: relative;
+  min-height: 0;
+}
+
+.call-thread {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  padding: 1.25rem 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.125rem;
+  /* Text dissolves under the header instead of colliding with its border. */
+  mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px);
+}
+
+.call-thread-empty {
+  margin: auto 0;
+  text-align: center;
+  color: var(--text-2, #6e6e6e);
+  font-size: 0.875rem;
+}
+
+.call-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 100%;
+}
+
+.call-turn--caller {
+  align-self: flex-end;
+  align-items: flex-end;
+  max-width: 82%;
+}
+
+.call-turn--agent {
+  align-self: stretch;
+  align-items: flex-start;
+}
+
+/* What the assistant (or the officer) says: plain text, no bubble — the
+   caller is listening to it, so on screen it should read like a transcript,
+   not like a chat message competing for attention. */
+.call-say {
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--text-0, #0d0d0d);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  animation: callTextIn 0.18s ease-out;
+}
+
+.call-say--interim {
+  color: var(--text-2, #6e6e6e);
+}
+
+@keyframes callTextIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.call-speaker-chip {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2, #6e6e6e);
+}
+
+/* The caller's own words, in the same bubble the chat uses for their typed
+   messages — scrolling up should feel like the same conversation. */
+.call-bubble {
+  padding: 0.5rem 0.875rem;
+  border-radius: 16px;
+  border-bottom-right-radius: 6px;
+  background: var(--cv2-user-bubble, #eef3fc);
+  border: 1px solid var(--cv2-user-bubble-border, #d9e4f5);
+  color: var(--text-0, #0d0d0d);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Interim hypothesis: still being revised by the recognizer, so it is shown
+   as provisional rather than as something the caller actually said. */
+.call-bubble--interim {
+  opacity: 0.7;
+  border-style: dashed;
+}
+
+.call-bubble-cursor {
+  display: inline-block;
+  width: 0.45rem;
+  height: 0.9em;
+  margin-left: 0.25rem;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: currentColor;
+  animation: callCaretBlink 1s steps(2, start) infinite;
+}
+
+@keyframes callCaretBlink {
+  to { visibility: hidden; }
+}
+
+.call-system-note {
+  align-self: center;
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-2, #6e6e6e);
+  text-align: center;
+}
+
+.call-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text-1, #3f3f3f);
+  background: var(--bg-0, #ffffff);
+  border: 1px solid var(--border-1, #d2d2d2);
+  box-shadow: var(--shadow-md, 0 4px 14px rgba(0, 0, 0, 0.08));
+  animation: callTextIn 0.15s ease-out;
+}
+
+.call-jump:hover {
+  background: var(--surface-1, #f7f7f7);
+}
+
+.call-error {
+  margin: 0 1.25rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  color: var(--danger, #b42318);
+  background: var(--cv2-danger-soft, #fee4e2);
+}
+
+.call-audio-unlock {
+  margin: 0 1.25rem;
+  padding: 0.625rem 0.75rem;
+  border: 0;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--cv2-accent-contrast, #ffffff);
+  background: var(--cv2-accent, #003087);
+  cursor: pointer;
+}
+
+.call-audio-unlock:focus-visible {
+  outline: 2px solid var(--cv2-accent, #003087);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------- dock */
+
+.call-dock {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.875rem 1.25rem 0.5rem;
+  border-top: 1px solid var(--border-0, #e6e6e6);
+}
+
+.call-dock-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex: 1;
+}
+
+.call-dock-side--end {
+  justify-content: flex-end;
+}
+
+.call-ctl {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-1, #3f3f3f);
+  background: var(--surface-1, #f7f7f7);
+  border: 1px solid var(--border-0, #e6e6e6);
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.call-ctl:hover {
+  background: var(--surface-2, #f0f0f0);
+  transform: translateY(-1px);
+}
+
+.call-ctl--muted {
+  background: var(--cv2-warning-soft, #fef0c7);
+  border-color: transparent;
+  color: var(--warning, #b54708);
+}
+
+/* Hang-up keeps one fixed red in both themes. `--danger` lightens in dark for
+   text legibility, which would leave a white glyph on a pale red button. */
+.call-ctl--hangup {
+  background: #d92d20;
+  border-color: transparent;
+  color: #ffffff;
+}
+
+.call-ctl--hangup:hover {
+  background: #b42318;
+}
+
+.call-hint {
+  margin: 0;
+  padding: 0 1.25rem 0.875rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-3, #6e6e6e);
+}
+
+/* ---------------------------------------------------------------------- orb */
+
+.call-orb-wrap {
+  width: 96px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.call-orb {
+  --orb-level: 0;
+  position: relative;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Scale is driven straight from the audio level written by CallOrb, so the
+     orb tracks the voice rather than running a fixed animation loop. */
+  transform: scale(calc(1 + var(--orb-level) * 0.18));
+  transition: transform 0.06s linear;
+}
+
+.call-orb-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  /* URA navy with a gold sheen, rather than the generic blue/purple orb. */
+  background:
+    radial-gradient(circle at 32% 28%, rgba(249, 199, 79, 0.55), transparent 42%),
+    radial-gradient(circle at 60% 65%, #0b57d0, #003087 72%);
+  box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.18);
+}
+
+.call-orb-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(11, 87, 208, 0.42), transparent 68%);
+  opacity: calc(0.15 + var(--orb-level) * 0.85);
+  transition: opacity 0.08s linear;
+  pointer-events: none;
+}
+
+/* Light theme washes out a wide bloom, so the glow tightens and the orb gets
+   a defining edge instead. */
+.call-orb::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 48, 135, 0.18);
+}
+
+:root[data-theme='dark'] .call-orb::after {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+:root[data-theme='dark'] .call-orb-halo {
+  inset: -20px;
+}
+
+.call-orb[data-mode='listening'] .call-orb-core {
+  background:
+    radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.5), transparent 42%),
+    radial-gradient(circle at 60% 65%, #12b886, #00756b 72%);
+}
+
+.call-orb[data-mode='listening'] .call-orb-halo {
+  background: radial-gradient(circle, rgba(0, 117, 107, 0.42), transparent 68%);
+}
+
+.call-orb[data-mode='idle'] {
+  animation: callOrbBreathe 4s ease-in-out infinite;
+}
+
+@keyframes callOrbBreathe {
+  0%, 100% { transform: scale(0.97); }
+  50% { transform: scale(1.02); }
+}
+
+/* ------------------------------------------------------------------ responsive */
+
+@media (max-width: 560px) {
+  .call-backdrop {
+    padding: 0.5rem;
+  }
+
+  .call-card--live {
+    height: min(88vh, 720px);
+  }
+
+  .call-thread {
+    padding: 1rem 0.875rem 1.25rem;
+    gap: 1rem;
+  }
+
+  .call-say {
+    font-size: 1rem;
+  }
+
+  .call-dock {
+    padding: 0.75rem 0.875rem 0.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .call-backdrop,
+  .call-say,
+  .call-jump {
+    animation: none;
+  }
+
+  .call-thread {
+    scroll-behavior: auto;
+  }
+
+  .call-bubble-cursor,
+  .call-orb[data-mode='idle'],
+  .call-status-pill--active .call-status-dot {
+    animation: none;
+  }
+
+  .call-orb {
+    transform: none;
+    transition: none;
+  }
+}

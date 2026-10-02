@@ -1,5 +1,10 @@
 # FinalYearProject
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/ura-chatbot/badge)](https://www.bestpractices.dev/)
+[![SLSA Level 2](https://slsa.dev/images/gh-badge-level2.svg)](https://slsa.dev/)
+[![Security: Trivy](https://img.shields.io/badge/Security-Trivy_Scanning-blue.svg)](.github/workflows/security-trivy.yml)
+[![DevSecOps: SAST/DAST](https://img.shields.io/badge/DevSecOps-SAST%2FDAST-green.svg)](.github/workflows/devsecops-sast-dast.yml)
+
 This repository is a customer-service conversation AI for Uganda Revenue Authority taxpayers. The pipeline uses GitHub Actions for CI/testing/deployment and Docker for containerised deployment. Backend uses Python/FastAPI with `uv` for dependency management; frontend (Next.js) uses Bun. Model training happens outside this repository — `ml/` retains only the production quality gates and corpus tooling `App/backend` and CI depend on (see [ml/README.md](ml/README.md)).
 
 ## Documentation

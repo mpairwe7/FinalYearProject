@@ -1,0 +1,98 @@
+"""What the chat's voice paths hear: uploaded PCM is decoded as PCM.
+
+On the local stack a Luganda question came back from ``/v1/asr`` as
+"Ekiriza e e e e e…" while the same clip, wrapped in a WAV header, read
+correctly. Its first sample was -1, whose bytes (FF FF) passed a bare MPEG
+frame-sync test, so libsndfile decoded the speech as an MP3.
+"""
+
+from __future__ import annotations
+
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+from app.speech_service import SpeechModel, _looks_like_mp3, raw_pcm_to_wav
+
+
+def _tone(first_sample: int | None = None, peak: float = 0.25, offset: int = 0) -> np.ndarray:
+    """One second of 16-bit, 16 kHz speech-band tone."""
+    t = np.arange(16000) / 16000
+    samples = (np.sin(2 * np.pi * 220 * t) * peak * 32767).astype(np.int32) + offset
+    pcm = np.clip(samples, -32768, 32767).astype("<i2")
+    if first_sample is not None:
+        pcm[0] = first_sample
+    return pcm
+
+
+def _mp3_frames(count: int = 3) -> bytes:
+    """MPEG-1 Layer III frames: 128 kbps at 44.1 kHz, no padding, so 417 bytes each."""
+    return (b"\xff\xfb\x90\x00" + b"\x00" * 413) * count
+
+
+def _decode(data: bytes) -> np.ndarray:
+    return SpeechModel.__new__(SpeechModel)._decode_audio_bytes(data)
+
+
+class RawPcmIsNotMistakenForMp3(unittest.TestCase):
+    def test_a_recording_that_starts_on_a_frame_sync_is_decoded_as_pcm(self):
+        # -1, -3841 and -7937 are FF FF, FF F0 and FF E0: the MPEG frame sync.
+        # Whether libsndfile then rejects the bytes or turns them into noise
+        # depends on the audio, so the routing itself is what is pinned.
+        routed = AssertionError("raw PCM was sent to the container (MP3) decoder")
+        for first in (-1, -3841, -7937):
+            with self.subTest(first_sample=first), patch.object(SpeechModel, "_decode_container", side_effect=routed):
+                pcm = _tone(first_sample=first)
+                self.assertFalse(_looks_like_mp3(pcm.tobytes()))
+                np.testing.assert_allclose(_decode(pcm.tobytes()), pcm / 32768.0, atol=1e-6)
+
+    def test_an_mp3_stream_is_still_recognised(self):
+        self.assertTrue(_looks_like_mp3(_mp3_frames()))
+        self.assertTrue(_looks_like_mp3(b"ID3\x04\x00\x00\x00\x00\x00\x00" + _mp3_frames()))
+        # One header and nothing one frame later to confirm it.
+        self.assertFalse(_looks_like_mp3(_mp3_frames()[:417]))
+
+
+class Int16IsNotMistakenForFloat32(unittest.TestCase):
+    def test_quiet_speech_with_a_dc_offset_is_decoded_as_int16(self):
+        # Every sample positive and quiet: read as float32 its largest value
+        # is tiny, which passed the old range check.
+        pcm = _tone(peak=0.03, offset=1200)
+        self.assertEqual(len(pcm.tobytes()) % 4, 0)
+        np.testing.assert_allclose(_decode(pcm.tobytes()), pcm / 32768.0, atol=1e-6)
+
+    def test_real_float32_audio_is_still_float32(self):
+        audio = (_tone() / 32768.0).astype(np.float32)
+        np.testing.assert_allclose(_decode(audio.tobytes()), audio, atol=1e-7)
+
+    def test_float32_speech_with_a_long_near_silent_stretch_is_still_float32(self):
+        # CodeRabbit on #523: noise suppression leaves stretches far below
+        # 1e-7, and an amplitude rule read the whole recording as int16.
+        audio = (_tone() / 32768.0).astype(np.float32)
+        audio[5000:11000] = np.random.default_rng(0).normal(0, 1e-9, 6000).astype(np.float32)  # 37%
+        np.testing.assert_allclose(_decode(audio.tobytes()), audio, atol=1e-7)
+
+
+class DeclaredEncoding(unittest.TestCase):
+    """A caller that names its raw format (/v1/asr?encoding=...) is never guessed."""
+
+    def test_each_encoding_becomes_wav_of_the_same_samples(self):
+        pcm = _tone()
+        for encoding, raw in (("pcm_s16le", pcm.tobytes()), ("pcm_f32le", (pcm / 32768.0).astype("<f4").tobytes())):
+            with self.subTest(encoding=encoding):
+                wav = raw_pcm_to_wav(raw, encoding, 16000)
+                self.assertEqual((wav[:4], wav[8:12]), (b"RIFF", b"WAVE"))
+                np.testing.assert_allclose(_decode(wav), pcm / 32768.0, atol=2e-4)
+
+    def test_a_wav_file_is_left_as_it_came(self):
+        wav = raw_pcm_to_wav(_tone().tobytes(), "pcm_s16le", 16000)
+        self.assertEqual(raw_pcm_to_wav(wav, "pcm_f32le", 16000), wav)
+
+    def test_what_cannot_be_that_encoding_is_refused(self):
+        for data, encoding in ((b"\x00\x01\x02", "pcm_s16le"), (b"\x00" * 6, "pcm_f32le"), (b"\x00" * 8, "mulaw")):
+            with self.subTest(encoding=encoding), self.assertRaises(ValueError):
+                raw_pcm_to_wav(data, encoding, 16000)
+
+
+if __name__ == "__main__":
+    unittest.main()

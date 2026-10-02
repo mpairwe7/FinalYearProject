@@ -453,3 +453,71 @@ class TakeHomePayTests(unittest.TestCase):
     def test_paye_only_result_omits_the_nssf_basis(self) -> None:
         basis = self._paye(1_000_000)["rate_basis"]
         self.assertNotIn("nssf_employee_contribution", basis.get("legal_basis", {}))
+
+
+class ExciseDutyTests(unittest.TestCase):
+    def test_mobile_money_cash_withdrawal(self) -> None:
+        result = ToolRegistry.call(
+            "calculate_excise_duty",
+            {"excise_type": "mobile_money_withdrawal", "amount": 1_000_000, "fiscal_year": FY26},
+        )
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual(result["excise_duty"], 5_000.0)  # 0.5%
+        self.assertIn("0.5%", result["explanation"])
+
+    def test_telecom_data_and_voice(self) -> None:
+        for etype in ("telecom_data", "telecom_voice"):
+            result = ToolRegistry.call(
+                "calculate_excise_duty",
+                {"excise_type": etype, "amount": 50_000, "fiscal_year": FY26},
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["excise_duty"], 6_000.0)  # 12%
+
+    def test_fuel_specific_rates(self) -> None:
+        petrol = ToolRegistry.call(
+            "calculate_excise_duty",
+            {"excise_type": "fuel_petrol", "amount": 50, "fiscal_year": FY26},
+        )
+        self.assertEqual(petrol["excise_duty"], 72_500.0)  # 50 * 1450
+
+        diesel = ToolRegistry.call(
+            "calculate_excise_duty",
+            {"excise_type": "fuel_diesel", "amount": 100, "fiscal_year": FY26},
+        )
+        self.assertEqual(diesel["excise_duty"], 113_000.0)  # 100 * 1130
+
+    def test_beer_malt(self) -> None:
+        result = ToolRegistry.call(
+            "calculate_excise_duty",
+            {"excise_type": "beer_malt", "amount": 100_000, "fiscal_year": FY26},
+        )
+        self.assertEqual(result["excise_duty"], 60_000.0)  # 60%
+
+
+class CustomsDutyExtendedTests(unittest.TestCase):
+    def test_raw_materials_zero_duty(self) -> None:
+        result = ToolRegistry.call(
+            "calculate_customs_duty",
+            {"cif_value": 10_000_000, "goods_category": "raw_materials", "fiscal_year": FY26},
+        )
+        self.assertEqual(result["duty"], 0.0)
+        self.assertEqual(result["vat"], 1_800_000.0)  # 18% of 10m
+        self.assertEqual(result["landed_cost"], 11_800_000.0)
+
+    def test_used_vehicle_levy_and_import_wht(self) -> None:
+        result = ToolRegistry.call(
+            "calculate_customs_duty",
+            {
+                "cif_value": 20_000_000,
+                "goods_category": "used_vehicle_5_to_8_years",
+                "include_wht": True,
+                "fiscal_year": FY26,
+            },
+        )
+        self.assertEqual(result["duty"], 5_000_000.0)  # 25% of 20m
+        self.assertEqual(result["environmental_levy"], 7_000_000.0)  # 35% of 20m
+        # VAT = (20m CIF + 5m duty + 7m levy) * 18% = 32m * 0.18 = 5,760,000
+        self.assertEqual(result["vat"], 5_760_000.0)
+        self.assertEqual(result["wht"], 1_200_000.0)  # 6% of 20m
+        self.assertEqual(result["landed_cost"], 20_000_000 + 5_000_000 + 7_000_000 + 5_760_000 + 1_200_000)

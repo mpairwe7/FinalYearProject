@@ -117,7 +117,12 @@ async function request<T>(
   path: string,
   init: RequestInit & { json?: unknown } = {},
 ): Promise<T> {
-  const { json, headers, ...rest } = init;
+  const { json, headers, signal: userSignal, ...rest } = init;
+  const timeoutSignal = AbortSignal.timeout(TIMEOUT_MS);
+  const signal = userSignal && typeof AbortSignal.any === "function"
+    ? AbortSignal.any([userSignal, timeoutSignal])
+    : (userSignal || timeoutSignal);
+
   const res = await fetch(`${BASE}${path}`, {
     ...rest,
     headers: authHeaders({
@@ -125,7 +130,7 @@ async function request<T>(
       ...((headers as Record<string, string> | undefined) ?? {}),
     }),
     ...(json === undefined ? {} : { body: JSON.stringify(json) }),
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal,
   });
   if (!res.ok) {
     // FastAPI puts the useful part in `detail`; fall back to the status line so

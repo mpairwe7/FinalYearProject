@@ -4,21 +4,17 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from app.memory import (
     EpisodicMemory,
     EpisodicSummary,
-    FactCandidate,
     FactExtractor,
-    MemoryService,
     SemanticMemory,
     UserFact,
     WorkingMemory,
     compute_decayed_confidence,
     decay_factor,
 )
-from app.memory.decay import HALF_LIVES, half_life_for
+from app.memory.decay import half_life_for
 from app.memory.service import _guess_topic_tag, reset_memory_service
 
 
@@ -330,6 +326,28 @@ class TestMemoryService:
         assert outcome["facts_written"] >= 2
         assert outcome["episodic_written"]
 
+    def test_absorb_extracts_and_writes_from_paired_turns(self, tmp_db):
+        reset_memory_service()
+        u = tmp_db.upsert_user(external_id="bob", tenant_id="t1")
+        tmp_db.grant_consent(u["id"], "personalization", "2026-04")
+
+        from app.memory import get_memory_service
+        mem = get_memory_service()
+
+        # Paired turns matching db.get_recent_turns format
+        outcome = mem.absorb_conversation(
+            user_id=u["id"],
+            conversation_id="c2",
+            turns=[
+                {"user_message": "I am a sole trader in transport", "bot_reply": "Noted."},
+            ],
+        )
+        assert outcome["facts_written"] >= 2
+        assert outcome["episodic_written"]
+        facts = mem.read_facts(u["id"])
+        assert any(f.category == "taxpayer_type" and f.object_value == "sole_trader" for f in facts)
+        assert any(f.category == "industry" and f.object_value == "transport" for f in facts)
+
     def test_consent_gate_blocks_reads(self, tmp_db):
         reset_memory_service()
         u = tmp_db.upsert_user(external_id="alice", tenant_id="t1")
@@ -359,6 +377,29 @@ class TestMemoryService:
         )
         facts = mem.read_facts(u["id"])
         assert len(facts) >= 2
+
+    def test_absorb_conversation_handles_empty_user_messages_before_content(self, tmp_db):
+        reset_memory_service()
+        u = tmp_db.upsert_user(external_id="bob", tenant_id="t1")
+        tmp_db.grant_consent(u["id"], "personalization", "2026-04")
+
+        from app.memory import get_memory_service
+        mem = get_memory_service()
+        mem.absorb_conversation(
+            user_id=u["id"],
+            conversation_id="c_empty_first",
+            turns=[
+                {"role": "user", "content": "   "},
+                {"role": "assistant", "content": "Hello!"},
+                {"role": "user", "content": "I'm a sole trader in retail"},
+                {"role": "assistant", "content": "Got it."},
+            ],
+        )
+        facts = mem.read_facts(u["id"])
+        assert len(facts) >= 2
+        episodic = mem.read_episodic(u["id"])
+        assert len(episodic) >= 1
+        assert "I'm a sole trader in retail" in episodic[0]["summary"]
 
     def test_consent_withdrawal_hides_future_reads(self, tmp_db):
         reset_memory_service()

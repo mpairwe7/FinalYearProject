@@ -46,9 +46,9 @@ Prototype sample rows live in `Data/eval/prototype_seed.json`. In development th
   - conversation_id (PK), topic_id, label (catalog only), tax_type, confidence, updated_at.
   - Retention: same `CONVERSATION_TTL_DAYS` on `updated_at`. Prompt sees the catalog label, never raw user text.
 
-- **workflow_sessions**: Guided workflow state (Phase 15).
-  - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, slots_json, last_prompt, created_at, updated_at.
-  - Indexes: status, updated_at.
+- **workflow_sessions**: Guided workflow state and durable journey outcome.
+  - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, user_id, slots_json, last_prompt, created_at, updated_at.
+  - Indexes: status, updated_at, user_id. `slots_json` and `last_prompt` are cleared after `CONVERSATION_TTL_DAYS` (default 7); outcome metadata is retained for `WORKFLOW_SESSION_TTL_DAYS` (default 365) for the CX funnel. Authenticated records are included in subject export and erasure.
 
 - **tenants**: Multi-tenant isolation (Phase 14).
   - id (PK), display_name, created_at.
@@ -171,7 +171,7 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 ### PII Patterns (Uganda-specific)
 | Pattern | Example | Redaction |
 |---------|---------|-----------|
-| Email | `user@ura.go.ug` | `[REDACTED_EMAIL]` |
+| Email | `user@example.com` (official `services@ura.go.ug` preserved) | `[REDACTED_EMAIL]` |
 | UG Phone | `+256701234567` | `[REDACTED_UG_PHONE]` |
 | UG TIN | `1234567890` | `[REDACTED_UG_TIN]` |
 | UG National ID | `CM95ABCDE12345A` | `[REDACTED_UG_NID]` |
@@ -196,6 +196,23 @@ retriever.search("TIN", filters={"tag": ["tin_registration", "taxpayer_registrat
 | **Citation Accuracy** | GT word overlap > 15% | Whether cited contexts contain GT information |
 | **Safety Probe Pass Rate** | 5 adversarial prompts through InputGuard | Refusal rate on injection attempts |
 | **Abstention Precision** | Faithfulness < threshold on unanswerable | Correct refusal rate |
+
+### Canonical FAQ Parallel Corpus Schema
+- Canonical CSV source files: `Data/dataset/ura_*_faqs.csv`
+- Canonical exported JSONL: `Data/faq_jsonl/ura_*_faqs.jsonl`
+- Canonical manifest: `Data/faq_jsonl/faq_corpus_manifest.json`
+
+Supported column headers:
+```csv
+question,answer,question_lg,answer_lg,question_sw,answer_sw
+```
+Fields:
+- `question`, `answer`: Mandatory English source strings.
+- `question_lg`, `answer_lg`: Optional human/SALT-reviewed Luganda parallel fields.
+- `question_sw`, `answer_sw`: Optional human/SALT-reviewed Swahili parallel fields.
+
+Integrity invariant:
+When compiling via `app.faq_corpus.export_faq_csvs_to_jsonl`, every vernacular answer (`answer_lg`, `answer_sw`) must pass `app.mt.figures_survived`. If numbers (e.g. 18%, 30%, UGX amounts) or statutory compliance periods are mutated, compilation halts with `CorpusValidationError`.
 
 ### Evaluation Datasets
 - `Data/eval/rag_eval.jsonl` — English eval set (30 samples), JSONL format:
