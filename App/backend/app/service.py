@@ -1234,6 +1234,9 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     generate().
     """
     empty = {"text": "", "tool_calls": [], "iterations": 0, "truncated": False}
+    calc_context = _evaluate_calculation_context(query)
+    if calc_context:
+        personalization_context = (personalization_context + "\n\n" + calc_context).strip()
     if not _LLM_CIRCUIT.allow_request():
         logger.warning("LLM circuit breaker OPEN — skipping agentic path")
         return empty
