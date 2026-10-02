@@ -304,7 +304,6 @@ _LG_WORD_NUMBERS: dict[str, float] = {
     "emu": 1.0,
     "kimu": 1.0,
     "kamu": 1.0,
-    "omu": 1.0,
     "bbiri": 2.0,
     "bibiri": 2.0,
     "babiri": 2.0,
@@ -363,7 +362,7 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
     source_figures = figures(source, locale="en")
     trans_figures = figures(translated, locale=locale)
     if not source_figures:
-        return not trans_figures
+        return not (trans_figures - {1.0})
     if trans_figures == source_figures:
         return True
 

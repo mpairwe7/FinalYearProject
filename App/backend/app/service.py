@@ -38,7 +38,7 @@ import uuid
 from collections import Counter
 from collections.abc import AsyncIterator, Generator, Iterable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Final
 
 from . import database as db
 from . import documents as documents_module
