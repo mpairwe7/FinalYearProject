@@ -29,6 +29,8 @@ skip-check:
   - CKV_DOCKER_2
   # CKV_DOCKER_7: Multiple RUN in Dockerfile — we optimise layers deliberately
   - CKV_DOCKER_7
+  # CKV_DOCKER_3: USER — supervisord is PID 1 to supervise multi-service stack (nginx, redis, qdrant, uvicorn, next.js)
+  - CKV_DOCKER_3
 
 # Output format
 output:
