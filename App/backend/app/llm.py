@@ -1020,26 +1020,26 @@ def _vllm_chat_completion(
         import json as _json
         import urllib.request
 
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        if tools:
-            total_chars += len(_json.dumps(tools))
-        while total_chars > 8500:
+        tools_chars = len(_json.dumps(tools)) if tools else 0
+        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
+        total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
+        while total_chars > max_prompt_chars:
             if len(messages) > 2:
                 popped = messages.pop(1)
                 total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > 3000:
-                messages[-1]["content"] = messages[-1]["content"][:3000]
-                total_chars = sum(len(m.get("content", "")) for m in messages) + (len(_json.dumps(tools)) if tools else 0)
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > 3000:
-                messages[0]["content"] = messages[0]["content"][:3000]
-                total_chars = sum(len(m.get("content", "")) for m in messages) + (len(_json.dumps(tools)) if tools else 0)
+            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
+                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
+                total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
+            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
+                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
+                total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
             else:
                 break
 
         est_prompt_tokens = max(100, total_chars // 3)
         safe_max_tokens = min(
             LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(128, 4000 - est_prompt_tokens),
+            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
         )
 
         payload: dict[str, Any] = {
@@ -1052,7 +1052,6 @@ def _vllm_chat_completion(
             "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools:
             payload["tools"] = tools
