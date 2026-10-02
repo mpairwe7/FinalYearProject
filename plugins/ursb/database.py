@@ -241,18 +241,29 @@ class UrsbDatabase:
         """Retrieve registered entity by registration number."""
         return self.search_entity(registration_number)
 
-    def search_entity(self, query: str) -> BusinessEntity | None:
+    def search_entity(self, query: str, *, exact: bool = False) -> BusinessEntity | None:
         q = query.strip()
         conn = self._get_connection()
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT * FROM ursb_entities
-            WHERE registration_number = ? OR LOWER(business_name) = LOWER(?) OR LOWER(business_name) LIKE LOWER(?)
-            LIMIT 1
-            """,
-            (q, q, f"%{q}%"),
-        )
+        if exact:
+            cur.execute(
+                """
+                SELECT * FROM ursb_entities
+                WHERE registration_number = ? OR LOWER(business_name) = LOWER(?)
+                LIMIT 1
+                """,
+                (q, q),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT * FROM ursb_entities
+                WHERE registration_number = ? OR LOWER(business_name) LIKE LOWER(?)
+                ORDER BY (registration_number = ? OR LOWER(business_name) = LOWER(?)) DESC
+                LIMIT 1
+                """,
+                (q, f"%{q}%", q, q),
+            )
         row = cur.fetchone()
         if not row:
             return None

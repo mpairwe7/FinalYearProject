@@ -333,7 +333,12 @@ class BwimsDatabase:
             already_cleared = row["cleared_quantity"]
             new_cleared = already_cleared + cleared_quantity
             remaining = max(0.0, total_qty - new_cleared)
-            new_status = ConsignmentStatus.EX_WAREHOUSED_HOME_USE.value if remaining <= 0.0 else ConsignmentStatus.BONDED_IN_STORAGE.value
+            if remaining > 0.0:
+                new_status = ConsignmentStatus.BONDED_IN_STORAGE.value
+            elif declaration_type == "RE_EXPORT":
+                new_status = ConsignmentStatus.RE_EXPORTED.value
+            else:
+                new_status = ConsignmentStatus.EX_WAREHOUSED_HOME_USE.value
 
             conn.execute(
                 """

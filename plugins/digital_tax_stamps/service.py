@@ -126,6 +126,23 @@ class DigitalTaxStampsService:
                 message="Stamp is genuine but the product shelf life has EXPIRED.",
             )
 
+        if record.status != StampStatus.GENUINE:
+            return StampVerificationResponse(
+                ok=False,
+                stamp_code=stamp_code,
+                is_authentic=False,
+                status=record.status,
+                product_category=record.product_category.value,
+                brand_name=record.brand_name,
+                manufacturer_name=record.manufacturer_name,
+                manufacturer_tin=record.manufacturer_tin,
+                batch_number=record.batch_number,
+                production_date=record.production_date,
+                expiry_date=record.expiry_date,
+                message=f"Stamp status is {record.status.value}; verification failed for market release.",
+                error=f"Stamp status is {record.status.value}; not authentic for retail circulation.",
+            )
+
         return StampVerificationResponse(
             ok=True,
             stamp_code=stamp_code,
@@ -181,7 +198,7 @@ class DigitalTaxStampsService:
             unit_fee = STAMP_UNIT_FEES.get(request.product_category, 30.0)
             total_amount = round(unit_fee * request.quantity, 2)
             prn = self._generate_prn()
-            order_id = f"DTS-ORD-{datetime.datetime.now(_UTC).strftime('%y%m%d')}-{1000 + secrets.randbelow(9000)}"
+            order_id = f"DTS-ORD-{datetime.datetime.now(_UTC).strftime('%y%m%d%H%M')}-{10000 + secrets.randbelow(90000)}"
 
             order_record = {
                 "order_id": order_id,
@@ -227,6 +244,55 @@ class DigitalTaxStampsService:
                     timestamp="",
                     status="REJECTED",
                     error=f"Order ID '{request.order_id}' was not found.",
+                )
+
+            if order.get("order_status") == "ACTIVATED":
+                return StampActivationResponse(
+                    ok=False,
+                    batch_id="",
+                    order_id=request.order_id,
+                    line_id=request.line_id,
+                    activated_count=0,
+                    timestamp="",
+                    status="REJECTED",
+                    error=f"Order '{request.order_id}' has already been activated.",
+                )
+
+            if order.get("payment_status") not in ("PAID", "PENDING"):
+                return StampActivationResponse(
+                    ok=False,
+                    batch_id="",
+                    order_id=request.order_id,
+                    line_id=request.line_id,
+                    activated_count=0,
+                    timestamp="",
+                    status="REJECTED",
+                    error=f"Requisition order '{request.order_id}' has not been paid (current status: {order.get('payment_status')}). Payment is required before line activation.",
+                )
+
+            if len(request.stamp_serials) > order.get("quantity", 0):
+                return StampActivationResponse(
+                    ok=False,
+                    batch_id="",
+                    order_id=request.order_id,
+                    line_id=request.line_id,
+                    activated_count=0,
+                    timestamp="",
+                    status="REJECTED",
+                    error=f"Submitted {len(request.stamp_serials)} stamps exceed ordered quantity of {order.get('quantity')}.",
+                )
+
+            line = self._db.get_packaging_line(request.line_id.strip())
+            if line and line.get("manufacturer_tin") != order.get("taxpayer_tin"):
+                return StampActivationResponse(
+                    ok=False,
+                    batch_id="",
+                    order_id=request.order_id,
+                    line_id=request.line_id,
+                    activated_count=0,
+                    timestamp="",
+                    status="REJECTED",
+                    error=f"Packaging line '{request.line_id}' does not belong to manufacturer TIN '{order.get('taxpayer_tin')}'.",
                 )
 
             if not request.stamp_serials:
@@ -294,25 +360,51 @@ class DigitalTaxStampsService:
                     error="At least one damaged stamp serial must be provided.",
                 )
 
-            decl_id = f"DTS-DMG-{datetime.datetime.now(_UTC).strftime('%y%m%d')}-{1000 + secrets.randbelow(9000)}"
+            valid_serials: list[str] = []
+            for s in request.damaged_serials:
+                st = self._db.get_stamp(s.strip())
+                if st:
+                    if st.manufacturer_tin != tin:
+                        return DamagedStampDeclarationResponse(
+                            ok=False,
+                            declaration_id="",
+                            reconciled_count=0,
+                            credit_allowable_ugx=0.0,
+                            status="REJECTED",
+                            message="",
+                            error=f"Stamp serial '{s}' does not belong to manufacturer TIN '{tin}'.",
+                        )
+                    if st.status == StampStatus.SPOILED:
+                        return DamagedStampDeclarationResponse(
+                            ok=False,
+                            declaration_id="",
+                            reconciled_count=0,
+                            credit_allowable_ugx=0.0,
+                            status="REJECTED",
+                            message="",
+                            error=f"Stamp serial '{s}' is already declared SPOILED.",
+                        )
+                valid_serials.append(s.strip())
+
+            decl_id = f"DTS-DMG-{datetime.datetime.now(_UTC).strftime('%y%m%d%H%M')}-{1000 + secrets.randbelow(9000)}"
             unit_rate = 30.0  # standard base reconciliation allowance
-            credit = round(len(request.damaged_serials) * unit_rate, 2)
+            credit = round(len(valid_serials) * unit_rate, 2)
 
             decl_data = {
                 "declaration_id": decl_id,
                 "tin": tin,
-                "damaged_count": len(request.damaged_serials),
+                "damaged_count": len(valid_serials),
                 "reason": request.incident_reason,
                 "line_id": request.line_id,
                 "credit_allowable_ugx": credit,
                 "timestamp": datetime.datetime.now(_UTC).isoformat(),
             }
-            self._db.insert_damaged_declaration(decl_data, request.damaged_serials)
+            self._db.insert_damaged_declaration(decl_data, valid_serials)
 
             return DamagedStampDeclarationResponse(
                 ok=True,
                 declaration_id=decl_id,
-                reconciled_count=len(request.damaged_serials),
+                reconciled_count=len(valid_serials),
                 credit_allowable_ugx=credit,
                 status="ACKNOWLEDGED",
                 message=(

@@ -96,7 +96,7 @@ class EfrisFiscalInvoiceTool(Tool):
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
             read_only=False,
             destructive=False,
-            idempotent=True,
+            idempotent=False,
             open_world=False,
         )
 
@@ -238,6 +238,8 @@ class EfrisStockManagementTool(Tool):
             },
             risk="medium",
             namespace="efris",
+            required_scopes=("ura_account_access",),
+            allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
             read_only=False,
             destructive=False,
             idempotent=False,
@@ -335,7 +337,7 @@ class EfrisCreditNoteTool(Tool):
             scope_exempt_roles=("ura_staff", "ura_admin"),
             read_only=False,
             destructive=False,
-            idempotent=True,
+            idempotent=False,
             open_world=False,
         )
 

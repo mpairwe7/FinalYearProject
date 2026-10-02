@@ -65,7 +65,7 @@ class UrsbService:
     def register_business(self, request: BusinessRegistrationRequest) -> BusinessRegistrationResponse:
         """Register a new business name or company and generate official URSB credentials."""
         with self._lock:
-            existing = self._db.search_entity(request.business_name)
+            existing = self._db.search_entity(request.business_name, exact=True)
             if existing:
                 return BusinessRegistrationResponse(
                     ok=False,
@@ -139,7 +139,7 @@ class UrsbService:
 
     def check_compliance(self, registration_number: str) -> ComplianceCheckResponse:
         """Validate legal active standing, Form 20, and annual returns compliance for URA integration."""
-        entity = self._db.search_entity(registration_number)
+        entity = self._db.search_entity(registration_number, exact=True)
         if not entity:
             return ComplianceCheckResponse(
                 ok=False,

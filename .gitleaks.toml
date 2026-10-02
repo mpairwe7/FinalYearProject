@@ -115,7 +115,6 @@ paths = [
     '''go\.sum$''',
     '''.*_test\.py$''',
     '''tests/.*''',
-    '''plugins/.*''',
     '''Results/.*''',
     '''Data/.*''',
     '''.*\.ipynb$''',

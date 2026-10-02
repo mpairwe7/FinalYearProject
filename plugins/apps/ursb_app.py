@@ -13,6 +13,7 @@ Features:
 
 from __future__ import annotations
 
+import html
 import os
 import sys
 from pathlib import Path
@@ -49,12 +50,12 @@ def index() -> str:  # noqa: S608
     ent_rows = []
     for e in entities:
         ent_rows.append(
-            f"<tr><td><strong style='color:var(--accent);'>{e['registration_number']}</strong></td>"
-            f"<td><strong>{e['business_name']}</strong></td>"
-            f"<td>{e['entity_type']}</td>"
-            f"<td>{e['district']}</td>"
-            f"<td>{e['registration_date']}</td>"
-            f"<td><span class='tag-success'>{e['status']}</span></td></tr>"
+            f"<tr><td><strong style='color:var(--accent);'>{html.escape(str(e['registration_number']))}</strong></td>"
+            f"<td><strong>{html.escape(str(e['business_name']))}</strong></td>"
+            f"<td>{html.escape(str(e['entity_type']))}</td>"
+            f"<td>{html.escape(str(e['district']))}</td>"
+            f"<td>{html.escape(str(e['registration_date']))}</td>"
+            f"<td><span class='tag-success'>{html.escape(str(e['status']))}</span></td></tr>"
         )
     ent_table_html = "\n".join(ent_rows)
 

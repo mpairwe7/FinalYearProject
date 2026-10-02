@@ -49,6 +49,10 @@ class TinRegistrationService:
 
     def _generate_tin(self) -> str:
         """Generate official 10-digit URA Tax Identification Number."""
+        for _ in range(10):
+            tin = f"1{100000000 + secrets.randbelow(900000000)}"
+            if not self._db.search_taxpayer(tin, exact=True):
+                return tin
         return f"1{100000000 + secrets.randbelow(900000000)}"
 
     def search_taxpayer(self, request: TinSearchRequest) -> TinSearchResponse:
@@ -88,7 +92,7 @@ class TinRegistrationService:
                 )
 
             # Check if NIN already has a TIN
-            existing = self._db.search_taxpayer(nin_clean)
+            existing = self._db.search_taxpayer(nin_clean, exact=True)
             if existing:
                 return InstantTinResponse(
                     ok=False,
@@ -150,7 +154,7 @@ class TinRegistrationService:
         """Process Non-Individual Company TIN registration linked to URSB."""
         with self._lock:
             ursb_no = request.ursb_registration_number.strip().upper()
-            existing = self._db.search_taxpayer(ursb_no)
+            existing = self._db.search_taxpayer(ursb_no, exact=True)
             if existing:
                 return NonIndividualTinResponse(
                     ok=False,
@@ -227,7 +231,7 @@ class TinRegistrationService:
     def update_tax_obligation(self, request: TaxObligationUpdateRequest) -> TaxObligationUpdateResponse:
         """Register or update statutory tax head obligations for a taxpayer."""
         with self._lock:
-            record = self._db.search_taxpayer(request.tin.strip())
+            record = self._db.search_taxpayer(request.tin.strip(), exact=True)
             if not record:
                 return TaxObligationUpdateResponse(
                     ok=False,
@@ -238,16 +242,17 @@ class TinRegistrationService:
                     error=f"No taxpayer found with TIN '{request.tin}'",
                 )
 
-            self._db.add_obligation(request.tin.strip(), request.tax_head)
-            updated = self._db.search_taxpayer(request.tin.strip())
+            if request.tax_head not in {ob.tax_head for ob in record.obligations}:
+                self._db.add_obligation(record.tin, request.tax_head)
+            updated = self._db.search_taxpayer(record.tin, exact=True)
             active_heads = [ob.tax_head.value for ob in (updated.obligations if updated else [])]
 
             return TaxObligationUpdateResponse(
                 ok=True,
-                tin=request.tin,
+                tin=record.tin,
                 legal_name=record.legal_name,
                 active_obligations=active_heads,
-                message=f"Tax head '{request.tax_head.value}' successfully registered for {record.legal_name} (TIN: {request.tin}).",
+                message=f"Tax head '{request.tax_head.value}' successfully registered for {record.legal_name} (TIN: {record.tin}).",
             )
 
     def get_stats(self) -> dict[str, Any]:

@@ -111,6 +111,31 @@ class BwimsService:
                 )
 
             available = entry.quantity - entry.cleared_quantity
+
+            if request.importer_tin.strip() and request.importer_tin.strip() != entry.importer_tin.strip():
+                return ExWarehouseClearanceResponse(
+                    ok=False,
+                    clearance_id="",
+                    entry_number=request.entry_number,
+                    cleared_quantity=0.0,
+                    remaining_quantity=available,
+                    status="REJECTED",
+                    message="Importer TIN mismatch",
+                    error="Importer TIN does not match the consignment importer record",
+                )
+
+            if request.declaration_type == "IM4_HOME_CONSUMPTION" and not request.duty_paid_prn.strip():
+                return ExWarehouseClearanceResponse(
+                    ok=False,
+                    clearance_id="",
+                    entry_number=request.entry_number,
+                    cleared_quantity=0.0,
+                    remaining_quantity=available,
+                    status="REJECTED",
+                    message="Duty payment PRN is required",
+                    error="A duty-paid PRN is required for home-consumption clearance",
+                )
+
             if request.cleared_quantity <= 0 or request.cleared_quantity > available:
                 return ExWarehouseClearanceResponse(
                     ok=False,

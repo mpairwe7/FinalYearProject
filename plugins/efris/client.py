@@ -89,13 +89,18 @@ class EfrisClient:
                 tax_cat = TaxRateCategory(tax_cat_str) if tax_cat_str in TaxRateCategory._value2member_map_ else TaxRateCategory.STANDARD
                 qty = float(item.get("quantity", 1.0))
                 price = float(item.get("unit_price", 0.0))
+                if qty <= 0:
+                    return {"ok": False, "error": f"Item {idx}: quantity must be greater than zero"}
+                if price < 0:
+                    return {"ok": False, "error": f"Item {idx}: unit_price must not be negative"}
+                tax_rate = 0.18 if tax_cat == TaxRateCategory.STANDARD else 0.0
                 typed_items.append(
                     InvoiceItem(
                         commodity_code=str(item.get("commodity_code", f"COMM-{idx:03d}")),
                         description=str(item.get("description", "Standard Supply")),
                         quantity=qty,
                         unit_price=price,
-                        tax_rate=float(item.get("tax_rate", 0.18)),
+                        tax_rate=tax_rate,
                         tax_category=tax_cat,
                     )
                 )

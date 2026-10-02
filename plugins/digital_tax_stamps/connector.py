@@ -224,7 +224,7 @@ class DtsActivateStampsTool(Tool):
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
             read_only=False,
             destructive=False,
-            idempotent=True,
+            idempotent=False,
             open_world=False,
         )
 

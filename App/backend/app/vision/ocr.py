@@ -395,13 +395,20 @@ def extract_national_id_card_data(text: str) -> dict[str, Any]:
                 break
 
     district_match = re.search(r"(?:District\s+of\s+Birth|Place\s+of\s+Birth|District)[:\s]+([A-Za-z\s]{3,20})", text, re.I)
-    district = district_match.group(1).strip() if district_match else "Kampala"
-    dob = dates[0] if dates else "1995-05-12"
+    district = district_match.group(1).strip() if district_match else None
+
+    dob_match = re.search(r"(?:Date\s+of\s+Birth|DOB|Birth\s+Date)[:\s]+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})", text, re.I)
+    if dob_match:
+        dob = dob_match.group(1).strip()
+    elif dates:
+        dob = dates[0]
+    else:
+        dob = None
 
     return {
         "nin": nins[0] if nins else None,
         "nins": nins,
-        "full_name": name or "Registered Citizen",
+        "full_name": name or None,
         "date_of_birth": dob,
         "district": district,
         "phone": phones[0] if phones else None,

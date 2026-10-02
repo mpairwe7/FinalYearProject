@@ -7,11 +7,48 @@ into the agentic tool registry and MCP service layer.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from .base import Plugin, PluginStatus, SystemConnector
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_remote_endpoint(url: str) -> str:
+    from urllib.parse import urlparse
+    import ipaddress
+    import socket
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("Invalid URL scheme; must be http or https")
+    hostname = parsed.hostname or ""
+    if not hostname:
+        raise ValueError("Missing hostname in endpoint URL")
+
+    # Block cloud metadata addresses
+    if hostname.lower() in ("169.254.169.254", "metadata.google.internal", "metadata"):
+        raise ValueError("Access to cloud metadata endpoints is prohibited")
+
+    app_env = os.getenv("APP_ENV", "development").lower()
+    if app_env == "production":
+        if parsed.scheme != "https":
+            raise ValueError("In production, remote connector endpoints must use HTTPS")
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+                raise ValueError(f"Endpoint IP {ip} is not allowed in production")
+        except ValueError:
+            try:
+                for res in socket.getaddrinfo(hostname, None):
+                    resolved_ip = ipaddress.ip_address(res[4][0])
+                    if resolved_ip.is_private or resolved_ip.is_loopback or resolved_ip.is_link_local or resolved_ip.is_multicast:
+                        raise ValueError(f"Resolved endpoint IP {resolved_ip} is not allowed in production")
+            except socket.gaierror:
+                raise ValueError(f"Could not resolve hostname {hostname}")
+
+    return url.rstrip("/")
 
 
 class PluginOrchestrator:
@@ -175,8 +212,15 @@ class PluginOrchestrator:
             self.wire_tools()
             return {"ok": ok, "connected": ok, "status": p.status.value}
         else:
+            tool_names = [t.schema.name for t in p.connector.get_tools()]
             self.disable_plugin(name_clean)
-            self.unwire_tools()
+            try:
+                from app.tools import ToolRegistry
+
+                for tool_name in tool_names:
+                    ToolRegistry.unregister(tool_name)
+            except Exception:
+                pass
             return {"ok": True, "connected": False, "status": p.status.value}
 
     def register_remote_connector(
@@ -192,7 +236,7 @@ class PluginOrchestrator:
         from .base import Plugin, PluginMetadata, Tool, ToolSchema
 
         name_clean = name.lower().replace("-", "_").strip()
-        endpoint_clean = endpoint_url.rstrip("/")
+        endpoint_clean = _validate_remote_endpoint(endpoint_url)
 
         if name_clean in self._plugins:
             p = self._plugins[name_clean]
@@ -219,6 +263,8 @@ class PluginOrchestrator:
                     parameters=self._params,
                     risk="medium",
                     namespace=name_clean,
+                    required_scopes=("ura_account_access",),
+                    allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
                 )
 
             def execute(self, **kwargs: Any) -> dict[str, Any]:
@@ -366,6 +412,13 @@ class PluginOrchestrator:
     def initialize_default_plugins(self) -> None:
         """Bootstrap default system plugins for EFRIS and Digital Tax Stamps."""
         if self._initialized:
+            return
+
+        app_env = os.getenv("APP_ENV", "development").lower()
+        connectors_enabled = os.getenv("FLAG_ENTERPRISE_CONNECTORS", "true" if app_env != "production" else "false").lower() in ("true", "1", "yes")
+        if app_env == "production" and not connectors_enabled:
+            logger.info("Default local mock connectors disabled in production (FLAG_ENTERPRISE_CONNECTORS=false).")
+            self._initialized = True
             return
 
         from .base import Plugin, PluginMetadata

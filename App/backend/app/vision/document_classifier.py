@@ -57,8 +57,8 @@ _PATTERNS: list[tuple[DocumentType, re.Pattern, float]] = [
         DocumentType.NATIONAL_ID,
         re.compile(
             r"national\s+identity\s+card|republic\s+of\s+uganda.*identity|"
-            r"national\s+identification\s+registration\s+authority|nira|"
-            r"given\s+names?|surname.*date\s+of\s+birth|\b[C][MFR][0-9A-Z]{12}\b",
+            r"national\s+identification\s+registration\s+authority|\bnira\b|"
+            r"(?:given\s+names?|surname).*(?:date\s+of\s+birth|\bnin\b)|\b[C][MFR][0-9A-Z]{12}\b",
             re.I,
         ),
         0.96,

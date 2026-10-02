@@ -252,7 +252,22 @@ class EfrisService:
                     error="Credit note seller TIN does not match the original invoice seller TIN",
                 )
 
-            if request.adjusted_amount <= 0 or request.adjusted_amount > record["gross_amount"]:
+            if record.get("status") == "CANCELLED":
+                return CreditNoteResponse(
+                    ok=False,
+                    credit_note_number="",
+                    original_fdn=original_fdn,
+                    adjusted_gross=0.0,
+                    adjusted_vat=0.0,
+                    status="REJECTED",
+                    message="Cannot adjust cancelled invoice",
+                    error=f"Invoice {original_fdn} is cancelled and cannot receive credit notes.",
+                )
+
+            already_credited = self._db.get_credited_gross_for_invoice(original_fdn)
+            remaining_balance = max(0.0, record["gross_amount"] - already_credited)
+
+            if request.adjusted_amount <= 0 or request.adjusted_amount > remaining_balance:
                 return CreditNoteResponse(
                     ok=False,
                     credit_note_number="",
@@ -263,13 +278,15 @@ class EfrisService:
                     message="Invalid adjustment amount",
                     error=(
                         f"Adjustment amount {request.adjusted_amount} must be between "
-                        f"1 and the original gross amount {record['gross_amount']} UGX"
+                        f"1 and the remaining uncredited balance {remaining_balance:,.0f} UGX"
                     ),
                 )
 
-            cn_num = f"CN-{datetime.datetime.now(_UTC).strftime('%y%m%d')}-{1000 + secrets.randbelow(9000)}"
-            # Standard VAT component adjustment (18/118 of gross)
-            adjusted_vat = round((request.adjusted_amount / 1.18) * 0.18, 2)
+            cn_num = f"CN-{datetime.datetime.now(_UTC).strftime('%y%m%d%H%M')}-{10000 + secrets.randbelow(90000)}"
+            # Compute proportional VAT component adjustment based on original invoice ratio
+            gross_val = record.get("gross_amount", 0.0) or 1.0
+            tax_val = record.get("tax_amount", 0.0)
+            adjusted_vat = round(request.adjusted_amount * (tax_val / gross_val), 2)
             adjusted_gross = round(request.adjusted_amount, 2)
 
             cn_record = {

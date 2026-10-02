@@ -311,6 +311,23 @@ class DtsDatabase:
             is_compliant=bool(row["is_compliant"]),
         )
 
+    def get_packaging_line(self, line_id: str) -> dict[str, Any] | None:
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT line_id, tin, equipment_type, speed_bpm, status, location FROM dts_packaging_lines WHERE line_id = ?", (line_id.strip(),))
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {
+            "line_id": row["line_id"],
+            "manufacturer_tin": row["tin"],
+            "tin": row["tin"],
+            "equipment_type": row["equipment_type"],
+            "speed_bpm": row["speed_bpm"],
+            "status": row["status"],
+            "location": row["location"],
+        }
+
     def get_stamp(self, stamp_code: str) -> StampRecord | None:
         conn = self._get_connection()
         cur = conn.cursor()
@@ -320,7 +337,7 @@ class DtsDatabase:
             return None
 
         cat = GazettedCategory(row["product_category"]) if row["product_category"] in GazettedCategory._value2member_map_ else GazettedCategory.BEER
-        status = StampStatus(row["status"]) if row["status"] in StampStatus._value2member_map_ else StampStatus.GENUINE
+        status = StampStatus(row["status"]) if row["status"] in StampStatus._value2member_map_ else StampStatus.COUNTERFEIT
 
         return StampRecord(
             stamp_code=row["stamp_code"],
@@ -401,9 +418,14 @@ class DtsDatabase:
             for serial in stamp_serials
         ]
         with conn:
+            cur = conn.cursor()
+            for serial in stamp_serials:
+                cur.execute("SELECT 1 FROM dts_stamps WHERE stamp_code = ?", (serial.strip(),))
+                if cur.fetchone():
+                    raise ValueError(f"Stamp serial '{serial}' already exists in registry.")
             conn.executemany(
                 """
-                INSERT OR REPLACE INTO dts_stamps (
+                INSERT INTO dts_stamps (
                     stamp_code, product_category, brand_name, manufacturer_tin,
                     manufacturer_name, batch_number, production_date, status,
                     expiry_date, line_id, activated_at, created_at

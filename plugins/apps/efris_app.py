@@ -13,6 +13,8 @@ Features:
 
 from __future__ import annotations
 
+import datetime
+import html
 import os
 import sys
 from pathlib import Path
@@ -52,30 +54,30 @@ def index() -> str:  # noqa: S608
     inv_rows = []
     for inv in invoices:
         inv_rows.append(
-            f"<tr><td><strong style='color:var(--accent);'>{inv['fdn']}</strong></td>"
-            f"<td>{inv['seller_name']}</td>"
-            f"<td>{inv.get('buyer_name') or 'Walk-in'}</td>"
+            f"<tr><td><strong style='color:var(--accent);'>{html.escape(str(inv['fdn']))}</strong></td>"
+            f"<td>{html.escape(str(inv['seller_name']))}</td>"
+            f"<td>{html.escape(str(inv.get('buyer_name') or 'Walk-in'))}</td>"
             f"<td>UGX {inv['gross_amount']:,.0f}</td>"
             f"<td>UGX {inv['tax_amount']:,.0f}</td>"
-            f"<td><span class='tag-success'>{inv['status']}</span></td></tr>"
+            f"<td><span class='tag-success'>{html.escape(str(inv['status']))}</span></td></tr>"
         )
     inv_table_html = "\n".join(inv_rows)
 
     stock_rows = []
     for s in stock:
         stock_rows.append(
-            f"<tr><td>{s['commodity_code']}</td>"
-            f"<td><strong>{s['description']}</strong></td>"
-            f"<td>{s['quantity_on_hand']:,.0f} {s['unit_of_measure']}</td>"
+            f"<tr><td>{html.escape(str(s['commodity_code']))}</td>"
+            f"<td><strong>{html.escape(str(s['description']))}</strong></td>"
+            f"<td>{s['quantity_on_hand']:,.0f} {html.escape(str(s['unit_of_measure']))}</td>"
             f"<td>UGX {s['unit_cost']:,.0f}</td>"
-            f"<td>{s['category']}</td></tr>"
+            f"<td>{html.escape(str(s['category']))}</td></tr>"
         )
     stock_table_html = "\n".join(stock_rows)
 
     tp_opts = []
     for tp in taxpayers:
         if tp:
-            tp_opts.append(f"<option value='{tp.tin}'>{tp.business_name} (TIN: {tp.tin})</option>")
+            tp_opts.append(f"<option value='{html.escape(str(tp.tin))}'>{html.escape(str(tp.business_name))} (Tax ID: {html.escape(str(tp.tin))})</option>")
     tp_options_html = "\n".join(tp_opts)
 
     return f"""<!DOCTYPE html>
@@ -527,16 +529,21 @@ def signup(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if not tin or not name:
         raise HTTPException(status_code=400, detail="TIN and business_name are required.")
 
+    existing = service.database.get_taxpayer(tin)
+    if existing:
+        raise HTTPException(status_code=409, detail="Taxpayer TIN is already registered on EFRIS.")
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
     conn = service.database._get_connection()
     with conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO efris_taxpayers (
+            INSERT INTO efris_taxpayers (
                 tin, business_name, is_vat_registered, efris_status, mandated_sector,
                 registration_date, integration_mode, active_terminals, sdc_enabled, created_at
-            ) VALUES (?, ?, 1, 'ACTIVE', 'General Trade', '2026-10-02', ?, '[]', 1, '2026-10-02T00:00:00')
+            ) VALUES (?, ?, 1, 'ACTIVE', 'General Trade', ?, ?, '[]', 1, ?)
             """,
-            (tin, name, payload.get("integration_mode", "SYSTEM_TO_SYSTEM")),
+            (tin, name, now_utc.strftime("%Y-%m-%d"), payload.get("integration_mode", "SYSTEM_TO_SYSTEM"), now_utc.isoformat()),
         )
     return {"ok": True, "tin": tin, "business_name": name, "status": "ACTIVE"}
 

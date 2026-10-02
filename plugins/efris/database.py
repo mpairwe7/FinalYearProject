@@ -388,6 +388,16 @@ class EfrisDatabase:
                 (status.value, fdn.strip()),
             )
 
+    def get_credited_gross_for_invoice(self, fdn: str) -> float:
+        conn = self._get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COALESCE(SUM(adjusted_gross), 0.0) as total FROM efris_credit_notes WHERE original_fdn = ? AND status = 'APPROVED'",
+            (fdn.strip(),),
+        )
+        row = cur.fetchone()
+        return float(row["total"]) if row else 0.0
+
     def insert_credit_note(self, cn: dict[str, Any]) -> None:
         conn = self._get_connection()
         with conn:

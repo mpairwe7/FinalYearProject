@@ -721,6 +721,8 @@ Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17
 
 All settings are configurable via environment variables. See [API Reference → Environment Variables](API_REFERENCE.md#environment-variables) for the complete list, or [PROJECT_SETUP.md](PROJECT_SETUP.md#5-environment-configuration) for a quick-start `.env` template.
 
+- `FLAG_ENTERPRISE_CONNECTORS` (default `false` in production, `true` in development): Gates default local mock system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). In production (`APP_ENV=production`), local mock connectors are blocked unless this flag is explicitly enabled.
+
 ## Dependencies
 
 ```

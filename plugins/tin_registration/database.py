@@ -265,18 +265,29 @@ class TinDatabase:
                 obligations,
             )
 
-    def search_taxpayer(self, query: str) -> TaxpayerRecord | None:
+    def search_taxpayer(self, query: str, *, exact: bool = False) -> TaxpayerRecord | None:
         q = query.strip()
         conn = self._get_connection()
         cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT * FROM tin_taxpayers
-            WHERE tin = ? OR UPPER(nin_or_passport) = UPPER(?) OR UPPER(ursb_reg_no) = UPPER(?) OR LOWER(legal_name) LIKE LOWER(?)
-            LIMIT 1
-            """,
-            (q, q, q, f"%{q}%"),
-        )
+        if exact:
+            cur.execute(
+                """
+                SELECT * FROM tin_taxpayers
+                WHERE tin = ? OR UPPER(nin_or_passport) = UPPER(?) OR UPPER(ursb_reg_no) = UPPER(?)
+                LIMIT 1
+                """,
+                (q, q, q),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT * FROM tin_taxpayers
+                WHERE tin = ? OR UPPER(nin_or_passport) = UPPER(?) OR UPPER(ursb_reg_no) = UPPER(?) OR LOWER(legal_name) LIKE LOWER(?)
+                ORDER BY (tin = ? OR UPPER(nin_or_passport) = UPPER(?)) DESC
+                LIMIT 1
+                """,
+                (q, q, q, f"%{q}%", q, q),
+            )
         row = cur.fetchone()
         if not row:
             return None

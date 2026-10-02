@@ -13,6 +13,8 @@ Features:
 
 from __future__ import annotations
 
+import datetime
+import html
 import os
 import sys
 from pathlib import Path
@@ -54,11 +56,11 @@ def index() -> str:  # noqa: S608
     for st in stamps:
         tag_cls = "tag-success" if st["status"] == "GENUINE" else "tag-danger"
         stamp_rows.append(
-            f"<tr><td><strong style='color:var(--accent);'>{st['stamp_code']}</strong></td>"
-            f"<td>{st['product_category']}</td>"
-            f"<td>{st['brand_name']}</td>"
-            f"<td>{st['manufacturer_name']}</td>"
-            f"<td><span class='{tag_cls}'>{st['status']}</span></td></tr>"
+            f"<tr><td><strong style='color:var(--accent);'>{html.escape(str(st['stamp_code']))}</strong></td>"
+            f"<td>{html.escape(str(st['product_category']))}</td>"
+            f"<td>{html.escape(str(st['brand_name']))}</td>"
+            f"<td>{html.escape(str(st['manufacturer_name']))}</td>"
+            f"<td><span class='{tag_cls}'>{html.escape(str(st['status']))}</span></td></tr>"
         )
     stamp_table_html = "\n".join(stamp_rows)
 
@@ -454,16 +456,21 @@ def signup(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if not tin or not name:
         raise HTTPException(status_code=400, detail="tin and manufacturer_name are required.")
 
+    existing = service.database.get_manufacturer(tin)
+    if existing:
+        raise HTTPException(status_code=409, detail="Manufacturer TIN is already registered on DTS.")
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
     conn = service.database._get_connection()
     with conn:
         conn.execute(
             """
-            INSERT OR REPLACE INTO dts_manufacturers (
+            INSERT INTO dts_manufacturers (
                 tin, manufacturer_name, taxpayer_type, gazetted_categories,
                 dts_registration_date, active_stamps_inventory, is_compliant, created_at
-            ) VALUES (?, ?, 'LOCAL_MANUFACTURER', '[\"BEER\"]', '2026-10-02', 100000, 1, '2026-10-02T00:00:00')
+            ) VALUES (?, ?, 'LOCAL_MANUFACTURER', '[\"BEER\"]', ?, 100000, 1, ?)
             """,
-            (tin, name),
+            (tin, name, now_utc.strftime("%Y-%m-%d"), now_utc.isoformat()),
         )
     return {"ok": True, "tin": tin, "manufacturer_name": name, "status": "ACTIVE"}
 
