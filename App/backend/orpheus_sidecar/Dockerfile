@@ -9,6 +9,12 @@ RUN pip install --no-cache-dir -r /srv/requirements.txt
 WORKDIR /srv
 COPY codes.py app.py /srv/
 
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid appuser --create-home --shell /usr/sbin/nologin appuser && \
+    chown -R appuser:appuser /srv
+
+USER appuser
+
 ENV HF_HOME=/app/hf_cache \
     VLLM_WORKER_MULTIPROC_METHOD=spawn
 EXPOSE 8100

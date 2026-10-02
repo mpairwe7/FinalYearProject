@@ -684,7 +684,7 @@ jobs:
     if: github.event_name == 'pull_request' && always()
     steps:
       - name: Create or update PR DevSecOps summary comment
-        uses: actions/github-script@v8
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.0.1
         with:
           script: |
             const marker = '<!-- devsecops-sast-dast-summary -->';

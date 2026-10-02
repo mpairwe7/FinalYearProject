@@ -835,3 +835,5 @@ ENV QDRANT_ENABLED=true \
 # Documented for clarity; HF uses README.md `app_port`. The base image's
 # CMD/ENTRYPOINT (supervisord → nginx:8080) is inherited unchanged.
 EXPOSE 8080
+
+USER 1000
