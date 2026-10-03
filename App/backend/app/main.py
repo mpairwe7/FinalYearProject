@@ -1043,7 +1043,7 @@ def chat(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> ChatResponse:
-    session_id = request.headers.get("X-Session-ID", "")
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
@@ -1139,7 +1139,7 @@ async def chat_stream(
     """
     from . import service as service_module
 
-    session_id = request.headers.get("X-Session-ID", "")
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     attachments = documents.resolve_attachments(
         body.attachment_ids, session_id=session_id, user_id=ctx.user_id
