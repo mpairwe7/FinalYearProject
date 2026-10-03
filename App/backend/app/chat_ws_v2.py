@@ -204,6 +204,7 @@ class WsChatSession:
     user_id: str
     tenant_id: str
     locale: str
+    locale_explicit: bool = False
     # Authenticated principal — resolved from the verified JWT at session_start,
     # never from a client frame.  Used to re-authorize HITL tool confirmations.
     user_role: str = "public"
@@ -234,12 +235,8 @@ class WsChatSession:
     def try_resume(self, previous_response_id: str) -> bool:
         """Best-effort hydrate history from the analytics DB.
 
-        Returns True if any history was recovered.  We use the SQLite
-        conversation log as the source of truth — there's no separate
-        response-id index today, so the conservative behaviour is to
-        load the last few turns of the same conversation.  Phase 4 of
-        the broader plan adds a real response_id table; until then we
-        record the attempt for observability.
+        Returns True only when the response id was issued for this exact
+        user, tenant, and conversation, then hydrates the recent transcript.
         """
         self.resume_attempted = True
         if not previous_response_id or not self.conversation_id:
@@ -249,11 +246,26 @@ class WsChatSession:
             logger.debug("resume: rejected for unauthenticated session")
             return False
         try:
+            owner = db.query_one(
+                """SELECT 1 FROM conversation_responses
+                   WHERE response_id = ? AND conversation_id = ?
+                     AND user_id = ? AND tenant_id = ? AND created_at >= ?""",
+                (
+                    previous_response_id,
+                    self.conversation_id,
+                    self.user_id,
+                    self.tenant_id,
+                    time.time() - db.conversation_ttl_seconds(),
+                ),
+            )
+            if not owner:
+                return False
             rows = db.get_recent_turns(
                 session_id=None,
                 conversation_id=self.conversation_id,
                 limit=10,
                 user_id=self.user_id,
+                tenant_id=self.tenant_id,
             )
         except Exception:
             logger.debug("resume: get_recent_turns failed", exc_info=True)
@@ -301,12 +313,17 @@ async def _run_response_create(
         await _send_json(websocket, {"type": "response.done"})
         return
 
-    locale = msg.get("locale") or session.locale or "en"
+    from .query import SUPPORTED_LOCALES
+
+    turn_locale = msg.get("locale")
+    if not isinstance(turn_locale, str) or turn_locale not in SUPPORTED_LOCALES:
+        turn_locale = session.locale if session.locale_explicit else ""
     top_k = int(msg.get("top_k", 4))
     top_k = max(1, min(top_k, 10))
     request_id = msg.get("metadata", {}).get("client_request_id") if isinstance(
         msg.get("metadata"), dict
     ) else None
+    response_id = f"resp_{uuid.uuid4().hex}"
 
     # Per-turn cancel event; session-scoped event is also honored.
     cancel_event = threading.Event()
@@ -325,7 +342,7 @@ async def _run_response_create(
             message=user_input,
             conversation_id=session.conversation_id or None,
             top_k=top_k,
-            locale=locale,
+            locale=turn_locale,
             session_id=session.session_id or None,
             request_id=request_id,
             user_id=session.user_id or None,
@@ -371,7 +388,10 @@ async def _run_response_create(
             elif event_type == "revision":
                 await _send_json(websocket, {"type": frame_type, "text": payload})
             elif event_type in ("metadata", "grounding"):
-                await _send_json(websocket, {"type": frame_type, **payload})
+                meta_payload = dict(payload) if isinstance(payload, dict) else {}
+                if event_type == "metadata" and "response_id" not in meta_payload:
+                    meta_payload["response_id"] = response_id
+                await _send_json(websocket, {"type": frame_type, **meta_payload})
             elif event_type == "error":
                 err_payload = payload if isinstance(payload, dict) else {"message": str(payload)}
                 await _send_json(websocket, {"type": frame_type, **err_payload})
@@ -414,7 +434,10 @@ async def _run_response_create(
                 evt_dict = {k: v for k, v in evt_dict.items() if k != "type"}
                 await _send_json(websocket, {"type": frame_type, **evt_dict})
             else:  # done
-                await _send_json(websocket, {"type": frame_type})
+                await _send_json(
+                    websocket,
+                    {"type": frame_type, "response_id": response_id},
+                )
 
     finally:
         if final_log is not None:
@@ -425,6 +448,8 @@ async def _run_response_create(
                 full_reply=full_reply,
                 log_payload=final_log,
                 user_id=session.user_id or "",
+                tenant_id=session.tenant_id,
+                response_id=response_id,
             )
             # Update the in-memory history cache so subsequent turns can
             # skip the DB fetch.  Also pick up the conversation_id the
@@ -435,6 +460,7 @@ async def _run_response_create(
                 session.conversation_id = new_conv
             if full_reply:
                 session.append_turn(user_input, full_reply)
+                session.last_response_id = response_id
 
 
 async def _handle_tool_call_confirm(
@@ -657,6 +683,8 @@ def _log_ws_turn(
     full_reply: str,
     log_payload: dict[str, Any],
     user_id: str = "",
+    tenant_id: str = "default",
+    response_id: str = "",
 ) -> None:
     """Persist a chat-WS turn to the analytics DB (mirrors SSE behaviour)."""
     from .service import ChatModel as _CM
@@ -673,11 +701,30 @@ def _log_ws_turn(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
+            tenant_id=tenant_id or "default",
             **flags.experiment_log_fields(
                 subject=user_id or None,
                 locale=str(result.get("locale") or ""),
             ),
         )
+        stored_conversation_id = str(result.get("conversation_id") or conversation_id or "")
+        if response_id and user_id and stored_conversation_id:
+            db.execute(
+                "DELETE FROM conversation_responses WHERE created_at < ?",
+                (time.time() - db.conversation_ttl_seconds(),),
+            )
+            db.execute(
+                """INSERT INTO conversation_responses
+                   (response_id, conversation_id, user_id, tenant_id, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    response_id,
+                    stored_conversation_id,
+                    user_id,
+                    tenant_id or "default",
+                    time.time(),
+                ),
+            )
     except Exception:
         logger.warning("chat WS conversation logging failed", exc_info=True)
 
@@ -738,15 +785,24 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             await _send_error(websocket, "First message must be session_start", recoverable=False)
             return
 
-        locale = config.get("locale", "en")
-        if not isinstance(locale, str) or len(locale) > 8:
-            locale = "en"
+        from .query import SUPPORTED_LOCALES
+
+        requested_locale = config.get("locale")
+        locale_explicit = isinstance(requested_locale, str) and requested_locale in SUPPORTED_LOCALES
+        locale = requested_locale if locale_explicit else "en"
+        if len(locale) > 8:
+            locale, locale_explicit = "en", False
         conversation_id = config.get("conversation_id") or ""
+        if not isinstance(conversation_id, str) or len(conversation_id) > 64:
+            conversation_id = ""
         previous_response_id = config.get("previous_response_id") or ""
+        if not isinstance(previous_response_id, str) or len(previous_response_id) > 128:
+            previous_response_id = ""
         protocol_version = int(config.get("protocol_version", 1) or 1)
 
         session_user_id = user_id
-        session_tenant_id = tenant_id if user_id else str(config.get("tenant_id", "default"))
+        # An unauthenticated frame cannot select another tenant's history.
+        session_tenant_id = tenant_id if user_id else "default"
         session_id = str(uuid.uuid4())
 
         session = WsChatSession(
@@ -755,6 +811,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             user_id=session_user_id or "",
             tenant_id=session_tenant_id,
             locale=locale,
+            locale_explicit=locale_explicit,
             user_role=user_role if session_user_id else "public",
             granted_purposes=granted_purposes if session_user_id else [],
         )
@@ -775,7 +832,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
                     "tool_confirmation": True,  # Phase 4
                     "speculative_prefetch": False,  # Phase 5
                     "prefix_cache": flags.is_enabled("prefix_caching"),  # Phase 3
-                    "session_resume": True,
+                    "session_resume": bool(session_user_id),
                 },
             },
         )

@@ -10,7 +10,9 @@
 - **qdrant_collections**: Qdrant vector store metadata (replaces FAISS).
   - id (uuid), collection_name, index_version, model_name, dim, metric (cosine), points_count, created_at, status (active/archived).
 - **conversations**: Conversation sessions with end users.
-  - id (uuid), user_id (optional), created_at, channel (web/ivr), locale.
+  - id (uuid), conversation_id, session_id, tenant_id, user_id (optional),
+    user_message, bot_reply, locale, created_at. History reads are scoped by
+    tenant + authenticated subject + conversation, or by anonymous session.
 - **messages**: Ordered turns within a conversation.
   - id (uuid), conversation_id (fk conversations), role (user/assistant/system), content, tokens, latency_ms, created_at, retrieval_context (json with chunk ids and scores).
 - **eval_runs**: Offline/online evaluation tracking.
@@ -22,7 +24,7 @@
 
 ## Runtime Database Schema (SQLite / PostgreSQL)
 
-The backend maintains 16 tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
+The backend maintains application-owned tables in SQLite (default, WAL mode) or PostgreSQL (opt-in via `ANALYTICS_BACKEND=postgres`). Forward-compatible migrations are applied on startup.
 
 Prototype sample rows live in `Data/eval/prototype_seed.json`. In development the API loads them on start unless `SEED_PROTOTYPE=false`. Production never seeds. CLI: `PYTHONPATH=App/backend python3 -m app.seed_prototype`.
 
@@ -39,15 +41,32 @@ Prototype sample rows live in `Data/eval/prototype_seed.json`. In development th
   - Indexes: last_active_at. Retention: `SESSION_TTL_DAYS` (default: 30).
 
 - **conversations**: Chat turns (multi-turn history).
-  - id (PK), conversation_id, session_id, user_message, bot_reply, sources (JSON), response_time_ms, confidence, topic_tag, created_at.
-  - Indexes: session_id, conversation_id, created_at. Retention: `CONVERSATION_TTL_DAYS` (default: 7).
+  - id (PK), conversation_id, session_id, tenant_id, user_id, user_message,
+    bot_reply, sources (JSON), response_time_ms, confidence, topic_tag, locale,
+    created_at.
+  - Indexes: tenant_id + conversation_id, session_id, conversation_id,
+    created_at. Retention: `CONVERSATION_TTL_DAYS` (default: 7).
+
+- **conversation_responses**: Server-issued WebSocket resume handles.
+  - response_id (PK), conversation_id, user_id, tenant_id, created_at.
+  - Resume requires an exact unexpired match for all owner fields; anonymous
+    clients cannot resume a previous socket from a client-supplied ID.
+
+- **working_memory**: Short-term personalization state shared across workers.
+  - tenant_id + user_id (composite PK), payload_json, expires_at, updated_at.
+  - Active personalization consent is required to read or write. Expiry is 30
+    minutes; export and erasure include this store.
 
 - **conversation_topics**: Current task for a thread (G6, 2026-08-17).
-  - conversation_id (PK), topic_id, label (catalog only), tax_type, confidence, updated_at.
+  - Scoped opaque state key (PK), topic_id, label (catalog only), tax_type,
+    confidence, updated_at. The key is derived from tenant + subject +
+    conversation, or tenant + anonymous session + conversation.
   - Retention: same `CONVERSATION_TTL_DAYS` on `updated_at`. Prompt sees the catalog label, never raw user text.
 
 - **workflow_sessions**: Guided workflow state and durable journey outcome.
-  - conversation_id (PK), workflow_id, status (active|completed|cancelled), current_step_idx, user_id, slots_json, last_prompt, created_at, updated_at.
+  - Scoped opaque state key (PK), tenant_id, workflow_id, status
+    (active|completed|cancelled), current_step_idx, user_id, slots_json,
+    last_prompt, created_at, updated_at.
   - Indexes: status, updated_at, user_id. `slots_json` and `last_prompt` are cleared after `CONVERSATION_TTL_DAYS` (default 7); outcome metadata is retained for `WORKFLOW_SESSION_TTL_DAYS` (default 365) for the CX funnel. Authenticated records are included in subject export and erasure.
 
 - **tenants**: Multi-tenant isolation (Phase 14).
@@ -369,4 +388,3 @@ User feedback (thumbs up/down) → database.save_feedback()
 - content_quality: text length, encoding issues
 - freshness: last update timestamps
 ```
-

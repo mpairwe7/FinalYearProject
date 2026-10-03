@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.documents import DocumentRecord
 from app.service import ChatModel
 from app.vision.ocr import (
@@ -134,6 +136,13 @@ class TestAutonomousAgentTinExecution:
 # Standalone Plugins Microservice Server Tests (FastAPI + MCP)
 # ---------------------------------------------------------------------------
 class TestStandalonePluginsServer:
+    @pytest.fixture(autouse=True)
+    def isolate_orchestrator(self):
+        from plugins.orchestrator import reset_orchestrator
+        reset_orchestrator()
+        yield
+        reset_orchestrator()
+
     def test_plugins_server_health(self):
         client = TestClient(plugins_server_app)
         res = client.get("/health")

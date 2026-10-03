@@ -201,7 +201,7 @@ class TestMultiTurnLocaleAndAttachedMetadataLocalization(FrameTestCase):
     def test_multi_turn_locale_continuity(self):
         # 1. Turn 1 Luganda query
         hist: list[dict[str, str]] = []
-        loc1 = ChatModel._resolve_conversation_locale("Nnyinza ntya okwewandiisa ku TIN?", "en", hist)
+        loc1 = ChatModel._resolve_conversation_locale("Nnyinza ntya okwewandiisa ku TIN?", "", hist)
         self.assertEqual(loc1, "lg")
 
         # 2. Turn 2 follow-up inquiry with numbers / English tokens preserves Luganda
@@ -209,19 +209,20 @@ class TestMultiTurnLocaleAndAttachedMetadataLocalization(FrameTestCase):
             "user_message": "Nnyinza ntya okwewandiisa ku TIN?",
             "bot_reply": "Osobola okwewandiisa ku mukutu gwa URA.",
         })
-        loc2 = ChatModel._resolve_conversation_locale("What about 150m?", "en", hist)
+        loc2 = ChatModel._resolve_conversation_locale("What about 150m?", "", hist)
         self.assertEqual(loc2, "lg")
 
         # 3. Explicit switch to English is honored
-        loc3 = ChatModel._resolve_conversation_locale("Speak in English please", "en", hist)
+        loc3 = ChatModel._resolve_conversation_locale("Speak in English please", "", hist)
         self.assertEqual(loc3, "en")
+        self.assertEqual(ChatModel._resolve_conversation_locale("What about this?", "en", hist), "en")
 
         # 4. Swahili thread preserves Swahili on follow-up
         hist_sw = [{
             "user_message": "Habari, ninawezaje kupata TIN?",
             "bot_reply": "Unaweza kujisajili kupitia tovuti ya URA.",
         }]
-        loc4 = ChatModel._resolve_conversation_locale("Je kuhusu VAT?", "en", hist_sw)
+        loc4 = ChatModel._resolve_conversation_locale("Je kuhusu VAT?", "", hist_sw)
         self.assertEqual(loc4, "sw")
 
     def test_localize_next_actions(self):

@@ -14,6 +14,7 @@ All write operations are wrapped in try/except to prevent data loss.
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 import sqlite3
 import threading
@@ -50,6 +51,98 @@ _WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "
 def conversation_ttl_seconds() -> float:
     """How long a conversation (and what a journey collected in it) is kept."""
     return _CONVERSATION_TTL_DAYS * 86400.0
+
+
+def conversation_state_key(
+    conversation_id: str | None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tenant_id: str = "default",
+) -> str:
+    """Build an opaque tenant/owner scoped key for topic and workflow state."""
+    subject = user_id or ""
+    anonymous_session = "" if subject else (session_id or "")
+    scope = conversation_id or session_id or str(uuid.uuid4())
+    parts = [tenant_id or "default", subject, anonymous_session, scope]
+    material = json.dumps(parts, ensure_ascii=True, separators=(",", ":"))
+    return "state_" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def migrate_legacy_conversation_state_keys() -> dict[str, int]:
+    """Re-key unambiguous legacy topic/workflow rows without guessing owners."""
+    migrated = {"conversation_topics": 0, "workflow_sessions": 0}
+
+    for row in query_all(
+        "SELECT conversation_id FROM conversation_topics WHERE conversation_id NOT LIKE 'state_%'"
+    ):
+        conversation_id = str(row.get("conversation_id") or "")
+        if not conversation_id:
+            continue
+        owners = query_all(
+            """SELECT DISTINCT tenant_id, user_id, session_id FROM conversations
+               WHERE conversation_id = ?""",
+            (conversation_id,),
+        )
+        if len(owners) != 1:
+            continue
+        owner = owners[0]
+        user_id = str(owner.get("user_id") or "")
+        session_id = str(owner.get("session_id") or "")
+        if not user_id and not session_id:
+            continue
+        state_id = conversation_state_key(
+            conversation_id,
+            session_id=session_id,
+            user_id=user_id or None,
+            tenant_id=str(owner.get("tenant_id") or "default"),
+        )
+        try:
+            migrated["conversation_topics"] += execute(
+                "UPDATE conversation_topics SET conversation_id = ? WHERE conversation_id = ?",
+                (state_id, conversation_id),
+            )
+        except Exception:
+            logger.debug("legacy topic scope migration skipped", exc_info=True)
+
+    for row in query_all(
+        """SELECT conversation_id, tenant_id, user_id FROM workflow_sessions
+           WHERE conversation_id NOT LIKE 'state_%'"""
+    ):
+        conversation_id = str(row.get("conversation_id") or "")
+        user_id = str(row.get("user_id") or "")
+        if not conversation_id:
+            continue
+        owners = query_all(
+            """SELECT DISTINCT tenant_id, user_id, session_id FROM conversations
+               WHERE conversation_id = ?""",
+            (conversation_id,),
+        )
+        if user_id:
+            owners = [owner for owner in owners if str(owner.get("user_id") or "") == user_id]
+        if len(owners) != 1:
+            continue
+        owner = owners[0]
+        effective_user = str(owner.get("user_id") or "")
+        session_id = str(owner.get("session_id") or "")
+        if not effective_user and not session_id:
+            continue
+        tenant = str(owner.get("tenant_id") or "default")
+        state_id = conversation_state_key(
+            conversation_id,
+            session_id=session_id,
+            user_id=effective_user or None,
+            tenant_id=tenant,
+        )
+        try:
+            migrated["workflow_sessions"] += execute(
+                """UPDATE workflow_sessions SET conversation_id = ?, tenant_id = ?
+                   WHERE conversation_id = ?""",
+                (state_id, tenant, conversation_id),
+            )
+        except Exception:
+            logger.debug("legacy workflow scope migration skipped", exc_info=True)
+    return migrated
 
 
 def workflow_session_ttl_days() -> int:
@@ -173,6 +266,99 @@ def execute_script(sql: str) -> None:
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
+
+
+def get_working_memory(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
+    """Return unexpired short-term state for one tenant-scoped subject."""
+    if not user_id:
+        return None
+    row = query_one(
+        "SELECT payload_json, expires_at FROM working_memory WHERE tenant_id = ? AND user_id = ?",
+        (tenant_id or "default", user_id),
+    )
+    if not row:
+        return None
+    now = time.time()
+    if float(row.get("expires_at") or 0) <= now:
+        execute(
+            "DELETE FROM working_memory WHERE tenant_id = ? AND user_id = ? AND expires_at <= ?",
+            (tenant_id or "default", user_id, now),
+        )
+        return None
+    raw_payload = row.get("payload_json")
+    payload = raw_payload if isinstance(raw_payload, dict) else _json_loads(raw_payload, {})
+    return payload if isinstance(payload, dict) else None
+
+
+def upsert_working_memory(
+    user_id: str,
+    tenant_id: str,
+    fields: dict[str, Any],
+    *,
+    ttl_seconds: int = 1800,
+) -> bool:
+    """Atomically merge short-term state and refresh its expiry."""
+    if not user_id or not fields:
+        return False
+    pg = _pg_module()
+    if pg is not None:
+        return pg.upsert_working_memory(
+            user_id, tenant_id or "default", fields, ttl_seconds=ttl_seconds
+        )
+
+    conn = _get_connection()
+    now = time.time()
+    tenant = tenant_id or "default"
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT payload_json, expires_at FROM working_memory WHERE tenant_id = ? AND user_id = ?",
+            (tenant, user_id),
+        ).fetchone()
+        payload = (
+            _json_loads(row["payload_json"], {})
+            if row and float(row["expires_at"] or 0) > now
+            else {}
+        )
+        if not isinstance(payload, dict):
+            payload = {}
+        payload.update(fields)
+        conn.execute(
+            """INSERT INTO working_memory
+               (tenant_id, user_id, payload_json, expires_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(tenant_id, user_id) DO UPDATE SET
+                 payload_json = excluded.payload_json,
+                 expires_at = excluded.expires_at,
+                 updated_at = excluded.updated_at""",
+            (
+                tenant,
+                user_id,
+                json.dumps(payload, ensure_ascii=True),
+                now + max(1, ttl_seconds),
+                now,
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def clear_working_memory(user_id: str, tenant_id: str = "default") -> int:
+    """Erase short-term state within one tenant."""
+    if not user_id:
+        return 0
+    return execute(
+        "DELETE FROM working_memory WHERE tenant_id = ? AND user_id = ?",
+        (tenant_id or "default", user_id),
+    )
+
+
+def cleanup_expired_working_memory() -> int:
+    """Delete expired short-term state from the selected shared backend."""
+    return execute("DELETE FROM working_memory WHERE expires_at < ?", (time.time(),))
 
 
 def _ensure_column(
@@ -304,6 +490,7 @@ def init_db() -> None:
             id              TEXT PRIMARY KEY,
             conversation_id TEXT,
             session_id      TEXT,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
             user_message    TEXT NOT NULL,
             bot_reply       TEXT NOT NULL,
             sources         TEXT DEFAULT '[]',
@@ -312,6 +499,25 @@ def init_db() -> None:
             topic_tag       TEXT DEFAULT '',
             created_at      REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS conversation_responses (
+            response_id     TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            user_id         TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            created_at      REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS working_memory (
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            user_id         TEXT NOT NULL,
+            payload_json    TEXT NOT NULL DEFAULT '{}',
+            expires_at      REAL NOT NULL,
+            updated_at      REAL NOT NULL,
+            PRIMARY KEY (tenant_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_working_memory_expiry
+            ON working_memory(expires_at);
 
         CREATE TABLE IF NOT EXISTS conversation_topics (
             conversation_id TEXT PRIMARY KEY,
@@ -324,6 +530,7 @@ def init_db() -> None:
 
         CREATE TABLE IF NOT EXISTS workflow_sessions (
             conversation_id TEXT PRIMARY KEY,
+            tenant_id        TEXT NOT NULL DEFAULT 'default',
             workflow_id     TEXT NOT NULL,
             status          TEXT NOT NULL
                             CHECK(status IN ('active','completed','cancelled'))
@@ -616,6 +823,8 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(last_active_at);
         CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
         CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at);
+        CREATE INDEX IF NOT EXISTS idx_response_owner
+            ON conversation_responses(tenant_id, user_id, conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_workflow_status ON workflow_sessions(status);
         CREATE INDEX IF NOT EXISTS idx_workflow_updated ON workflow_sessions(updated_at);
         CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
@@ -630,10 +839,12 @@ def init_db() -> None:
     # Forward-compatible schema migrations for existing DBs.
     _refresh_consent_purpose_check(conn)
     _ensure_column(conn, "conversations", "conversation_id", "TEXT")
+    _ensure_column(conn, "conversations", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
     conn.execute(
         "UPDATE conversations SET conversation_id = id WHERE conversation_id IS NULL OR conversation_id = ''"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_tenant_thread ON conversations(tenant_id, conversation_id)")
     _ensure_column(conn, "tickets", "handoff_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "transcript_json", "TEXT DEFAULT '[]'")
@@ -672,6 +883,10 @@ def init_db() -> None:
                WHERE user_id = ''"""
         )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
+    _ensure_column(conn, "workflow_sessions", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_tenant_user ON workflow_sessions(tenant_id, user_id)"
+    )
     _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
@@ -687,6 +902,7 @@ def init_db() -> None:
         ("default", "URA Default Tenant", time.time()),
     )
     conn.commit()
+    migrate_legacy_conversation_state_keys()
     logger.info("Analytics database initialised at %s", _DB_PATH)
 
     # Run cleanup on startup
@@ -704,6 +920,7 @@ def cleanup_expired_data() -> dict[str, int]:
 
     ttls = [
         ("conversations", _CONVERSATION_TTL_DAYS),
+        ("conversation_responses", _CONVERSATION_TTL_DAYS),
         ("analytics_events", _ANALYTICS_TTL_DAYS),
         ("feedback", _FEEDBACK_TTL_DAYS),
         ("sessions", _SESSION_TTL_DAYS),
@@ -714,6 +931,7 @@ def cleanup_expired_data() -> dict[str, int]:
     ]
     ts_col = {
         "conversations": "created_at",
+        "conversation_responses": "created_at",
         "analytics_events": "created_at",
         "feedback": "created_at",
         "sessions": "last_active_at",
@@ -1060,6 +1278,7 @@ def log_conversation(
     user_id: str = "",
     flag_variants: str = "{}",
     locale: str = "",
+    tenant_id: str = "default",
 ) -> str:
     """Log a conversation turn and return the stable thread id.
 
@@ -1076,14 +1295,15 @@ def log_conversation(
     try:
         conn.execute(
             """INSERT INTO conversations
-               (id, conversation_id, session_id, user_message, bot_reply, sources,
+               (id, conversation_id, session_id, tenant_id, user_message, bot_reply, sources,
                 contexts, response_time_ms, confidence, topic_tag, created_at, user_id,
                 flag_variants, locale)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
                 session_id,
+                tenant_id or "default",
                 user_message,
                 bot_reply,
                 sources,
@@ -1110,34 +1330,33 @@ def get_recent_turns(
     conversation_id: str | None = None,
     limit: int = 5,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, str]]:
     """Retrieve the most recent conversation turns for a session (multi-turn memory).
 
     Returns a list of dicts with ``user_message`` and ``bot_reply`` keys,
     ordered oldest-first (chronological) for prompt injection.
     """
-    if conversation_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE conversation_id = ? AND user_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args: tuple[Any, ...] = (conversation_id, user_id, limit)
-        else:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE conversation_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args = (conversation_id, limit)
-    elif session_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE session_id = ? AND user_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args = (session_id, user_id, limit)
-        else:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE session_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args = (session_id, limit)
+    tenant_id = tenant_id or "default"
+    if user_id and conversation_id:
+        sql = """SELECT user_message, bot_reply, locale FROM conversations
+                 WHERE tenant_id = ? AND conversation_id = ? AND user_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args: tuple[Any, ...] = (tenant_id, conversation_id, user_id, limit)
+    elif user_id and session_id:
+        sql = """SELECT user_message, bot_reply, locale FROM conversations
+                 WHERE tenant_id = ? AND session_id = ? AND user_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args = (tenant_id, session_id, user_id, limit)
+    elif not user_id and session_id:
+        # Anonymous history is session-bound. A client-supplied conversation id
+        # alone is not an authorization credential.
+        sql = """SELECT user_message, bot_reply, locale FROM conversations
+                 WHERE tenant_id = ? AND session_id = ? AND conversation_id = ?
+                 ORDER BY created_at DESC LIMIT ?""" if conversation_id else """SELECT user_message, bot_reply, locale FROM conversations
+                 WHERE tenant_id = ? AND session_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args = (tenant_id, session_id, conversation_id, limit) if conversation_id else (tenant_id, session_id, limit)
     else:
         return []
 
@@ -1160,6 +1379,7 @@ def get_conversation_context(
     recent_limit: int = 6,
     max_history: int = 25,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Retrieve multi-turn conversation history and build rolling context & summary."""
     from .context_manager import RollingContextManager, context_manager
@@ -1169,6 +1389,7 @@ def get_conversation_context(
         conversation_id=conversation_id,
         limit=max_history,
         user_id=user_id,
+        tenant_id=tenant_id,
     )
     mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
     ctx = mgr.build_context(
@@ -1247,6 +1468,8 @@ def get_conversation_transcript(
     conversation_id: str | None = None,
     session_id: str | None = None,
     limit: int = 200,
+    user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, Any]]:
     """Return the whole conversation, both sides, oldest first.
 
@@ -1257,19 +1480,33 @@ def get_conversation_transcript(
     again.  Timestamps are included so the officer can see where the
     conversation stalled.
     """
-    if conversation_id:
-        where, key = "conversation_id = ?", conversation_id
-    elif session_id:
-        where, key = "session_id = ?", session_id
-    else:
+    if not conversation_id and not session_id:
         return []
     limit = max(1, min(int(limit), 1000))
     conn = _get_connection()
+    clauses = ["tenant_id = ?"]
+    args: list[Any] = [tenant_id or "default"]
+    if user_id:
+        clauses.append("user_id = ?")
+        args.append(user_id)
+    elif session_id:
+        clauses.extend(("session_id = ?", "COALESCE(user_id, '') = ''"))
+        args.append(session_id)
+    else:
+        return []
+    if conversation_id:
+        clauses.append("conversation_id = ?")
+        args.append(conversation_id)
+    elif session_id and user_id:
+        clauses.append("session_id = ?")
+        args.append(session_id)
+    where = " AND ".join(clauses)
+    args.append(limit)
     rows = conn.execute(
         f"""SELECT user_message, bot_reply, created_at, sources, topic_tag
             FROM conversations WHERE {where}
-            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 # noqa: S608 - `where` is a fixed literal
-        (key, limit),
+            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 # noqa: S608 - predicates are fixed literals
+        tuple(args),
     ).fetchall()
     return [
         {
@@ -1283,16 +1520,18 @@ def get_conversation_transcript(
     ]
 
 
-def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
+def get_workflow_session(
+    conversation_id: str, tenant_id: str = "default"
+) -> dict[str, Any] | None:
     """Return the persisted workflow session for a conversation, if any."""
     if not conversation_id:
         return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT conversation_id, workflow_id, status, current_step_idx, user_id,
+        """SELECT conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id,
                   slots_json, last_prompt, created_at, updated_at
-           FROM workflow_sessions WHERE conversation_id = ?""",
-        (conversation_id,),
+           FROM workflow_sessions WHERE conversation_id = ? AND tenant_id = ?""",
+        (conversation_id, tenant_id or "default"),
     ).fetchone()
     if not row:
         return None
@@ -1304,6 +1543,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         slots = {}
     return {
         "conversation_id": row["conversation_id"],
+        "tenant_id": row["tenant_id"] or "default",
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
@@ -1324,6 +1564,7 @@ def upsert_workflow_session(
     status: str = "active",
     last_prompt: str = "",
     user_id: str = "",
+    tenant_id: str = "default",
 ) -> None:
     """Create or update a durable workflow session."""
     if not conversation_id or not workflow_id:
@@ -1336,9 +1577,9 @@ def upsert_workflow_session(
     try:
         conn.execute(
             """INSERT INTO workflow_sessions
-               (conversation_id, workflow_id, status, current_step_idx, user_id,
+               (conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id,
                 slots_json, last_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(conversation_id) DO UPDATE SET
                  workflow_id = excluded.workflow_id,
                  status = excluded.status,
@@ -1346,9 +1587,11 @@ def upsert_workflow_session(
                  user_id = CASE WHEN excluded.user_id != '' THEN excluded.user_id ELSE workflow_sessions.user_id END,
                  slots_json = excluded.slots_json,
                  last_prompt = excluded.last_prompt,
-                 updated_at = excluded.updated_at""",
+                 updated_at = excluded.updated_at
+               WHERE workflow_sessions.tenant_id = excluded.tenant_id""",
             (
                 conversation_id,
+                tenant_id or "default",
                 workflow_id,
                 status,
                 max(0, int(current_step_idx)),
@@ -1370,6 +1613,7 @@ def complete_workflow_session(
     conversation_id: str,
     *,
     status: str = "completed",
+    tenant_id: str = "default",
 ) -> bool:
     """Mark a workflow session as completed or cancelled."""
     if not conversation_id:
@@ -1379,8 +1623,8 @@ def complete_workflow_session(
     conn = _get_connection()
     try:
         cursor = conn.execute(
-            "UPDATE workflow_sessions SET status = ?, updated_at = ? WHERE conversation_id = ?",
-            (status, time.time(), conversation_id),
+            "UPDATE workflow_sessions SET status = ?, updated_at = ? WHERE conversation_id = ? AND tenant_id = ?",
+            (status, time.time(), conversation_id, tenant_id or "default"),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -2555,12 +2799,18 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def get_user_profile(user_id: str) -> dict[str, Any] | None:
+def get_user_profile(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
     conn = _get_connection()
     row = conn.execute(
         "SELECT * FROM user_profiles WHERE user_id = ?",
         (user_id,),
     ).fetchone()
+    if row is None:
+        internal_id = _resolve_internal_user_id(user_id, tenant_id or "default")
+        if internal_id and internal_id != user_id:
+            row = conn.execute(
+                "SELECT * FROM user_profiles WHERE user_id = ?", (internal_id,)
+            ).fetchone()
     if row is None:
         return None
     d = dict(row)
@@ -2772,7 +3022,11 @@ def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -
     return False
 
 
-def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
+def export_user_data(
+    user_id: str,
+    external_id: str = "",
+    tenant_id: str = "default",
+) -> dict[str, Any]:
     """GET /v1/me/export — subject right to data portability (UDPA 2019).
 
     ``user_id`` is the internal UUID (users/profiles/consents); ``external_id`` is
@@ -2786,18 +3040,33 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
     sessions: list[dict[str, Any]] = []
     feedback: list[dict[str, Any]] = []
     workflow_sessions: list[dict[str, Any]] = []
+    conversation_responses: list[dict[str, Any]] = []
     if external_id:
         conversations = query_all(
-            "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
-            (external_id,),
+            """SELECT * FROM conversations WHERE tenant_id = ? AND user_id = ?
+               ORDER BY created_at DESC LIMIT 1000""",
+            (tenant_id or "default", external_id),
         )
         conv_ids = [c["conversation_id"] for c in conversations if c.get("conversation_id")]
-        if conv_ids:
-            ph = ",".join("?" * len(conv_ids))
-            tickets = query_all(
-                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
-                tuple(conv_ids),
+        state_ids = [
+            conversation_state_key(
+                c.get("conversation_id"),
+                session_id=c.get("session_id"),
+                user_id=external_id,
+                tenant_id=tenant_id,
             )
+            for c in conversations
+        ]
+        if conv_ids:
+            tickets = query_all(
+                "SELECT * FROM tickets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+                (external_id,),
+            )
+        conversation_responses = query_all(
+            """SELECT * FROM conversation_responses
+               WHERE tenant_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1000""",
+            (tenant_id or "default", external_id),
+        )
         analytics_events = query_all(
             "SELECT * FROM analytics_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
             (external_id,),
@@ -2810,14 +3079,14 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
             "SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
             (external_id,),
         )
-        workflow_where = "user_id = ?"
-        workflow_params: tuple[Any, ...] = (external_id,)
-        if conv_ids:
-            placeholders = ",".join("?" * len(conv_ids))
-            workflow_where += f" OR conversation_id IN ({placeholders})"
-            workflow_params += tuple(conv_ids)
+        workflow_where = "tenant_id = ? AND user_id = ?"
+        workflow_params: tuple[Any, ...] = (tenant_id or "default", external_id)
+        if state_ids:
+            placeholders = ",".join("?" * len(state_ids))
+            workflow_where += f" OR (tenant_id = ? AND conversation_id IN ({placeholders}))"
+            workflow_params += (tenant_id or "default", *state_ids)
         workflow_sessions = query_all(
-            f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608 — identifiers are fixed; values are bound parameters
+            f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608
             workflow_params,
         )
     return {
@@ -2830,11 +3099,16 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         "sessions": sessions,
         "feedback": feedback,
         "workflow_sessions": workflow_sessions,
+        "conversation_responses": conversation_responses,
         "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
 
-def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
+def delete_user_cascade(
+    user_id: str,
+    external_id: str = "",
+    tenant_id: str = "default",
+) -> dict[str, int]:
     """DELETE /v1/me — right to erasure.
 
     Cascades through every table that holds user data.  The audit ledger is
@@ -2852,47 +3126,58 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     if external_id:
         for store, count in delete_user_analytics(external_id).items():
             counts[store] = count
-        conv_ids = [
-            r["conversation_id"]
-            for r in query_all(
-                "SELECT conversation_id FROM conversations "
-                "WHERE user_id = ? AND conversation_id IS NOT NULL",
-                (external_id,),
+        try:
+            counts["conversation_responses"] = execute(
+                "DELETE FROM conversation_responses WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", external_id),
             )
+        except Exception:
+            logger.exception("delete_user_cascade: conversation_responses")
+            counts["conversation_responses"] = -1
+        conversation_rows = query_all(
+            "SELECT conversation_id, session_id FROM conversations "
+            "WHERE tenant_id = ? AND user_id = ? AND conversation_id IS NOT NULL",
+            (tenant_id or "default", external_id),
+        )
+        conv_ids = [r["conversation_id"] for r in conversation_rows]
+        state_ids = [
+            conversation_state_key(
+                r.get("conversation_id"),
+                session_id=r.get("session_id"),
+                user_id=external_id,
+                tenant_id=tenant_id,
+            )
+            for r in conversation_rows
         ]
         # Delete by user_id AND by conversation_id: the first reaches
         # tickets whose conversation has already been purged, the second
         # reaches tickets raised before user_id was stamped on the row.
         try:
             deleted = execute("DELETE FROM tickets WHERE user_id = ?", (external_id,))
-            if conv_ids:
-                ph = ",".join("?" * len(conv_ids))
-                deleted += execute(
-                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
-                    tuple(conv_ids),
-                )
             counts["tickets"] = deleted
         except Exception:
             logger.exception("delete_user_cascade: tickets")
             counts["tickets"] = -1
         try:
-            if conv_ids:
-                ph = ",".join("?" * len(conv_ids))
+            delete_topic_ids = list(dict.fromkeys([*conv_ids, *state_ids]))
+            if delete_topic_ids:
+                ph = ",".join("?" * len(delete_topic_ids))
                 execute(
                     f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
-                    tuple(conv_ids),
+                    tuple(delete_topic_ids),
                 )
         except Exception:
             logger.exception("delete_user_cascade: conversation_topics")
         try:
             workflow_deleted = execute(
-                "DELETE FROM workflow_sessions WHERE user_id = ?", (external_id,)
+                "DELETE FROM workflow_sessions WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", external_id),
             )
-            if conv_ids:
-                ph = ",".join("?" * len(conv_ids))
+            if state_ids:
+                ph = ",".join("?" * len(state_ids))
                 workflow_deleted += execute(
-                    f"DELETE FROM workflow_sessions WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
-                    tuple(conv_ids),
+                    f"DELETE FROM workflow_sessions WHERE tenant_id = ? AND conversation_id IN ({ph})",  # nosec B608 # noqa: S608
+                    (tenant_id or "default", *state_ids),
                 )
             counts["workflow_sessions"] = workflow_deleted
         except Exception:
@@ -2900,7 +3185,8 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             counts["workflow_sessions"] = -1
         try:
             counts["conversations"] = execute(
-                "DELETE FROM conversations WHERE user_id = ?", (external_id,)
+                "DELETE FROM conversations WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", external_id),
             )
         except Exception:
             logger.exception("delete_user_cascade: conversations")

@@ -27,11 +27,10 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from ..text_signals import detect_user_distress
 from .episodic import EpisodicMemory, EpisodicSummary
 from .extractor import FactExtractor
 from .semantic import SemanticMemory, UserFact
-from .working import WorkingMemory
+from .working import WORKING_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -51,19 +50,20 @@ class MemoryService:
     """Unified memory interface used by the graph orchestrator."""
 
     def __init__(self) -> None:
-        self.working = WorkingMemory()
         self.episodic = EpisodicMemory()
         self.semantic = SemanticMemory()
         self.extractor = FactExtractor()
 
     # -- Consent-gated reads -------------------------------------------
-    def _has_consent(self, user_id: str, purpose: str = "personalization") -> bool:
+    def _has_consent(
+        self, user_id: str, purpose: str = "personalization", tenant_id: str = "default"
+    ) -> bool:
         if not user_id:
             return False
         try:
             from .. import database as db
 
-            return db.has_active_consent(user_id, purpose)
+            return db.has_active_consent(user_id, purpose, tenant_id=tenant_id or "default")
         except Exception:
             logger.debug("consent check failed", exc_info=True)
             return False
@@ -74,6 +74,7 @@ class MemoryService:
         category: str | None = None,
         limit: int = 10,
         purpose: str = "personalization",
+        tenant_id: str = "default",
     ) -> list[UserFact]:
         """Return decay-adjusted facts for a user.
 
@@ -81,10 +82,11 @@ class MemoryService:
         for the requested purpose.  This is the primary guard that
         enforces UDPA 2019 purpose limitation at the retrieval boundary.
         """
-        if not self._has_consent(user_id, purpose):
+        if not self._has_consent(user_id, purpose, tenant_id):
             return []
         return self.semantic.read(
             user_id=user_id,
+            tenant_id=tenant_id,
             category=category,
             limit=limit,
         )
@@ -95,22 +97,28 @@ class MemoryService:
         topic_tag: str | None = None,
         limit: int = 5,
         purpose: str = "personalization",
+        tenant_id: str = "default",
     ) -> list[dict[str, Any]]:
-        if not self._has_consent(user_id, purpose):
+        if not self._has_consent(user_id, purpose, tenant_id):
             return []
         return self.episodic.list_for_user(
             user_id=user_id,
+            tenant_id=tenant_id,
             limit=limit,
             topic_tag=topic_tag,
         )
 
-    def read_all(self, user_id: str, purpose: str = "personalization") -> MemoryReadResult:
+    def read_all(
+        self, user_id: str, purpose: str = "personalization", tenant_id: str = "default"
+    ) -> MemoryReadResult:
         """One-shot read — facts, episodic summaries, and working state."""
-        granted = self._has_consent(user_id, purpose)
+        granted = self._has_consent(user_id, purpose, tenant_id)
+        from .. import database as db
+
         return MemoryReadResult(
-            facts=self.semantic.read(user_id=user_id) if granted else [],
-            episodic=self.episodic.list_for_user(user_id=user_id, limit=5) if granted else [],
-            working=self.working.get(user_id) if granted else None,
+            facts=self.semantic.read(user_id=user_id, tenant_id=tenant_id) if granted else [],
+            episodic=self.episodic.list_for_user(user_id=user_id, tenant_id=tenant_id, limit=5) if granted else [],
+            working=db.get_working_memory(user_id, tenant_id=tenant_id) if granted else None,
             consent_granted=granted,
         )
 
@@ -126,13 +134,15 @@ class MemoryService:
         """Extract facts and write an episodic summary from a conversation.
 
         Called by the offline worker after a conversation ends.
-        Consent is NOT checked here — writes happen regardless
-        (so the audit trail is complete) but reads are gated.
+        Writes are consent-gated at the storage boundary. The caller also
+        checks consent so revoked consent cannot be bypassed by another agent.
 
         Returns a dict with counts of writes performed.
         """
         if not user_id or not turns:
             return {"facts_written": 0, "episodic_written": False}
+        if not self._has_consent(user_id, tenant_id=tenant_id):
+            return {"facts_written": 0, "episodic_written": False, "skipped": "consent_required"}
 
         # 1. Extract facts (rule-based in Phase 16 Lite)
         candidates = self.extractor.extract(turns)
@@ -159,7 +169,9 @@ class MemoryService:
             except Exception:
                 logger.exception("semantic write failed")
 
-        # 2. Write an episodic summary (naive: first user turn truncated)
+        # 2. Store only a coarse topic label. Raw user text can contain
+        # identifiers, financial details, or prompt injection and does not
+        # belong in long-lived personalization memory.
         first_user = next(
             (
                 msg
@@ -169,23 +181,17 @@ class MemoryService:
             ),
             "",
         )
-        summary_text = first_user[:240] if first_user else "(empty conversation)"
+        topic_tag = _guess_topic_tag(first_user)
+        summary_text = f"Discussed {topic_tag.replace('_', ' ')}." if first_user else "Conversation topic unavailable."
         episodic = EpisodicSummary(
             summary_id=str(uuid.uuid4()),
             user_id=user_id,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             summary=summary_text,
-            topic_tag=_guess_topic_tag(first_user),
-            # Distress reads as negative; calm, merely time-pressured, or
-            # simply confused turns stay neutral.  Hardship — a taxpayer
-            # who cannot pay — is the most negative of all, so it must not
-            # fall through to neutral just because it is a newer kind.
-            sentiment=(
-                "negative"
-                if detect_user_distress(first_user) in ("frustration", "anxiety", "hardship")
-                else "neutral"
-            ),
+            topic_tag=topic_tag,
+            # Do not persist inferred emotional or hardship labels.
+            sentiment="neutral",
             turn_count=len(turns),
         )
         episodic_id = ""
@@ -202,39 +208,57 @@ class MemoryService:
         }
 
     # -- Working memory -----------------------------------------------
-    def update_working(self, user_id: str, **fields: Any) -> None:
-        """Set/merge short-term working state (no consent gate — ephemeral)."""
-        self.working.update(user_id, **fields)
+    def update_working(self, user_id: str, tenant_id: str = "default", **fields: Any) -> None:
+        """Persist consented short-term state in the shared analytics backend."""
+        if not self._has_consent(user_id, tenant_id=tenant_id):
+            return
+        from .. import database as db
+
+        db.upsert_working_memory(
+            user_id,
+            tenant_id or "default",
+            fields,
+            ttl_seconds=WORKING_TTL_SECONDS,
+        )
 
     # -- Subject-access export ----------------------------------------
-    def export_user(self, user_id: str) -> dict[str, Any]:
+    def export_user(self, user_id: str, tenant_id: str = "default") -> dict[str, Any]:
         """Ungated subject-access export of stored memory (UDPA data portability).
 
         Unlike :meth:`read_facts`, this is NOT consent-gated — a data subject is
         entitled to a copy of their stored data regardless of current consent.
         """
-        import dataclasses
+        # Export stored records directly, without retrieval decay, consent, or
+        # a short result cap. Access/export must include historical facts even
+        # when they are no longer selected for personalization.
+        from .. import database as db
 
-        facts = self.semantic.read(user_id=user_id, limit=1000)
+        facts = db.query_all(
+            """SELECT * FROM user_facts WHERE tenant_id = ? AND user_id = ?
+               ORDER BY extracted_at DESC""",
+            (tenant_id or "default", user_id),
+        )
+        episodic = self.episodic.export_for_user(user_id, tenant_id=tenant_id)
         return {
-            "facts": [
-                dataclasses.asdict(f) if dataclasses.is_dataclass(f) else dict(f) for f in facts
-            ],
-            "episodic": self.episodic.list_for_user(user_id=user_id, limit=1000),
+            "facts": facts,
+            "episodic": episodic,
+            "working": db.get_working_memory(user_id, tenant_id=tenant_id),
         }
 
     # -- Erasure cascade ----------------------------------------------
-    def forget_user(self, user_id: str) -> dict[str, int]:
+    def forget_user(self, user_id: str, tenant_id: str = "default") -> dict[str, int]:
         """Cascade delete across all three tiers (UDPA right to erasure).
 
         The audit ledger is intentionally not touched — erasure is
         cryptographically noted but the hash chain is immutable.
         """
-        self.working.clear(user_id)
-        episodic_deleted = self.episodic.delete_for_user(user_id)
-        facts_deleted = self.semantic.forget_user(user_id)
+        from .. import database as db
+
+        working_deleted = db.clear_working_memory(user_id, tenant_id=tenant_id)
+        episodic_deleted = self.episodic.delete_for_user(user_id, tenant_id)
+        facts_deleted = self.semantic.forget_user(user_id, tenant_id)
         return {
-            "working": 1,
+            "working": working_deleted,
             "episodic": episodic_deleted,
             "semantic": facts_deleted,
         }
@@ -242,11 +266,13 @@ class MemoryService:
     def cleanup_expired(self) -> dict[str, int]:
         """Run retention across every memory tier.
 
-        Working memory evicts lazily; ``size`` performs that eviction without
-        exposing any personal data. Persistent tiers are deleted explicitly.
+        Working memory uses the shared backend and a short expiry; persistent
+        tiers are deleted explicitly.
         """
+        from .. import database as db
+
         return {
-            "working": self.working.purge_expired(),
+            "working": db.cleanup_expired_working_memory(),
             "episodic": self.episodic.cleanup_expired(),
             "semantic": self.semantic.cleanup_expired(),
         }
@@ -259,16 +285,17 @@ _TOPIC_KEYWORDS = {
     "vat": ["vat", "value added"],
     "paye": ["paye", "take-home", "salary tax"],
     "cit": ["corporation tax", "corporate tax", "cit"],
-    "customs": ["import", "customs", "cif", "tariff"],
+    "customs": ["import", "customs", "cif", "tariff", "forodha"],
     "registration": ["register", "tin", "sign up"],
-    "withholding": ["withholding", "wht"],
+    "withholding": ["withholding", "wht", "kodi ya zuio", "zuio"],
     "capital_gains": ["capital gains", "cgt", "sold"],
-    "rental": ["rental", "landlord", "tenancy"],
+    "rental": ["rental", "landlord", "tenancy", "kodi ya pango"],
     "stamp": ["stamp duty", "property transfer", "land transfer"],
     "motor_vehicle": ["motor vehicle", "logbook", "number plate"],
     "excise": ["excise", "dts", "digital tax stamp"],
     "efris": ["efris", "fiscal invoice"],
     "escalation": ["human", "officer", "dispute", "appeal"],
+    "general_tax": ["omusolo", "kodi", "ushuru"],
 }
 
 

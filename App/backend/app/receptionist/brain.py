@@ -960,6 +960,7 @@ class UraReceptionistBrain(LLMService):
                 confidence=float(mean_word_prob or 0.0),
                 user_id=self.room.state.user_id,
                 locale=self.room.state.locale,
+                tenant_id=self.room.state.tenant_id or "default",
             )
         except Exception:
             logger.debug("Failed logging conversation turn to DB", exc_info=True)

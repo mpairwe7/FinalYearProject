@@ -89,10 +89,12 @@ class ReceptionistLexicon:
             from ..speech_normalization import _ACRONYMS
 
             for pattern, spoken in _ACRONYMS:
-                raw = pattern.pattern.replace(r"\b", "").strip()
-                if raw.isalnum():
-                    self.single_terms.add(raw.lower())
-                    self.acronyms.add(raw.lower())
+                pat = pattern.pattern.replace(r"\b", "").replace(r"\B", "")
+                for alt in pat.split("|"):
+                    cleaned = re.sub(r"[^A-Za-z]", "", alt)
+                    if len(cleaned) >= 2:
+                        self.single_terms.add(cleaned.lower())
+                        self.acronyms.add(cleaned.lower())
                 spoken_clean = spoken.replace("-", "").lower().strip()
                 if " " in spoken_clean:
                     self.multi_terms.add(spoken_clean)

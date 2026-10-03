@@ -117,6 +117,7 @@ def init_db() -> None:
         id               TEXT PRIMARY KEY,
         conversation_id  TEXT,
         session_id       TEXT,
+        tenant_id        TEXT NOT NULL DEFAULT 'default',
         user_message     TEXT NOT NULL,
         bot_reply        TEXT NOT NULL,
         sources          TEXT DEFAULT '[]',
@@ -127,6 +128,27 @@ def init_db() -> None:
         user_id          TEXT DEFAULT '',
         created_at       DOUBLE PRECISION NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS conversation_responses (
+        response_id     TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        tenant_id       TEXT NOT NULL DEFAULT 'default',
+        created_at      DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_response_owner
+        ON conversation_responses(tenant_id, user_id, conversation_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS working_memory (
+        tenant_id       TEXT NOT NULL DEFAULT 'default',
+        user_id         TEXT NOT NULL,
+        payload_json    JSONB NOT NULL DEFAULT '{}'::jsonb,
+        expires_at      DOUBLE PRECISION NOT NULL,
+        updated_at      DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (tenant_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_working_memory_expiry
+        ON working_memory(expires_at);
 
     -- Escalation tickets.  These MUST live in the same store as
     -- `conversations`: a ticket references a conversation_id, and the
@@ -266,6 +288,7 @@ def init_db() -> None:
 
     CREATE TABLE IF NOT EXISTS workflow_sessions (
         conversation_id  TEXT PRIMARY KEY,
+        tenant_id        TEXT NOT NULL DEFAULT 'default',
         workflow_id      TEXT NOT NULL,
         status           TEXT NOT NULL DEFAULT 'active'
                          CHECK(status IN ('active','completed','cancelled')),
@@ -298,6 +321,7 @@ def init_db() -> None:
         with conn.cursor() as cur:
             cur.execute(ddl)
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contexts TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             # Sessions from before the column existed take their owner from
@@ -308,6 +332,7 @@ def init_db() -> None:
             )
             workflow_owner_missing = cur.fetchone() is None
             cur.execute("ALTER TABLE workflow_sessions ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE workflow_sessions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             if workflow_owner_missing:
                 cur.execute(
                     """UPDATE workflow_sessions AS ws SET user_id = c.user_id
@@ -319,8 +344,10 @@ def init_db() -> None:
                        WHERE ws.conversation_id = c.conversation_id AND ws.user_id = ''"""
                 )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_tenant_user ON workflow_sessions(tenant_id, user_id)")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_conversations_tenant_thread ON conversations(tenant_id, conversation_id)")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             # Which route / journey step produced a rated reply (journey analytics).
             for _col in ("retrieval_mode", "workflow_id", "step_id"):
@@ -354,6 +381,9 @@ def init_db() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.commit()
     logger.info("Postgres analytics schema ready")
+    from . import database as _database
+
+    _database.migrate_legacy_conversation_state_keys()
     cleanup_expired_data()
 
 
@@ -364,6 +394,7 @@ def cleanup_expired_data() -> dict[str, int]:
     now = time.time()
     ttls = [
         ("conversations", _CONVERSATION_TTL_DAYS, "created_at"),
+        ("conversation_responses", _CONVERSATION_TTL_DAYS, "created_at"),
         ("analytics_events", _ANALYTICS_TTL_DAYS, "created_at"),
         ("feedback", _FEEDBACK_TTL_DAYS, "created_at"),
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
@@ -701,6 +732,7 @@ def log_conversation(
     user_id: str = "",
     flag_variants: str = "{}",
     locale: str = "",
+    tenant_id: str = "default",
 ) -> str:
     """Mirrors :func:`database.log_conversation` exactly.
 
@@ -723,14 +755,15 @@ def log_conversation(
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO conversations (id, conversation_id, session_id, user_message, bot_reply,
+                """INSERT INTO conversations (id, conversation_id, session_id, tenant_id, user_message, bot_reply,
                        sources, contexts, response_time_ms, confidence, topic_tag,
                        user_id, flag_variants, locale, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     row_id,
                     thread_id,
                     session_id,
+                    tenant_id or "default",
                     user_message,
                     bot_reply,
                     sources,
@@ -753,38 +786,39 @@ def get_recent_turns(
     conversation_id: str | None = None,
     limit: int = 5,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, str]]:
     pool = _get_pool()
     if pool is None:
         return []
-    if conversation_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE conversation_id = %s AND user_id = %s
+    tenant_id = tenant_id or "default"
+    if user_id and conversation_id:
+        sql = """SELECT user_message, bot_reply, locale FROM conversations
+                   WHERE tenant_id = %s AND conversation_id = %s AND user_id = %s
+                   ORDER BY created_at DESC LIMIT %s"""
+        args: tuple[Any, ...] = (tenant_id, conversation_id, user_id, limit)
+    elif user_id and session_id:
+        sql = """SELECT user_message, bot_reply, locale FROM conversations
+                   WHERE tenant_id = %s AND session_id = %s AND user_id = %s
+                   ORDER BY created_at DESC LIMIT %s"""
+        args = (tenant_id, session_id, user_id, limit)
+    elif not user_id and session_id:
+        if conversation_id:
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
+                       WHERE tenant_id = %s AND session_id = %s AND conversation_id = %s
                        ORDER BY created_at DESC LIMIT %s"""
-            args: tuple[Any, ...] = (conversation_id, user_id, limit)
+            args = (tenant_id, session_id, conversation_id, limit)
         else:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE conversation_id = %s
+            sql = """SELECT user_message, bot_reply, locale FROM conversations
+                       WHERE tenant_id = %s AND session_id = %s
                        ORDER BY created_at DESC LIMIT %s"""
-            args = (conversation_id, limit)
-    elif session_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE session_id = %s AND user_id = %s
-                       ORDER BY created_at DESC LIMIT %s"""
-            args = (session_id, user_id, limit)
-        else:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE session_id = %s
-                       ORDER BY created_at DESC LIMIT %s"""
-            args = (session_id, limit)
+            args = (tenant_id, session_id, limit)
     else:
         return []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, args)
         rows = cur.fetchall()
-    return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
+    return [{"user_message": r[0], "bot_reply": r[1], "locale": r[2] or ""} for r in reversed(rows)]
 
 
 def get_conversation_context(
@@ -793,6 +827,7 @@ def get_conversation_context(
     recent_limit: int = 6,
     max_history: int = 25,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Retrieve multi-turn conversation history and build rolling context & summary."""
     from .context_manager import RollingContextManager, context_manager
@@ -802,6 +837,7 @@ def get_conversation_context(
         conversation_id=conversation_id,
         limit=max_history,
         user_id=user_id,
+        tenant_id=tenant_id,
     )
     mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
     ctx = mgr.build_context(
@@ -815,6 +851,43 @@ def get_conversation_context(
         "total_turns": ctx.total_turns,
         "all_turns": ctx.all_turns,
     }
+
+
+def upsert_working_memory(
+    user_id: str,
+    tenant_id: str,
+    fields: dict[str, Any],
+    *,
+    ttl_seconds: int = 1800,
+) -> bool:
+    """Atomically merge a tenant-scoped short-term state update."""
+    pool = _get_pool()
+    if pool is None or not user_id or not fields:
+        return False
+    now = time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO working_memory
+               (tenant_id, user_id, payload_json, expires_at, updated_at)
+               VALUES (%s, %s, %s::jsonb, %s, %s)
+               ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+                 payload_json = CASE
+                   WHEN working_memory.expires_at <= EXCLUDED.updated_at
+                     THEN EXCLUDED.payload_json
+                   ELSE working_memory.payload_json || EXCLUDED.payload_json
+                 END,
+                 expires_at = EXCLUDED.expires_at,
+                 updated_at = EXCLUDED.updated_at""",
+            (
+                tenant_id or "default",
+                user_id,
+                json.dumps(fields, ensure_ascii=True),
+                now + max(1, ttl_seconds),
+                now,
+            ),
+        )
+        conn.commit()
+    return True
 
 
 def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
@@ -1322,24 +1395,40 @@ def get_conversation_transcript(
     conversation_id: str | None = None,
     session_id: str | None = None,
     limit: int = 200,
+    user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, Any]]:
     """Postgres mirror of :func:`database.get_conversation_transcript`."""
     pool = _get_pool()
     if pool is None:
         return []
-    if conversation_id:
-        where, key = "conversation_id = %s", conversation_id
-    elif session_id:
-        where, key = "session_id = %s", session_id
-    else:
+    if not conversation_id and not session_id:
         return []
     limit = max(1, min(int(limit), 1000))
+    clauses = ["tenant_id = %s"]
+    args: list[Any] = [tenant_id or "default"]
+    if user_id:
+        clauses.append("user_id = %s")
+        args.append(user_id)
+    elif session_id:
+        clauses.extend(("session_id = %s", "COALESCE(user_id, '') = ''"))
+        args.append(session_id)
+    else:
+        return []
+    if conversation_id:
+        clauses.append("conversation_id = %s")
+        args.append(conversation_id)
+    elif session_id and user_id:
+        clauses.append("session_id = %s")
+        args.append(session_id)
+    args.append(limit)
     sql = (
         "SELECT user_message, bot_reply, created_at, sources, topic_tag "
-        f"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT %s"  # nosec B608 # noqa: S608
+        f"FROM conversations WHERE {' AND '.join(clauses)} "
+        "ORDER BY created_at DESC LIMIT %s"  # nosec B608 # noqa: S608
     )
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (key, limit))
+        cur.execute(sql, tuple(args))
         rows = cur.fetchall()
     return [
         {
@@ -1778,7 +1867,7 @@ _CONSENT_COLUMNS = (
     "receipt_id, user_id, purpose, version, granted_at, withdrawn_at, legal_basis"
 )
 _WORKFLOW_COLUMNS = (
-    "conversation_id, workflow_id, status, current_step_idx, user_id, slots_json, "
+    "conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id, slots_json, "
     "last_prompt, created_at, updated_at"
 )
 
@@ -1845,7 +1934,7 @@ def get_user(user_id: str) -> dict[str, Any] | None:
         return _as_dict(_USER_COLUMNS, cur.fetchone())
 
 
-def get_user_profile(user_id: str) -> dict[str, Any] | None:
+def get_user_profile(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
     pool = _get_pool()
     if pool is None:
         return None
@@ -1855,6 +1944,18 @@ def get_user_profile(user_id: str) -> dict[str, Any] | None:
             (user_id,),
         )
         profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
+        if profile is None:
+            cur.execute(
+                "SELECT id FROM users WHERE tenant_id = %s AND external_id = %s",
+                (tenant_id or "default", user_id),
+            )
+            owner = cur.fetchone()
+            if owner:
+                cur.execute(
+                    f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",  # nosec B608 # noqa: S608
+                    (owner[0],),
+                )
+                profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
     if profile is None:
         return None
     profile["registered_tax_types"] = _loads(profile.get("registered_tax_types"), [])
@@ -2036,14 +2137,16 @@ def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -
 # conversation.  On a per-replica store a taxpayer half-way through a
 # registration hits a different pod and the flow restarts from nothing.
 # ---------------------------------------------------------------------------
-def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
+def get_workflow_session(
+    conversation_id: str, tenant_id: str = "default"
+) -> dict[str, Any] | None:
     pool = _get_pool()
     if pool is None or not conversation_id:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",  # nosec B608 # noqa: S608
-            (conversation_id,),
+            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s AND tenant_id = %s",  # nosec B608 # noqa: S608
+            (conversation_id, tenant_id or "default"),
         )
         row = _as_dict(_WORKFLOW_COLUMNS, cur.fetchone())
     if row is None:
@@ -2051,6 +2154,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
     slots = _loads(row.pop("slots_json", "{}"), {})
     return {
         "conversation_id": row["conversation_id"],
+        "tenant_id": row["tenant_id"] or "default",
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
@@ -2071,6 +2175,7 @@ def upsert_workflow_session(
     status: str = "active",
     last_prompt: str = "",
     user_id: str = "",
+    tenant_id: str = "default",
 ) -> None:
     pool = _get_pool()
     if pool is None or not conversation_id or not workflow_id:
@@ -2082,7 +2187,7 @@ def upsert_workflow_session(
         with conn.cursor() as cur:
             cur.execute(
                 f"""INSERT INTO workflow_sessions ({_WORKFLOW_COLUMNS})
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (conversation_id) DO UPDATE SET
                       workflow_id = EXCLUDED.workflow_id,
                       status = EXCLUDED.status,
@@ -2090,9 +2195,11 @@ def upsert_workflow_session(
                       user_id = CASE WHEN EXCLUDED.user_id != '' THEN EXCLUDED.user_id ELSE workflow_sessions.user_id END,
                       slots_json = EXCLUDED.slots_json,
                       last_prompt = EXCLUDED.last_prompt,
-                      updated_at = EXCLUDED.updated_at""",  # nosec B608 # noqa: S608
+                      updated_at = EXCLUDED.updated_at
+                    WHERE workflow_sessions.tenant_id = EXCLUDED.tenant_id""",  # nosec B608 # noqa: S608
                 (
                     conversation_id,
+                    tenant_id or "default",
                     workflow_id,
                     status,
                     max(0, int(current_step_idx)),
@@ -2106,7 +2213,12 @@ def upsert_workflow_session(
         conn.commit()
 
 
-def complete_workflow_session(conversation_id: str, *, status: str = "completed") -> bool:
+def complete_workflow_session(
+    conversation_id: str,
+    *,
+    status: str = "completed",
+    tenant_id: str = "default",
+) -> bool:
     pool = _get_pool()
     if pool is None or not conversation_id:
         return False
@@ -2116,8 +2228,8 @@ def complete_workflow_session(conversation_id: str, *, status: str = "completed"
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE workflow_sessions SET status = %s, updated_at = %s "
-                "WHERE conversation_id = %s",
-                (status, time.time(), conversation_id),
+                "WHERE conversation_id = %s AND tenant_id = %s",
+                (status, time.time(), conversation_id, tenant_id or "default"),
             )
             touched = cur.rowcount > 0
         conn.commit()
