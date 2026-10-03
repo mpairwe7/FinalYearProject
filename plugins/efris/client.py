@@ -101,8 +101,8 @@ class EfrisClient:
                         tax_category=tax_cat,
                     )
                 )
-            except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": f"Invalid item format at index {idx}: {exc}"}
+            except Exception:  # noqa: BLE001
+                return {"ok": False, "error": f"Invalid item format at index {idx}"}
 
         inv_type = InvoiceType.B2B
         if invoice_type.upper() in ("B2C", "RETAIL"):

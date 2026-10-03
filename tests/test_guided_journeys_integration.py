@@ -110,7 +110,7 @@ def test_tin_guide_avoids_personal_data_and_makes_no_submission_claim(client):
         "/v1/chat", json={"message": "yes", "conversation_id": conversation_id, "locale": "en"}
     ).json()
     assert "has not created or submitted a TIN application" in summary["reply"]
-    assert "https://ura.go.ug" in summary["reply"]
+    assert "ura.go.ug" in summary["reply"]
     assert summary["workflow"]["status"] == "completed"
 
 

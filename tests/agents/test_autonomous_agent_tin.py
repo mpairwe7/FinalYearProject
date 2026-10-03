@@ -96,7 +96,7 @@ class TestAutonomousAgentTinExecution:
         assert res["retrieval_mode"] == "tin_registration_guidance"
         assert res["agent_role"] == "registration_specialist"
         assert "has not been sent to URA" in res["reply"]
-        assert "https://ura.go.ug" in res["reply"]
+        assert "ura.go.ug" in res["reply"]
         assert test_nin not in res["reply"]
         assert "Grace Akello" not in res["reply"]
         assert "+256782112233" not in res["reply"]

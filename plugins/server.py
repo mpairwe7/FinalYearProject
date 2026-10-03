@@ -242,7 +242,8 @@ def call_mcp_tool(
     if "submit" not in tool_properties:
         tool_arguments.pop("submit", None)
 
-    replay_key = f"{body.name}:{body.idempotency_key.strip()}" if tool.schema.requires_confirmation else ""
+    safe_tool_id = str(tool.schema.name)
+    replay_key = f"{safe_tool_id}:{body.idempotency_key.strip()}" if tool.schema.requires_confirmation else ""
     if replay_key:
         with _MCP_REPLAY_LOCK:
             cached = _MCP_REPLAY_CACHE.get(replay_key)
@@ -252,15 +253,15 @@ def call_mcp_tool(
                 result = tool.execute(**tool_arguments)
                 response = {
                     "ok": True,
-                    "tool_name": body.name,
+                    "tool_name": safe_tool_id,
                     "mode": "simulation",
                     "live": False,
                     "simulation_notice": _SIMULATION_NOTICE,
                     "result": _simulation_result(result),
                 }
             except Exception as exc:  # noqa: BLE001
-                logger.exception("Error executing confirmed remote tool %s", body.name)
-                response = {"ok": False, "tool_name": body.name, "error": type(exc).__name__}
+                logger.exception("Error executing confirmed remote tool %s", safe_tool_id)
+                response = {"ok": False, "tool_name": safe_tool_id, "error": type(exc).__name__}
             if response["ok"]:
                 if len(_MCP_REPLAY_CACHE) >= 512:
                     _MCP_REPLAY_CACHE.pop(next(iter(_MCP_REPLAY_CACHE)))
@@ -271,15 +272,15 @@ def call_mcp_tool(
         result = tool.execute(**tool_arguments)
         return {
             "ok": True,
-            "tool_name": body.name,
+            "tool_name": safe_tool_id,
             "mode": "simulation",
             "live": False,
             "simulation_notice": _SIMULATION_NOTICE,
             "result": _simulation_result(result),
         }
     except Exception as exc:  # noqa: BLE001
-        logger.exception("Error executing remote tool %s", body.name)
-        return {"ok": False, "tool_name": body.name, "error": str(exc)}
+        logger.exception("Error executing remote tool %s", safe_tool_id)
+        return {"ok": False, "tool_name": safe_tool_id, "error": type(exc).__name__}
 
 
 # ---------------------------------------------------------------------------
