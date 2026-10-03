@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextvars
 import csv
 import functools
+import inspect
 import json
 import logging
 import os
@@ -166,6 +168,50 @@ from .workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn,
 from .workflows.slots import validate_slot
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_CONVERSATION_STATE: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "active_conversation_state", default=""
+)
+_ACTIVE_TENANT_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "active_conversation_tenant", default=""
+)
+
+
+def _state_conversation_id(conversation_id: str) -> str:
+    """Use the active opaque state key for durable topic/workflow lookups."""
+    return _ACTIVE_CONVERSATION_STATE.get() or conversation_id
+
+
+def _state_tenant_id() -> str:
+    return _ACTIVE_TENANT_ID.get() or "default"
+
+
+def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]:
+    """Bind durable topic/workflow state to this request's verified owner."""
+    signature = inspect.signature(method)
+
+    @functools.wraps(method)
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
+        bound = signature.bind(self, *args, **kwargs)
+        bound.apply_defaults()
+        if not bound.arguments.get("conversation_id"):
+            bound.arguments["conversation_id"] = str(uuid.uuid4())
+        values = bound.arguments
+        state_id = db.conversation_state_key(
+            values.get("conversation_id"),
+            session_id=values.get("session_id"),
+            user_id=values.get("user_id"),
+            tenant_id=values.get("tenant_id") or "default",
+        )
+        token = _ACTIVE_CONVERSATION_STATE.set(state_id)
+        tenant_token = _ACTIVE_TENANT_ID.set(values.get("tenant_id") or "default")
+        try:
+            return method(*bound.args, **bound.kwargs)
+        finally:
+            _ACTIVE_TENANT_ID.reset(tenant_token)
+            _ACTIVE_CONVERSATION_STATE.reset(token)
+
+    return wrapped
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1343,6 +1389,7 @@ def _apply_output_guards(
     existing_handoff: dict[str, Any] | None = None,
     existing_ticket_id: str = "",
     user_id: str = "",
+    tenant_id: str = "default",
     locale: str = "en",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
@@ -1479,6 +1526,7 @@ def _apply_output_guards(
             handoff=handoff,
             response_judge=response_judge,
             user_id=user_id,
+            tenant_id=tenant_id or "default",
         )
 
     return {
@@ -1494,7 +1542,9 @@ def _apply_output_guards(
     }
 
 
-def _recent_turns_for_guidance(result: dict[str, Any], user_id: str | None) -> list[dict[str, str]]:
+def _recent_turns_for_guidance(
+    result: dict[str, Any], user_id: str | None, tenant_id: str = "default"
+) -> list[dict[str, str]]:
     """Earlier turns of this conversation for :func:`apply_turn_guidance`.
 
     Read before the current turn is logged (``main.py`` logs after the reply
@@ -1504,7 +1554,12 @@ def _recent_turns_for_guidance(result: dict[str, Any], user_id: str | None) -> l
     if not conversation_id:
         return []
     try:
-        return db.get_recent_turns(conversation_id=conversation_id, limit=3, user_id=user_id or None)
+        return db.get_recent_turns(
+            conversation_id=conversation_id,
+            limit=3,
+            user_id=user_id or None,
+            tenant_id=tenant_id or "default",
+        )
     except Exception:
         logger.debug("recent turns unavailable for turn guidance", exc_info=True)
         return []
@@ -1632,7 +1687,9 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
         # database only when it loaded none, and off the event loop.
         history_turns = turns_from_history(result.get("_history") or [])
         if not history_turns:
-            history_turns = await asyncio.to_thread(_recent_turns_for_guidance, result, user_id)
+            history_turns = await asyncio.to_thread(
+                _recent_turns_for_guidance, result, user_id, tenant_id
+            )
         prior_replies = [t["bot_reply"] for t in history_turns]
         apply_turn_guidance(
             message,
@@ -1771,6 +1828,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     existing_handoff=result.get("handoff"),
                     existing_ticket_id=result.get("ticket_id", ""),
                     user_id=user_id or "",
+                    tenant_id=tenant_id or "default",
                     locale=locale,
                 )
                 full_reply = guard["reply"]
@@ -1845,6 +1903,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 handoff=handoff,
                 response_judge=response_judge,
                 user_id=user_id or "",
+                tenant_id=tenant_id or "default",
             )
             result["reply"] = abstained_reply
             result["retrieval_mode"] = "abstained"
@@ -2017,6 +2076,7 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                 existing_handoff=result.get("handoff"),
                 existing_ticket_id=result.get("ticket_id", ""),
                 user_id=user_id or "",
+                tenant_id=tenant_id or "default",
                 locale=locale,
             )
             full_reply = guard["reply"]
@@ -3983,7 +4043,11 @@ class ChatModel:
         if not flags.is_enabled("workflows"):
             return None
         try:
-            persisted = db.get_workflow_session(thread_id)
+            persisted = db.get_workflow_session(
+                _state_conversation_id(thread_id), tenant_id=_state_tenant_id()
+            )
+            if not persisted and _state_conversation_id(thread_id) != thread_id:
+                persisted = db.get_workflow_session(thread_id, tenant_id=_state_tenant_id())
             if persisted and persisted.get("status") == "active":
                 wf = WorkflowRegistry.get(persisted.get("workflow_id", ""))
                 if wf:
@@ -3999,13 +4063,17 @@ class ChatModel:
             return False
         return bool(re.search(r"\[\d+\]", reply))
 
-    def _load_personalization_state(self, user_id: str | None) -> dict[str, Any] | None:
+    def _load_personalization_state(
+        self, user_id: str | None, tenant_id: str = "default"
+    ) -> dict[str, Any] | None:
         """Return consent-gated profile + memory context for personalization."""
         if not user_id or not flags.is_enabled("memory_enabled"):
             return None
 
         try:
-            snapshot = get_memory_service().read_all(user_id, purpose="personalization")
+            snapshot = get_memory_service().read_all(
+                user_id, purpose="personalization", tenant_id=tenant_id or "default"
+            )
         except Exception:
             logger.debug("personalization read failed", exc_info=True)
             return None
@@ -4013,7 +4081,7 @@ class ChatModel:
         if not snapshot.consent_granted:
             return None
 
-        profile = db.get_user_profile(user_id) or {}
+        profile = db.get_user_profile(user_id, tenant_id=tenant_id or "default") or {}
         lines: list[str] = []
         prefill_slots: dict[str, Any] = {}
 
@@ -4044,7 +4112,6 @@ class ChatModel:
             "industry": "Industry",
             "registered_tax": "Registered tax",
             "registered_vat": "VAT registration",
-            "primary_language": "Preferred language",
         }
         seen_facts: set[tuple[str, str]] = set()
         for fact in snapshot.facts[:5]:
@@ -4098,7 +4165,7 @@ class ChatModel:
         trace_ctx: dict[str, Any] | None = None,
     ) -> tuple[str, str, dict[str, Any] | None]:
         """Keep the current task across turns (G6) and expand anaphoric retrieval."""
-        topic = resolve_topic(conversation_id, message)
+        topic = resolve_topic(_state_conversation_id(conversation_id), message)
         if trace_ctx is not None:
             trace_ctx["current_topic"] = topic.topic_id if topic else ""
         retrieval_query = topic_retrieval_query(topic, retrieval_query)
@@ -4980,18 +5047,15 @@ class ChatModel:
         if conversation_history:
             for turn in reversed(conversation_history[-4:]):
                 usr = str(turn.get("user_message") or "").strip()
-                bot = str(turn.get("bot_reply") or "").strip()
-                for sample in (usr, bot):
-                    if not sample or len(sample) < 4:
-                        continue
-                    loc = detect_language(sample, default_lang="en")
+                if usr and len(usr) >= 4:
+                    loc = detect_language(usr, default_lang="en")
                     if loc in ("lg", "sw"):
                         established_locale = loc
-                        break
                 if established_locale:
                     break
 
-        if requested_locale not in ("", "en") and requested_locale in SUPPORTED_LOCALES:
+        # Honor explicit English as well as Luganda and Swahili overrides.
+        if requested_locale in SUPPORTED_LOCALES:
             return requested_locale
 
         if established_locale in ("lg", "sw"):
@@ -5827,6 +5891,8 @@ class ChatModel:
     def _escalation_transcript(
         conversation_id: str,
         session_id: str | None,
+        user_id: str,
+        tenant_id: str,
     ) -> list[dict[str, Any]]:
         """Snapshot the conversation for the officer handling this ticket.
 
@@ -5840,6 +5906,8 @@ class ChatModel:
             return db.get_conversation_transcript(
                 conversation_id=conversation_id or None,
                 session_id=session_id or None,
+                user_id=user_id or None,
+                tenant_id=tenant_id or "default",
             )
         except Exception:
             logger.exception("failed to snapshot transcript for escalation")
@@ -5919,7 +5987,14 @@ class ChatModel:
         return text
 
     def _conversation_repair_result(
-        self, *, message: str, thread_id: str, locale: str
+        self,
+        *,
+        message: str,
+        thread_id: str,
+        locale: str,
+        user_id: str | None = None,
+        tenant_id: str = "default",
+        session_id: str | None = None,
     ) -> dict[str, Any] | None:
         """A clarifying turn for a message that is all feeling and no task.
 
@@ -5937,9 +6012,15 @@ class ChatModel:
         if classify_topic(message) is not None or not is_feeling_only(message):
             return None
         try:
-            if db.get_conversation_topic(thread_id):
+            if db.get_conversation_topic(_state_conversation_id(thread_id)):
                 return None
-            recent = db.get_recent_turns(conversation_id=thread_id, limit=1)
+            recent = db.get_recent_turns(
+                session_id=session_id,
+                conversation_id=thread_id,
+                limit=1,
+                user_id=user_id,
+                tenant_id=tenant_id or "default",
+            )
         except Exception:
             logger.debug("conversation state unavailable for repair", exc_info=True)
             recent = []
@@ -6003,6 +6084,7 @@ class ChatModel:
         handoff: dict[str, Any] | None = None,
         response_judge: dict[str, Any] | None = None,
         user_id: str = "",
+        tenant_id: str | None = None,
         locale: str | None = None,
         modality: str = "text",
     ) -> str:
@@ -6042,7 +6124,10 @@ class ChatModel:
         # logged by the caller after generate() returns — so append it to
         # the snapshot rather than leaving the officer without the very
         # message that triggered the handoff.
-        transcript = self._escalation_transcript(conversation_id, session_id)
+        effective_tenant = tenant_id or _state_tenant_id()
+        transcript = self._escalation_transcript(
+            conversation_id, session_id, user_id, effective_tenant
+        )
         transcript.append(
             {
                 "user_message": self.redact_for_storage(user_query),
@@ -6143,6 +6228,7 @@ class ChatModel:
         self,
         *,
         user_id: str | None,
+        tenant_id: str,
         conversation_id: str,
         message: str,
         reply: str,
@@ -6157,6 +6243,7 @@ class ChatModel:
             memsvc = get_memory_service()
             memsvc.update_working(
                 user_id,
+                tenant_id=tenant_id or "default",
                 last_topic=workflow.get("name") if workflow else agent_role,
                 last_agent_role=agent_role,
                 last_conversation_id=conversation_id,
@@ -6165,7 +6252,9 @@ class ChatModel:
                 {"role": "user", "content": message},
                 {"role": "assistant", "content": reply},
             ]
-            memsvc.absorb_conversation(user_id, conversation_id, turns)
+            memsvc.absorb_conversation(
+                user_id, conversation_id, turns, tenant_id=tenant_id or "default"
+            )
         except Exception:
             logger.debug("personalization persistence failed", exc_info=True)
 
@@ -6712,7 +6801,8 @@ class ChatModel:
         """
         from .tools.education import detect_education_intent, explain, format_education_reply
 
-        prev_topic_record = db.get_conversation_topic(thread_id)
+        state_thread_id = _state_conversation_id(thread_id)
+        prev_topic_record = db.get_conversation_topic(state_thread_id)
         prev_topic = prev_topic_record.get("topic_id") if prev_topic_record else None
 
         topic, level, reveal_answer = detect_education_intent(message, previous_topic=prev_topic)
@@ -6760,7 +6850,7 @@ class ChatModel:
 
         try:
             db.upsert_conversation_topic(
-                conversation_id=thread_id,
+                conversation_id=state_thread_id,
                 topic_id=topic,
                 display_name=title,
                 turn_count=1,
@@ -6827,13 +6917,14 @@ class ChatModel:
         turn, _tool_messages = self._advance_workflow(session, "", thread_id)
         prompt = turn.question or ""
         db.upsert_workflow_session(
-            thread_id,
+            _state_conversation_id(thread_id),
             session.workflow_id,
             session.current_step_idx,
             session.slots,
             status="active",
             last_prompt=prompt,
             user_id=user_id or "",
+            tenant_id=_state_tenant_id(),
         )
         workflow = self._workflow_view(
             session,
@@ -6984,13 +7075,14 @@ class ChatModel:
             prompt = "\n\n".join(tool_messages + [prompt]).strip()
         status = "completed" if (session.completed or turn.is_complete) else "active"
         db.upsert_workflow_session(
-            thread_id,
+            _state_conversation_id(thread_id),
             session.workflow_id,
             session.current_step_idx,
             session.slots,
             status=status,
             last_prompt=prompt,
             user_id=user_id or "",
+            tenant_id=_state_tenant_id(),
         )
         workflow = self._workflow_view(
             session,
@@ -7295,7 +7387,11 @@ class ChatModel:
     def _close_flow_left_for(self, persisted: dict[str, Any], thread_id: str) -> None:
         """Count the flow the taxpayer left as cancelled, at the step it was on."""
         pending = WorkflowRegistry.pending_step(self._restore_workflow_session(persisted))
-        db.complete_workflow_session(thread_id, status="cancelled")
+        db.complete_workflow_session(
+            _state_conversation_id(thread_id),
+            status="cancelled",
+            tenant_id=_state_tenant_id(),
+        )
         self._record_journey(str(persisted.get("workflow_id") or ""), "cancelled", pending.id if pending else "")
 
     def _maybe_handle_workflow(
@@ -7312,7 +7408,11 @@ class ChatModel:
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
             return None
 
-        persisted = db.get_workflow_session(thread_id)
+        state_thread_id = _state_conversation_id(thread_id)
+        state_tenant_id = _state_tenant_id()
+        persisted = db.get_workflow_session(state_thread_id, tenant_id=state_tenant_id)
+        if not persisted and state_thread_id != thread_id:
+            persisted = db.get_workflow_session(thread_id, tenant_id=state_tenant_id)
         # Past the conversation's retention the session keeps only its outcome
         # (the answers are blanked), so it is history, not something to resume.
         updated_at = (persisted or {}).get("updated_at")
@@ -7330,11 +7430,15 @@ class ChatModel:
             self._apply_personalization_to_workflow(session, personalization)
             wf = WorkflowRegistry.get(session.workflow_id)
             if wf is None:
-                db.complete_workflow_session(thread_id, status="cancelled")
+                db.complete_workflow_session(
+                    state_thread_id, status="cancelled", tenant_id=state_tenant_id
+                )
                 return None
             user_input = (message or "").strip()
             if user_input.lower() in _WORKFLOW_CANCEL_WORDS:
-                db.complete_workflow_session(thread_id, status="cancelled")
+                db.complete_workflow_session(
+                    state_thread_id, status="cancelled", tenant_id=state_tenant_id
+                )
                 pending = WorkflowRegistry.pending_step(session)
                 self._record_journey(session.workflow_id, "cancelled", pending.id if pending else "")
                 workflow = self._workflow_view(
@@ -7402,7 +7506,9 @@ class ChatModel:
             # answer keyed on the collected taxpayer kind — not a generic
             # workflow completion prompt.
             if wf.id == "tin_procedure_help" and (session.completed or turn.is_complete):
-                db.complete_workflow_session(thread_id, status="completed")
+                db.complete_workflow_session(
+                    state_thread_id, status="completed", tenant_id=state_tenant_id
+                )
                 kind = str(session.slots.get("taxpayer_kind", "individual"))
                 workflow = self._workflow_view(session, name=wf.name, status="completed")
                 return {
@@ -7438,23 +7544,25 @@ class ChatModel:
                 prompt = "\n\n".join(tool_messages + [prompt]).strip()
             if status == "completed":
                 db.upsert_workflow_session(
-                    thread_id,
+                    state_thread_id,
                     session.workflow_id,
                     session.current_step_idx,
                     session.slots,
                     status="completed",
                     last_prompt=prompt,
                     user_id=user_id or "",
+                    tenant_id=state_tenant_id,
                 )
             else:
                 db.upsert_workflow_session(
-                    thread_id,
+                    state_thread_id,
                     session.workflow_id,
                     session.current_step_idx,
                     session.slots,
                     status="active",
                     last_prompt=prompt,
                     user_id=user_id or "",
+                    tenant_id=state_tenant_id,
                 )
             workflow = self._workflow_view(
                 session,
@@ -7525,13 +7633,14 @@ class ChatModel:
             prompt = "\n\n".join(tool_messages + [prompt]).strip()
         status = "completed" if (session.completed or turn.is_complete) else "active"
         db.upsert_workflow_session(
-            thread_id,
+            state_thread_id,
             session.workflow_id,
             session.current_step_idx,
             session.slots,
             status=status,
             last_prompt=prompt,
             user_id=user_id or "",
+            tenant_id=state_tenant_id,
         )
         workflow = self._workflow_view(
             session,
@@ -7570,7 +7679,7 @@ class ChatModel:
         message: str,
         conversation_id: str | None = None,
         top_k: int = 6,
-        locale: str = "en",
+        locale: str = "",
         session_id: str | None = None,
         request_id: str | None = None,
         user_id: str | None = None,
@@ -7614,7 +7723,7 @@ class ChatModel:
                 message,
                 result,
                 rewritten=str(result.get("_rewritten") or ""),
-                recent_turns=_recent_turns_for_guidance(result, user_id),
+                recent_turns=_recent_turns_for_guidance(result, user_id, tenant_id or "default"),
             )
             # reply_locale is the language the reply is actually in: when
             # translation fails, localize_reply hands back the English, and a
@@ -7634,6 +7743,7 @@ class ChatModel:
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
         return result
 
+    @_scoped_conversation_state
     def _generate_en(
         self,
         message: str,
@@ -7663,6 +7773,7 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
+        requested_locale = locale if locale in SUPPORTED_LOCALES else ""
         # An explicitly-requested locale outside SUPPORTED_LOCALES is gated
         # to English here — see query.SUPPORTED_LOCALES for why.
         locale = gate_locale(locale)
@@ -7675,7 +7786,7 @@ class ChatModel:
             # 0. Multi-turn memory — fetch rolling conversation context
             conversation_history: list[dict[str, str]] = []
             context_summary = ""
-            history_session_id = None if conversation_id else session_id
+            history_session_id = session_id
             if conversation_id or history_session_id:
                 try:
                     conv_ctx = db.get_conversation_context(
@@ -7684,6 +7795,7 @@ class ChatModel:
                         recent_limit=6,
                         max_history=25,
                         user_id=user_id,
+                        tenant_id=tenant_id or "default",
                     )
                     conversation_history = conv_ctx["recent_turns"]
                     context_summary = conv_ctx["context_summary"]
@@ -7720,7 +7832,7 @@ class ChatModel:
             # 0c. Language detection & multi-turn continuity — auto-detect user's language,
             #     preserving established conversation locale across follow-up turns.
             with trace_stage("lang_detect", timings=timings):
-                locale = self._resolve_conversation_locale(message, locale, conversation_history)
+                locale = self._resolve_conversation_locale(message, requested_locale, conversation_history)
                 logger.info("Effective turn locale: %s", locale)
 
             # The deterministic routers below — workflows, TIN clarification,
@@ -7741,7 +7853,7 @@ class ChatModel:
                     router_message = english_form
                     router_rewritten = normalize_query(english_form)
 
-            personalization = self._load_personalization_state(user_id)
+            personalization = self._load_personalization_state(user_id, tenant_id or "default")
             # Attachment turns and ongoing multi-turn conversations are never cache-served
             # or cache-stored: context is specific to attachments or prior dialogue turns.
             cache_allowed = personalization is None and not attachments and not conversation_history
@@ -7867,7 +7979,14 @@ class ChatModel:
                     )
                     return workflow_result
 
-            repair = self._conversation_repair_result(message=router_message, thread_id=thread_id, locale=locale)
+            repair = self._conversation_repair_result(
+                message=router_message,
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+                tenant_id=tenant_id or "default",
+                session_id=session_id,
+            )
             if repair is not None:
                 self._audit_turn(message=message, result=repair, session_id=session_id, trace_ctx=trace_ctx)
                 return repair
@@ -8340,6 +8459,7 @@ class ChatModel:
                             }
                             self._persist_personalization_turn(
                                 user_id=user_id,
+                                tenant_id=tenant_id or "default",
                                 conversation_id=thread_id,
                                 message=message,
                                 reply=graph_reply,
@@ -8567,6 +8687,7 @@ class ChatModel:
                     result["reply"] = reply
                 self._persist_personalization_turn(
                     user_id=user_id,
+                    tenant_id=tenant_id or "default",
                     conversation_id=thread_id,
                     message=message,
                     reply=reply,
@@ -8605,6 +8726,7 @@ class ChatModel:
                 }
                 self._persist_personalization_turn(
                     user_id=user_id,
+                    tenant_id=tenant_id or "default",
                     conversation_id=thread_id,
                     message=message,
                     reply=premise_reply,
@@ -9166,6 +9288,7 @@ class ChatModel:
 
         self._persist_personalization_turn(
             user_id=user_id,
+            tenant_id=tenant_id or "default",
             conversation_id=thread_id,
             message=message,
             reply=reply,
@@ -9244,12 +9367,13 @@ class ChatModel:
         except Exception:
             logger.debug("audit ledger append failed", exc_info=True)
 
+    @_scoped_conversation_state
     def generate_retrieval_only(
         self,
         message: str,
         conversation_id: str | None = None,
         top_k: int = 6,
-        locale: str = "en",
+        locale: str = "",
         session_id: str | None = None,
         request_id: str | None = None,
         user_id: str | None = None,
@@ -9273,6 +9397,7 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
+        requested_locale = locale if locale in SUPPORTED_LOCALES else ""
         # An explicitly-requested locale outside SUPPORTED_LOCALES is gated
         # to English here — see query.SUPPORTED_LOCALES for why.
         locale = gate_locale(locale)
@@ -9290,7 +9415,7 @@ class ChatModel:
             conversation_history = conv_ctx.recent_turns
             context_summary = conv_ctx.context_summary
         else:
-            history_session_id = None if conversation_id else session_id
+            history_session_id = session_id
             if conversation_id or history_session_id:
                 try:
                     conv_ctx = db.get_conversation_context(
@@ -9299,6 +9424,7 @@ class ChatModel:
                         recent_limit=6,
                         max_history=25,
                         user_id=user_id,
+                        tenant_id=tenant_id or "default",
                     )
                     conversation_history = conv_ctx["recent_turns"]
                     context_summary = conv_ctx["context_summary"]
@@ -9313,10 +9439,10 @@ class ChatModel:
 
         # Language detection & multi-turn continuity — auto-detect user's language,
         # preserving established conversation locale across follow-up turns.
-        locale = self._resolve_conversation_locale(message, locale, conversation_history)
+        locale = self._resolve_conversation_locale(message, requested_locale, conversation_history)
         logger.info("Effective turn locale (streaming): %s", locale)
 
-        personalization = self._load_personalization_state(user_id)
+        personalization = self._load_personalization_state(user_id, tenant_id or "default")
         # Attachment turns and ongoing multi-turn conversations are never cache-served
         # or cache-stored: context is specific to attachments or prior dialogue turns.
         cache_allowed = personalization is None and not attachments and not conversation_history
@@ -9398,7 +9524,14 @@ class ChatModel:
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
             }
 
-        repair = self._conversation_repair_result(message=message, thread_id=thread_id, locale=locale)
+        repair = self._conversation_repair_result(
+            message=message,
+            thread_id=thread_id,
+            locale=locale,
+            user_id=user_id,
+            tenant_id=tenant_id or "default",
+            session_id=session_id,
+        )
         if repair is not None:
             return {**repair, "_hits": [], "_history": conversation_history, "_rewritten": rewritten}
 
@@ -9736,6 +9869,7 @@ class ChatModel:
                     }
                     self._persist_personalization_turn(
                         user_id=user_id,
+                        tenant_id=tenant_id or "default",
                         conversation_id=thread_id,
                         message=message,
                         reply=graph_reply,

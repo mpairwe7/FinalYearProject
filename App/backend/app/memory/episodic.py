@@ -81,11 +81,28 @@ class EpisodicMemory:
             );
             CREATE INDEX IF NOT EXISTS idx_episodic_user
                 ON episodic_summaries(user_id);
+            CREATE INDEX IF NOT EXISTS idx_episodic_tenant_user
+                ON episodic_summaries(tenant_id, user_id);
             CREATE INDEX IF NOT EXISTS idx_episodic_created
                 ON episodic_summaries(created_at);
             CREATE INDEX IF NOT EXISTS idx_episodic_topic
-                ON episodic_summaries(user_id, topic_tag);
+                ON episodic_summaries(tenant_id, user_id, topic_tag);
             """
+        )
+        rows = db.query_all(
+            """SELECT summary_id, tenant_id, user_id, conversation_id
+               FROM episodic_summaries ORDER BY created_at DESC"""
+        )
+        seen: set[tuple[str, str, str]] = set()
+        for row in rows:
+            key = (str(row["tenant_id"] or "default"), str(row["user_id"]), str(row["conversation_id"]))
+            if key in seen:
+                db.execute("DELETE FROM episodic_summaries WHERE summary_id = ?", (row["summary_id"],))
+            else:
+                seen.add(key)
+        db.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_episodic_conversation
+               ON episodic_summaries(tenant_id, user_id, conversation_id)"""
         )
 
     def write(self, summary: EpisodicSummary) -> str:
@@ -98,7 +115,16 @@ class EpisodicMemory:
                 """INSERT INTO episodic_summaries
                    (summary_id, user_id, tenant_id, conversation_id,
                     summary, topic_tag, sentiment, turn_count, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(tenant_id, user_id, conversation_id)
+                   DO UPDATE SET
+                       summary_id = excluded.summary_id,
+                       summary = excluded.summary,
+                       topic_tag = excluded.topic_tag,
+                       sentiment = excluded.sentiment,
+                       turn_count = CASE WHEN episodic_summaries.turn_count > excluded.turn_count
+                                         THEN episodic_summaries.turn_count ELSE excluded.turn_count END,
+                       created_at = excluded.created_at""",
                 tuple(summary.to_row()),
             )
         except Exception:
@@ -109,6 +135,7 @@ class EpisodicMemory:
     def list_for_user(
         self,
         user_id: str,
+        tenant_id: str = "default",
         limit: int = 20,
         topic_tag: str | None = None,
         since_days: int = 90,
@@ -116,8 +143,8 @@ class EpisodicMemory:
         from .. import database as db
 
         cutoff = time.time() - (since_days * 86400)
-        sql = "SELECT * FROM episodic_summaries " "WHERE user_id = ? AND created_at >= ?"
-        params: list[Any] = [user_id, cutoff]
+        sql = "SELECT * FROM episodic_summaries " "WHERE tenant_id = ? AND user_id = ? AND created_at >= ?"
+        params: list[Any] = [tenant_id or "default", user_id, cutoff]
         if topic_tag:
             sql += " AND topic_tag = ?"
             params.append(topic_tag)
@@ -125,13 +152,24 @@ class EpisodicMemory:
         params.append(limit)
         return db.query_all(sql, tuple(params))
 
-    def delete_for_user(self, user_id: str) -> int:
+    def export_for_user(self, user_id: str, tenant_id: str = "default") -> list[dict[str, Any]]:
+        """Return every retained episode for subject access/export."""
+        from .. import database as db
+
+        return db.query_all(
+            """SELECT * FROM episodic_summaries
+               WHERE tenant_id = ? AND user_id = ? ORDER BY created_at DESC""",
+            (tenant_id or "default", user_id),
+        )
+
+    def delete_for_user(self, user_id: str, tenant_id: str = "default") -> int:
         """Forget cascade — delete every summary for this user."""
         from .. import database as db
 
         try:
             return db.execute(
-                "DELETE FROM episodic_summaries WHERE user_id = ?", (user_id,)
+                "DELETE FROM episodic_summaries WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", user_id),
             )
         except Exception:
             logger.exception("episodic delete failed")

@@ -1043,7 +1043,7 @@ def chat(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> ChatResponse:
-    session_id = request.headers.get("X-Session-ID", "")
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
 
@@ -1054,7 +1054,7 @@ def chat(
         message=body.message,
         conversation_id=body.conversation_id,
         top_k=body.top_k,
-        locale=body.locale,
+        locale=body.locale or "",
         session_id=session_id or None,
         request_id=request_id,
         user_id=ctx.user_id or None,
@@ -1093,7 +1093,8 @@ def chat(
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
-            **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or ""),
+            tenant_id=ctx.tenant_id or "default",
+            **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or "en"),
         )
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
@@ -1138,7 +1139,7 @@ async def chat_stream(
     """
     from . import service as service_module
 
-    session_id = request.headers.get("X-Session-ID", "")
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     attachments = documents.resolve_attachments(
         body.attachment_ids, session_id=session_id, user_id=ctx.user_id
@@ -1154,7 +1155,7 @@ async def chat_stream(
             message=body.message,
             conversation_id=body.conversation_id,
             top_k=body.top_k,
-            locale=body.locale,
+            locale=body.locale or "",
             session_id=session_id or None,
             request_id=request_id,
             user_id=ctx.user_id or None,
@@ -1171,7 +1172,9 @@ async def chat_stream(
                 }
                 continue
             if event_type == "_log":
-                _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
+                _log_stream_conversation(
+                    body, session_id, payload, user_id=ctx.user_id or "", tenant_id=ctx.tenant_id
+                )
                 continue
             if event_type.startswith("translation."):
                 # Reply localization is the slow leg of a non-English turn and
@@ -1232,6 +1235,7 @@ def _log_stream_conversation(
     session_id: str,
     log_payload: dict[str, Any],
     user_id: str = "",
+    tenant_id: str = "default",
 ) -> None:
     """Mirror the old SSE ``finally`` block — log to analytics DB."""
     from .service import ChatModel as _CM
@@ -1249,7 +1253,8 @@ def _log_stream_conversation(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
-            **_experiment_log_fields(user_id, result.get("locale") or body.locale or ""),
+            tenant_id=tenant_id or "default",
+            **_experiment_log_fields(user_id, result.get("locale") or body.locale or "en"),
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
@@ -2019,6 +2024,7 @@ async def voice_chat(
             sources=json.dumps(chat_result.get("sources", [])),
             contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
+            tenant_id=ctx.tenant_id or "default",
             **_experiment_log_fields(ctx.user_id or "", chat_result.get("locale") or ""),
         )
     except Exception:
@@ -4083,7 +4089,7 @@ def me_withdraw_consent(
     if "personalization" in body.purposes:
         from .memory.service import get_memory_service
 
-        get_memory_service().forget_user(ctx.user.user_id)
+        get_memory_service().forget_user(ctx.user.user_id, tenant_id=ctx.tenant_id or "default")
     if "analytics" in body.purposes:
         withdrawn["analytics_data"] = db.delete_user_analytics(ctx.user.user_id)
     return {"user_id": row["id"], "withdrawn": withdrawn}
@@ -4101,8 +4107,15 @@ def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
-    data = db.export_user_data(row["id"], external_id=ctx.user.user_id)
-    data["facts"] = get_memory_service().export_user(ctx.user.user_id)["facts"]
+    data = db.export_user_data(
+        row["id"], external_id=ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
+    memory_export = get_memory_service().export_user(
+        ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
+    data["facts"] = memory_export["facts"]
+    data["episodic_memory"] = memory_export["episodic"]
+    data["working_memory"] = memory_export["working"]
     data["documents"] = documents.export_user_documents(ctx.user.user_id)
     return data
 
@@ -4123,8 +4136,14 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
     )
     from .memory.service import get_memory_service
 
-    counts = db.delete_user_cascade(row["id"], external_id=ctx.user.user_id)
-    counts["memory"] = sum(get_memory_service().forget_user(ctx.user.user_id).values())
+    counts = db.delete_user_cascade(
+        row["id"], external_id=ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
+    counts["memory"] = sum(
+        get_memory_service().forget_user(
+            ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+        ).values()
+    )
     counts["documents"] = sum(documents.forget_user_documents(ctx.user.user_id).values())
     return {"deleted": counts, "external_id": ctx.user.user_id}
 

@@ -20,10 +20,10 @@ class ChatRequest(BaseModel):
         description="Optional conversation/session id",
     )
     top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
-    locale: str = Field(
-        "en",
+    locale: str | None = Field(
+        None,
         pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
-        description="ISO 639-1/639-3 locale (e.g. en, lg, nyn, ach)",
+        description="Optional ISO 639-1/639-3 locale override (e.g. en, lg, sw)",
     )
     attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
         default_factory=list,

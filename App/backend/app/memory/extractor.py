@@ -35,9 +35,10 @@ class FactCandidate:
 # ---------------------------------------------------------------------------
 _TAXPAYER_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(i\s*am|i'm|i\s+run)\s+a\s+sole[- ]?trader\b", re.IGNORECASE), "sole_trader"),
+    (re.compile(r"\b(?:nze\s+ndi|ndi|mimi\s+ni)\s+(?:a\s+)?sole[- ]?trader\b", re.IGNORECASE), "sole_trader"),
     (
         re.compile(
-            r"\b(my\s+)?(company|firm|business)\b.*\b(ltd|limited|plc|inc)\b", re.IGNORECASE
+            r"\b(my\s+)?(company|firm|business|kampuni)\b.*\b(ltd|limited|plc|inc)\b", re.IGNORECASE
         ),
         "company",
     ),
@@ -57,16 +58,19 @@ _INDUSTRY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 _REGISTRATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bregistered\s+for\s+vat\b|\bi\s+pay\s+vat\b", re.IGNORECASE), "vat"),
+    (
+        re.compile(
+            r"\bregistered\s+for\s+vat\b|\bi\s+pay\s+vat\b|"
+            r"\bnimesajiliwa(?:\s+kwa)?\s+vat\b|\bninalipa\s+vat\b|"
+            r"\bnawandiisiddwa\s+(?:ku\s+)?vat\b|\bnawandiisibwa\s+(?:ku\s+)?vat\b",
+            re.IGNORECASE,
+        ),
+        "vat",
+    ),
     (re.compile(r"\bpaye\b", re.IGNORECASE), "paye"),
     (re.compile(r"\bwithholding\s+tax\b|\bwht\b", re.IGNORECASE), "wht"),
     (re.compile(r"\bcorporation\s+tax\b|\bcit\b", re.IGNORECASE), "cit"),
 ]
-
-_LANGUAGE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bluganda\b|\bmunange\b|\bwabula\b", re.IGNORECASE), "lg"),
-]
-
 
 class FactExtractor:
     """Rule-based extractor over conversation turns.
@@ -134,20 +138,6 @@ class FactExtractor:
                         confidence=0.80,
                         source_turn=source_turn,
                         rule_id=f"reg:{value}",
-                    )
-                )
-
-        for pat, value in _LANGUAGE_PATTERNS:
-            if pat.search(text):
-                out.append(
-                    FactCandidate(
-                        category="primary_language",
-                        subject="user",
-                        predicate="speaks",
-                        object_value=value,
-                        confidence=0.70,
-                        source_turn=source_turn,
-                        rule_id="language",
                     )
                 )
 

@@ -16,7 +16,7 @@ The URA Chatbot implements a production-grade Retrieval-Augmented Generation pip
 User Query
   │
   ├─► Stage 0: Conversation History (database.py)
-  │     └── Fetch 5-turn sliding window from SQLite/Postgres (keyed by session_id)
+  │     └── Fetch tenant + subject scoped history, or anonymous session scoped history
   │
   ├─► Stage 0b: Query Rewriting (query.py)  [FLAG_QUERY_REWRITE]
   │     ├── normalize() — whitespace cleanup
@@ -202,9 +202,34 @@ questions in English while `ChatModel.generate()` handled them correctly.
 - Coreference resolution: detects pronouns (it, that, this, they) and prepends context from last assistant reply
 
 **Multi-turn Memory** (`database.py`):
-- 5-turn sliding window from SQLite conversation history
-- Keyed by `session_id` from `X-Session-ID` header
+- Up to 25 stored turns are summarized into a bounded context; the prompt receives
+  the recent window plus a coarse summary.
+- Authenticated reads require tenant, subject, and conversation identity. Anonymous
+  reads require the server-issued session identity; a bare conversation ID is not
+  sufficient.
+- The stored locale is returned with each turn so language continuity is based on
+  taxpayer turns. An explicit supported request, including English, takes priority.
 - History passed to both query rewriting and LLM generation
+- Topic and guided-workflow rows use an opaque key derived from the tenant,
+  authenticated subject or anonymous session, and conversation. Workflow reads,
+  writes, and completion also check the tenant column.
+
+**Personalization Memory** (`memory/`):
+- Semantic facts, episodic topic labels, and short-term working state are all
+  tenant-scoped. Reads and writes require active personalization consent.
+- Exact facts and one episode per conversation are upserted, so retries do not
+  multiply memory rows. Corrections supersede earlier taxpayer-type facts.
+- Episodic storage keeps only a coarse tax-topic label; it does not retain raw
+  inquiry text or inferred distress. `/v1/me/export` includes facts, episodes,
+  and working state; withdrawal and erasure remove all three.
+- Working state is stored in the selected shared analytics backend with a
+  30-minute expiry, so a new worker can continue using the same state.
+
+**WebSocket resume** (`chat_ws_v2.py`):
+- Each completed response has a server-minted response ID. Resume requires an
+  unexpired mapping for that exact response, user, tenant, and conversation.
+- Anonymous sockets do not advertise durable resume. Same-socket history remains
+  connection-local and bounded; it is not a cross-replica checkpoint.
 
 **Semantic Cache** (`cache.py`):
 - Shares embedding model with retriever
@@ -323,11 +348,11 @@ App/backend/app/
 │   ├── slots.py         #   Slot validators (TIN, email, phone, date, currency)
 │   └── flows/           #   YAML definitions (TIN registration, filing, payment, customs)
 │
-├── memory/              # Consent-gated personalization memory (Phase 16)
+├── memory/              # Consent-gated, tenant-scoped personalization memory (Phase 16)
 │   ├── service.py       #   Unified memory interface (MemoryService)
 │   ├── semantic.py      #   User facts with time-based decay
 │   ├── episodic.py      #   Conversation summaries by topic
-│   ├── working.py       #   Transient session state (last_topic, agent_role)
+│   ├── working.py       #   Standalone in-process helper; service uses shared TTL storage
 │   ├── extractor.py     #   Rule-based fact extraction from turns
 │   └── decay.py         #   Time-based fact decay
 │

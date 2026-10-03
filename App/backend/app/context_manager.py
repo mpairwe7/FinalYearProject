@@ -7,24 +7,16 @@ Provides:
    taxpayer status, figures, reference numbers, and core subject entities across turns.
 3. ``RollingContextManager``: Hierarchical context manager maintaining:
    - Verbatim recent turns (last 4-6 turns) for high-fidelity prompt generation.
-   - Compact abstractive rolling summary of older turns (1..N-K) to prevent
+   - Compact structured rolling summary of older turns (1..N-K) to prevent
      memory loss in extended multi-turn sessions (>5 turns).
-   - In-session working memory caching keyed on conversation_id.
+   - Structured entities extracted from the bounded history window.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
-from .memory.working import WorkingMemory
-
-logger = logging.getLogger(__name__)
-
-# Global session working memory singleton (30 min TTL)
-_SESSION_WORKING_MEMORY = WorkingMemory(ttl_seconds=30 * 60)
 
 # ---------------------------------------------------------------------------
 # Known Tax Domain Patterns & Entities
@@ -34,11 +26,11 @@ _TAX_TOPIC_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\b(paye|pay\s+as\s+you\s+earn|salary|gross\s+pay|net\s+pay|employment\s+income)\b", re.I), "PAYE (Pay As You Earn)", "paye"),
     (re.compile(r"\b(efris|electronic\s+fiscal\s+(?:receipting|invoicing|device|system)?)\b", re.I), "EFRIS", "efris"),
     (re.compile(r"\b(value\s+added\s+tax|vat\b)\b", re.I), "Value Added Tax (VAT)", "vat"),
-    (re.compile(r"\b(withholding\s+tax|wht\b)\b", re.I), "Withholding Tax (WHT)", "wht"),
+    (re.compile(r"\b(withholding\s+tax|wht\b|kodi\s+ya\s+zuio|zuio)\b", re.I), "Withholding Tax (WHT)", "wht"),
     (re.compile(r"\b(corporat(?:e|ion)\s+(?:income\s+)?tax|company\s+tax|cit\b)\b", re.I), "Corporation Tax (CIT)", "cit"),
     (re.compile(r"\b(register(?:ing|ation)?\s+for\s+(?:a\s+)?tin|get\s+(?:a\s+)?tin|apply\s+for\s+(?:a\s+)?tin|tin\s+registration|obtain\s+(?:a\s+)?tin)\b", re.I), "TIN Registration", "tin_registration"),
     (re.compile(r"\b(tin\b|tax\s+identification\s+number)\b", re.I), "TIN", "tin"),
-    (re.compile(r"\b(customs|import\s+duty|export\s+duty|tariffs?|clearance|asycuda|single\s+customs)\b", re.I), "Customs & Import/Export Duty", "customs"),
+    (re.compile(r"\b(customs|forodha|import\s+duty|export\s+duty|tariffs?|clearance|asycuda|single\s+customs)\b", re.I), "Customs & Import/Export Duty", "customs"),
     (re.compile(r"\b(stamp\s+duty|land\s+transfer|property\s+transfer)\b", re.I), "Stamp Duty", "stamp_duty"),
     (re.compile(r"\b(local\s+excise\s+duty|excise\s+duty|dts|digital\s+tax\s+stamps?)\b", re.I), "Excise Duty / DTS", "excise_duty"),
     (re.compile(r"\b(motor\s+vehicle|logbook|driving\s+licen[sc]e|number\s+plate|vehicle\s+transfer)\b", re.I), "Motor Vehicle Registration", "motor_vehicle"),
@@ -144,9 +136,9 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
 
     for turn in turns:
         user_msg = turn.get("user_message", "")
-        bot_reply = turn.get("bot_reply", "")
 
-        # Tax Topics: match user message first for active topic
+        # Only derive persistent context from user input. Assistant-generated
+        # claims are not evidence about the taxpayer's circumstances.
         user_matched_topic = ""
         for pat, label, key in _TAX_TOPIC_PATTERNS:
             if pat.search(user_msg):
@@ -155,15 +147,15 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
                     topic_keys.append(key)
                 user_matched_topic = label
 
+        if not user_matched_topic and re.search(r"\b(omusolo|kodi|ushuru)\b", user_msg, re.I):
+            label, key = "Tax", "general_tax"
+            if label not in topics:
+                topics.append(label)
+                topic_keys.append(key)
+            user_matched_topic = label
+
         if user_matched_topic:
             active_subject = user_matched_topic
-        else:
-            for pat, label, key in _TAX_TOPIC_PATTERNS:
-                if pat.search(bot_reply):
-                    if label not in topics:
-                        topics.append(label)
-                        topic_keys.append(key)
-                    active_subject = label
 
         # Taxpayer status
         for pat, status_label in _TAXPAYER_STATUS_PATTERNS:
@@ -208,19 +200,9 @@ def summarize_older_turns(turns: list[dict[str, str]]) -> str:
     if entities.amounts:
         lines.append(f"Financial figures mentioned: {', '.join(entities.amounts[-3:])}.")
     if entities.reference_numbers:
-        lines.append(f"Reference IDs: {', '.join(entities.reference_numbers)}.")
-
-    # Extract key user intent queries from the older turns
-    key_queries: list[str] = []
-    for turn in turns:
-        u = turn.get("user_message", "").strip()
-        if len(u) > 5 and u not in key_queries:
-            # Clean punctuation and keep short
-            key_queries.append(u[:80] + ("..." if len(u) > 80 else ""))
-
-    if key_queries:
-        sampled = key_queries if len(key_queries) <= 5 else key_queries[:2] + key_queries[-3:]
-        lines.append(f"Previous inquiries: {'; '.join(sampled)}.")
+        lines.append("A tax or payment reference number appeared earlier; its value is omitted.")
+    if not lines and turns:
+        lines.append(f"Earlier turns: {len(turns)} prior exchanges.")
 
     return " ".join(lines)
 
@@ -256,6 +238,8 @@ class RollingContextManager:
     ) -> ConversationContext:
         """Construct a multi-turn context object with rolling summary and entity slots."""
         normalized = normalize_history_turns(raw_history)
+        if self.max_total_turns > 0 and len(normalized) > self.max_total_turns:
+            normalized = normalized[-self.max_total_turns :]
         total = len(normalized)
 
         entities = extract_conversation_entities(normalized)
@@ -268,22 +252,6 @@ class RollingContextManager:
             recent = normalized[-self.recent_limit:]
             summary = summarize_older_turns(older_turns)
 
-        # Cache in-session working state
-        if conversation_id:
-            try:
-                _SESSION_WORKING_MEMORY.update(
-                    conversation_id,
-                    active_subject=entities.active_subject,
-                    tax_topics=entities.tax_topics,
-                    taxpayer_types=entities.taxpayer_types,
-                    amounts=entities.amounts[-3:],
-                    reference_numbers=entities.reference_numbers[-2:],
-                    summary=summary,
-                    turn_count=total,
-                )
-            except Exception:
-                logger.debug("Failed to update session working memory", exc_info=True)
-
         return ConversationContext(
             recent_turns=recent,
             context_summary=summary,
@@ -291,13 +259,6 @@ class RollingContextManager:
             total_turns=total,
             all_turns=normalized,
         )
-
-    def get_session_state(self, session_key: str) -> dict[str, Any] | None:
-        """Retrieve active working session state."""
-        if not session_key:
-            return None
-        return _SESSION_WORKING_MEMORY.get(session_key)
-
 
 # Global helper instance
 context_manager = RollingContextManager()
