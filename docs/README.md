@@ -14,7 +14,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Application** |
 | [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
 | [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
-| [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | 6 URA/URSB systems, Grok-style connectors, CAPTCHA gates, autonomous OCR TIN |
+| [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | Local connector simulators, safe staff controls, guide-only customer journeys, and their production boundary |
 | [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
 | [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
 | **Data & Evaluation** |

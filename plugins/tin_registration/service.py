@@ -48,7 +48,7 @@ class TinRegistrationService:
         return self._db
 
     def _generate_tin(self) -> str:
-        """Generate official 10-digit URA Tax Identification Number."""
+        """Generate a simulator-only sample 10-digit TIN-like identifier."""
         for _ in range(10):
             tin = f"1{100000000 + secrets.randbelow(900000000)}"
             if not self._db.search_taxpayer(tin, exact=True):
@@ -88,7 +88,7 @@ class TinRegistrationService:
                     default_obligations=[],
                     certificate_reference="",
                     message="Invalid NIN format",
-                    error="National Identification Number (NIN) must be exactly 14 alphanumeric characters per NIRA standards.",
+                    error="The local simulator expects a 14-character alphanumeric sample NIN value; no NIRA check was made.",
                 )
 
             # Check if NIN already has a TIN

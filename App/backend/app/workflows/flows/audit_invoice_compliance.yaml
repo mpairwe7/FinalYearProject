@@ -1,9 +1,10 @@
 id: audit_invoice_compliance
-name: Tax Invoice & EFRIS Compliance Audit
+name: Tax Invoice & EFRIS Document Review
 version: "1"
 description: >
-  Guided routine for URA officers and taxpayers to audit tax invoices, EFRIS fiscal receipts,
-  line-item computations, and input tax credit eligibility.
+  Guided collection of visible tax-invoice fields and taxpayer-reported amounts.
+  This chat does not calculate VAT, query EFRIS, verify a fiscal signature,
+  check TIN status, or determine input tax-credit eligibility.
 requires_auth: false
 
 trigger_phrases:
@@ -16,24 +17,24 @@ trigger_phrases:
   - "is this invoice valid"
 
 steps:
-  - id: collect_doc_category
+  - id: collect_document_category
     question: >
       What type of document are you auditing: an **efris invoice**, a **standard tax invoice**,
       a **fiscal receipt**, or a **withholding certificate**?
     slot: doc_category
     validator: "enum[efris invoice,standard tax invoice,fiscal receipt,withholding certificate]"
 
-  - id: collect_supplier_tin
+  - id: collect_supplier_tin_present
     question: >
-      What is the supplier or issuer's 10-digit Taxpayer Identification Number (TIN)?
-    slot: supplier_tin
-    validator: text
+      Does the invoice show the supplier's TIN? Please answer yes or no; do not paste the number here.
+    slot: supplier_tin_present
+    validator: boolean
 
-  - id: collect_buyer_tin
+  - id: collect_buyer_tin_present
     question: >
-      What is the purchaser or buyer's 10-digit TIN?
-    slot: buyer_tin
-    validator: text
+      Does the invoice show the buyer's TIN? Please answer yes or no; do not paste the number here.
+    slot: buyer_tin_present
+    validator: boolean
 
   - id: collect_net_amount
     question: >
@@ -49,24 +50,20 @@ steps:
 
   - id: collect_efris_serial
     question: >
-      Does the invoice show an official URA EFRIS verification code, QR code, or Fiscal Device (FD) serial number? (yes/no)
+      Does the invoice show an FDN and verification code or QR code? Please answer yes or no; this chat cannot validate them against EFRIS.
     slot: has_efris_code
     validator: boolean
 
   - id: efris_warning
     question: >
-      Notice: Under the Tax Procedures Code Act 2014, VAT-registered taxpayers must issue e-invoices
-      through EFRIS. Input tax credit cannot be claimed on non-fiscalized invoices from VAT-registered suppliers.
+      This chat cannot validate the invoice with EFRIS. Use the official URA portal or EFRIS app to check its FDN and date before relying on it.
     when: "has_efris_code == False"
     slot: ""
     validator: text
 
   - id: summary
     question: >
-      Audit outcome: Verification details recorded. For a standard VAT invoice, the tax charged must equal exactly
-      18% of the net amount. To claim input tax credit, ensure the supplier's TIN is active, both parties' TINs appear,
-      and the invoice carries an authentic EFRIS fiscal signature. You can attach the document in chat to generate
-      a verified PDF compliance report.
+      Review complete: this guide recorded visible fields and amounts you reported. It did not calculate VAT, check whether either TIN is active, authenticate an EFRIS signature, or determine input-tax eligibility. For an EFRIS invoice, validate the FDN and date in the official URA portal or EFRIS app. Ask a tax adviser or URA if you are unsure whether the expense qualifies for input tax.
     slot: ""
     validator: text
     portal_action: efris_portal

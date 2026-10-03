@@ -24,8 +24,7 @@ class TinSearchVerifyTool(Tool):
         return ToolSchema(
             name="tin_search_verify",
             description=(
-                "Search and verify Tax Identification Number (TIN) status on the URA e-Services registry. "
-                "Look up by 10-digit TIN, citizen National ID (NIN), URSB registration number, or registered legal name."
+                "Search sample taxpayer records in the local TIN simulator. This does not check URA, NIRA, or URSB records."
             ),
             parameters={
                 "type": "object",
@@ -70,8 +69,8 @@ class TinApplyIndividualTool(Tool):
         return ToolSchema(
             name="tin_apply_individual",
             description=(
-                "Apply for an Instant Individual Tax Identification Number (TIN) on the URA portal. "
-                "Validates 14-character National Identification Number (NIN) and generates an official 10-digit TIN."
+                "Create a sample registration record in the local TIN simulator. This does not validate a NIN with NIRA "
+                "or issue a real TIN."
             ),
             parameters={
                 "type": "object",
@@ -117,6 +116,7 @@ class TinApplyIndividualTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="tin_registration",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -205,6 +205,7 @@ class TinApplyNonIndividualTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="tin_registration",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -283,6 +284,7 @@ class TinTaxObligationsTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="tin_registration",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),

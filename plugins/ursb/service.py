@@ -59,11 +59,11 @@ class UrsbService:
             ok=True,
             found=True,
             entity=entity.to_dict(),
-            message=f"Entity '{entity.business_name}' found in official URSB registry.",
+            message=f"Sample entity '{entity.business_name}' found in the local URSB simulator.",
         )
 
     def register_business(self, request: BusinessRegistrationRequest) -> BusinessRegistrationResponse:
-        """Register a new business name or company and generate official URSB credentials."""
+        """Create a sample business record and registration reference in the local simulator."""
         with self._lock:
             existing = self._db.search_entity(request.business_name, exact=True)
             if existing:
@@ -76,7 +76,7 @@ class UrsbService:
                     status="REJECTED",
                     certificate_reference="",
                     message="Business name already exists",
-                    error=f"The name '{request.business_name}' is already reserved or registered in the URSB registry.",
+                    error=f"The name '{request.business_name}' already exists in the local URSB simulator.",
                 )
 
             prefix = "URSB-CO" if request.entity_type == EntityType.LIMITED_COMPANY else "URSB-BN"
@@ -132,13 +132,13 @@ class UrsbService:
                 status="ACTIVE",
                 certificate_reference=cert_ref,
                 message=(
-                    f"Business successfully registered with URSB. Use registration number '{reg_no}' "
-                    "when applying for your Non-Individual Tax Identification Number (TIN) on the URA portal."
+                    f"Sample business record created in the local simulator. Reference: '{reg_no}'. "
+                    "This is not a real URSB registration."
                 ),
             )
 
     def check_compliance(self, registration_number: str) -> ComplianceCheckResponse:
-        """Validate legal active standing, Form 20, and annual returns compliance for URA integration."""
+        """Read sample compliance fields from the local simulator; this is not a legal-status check."""
         entity = self._db.search_entity(registration_number, exact=True)
         if not entity:
             return ComplianceCheckResponse(

@@ -747,7 +747,14 @@ Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17
 
 All settings are configurable via environment variables. See [API Reference → Environment Variables](API_REFERENCE.md#environment-variables) for the complete list, or [PROJECT_SETUP.md](PROJECT_SETUP.md#5-environment-configuration) for a quick-start `.env` template.
 
-- `FLAG_ENTERPRISE_CONNECTORS` (default `false` in production, `true` in development): Gates default local mock system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). In production (`APP_ENV=production`), local mock connectors are blocked unless this flag is explicitly enabled.
+- `FLAG_ENTERPRISE_CONNECTORS` (default `false`): Reserved for reviewed enterprise integrations. It cannot enable local simulator fixtures in production; production remains fail-closed until a live connector implementation is reviewed and deployed.
+
+These built-ins remain local simulators even when enabled; their status is not
+evidence of a live URA, NIRA, URSB, bank, or payment connection. Connector
+health is staff-only; raw connector records are no longer exposed. Connector writes require dispatch-time
+authorization, an explicit confirmation proposal, and an idempotency key.
+Browser-supplied remote connector registration is disabled until a reviewed
+server configuration and standards-compliant MCP negotiation are available.
 
 ## Dependencies
 

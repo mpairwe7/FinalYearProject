@@ -1,8 +1,8 @@
 # URA Agentic System Plugins & Connectors
 
-This directory houses system plugins and connectors for external, auxiliary, and enterprise tax platforms that integrate with the agentic URA system.
+This directory contains **local connector simulators** for URA and related services. They use SQLite fixture data; they do not connect to URA, NIRA, URSB, a bank, or a payment network. A healthy simulator is not evidence that an external service is available, and a generated reference is not an official URA record.
 
-## Directory Layout & Independent Databases
+## Directory Layout & Local Simulator Databases
 
 ```
 plugins/
@@ -46,7 +46,7 @@ plugins/
 ├── payment_system/           # URA Make a Payment & PRN Suite (data_store/payments_system.db)
 │   ├── models.py             # 12-digit PRN slips, expired PRN renewals, checkout receipts
 │   ├── database.py           # Dedicated SQLite database store
-│   ├── service.py            # PRN generator, bank clearance, and advance tax verification
+│   ├── service.py            # Sample PRN generation, simulated clearance, and advance tax examples
 │   ├── client.py             # Typed SDK for Payment operations
 │   ├── connector.py          # PaymentConnector with 5 Tool implementations
 │   └── README.md
@@ -65,46 +65,45 @@ plugins/
 ## Connectors & Agent Tools (23 Tools Total)
 
 ### 1. EFRIS Connector (`efris` namespace, `efris_system.db`)
-1. **`efris_fiscal_invoice`**: Generates 20-digit Fiscal Document Numbers (FDN) with 18% standard VAT calculation and verification codes, or validates existing FDN authenticity.
-2. **`efris_taxpayer_status`**: Queries taxpayer EFRIS enrollment, active EFD devices, cashier terminals, and integration mode.
-3. **`efris_stock_management`**: Checks real-time stock balances or records stock additions from local purchases and customs imports.
-4. **`efris_credit_note`**: Applies credit notes against issued fiscal documents with elevated authorization.
+1. **`efris_fiscal_invoice`**: Simulates local invoice references and validates fixture records; it does not issue or verify an official FDN.
+2. **`efris_taxpayer_status`**: Reads local EFRIS fixture profiles and device examples.
+3. **`efris_stock_management`**: Reads or changes simulator inventory.
+4. **`efris_credit_note`**: Creates a simulator credit note after explicit confirmation.
 
 ### 2. Digital Tax Stamps Connector (`digital_tax_stamps` namespace, `dts_system.db`)
-1. **`dts_verify_stamp`**: Authenticates digital tax stamps on gazetted commodities (beer, spirits, wine, bottled water, soda, tobacco, cement, sugar, cooking oil, juices) via the Kakasa verification protocol.
-2. **`dts_order_stamps`**: Requisitions stamps, calculates statutory unit tariffs, and generates 10-digit PRNs with collection designated at SICPA Uganda (Ntinda).
-3. **`dts_activate_stamps`**: Activates stamps on factory packaging lines or reports spoiled stamps from packaging line jams.
+1. **`dts_verify_stamp`**: Checks sample stamp fixtures locally; it does not verify a physical stamp through URA or Kakasa.
+2. **`dts_order_stamps`**: Simulates stamp orders, fees, and payment references using local fixtures.
+3. **`dts_activate_stamps`**: Updates simulator stamp status; it does not activate physical stamps.
 4. **`dts_taxpayer_status`**: Inspects manufacturer/importer packaging lines, applicator types, and compliance status.
 
 ### 3. URSB Connector (`ursb` namespace, `ursb_system.db`)
 1. **`ursb_verify_business`**: Searches and verifies legal business names, registration numbers (BRN), and Form 20 director records.
-2. **`ursb_register_business`**: Reserves and registers formal business names and companies.
+2. **`ursb_register_business`**: Creates a local simulator registration record; it does not reserve or register a real business.
 3. **`ursb_compliance_status`**: Audits active legal standing, annual return filings, and non-individual TIN readiness.
 
 ### 4. BWIMS Connector (`bwims` namespace, `bwims_system.db`)
-1. **`bwims_consignment_status`**: Tracks imported cargo stored under IM7 customs bond and enforces statutory 9-month overstay limits.
+1. **`bwims_consignment_status`**: Reads sample cargo fixtures and illustrative dates; it does not verify a customs entry or determine a legal deadline.
 2. **`bwims_warehouse_inventory`**: Audits inventory balances across licensed customs bonded warehouses.
-3. **`bwims_release_clearance`**: Processes ex-warehouse entries for home consumption (IM4) or re-export.
+3. **`bwims_release_clearance`**: Simulates an ex-warehouse clearance; it does not release real bonded goods.
 
 ### 5. TIN Registration Connector (`tin_registration` namespace, `tin_system.db`)
-1. **`tin_search_verify`**: Looks up taxpayer 10-digit TIN, citizen NIN, or URSB incorporation number.
-2. **`tin_apply_individual`**: Issues Instant Individual TINs for citizens with valid 14-character NINs.
-3. **`tin_apply_non_individual`**: Registers Non-Individual corporate TINs cross-referenced with URSB credentials.
-4. **`tin_tax_obligations`**: Enrolls or updates statutory tax heads (VAT, PAYE, CIT).
+1. **`tin_search_verify`**: Searches local taxpayer fixture records.
+2. **`tin_apply_individual`**: Creates a simulator record; it does not verify a NIN with NIRA or issue a live TIN.
+3. **`tin_apply_non_individual`**: Creates a simulator company record; it does not verify URSB credentials.
+4. **`tin_tax_obligations`**: Updates simulator tax-head records.
 
 ### 6. URA Payment System Connector (`payment_system` namespace, `payments_system.db`)
-1. **`payment_generate_prn`**: Generates 12-digit PRN payment vouchers with bank barcodes and 21-day validity for taxes and NTR/MDA fees.
-2. **`payment_view_status`**: Verifies real-time bank clearance, ledger posting, and electronic receipts.
-3. **`payment_reactivate_prn`**: Reactivates expired PRNs without having to re-declare tax returns.
-4. **`payment_checkout_settle`**: Executes electronic checkout settlement via VISA, MasterCard, or Mobile Money (MTN/Airtel).
+1. **`payment_generate_prn`**: Generates a simulator payment reference; it is not a valid URA PRN.
+2. **`payment_view_status`**: Reads simulator payment status; it does not check bank clearance or the URA ledger.
+3. **`payment_reactivate_prn`**: Changes a simulator reference only.
+4. **`payment_checkout_settle`**: Simulates checkout; it does not contact a card network or mobile-money provider.
 5. **`payment_verify_advance_tax`**: Verifies motor vehicle advance income tax compliance for passenger PSVs and freight carriers.
 
-## UI Integration (Inspired by Grok App Connectors)
+## Access and safety
 
-- **Chat Composer Attach Icon**: Clicking the attach button displays a Grok-inspired menu:
-  - 📄 Upload Document (PDF, Word, Excel, CSV, Image)
-  - ⚡ Add Connector / Connect Systems (displays active count badge)
-- **Active Connector Chips Bar**: Displays real-time green-pulsing active chips above the prompt (`[EFRIS · Active]`, `[DTS · Active]`, `[URSB · Active]`, `[BWIMS · Active]`, `[TIN · Active]`, `[PAYMENTS · Active]`).
-- **Connectors Modal (`ConnectorsModal.tsx`)**:
-  - Connect / Disconnect individual enterprise systems.
-  - Inspect live SQLite database records (`data_store/*.db`) directly from the UI.
+- Connector status and enablement are available to staff at `/admin/connectors`. The page identifies every built-in connector as a simulation and does not expose taxpayer records.
+- Connector health and toggle APIs require staff authentication; changing state also requires a staff-writer role. Raw record inspection is retired (`410 Gone`); taxpayers cannot inspect fixture databases.
+- Mutating agent tools return a proposal first. The MCP dispatch layer checks role and consent, then requires explicit confirmation and an idempotency key before it runs the action.
+- The standalone plugin service requires `PLUGINS_API_KEY`; its write APIs use confirmation and replay keys. Production always disables local simulator writes; `FLAG_ENTERPRISE_CONNECTORS` cannot enable fixture data. Keep the service key in the server environment and never send it from a browser.
+- Dynamic remote registration is disabled. The previous endpoint accepted arbitrary URLs and browser-supplied credentials without MCP discovery or a review step. A reviewed deployment configuration and a real protocol negotiation path are required before re-enabling remote connectors.
+- Taxpayer filing, TIN registration, and payment workflows are guidance only. They link to the official URA portal and state that the chat has not submitted a filing, created a TIN, or made a payment.

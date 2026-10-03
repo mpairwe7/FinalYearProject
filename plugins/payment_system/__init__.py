@@ -42,9 +42,8 @@ class PaymentPlugin(Plugin):
             display_name="URA e-Services > Make a Payment Suite",
             version="1.0.0",
             description=(
-                "Connects the agentic URA system to the official e-Payment portal suite. "
-                "Enables generating PRN payment slips (taxes and NTR/MDA fees), reactivating expired PRNs, "
-                "real-time bank payment status checking, card/mobile-money checkout, and advance motor vehicle tax verification."
+                "Local payment simulator for sample PRNs, status checks, checkout, and advance motor vehicle tax scenarios; "
+                "it does not connect to URA, banks, or mobile-money providers."
             ),
             author="URA Revenue Accounting & e-Payments",
             system_type="payment_gateway",

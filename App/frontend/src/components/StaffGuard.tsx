@@ -110,6 +110,7 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
   "/admin/flags": FlagIcon,
   "/admin/overrides": SlidersIcon,
   "/admin/outbox": SendIcon,
+  "/admin/connectors": ListIcon,
   "/analytics": ChartIcon,
   "/analytics/evaluation": BeakerIcon,
 };

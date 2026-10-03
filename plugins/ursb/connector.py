@@ -24,9 +24,8 @@ class UrsbVerifyBusinessTool(Tool):
         return ToolSchema(
             name="ursb_verify_business",
             description=(
-                "Search and verify legal business entity details with the Uganda Registration Services Bureau (URSB). "
-                "Retrieves official registration number/BRN, incorporation date, directors list (Form 20), "
-                "and active legal status required for URA TIN generation."
+                "Search local business fixtures in the URSB simulator. This does not verify a real business, registration "
+                "number, director record, or legal standing."
             ),
             parameters={
                 "type": "object",
@@ -71,8 +70,8 @@ class UrsbRegisterBusinessTool(Tool):
         return ToolSchema(
             name="ursb_register_business",
             description=(
-                "Register a formal business name or incorporate a limited company with URSB. "
-                "Generates an official Registration Number to enable subsequent URA tax registration."
+                "Create a sample business record in the local URSB simulator. It does not register a real entity or issue "
+                "an official registration number."
             ),
             parameters={
                 "type": "object",
@@ -114,6 +113,7 @@ class UrsbRegisterBusinessTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="ursb",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -152,8 +152,8 @@ class UrsbComplianceStatusTool(Tool):
         return ToolSchema(
             name="ursb_compliance_status",
             description=(
-                "Inspect company legal compliance with URSB: checks active legal standing, "
-                "annual return filing up-to-date status, and Form 20 director records for URA TIN readiness."
+                "Read sample company-status fields in the local URSB simulator. This does not verify legal standing, "
+                "annual returns, or URA TIN readiness."
             ),
             parameters={
                 "type": "object",

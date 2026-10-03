@@ -1,9 +1,8 @@
-"""Test suite for autonomous agent task execution (National ID + Phone -> TIN Application) and standalone plugins server."""
+"""TIN attachment privacy behavior and the standalone connector server."""
 
 from __future__ import annotations
 
 import pytest
-
 from app.documents import DocumentRecord
 from app.service import ChatModel
 from app.vision.ocr import (
@@ -55,7 +54,7 @@ class TestNationalIdOcrExtraction:
 # Autonomous Agent Task Execution: National ID + Phone -> TIN Application
 # ---------------------------------------------------------------------------
 class TestAutonomousAgentTinExecution:
-    def test_autonomous_tin_registration_success(self):
+    def test_id_attachment_gets_portal_guidance_without_creating_a_tin(self):
         import secrets
 
         test_nin = f"CF94{1000000 + secrets.randbelow(9000000)}GUL"
@@ -83,7 +82,9 @@ class TestAutonomousAgentTinExecution:
             created_at=0.0,
         )
 
-        model = ChatModel()
+        # Exercise the pure guidance helper without initializing the full
+        # retrieval/model stack, which is unrelated to this privacy boundary.
+        model = ChatModel.__new__(ChatModel)
         res = model._maybe_handle_autonomous_tin_registration(
             message="Here is my national ID card. My phone number is +256782112233. Please apply for my TIN.",
             attachments=[doc],
@@ -92,14 +93,18 @@ class TestAutonomousAgentTinExecution:
         )
 
         assert res is not None
-        assert res["retrieval_mode"] == "autonomous_agent_tin"
+        assert res["retrieval_mode"] == "tin_registration_guidance"
         assert res["agent_role"] == "registration_specialist"
-        assert "Autonomous TIN Registration Completed" in res["reply"]
-        assert test_nin in res["reply"]
-        assert "Grace Akello" in res["reply"]
-        assert "Assigned 10-Digit TIN" in res["reply"]
+        assert "has not been sent to URA" in res["reply"]
+        assert "https://ura.go.ug" in res["reply"]
+        assert test_nin not in res["reply"]
+        assert "Grace Akello" not in res["reply"]
+        assert "+256782112233" not in res["reply"]
+        from plugins.tin_registration import TinRegistrationClient
 
-    def test_autonomous_tin_prompts_for_missing_phone(self):
+        assert not TinRegistrationClient().search_taxpayer(test_nin).get("found", False)
+
+    def test_id_attachment_never_prompts_for_phone_or_repeats_the_nin(self):
         doc = DocumentRecord(
             doc_id="doc_nid_auto_2",
             filename="my_id.png",
@@ -118,7 +123,7 @@ class TestAutonomousAgentTinExecution:
             created_at=0.0,
         )
 
-        model = ChatModel()
+        model = ChatModel.__new__(ChatModel)
         res = model._maybe_handle_autonomous_tin_registration(
             message="Please register my TIN using this attached National ID.",
             attachments=[doc],
@@ -127,9 +132,10 @@ class TestAutonomousAgentTinExecution:
         )
 
         assert res is not None
-        assert "National ID Scanned & Verified" in res["reply"]
-        assert "CM930039182LIR" in res["reply"]
-        assert "active mobile telephone number" in res["reply"].lower()
+        assert res["retrieval_mode"] == "tin_registration_guidance"
+        assert "CM930039182LIR" not in res["reply"]
+        assert "mobile telephone number" not in res["reply"].lower()
+        assert "submit TIN applications" in res["reply"]
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +143,21 @@ class TestAutonomousAgentTinExecution:
 # ---------------------------------------------------------------------------
 class TestStandalonePluginsServer:
     @pytest.fixture(autouse=True)
-    def isolate_orchestrator(self):
+    def _isolate_orchestrator(self, monkeypatch):
+        import plugins.server as server_module
         from plugins.orchestrator import reset_orchestrator
+
+        monkeypatch.setattr(server_module, "_EXPECTED_API_KEY", "e2e-plugins-key")
+        for env_name in (
+            "EFRIS_DB_PATH",
+            "DTS_DB_PATH",
+            "URSB_DB_PATH",
+            "BWIMS_DB_PATH",
+            "TIN_DB_PATH",
+            "PAYMENT_DB_PATH",
+        ):
+            monkeypatch.setenv(env_name, ":memory:")
+        server_module._MCP_REPLAY_CACHE.clear()
         reset_orchestrator()
         yield
         reset_orchestrator()
@@ -155,12 +174,18 @@ class TestStandalonePluginsServer:
 
     def test_mcp_manifest_discovery(self):
         client = TestClient(plugins_server_app)
-        res = client.get("/mcp/manifest")
+        res = client.get("/mcp/manifest", headers={"Authorization": "Bearer e2e-plugins-key"})
         assert res.status_code == 200
         data = res.json()
         assert data["server_name"] == "ura-enterprise-connectors"
+        assert data["manifest_schema_version"] == "1.0.0"
+        assert data["transport"] == "internal-rest"
+        assert data["mcp_compatible"] is False
+        assert data["mode"] == "simulation"
+        assert data["live"] is False
         assert len(data["tools"]) == 23
         assert len(data["connectors"]) == 6
+        assert all("LOCAL SIMULATOR ONLY" in tool["description"] for tool in data["tools"])
 
     def test_mcp_tool_call_remote_dispatch(self):
         client = TestClient(plugins_server_app)
@@ -174,11 +199,102 @@ class TestStandalonePluginsServer:
                     "fdn": "01240000000000001001",
                     "verification_code": "A9F23B",
                 },
+                "confirmed": True,
+                "idempotency_key": "e2e-verification-once",
             },
+            headers={"Authorization": "Bearer e2e-plugins-key"},
         )
         assert res.status_code == 200
         data = res.json()
         assert data["ok"] is True
+        assert data["mode"] == "simulation"
+        assert data["live"] is False
         assert data["tool_name"] == "efris_fiscal_invoice"
         assert data["result"]["ok"] is True
+        assert data["result"]["mode"] == "simulation"
         assert data["result"]["data"]["is_authentic"] is True
+
+    def test_mutating_mcp_call_proposes_then_executes_once_after_confirmation(self):
+        client = TestClient(plugins_server_app)
+        headers = {"Authorization": "Bearer e2e-plugins-key"}
+        proposal = client.post(
+            "/mcp/call",
+            json={
+                "name": "payment_generate_prn",
+                "arguments": {"taxpayer_name": "E2E Sample", "amount_ugx": 25000},
+            },
+            headers=headers,
+        )
+        assert proposal.status_code == 200
+        proposal_body = proposal.json()
+        assert proposal_body["submitted"] is False
+        assert proposal_body["requires_confirmation"] is True
+        assert proposal_body["mode"] == "simulation"
+        assert proposal_body["live"] is False
+
+        confirmed_payload = {
+            "name": "payment_generate_prn",
+            "arguments": proposal_body["proposal"],
+            "confirmed": True,
+            "idempotency_key": proposal_body["idempotency_key"],
+        }
+        first = client.post("/mcp/call", json=confirmed_payload, headers=headers).json()
+        second = client.post("/mcp/call", json=confirmed_payload, headers=headers).json()
+        assert first["ok"] is True
+        assert first["mode"] == "simulation"
+        assert first["result"]["mode"] == "simulation"
+        assert second["replayed"] is True
+        assert first["result"]["prn"] == second["result"]["prn"]
+
+    def test_direct_payment_api_requires_confirmation_and_replays(self):
+        client = TestClient(plugins_server_app)
+        headers = {"Authorization": "Bearer e2e-plugins-key"}
+        proposal = client.post(
+            "/api/v1/payments/prn/generate",
+            json={"taxpayer_name": "E2E REST Sample", "amount_ugx": 17000},
+            headers=headers,
+        ).json()
+        assert proposal["submitted"] is False
+        assert proposal["requires_confirmation"] is True
+        assert proposal["live"] is False
+
+        payload = {
+            **proposal["proposal"],
+            "confirmed": True,
+            "idempotency_key": proposal["idempotency_key"],
+        }
+        first = client.post("/api/v1/payments/prn/generate", json=payload, headers=headers).json()
+        second = client.post("/api/v1/payments/prn/generate", json=payload, headers=headers).json()
+        assert first["submitted"] is True
+        assert first["mode"] == "simulation"
+        assert first["result"]["mode"] == "simulation"
+        assert second["replayed"] is True
+        assert first["result"]["prn"] == second["result"]["prn"]
+
+    def test_plugin_apis_fail_closed_without_a_configured_key(self, monkeypatch):
+        import plugins.server as server_module
+
+        monkeypatch.setattr(server_module, "_EXPECTED_API_KEY", "")
+        client = TestClient(plugins_server_app)
+        assert client.get("/mcp/manifest").status_code == 503
+        assert client.get("/api/v1/tin/taxpayers/search", params={"query": "sample"}).status_code == 503
+
+    def test_production_simulator_writes_stay_disabled_even_with_flag(self, monkeypatch):
+        client = TestClient(plugins_server_app)
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("FLAG_ENTERPRISE_CONNECTORS", "true")
+        headers = {"Authorization": "Bearer e2e-plugins-key"}
+
+        direct = client.post(
+            "/api/v1/payments/prn/generate",
+            json={"taxpayer_name": "E2E Production Sample", "amount_ugx": 10},
+            headers=headers,
+        )
+        assert direct.status_code == 503
+
+        mcp = client.post(
+            "/mcp/call",
+            json={"name": "payment_generate_prn", "arguments": {"taxpayer_name": "E2E", "amount_ugx": 10}},
+            headers=headers,
+        )
+        assert mcp.status_code == 503

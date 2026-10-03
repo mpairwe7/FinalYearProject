@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import os
+from typing import TYPE_CHECKING
+
+from fastapi.responses import JSONResponse
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI, Request
+
 COMMON_CSS = """
 :root {
   --bg: #0b132b;
@@ -127,36 +135,43 @@ function drawCaptcha(canvasId, code) {
   }
 }
 
-function notifyParentOAuthSuccess(connectorId, accountName, identifier) {
-  if (window.opener && !window.opener.closed) {
-    try {
-      window.opener.postMessage({
-        type: 'URA_CONNECTOR_AUTH_SUCCESS',
-        connectorId: connectorId,
-        accountName: accountName || identifier,
-        identifier: identifier,
-      }, '*');
-      setTimeout(() => window.close(), 350);
-      return true;
-    } catch (e) {
-      console.error('Error posting message to opener', e);
-    }
-  }
-  return false;
-}
-
 window.addEventListener('DOMContentLoaded', () => {
-  if (window.opener && !window.opener.closed) {
-    const authWrapper = document.querySelector('.auth-wrapper');
-    if (authWrapper) {
-      const banner = document.createElement('div');
-      banner.style.cssText = 'background: rgba(0, 173, 181, 0.15); border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-bottom: 1rem; font-size: 12px; display: flex; align-items: center; gap: 8px;';
-      banner.innerHTML = '<span>⚡</span><div><strong>URA AI Assistant Integration</strong><br><span style="color:var(--text-muted);">Sign in to authorize connecting this system to your chat assistant.</span></div>';
-      authWrapper.insertBefore(banner, authWrapper.firstChild);
-    }
-  }
+  const simulatorNotice = document.createElement('div');
+  simulatorNotice.setAttribute('role', 'note');
+  simulatorNotice.style.cssText = 'background:#422006;color:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin:0 auto 16px;max-width:1050px;font-size:13px;font-weight:600;';
+  simulatorNotice.textContent = 'SIMULATION ONLY — This demo uses local sample data. It does not connect to URA, NIRA, URSB, customs, banks, or payment providers, and does not create official records.';
+  document.body.insertBefore(simulatorNotice, document.body.firstChild);
 });
 """
+
+
+def install_simulator_safety_boundary(app: FastAPI) -> None:
+    """Mark legacy demo responses and prevent their use as production services."""
+
+    @app.middleware("http")
+    async def simulator_safety_boundary(request: Request, call_next):  # noqa: ANN001
+        if os.getenv("APP_ENV", "development").strip().lower() == "production" and request.url.path != "/health":
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "Standalone connector demos are disabled in production; use official URA services.",
+                    "mode": "simulation",
+                    "live": False,
+                },
+            )
+        if request.url.path.startswith("/mcp/"):
+            return JSONResponse(
+                status_code=410,
+                content={
+                    "detail": "This legacy endpoint is not an MCP JSON-RPC transport.",
+                    "mode": "simulation",
+                    "live": False,
+                },
+            )
+        response = await call_next(request)
+        response.headers["X-Connector-Mode"] = "simulation"
+        response.headers["X-Connector-Live"] = "false"
+        return response
 
 EFRIS_LOGO_SVG = """<svg width="{size}" height="{size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect width="32" height="32" rx="8" fill="#0369a1" />
@@ -223,4 +238,3 @@ def render_logo(logo_type: str, size: int = 32) -> str:
     }
     template = logos.get(logo_type.lower(), GATEWAY_LOGO_SVG)
     return template.format(size=size)
-

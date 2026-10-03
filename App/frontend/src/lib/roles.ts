@@ -178,6 +178,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     roles: ["ura_admin", "ura_auditor"],
   },
   {
+    href: "/admin/connectors",
+    label: "System connectors",
+    navLabel: "Connectors",
+    group: "configure",
+    blurb: "Health and enablement for reviewed connector simulators",
+    roles: ["ura_staff", "ura_admin"],
+  },
+  {
     href: "/analytics",
     label: "Analytics",
     navLabel: "Analytics",

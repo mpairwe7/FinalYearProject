@@ -1,0 +1,217 @@
+{
+ "date": "2026-10-03",
+ "ws": "ws://127.0.0.1:8083/v1/calls/stream",
+ "passed": 4,
+ "scenarios": 4,
+ "first_audio_ms_p50": 1594.0,
+ "results": [
+  {
+   "name": "1_english_stays_english",
+   "note": "English caller: locks English, never leaves it.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1514,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1270,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.86
+      }
+     ],
+     "assistant": [
+      "Happy to help you register for a TIN!\n\nTo register for a TIN with U R A in Uganda: 1. Visit the official U R A web portal 2. Navigate to eServices TIN Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/NIN) or an organisation (requires Certificate of Incorporation)?"
+     ],
+     "caller": [
+      "Hello.",
+      "How do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_vat",
+     "said": "What is the standard VAT rate in Uganda?",
+     "first_audio_ms": 1674,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1672,
+     "languages": [],
+     "assistant": [
+      "The standard rate of Value Added Tax (VAT) is 18 percent, for the 2026 to 2027 financial year. Value Added Tax is charged at 18 percent on taxable supplies of goods and services; VAT-registered businesses collect it from customers and remit it to U R A. - Statutory Basis: Value Added Tax Act\n\nThat comes from the official U R A 2026 to 2027 rate table. Would you like more detail?"
+     ],
+     "caller": [
+      "What is the standard VAT rate in Uganda?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_fca9652d3ef0",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "2_selected_english_speaks_luganda",
+   "note": "First answer in Luganda, same question, not repeated.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 3072,
+     "filler_caption_ms": 3063,
+     "answer_caption_ms": 5250,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.9
+      }
+     ],
+     "assistant": [
+      "Ka ndabe.",
+      "Osobola okwewandiisa ku TIN ng’ogenda ku mukutu gwa U R A ogwa U R A dot go dot u g/ eServices/TIN Registration, ojjuze foomu eyo ku mutimbagano era oweebwe TIN yo."
+     ],
+     "caller": [
+      "Ekiriza ntyo kwewandiisa okufuna ttiimu yange okuva n'era?",
+      "Ninza ndyo wewandiisa okufuna timu yange okuva neera?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_af2e5370b6de",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": true
+  },
+  {
+   "name": "3_swahili_local",
+   "note": "Answered in Swahili on the local engine.",
+   "turns": [
+    {
+     "utterance": "sw_tin",
+     "said": "Habari. Ninawezaje kujisajili kupata namba ya TIN kutoka URA?",
+     "first_audio_ms": 2070,
+     "filler_caption_ms": 2065,
+     "answer_caption_ms": 3882,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Ngoja niangalie.",
+      "Ninafurahi kukusaidia kujisajili kwa ajili ya TIN! Kusajiliwa kwa TIN na U R A nchini Uganda:\nHatua moja: Tembelea tovuti rasmi ya U R A kwenye U R A dot go dot u g mbili. Nenda kwenye eServices Usajili wa TIN tatu. Jaza fomu ya maombi mtandaoni na uwasilishe. Je! Ungependa maelezo zaidi?"
+     ],
+     "caller": [
+      "Habari, inawezaje kujisajili kupata mamlaba ya tini kutoka Ura.",
+      "Habari, ninawezaje kujisayi kupata namba ya TIN kutoka uura."
+     ],
+     "status": [],
+     "reply_language": "sw",
+     "reply_language_expected": "sw",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_bdd47c6f900c",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "sw"
+   ],
+   "passed": true
+  },
+  {
+   "name": "6_explicit_request",
+   "note": "Immediate switch.",
+   "turns": [
+    {
+     "utterance": "en_tin",
+     "said": "Hello. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1233,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1231,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.86
+      }
+     ],
+     "assistant": [
+      "Happy to help you register for a TIN!\n\nTo register for a TIN with U R A in Uganda: 1. Visit the official U R A web portal 2. Navigate to eServices TIN Registration 3. Complete the online application form and submit.\nAre you registering as an individual (requires your National ID/NIN) or an organisation (requires Certificate of Incorporation)?"
+     ],
+     "caller": [
+      "Hello.",
+      "How do I register for a tin number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_ask_sw",
+     "said": "Can we speak Swahili, please?",
+     "first_audio_ms": 1191,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1185,
+     "languages": [
+      {
+       "type": "language",
+       "language": "sw",
+       "source": "explicit",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Sawa — tuendelee kwa Kiswahili."
+     ],
+     "caller": [
+      "Can we speak Swahili, please?"
+     ],
+     "status": [],
+     "reply_language": "sw",
+     "reply_language_expected": "sw",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_26d1130d5891",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en",
+    "sw"
+   ],
+   "passed": true
+  }
+ ]
+}

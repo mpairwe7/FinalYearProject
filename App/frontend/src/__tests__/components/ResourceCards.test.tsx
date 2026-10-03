@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import ResourceCards from "../../components/ResourceCards";
-import type { ContextResource } from "../../store/useChatStore";
+import { useChatStore, type ContextResource } from "../../store/useChatStore";
 
 describe("ResourceCards", () => {
+  afterEach(() => useChatStore.setState({ locale: "en" }));
+
   const mockResources: ContextResource[] = [
     {
       id: "form_vat_offline_template",
@@ -68,6 +70,15 @@ describe("ResourceCards", () => {
     expect(screen.getByText("Cap. 349, Section 31")).toBeInTheDocument();
     expect(screen.getByText("Checklist before submitting:")).toBeInTheDocument();
     expect(screen.getByText("Input tax credit EFRIS receipts")).toBeInTheDocument();
+  });
+
+  it("localizes resource actions with the selected assistant language", () => {
+    useChatStore.setState({ locale: "sw" });
+    render(<ResourceCards resources={mockResources} />);
+
+    expect(screen.getByText("Fomu, vielelezo na vyanzo rasmi vya URA")).toBeInTheDocument();
+    const downloadLink = screen.getByText("Pakua kiolezo").closest("a");
+    expect(downloadLink).toHaveAttribute("href", mockResources[0].url);
   });
 
   it("renders null when resources array is empty", () => {

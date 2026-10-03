@@ -5,10 +5,10 @@
  "runs": {
   "en": [
    {
-    "text_s": 0.42,
+    "text_s": 0.51,
     "reply_chars": 362,
     "streamed": {
-     "first_piece_s": 3.66,
+     "first_piece_s": 4.54,
      "pieces": 5,
      "cached_pieces": 0,
      "failed": 0,
@@ -21,25 +21,25 @@
       0.0,
       0.0
      ],
-     "kb": 125.4,
-     "heard_s": 27.9,
-     "first_audio_s": 4.08
+     "kb": 142.3,
+     "heard_s": 31.8,
+     "first_audio_s": 5.05
     },
     "whole": {
-     "total_s": 8.86,
-     "kb": 1364.0,
-     "duration_s": 29.099,
+     "total_s": 9.05,
+     "kb": 1496.0,
+     "duration_s": 31.915,
      "backend": "orpheus_salt",
-     "first_audio_s": 9.28
+     "first_audio_s": 9.56
     }
    }
   ],
   "lg": [
    {
-    "text_s": 4.71,
+    "text_s": 5.34,
     "reply_chars": 401,
     "streamed": {
-     "first_piece_s": 2.18,
+     "first_piece_s": 2.64,
      "pieces": 6,
      "cached_pieces": 0,
      "failed": 0,
@@ -47,53 +47,54 @@
       "ogg_opus"
      ],
      "gaps_s": [
-      0.0,
-      1.64,
+      0.12,
+      1.23,
       0.0,
       0.0,
       0.0
      ],
-     "kb": 161.6,
-     "heard_s": 37.3,
-     "first_audio_s": 6.89
+     "kb": 174.2,
+     "heard_s": 40.3,
+     "first_audio_s": 7.98
     },
     "whole": {
-     "total_s": 10.59,
-     "kb": 1636.0,
-     "duration_s": 34.901,
+     "total_s": 11.05,
+     "kb": 1560.0,
+     "duration_s": 33.28,
      "backend": "orpheus_salt",
-     "first_audio_s": 15.3
+     "first_audio_s": 16.39
     }
    }
   ],
   "sw": [
    {
-    "text_s": 1.16,
-    "reply_chars": 361,
+    "text_s": 4.85,
+    "reply_chars": 378,
     "streamed": {
-     "first_piece_s": 2.52,
-     "pieces": 5,
+     "first_piece_s": 2.01,
+     "pieces": 6,
      "cached_pieces": 0,
      "failed": 0,
      "formats": [
       "ogg_opus"
      ],
      "gaps_s": [
+      1.32,
+      4.39,
       0.0,
-      1.91,
       0.0,
       0.0
      ],
-     "kb": 190.1,
-     "heard_s": 45.1,
-     "first_audio_s": 3.68
+     "kb": 203.4,
+     "heard_s": 52.5,
+     "first_audio_s": 6.86
     },
     "whole": {
-     "total_s": 14.58,
-     "kb": 2032.0,
-     "duration_s": 43.349,
+     "total_s": 13.2,
+     "kb": 2248.0,
+     "duration_s": 47.957,
      "backend": "orpheus_salt",
-     "first_audio_s": 15.74
+     "first_audio_s": 18.05
     }
    }
   ]

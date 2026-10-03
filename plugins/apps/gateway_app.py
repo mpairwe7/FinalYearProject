@@ -1,19 +1,11 @@
-"""Standalone FastAPI Application for URA Enterprise Systems & MCP Gateway.
+"""Standalone development-only dashboard for connector simulator examples.
 
 Features:
 - Dedicated SQLite stores (data_store/tin_system.db and data_store/payments_system.db)
-- Mandatory Auth Gate with URA Security CAPTCHA verification
-- 1-click Demo Account presets (Kakira Sugar, Nile Breweries, David Ochieng)
-- Instant Individual TIN application via citizen NIN (NIRA verification)
-- Non-Individual Company TIN registration linked to URSB
-- Make a Payment Suite: 12-digit PRN generation for all taxes & NTR fees
-- Reactivate expired PRNs with 21-day validity extension
-- Electronic Card (VISA/MasterCard) and Mobile Money (MTN/Airtel) checkout
-- Advance motor vehicle tax compliance verification (PSV & cargo carriers)
-- Tax Return Filing (Form DT-1001 CIT, DT-1014 VAT, DT-1004 PAYE)
-- Tax Clearance Certificate (TCC) application & automated arrears audit
-- Administrative Objections & Dispute Appeals (Section 24 TPCA)
-- Complete MCP 2026 tools gateway hosting all 23 enterprise tools (/mcp/manifest, /mcp/call)
+- Demo login screens and sample account presets (not production authentication)
+- Local sample TIN, payment, return, TCC, and objection scenarios
+- No URA, NIRA, URSB, bank, payment-provider, or MCP connection
+- Disabled outside development; all displayed outcomes are simulations
 """
 
 from __future__ import annotations
@@ -32,7 +24,12 @@ from fastapi import Body, FastAPI, HTTPException  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
 
-from plugins.apps.common_ui import COMMON_AUTH_JS, COMMON_CSS, render_logo  # noqa: E402
+from plugins.apps.common_ui import (  # noqa: E402
+    COMMON_AUTH_JS,
+    COMMON_CSS,
+    install_simulator_safety_boundary,
+    render_logo,
+)
 from plugins.orchestrator import get_orchestrator  # noqa: E402
 from plugins.payment_system import PaymentClient  # noqa: E402
 from plugins.tin_registration import TinRegistrationClient  # noqa: E402
@@ -41,7 +38,8 @@ orchestrator = get_orchestrator()
 tin_client = TinRegistrationClient()
 payment_client = PaymentClient()
 
-app = FastAPI(title="URA Enterprise Systems & MCP Gateway", version="1.0.0")
+app = FastAPI(title="Connector Simulator Demo", version="1.0.0")
+install_simulator_safety_boundary(app)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -151,11 +149,11 @@ def index() -> str:  # noqa: S608
       <div class="logo-title">
         {render_logo('gateway', 34)}
         <div>
-          <h1 style="font-size:18px; color:var(--accent);">URA Enterprise Systems &amp; MCP Gateway</h1>
-          <div style="font-size:12px; color:var(--text-muted);">Central Gateway Hosting All 6 Systems with Independent SQLite Stores</div>
+          <h1 style="font-size:18px; color:var(--accent);">Connector Simulator Demo</h1>
+          <div style="font-size:12px; color:var(--text-muted);">Local examples backed by SQLite fixtures; no external service is connected</div>
         </div>
       </div>
-      <div id="authStatus"><span class="badge">23 MCP Tools Online</span></div>
+      <div id="authStatus"><span class="badge">Local simulations</span></div>
     </div>
 
     <div class="tabs">
@@ -173,7 +171,6 @@ def index() -> str:  # noqa: S608
         <div class="grid-metrics">{conn_cards_html}</div>
         <p style="font-size:12px; color:var(--text-muted);">
           🔗 <a href="/docs" style="color:var(--accent);">OpenAPI / Swagger Documentation</a> |
-          <a href="/mcp/manifest" style="color:var(--accent);">Complete MCP 2026 Manifest (23 Tools)</a> |
           <a href="/health" style="color:var(--accent);">Health Probes</a>
         </p>
       </div>
@@ -319,7 +316,6 @@ def index() -> str:  # noqa: S608
       <div>URA Central Gateway Node v1.0.0 · Databases: <code>tin_system.db</code>, <code>payments_system.db</code></div>
       <div>
         <a href="/docs">Swagger API Docs</a> |
-        <a href="/mcp/manifest">MCP Tool Manifest</a> |
         <a href="/health">Health Probe</a>
       </div>
     </div>
@@ -377,7 +373,6 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('gateway_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
-      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('tin_registration', res.body.user.legal_name, res.body.user.tin)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';
@@ -409,7 +404,7 @@ function handleSignup(e) {{
     }})
   }}).then(r => r.json().then(d => ({{ status: r.status, body: d }}))).then(res => {{
     if (res.status === 200 && res.body.ok) {{
-      document.getElementById('authAlert').innerHTML = '<div class="alert alert-success">✓ Instant Individual TIN issued: <strong>' + res.body.tin + '</strong>! You can now sign in.</div>';
+      document.getElementById('authAlert').innerHTML = '<div class="alert alert-success">Simulation only: sample TIN-like value <strong>' + res.body.tin + '</strong>. No official TIN was issued and NIRA was not contacted.</div>';
       showAuthMode('login');
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Registration failed') + '</div>';
@@ -450,7 +445,7 @@ function handleApplyTin(e) {{
     body: JSON.stringify({{ nin: nin, full_name: name, mobile: phone, district: dist }})
   }}).then(r => r.json()).then(data => {{
     if (data.ok) {{
-      document.getElementById('tinAlert').innerHTML = '<div class="alert alert-success"><strong>✓ Instant TIN Issued!</strong><br>Assigned TIN: <strong>' + data.tin + '</strong><br>Name: ' + data.legal_name + '<br>Certificate Ref: ' + data.certificate_reference + '</div>';
+      document.getElementById('tinAlert').innerHTML = '<div class="alert alert-success"><strong>Simulation only — no official TIN was issued.</strong><br>Sample value: <strong>' + data.tin + '</strong><br>No identity record was checked with NIRA.</div>';
     }} else {{
       document.getElementById('tinAlert').innerHTML = '<div class="alert alert-danger">' + (data.error || 'Application failed') + '</div>';
     }}
@@ -469,7 +464,7 @@ function handleGeneratePrn(e) {{
     body: JSON.stringify({{ taxpayer_name: name, amount_ugx: amt, tax_head: head }})
   }}).then(r => r.json()).then(data => {{
     if (data.ok) {{
-      document.getElementById('prnAlert').innerHTML = '<div class="alert alert-success"><strong>✓ PRN Generated!</strong><br>PRN: <strong>' + data.prn + '</strong><br>Valid Until: ' + data.expiry_date + '<br>' + data.message + '</div>';
+      document.getElementById('prnAlert').innerHTML = '<div class="alert alert-success"><strong>Simulation only — this is not a valid URA PRN.</strong><br>Sample reference: <strong>' + data.prn + '</strong><br>' + data.message + '</div>';
     }} else {{
       document.getElementById('prnAlert').innerHTML = '<div class="alert alert-danger">' + (data.error || 'Failed') + '</div>';
     }}
@@ -488,7 +483,7 @@ function handleCheckout(e) {{
     body: JSON.stringify({{ prn: prn, payment_method: method, amount_paid_ugx: amt, payer_identifier: '256772123456' }})
   }}).then(r => r.json()).then(data => {{
     if (data.ok) {{
-      document.getElementById('checkAlert').innerHTML = '<div class="alert alert-success"><strong>✓ Settlement Cleared!</strong><br>Transaction ID: ' + data.transaction_id + '<br>Receipt: ' + data.receipt_number + '<br>' + data.message + '</div>';
+      document.getElementById('checkAlert').innerHTML = '<div class="alert alert-success"><strong>Simulation only — no money moved and no payment was made.</strong><br>Sample transaction: ' + data.transaction_id + '<br>' + data.message + '</div>';
     }} else {{
       document.getElementById('checkAlert').innerHTML = '<div class="alert alert-danger">' + (data.error || 'Checkout failed') + '</div>';
     }}
@@ -506,7 +501,7 @@ function handleFileReturn(e) {{
     headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ tin: tin, form_type: form, period: per }})
   }}).then(r => r.json()).then(data => {{
-    document.getElementById('returnAlert').innerHTML = '<div class="alert alert-success"><strong>✓ Return Acknowledged!</strong><br>Filing Reference: <code>' + data.acknowledgement_number + '</code><br>Status: ' + data.status + '</div>';
+    document.getElementById('returnAlert').innerHTML = '<div class="alert alert-success"><strong>Simulation only — your return was not filed.</strong><br>Sample reference: <code>' + data.acknowledgement_number + '</code></div>';
   }});
 }}
 
@@ -518,7 +513,7 @@ function handleApplyTcc() {{
     body: JSON.stringify({{ tin: tin }})
   }}).then(r => r.json()).then(data => {{
     if (data.ok) {{
-      document.getElementById('returnAlert').innerHTML = '<div class="alert alert-success"><strong>✓ Tax Clearance Certificate Approved!</strong><br>TCC Number: <code>' + data.tcc_number + '</code><br>Valid Until: ' + data.valid_until + '<br>Compliance Standing: 100% Tax Compliant</div>';
+      document.getElementById('returnAlert').innerHTML = '<div class="alert alert-success"><strong>Simulation only — no tax clearance certificate was issued.</strong><br>Sample reference: <code>' + data.tcc_number + '</code></div>';
     }} else {{
       document.getElementById('returnAlert').innerHTML = '<div class="alert alert-danger">' + (data.error || 'TCC Denied: Outstanding liabilities') + '</div>';
     }}
@@ -536,7 +531,7 @@ function handleLodgeObjection(e) {{
     headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify({{ assessment_number: assNo, tin: tin, grounds: grounds }})
   }}).then(r => r.json()).then(data => {{
-    document.getElementById('objAlert').innerHTML = '<div class="alert alert-success"><strong>✓ Tax Objection Lodged!</strong><br>Objection Case Ref: <code>' + data.case_reference + '</code><br>Statutory Review Window: 45 Days<br>Enforcement Action: STAYED under Section 24 TPCA</div>';
+    document.getElementById('objAlert').innerHTML = '<div class="alert alert-success"><strong>Simulation only — no objection was lodged.</strong><br>Sample reference: <code>' + data.case_reference + '</code></div>';
   }});
 }}
 
@@ -643,7 +638,7 @@ def lodge_objection(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     }
 
 
-@app.get("/mcp/manifest")
+@app.get("/mcp/manifest", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_manifest() -> dict[str, Any]:
     tools = []
     for tool in orchestrator.get_all_tools():
@@ -663,7 +658,7 @@ def mcp_manifest() -> dict[str, Any]:
     }
 
 
-@app.post("/mcp/call")
+@app.post("/mcp/call", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_call(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     name = body.get("name")
     args = body.get("arguments", {})

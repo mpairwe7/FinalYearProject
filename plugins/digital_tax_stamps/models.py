@@ -26,6 +26,7 @@ class StampStatus(str, Enum):
     EXPIRED = "EXPIRED"
     COUNTERFEIT = "COUNTERFEIT"
     SPOILED = "SPOILED"
+    UNKNOWN = "UNKNOWN"
 
 
 class PackagingType(str, Enum):
@@ -72,7 +73,7 @@ class StampVerificationRequest:
 class StampVerificationResponse:
     ok: bool
     stamp_code: str
-    is_authentic: bool
+    is_authentic: bool | None
     status: StampStatus
     product_category: str
     brand_name: str

@@ -128,8 +128,8 @@ class AgenticPhaseTests(unittest.TestCase):
         assert session is not None
         model._apply_personalization_to_workflow(session, personalization)
         turn = WorkflowRegistry.advance(session, "")
-        self.assertIn("full legal name", turn.question.lower())
-        self.assertEqual(turn.slot_name, "legal_name")
+        self.assertIn("documents ready", turn.question.lower())
+        self.assertEqual(turn.slot_name, "documents_ready")
 
     def test_response_judge_revises_weak_uncited_reply(self) -> None:
         model = ChatModel.__new__(ChatModel)

@@ -66,11 +66,18 @@ class Tool(ABC):
     def to_openai_spec(self) -> dict[str, Any]:
         """Convert to the OpenAI/Qwen2.5 function-calling schema."""
         s = self.schema
+        description = s.description
+        if s.namespace in {"efris", "payment_system", "bwims", "tin_registration", "digital_tax_stamps", "ursb"}:
+            description = (
+                "LOCAL SIMULATOR ONLY. This tool does not contact or change an external government, identity, "
+                "customs, registry, bank, or payment system. "
+                + description
+            )
         return {
             "type": "function",
             "function": {
                 "name": s.name,
-                "description": s.description,
+                "description": description,
                 "parameters": s.parameters,
             },
         }
@@ -78,9 +85,16 @@ class Tool(ABC):
     def to_mcp_tool(self) -> dict[str, Any]:
         """Convert to an MCP Tool descriptor."""
         s = self.schema
+        description = s.description
+        if s.namespace in {"efris", "payment_system", "bwims", "tin_registration", "digital_tax_stamps", "ursb"}:
+            description = (
+                "LOCAL SIMULATOR ONLY. This tool does not contact or change an external government, identity, "
+                "customs, registry, bank, or payment system. "
+                + description
+            )
         descriptor: dict[str, Any] = {
             "name": s.name,
-            "description": s.description,
+            "description": description,
             "inputSchema": s.parameters,
             "annotations": s.annotations(),
             "_meta": {

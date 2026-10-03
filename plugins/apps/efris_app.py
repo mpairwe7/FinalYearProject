@@ -1,14 +1,12 @@
-"""Standalone FastAPI Application for URA EFRIS (Electronic Fiscal Receipting & Invoicing System).
+"""Development-only dashboard for the local EFRIS simulator.
 
 Features:
 - Dedicated SQLite database (data_store/efris_system.db)
-- Mandatory Auth Gate with URA Security CAPTCHA verification
-- 1-click Demo Account presets (Kakira Sugar, Nile Breweries, Kampala Supermarket)
-- 20-digit FDN fiscal invoice generation and validation
-- Credit notes with statutory VAT relief
-- Stock inventory tracking and local purchase additions
-- Monthly VAT Return (Form DT-1014) auto-reconciliation
-- MCP 2026 tools gateway for remote AI agents (/mcp/manifest, /mcp/call)
+- Demo login screen and sample accounts (not production authentication)
+- Sample FDN-shaped invoice and verification records
+- Local credit-note and inventory examples
+- VAT reconciliation demonstration using fixtures
+- No connection to URA or standards-compliant MCP transport
 """
 
 from __future__ import annotations
@@ -32,7 +30,12 @@ from fastapi.responses import HTMLResponse  # noqa: E402
 
 os.environ.setdefault("EFRIS_DB_PATH", str(_root / "data_store" / "efris_system.db"))
 
-from plugins.apps.common_ui import COMMON_AUTH_JS, COMMON_CSS, render_logo  # noqa: E402
+from plugins.apps.common_ui import (  # noqa: E402
+    COMMON_AUTH_JS,
+    COMMON_CSS,
+    install_simulator_safety_boundary,
+    render_logo,
+)
 from plugins.efris import EfrisClient, EfrisConnector, EfrisService  # noqa: E402
 
 service = EfrisService()
@@ -40,7 +43,8 @@ client = EfrisClient(service=service)
 connector = EfrisConnector(service=service)
 connector.initialize()
 
-app = FastAPI(title="URA EFRIS Standalone Portal", version="1.0.0")
+app = FastAPI(title="EFRIS Simulator Demo", version="1.0.0")
+install_simulator_safety_boundary(app)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -307,7 +311,6 @@ def index() -> str:  # noqa: S608
       <div>URA EFRIS Standalone Node v1.0.0 · Database: <code>efris_system.db</code></div>
       <div>
         <a href="/docs">Swagger API Docs</a> |
-        <a href="/mcp/manifest">MCP Tool Manifest</a> |
         <a href="/health">Health Probe</a>
       </div>
     </div>
@@ -365,7 +368,6 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('efris_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
-      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('efris', res.body.user.business_name, res.body.user.tin)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';
@@ -534,7 +536,7 @@ def signup(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if existing:
         raise HTTPException(status_code=409, detail="Taxpayer TIN is already registered on EFRIS.")
 
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_utc = datetime.datetime.now(datetime.UTC)
     conn = service.database._get_connection()
     with conn:
         conn.execute(
@@ -592,7 +594,7 @@ def vat_reconciliation(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     }
 
 
-@app.get("/mcp/manifest")
+@app.get("/mcp/manifest", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_manifest() -> dict[str, Any]:
     return {
         "schema_version": "2026-07-28",
@@ -601,7 +603,7 @@ def mcp_manifest() -> dict[str, Any]:
     }
 
 
-@app.post("/mcp/call")
+@app.post("/mcp/call", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_call(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     name = body.get("name")
     args = body.get("arguments", {})

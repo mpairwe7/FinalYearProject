@@ -3,8 +3,8 @@
  "api": "http://127.0.0.1:8083",
  "summary": {
   "lg/percent": "8/9",
-  "lg/amount": "7/7",
-  "sw/percent": "8/9",
+  "lg/amount": "6/7",
+  "sw/percent": "9/9",
   "sw/amount": "7/7"
  },
  "rows": [
@@ -12,7 +12,7 @@
    "lang": "lg",
    "raw": "Omusolo guli 0%.",
    "spoken": "Omusolo guli ebitundu zeero ku buli kikumi.",
-   "heard": "Omusolo guli ebitunduzi eri ku buli kikumi.",
+   "heard": "Omusolo guli ebitundu zirawo ku buli kikumi.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": false
@@ -21,7 +21,7 @@
    "lang": "lg",
    "raw": "Omusolo guli 10%.",
    "spoken": "Omusolo guli ebitundu kkumi ku buli kikumi.",
-   "heard": "Omusolo buli ebitundu kkumi ku buli kikumi.",
+   "heard": "Omusolo guli ebitundu kkumi ku buli kikumi.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -93,7 +93,7 @@
    "lang": "lg",
    "raw": "Omusaala gwa UGX 5,000.",
    "spoken": "Omusaala gwa shilingi five thousand.",
-   "heard": "Omusaala gwa shiringi five thousand.",
+   "heard": "Omusana gwa shilling five thousand.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -102,7 +102,7 @@
    "lang": "lg",
    "raw": "Omusaala gwa UGX 20,000.",
    "spoken": "Omusaala gwa shilingi twenty thousand.",
-   "heard": "Omusaala gwa shilling twenty thousand.",
+   "heard": "Omusaala gwa shiringi twenty thousand.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -111,7 +111,7 @@
    "lang": "lg",
    "raw": "Omusaala gwa UGX 335,000.",
    "spoken": "Omusaala gwa shilingi three hundred and thirty-five thousand.",
-   "heard": "Omusaala gwa shilling three hundred and thirty five thousand.",
+   "heard": "Omusana gwa shirindi three hundred and thirty five thousand.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -120,7 +120,7 @@
    "lang": "lg",
    "raw": "Omusaala gwa UGX 410,000.",
    "spoken": "Omusaala gwa shilingi four hundred and ten thousand.",
-   "heard": "Omusaala gwa shiringi four hundred and ten thousand.",
+   "heard": "Omusaala gwa shilling four hundred and ten thousand.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -129,7 +129,7 @@
    "lang": "lg",
    "raw": "Omusaala gwa UGX 1,000,000.",
    "spoken": "Omusaala gwa shilingi akakadde kamu.",
-   "heard": "Omusana gwa shiringi akakadde kamu.",
+   "heard": "Omusala gwa kiringi akakadde kamu.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -138,16 +138,16 @@
    "lang": "lg",
    "raw": "Omusaala gwa UGX 10,000,000.",
    "spoken": "Omusaala gwa shilingi obukadde kkumi.",
-   "heard": "Omusaala gwa shiringi obukadde kkumi.",
+   "heard": "Omusaala gwa kirindi obukadda kkumi.",
    "backend": "orpheus_salt",
    "tts_error": null,
-   "recovered": true
+   "recovered": false
   },
   {
    "lang": "lg",
    "raw": "Omusaala gwa UGX 150,000,000.",
    "spoken": "Omusaala gwa shilingi one hundred and fifty million.",
-   "heard": "Omusaala bwa shilling one hundred fifty million.",
+   "heard": "Omusaala gwa shiringi one hundred fifty million.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -156,7 +156,7 @@
    "lang": "sw",
    "raw": "Kodi ni 0%.",
    "spoken": "Kodi ni asilimia sifuri.",
-   "heard": "Kundi ni asilimia sifuri.",
+   "heard": "Kodi ni asilimia sifuri.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -165,7 +165,7 @@
    "lang": "sw",
    "raw": "Kodi ni 10%.",
    "spoken": "Kodi ni asilimia kumi.",
-   "heard": "Kodi ni asilimia kumi.",
+   "heard": "Kundi ni asiimi ya kumi.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -183,7 +183,7 @@
    "lang": "sw",
    "raw": "Kodi ni 15%.",
    "spoken": "Kodi ni asilimia kumi na tano.",
-   "heard": "Kodi ni asilimia kumi na tano.",
+   "heard": "Mapakaa ni asilimia kumi na tano.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -192,7 +192,7 @@
    "lang": "sw",
    "raw": "Kodi ni 18%.",
    "spoken": "Kodi ni asilimia kumi na nane.",
-   "heard": "Makundi ni asilimia kumi na nane.",
+   "heard": "Kodi ni asilimia kumi na nane.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -201,7 +201,7 @@
    "lang": "sw",
    "raw": "Kodi ni 20%.",
    "spoken": "Kodi ni asilimia ishirini.",
-   "heard": "Kodi ni asilimia ishirini.",
+   "heard": "Toni si nia ishirini.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -210,7 +210,7 @@
    "lang": "sw",
    "raw": "Kodi ni 25%.",
    "spoken": "Kodi ni asilimia ishirini na tano.",
-   "heard": "Kodi ni asilimia ishirini na tano.",
+   "heard": "Kodi asilimia ishirini na tano.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -219,7 +219,7 @@
    "lang": "sw",
    "raw": "Kodi ni 30%.",
    "spoken": "Kodi ni asilimia thelathini.",
-   "heard": "Sikodi ni asilimia thelathini.",
+   "heard": "Kodi ni asilimia thelathini.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -228,10 +228,10 @@
    "lang": "sw",
    "raw": "Kodi ni 40%.",
    "spoken": "Kodi ni asilimia arobaini.",
-   "heard": "Mapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapapap Apaa.",
+   "heard": "Kodi ni asilimia arobaini.",
    "backend": "orpheus_salt",
    "tts_error": null,
-   "recovered": false
+   "recovered": true
   },
   {
    "lang": "sw",
@@ -246,7 +246,7 @@
    "lang": "sw",
    "raw": "Mshahara wa UGX 20,000.",
    "spoken": "Mshahara wa shilingi elfu ishirini za Uganda.",
-   "heard": "Mshahara wa Shilingi elfu ishirini za Uganda.",
+   "heard": "Mushahara wa Shilingi elfu ishirini za Uganda.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -255,7 +255,7 @@
    "lang": "sw",
    "raw": "Mshahara wa UGX 335,000.",
    "spoken": "Mshahara wa shilingi elfu mia tatu thelathini na tano za Uganda.",
-   "heard": "Mshahara wa Shilingi elfu mia tatu thelathini na tano za Uganda.",
+   "heard": "Mshahara wa Shilingi elfu mia tatu themasini na tano za Uganda.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -264,7 +264,7 @@
    "lang": "sw",
    "raw": "Mshahara wa UGX 410,000.",
    "spoken": "Mshahara wa shilingi elfu mia nne na kumi za Uganda.",
-   "heard": "Mishahara wa shilingi elfu mia nne na kumi za Uganda.",
+   "heard": "Mshahara wa Shilingi elfu mia nne na kumi za Uganda.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true
@@ -273,7 +273,7 @@
    "lang": "sw",
    "raw": "Mshahara wa UGX 1,000,000.",
    "spoken": "Mshahara wa shilingi milioni moja za Uganda.",
-   "heard": "Mushahara wa Shilingi milioni moja za Uganda.",
+   "heard": "Mshahara wa Shilingi milioni moja za Uganda.",
    "backend": "orpheus_salt",
    "tts_error": null,
    "recovered": true

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from .models import (
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class BwimsClient:
-    """Client for BWIMS operations, supporting local simulated engine or remote REST API."""
+    """Client for the local BWIMS simulator; live customs calls are not implemented."""
 
     def __init__(
         self,
@@ -25,17 +24,15 @@ class BwimsClient:
         api_base: str | None = None,
         api_key: str | None = None,
     ) -> None:
+        del api_base, api_key  # retained for compatibility; remote calls are not implemented
         self._service = service or BwimsService()
-        self._api_base = api_base or os.getenv("BWIMS_API_BASE", "")
-        self._api_key = api_key or os.getenv("BWIMS_API_KEY", "")
-        self._is_live = bool(self._api_base and self._api_key.startswith("bwims_live_"))
 
     @property
     def is_live(self) -> bool:
-        return self._is_live
+        return False
 
     def ping(self) -> bool:
-        """Health check for BWIMS connectivity."""
+        """Report local simulator readiness, not external BWIMS connectivity."""
         return True
 
     def get_consignment(self, entry_number: str) -> dict[str, Any]:

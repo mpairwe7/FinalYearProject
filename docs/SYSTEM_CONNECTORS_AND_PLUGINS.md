@@ -1,192 +1,108 @@
-# URA Enterprise Systems, Connectors & Autonomous Agentic Architecture
+# System connectors and customer guidance
 
-**Version**: 2026.1  
-**Scope**: 6 Independent Enterprise Systems, Grok-inspired Agent Connectors, URA Security CAPTCHA Gates, and Autonomous Vision/OCR Agent Workflows.
+## Current boundary
 
----
+The six built-in plugins are **local SQLite simulators**. They are not connected
+to URA, NIRA, URSB, BWIMS, EFRIS, a bank, or a payment provider. Their fixture
+records, generated TIN-like identifiers, FDNs, PRNs, receipts, and health checks
+are not official data or evidence of a live connection. Tool schemas and tool
+results carry this simulation status so the assistant can disclose it.
 
-## 1. Executive Summary
+The standalone `plugins/server.py` service is a protected internal REST
+dispatcher. Its `/mcp/manifest` and `/mcp/call` routes are **not** an MCP
+JSON-RPC transport. Dynamic browser-supplied endpoint registration is disabled.
+Production always keeps these local simulator tools and writes disabled. The
+`enterprise_connectors` flag cannot enable sample fixtures; it is reserved for
+future integrations after a live API, security review, and operational controls
+are in place.
 
-This architecture implements six production-grade, independent enterprise systems reflecting the digital infrastructure of the **Uganda Revenue Authority (URA)** and partner statutory bodies (**Uganda Registration Services Bureau - URSB**).
+URA documents an EFRIS system-to-system API path and provides a UAT developer
+portal. The current repository has no authenticated API contract, subscription
+credentials, or accreditation evidence, so EFRIS stays simulated until the
+integration owner obtains those prerequisites. URA also publishes FY 2026/27
+EFRIS handbooks in English, Luganda, and Swahili. See the [EFRIS
+service](https://ura.go.ug/en/efris/), [UAT developer
+portal](https://developer-uat.ura.go.ug/devportal/), and [handbook
+archive](https://ura.go.ug/download-category/efris-handbook/).
 
-The systems operate both as **standalone cloud services** (with dedicated web dashboards and authentication gates) and as **pluggable agent connectors** integrated into the URA Taxpayer Chatbot and Autonomous Agent runtime.
+Older `plugins/apps/*_app.py` dashboards are development demos as well. They show
+a persistent simulation notice, mark responses with simulation headers, retire
+their legacy `/mcp/*` routes with `410 Gone`, and return `503` for all non-health
+routes in production.
 
-```
-                      +-----------------------------------+
-                      |   URA AI Chatbot & Agent Core     |
-                      |  (FastAPI / Supervisor / MCP)    |
-                      +-----------------+-----------------+
-                                        |
-       +--------------------------------+-------------------------------+
-       |                 Dynamic Plugin Orchestrator                   |
-       |                   (23 Registered Tools)                       |
-       +-------+------------+------------+-----------+---------+-------+
-               |            |            |           |         |
-               v            v            v           v         v
-            [EFRIS]       [DTS]        [URSB]     [BWIMS]    [TIN] & [PAYMENTS]
-          efris_system  dts_system   ursb_system bwims_system tin_system  payments_system
-              .db          .db          .db         .db       .db          .db
-```
+## Included systems
 
----
+| Connector | Local demonstration only |
+| --- | --- |
+| EFRIS | Fixture taxpayer profiles, invoice and credit-note examples, stock records, and FDN-shaped references |
+| Digital Tax Stamps | Fixture stamp records, sample orders, and local activation state |
+| URSB | Fixture business searches and local registration examples |
+| BWIMS | Fixture consignments, warehouse inventory, and local clearance examples |
+| TIN registration | Fixture taxpayer searches and sample registration records; no NIRA identity verification |
+| Payment system | Sample PRNs, status, and checkout records; no bank settlement or URA ledger update |
 
-## 2. Core Architectural Pillars
+Mutating plugin tools require a proposal, explicit confirmation, and an
+idempotency key at the dispatch boundary. This protects simulated state from an
+unreviewed agent call; it does not turn a simulator action into a real filing,
+registration, customs release, or payment.
 
-### 2.1 Independent Data Isolation
-Each enterprise system possesses its own isolated SQLite relational database under `data_store/`:
-- `data_store/efris_system.db`: Electronic fiscal devices, invoices, credit notes, stock items, VAT returns.
-- `data_store/dts_system.db`: Excisable manufacturers, packaging lines, tax stamp orders, Kakasa stamp verifications.
-- `data_store/ursb_system.db`: Business name reservations, incorporated companies, Form 20 directors, annual return compliance.
-- `data_store/bwims_system.db`: Bonded warehouse facilities, customs officers, IM7 bonded consignments, ex-warehouse releases.
-- `data_store/tin_system.db`: Individual citizens (NIN validation), corporate entities, registered tax heads, issued TINs.
-- `data_store/payments_system.db`: 12-digit Payment Registration Numbers (PRNs), bank/MoMo transactions, advance tax assessments.
+## Customer journeys
 
-### 2.2 Security Authentication Gate & URA CAPTCHA
-All standalone web portals enforce a mandatory **Auth Gate**:
-- Unauthenticated users cannot view portal metrics, database tables, or trigger operations.
-- **URA Security CAPTCHA**:
-  - Dynamically generated 5-character alphanumeric token rendered on an HTML5 canvas.
-  - Distorted with Bezier noise curves, random character rotation, and background interference dots.
-  - **Strict Server-Side Validation**: `POST /api/v1/auth/login` and `POST /api/v1/auth/signup` require a valid CAPTCHA token; invalid attempts fail with HTTP 400.
-  - **1-Click Quick Demo Presets**: Pre-seeded corporate and individual accounts allow one-click testing while maintaining full server validation.
+The TIN registration, filing-return, and payment-assistance journeys are guides.
+They do not collect NINs or identity documents, generate a live TIN or PRN,
+prepare or submit a return, or process a payment. They gather only the
+information needed to explain the next step, link to the official URA portal,
+and say clearly that no transaction was submitted. Customers should enter
+identity, account, and payment details only on the official service.
 
----
+Invoice review records visible fields and taxpayer-reported amounts. It does
+not calculate VAT, query EFRIS, authenticate a fiscal signature, or decide
+input-tax eligibility, and it asks whether TIN fields are present instead of
+collecting the numbers.
 
-## 3. The Six Enterprise Systems
+Luganda (`lg`), English (`en`), and Swahili (`sw`) have localized journey names,
+curated step and choice labels for the TIN, invoice, payment, return, and BWIMS
+guides, localized stepper controls, portal-action labels, resource-card actions,
+and the composer privacy reminder. Resource titles and descriptions use the
+safety-checked reply localization path. Choice labels are kept separate from the
+canonical workflow values the server validates. Reply text uses the existing
+safety-checked localization path. Language quality still needs per-locale
+evaluation before claiming equal quality; review the stored multilingual
+quality reports and `docs/runbooks/guided-journey-probes.md`.
 
-### 3.1 EFRIS (Electronic Fiscal Receipting & Invoicing System)
-- **Primary Function**: Real-time fiscal invoice issuance, B2B/B2C transactions, VAT declaration.
-- **Key Features**:
-  - Generates verifiable 20-digit Fiscal Document Numbers (FDN) with SHA256 fiscal verification codes and QR codes.
-  - Credit note issuance with statutory VAT adjustment validation.
-  - Real-time stock decrement upon invoice generation.
-  - Automatic reconciliation for **Monthly VAT Return (Form DT-1014)**.
-- **Agent Tools**: `efris_issue_invoice`, `efris_verify_fdn`, `efris_issue_credit_note`, `efris_get_stock`.
+## Staff controls and data access
 
-### 3.2 Digital Tax Stamps (DTS / Kakasa)
-- **Primary Function**: Track-and-trace system for 9 gazetted excisable commodities (beer, spirits, wine, bottled water, soda, tobacco, cement, sugar, cooking oil).
-- **Key Features**:
-  - **Kakasa Stamp Scanner**: Validates stamp security codes as `GENUINE`, `EXPIRED`, or `COUNTERFEIT_ALERT`.
-  - Requisition ordering with automatic PRN generation (e.g. UGX 110/stamp for spirits, UGX 15/stamp for water).
-  - Production line controller activation batching.
-  - Spoiled and damaged stamp return reconciliation.
-- **Agent Tools**: `dts_verify_stamp`, `dts_order_stamps`, `dts_activate_line_controller`, `dts_report_damaged_stamps`.
+- Staff and administrators use `/admin/connectors` to see local health and
+  enable or disable built-in simulators. The page states that external services
+  are not connected.
+- The connector API requires administrator access; changing connector state
+  also requires a staff-writer role.
+- Raw database record inspection is retired. `/v1/connectors/{name}/records`
+  returns `410 Gone`; `/v1/connectors` exposes aggregate simulator health.
+- A stamp code missing from the DTS sample fixtures returns `UNKNOWN` with
+  `is_authentic: null`; absence from simulator data is not a counterfeit finding.
+- The standalone plugin API requires `PLUGINS_API_KEY` and fails closed when it
+  is absent. The key is for server-to-server use and must not be sent by the
+  browser. Confirmed REST writes use idempotency keys and replay protection.
 
-### 3.3 URSB (Uganda Registration Services Bureau)
-- **Primary Function**: Official registry for business names, partnerships, and limited liability companies.
-- **Key Features**:
-  - Name search and reservation against existing entity collisions.
-  - Full company incorporation issuing official registration numbers (`URSB-CO-XXXXX`).
-  - Company Form 20 management (directors and corporate secretaries).
-  - Annual return compliance verification as a strict prerequisite for URA Non-Individual TIN registration.
-- **Agent Tools**: `ursb_search_business`, `ursb_reserve_name`, `ursb_incorporate_company`, `ursb_get_directors`, `ursb_verify_compliance`.
+## Standards and risk controls
 
-### 3.4 BWIMS (Bonded Warehouse Information Management System)
-- **Primary Function**: Customs control of bonded warehouses and duty-deferred imported cargo.
-- **Key Features**:
-  - IM7 customs entry tracking for imported goods held in bonded warehousing.
-  - **EACCMA Section 67 Overstay Alerts**: Automated statutory alert when goods exceed the statutory 9-month (270-day) warehousing limit, flagging them for public customs auction.
-  - Ex-warehouse release processing (IM4 Home Consumption or IM8 Transit) verifying duty settlement.
-- **Agent Tools**: `bwims_track_consignment`, `bwims_check_overstay_alerts`, `bwims_release_cargo`, `bwims_get_warehouse_inventory`.
+The agent confirmation boundary follows the [OWASP GenAI Excessive Agency
+recommendations](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/),
+including human approval for consequential tool actions. The current MCP
+protocol is versioned separately from this internal REST dispatcher; see the
+[official MCP versioning documentation](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/docs/2026-07-28/learn/versioning.mdx).
+Do not label a custom REST manifest as MCP-compatible without implementing and
+verifying the protocol handshake and tool-call exchange.
+For public notices and interaction controls, use the latest [W3C WCAG 2.2
+Recommendation](https://www.w3.org/TR/WCAG22/); WCAG 2.2 was also adopted as
+ISO/IEC 40500:2025. This implementation adds accessible simulation notices but
+does not claim full WCAG conformance.
 
-### 3.5 TIN Registration System
-- **Primary Function**: Issuance of 10-digit Taxpayer Identification Numbers.
-- **Key Features**:
-  - **Instant Individual TIN**: Validates 14-character Ugandan National Identification Numbers (NIN) against simulated NIRA identity registries.
-  - **Non-Individual TIN**: Validates business incorporation numbers against URSB before tax registration.
-  - Registration of statutory tax heads (Income Tax, VAT, PAYE, Local Excise Duty, Withholding Tax).
-- **Agent Tools**: `tin_apply_individual`, `tin_apply_non_individual`, `tin_verify_status`, `tin_add_tax_head`.
+## Verification
 
-### 3.6 Payment System (PRN & Assessment Suite)
-- **Primary Function**: Official URA e-Tax payment gateway and reconciliation engine.
-- **Key Features**:
-  - Generates official 12-digit Payment Registration Numbers (PRNs) with valid search codes.
-  - 21-day statutory PRN expiry check and automated renewal.
-  - Multi-channel instant checkout supporting VISA, MasterCard, MTN Mobile Money, and Airtel Money.
-  - Motor Vehicle Advance Income Tax calculator (Section 118A Income Tax Act).
-- **Agent Tools**: `payments_generate_prn`, `payments_check_status`, `payments_renew_prn`, `payments_calculate_advance_tax`, `payments_process_checkout`.
-
----
-
-## 4. Autonomous Agent Workflows
-
-### 4.1 Autonomous National ID OCR to Instant TIN
-When a taxpayer uploads or snaps a photo of a Ugandan National ID card in the chat interface:
-1. **Vision Classification**: Identified as `national_id` by `App/backend/app/vision/document_classifier.py`.
-2. **Entity Extraction**: `App/backend/app/vision/ocr.py` runs regex-based heuristic extraction to identify:
-   - 14-character Ugandan NIN (e.g. `CM950019284KLA`).
-   - Taxpayer legal name and date of birth.
-   - Contact mobile number (e.g. `+256 772 123456`).
-3. **Autonomous Execution**: `App/backend/app/service.py` autonomously invokes `tin_apply_individual` via the TIN connector without requiring the user to fill forms.
-4. **Interactive Response**: The chat assistant returns the newly issued 10-digit TIN, taxpayer category, and next steps for e-tax login.
-
----
-
-## 5. UI/UX & Connector Integrations
-
-### 5.1 Grok-Inspired Chat Composer (`+` Add Button)
-- Replaced basic attachment button with a modern `+` Add Icon (`PlusIcon`, `.composer-add-btn`).
-- Interactive popover offering:
-  - 📄 **Upload a file**: PDF, Word, Excel, CSV, or Image.
-  - 📷 **Take a photo**: Direct camera viewfinder capture (`CameraCapture.tsx`).
-  - ⚡ **Add connector**: Opens the Connectors Modal.
-- **Active Connector Chips Bar**:
-  - Displays currently enabled enterprise systems directly above the input box.
-  - Pulsing emerald indicator with quick-disconnect (`×`) control.
-
-### 5.2 Connectors Modal (`ConnectorsModal.tsx`)
-- Tabbed management interface:
-  - **Available Connectors**: Toggle systems on/off, inspect active tools, view live stats.
-  - **Database Inspector**: Live interactive viewer for SQLite tables in `data_store/`.
-  - **External Connectors**: Register custom remote REST APIs or MCP 2026 servers on the fly via `POST /v1/connectors/register`.
-
----
-
-## 6. Live Deployments
-
-### 6.1 Crane Cloud (RENU Infrastructure)
-- **URA EFRIS**: `https://ura-efris-67a9f3c3.renu-01.cranecloud.io`
-- **URA DTS (Kakasa)**: `https://ura-dts-f1af1c08.renu-01.cranecloud.io`
-- **URSB Registry**: `https://ura-ursb-7e854617.renu-01.cranecloud.io`
-- **URA BWIMS**: `https://ura-bwims-d16293b1.renu-01.cranecloud.io`
-- **URA Central Gateway**: `https://ura-plugins-gateway-6f178237.renu-01.cranecloud.io`
-
-### 6.2 Hugging Face Spaces (`landwind22`)
-- `https://huggingface.co/spaces/landwind22/ura-efris`
-- `https://huggingface.co/spaces/landwind22/ura-digital-tax-stamps`
-- `https://huggingface.co/spaces/landwind22/ura-ursb`
-- `https://huggingface.co/spaces/landwind22/ura-bwims`
-- `https://huggingface.co/spaces/landwind22/ura-tin-payments-gateway`
-
----
-
-## 7. Operational Runbook
-
-### 7.1 Running All Systems Locally (Development)
 ```bash
-# Run standalone gateway hosting all 6 systems
-PYTHONPATH=. python3 plugins/server.py --port 8005
-
-# Or run individual systems:
-PYTHONPATH=. python3 plugins/apps/efris_app.py --port 8006
-PYTHONPATH=. python3 plugins/apps/dts_app.py --port 8007
-PYTHONPATH=. python3 plugins/apps/ursb_app.py --port 8008
-PYTHONPATH=. python3 plugins/apps/bwims_app.py --port 8009
-```
-
-### 7.2 Running via Docker Compose
-```bash
-docker compose -f docker-compose.plugins.yml up --build -d
-```
-
-### 7.3 Verification Commands
-```bash
-# Test backend orchestrator and autonomous agent flows
-PYTHONPATH=App/backend python3 -m pytest tests/agents/test_plugins_orchestrator.py tests/agents/test_autonomous_agent_tin.py -q
-
-# Test all 93 backend API endpoints
-PYTHONPATH=App/backend python3 -m pytest tests/test_all_endpoints_e2e.py -q
-
-# Test frontend
+PYTHONPATH=App/backend python3 -m pytest App/backend/tests tests/agents tests/chaos -q
 cd App/frontend && bun run test && bun run lint
+git diff --check
 ```

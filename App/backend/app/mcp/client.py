@@ -327,6 +327,13 @@ class MCPClient:
         risk = str(_meta_of(descriptor, "risk", "low"))
         namespace = str(_meta_of(descriptor, "namespace", "core"))
 
+        requires_confirmation = bool(
+            _meta_of(descriptor, "requiresConfirmation", False)
+        )
+        # A write proposal must pass role and consent checks before it is
+        # shown to the user, but the proposal itself is not a write. The
+        # approval replay below is the only call that satisfies the
+        # confirmation and idempotency requirements.
         policy = authorize_tool_call(
             name=name,
             risk=risk,
@@ -339,7 +346,7 @@ class MCPClient:
             required_scopes=tuple(_meta_of(descriptor, "requiredScopes", ()) or ()),
             allowed_roles=tuple(_meta_of(descriptor, "allowedRoles", ()) or ()),
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
-            requires_confirmation=_meta_of(descriptor, "requiresConfirmation", None),
+            requires_confirmation=requires_confirmation and confirmed,
         )
         if not policy["allowed"]:
             return finish(
@@ -349,17 +356,45 @@ class MCPClient:
                 namespace=namespace,
             )
 
-        errors = validate_arguments(descriptor.get("inputSchema"), args)
+        input_schema = descriptor.get("inputSchema") or {}
+        declared_properties = set((input_schema.get("properties") or {}).keys())
+        validation_args = dict(args)
+        # These are MCP dispatch controls, not tool inputs. Older tools do
+        # not declare them in their schemas; strip them only in that case so
+        # strict additionalProperties validation remains useful.
+        for control in ("submit", "idempotency_key"):
+            if control not in declared_properties:
+                validation_args.pop(control, None)
+        errors = validate_arguments(input_schema, validation_args)
         if errors:
             return finish(
                 {
                     "ok": False,
                     "error": f"Invalid arguments for {name}: " + "; ".join(errors),
                     "validation_errors": errors,
-                    "expected": descriptor.get("inputSchema"),
+                    "expected": input_schema,
                     "policy": policy,
                 },
                 ok=False,
+                risk=risk,
+                namespace=namespace,
+            )
+
+        if requires_confirmation and not confirmed:
+            proposal = dict(validation_args)
+            proposal["idempotency_key"] = idempotency_key or uuid.uuid4().hex
+            proposal_policy = dict(policy)
+            proposal_policy["requires_confirmation"] = True
+            return finish(
+                {
+                    "ok": True,
+                    "submitted": False,
+                    "requires_confirmation": True,
+                    "proposal": proposal,
+                    "message": "No connector action has run. Review and confirm this proposal to continue.",
+                    "policy": proposal_policy,
+                },
+                ok=True,
                 risk=risk,
                 namespace=namespace,
             )
@@ -407,9 +442,15 @@ class MCPClient:
             )
 
         try:
+            declared_args = set((input_schema.get("properties") or {}).keys())
+            dispatch_args = dict(validation_args)
+            if "submit" in declared_args and "submit" in args:
+                dispatch_args["submit"] = args["submit"]
+            if "idempotency_key" in declared_args and "idempotency_key" in args:
+                dispatch_args["idempotency_key"] = args["idempotency_key"]
             raw = transport.call(
                 name,
-                args,
+                dispatch_args,
                 meta=meta,
                 timeout_s=timeout_s,
                 input_responses=input_responses,

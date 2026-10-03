@@ -23,12 +23,20 @@ unchanged from Phase 1-13.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_SIMULATED_CONNECTOR_NAMESPACES = frozenset(
+    {"efris", "payment_system", "bwims", "tin_registration", "digital_tax_stamps", "ursb"}
+)
+_SIMULATION_NOTICE = (
+    "Local simulator result only. No live URA, NIRA, URSB, EFRIS, BWIMS, bank, or payment service was contacted or updated."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +284,17 @@ class ToolRegistry:
                 "error": f"Unknown tool: {name}",
             }
 
+        if (
+            tool.schema.namespace in _SIMULATED_CONNECTOR_NAMESPACES
+            and os.getenv("APP_ENV", "development").lower() == "production"
+        ):
+            return {
+                "ok": False,
+                "error": "Local simulator connector tools are never enabled in production.",
+                "mode": "simulation",
+                "live": False,
+            }
+
         try:
             result = tool.execute(**(arguments or {}))
             if not isinstance(result, dict):
@@ -303,6 +322,10 @@ class ToolRegistry:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.debug("Tool %s executed in %.1fms", name, elapsed_ms)
 
+        if tool.schema.namespace in _SIMULATED_CONNECTOR_NAMESPACES:
+            result.setdefault("mode", "simulation")
+            result.setdefault("live", False)
+            result.setdefault("simulation_notice", _SIMULATION_NOTICE)
         return result
 
 

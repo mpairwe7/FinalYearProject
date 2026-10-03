@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import unittest
+from unittest.mock import patch
 
 from app.mcp import get_client, reset_client
 from app.mcp.policy import authorize_tool_call
@@ -110,6 +112,17 @@ class DeclarationDrivenPolicyTests(unittest.TestCase):
 
 
 class ToolDeclarationTests(unittest.TestCase):
+    def test_simulated_connector_tools_stay_closed_in_production_even_with_flag(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"APP_ENV": "production", "FLAG_ENTERPRISE_CONNECTORS": "true"},
+            clear=False,
+        ):
+            result = ToolRegistry.call("payment_view_status", {"prn": "226030001001"})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["mode"], "simulation")
+        self.assertIn("never enabled in production", result["error"])
+
     def test_every_elevated_tool_declares_its_requirements(self) -> None:
         for tool in ToolRegistry.all():
             schema = tool.schema
@@ -128,6 +141,25 @@ class ToolDeclarationTests(unittest.TestCase):
                 with self.subTest(tool=schema.name):
                     self.assertFalse(schema.read_only)
                     self.assertTrue(schema.destructive)
+
+    def test_connector_write_tools_require_confirmation(self) -> None:
+        connector_namespaces = {
+            "efris",
+            "payment_system",
+            "bwims",
+            "tin_registration",
+            "digital_tax_stamps",
+            "ursb",
+        }
+        writes = [
+            tool.schema
+            for tool in ToolRegistry.all()
+            if tool.schema.namespace in connector_namespaces and not tool.schema.read_only
+        ]
+        self.assertTrue(writes)
+        for schema in writes:
+            with self.subTest(tool=schema.name):
+                self.assertTrue(schema.requires_confirmation)
 
 
 if __name__ == "__main__":

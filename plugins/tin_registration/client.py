@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from .models import (
@@ -20,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class TinRegistrationClient:
-    """Client for URA TIN operations, supporting local simulated engine or remote REST API."""
+    """Client for the local TIN simulator; live URA or NIRA calls are not implemented."""
 
     def __init__(
         self,
@@ -28,17 +27,15 @@ class TinRegistrationClient:
         api_base: str | None = None,
         api_key: str | None = None,
     ) -> None:
+        del api_base, api_key  # retained for compatibility; remote calls are not implemented
         self._service = service or TinRegistrationService()
-        self._api_base = api_base or os.getenv("TIN_API_BASE", "")
-        self._api_key = api_key or os.getenv("TIN_API_KEY", "")
-        self._is_live = bool(self._api_base and self._api_key.startswith("tin_live_"))
 
     @property
     def is_live(self) -> bool:
-        return self._is_live
+        return False
 
     def ping(self) -> bool:
-        """Health check for TIN Registration platform connectivity."""
+        """Report local simulator readiness, not URA or NIRA connectivity."""
         return True
 
     def search_taxpayer(self, query: str) -> dict[str, Any]:
