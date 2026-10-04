@@ -407,7 +407,7 @@ async def test_multilingual_accuracy_statutory_fidelity() -> dict[str, Any]:
         pump_task.cancel()
     vat_lg = " ".join(answers)
     lg_ok = language_of(vat_lg) == "lg" and any(
-        tok in vat_lg for tok in ("18", "kkumi na munaana", "30", "amakumi asatu")
+        tok in vat_lg for tok in ("18", "kkumi na munaana")
     )
     results["lg_vat_accuracy"] = {"passed": lg_ok, "text": vat_lg}
     print(f" -> Luganda: {'PASS' if lg_ok else 'FAIL'} (Vernacular accuracy: {vat_lg[:60]}...)")
