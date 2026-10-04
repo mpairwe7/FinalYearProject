@@ -787,7 +787,7 @@
 #
 # Pin to an immutable sha tag. Bump this line to roll the Space to a newer
 # image.
-FROM landwind/ura-chatbot:sha-554809e
+FROM landwind/ura-chatbot:sha-e825bab
 
 # Gate the pin on the two embedded stores this Space depends on: a Qdrant
 # collection seeded from the FAQ JSONL corpus, and an embedded Redis.
