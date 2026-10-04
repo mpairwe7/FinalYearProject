@@ -12,7 +12,7 @@
 # lines but cannot see an ARG default, which is how this sat on 3.11.11
 # (Debian 12.10, OpenSSL 3.0.15) with 4 critical and 42 high fixable OS
 # findings in the Trivy image scan.
-FROM python:3.11.16-slim-bookworm AS builder
+FROM python:3.14.7-slim-bookworm AS builder
 
 # Install uv for fast dependency resolution
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
@@ -47,7 +47,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
 # -----------------------------------------------------------------------------
-FROM python:3.11.16-slim-bookworm AS runtime
+FROM python:3.14.7-slim-bookworm AS runtime
 
 # The base image's own packaging tools are never used here (the app runs from
 # /opt/venv) and were its only remaining HIGH findings (wheel 0.45.1, the
