@@ -1035,6 +1035,7 @@ export default function Page() {
         useChatStore.getState().setLocale(d.locale);
       }
       const content = cleanResponse(d.reply ?? '');
+      const disc = d.discrepancy_report ?? d.discrepancyReport;
       const meta = {
         citations: d.citations ?? [],
         faithfulnessScore: d.faithfulness_score ?? null,
@@ -1044,6 +1045,12 @@ export default function Page() {
         nextActions: d.next_actions ?? [],
         workflow: d.workflow ?? undefined,
         resources: d.resources ?? (d.workflow?.resources ?? []),
+        discrepancyReport: disc && typeof disc === 'object' ? {
+          id: String(disc.id || ''),
+          status: String(disc.status || 'pending'),
+          frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+          discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+        } : undefined,
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -1136,6 +1143,7 @@ export default function Page() {
                 if (typeof p.reply === 'string' && p.reply.trim()) {
                   reveal.set(cleanResponse(p.reply));
                 }
+                const disc = p.discrepancy_report ?? p.discrepancyReport;
                 updateLastTurn((t) => ({
                   ...t,
                   citations: p.citations ?? t.citations,
@@ -1145,6 +1153,12 @@ export default function Page() {
                   escalationReason: p.escalation_reason ?? t.escalationReason,
                   workflow: p.workflow ?? t.workflow,
                   resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+                  discrepancyReport: disc && typeof disc === 'object' ? {
+                    id: String(disc.id || ''),
+                    status: String(disc.status || 'pending'),
+                    frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+                    discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+                  } : t.discrepancyReport,
                 }));
               }
             } catch {}
@@ -1173,6 +1187,7 @@ export default function Page() {
               if (typeof p.reply === 'string' && p.reply.trim()) {
                 reveal.set(cleanResponse(p.reply));
               }
+              const disc = p.discrepancy_report ?? p.discrepancyReport;
               updateLastTurn((t) => ({
                 ...t,
                 citations: p.citations ?? t.citations,
@@ -1183,6 +1198,12 @@ export default function Page() {
                 nextActions: p.next_actions ?? t.nextActions,
                 workflow: p.workflow ?? t.workflow,
                 resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+                discrepancyReport: disc && typeof disc === 'object' ? {
+                  id: String(disc.id || ''),
+                  status: String(disc.status || 'pending'),
+                  frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+                  discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+                } : t.discrepancyReport,
               }));
             } catch {}
           }
@@ -1198,17 +1219,24 @@ export default function Page() {
             const p = JSON.parse(data);
             meta = { ...meta, ...p };
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-              updateLastTurn((t) => ({
-                ...t,
-                citations: p.citations ?? t.citations,
-                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-                escalationRequired: p.escalation_required ?? t.escalationRequired,
-                escalationReason: p.escalation_reason ?? t.escalationReason,
-                nextActions: p.next_actions ?? t.nextActions,
-                workflow: p.workflow ?? t.workflow,
-                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
-              }));
+            const disc = p.discrepancy_report ?? p.discrepancyReport;
+            updateLastTurn((t) => ({
+              ...t,
+              citations: p.citations ?? t.citations,
+              faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+              retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+              escalationRequired: p.escalation_required ?? t.escalationRequired,
+              escalationReason: p.escalation_reason ?? t.escalationReason,
+              nextActions: p.next_actions ?? t.nextActions,
+              workflow: p.workflow ?? t.workflow,
+              resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+              discrepancyReport: disc && typeof disc === 'object' ? {
+                id: String(disc.id || ''),
+                status: String(disc.status || 'pending'),
+                frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+                discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+              } : t.discrepancyReport,
+            }));
           } catch {}
           return;
         }

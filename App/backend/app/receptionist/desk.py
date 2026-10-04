@@ -257,10 +257,37 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
 
 
 async def end(call_id: str, officer_id: str, speech_model: Any, *, is_admin: bool = False) -> dict[str, Any]:
-    """The officer ends the call: a closing line, then the caller's screen hangs up."""
-    room = _live_room(call_id)
+    """The officer ends the call: a closing line, then the caller's screen hangs up.
+
+    If the call is in waiting/transferring status (or stale/disconnected), an admin
+    or the assigned officer can terminate the call immediately.
+    """
+    try:
+        room = _live_room(call_id)
+    except DeskError as exc:
+        if exc.status == 404:
+            if not is_admin:
+                raise
+            now = time.time()
+            update_call(call_id, status="ended", end_reason="officer_terminated_stale", ended_at=now)
+            hub.publish_lobby("call.ended", {"call_id": call_id, "reason": "officer_terminated_stale"})
+            return {"ended": True, "call_id": call_id, "stale": True}
+        raise
+
     if room.state.mode != "bridged":
-        raise DeskError(409, "No officer is on this call")
+        if not is_admin and (not room.state.officer_id or room.state.officer_id != officer_id):
+            raise DeskError(409, "No officer is on this call")
+        # Allow ending/terminating a call that is waiting for an officer, transferring or idle
+        now = time.time()
+        room.state.mode = "ended"
+        if room.state.officer_id:
+            presence.clear_officer(room.state.officer_id)
+        await hang_up_caller(room, "officer_terminated_waiting")
+        update_call(call_id, status="ended", end_reason="officer_terminated_waiting", ended_at=now)
+        hub.publish_lobby("call.ended", {"call_id": call_id, "reason": "officer_terminated_waiting"})
+        asyncio.create_task(_save_draft_wrapup(call_id))
+        return {"ended": True, "call_id": call_id}
+
     if room.state.officer_id != officer_id and not is_admin:
         raise DeskError(403, "Another officer is on this call")
     presence.set_wrap_up(officer_id, call_id=call_id)

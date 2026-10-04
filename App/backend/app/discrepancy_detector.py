@@ -26,31 +26,52 @@ logger = logging.getLogger(__name__)
 # Patterns
 # ---------------------------------------------------------------------------
 
+# Positive indicators of an explicit bug or discrepancy report
+_EXPLICIT_BUG_PATTERNS = [
+    re.compile(
+        r"\b(?:report\s+(?:a\s+)?(?:bug|discrepancy|error|mistake|issue)|"
+        r"bug\s+report(?::|\b)|"
+        r"error\s+report(?::|\b)|"
+        r"i\s+(?:want|need|would\s+like)\s+to\s+report\s+(?:a\s+)?(?:bug|error|discrepancy|mistake)|"
+        r"there\s+(?:is|'s)\s+a\s+(?:bug|discrepancy|factual\s+error)\b)\b",
+        re.IGNORECASE,
+    ),
+]
+
 # Positive indicators of a factual disagreement
 _DISPUTE_PATTERNS = [
     re.compile(
-        r"\b(?:that(?:'s|\s+is)?\s+(?:wrong|incorrect|false|untrue|outdated|not\s+true|not\s+right|a\s+mistake|inaccurate)|"
+        r"\b(?:"
+        r"(?:that|this|it|the\s+(?:answer|information|reply|response|calculation)|your\s+(?:answer|information|reply|response|calculation))"
+        r"(?:'s|\s+is|\s+was)?\s+(?:wrong|incorrect|false|untrue|outdated|not\s+true|not\s+right|a\s+mistake|inaccurate|erroneous|misleading)|"
         r"you(?:'re|\s+are)\s+(?:wrong|mistaken|incorrect)|"
+        r"you\s+made\s+an?\s+(?:error|mistake)|"
+        r"(?:there\s+(?:is|'s)|i\s+found)\s+an?\s+(?:error|bug|mistake|discrepancy)|"
         r"(?:the\s+)?(?:rate|threshold|law|rule|act|procedure|fee|penalty)\s+(?:changed|was\s+updated|was\s+amended|is\s+actually|has\s+been\s+repealed)|"
         r"under\s+the\s+(?:20\d\d\s+)?(?:amendment|amendment\s+act|finance\s+act|statutory\s+instrument)|"
         r"actually\b.*?\b(?:is|was|changed|now|reduced|increased|raised|repealed|became|amended)\b|"
         r"it\s+(?:is|was)\s+(?:increased|reduced|raised|lowered|changed)\s+to\b|"
         r"instead\s+of\s+\d+|"
         r"not\s+\d+(?:\.\d+)?%\s*,?\s*(?:it(?:'s|\s+is)|but)\b|"
-        r"stop\s+giving\s+(?:false|wrong|outdated)\s+info)\b",
+        r"stop\s+giving\s+(?:false|wrong|outdated)\s+info|"
+        r"(?:report|reporting)\s+(?:a\s+)?(?:bug|discrepancy|error|mistake)|"
+        r"bug\s+report\b|"
+        r"error\s+report\b)\b",
         re.IGNORECASE,
     ),
     # Luganda dispute indicators
     re.compile(
         r"\b(?:nedda\b.*?\b(?:si\s+kituufu|kikyamu|si\s+kituukire|ssi\s+\d+|si\s+\d+|gukyuse|byakyusibwa)\b|"
         r"ebbago\s+(?:lyakyusibwa|lyakyuusibwa)|"
-        r"amateeka\s+makadde|omusolo\s+gukyuse)\b",
+        r"amateeka\s+makadde|omusolo\s+gukyuse|"
+        r"waliwo\s+(?:ensobi|akazito|obuzibu))\b",
         re.IGNORECASE,
     ),
     # Swahili dispute indicators
     re.compile(
         r"\b(?:hapana\b.*?\b(?:si\s+sahihi|si\s+kweli|siyo\s+kweli|siyo\s+\d+|si\s+\d+|imebadilika|kimebadilika)\b|"
-        r"sheria\s+imebadilika|kiwango\s+kimebadilika|hilo\s+ni\s+kosa)\b",
+        r"sheria\s+imebadilika|kiwango\s+kimebadilika|hilo\s+ni\s+kosa|"
+        r"kuna\s+(?:kosa|hitilafu))\b",
         re.IGNORECASE,
     ),
 ]
@@ -78,7 +99,7 @@ _SENTIMENT_COMPLAINT_PATTERNS = [
     ),
 ]
 
-_RATE_CLUES = re.compile(r"\b(?:\d+(?:\.\d+)?%|percent|rate|ugx|shillings|threshold|bracket|cap)\b", re.IGNORECASE)
+_RATE_CLUES = re.compile(r"(?:\b\d+(?:\.\d+)?%|\b(?:percent|rate|ugx|shillings|threshold|bracket|cap)\b)", re.IGNORECASE)
 _PROCEDURE_CLUES = re.compile(r"\b(?:form|step|portal|e-services|application|prn|apply|process|procedure)\b", re.IGNORECASE)
 _AMENDMENT_CLUES = re.compile(r"\b(?:act|amendment|gazette|repealed|statutory|law|section|schedule|202[0-9])\b", re.IGNORECASE)
 
@@ -130,13 +151,34 @@ def _extract_challenged_statement(bot_reply: str, user_message: str) -> str:
 
 def detect_discrepancy(
     user_message: str,
-    previous_bot_reply: str,
+    previous_bot_reply: str = "",
 ) -> DiscrepancyDetectionResult:
     """Analyze whether user_message asserts a factual error or outdated info in previous_bot_reply."""
     u_text = str(user_message or "").strip()
     b_text = str(previous_bot_reply or "").strip()
 
-    if not u_text or not b_text or len(u_text) < 4:
+    if not u_text or len(u_text) < 4:
+        return DiscrepancyDetectionResult(is_dispute=False)
+
+    # Check explicit bug report first (works even without previous bot reply)
+    is_explicit_bug = any(p.search(u_text) for p in _EXPLICIT_BUG_PATTERNS)
+    if is_explicit_bug and not b_text:
+        discrepancy_type = "outdated_law"
+        if _RATE_CLUES.search(u_text):
+            discrepancy_type = "incorrect_rate"
+        elif _PROCEDURE_CLUES.search(u_text):
+            discrepancy_type = "procedure_changed"
+        priority = "high" if re.search(r"\b(?:202[3-6]|amendment\s+act|statutory\s+instrument|finance\s+act)\b", u_text, re.IGNORECASE) else "normal"
+        return DiscrepancyDetectionResult(
+            is_dispute=True,
+            discrepancy_type=discrepancy_type,
+            confidence=0.95,
+            bot_statement="User-reported discrepancy in tax guidance or calculation",
+            user_correction=redact_pii_text(u_text),
+            suggested_priority=priority,
+        )
+
+    if not b_text:
         return DiscrepancyDetectionResult(is_dispute=False)
 
     # 1. Check for clarification exclusions (e.g. "No, I meant for an NGO")
@@ -150,12 +192,7 @@ def detect_discrepancy(
             return DiscrepancyDetectionResult(is_dispute=False)
 
     # 3. Check for dispute signals
-    matched = False
-    for pat in _DISPUTE_PATTERNS:
-        if pat.search(u_text):
-            matched = True
-            break
-
+    matched = is_explicit_bug or any(pat.search(u_text) for pat in _DISPUTE_PATTERNS)
     if not matched:
         return DiscrepancyDetectionResult(is_dispute=False)
 
@@ -169,7 +206,7 @@ def detect_discrepancy(
         discrepancy_type = "procedure_changed"
 
     # Identify challenged sentence
-    challenged = _extract_challenged_statement(b_text, u_text)
+    challenged = _extract_challenged_statement(b_text, u_text) or b_text[:300].strip()
 
     # Prioritization: legal/amendment/rate disputes with explicit citations or dates get high priority
     priority = "normal"

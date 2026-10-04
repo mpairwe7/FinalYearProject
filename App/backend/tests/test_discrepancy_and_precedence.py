@@ -72,6 +72,16 @@ class TestDiscrepancyDetector(unittest.TestCase):
         )
         self.assertFalse(res.is_dispute)
 
+    def test_explicit_bug_reports(self):
+        # Standalone bug report without previous reply
+        res = detect_discrepancy("Report bug: the withholding tax on professional services is actually 6%")
+        self.assertTrue(res.is_dispute)
+        self.assertEqual(res.discrepancy_type, "incorrect_rate")
+
+        # Conversational error variation
+        res2 = detect_discrepancy("This is wrong, your answer has an error", "The PAYE threshold is 235,000 UGX")
+        self.assertTrue(res2.is_dispute)
+
     def test_format_acknowledgement(self):
         msg_en = format_discrepancy_acknowledgement("kb_abcdef123456", locale="en")
         self.assertIn("#KB-ef123456", msg_en)

@@ -2293,6 +2293,7 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
         "next_actions": result.get("next_actions", []),
         "ticket_id": result.get("ticket_id", ""),
         "resources": result.get("resources", []),
+        "discrepancy_report": result.get("discrepancy_report"),
     }
     if include_short_circuit:
         payload.update(
@@ -7878,15 +7879,14 @@ class ChatModel:
             # 0a. Check for factual dispute against previous turn (Auto Bug / Knowledge Discrepancy Reporting)
             discrepancy_payload = None
             discrepancy_ack_prefix = ""
-            if flags.is_enabled("knowledge_discrepancy_reporting") and conversation_history:
+            if flags.is_enabled("knowledge_discrepancy_reporting"):
                 try:
                     last_turn = conversation_history[-1] if conversation_history else {}
                     prev_bot_reply = str(last_turn.get("bot_reply") or "").strip()
-                    if prev_bot_reply:
-                        from .discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
+                    from .discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
 
-                        det = detect_discrepancy(message, prev_bot_reply)
-                        if det.is_dispute:
+                    det = detect_discrepancy(message, prev_bot_reply)
+                    if det.is_dispute:
                             prev_sources = last_turn.get("sources") or []
                             rep = db.create_or_increment_discrepancy(
                                 bot_statement=det.bot_statement,

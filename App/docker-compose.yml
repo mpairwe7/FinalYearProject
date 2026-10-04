@@ -77,9 +77,9 @@ services:
       - VLLM_API_KEY=not-needed
       - VLLM_HTTP_TIMEOUT=90
       - LLM_MAX_TOKENS=512
-      - LLM_DEVICE=cuda:0
-      - LLM_LOAD_IN_4BIT=true
-      - RETRIEVER_DENSE_DEVICE=cuda:0
+      - LLM_DEVICE=cpu
+      - LLM_LOAD_IN_4BIT=false
+      - RETRIEVER_DENSE_DEVICE=cpu
       - RERANKER_DEVICE=cpu
       # --- Qwen3-8B LoRA adapters ---
       - LORA_ADAPTER_LG=/app/adapters/luganda-lora
@@ -133,6 +133,7 @@ services:
       - ../fine-tuning/adapters:/app/adapters:ro
       - ../ml:/app/ml:ro
       - ../plugins:/app/plugins:ro
+      - ./backend/app:/app/app
       - api_logs:/app/logs
       - ../data_store:/app/data_store
       - /mnt/nas1/caches/huggingface_cache:/app/hf_cache:ro
