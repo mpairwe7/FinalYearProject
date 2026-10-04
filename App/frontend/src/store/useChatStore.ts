@@ -61,6 +61,7 @@ export interface WorkflowState {
   step_title?: string;
   ui_widget?: 'options' | 'boolean' | 'text' | 'number' | 'portal_action' | string;
   options?: string[];
+  option_labels?: string[];
   portal_action?: { label: string; url: string; selector?: string } | null;
   all_steps?: WorkflowStepSummary[];
   resources?: ContextResource[];

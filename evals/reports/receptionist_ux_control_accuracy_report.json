@@ -1,5 +1,5 @@
 {
-  "timestamp": 1790956192.1900885,
+  "timestamp": 1791034230.8611505,
   "target_url": "ws://127.0.0.1:8083/v1/calls/stream",
   "all_passed": true,
   "total_tests": 7,
@@ -29,7 +29,7 @@
     {
       "test": "barge_in_user_control",
       "passed": true,
-      "bot_stop_ms": 1140,
+      "bot_stop_ms": 1144,
       "talking_at_barge": true,
       "interrupt_seen": true
     },
@@ -49,7 +49,7 @@
         },
         "lg_vat_accuracy": {
           "passed": true,
-          "text": "Okusinziira ku biwandiiko bya U R A, omusolo ogwa ebitundu kkumi na munaana ku buli kikumi gwe gwateekebwawo ku nsimbi z'okupangisa ennyumba mu mwaka gw'ebyensimbi twenty twenty-four okutuuka ku twenty twenty-five. Okumanya ebisingawo oba okufuna omuwendo omutuufu, kikulu okwebuuza ku mukungu wa U R A oba okukubira ku nnamba yaabwe ey'obwereere 0 800, 117, 0 0 0 / 0 800, 217, 0 0 0. Wandiyagadde okwogera n'omukozi ku nsonga eno?"
+          "text": "Omusolo gw'omugaso omwongere (VAT) mu Uganda guli ebitundu kkumi na munaana ku buli kikumi (18%) ku bintu n'empeereza ezisoloozebwako omusolo okusinziira ku tteeka lya Value Added Tax Act."
         },
         "sw_tin_accuracy": {
           "passed": true,
@@ -68,11 +68,11 @@
       "audio_chunks": 4,
       "latency_report": {
         "type": "latency_report",
-        "asr_ms": 311.3,
+        "asr_ms": 307.8,
         "mt_ms": 0.0,
-        "llm_ms": 27.6,
-        "tts_first_chunk_ms": 6452.9,
-        "total_ms": 6791.8,
+        "llm_ms": 15.5,
+        "tts_first_chunk_ms": 0.8,
+        "total_ms": 324.1,
         "asr_backend": "whisper_salt",
         "tts_backend": "speech.tts",
         "mt_backend": ""

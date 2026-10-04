@@ -32,7 +32,11 @@ function violationSummary(violations: Awaited<ReturnType<AxeBuilder["analyze"]>>
 }
 
 async function expectNoSeriousOrCritical(page: Page, surface: string) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA_TAGS).analyze();
+  const results = await new AxeBuilder({
+    page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"],
+  })
+    .withTags(WCAG_22_AA_TAGS)
+    .analyze();
   const violations = results.violations.filter(
     (violation) => violation.impact === "critical" || violation.impact === "serious",
   );

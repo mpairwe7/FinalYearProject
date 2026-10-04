@@ -814,40 +814,38 @@ def test_auth_dev_token():
 
 
 def test_connectors_endpoints():
-    """Verify GET /v1/connectors, POST /v1/connectors/{name}/toggle, GET /v1/connectors/{name}/records."""
+    """Connector operations are staff-only and describe local simulations accurately."""
     c = _client()
-    r1 = c.get("/v1/connectors")
+    assert c.get("/v1/connectors").status_code in (401, 503)
+    assert c.get("/v1/connectors", headers=_bearer(USER)).status_code == 403
+
+    r1 = c.get("/v1/connectors", headers=_bearer(STAFF))
     assert r1.status_code == 200
     data = r1.json()
     assert data["ok"] is True
+    assert data["live"] is False
+    assert data["mode"] == "simulation"
     assert len(data["connectors"]) >= 2
+    assert all(connector["live"] is False for connector in data["connectors"])
 
-    # Toggle connector
-    r2 = c.post("/v1/connectors/efris/toggle", json={"enable": True})
+    # Auditors can read status but cannot change connector availability.
+    auditor = _bearer(make_dev_token("e2e-auditor", role="ura_auditor"))
+    assert c.post("/v1/connectors/efris/toggle", json={"enable": True}, headers=auditor).status_code == 403
+
+    r2 = c.post("/v1/connectors/efris/toggle", json={"enable": True}, headers=_bearer(STAFF))
     assert r2.status_code == 200
     assert r2.json()["ok"] is True
+    assert c.post("/v1/connectors/efris/toggle", json={"enable": "false"}, headers=_bearer(STAFF)).status_code == 422
 
-    # Inspect records from independent database
-    r3 = c.get("/v1/connectors/efris/records?limit=3")
-    assert r3.status_code == 200
-    assert r3.json()["ok"] is True
-    assert "invoices" in r3.json()
+    # Raw fixture and taxpayer records are no longer exposed by the admin API.
+    r3 = c.get("/v1/connectors/efris/records?limit=3", headers=_bearer(STAFF))
+    assert r3.status_code == 410
+    assert "Raw connector records are not exposed" in r3.json()["detail"]
 
-    # Register external API/MCP connector
-    r4 = c.post(
-        "/v1/connectors/register",
-        json={
-            "name": "stripe_payments",
-            "endpoint_url": "http://127.0.0.1:8200",
-            "api_key": "sec_test_stripe_token",  # pragma: allowlist secret
-            "system_type": "external_payment",
-            "display_name": "Stripe Gateway",
-            "description": "External payment processor",
-        },
-    )
-    assert r4.status_code == 200
-    assert r4.json()["ok"] is True
-    assert r4.json()["status"] == "connected"
+    # Arbitrary endpoints and browser-supplied credentials are not accepted.
+    r4 = c.post("/v1/connectors/register", headers=_bearer(STAFF))
+    assert r4.status_code == 410
+    assert "Dynamic connector registration is disabled" in r4.json()["detail"]
 
 
 if __name__ == "__main__":

@@ -50,7 +50,6 @@ import { CallScreen } from '../components/call/CallScreen';
 import { useCallStore } from '../store/useCallStore';
 import { DocumentInspectionModal } from '../components/DocumentInspectionModal';
 import { SupportCaseModal } from '../components/SupportCaseModal';
-import { ConnectorsModal } from '../components/ConnectorsModal';
 import { useIdentity } from '../hooks/useIdentity';
 
 // ---------------------------------------------------------------------------
@@ -2041,8 +2040,6 @@ export default function Page() {
         ticketId={activeTicketId}
         conversationId={activeConversationId}
       />
-
-      <ConnectorsModal />
 
       <CallScreen />
 

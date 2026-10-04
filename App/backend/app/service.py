@@ -92,7 +92,6 @@ from .calculator_router import (
     format_calc_reply,
     format_rate_reply,
     has_money_amount,
-    parse_ugx_amount,
     plan_calculation,
     rate_lookup_calendar_years,
     plan_rate_lookup,
@@ -134,8 +133,6 @@ from .text_signals import (
     LOCALIZED_CONTACT_FOOTERS,
     NO_HITS_REPLY,
     get_greeting_reply,
-    get_gratitude_reply,
-    get_farewell_reply,
     get_greeting_next_actions,
     strip_conversational_prefix,
     detect_comparison_jurisdiction,
@@ -4686,7 +4683,13 @@ class ChatModel:
         thread_id: str = "",
         locale: str = "en",
     ) -> dict[str, Any] | None:
-        """Autonomously execute TIN registration when user attaches a National ID card."""
+        """Offer the secure portal route when an ID is attached; never register from chat.
+
+        The bundled TIN connector is a local simulator, not NIRA or URA. An
+        attachment is not consent to read back identity fields or create a
+        taxpayer record, so this path deliberately does neither.
+        """
+        del message, thread_id, locale
         if not attachments:
             return None
 
@@ -4700,99 +4703,20 @@ class ChatModel:
 
         if not nid_doc:
             return None
-
-        from .vision.ocr import extract_national_id_card_data, extract_phone_numbers, extract_nin_numbers
-
-        doc_text = getattr(nid_doc, "text", "")
-        data = extract_national_id_card_data(doc_text)
-        doc_fields = getattr(nid_doc, "fields", {}) or {}
-        nins = doc_fields.get("nins", []) or data.get("nins") or extract_nin_numbers(doc_text)
-        nin = nins[0] if nins else data.get("nin")
-        if not nin:
-            return None
-
-        phones = extract_phone_numbers(message) or extract_phone_numbers(doc_text)
-        phone = phones[0] if phones else None
-
-        full_name = data.get("full_name") or "Registered Citizen"
-        dob = data.get("date_of_birth") or "1995-05-12"
-        district = data.get("district") or "Kampala"
-
-        if not phone:
-            reply = (
-                f"### 🪪 National ID Scanned & Verified\n\n"
-                f"I have successfully scanned and verified your Ugandan National Identity Card from NIRA records:\n\n"
-                f"- **National Identification Number (NIN)**: `{nin}`\n"
-                f"- **Cardholder Name**: **{full_name}**\n"
-                f"- **Date of Birth**: {dob}\n"
-                f"- **District**: {district}\n\n"
-                f"To complete your **Instant URA Taxpayer Identification Number (TIN)** application autonomously, "
-                f"please provide your **active mobile telephone number** (e.g. `+256 772 123456`)."
-            )
-            return {
-                "reply": reply,
-                "confidence": 0.98,
-                "retrieval_mode": "autonomous_agent_tin",
-                "agent_role": "registration_specialist",
-                "sources": [{"title": "NIRA / URA Identity Verification Gateway", "url": "https://ura.go.ug"}],
-                "claims": [],
-                "claim_report": {"overall_decision": "approve"},
-            }
-
-        try:
-            from .tools import ToolRegistry
-            res = ToolRegistry.call(
-                "tin_apply_individual",
-                {
-                    "nin": nin,
-                    "full_name": full_name,
-                    "date_of_birth": dob,
-                    "phone": phone,
-                    "email": f"{full_name.lower().replace(' ', '.')}@taxpayer.ug",
-                    "district": district,
-                },
-            )
-        except Exception:
-            res = None
-
-        if not res or not res.get("ok"):
-            from plugins.tin_registration import TinRegistrationService
-            srv = TinRegistrationService()
-            from plugins.tin_registration.models import IndividualTinApplicationRequest
-            app_req = IndividualTinApplicationRequest(
-                nin=nin,
-                full_name=full_name,
-                date_of_birth=dob,
-                phone=phone,
-                email=f"{full_name.lower().replace(' ', '.')}@taxpayer.ug",
-                district=district,
-            )
-            reg_res = srv.apply_individual_tin(app_req)
-            res = reg_res.model_dump()
-
-        tin = res.get("tin", "1000000008")
-        tax_heads = res.get("registered_tax_heads", ["INCOME_TAX_INDIVIDUAL"])
-        heads_str = ", ".join(tax_heads)
-
         reply = (
-            f"### 🎉 Autonomous TIN Registration Completed!\n\n"
-            f"Your individual taxpayer profile has been registered in the URA e-Tax registry:\n\n"
-            f"- **Assigned 10-Digit TIN**: `{tin}`\n"
-            f"- **Taxpayer Name**: **{full_name}**\n"
-            f"- **Verified NIN**: `{nin}`\n"
-            f"- **Registered Phone**: `{phone}`\n"
-            f"- **Tax Obligations**: {heads_str}\n"
-            f"- **Registration Status**: `ACTIVE`\n\n"
-            f"You can now use your 10-digit TIN `{tin}` to log into the URA web portal, generate PRNs, "
-            f"or file annual tax returns."
+            "### Keep your identity details safe\n\n"
+            "This chat does not verify National IDs with NIRA or submit TIN applications to URA. "
+            "I will not repeat the ID details here, and this attachment has not been sent to URA by this guide.\n\n"
+            "Continue through the official URA portal at https://ura.go.ug and choose eServices → TIN Registration. "
+            "Keep your original ID or company registration documents ready. Do not share passwords, one-time codes, "
+            "or payment card details in chat."
         )
-
         return {
             "reply": reply,
-            "confidence": 0.99,
-            "retrieval_mode": "autonomous_agent_tin",
+            "confidence": 1.0,
+            "retrieval_mode": "tin_registration_guidance",
             "agent_role": "registration_specialist",
-            "sources": [{"title": "URA Taxpayer Registration Gateway", "url": "https://ura.go.ug"}],
+            "sources": [],
             "claims": [],
             "claim_report": {"overall_decision": "approve"},
         }
@@ -4903,11 +4827,15 @@ class ChatModel:
         "sw": {
             "names": {
                 "TIN Registration": "Usajili wa TIN",
+                "TIN Registration Guide": "Mwongozo wa Usajili wa TIN",
+                "Bonded Warehouse & BWIMS Guidance": "Mwongozo wa Ghala la Forodha na BWIMS",
                 "TIN Registration Help": "Usaidizi wa Usajili wa TIN",
+                "Tax Invoice & EFRIS Document Review": "Mapitio ya Ankara ya Kodi na EFRIS",
                 "VAT Registration Check": "Ukaguzi wa Usajili wa VAT",
                 "VAT Calculator": "Kikokotoo cha VAT",
                 "PAYE Calculator": "Kikokotoo cha PAYE",
                 "Payment Assistance": "Msaada wa Malipo ya Ushuru",
+                "Return Filing": "Uwasilishaji wa Marejesho",
                 "Tax Clearance Certificate": "Cheti cha Kibali cha Ushuru",
                 "Return Filing Help": "Usaidizi wa Uwasilishaji wa Marejesho",
                 "Customs Clearance Help": "Usaidizi wa Kibali cha Forodha",
@@ -4916,6 +4844,32 @@ class ChatModel:
             },
             "step_titles": {
                 "Taxpayer type": "Aina ya Mlipakodi",
+                "Applicant type": "Aina ya Mwombaji",
+                "Documents": "Nyaraka",
+                "Document category": "Aina ya Hati",
+                "Supplier TIN present": "TIN ya Muuzaji",
+                "Buyer TIN present": "TIN ya Mnunuzi",
+                "Net amount": "Kiasi bila Kodi",
+                "VAT amount": "Kiasi cha VAT",
+                "EFRIS serial": "Msimbo wa EFRIS",
+                "Summary": "Muhtasari",
+                "Continue securely": "Endelea kwa Usalama",
+                "Tax type": "Aina ya Kodi",
+                "Reference type": "Aina ya Rejea",
+                "Amount": "Kiasi",
+                "Amount due": "Kiasi Kinachodaiwa",
+                "Payment channel": "Njia ya Malipo",
+                "Confirm the amount": "Thibitisha Kiasi",
+                "Pay and keep proof": "Lipa na Hifadhi Uthibitisho",
+                "Filing period": "Kipindi cha Kuwasilisha",
+                "Supporting records": "Nyaraka Saidizi",
+                "Portal access": "Ufikiaji wa Tovuti",
+                "Recover portal access": "Rejesha Ufikiaji wa Tovuti",
+                "Prepare records": "Andaa Nyaraka",
+                "Continue in the URA portal": "Endelea kwenye tovuti ya URA",
+                "What do you need?": "Unahitaji msaada gani?",
+                "Your role": "Jukumu lako",
+                "Official next steps": "Hatua rasmi zinazofuata",
                 "Kind": "Aina ya Mlipakodi",
                 "Legal name": "Jina la Kisheria",
                 "National ID (NIN)": "Kitambulisho cha Taifa (NIN) au Pasipoti",
@@ -4931,28 +4885,65 @@ class ChatModel:
                 "Gross amount": "Kiasi Kamili",
                 "Tax rate": "Kiwango cha Ushuru",
             },
+            "portal_labels": {
+                "Get a TIN": "Pata TIN",
+                "URA eTax portal": "Tovuti ya URA eTax",
+                "EFRIS portal": "Tovuti ya EFRIS",
+                "Make a payment (Generate PRN)": "Lipa (Tengeneza PRN)",
+                "Bonded Warehouse Information Management System (BWIMS)": "Mfumo wa Taarifa za Maghala ya Forodha (BWIMS)",
+                "Uganda Electronic Single Window": "Mfumo wa Dirisha Moja la Uganda",
+            },
             "options": {
                 "individual": "mtu binafsi",
                 "organisation": "shirika",
                 "organization": "shirika",
                 "company": "kampuni",
                 "ngo": "shirika lisilo la kiserikali",
+                "efris invoice": "Ankara ya EFRIS",
+                "standard tax invoice": "Ankara ya kawaida ya kodi",
+                "fiscal receipt": "Risiti ya kodi ya kielektroniki",
+                "withholding certificate": "Cheti cha kodi ya zuio",
                 "yes": "ndiyo",
                 "no": "hapana",
                 "resident": "mkazi",
                 "non-resident": "asiye mkazi",
                 "citizen": "mwananchi",
                 "foreigner": "mgeni",
+                "vat": "VAT",
+                "paye": "PAYE",
+                "corporation tax": "kodi ya kampuni",
+                "withholding tax": "kodi ya zuio",
+                "stamp duty": "ushuru wa stempu",
+                "prn": "PRN",
+                "return": "marejesho",
+                "assessment": "tathmini",
+                "unknown": "sijui",
+                "bank": "benki",
+                "mobile money": "pesa kwa simu",
+                "online card": "kadi ya mtandaoni",
+                "other": "nyingine",
+                "overview": "maelezo ya jumla",
+                "track cargo": "kufuatilia shehena",
+                "clear or release goods": "kutoa au kuachilia bidhaa",
+                "warehouse operator guidance": "mwongozo kwa mwendeshaji wa ghala",
+                "report a BWIMS issue": "kuripoti tatizo la BWIMS",
+                "importer": "mwagizaji",
+                "clearing agent": "wakala wa forodha",
+                "warehouse operator": "mwendeshaji wa ghala",
             },
         },
         "lg": {
             "names": {
                 "TIN Registration": "Okwewandiisa ku TIN",
+                "TIN Registration Guide": "Obulagirizi bw'Okwewandiisa ku TIN",
+                "Bonded Warehouse & BWIMS Guidance": "Obulagirizi ku BWIMS n'amaterekero g'Ebyamaguzi bya Customs",
                 "TIN Registration Help": "Obuyambi bw'Okwewandiisa ku TIN",
+                "Tax Invoice & EFRIS Document Review": "Okukebera Invoice y'Omusolo ne EFRIS",
                 "VAT Registration Check": "Okwekebejja Okwewandiisa ku VAT",
                 "VAT Calculator": "Okubala Omusolo gwa VAT",
                 "PAYE Calculator": "Okubala Omusolo gwa PAYE",
                 "Payment Assistance": "Obuyambi bw'Okusasula Omusolo",
+                "Return Filing": "Okusindika Alitula",
                 "Tax Clearance Certificate": "Satifiketi y'Okumalayo Omusolo",
                 "Return Filing Help": "Obuyambi bw'Okusindika Alitula",
                 "Customs Clearance Help": "Obuyambi bw'Okuyisa Ebyamaguzi mu Forodha",
@@ -4961,6 +4952,32 @@ class ChatModel:
             },
             "step_titles": {
                 "Taxpayer type": "Ekika ky'Omusasuzi",
+                "Applicant type": "Ekika ky'Omuwandiisa",
+                "Documents": "Ebiwandiiko",
+                "Document category": "Ekika ky'Ekiwandiiko",
+                "Supplier TIN present": "TIN y'Omusubuzi",
+                "Buyer TIN present": "TIN y'Oguze",
+                "Net amount": "Omuwendo nga tegunnaba VAT",
+                "VAT amount": "Omuwendo gwa VAT",
+                "EFRIS serial": "Koodi ya EFRIS",
+                "Summary": "Mu bufunze",
+                "Continue securely": "Weyongereyo mu Ngeri Ekuuma",
+                "Tax type": "Ekika ky'Omusolo",
+                "Reference type": "Ekika ky'Ekitegeeza",
+                "Amount": "Omuwendo",
+                "Amount due": "Omuwendo Ogusasibwa",
+                "Payment channel": "Engeri y'Okusasula",
+                "Confirm the amount": "Kakasa Omuwendo",
+                "Pay and keep proof": "Sasula Otereke Obukakafu",
+                "Filing period": "Ekiseera ky'Okusindika",
+                "Supporting records": "Ebiwandiiko Ebiwagira",
+                "Portal access": "Okuyingira ku Mukutu",
+                "Recover portal access": "Ddamu Okufuna Okuyingira ku Mukutu",
+                "Prepare records": "Teekateeka Ebiwandiiko",
+                "Continue in the URA portal": "Weyongereyo ku mukutu gwa URA",
+                "What do you need?": "Oyagala buyambi ki?",
+                "Your role": "Omulimu gwo",
+                "Official next steps": "Emitendera Emitongole Egiddako",
                 "Kind": "Ekika ky'Omusasuzi",
                 "Legal name": "Erinnya ly'Amateeka",
                 "National ID (NIN)": "Endagamuntu (NIN) oba Paasipooti",
@@ -4976,18 +4993,51 @@ class ChatModel:
                 "Gross amount": "Omuwendo Gwonnamu",
                 "Tax rate": "Omutemwa gw'Omusolo",
             },
+            "portal_labels": {
+                "Get a TIN": "Funa TIN",
+                "URA eTax portal": "Omukutu gwa URA eTax",
+                "EFRIS portal": "Omukutu gwa EFRIS",
+                "Make a payment (Generate PRN)": "Sasula (Fulumya PRN)",
+                "Bonded Warehouse Information Management System (BWIMS)": "Omukutu gwa BWIMS",
+                "Uganda Electronic Single Window": "Enkola ya Uganda ey'Okuyingira ku Mukutu Ogumu",
+            },
             "options": {
                 "individual": "omuntu kinnoomu",
                 "organisation": "ekitongole",
                 "organization": "ekitongole",
                 "company": "kampuni",
                 "ngo": "ekitongole ky'obwannakyewa",
+                "efris invoice": "Invoice ya EFRIS",
+                "standard tax invoice": "Invoice y'omusolo eya bulijjo",
+                "fiscal receipt": "Risiti y'omusolo eya EFRIS",
+                "withholding certificate": "Satifiketi y'omusolo ogwasigaziddwa",
                 "yes": "yeeyo",
                 "no": "nedda",
                 "resident": "omutuuze",
                 "non-resident": "atali mutuuze",
                 "citizen": "omunnansi",
                 "foreigner": "omugwira",
+                "vat": "VAT",
+                "paye": "PAYE",
+                "corporation tax": "omusolo gwa kampuni",
+                "withholding tax": "omusolo ogusigazibwa",
+                "stamp duty": "omusolo gwa sitampu",
+                "prn": "PRN",
+                "return": "alitula",
+                "assessment": "okukebera omusolo",
+                "unknown": "simanyi",
+                "bank": "bbanka",
+                "mobile money": "ssente ku ssimu",
+                "online card": "kaadi ku yintaneeti",
+                "other": "endala",
+                "overview": "ebifaayo okumanya",
+                "track cargo": "okulondoola ebyamaguzi",
+                "clear or release goods": "okuyisa oba okukkiriza ebyamaguzi",
+                "warehouse operator guidance": "obulagirizi bw'omuddukanya w'ekifo eky'okuterekamu ebyamaguzi",
+                "report a BWIMS issue": "okutegeeza ku kizibu kya BWIMS",
+                "importer": "omuntu ayingiza ebyamaguzi",
+                "clearing agent": "agenti wa Customs",
+                "warehouse operator": "omukulembeze w'ekifo eky'okuterekamu ebyamaguzi",
             },
         },
     }
@@ -5002,6 +5052,7 @@ class ChatModel:
         out = dict(wf)
         names = loc_data.get("names", {})
         step_titles = loc_data.get("step_titles", {})
+        portal_labels = loc_data.get("portal_labels", {})
         options_map = loc_data.get("options", {})
 
         cur_name = str(out.get("name") or "").strip()
@@ -5013,7 +5064,18 @@ class ChatModel:
             out["step_title"] = step_titles[cur_step_title]
 
         if "options" in out and isinstance(out["options"], list):
-            out["options"] = [options_map.get(opt, opt) for opt in out["options"]]
+            # Keep the schema values unchanged for validation; the UI renders
+            # these parallel labels while submitting the original option.
+            out["option_labels"] = [options_map.get(opt, opt) for opt in out["options"]]
+
+        portal_action = out.get("portal_action")
+        if isinstance(portal_action, dict):
+            portal_label = str(portal_action.get("label") or "")
+            if portal_label in portal_labels:
+                out["portal_action"] = {
+                    **portal_action,
+                    "label": portal_labels[portal_label],
+                }
 
         if "all_steps" in out and isinstance(out["all_steps"], list):
             new_all = []
@@ -5027,6 +5089,14 @@ class ChatModel:
                 else:
                     new_all.append(step)
             out["all_steps"] = new_all
+
+        if "resources" in out and isinstance(out["resources"], list):
+            out["resources"] = [
+                cls._localize_resource(resource, locale)
+                if isinstance(resource, dict)
+                else resource
+                for resource in out["resources"]
+            ]
 
         return out
 
@@ -9718,7 +9788,7 @@ class ChatModel:
         if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
             if cached:
-                return _with_discrepancy({
+                return self._finalize_result({
                     **cached,
                     "conversation_id": thread_id,
                     "locale": locale,
@@ -9738,7 +9808,7 @@ class ChatModel:
                 locale=locale,
             )
             if route_decision.route == AgentRoute.CLARIFY:
-                return _with_discrepancy({
+                return {
                     "reply": route_decision.clarification_question
                     or CLARIFICATION_PROMPT,
                     "sources": [],
@@ -9757,7 +9827,7 @@ class ChatModel:
                     ),
                     "_hits": [],
                     "_history": [],
-                })
+                }
 
         # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
         conv_res_s = handle_conversational_turn(message, locale)

@@ -39,6 +39,7 @@ export const en = {
   'composer.label': 'Type your message',
   'composer.send': 'Send message',
   'composer.attach': 'Attach a file',
+  'composer.attachPrivacyNotice': 'Attach documents or photos only when needed for your question. Never share passwords or one-time codes.',
   'composer.removeAttachment': 'Remove attachment',
   'composer.micStart': 'Start speaking',
   'composer.micStop': 'Stop listening',
@@ -127,6 +128,36 @@ export const en = {
   'message.escalated':
     'This has been passed to a URA officer. They will reply here.',
   'message.latest': 'Latest',
+
+  // Guided workflows ------------------------------------------------------
+  'workflow.region': 'Guided workflow: {name}',
+  'workflow.step': 'Step {current} of {total}',
+  'workflow.completed': 'Completed',
+  'workflow.currentStep': 'Current step: {title}',
+  'workflow.stepProgress': 'Step progress',
+  'workflow.quickOptions': 'Quick options',
+  'workflow.chooseOption': 'Choose an option to advance:',
+  'workflow.selectOption': 'Select: {label}',
+  'workflow.resources': 'Required Forms & Source References',
+  'workflow.openPortal': 'Open official portal: {label}',
+  'workflow.openPortalDefault': 'Open URA Portal ↗',
+  'workflow.cancel': 'Cancel workflow',
+
+  // Official resources shown alongside workflow guidance ------------------
+  'resource.title': 'Official URA Forms, Templates & Sources',
+  'resource.verified': 'Official Verified Sources',
+  'resource.type.download': 'Downloadable Form',
+  'resource.type.online': 'Online Form',
+  'resource.type.statute': 'Statutory Law',
+  'resource.type.guide': 'Official Guide',
+  'resource.effectivePeriod': 'Effective statutory period',
+  'resource.statutoryBasis': 'Statutory Basis:',
+  'resource.checklist': 'Checklist before submitting:',
+  'resource.action.download': 'Download Template',
+  'resource.action.online': 'Open Online Form',
+  'resource.action.statute': 'View Statute',
+  'resource.action.guide': 'Access Guide',
+  'resource.source': 'Source: {domain}',
 
   // Human handoff. The taxpayer's own way into the officer queue — every
   // other route into it is a judgement the system makes for them.

@@ -1,7 +1,7 @@
 """Sample system implementation for URA EFRIS (Electronic Fiscal Receipting and Invoicing System).
 
-Simulates the core business logic, validation rules, and transactional persistence
-of the official URA EFRIS platform backed by an independent SQLite database.
+Simulates sample business logic, validation rules, and transactional persistence
+in a local SQLite database; it is not connected to the official URA EFRIS platform.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class EfrisService:
         return self._db
 
     def _generate_fdn(self) -> str:
-        """Generate official 20-digit Fiscal Document Number (FDN)."""
+        """Generate a simulator-only 20-digit sample FDN."""
         now = datetime.datetime.now(_UTC)
         prefix = "01"  # 01 = Standard Fiscal Invoice
         date_part = now.strftime("%y%m%d")  # 6 digits: YYMMDD
@@ -62,7 +62,7 @@ class EfrisService:
         return self._db.get_taxpayer(tin.strip())
 
     def issue_fiscal_invoice(self, request: FiscalInvoiceRequest) -> FiscalInvoiceResponse:
-        """Generate and fiscalize an invoice in real-time."""
+        """Generate a sample invoice in the local simulator database."""
         with self._lock:
             seller_tin = request.seller_tin.strip()
             taxpayer = self._db.get_taxpayer(seller_tin)
@@ -114,7 +114,8 @@ class EfrisService:
             fdn = self._generate_fdn()
             verification_code = self._generate_verification_code(fdn, gross_amount)
             issued_at = datetime.datetime.now(_UTC).isoformat()
-            qr_url = f"https://efris.ura.go.ug/verify?fdn={fdn}&code={verification_code}"
+            # A fake FDN must never be linked to the real verification portal.
+            qr_url = ""
 
             # Stock balance deduction if inventory tracked for this seller
             for item in request.items:
@@ -220,7 +221,7 @@ class EfrisService:
             gross_amount=record["gross_amount"],
             currency=record["currency"],
             items_count=record["items_count"],
-            message="Invoice successfully verified as authentic on URA EFRIS.",
+            message="Invoice matched the local EFRIS simulator record.",
         )
 
     def apply_credit_note(self, request: CreditNoteRequest) -> CreditNoteResponse:

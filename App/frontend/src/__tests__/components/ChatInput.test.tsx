@@ -116,7 +116,7 @@ describe("ChatInput attachments", () => {
     expect(screen.queryByLabelText(/Attach a document/)).not.toBeInTheDocument();
   });
 
-  it("renders the Add button and opens Grok-style dropdown with Upload, Photo, and Connector options", async () => {
+  it("offers document and photo attachments with the privacy reminder", async () => {
     render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
     const addBtn = screen.getByTestId("composer-add-btn");
     expect(addBtn).toBeInTheDocument();
@@ -125,27 +125,8 @@ describe("ChatInput attachments", () => {
 
     expect(screen.getByText("Upload a file")).toBeInTheDocument();
     expect(screen.getByText("Take a photo")).toBeInTheDocument();
-    expect(screen.getByText("Add connector")).toBeInTheDocument();
-  });
-
-  it("navigates to connectors view and allows popup connect", async () => {
-    render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
-    const addBtn = screen.getByTestId("composer-add-btn");
-    await userEvent.click(addBtn);
-
-    const connectorOpt = screen.getByText("Add connector");
-    await userEvent.click(connectorOpt);
-
-    expect(screen.getByText("Connect extra systems")).toBeInTheDocument();
-    expect(screen.getByText(/Electronic Fiscal Receipting/)).toBeInTheDocument();
-
-    const disconnectButtons = screen.getAllByRole("button", { name: /Disconnect/ });
-    expect(disconnectButtons.length).toBeGreaterThan(0);
-
-    // Clicking back returns to main menu
-    const backBtn = screen.getByLabelText("Back to add menu");
-    await userEvent.click(backBtn);
-    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+    expect(screen.getByText(/Never share passwords or one-time codes/)).toBeInTheDocument();
+    expect(screen.queryByText("Add connector")).not.toBeInTheDocument();
   });
 
   it("does not render any composer-connector-bar keeping prompt area clean", () => {

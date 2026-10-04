@@ -157,7 +157,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     href: "/admin/discrepancies",
     label: "Knowledge & Bug Reports",
     navLabel: "Bug Reports",
-    group: "triage",
+    group: "configure",
     blurb: "Taxpayer-reported inaccuracies and knowledge discrepancies",
     roles: ["ura_staff", "ura_admin", "ura_auditor"],
   },
@@ -176,6 +176,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     group: "configure",
     blurb: "Queued email and SMS rows",
     roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/admin/connectors",
+    label: "System connectors",
+    navLabel: "Connectors",
+    group: "configure",
+    blurb: "Health and enablement for reviewed connector simulators",
+    roles: ["ura_staff", "ura_admin"],
   },
   {
     href: "/analytics",

@@ -4680,14 +4680,16 @@ def download_offline_bundle(
 # ---------------------------------------------------------------------------
 
 
-@app.get("/v1/connectors", tags=["connectors"])
+@app.get("/v1/connectors", tags=["connectors"], dependencies=[Depends(require_admin_access)])
 def list_system_connectors() -> dict[str, Any]:
-    """List system connectors (EFRIS, DTS) with health and independent database metrics."""
+    """List staff-only connector health and simulator metrics."""
     from .plugins import get_orchestrator
 
     orchestrator = get_orchestrator()
     return {
         "ok": True,
+        "live": False,
+        "mode": "simulation",
         "connectors": orchestrator.get_connectors_summary(),
         "health": orchestrator.health_check(),
     }
@@ -4697,12 +4699,21 @@ def list_system_connectors() -> dict[str, Any]:
 def toggle_system_connector(
     name: str,
     payload: dict[str, Any] = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Connect or disconnect an enterprise system connector."""
+    """Enable or disable a built-in connector from the staff console."""
+    _require_staff_writer(ctx)
+    if os.getenv("APP_ENV", "development").lower() == "production":
+        raise HTTPException(
+            status_code=409,
+            detail="Local simulator connectors cannot be enabled in production.",
+        )
     from .plugins import get_orchestrator
 
     orchestrator = get_orchestrator()
-    enable = bool(payload.get("enable", True))
+    enable = payload.get("enable", True)
+    if not isinstance(enable, bool):
+        raise HTTPException(status_code=422, detail="enable must be a boolean")
     return orchestrator.toggle_connector(name, enable)
 
 
@@ -4710,34 +4721,22 @@ def toggle_system_connector(
 def inspect_connector_database(
     name: str,
     limit: int = Query(5, ge=1, le=50),
+    _ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Retrieve recent records from the connector's independent SQLite database."""
-    from .plugins import get_orchestrator
+    """Retire raw connector record inspection; use aggregate connector health instead."""
+    del name, limit, _ctx
+    raise HTTPException(
+        status_code=410,
+        detail="Raw connector records are not exposed. Use /v1/connectors for aggregate simulator health.",
+    )
 
-    orchestrator = get_orchestrator()
-    return orchestrator.get_connector_records(name, limit=limit)
 
-
-@app.post("/v1/connectors/register", tags=["connectors"])
-def register_external_connector(
-    payload: dict[str, Any] = Body(...),
-) -> dict[str, Any]:
-    """Register an external API/MCP system connector (e.g. Stripe, GitHub, or standalone enterprise server)."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    name = str(payload.get("name", "")).strip()
-    endpoint_url = str(payload.get("endpoint_url", "")).strip()
-    if not name or not endpoint_url:
-        raise HTTPException(status_code=400, detail="name and endpoint_url are required")
-
-    return orchestrator.register_remote_connector(
-        name=name,
-        endpoint_url=endpoint_url,
-        api_key=str(payload.get("api_key", "")),
-        system_type=str(payload.get("system_type", "external_mcp")),
-        display_name=str(payload.get("display_name", "")),
-        description=str(payload.get("description", "")),
+@app.post("/v1/connectors/register", tags=["connectors"], dependencies=[Depends(require_admin_access)])
+def register_external_connector() -> dict[str, Any]:
+    """Reject unverified dynamic servers until an MCP handshake and review flow exist."""
+    raise HTTPException(
+        status_code=410,
+        detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
     )
 
 

@@ -24,9 +24,8 @@ class EfrisFiscalInvoiceTool(Tool):
         return ToolSchema(
             name="efris_fiscal_invoice",
             description=(
-                "Issue or verify URA EFRIS fiscal documents. Allows generating a 20-digit "
-                "Fiscal Document Number (FDN) with QR code or authenticating an existing "
-                "invoice FDN and verification code."
+                "Create or check sample fiscal-document records in the local EFRIS simulator. "
+                "Generated FDN-shaped values are not official fiscal documents and cannot be verified by URA."
             ),
             parameters={
                 "type": "object",
@@ -91,6 +90,7 @@ class EfrisFiscalInvoiceTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="efris",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
@@ -146,8 +146,8 @@ class EfrisTaxpayerStatusTool(Tool):
         return ToolSchema(
             name="efris_taxpayer_status",
             description=(
-                "Query taxpayer EFRIS compliance status, integration mode (EFD vs system-to-system), "
-                "active terminal serial numbers, and VAT status."
+                "Read a sample taxpayer profile from the local EFRIS simulator. This does not check URA registration, "
+                "VAT status, or terminal readiness."
             ),
             parameters={
                 "type": "object",
@@ -192,8 +192,7 @@ class EfrisStockManagementTool(Tool):
         return ToolSchema(
             name="efris_stock_management",
             description=(
-                "Manage taxpayer stock inventory on EFRIS. Query current stock quantities on hand "
-                "or record stock additions from local purchases or customs imports."
+                "Read or change sample inventory in the local EFRIS simulator; no URA stock record is checked or changed."
             ),
             parameters={
                 "type": "object",
@@ -237,6 +236,7 @@ class EfrisStockManagementTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="efris",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
@@ -286,9 +286,8 @@ class EfrisCreditNoteTool(Tool):
         return ToolSchema(
             name="efris_credit_note",
             description=(
-                "Create a credit note on URA EFRIS against an issued fiscal document (FDN). "
-                "Required when goods are returned, price discounts are applied, or invoicing errors occur. "
-                "Requires elevated consent."
+                "Create a sample credit-note record in the local EFRIS simulator. It does not adjust an official invoice "
+                "or URA account. Requires elevated consent."
             ),
             parameters={
                 "type": "object",

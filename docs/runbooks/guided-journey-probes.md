@@ -48,6 +48,8 @@ stacks, not production.
 | --- | --- | --- |
 | A how-to question is answered and offers the matching journey | how-to return, TCC need, vehicle how-to | `turn_guidance.guided_mode_action`; G39 entrance rule in `service._maybe_handle_workflow` |
 | An explicit request starts the journey | help-me return/TIN, VAT walkthrough, PRN, customs, objection, TCC guide, imported car | `WorkflowRegistry.match_trigger` (normalised, name as trigger) |
+| The TIN guide does not ask for identifiers or claim registration | individual/company TIN guide | `app/workflows/flows/tin_registration.yaml`; `test_tin_guide_avoids_personal_data_and_makes_no_submission_claim` |
+| Invoice review asks only whether TIN fields are present and never claims a live EFRIS check | invoice review | `app/workflows/flows/audit_invoice_compliance.yaml`; `test_invoice_review_does_not_collect_tins_or_claim_live_efris_verification` |
 | "Help me …" gets no stress opener | help-me return/TIN | `text_signals._DISTRESS_PATTERNS` |
 | Only account-state questions escalate | how-to return (no), "What is my balance?" (yes) | `HOW_TO_QUESTION_RE` in `agents/patterns/en.py` |
 | An explicit human request escalates | "I want to talk to a person" | supervisor escalation rules |
@@ -60,6 +62,12 @@ stacks, not production.
 | Asking for another flow inside one switches | TCC, then "help me file my return" | `service._leaves_flow_for_another` |
 | "Help me" does not exempt an account problem | "Please help me, my account is locked" | `HOW_TO_QUESTION_RE` has no "help me" |
 | Luganda / Kiswahili questions are answered in that language | Luganda TIN, Kiswahili TIN | `localize_reply` (G64 open for Kiswahili) |
+
+TIN, return, and payment guide steps do not transact. When checking non-English
+journeys, verify the explicit “not submitted” guidance and official portal link
+survive localization. Curated TIN and invoice-review step labels/buttons are
+checked by the integration suite; reply translation still uses the guarded
+`localize_reply` path.
 
 "I need a tax clearance certificate" is **answered, not captured**: "I need …"
 reads as a question at the flow entrance (G39). The answer carries the

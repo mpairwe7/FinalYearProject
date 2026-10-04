@@ -16,7 +16,7 @@
 | 3 | **Excessive Tool Agency** | Critical | Unauthorized execution of tax adjustments via MCP | Strict tool policy whitelist, human-in-the-loop | **Mitigated** |
 | 4 | **Direct / Indirect Prompt Injection** | High | Jailbreak prompts or adversarial PDF instructions | InputGuard multi-tier sanitization, strict delimiters | **Mitigated** |
 | 5 | **Tax Law Hallucination** | High | LLM fabricating tax rates or compliance deadlines | DeBERTa NLI cross-encoder grounding (>0.65 threshold) | **Mitigated** |
-| 6 | **Connector SSRF & Internal Network Probing** | High | Malicious remote MCP connector registration | Strict URL validation, metadata blocking, private IP ban in prod | **Mitigated** |
+| 6 | **Connector SSRF & Internal Network Probing** | High | Malicious remote connector registration | Dynamic registration disabled; protected internal simulator API; production gate | **Mitigated by disabling registration** |
 | 7 | **OCR Indirect Prompt Injection** | High | Adversarial instructions hidden in National ID/receipts | Strict regex entity extraction, document classification gate | **Mitigated** |
 | 8 | **Denial of Service (DoS)** | High | Quadratic attention token exhaustion / flood requests | SlowAPI / Redis sliding window rate limits, max 8k ctx | **Mitigated** |
 | 9 | **Supply Chain Vulnerability** | High | Compromised upstream Python/Node dependencies | Pip-audit + Trivy SCA in CI, Dependabot, SBOMs | **Mitigated** |
@@ -93,14 +93,14 @@
   - *Mitigation*: Context window clamped to 8192 tokens, max output clamped to 1024 tokens.
 
 ### 3.5 Enterprise Connectors & Standalone Systems
-- **T-CON-01 (Elevation of Privilege / SSRF)**: Malicious remote MCP connector registration probes internal network or cloud metadata.
-  - *Mitigation*: Scheme validation, metadata endpoint rejection (`169.254.169.254`), private IP resolution blocking in production, `FLAG_ENTERPRISE_CONNECTORS` production gate.
-- **T-CON-02 (Tampering / Indirect Injection)**: Attacker embeds instructions in National ID card OCR images to trigger unauthorized TIN issuance.
-  - *Mitigation*: Regex-based entity isolation (NIN, phone), document classification priority gate, PII input guard validation.
-- **T-CON-03 (Spoofing / XSS)**: Automated brute-force credential stuffing and unescaped database XSS on standalone web portals.
-  - *Mitigation*: Mandatory Auth Gate, dynamic server-validated HTML5 canvas CAPTCHA with Bezier distortion curves, HTML escaping on all rendered fields.
-- **T-CON-04 (Tampering / Business Logic)**: State manipulation via credit note over-crediting, unvalidated stamp activations, or unauthenticated stock releases.
-  - *Mitigation*: Cumulative credited balance tracking, order payment checks, exact matching on taxpayer lookups, non-idempotent tool flags.
+- **T-CON-01 (Elevation of Privilege / SSRF)**: An unreviewed connector endpoint probes internal network or cloud metadata.
+  - *Mitigation*: Browser registration returns `410 Gone`; remote registration is disabled. The internal REST simulator service requires a configured server key. Its `/mcp/*` routes are explicitly not MCP JSON-RPC.
+- **T-CON-02 (Privacy / Indirect Injection)**: Uploaded identity documents expose NIN or contact details or are reused for an application the taxpayer did not request.
+  - *Mitigation*: The automatic TIN path no longer extracts or submits identity fields. The TIN journey is guide-only, and the composer warns against sharing identity and account secrets.
+- **T-CON-03 (Spoofing / Misrepresentation)**: Prototype dashboards or APIs are mistaken for authenticated URA services.
+  - *Mitigation*: Legacy dashboards carry a persistent simulation notice, expose `X-Connector-Mode: simulation`, retire legacy `/mcp/*` routes with `410`, and return `503` for non-health routes in production. Their login screens are demonstrations, not production authentication.
+- **T-CON-04 (Tampering / Business Logic)**: An agent creates a misleading or duplicate simulated transaction.
+  - *Mitigation*: Mutating agent tools require dispatch-time authorization, confirmation, and idempotency. Simulator output is marked `mode=simulation`; no live filing, registration, customs release, or payment is made.
 
 ---
 

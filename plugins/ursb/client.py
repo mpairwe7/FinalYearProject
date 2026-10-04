@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from .models import (
@@ -17,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class UrsbClient:
-    """Client for URSB operations, supporting local simulated engine or remote REST API."""
+    """Client for the local URSB simulator; live registry calls are not implemented."""
 
     def __init__(
         self,
@@ -25,17 +24,15 @@ class UrsbClient:
         api_base: str | None = None,
         api_key: str | None = None,
     ) -> None:
+        del api_base, api_key  # retained for compatibility; remote calls are not implemented
         self._service = service or UrsbService()
-        self._api_base = api_base or os.getenv("URSB_API_BASE", "")
-        self._api_key = api_key or os.getenv("URSB_API_KEY", "")
-        self._is_live = bool(self._api_base and self._api_key.startswith("ursb_live_"))
 
     @property
     def is_live(self) -> bool:
-        return self._is_live
+        return False
 
     def ping(self) -> bool:
-        """Health check for URSB connectivity."""
+        """Report local simulator readiness, not external URSB connectivity."""
         return True
 
     def search_business(self, query: str) -> dict[str, Any]:

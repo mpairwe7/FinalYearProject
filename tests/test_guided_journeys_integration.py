@@ -23,6 +23,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import yaml
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -36,6 +37,7 @@ os.environ.setdefault("QDRANT_URL", "http://127.0.0.1:1")
 os.environ.setdefault("QDRANT_ENABLED", "false")
 os.environ.setdefault("SPEECH_ENABLED", "false")
 
+from app.workflows.loader import load_workflow  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from App.backend.app import database  # noqa: E402
@@ -87,6 +89,210 @@ def test_a_help_me_request_gets_no_stress_opener(client):
     body = _chat(client, "Help me register for a TIN")
     assert body["retrieval_mode"] == "workflow"
     assert "stressful" not in body["reply"]
+
+
+def test_tin_guide_avoids_personal_data_and_makes_no_submission_claim(client):
+    conversation_id = f"conv-tin-guide-{uuid.uuid4().hex[:10]}"
+    first = client.post(
+        "/v1/chat",
+        json={"message": "Help me register for a TIN", "conversation_id": conversation_id, "locale": "en"},
+    ).json()
+    assert first["retrieval_mode"] == "workflow"
+    assert "Please do not share your NIN" in first["reply"]
+    assert "full legal name" not in first["reply"].lower()
+
+    documents = client.post(
+        "/v1/chat", json={"message": "individual", "conversation_id": conversation_id, "locale": "en"}
+    ).json()
+    assert "documents ready" in documents["reply"].lower()
+
+    summary = client.post(
+        "/v1/chat", json={"message": "yes", "conversation_id": conversation_id, "locale": "en"}
+    ).json()
+    assert "has not created or submitted a TIN application" in summary["reply"]
+    assert "ura.go.ug" in summary["reply"]
+    assert summary["workflow"]["status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    ("locale", "name", "title"),
+    [
+        ("sw", "Mwongozo wa Usajili wa TIN", "Endelea kwa Usalama"),
+        ("lg", "Obulagirizi bw'Okwewandiisa ku TIN", "Weyongereyo mu Ngeri Ekuuma"),
+    ],
+)
+def test_tin_guide_stepper_labels_are_curated_for_supported_languages(locale, name, title):
+    workflow = service_module.ChatModel._localize_workflow(
+        {
+            "name": "TIN Registration Guide",
+            "step_title": "Continue securely",
+            "all_steps": [{"title": "Continue securely"}],
+        },
+        locale,
+    )
+    assert workflow["name"] == name
+    assert workflow["step_title"] == title
+    assert workflow["all_steps"][0]["title"] == title
+
+
+def test_invoice_review_does_not_collect_tins_or_claim_live_efris_verification():
+    path = PROJECT_ROOT / "App/backend/app/workflows/flows/audit_invoice_compliance.yaml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    steps = {step["id"]: step for step in workflow["steps"]}
+    questions = " ".join(step.get("question", "") for step in workflow["steps"])
+
+    assert steps["collect_supplier_tin_present"]["validator"] == "boolean"
+    assert steps["collect_buyer_tin_present"]["validator"] == "boolean"
+    assert "do not paste the number here" in questions.lower()
+    assert "cannot validate them against efris" in questions.lower()
+    assert "does not calculate vat" in workflow["description"].lower()
+    assert "verified pdf compliance report" not in questions.lower()
+
+
+@pytest.mark.parametrize(
+    ("locale", "name", "first_option", "step_title", "supplier_title"),
+    [
+        (
+            "lg",
+            "Okukebera Invoice y'Omusolo ne EFRIS",
+            "Invoice ya EFRIS",
+            "Ekika ky'Ekiwandiiko",
+            "TIN y'Omusubuzi",
+        ),
+        (
+            "sw",
+            "Mapitio ya Ankara ya Kodi na EFRIS",
+            "Ankara ya EFRIS",
+            "Aina ya Hati",
+            "TIN ya Muuzaji",
+        ),
+    ],
+)
+def test_invoice_review_buttons_and_step_titles_are_localized(
+    locale, name, first_option, step_title, supplier_title
+):
+    workflow = service_module.ChatModel._localize_workflow(
+        {
+            "name": "Tax Invoice & EFRIS Document Review",
+            "step_title": "Document category",
+            "options": ["efris invoice", "standard tax invoice"],
+            "all_steps": [{"title": "Supplier TIN present"}],
+        },
+        locale,
+    )
+
+    assert workflow["name"] == name
+    assert workflow["step_title"] == step_title
+    assert workflow["options"][0] == "efris invoice"
+    assert workflow["option_labels"][0] == first_option
+    assert workflow["all_steps"][0]["title"] == supplier_title
+
+
+@pytest.mark.parametrize(
+    ("locale", "channel_label", "tax_label"),
+    [
+        ("lg", "ssente ku ssimu", "omusolo gwa kampuni"),
+        ("sw", "pesa kwa simu", "kodi ya kampuni"),
+    ],
+)
+def test_payment_and_return_buttons_are_localized_without_changing_schema_values(
+    locale, channel_label, tax_label
+):
+    localized = service_module.ChatModel._localize_workflow(
+        {
+            "name": "Payment Assistance",
+            "options": ["mobile money", "online card"],
+        },
+        locale,
+    )
+    localized_return = service_module.ChatModel._localize_workflow(
+        {
+            "name": "Return Filing",
+            "options": ["corporation tax", "withholding tax"],
+        },
+        locale,
+    )
+
+    assert localized["options"] == ["mobile money", "online card"]
+    assert localized["option_labels"][0] == channel_label
+    assert localized_return["options"][0] == "corporation tax"
+    assert localized_return["option_labels"][0] == tax_label
+
+
+def test_bwims_guide_uses_public_guidance_without_collecting_cargo_identifiers():
+    path = PROJECT_ROOT / "App/backend/app/workflows/flows/bwims_warehouse_guidance.yaml"
+    workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+    definition = load_workflow(path)
+    slots = {step["slot"] for step in workflow["steps"] if step.get("slot")}
+    questions = " ".join(step.get("question", "") for step in workflow["steps"])
+    summary = next(step for step in workflow["steps"] if step["id"] == "summary")
+
+    assert slots == {"request_goal", "user_role"}
+    assert "do not share tins" in questions.lower()
+    assert "entry numbers" in questions.lower()
+    assert "has not queried bwims" in summary["question"].lower()
+    assert "sample data" in summary["question"].lower()
+    assert summary["portal_action"] == "bwims_portal"
+    assert definition.steps[0].options == [
+        "overview",
+        "track cargo",
+        "clear or release goods",
+        "warehouse operator guidance",
+        "report a BWIMS issue",
+        "other",
+    ]
+    assert definition.steps[-1].portal_action["url"] == "https://ura.go.ug/en/bwims/"
+    assert len(definition.steps[-1].resources) == 2
+
+
+@pytest.mark.parametrize(
+    ("locale", "name", "issue_label", "next_steps", "portal_label"),
+    [
+        (
+            "lg",
+            "Obulagirizi ku BWIMS n'amaterekero g'Ebyamaguzi bya Customs",
+            "okutegeeza ku kizibu kya BWIMS",
+            "Emitendera Emitongole Egiddako",
+            "Omukutu gwa BWIMS",
+        ),
+        (
+            "sw",
+            "Mwongozo wa Ghala la Forodha na BWIMS",
+            "kuripoti tatizo la BWIMS",
+            "Hatua rasmi zinazofuata",
+            "Mfumo wa Taarifa za Maghala ya Forodha (BWIMS)",
+        ),
+    ],
+)
+def test_bwims_guide_labels_follow_selected_language_without_changing_values(
+    locale, name, issue_label, next_steps, portal_label, monkeypatch
+):
+    monkeypatch.setattr(
+        service_module,
+        "localize_reply",
+        lambda text, target_locale: f"{target_locale}:{text}",
+    )
+    workflow = service_module.ChatModel._localize_workflow(
+        {
+            "name": "Bonded Warehouse & BWIMS Guidance",
+            "step_title": "Official next steps",
+            "options": ["overview", "report a BWIMS issue"],
+            "portal_action": {
+                "label": "Bonded Warehouse Information Management System (BWIMS)",
+                "url": "https://ura.go.ug/en/bwims/",
+            },
+            "resources": [{"title": "URA Customs Systems", "description": "Public guidance."}],
+        },
+        locale,
+    )
+
+    assert workflow["name"] == name
+    assert workflow["options"] == ["overview", "report a BWIMS issue"]
+    assert workflow["option_labels"][1] == issue_label
+    assert workflow["step_title"] == next_steps
+    assert workflow["portal_action"]["label"] == portal_label
+    assert workflow["resources"][0]["title"] == f"{locale}:URA Customs Systems"
+    assert workflow["resources"][0]["description"] == f"{locale}:Public guidance."
 
 
 @pytest.mark.parametrize(
@@ -259,10 +465,12 @@ def test_journey_funnel_endpoint(client):
     body = response.json()
     journeys = {j["workflow_id"]: j for j in body["journeys"]}
     filing = journeys["return_filing"]
-    assert filing["started"] >= 1 and filing["cancelled"] >= 1
+    assert filing["started"] >= 1
+    assert filing["cancelled"] >= 1
     first = filing["steps"][0]
     assert first["step_id"] == "collect_taxpayer_type"
-    assert first["stopped"] >= 1 and first["not_helpful"] >= 1
+    assert first["stopped"] >= 1
+    assert first["not_helpful"] >= 1
     assert "motor_vehicle_registration" in journeys  # listed even when unused
     assert client.get("/v1/analytics/journeys?days=0", headers=staff).status_code == 400
 

@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { WorkflowState } from '../store/useChatStore';
+import { useTranslation } from '../lib/i18n';
 import ResourceCards from './ResourceCards';
 
 interface WorkflowStepperProps {
@@ -8,6 +9,7 @@ interface WorkflowStepperProps {
 }
 
 function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps) {
+  const t = useTranslation();
   if (!workflow || !workflow.name) return null;
 
   const isActive = workflow.status === 'active';
@@ -19,7 +21,7 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
     <div
       className={`workflow-stepper-container ${isActive ? 'is-active' : isCompleted ? 'is-completed' : 'is-cancelled'}`}
       role="region"
-      aria-label={`Guided workflow: ${workflow.name}`}
+      aria-label={t('workflow.region', { name: workflow.name })}
     >
       <div className="workflow-stepper-header">
         <div className="workflow-title-wrap">
@@ -28,18 +30,18 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
           </span>
           <span className="workflow-name">{workflow.name}</span>
           {isActive && total > 0 && (
-            <span className="workflow-progress-pill" aria-label={`Step ${currentIdx} of ${total}`}>
-              Step {currentIdx} of {total}
+            <span className="workflow-progress-pill" aria-label={t('workflow.step', { current: currentIdx, total })}>
+              {t('workflow.step', { current: currentIdx, total })}
             </span>
           )}
           {isCompleted && (
-            <span className="workflow-status-pill is-complete">Completed</span>
+            <span className="workflow-status-pill is-complete">{t('workflow.completed')}</span>
           )}
         </div>
       </div>
 
       {workflow.all_steps && workflow.all_steps.length > 0 && (
-        <div className="workflow-step-track" role="list" aria-label="Step progress">
+        <div className="workflow-step-track" role="list" aria-label={t('workflow.stepProgress')}>
           {workflow.all_steps.map((st, i) => {
             const stepNum = i + 1;
             const isCur = st.status === 'current';
@@ -64,32 +66,37 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
 
       {isActive && workflow.step_title && (
         <div className="workflow-current-step-banner">
-          <span className="workflow-step-heading">Current step: <strong>{workflow.step_title}</strong></span>
+          <span className="workflow-step-heading">
+            {t('workflow.currentStep', { title: workflow.step_title })}
+          </span>
         </div>
       )}
 
       {isActive && workflow.options && workflow.options.length > 0 && onSelectOption && (
-        <div className="workflow-options-group" role="group" aria-label="Quick options">
-          <span className="workflow-options-prompt">Choose an option to advance:</span>
+        <div className="workflow-options-group" role="group" aria-label={t('workflow.quickOptions')}>
+          <span className="workflow-options-prompt">{t('workflow.chooseOption')}</span>
           <div className="workflow-options-buttons">
-            {workflow.options.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                className="workflow-option-btn"
-                onClick={() => onSelectOption(opt)}
-                title={`Select: ${opt}`}
-              >
-                <span className="workflow-option-bullet" aria-hidden="true">●</span>
-                <span className="workflow-option-text">{opt}</span>
-              </button>
-            ))}
+            {workflow.options.map((opt, index) => {
+              const label = workflow.option_labels?.[index] ?? opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  className="workflow-option-btn"
+                  onClick={() => onSelectOption(opt)}
+                  title={t('workflow.selectOption', { label })}
+                >
+                  <span className="workflow-option-bullet" aria-hidden="true">●</span>
+                  <span className="workflow-option-text">{label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
 
       {workflow.resources && workflow.resources.length > 0 && (
-        <ResourceCards resources={workflow.resources} title="Required Forms & Source References" />
+        <ResourceCards resources={workflow.resources} title={t('workflow.resources')} />
       )}
 
       <div className="workflow-footer-actions">
@@ -99,9 +106,9 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
             target="_blank"
             rel="noopener noreferrer"
             className="workflow-portal-btn"
-            title={`Open official portal: ${workflow.portal_action.label || 'URA Portal'}`}
+            title={t('workflow.openPortal', { label: workflow.portal_action.label || 'URA Portal' })}
           >
-            {workflow.portal_action.label || 'Open URA Portal ↗'}
+            {workflow.portal_action.label || t('workflow.openPortalDefault')}
           </a>
         )}
         {isActive && onSelectOption && (
@@ -109,9 +116,9 @@ function WorkflowStepperInner({ workflow, onSelectOption }: WorkflowStepperProps
             type="button"
             className="workflow-cancel-btn"
             onClick={() => onSelectOption('cancel')}
-            title="Cancel this guided workflow"
+            title={t('workflow.cancel')}
           >
-            Cancel workflow
+            {t('workflow.cancel')}
           </button>
         )}
       </div>

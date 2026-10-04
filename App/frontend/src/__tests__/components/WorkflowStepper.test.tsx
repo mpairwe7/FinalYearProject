@@ -1,9 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import WorkflowStepper from "../../components/WorkflowStepper";
-import type { WorkflowState } from "../../store/useChatStore";
+import { useChatStore, type WorkflowState } from "../../store/useChatStore";
 
 describe("WorkflowStepper", () => {
+  afterEach(() => useChatStore.setState({ locale: "en" }));
+
   const activeWorkflow: WorkflowState = {
     id: "tin_registration",
     name: "TIN Registration",
@@ -52,6 +54,28 @@ describe("WorkflowStepper", () => {
     const compBtn = screen.getByText("company");
     fireEvent.click(compBtn);
     expect(onSelect).toHaveBeenCalledWith("company");
+  });
+
+  it("shows translated option labels while submitting the validator value", () => {
+    const onSelect = vi.fn();
+    const localizedWorkflow: WorkflowState = {
+      ...activeWorkflow,
+      options: ["efris invoice", "standard tax invoice"],
+      option_labels: ["Ankara ya EFRIS", "Ankara ya kawaida ya kodi"],
+    };
+    render(<WorkflowStepper workflow={localizedWorkflow} onSelectOption={onSelect} />);
+
+    fireEvent.click(screen.getByText("Ankara ya EFRIS"));
+    expect(onSelect).toHaveBeenCalledWith("efris invoice");
+  });
+
+  it("localizes step controls with the selected assistant language", () => {
+    useChatStore.setState({ locale: "sw" });
+    render(<WorkflowStepper workflow={activeWorkflow} onSelectOption={vi.fn()} />);
+
+    expect(screen.getByText("Hatua 1 kati ya 4")).toBeInTheDocument();
+    expect(screen.getByText("Chagua chaguo ili kuendelea:")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ghairi mwongozo" })).toBeInTheDocument();
   });
 
   it("renders portal link and cancel button", () => {

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class PaymentGeneratePrnTool(Tool):
-    """Tool for generating official 12-digit URA Payment Registration Numbers (PRNs)."""
+    """Tool for generating a sample PRN-shaped reference in the local simulator."""
 
     def __init__(self, client: PaymentClient) -> None:
         self._client = client
@@ -24,9 +24,8 @@ class PaymentGeneratePrnTool(Tool):
         return ToolSchema(
             name="payment_generate_prn",
             description=(
-                "Generate an official 12-digit URA Payment Registration Number (PRN) payment slip. "
-                "Generates bank barcode vouchers and 21-day validity for tax liabilities (VAT, PAYE, CIT, WHT) "
-                "or Non-Tax Revenue (NTR/MDA fees like passport or traffic fines)."
+                "Generate a sample PRN-shaped reference in the local payment simulator. It is not a valid URA PRN "
+                "and cannot be used to pay tax, fees, a bank, or a mobile-money provider."
             ),
             parameters={
                 "type": "object",
@@ -71,6 +70,7 @@ class PaymentGeneratePrnTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="payment_system",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -99,7 +99,7 @@ class PaymentGeneratePrnTool(Tool):
 
 
 class PaymentViewStatusTool(Tool):
-    """Tool for checking real-time PRN clearance and bank transaction status."""
+    """Tool for reading a sample payment status from the local simulator."""
 
     def __init__(self, client: PaymentClient) -> None:
         self._client = client
@@ -109,9 +109,8 @@ class PaymentViewStatusTool(Tool):
         return ToolSchema(
             name="payment_view_status",
             description=(
-                "Query real-time clearance status for a Payment Registration Number (PRN). "
-                "Confirms whether funds have posted to the URA tax ledger, bank transaction reference, "
-                "and electronic receipt availability."
+                "Read status stored for a sample reference in the local payment simulator. This does not check "
+                "bank settlement, a payment network, or the URA tax ledger."
             ),
             parameters={
                 "type": "object",
@@ -161,8 +160,8 @@ class PaymentReactivatePrnTool(Tool):
         return ToolSchema(
             name="payment_reactivate_prn",
             description=(
-                "Reactivate an expired PRN on the URA portal. Extends payment validity by another 21 days "
-                "without having to re-declare tax returns or re-assess fees."
+                "Change expiry data for a sample reference in the local payment simulator. This does not reactivate "
+                "a real URA PRN."
             ),
             parameters={
                 "type": "object",
@@ -187,6 +186,7 @@ class PaymentReactivatePrnTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="payment_system",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -211,8 +211,8 @@ class PaymentCheckoutSettleTool(Tool):
         return ToolSchema(
             name="payment_checkout_settle",
             description=(
-                "Execute electronic settlement for a PRN via VISA, MasterCard, or Mobile Money (MTN MoMo/Airtel Money). "
-                "Marks the PRN as cleared and generates an official cleared tax receipt."
+                "Simulate a payment outcome in the local database. No card, bank, or mobile-money provider is contacted, "
+                "no money moves, and no official receipt is issued."
             ),
             parameters={
                 "type": "object",

@@ -336,8 +336,8 @@ _REGISTRY: dict[str, Flag] = {
         Flag(
             "enterprise_connectors",
             False,
-            "Enable enterprise system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). "
-            "In production (APP_ENV=production), local mock connectors are disabled unless this flag is on.",
+            "Gate reviewed enterprise connector integrations (EFRIS, DTS, URSB, BWIMS, TIN, Payments). "
+            "This flag cannot enable local simulator fixtures in production; a live implementation must be reviewed first.",
         ),
         # Phase 30 (2026) — next-generation architecture increments.
         # All default off and all subject-addressable, so each lands on a
@@ -506,9 +506,8 @@ class FeatureFlags:
         env_val = os.getenv(f"FLAG_{name.upper()}")
         if env_val is not None:
             return env_val.lower() in ("1", "true", "yes", "on")
-        if os.getenv("APP_ENV", "development").lower() == "production":
-            if name in _PRODUCTION_ON_FLAGS:
-                return True
+        if os.getenv("APP_ENV", "development").lower() == "production" and name in _PRODUCTION_ON_FLAGS:
+            return True
 
         rollout = _env_rollout(name, flag.rollout)
         if rollout is not None and rollout.is_addressed():
