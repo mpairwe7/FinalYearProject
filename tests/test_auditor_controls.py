@@ -326,7 +326,15 @@ def test_every_admin_write_route_refuses_an_auditor(client, tenant):
     """Enumerates the live routes, so a new staff write that forgets its role check fails here."""
     from fastapi.routing import APIRoute
 
-    ids = {"ticket_id": _ticket(), "call_id": _receptionist_call(tenant), "override_id": "ovr-qa", "name": "hyde"}
+    ids = {
+        "ticket_id": _ticket(),
+        "call_id": _receptionist_call(tenant),
+        "override_id": "ovr-qa",
+        "name": "hyde",
+        "report_id": "kb_test123",
+        "tombstone_id": "tomb_test123",
+        "precedence_id": "prec_test123",
+    }
     auditor = _headers("aud-matrix", "ura_auditor", tenant)
     checked, leaks = [], []
     for route in app.routes:
