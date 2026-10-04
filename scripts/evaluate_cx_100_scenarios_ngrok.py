@@ -1012,26 +1012,32 @@ def run_scenario(client: requests.Session, base_url: str, scenario: CXScenario) 
         step_headers = dict(HEADERS)
         step_headers["X-Session-ID"] = sess_id
 
-        t0 = time.perf_counter()
-        try:
-            resp = client.post(chat_url, headers=step_headers, json=payload, timeout=60)
-            elapsed_s = time.perf_counter() - t0
-            total_time_s += elapsed_s
-        except Exception as exc:
-            results.append({
-                "turn": step_num,
-                "passed": False,
-                "error": f"HTTP request failed: {exc}",
-                "elapsed_s": 0.0,
-            })
-            return {
-                "id": scenario.id,
-                "title": scenario.title,
-                "category": scenario.category,
-                "passed": False,
-                "total_time_s": 0.0,
-                "turns": results,
-            }
+        resp = None
+        for attempt in range(5):
+            t0 = time.perf_counter()
+            try:
+                resp = client.post(chat_url, headers=step_headers, json=payload, timeout=60)
+                elapsed_s = time.perf_counter() - t0
+                total_time_s += elapsed_s
+                break
+            except Exception as exc:
+                if attempt < 4:
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                results.append({
+                    "turn": step_num,
+                    "passed": False,
+                    "error": f"HTTP request failed: {exc}",
+                    "elapsed_s": 0.0,
+                })
+                return {
+                    "id": scenario.id,
+                    "title": scenario.title,
+                    "category": scenario.category,
+                    "passed": False,
+                    "total_time_s": 0.0,
+                    "turns": results,
+                }
 
         if resp.status_code != 200:
             results.append({

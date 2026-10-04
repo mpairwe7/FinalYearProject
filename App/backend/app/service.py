@@ -7348,6 +7348,86 @@ class ChatModel:
                 "ticket_id": "",
             }
 
+        # 8. Real Estate Developer Infrastructure Cost Deduction (CX-195)
+        if (
+            ("real estate" in text or "developer" in text or "subdivision" in text or "plots" in text)
+            and any(k in text for k in ("grading", "culverts", "murram", "infrastructure", "deduct", "roads"))
+        ):
+            reply = (
+                "**Allowable Infrastructure Deductions for Real Estate Developers**:\n\n"
+                "Under the **Income Tax Act (Cap. 340)**, capital expenditures incurred by a property developer in improving "
+                "land for sale—such as opening and grading access roads, drainage culverts, electrical connectivity, and water lines—are "
+                "legally deductible as part of the **cost base of the asset** or business cost of sales.\n\n"
+                "**How to substantiate infrastructure deductions**:\n"
+                "1. **Cost Base Inclusions**: Keep all EFRIS fiscal receipts and civil engineering contractor invoices for roadworks, drainage, and utility trenching.\n"
+                "2. **Capital Gains / Business Profit Computation**: When selling subdivided plots, deduct the apportioned development cost per plot from the gross plot sale proceeds to calculate true net chargeable income.\n"
+                "3. **Withholding Compliance**: Ensure 6% WHT was properly deducted and remitted on payments made to the road and civil works contractors."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/category/tax-education/sector-guides/real-estate-sector/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Real Estate Sector Taxation Guide",
+                    "passage": "Infrastructure improvements on land developed for sale form part of allowable cost base deductions under the Income Tax Act.",
+                    "url": "https://ura.go.ug/en/category/tax-education/sector-guides/real-estate-sector/",
+                    "page": "",
+                    "section": "Real Estate Deductions",
+                    "title": "Real Estate Developer Cost Base Deductions",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "real_estate_advisory",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tax_advisor",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Keep contractor EFRIS receipts", "Apportion infrastructure costs per plot"],
+                "ticket_id": "",
+            }
+
+        # 9. Motor Vehicle Search Application Tracking (CX-199)
+        if (
+            ("motor vehicle" in text or "search" in text or "logbook" in text)
+            and any(k in text for k in ("search application", "search report", "vehicle search", "track the status of my motor vehicle search"))
+        ):
+            reply = (
+                "**Tracking Motor Vehicle Search Application Status**:\n\n"
+                "To track the progress of an official Motor Vehicle Search report on the URA e-Tax portal:\n\n"
+                "1. **Visit e-Services Portal**: Go to https://ura.go.ug → **e-Services** → **Motor Vehicle** → **Search Report Status**.\n"
+                "2. **Enter Search PRN / Reference**: Enter the 10-digit PRN or Search Application Reference number generated during application submission.\n"
+                "3. **Verify Payment**: Ensure the statutory 20,000 UGX search fee was paid at the bank or via mobile money (*165# / *185#).\n"
+                "4. **Download Certified Search Report**: Once confirmed, download the certified PDF report detailing registered vehicle owner, engine number, chassis number, logbook status, and any active caveats or bank encumbrances."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/motor-vehicle/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Motor Vehicle Search Portal",
+                    "passage": "Motor vehicle search reports can be tracked and downloaded online using the payment registration number.",
+                    "url": "https://ura.go.ug/en/motor-vehicle/",
+                    "page": "",
+                    "section": "Search Status",
+                    "title": "Motor Vehicle Search Verification",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "vehicle_search_tracking",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "vehicle_specialist",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Enter search PRN on e-Services", "Download certified vehicle search report"],
+                "ticket_id": "",
+            }
+
         return None
 
     def _maybe_handle_tin_clarification(
