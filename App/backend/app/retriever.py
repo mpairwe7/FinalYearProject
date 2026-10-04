@@ -237,6 +237,47 @@ def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
     return kept
 
 
+def _filter_tombstoned_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop any candidate chunk matching an active corpus tombstone (Solution B)."""
+    if not candidates:
+        return candidates
+    try:
+        from . import database as db
+        from .flags import flags
+
+        if not flags.is_enabled("knowledge_discrepancy_reporting"):
+            return candidates
+
+        tombstones = db.get_active_corpus_tombstones()
+    except Exception:
+        return candidates
+
+    if not tombstones:
+        return candidates
+
+    bad_uris = {str(t.get("source_uri") or "").strip().lower() for t in tombstones if t.get("source_uri")}
+    bad_chunks = {str(t.get("chunk_id") or "").strip() for t in tombstones if t.get("chunk_id")}
+
+    survived = []
+    for c in candidates:
+        src = str(c.get("source") or "").strip().lower()
+        chunk = str(c.get("chunk_id") or c.get("id") or "").strip()
+        if chunk and chunk in bad_chunks:
+            logger.debug("Corpus tombstone dropped chunk: %s", chunk)
+            continue
+        if src and any(bad_uri in src or src in bad_uri for bad_uri in bad_uris if bad_uri):
+            matching_source = [
+                t for t in tombstones
+                if str(t.get("source_uri") or "").strip().lower() in src
+                or src in str(t.get("source_uri") or "").strip().lower()
+            ]
+            if any(not str(t.get("chunk_id") or "").strip() for t in matching_source):
+                logger.debug("Corpus tombstone dropped source: %s", src)
+                continue
+        survived.append(c)
+    return survived
+
+
 def hit_relevance(hit: dict[str, Any]) -> float | None:
     """Best-effort calibrated [0,1] relevance for a hit, or ``None`` (P1-5).
 
@@ -1418,6 +1459,7 @@ class HybridRetriever:
         """
         if self._vectorize_mode:
             hits = self._search_vectorize(query, top_k, prefetch_limit, filters, subject=subject)
+            hits = _filter_tombstoned_candidates(hits)
             if hits or self._client is None:
                 return hits
             # Vectorize produced nothing: an open circuit, an exhausted neuron
@@ -1570,6 +1612,7 @@ class HybridRetriever:
                     }
                 )
 
+            candidates = _filter_tombstoned_candidates(candidates)
             # Drop near-duplicate chunks before the expensive step.  The
             # corpus carries the same guidance across editions, so a
             # prefetch of 20 routinely contains several copies of one

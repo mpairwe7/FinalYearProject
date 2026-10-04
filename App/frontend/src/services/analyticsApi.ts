@@ -235,6 +235,65 @@ export interface FeedbackSummary {
   }[];
 }
 
+export interface DiscrepancyRecord {
+  id: string;
+  conversation_id: string;
+  session_id: string;
+  user_id: string;
+  status: 'pending' | 'verified' | 'dismissed' | 'resolved';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  discrepancy_type: string;
+  bot_statement: string;
+  user_correction: string;
+  cited_sources: string[];
+  frequency_count: number;
+  dedup_key: string;
+  admin_note: string;
+  verified_override_id: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DiscrepancyStats {
+  total: number;
+  pending: number;
+  verified: number;
+  dismissed: number;
+}
+
+export interface VerifyDiscrepancyPayload {
+  admin_note?: string;
+  create_override?: boolean;
+  override_query?: string;
+  override_reply?: string;
+  source_url?: string;
+  precedence_topic?: string;
+  precedence_rule?: string;
+  statute_reference?: string;
+  tombstone_sources?: string[];
+  tombstone_chunk_ids?: string[];
+}
+
+export interface CorpusTombstone {
+  id: string;
+  source_uri: string;
+  chunk_id: string;
+  reason: string;
+  superseded_by: string;
+  created_at: number;
+  created_by: string;
+}
+
+export interface StatutoryPrecedence {
+  id: string;
+  topic: string;
+  rule_statement: string;
+  statute_reference: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
+}
+
 /** GET /v1/analytics/journeys — one row per guided journey. */
 export interface JourneyStepStats {
   step_id: string;
@@ -434,6 +493,45 @@ export const analyticsApi = {
     }),
   deleteOverride: (id: string) =>
     fetchJson<{ ok: boolean }>(`/v1/admin/overrides/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  discrepancies: (params?: { status?: string; priority?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.priority) q.set("priority", params.priority);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return fetchJson<{ discrepancies: DiscrepancyRecord[]; stats: DiscrepancyStats }>(
+      `/v1/admin/discrepancies${qs ? `?${qs}` : ""}`,
+    );
+  },
+  verifyDiscrepancy: (id: string, payload: VerifyDiscrepancyPayload) =>
+    fetchJson<{ ok: boolean; report_id: string; status: string; override_id?: string }>(
+      `/v1/admin/discrepancies/${encodeURIComponent(id)}/verify`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  dismissDiscrepancy: (id: string, payload: { admin_note?: string; reason?: string }) =>
+    fetchJson<{ ok: boolean; report_id: string; status: string }>(
+      `/v1/admin/discrepancies/${encodeURIComponent(id)}/dismiss`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  tombstones: () => fetchJson<{ tombstones: CorpusTombstone[] }>("/v1/admin/tombstones"),
+  addTombstone: (payload: { source_uri: string; chunk_id?: string; reason?: string }) =>
+    fetchJson<CorpusTombstone>("/v1/admin/tombstones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deleteTombstone: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/v1/admin/tombstones/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  precedences: () => fetchJson<{ precedences: StatutoryPrecedence[] }>("/v1/admin/precedences"),
+  addPrecedence: (payload: { topic: string; rule_statement: string; statute_reference?: string; enabled?: boolean }) =>
+    fetchJson<StatutoryPrecedence>("/v1/admin/precedences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deletePrecedence: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/v1/admin/precedences/${encodeURIComponent(id)}`, { method: "DELETE" }),
   outbox: () =>
     fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
       "/v1/admin/outbox",

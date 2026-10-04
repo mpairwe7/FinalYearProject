@@ -426,6 +426,39 @@ _FEW_SHOT_PROMPTS_BY_LOCALE: Final[dict[str, str]] = {
 }
 
 
+def _inject_statutory_precedences(system_content: str) -> str:
+    """Inject active statutory precedence rules (Solution C) into system prompt."""
+    try:
+        from . import database as db
+        from .flags import flags
+
+        if not flags.is_enabled("knowledge_discrepancy_reporting"):
+            return system_content
+
+        precedences = db.get_active_statutory_precedences()
+        if not precedences:
+            return system_content
+
+        rules = []
+        for p in precedences:
+            ref = f" (Statutory Ref: {p['statute_reference']})" if p.get("statute_reference") else ""
+            rules.append(f"- **{p['topic']}**: {p['rule_statement']}{ref}")
+
+        rules_text = "\n".join(rules)
+        return (
+            f"{system_content}\n\n"
+            "## Verified Statutory Precedences (Authoritative Corrections)\n"
+            "The following administrative and statutory precedence rules STRICTLY SUPERSEDE "
+            "any conflicting information found in older retrieved passages or FAQs. "
+            "If any retrieved passage contradicts these precedence rules, you MUST state the rule "
+            "from this section as the current, authoritative legal requirement:\n"
+            f"{rules_text}"
+        )
+    except Exception:
+        logger.debug("Failed to inject statutory precedences", exc_info=True)
+        return system_content
+
+
 def _build_messages(
     query: str,
     passages: list[dict[str, Any]],
@@ -494,6 +527,7 @@ def _build_messages(
             "- Never begin your answer with internal prefixes like '[User-attached document: ...]' or 'Summary:'."
         )
 
+    system_content = _inject_statutory_precedences(system_content)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]
@@ -1864,6 +1898,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
+    system_content = _inject_statutory_precedences(system_content)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},
     ]

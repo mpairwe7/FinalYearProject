@@ -116,6 +116,10 @@ class ChatResponse(BaseModel):
         default_factory=list,
         description="Official URA pages for this answer; empty for refusals, abstentions and small talk",
     )
+    discrepancy_report: dict[str, Any] | None = Field(
+        None,
+        description="Knowledge discrepancy report metadata if the user disputed previous guidance",
+    )
 
 
 # ---------------------------------------------------------------------------

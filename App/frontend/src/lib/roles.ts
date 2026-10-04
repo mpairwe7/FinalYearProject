@@ -154,6 +154,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     roles: ["ura_admin", "ura_auditor"],
   },
   {
+    href: "/admin/discrepancies",
+    label: "Knowledge & Bug Reports",
+    navLabel: "Bug Reports",
+    group: "triage",
+    blurb: "Taxpayer-reported inaccuracies and knowledge discrepancies",
+    roles: ["ura_staff", "ura_admin", "ura_auditor"],
+  },
+  {
     href: "/admin/overrides",
     label: "Answer overrides",
     navLabel: "Overrides",

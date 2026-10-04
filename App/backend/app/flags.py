@@ -409,6 +409,12 @@ _REGISTRY: dict[str, Flag] = {
             "Receptionist answers in the language the caller speaks (en/sw on Gemini Live, "
             "lg on the cascaded engine), detected per utterance; needs voice_receptionist",
         ),
+        Flag(
+            "knowledge_discrepancy_reporting",
+            True,
+            "Auto-detect conversational factual disputes, log discrepancy reports, "
+            "and apply active statutory precedences & tombstones.",
+        ),
     ]
 }
 

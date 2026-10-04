@@ -97,6 +97,13 @@ export interface ChatTurn {
    * in-flight state that produced it.
    */
   thoughtForMs?: number;
+  /** Knowledge discrepancy / bug report metadata if the turn disputed previous guidance */
+  discrepancyReport?: {
+    id: string;
+    status: string;
+    frequency_count?: number;
+    discrepancy_type?: string;
+  };
 }
 
 export interface Conversation {
@@ -246,6 +253,15 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
   if (typeof value.thoughtForMs === 'number' && Number.isFinite(value.thoughtForMs)) {
     turn.thoughtForMs = value.thoughtForMs;
+  }
+  const disc = value.discrepancyReport ?? (value as Record<string, unknown>).discrepancy_report;
+  if (isRecord(disc) && typeof disc.id === 'string') {
+    turn.discrepancyReport = {
+      id: disc.id,
+      status: String(disc.status || 'pending'),
+      frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+      discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+    };
   }
   if (Array.isArray(value.attachments)) {
     const attachments = value.attachments

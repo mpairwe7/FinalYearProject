@@ -633,6 +633,7 @@ chunks do).
 | `FLAG_CORRECTIVE_RAG` | on | Re-retrieve on low calibrated relevance |
 | `FLAG_GRAPH_FUSION` + `FLAG_TAX_GRAPH` | **off** | Statutory graph as a third RRF leg |
 | `FLAG_TOOL_RAG` | **off** | Top-k tool schemas + rails. Dense embedder is injected from the retriever when loaded; a miss keeps rails only. A/B via `FLAG_TOOL_RAG_PERCENT`. |
+| `FLAG_KNOWLEDGE_DISCREPANCY_REPORTING` | on | Auto-detect conversational factual disputes, log discrepancy reports, and apply active statutory precedences & tombstones. |
 | `python -m app.freshness --check --write-status --notify` | — | Exit 1 on drift; writes status for `GET /v1/index/freshness`; Slack if `FRESHNESS_SLACK_WEBHOOK` is https |
 
 ### Answer language

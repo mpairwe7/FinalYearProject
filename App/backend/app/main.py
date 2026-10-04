@@ -3134,6 +3134,267 @@ def delete_override_endpoint(
     return {"ok": True, "id": override_id}
 
 
+# ---------------------------------------------------------------------------
+# Knowledge Discrepancies & Reporting (Automated Bug Reporting)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/discrepancies", tags=["admin"])
+def list_discrepancies_endpoint(
+    status: str | None = None,
+    priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {
+        "discrepancies": db.list_discrepancies(
+            status=status, priority=priority, limit=limit, offset=offset
+        ),
+        "stats": db.get_discrepancy_stats(),
+    }
+
+
+@app.get("/v1/admin/discrepancies/stats", tags=["admin"])
+def get_discrepancy_stats_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return db.get_discrepancy_stats()
+
+
+@app.get("/v1/admin/discrepancies/{report_id}", tags=["admin"])
+def get_discrepancy_endpoint(
+    report_id: str,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    report = db.get_discrepancy(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="discrepancy report not found")
+    return report
+
+
+@app.post("/v1/admin/discrepancies/{report_id}/verify", tags=["admin"])
+def verify_discrepancy_endpoint(
+    report_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may verify discrepancies")
+    report = db.get_discrepancy(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="discrepancy report not found")
+
+    admin_note = str(body.get("admin_note") or "").strip()
+    override_id = ""
+
+    # Optional 1-Click Answer Override
+    if body.get("create_override"):
+        from . import cms
+
+        override_query = str(body.get("override_query") or report.get("user_correction") or "").strip()
+        override_reply = str(body.get("override_reply") or "").strip()
+        source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
+        if override_query and override_reply:
+            row = cms.upsert(
+                override_query,
+                override_reply,
+                source_url=source_url,
+                created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                enabled=True,
+            )
+            override_id = str((row or {}).get("id") or "")
+
+    # Optional Solution C: Active Statutory Precedence
+    precedence_topic = str(body.get("precedence_topic") or "").strip()
+    precedence_rule = str(body.get("precedence_rule") or "").strip()
+    statute_ref = str(body.get("statute_reference") or "").strip()
+    if precedence_topic and precedence_rule:
+        db.add_statutory_precedence(
+            precedence_topic,
+            precedence_rule,
+            statute_reference=statute_ref,
+            enabled=True,
+        )
+
+    # Optional Solution B: Tombstone cited sources or chunks
+    tomb_sources = body.get("tombstone_sources") or []
+    if isinstance(tomb_sources, list):
+        for src in tomb_sources:
+            if src and str(src).strip():
+                db.add_corpus_tombstone(
+                    str(src).strip(),
+                    reason=f"Superseded via report {report_id}",
+                    superseded_by=override_id,
+                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                )
+
+    tomb_chunks = body.get("tombstone_chunk_ids") or []
+    if isinstance(tomb_chunks, list):
+        for cid in tomb_chunks:
+            if cid and str(cid).strip():
+                db.add_corpus_tombstone(
+                    "",
+                    chunk_id=str(cid).strip(),
+                    reason=f"Superseded via report {report_id}",
+                    superseded_by=override_id,
+                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                )
+
+    db.update_discrepancy_status(
+        report_id,
+        "verified",
+        admin_note=admin_note,
+        verified_override_id=override_id,
+    )
+    _audit_staff_action(
+        ctx,
+        "staff.discrepancy_verified",
+        {"report_id": report_id, "override_id": override_id},
+    )
+    return {"ok": True, "report_id": report_id, "status": "verified", "override_id": override_id}
+
+
+@app.post("/v1/admin/discrepancies/{report_id}/dismiss", tags=["admin"])
+def dismiss_discrepancy_endpoint(
+    report_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may dismiss discrepancies")
+    report = db.get_discrepancy(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="discrepancy report not found")
+    admin_note = str(body.get("admin_note") or body.get("reason") or "does_not_apply").strip()
+    db.update_discrepancy_status(report_id, "dismissed", admin_note=admin_note)
+    _audit_staff_action(
+        ctx,
+        "staff.discrepancy_dismissed",
+        {"report_id": report_id, "reason": admin_note},
+    )
+    return {"ok": True, "report_id": report_id, "status": "dismissed"}
+
+
+# ---------------------------------------------------------------------------
+# Corpus Tombstones (Solution B)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/tombstones", tags=["admin"])
+def list_tombstones_endpoint(
+    limit: int = 100,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {"tombstones": db.list_corpus_tombstones(limit=limit)}
+
+
+@app.post("/v1/admin/tombstones", tags=["admin"])
+def create_tombstone_endpoint(
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may add tombstones")
+    src = str(body.get("source_uri") or "").strip()
+    cid = str(body.get("chunk_id") or "").strip()
+    reason = str(body.get("reason") or "").strip()
+    superseded = str(body.get("superseded_by") or "").strip()
+    try:
+        tomb = db.add_corpus_tombstone(
+            src,
+            chunk_id=cid,
+            reason=reason,
+            superseded_by=superseded,
+            created_by=ctx.user.user_id if ctx.user else "ura_admin",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(ctx, "staff.tombstone_created", {"tombstone_id": tomb.get("id")})
+    return tomb
+
+
+@app.delete("/v1/admin/tombstones/{tombstone_id}", tags=["admin"])
+def delete_tombstone_endpoint(
+    tombstone_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may delete tombstones")
+    ok = db.delete_corpus_tombstone(tombstone_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="tombstone not found")
+    _audit_staff_action(ctx, "staff.tombstone_deleted", {"tombstone_id": tombstone_id})
+    return {"ok": True, "id": tombstone_id}
+
+
+# ---------------------------------------------------------------------------
+# Statutory Precedences (Solution C)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/precedences", tags=["admin"])
+def list_precedences_endpoint(
+    enabled_only: bool = False,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {"precedences": db.list_statutory_precedences(enabled_only=enabled_only)}
+
+
+@app.post("/v1/admin/precedences", tags=["admin"])
+def create_precedence_endpoint(
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may add precedences")
+    topic = str(body.get("topic") or "").strip()
+    rule = str(body.get("rule_statement") or "").strip()
+    statute_ref = str(body.get("statute_reference") or "").strip()
+    enabled = bool(body.get("enabled", True))
+    try:
+        prec = db.add_statutory_precedence(
+            topic, rule, statute_reference=statute_ref, enabled=enabled
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(ctx, "staff.precedence_created", {"precedence_id": prec.get("id")})
+    return prec
+
+
+@app.patch("/v1/admin/precedences/{precedence_id}", tags=["admin"])
+def update_precedence_endpoint(
+    precedence_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may edit precedences")
+    enabled = body.get("enabled")
+    if enabled is not None:
+        enabled = bool(enabled)
+    rule = body.get("rule_statement")
+    statute_ref = body.get("statute_reference")
+    ok = db.update_statutory_precedence(
+        precedence_id,
+        enabled=enabled,
+        rule_statement=str(rule) if rule is not None else None,
+        statute_reference=str(statute_ref) if statute_ref is not None else None,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="precedence not found")
+    _audit_staff_action(ctx, "staff.precedence_updated", {"precedence_id": precedence_id})
+    return {"ok": True, "id": precedence_id}
+
+
+@app.delete("/v1/admin/precedences/{precedence_id}", tags=["admin"])
+def delete_precedence_endpoint(
+    precedence_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may delete precedences")
+    ok = db.delete_statutory_precedence(precedence_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="precedence not found")
+    _audit_staff_action(ctx, "staff.precedence_deleted", {"precedence_id": precedence_id})
+    return {"ok": True, "id": precedence_id}
+
+
 @app.get("/v1/admin/outbox", tags=["admin"])
 def list_outbox_endpoint(
     _ctx: AuthContext = Depends(require_admin_access),

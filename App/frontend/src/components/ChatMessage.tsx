@@ -415,6 +415,31 @@ function ChatMessageInner({
           </div>
         )}
 
+        {isAssistant && turn.discrepancyReport && (
+          <div
+            className="discrepancy-badge"
+            role="status"
+            aria-label="Knowledge review report submitted"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              fontSize: "0.75rem",
+              padding: "0.3rem 0.6rem",
+              marginTop: "0.5rem",
+              borderRadius: "6px",
+              background: "rgba(234, 179, 8, 0.12)",
+              border: "1px solid rgba(234, 179, 8, 0.3)",
+              color: "var(--text-1, #1e293b)",
+            }}
+          >
+            <span aria-hidden="true">📋</span>
+            <span>
+              Knowledge review report <strong>#{turn.discrepancyReport.id.slice(-8)}</strong> logged for URA verification
+            </span>
+          </div>
+        )}
+
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="bubble-actions">
             {/* Live while loading: a tap then cancels the read-aloud, rather

@@ -19,6 +19,9 @@ export const queryKeys = {
     all: () => ['admin'] as const,
     flags: () => ['admin', 'flags'] as const,
     overrides: () => ['admin', 'overrides'] as const,
+    discrepancies: (status?: string, priority?: string) => ['admin', 'discrepancies', { status, priority }] as const,
+    tombstones: () => ['admin', 'tombstones'] as const,
+    precedences: () => ['admin', 'precedences'] as const,
     outbox: () => ['admin', 'outbox'] as const,
     evaluation: () => ['admin', 'evaluation'] as const,
     /** Prefix of every audit-trail query: invalidates events and the integrity check together. */

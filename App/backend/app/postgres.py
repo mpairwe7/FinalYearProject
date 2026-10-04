@@ -277,6 +277,50 @@ def init_db() -> None:
         updated_at   DOUBLE PRECISION NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS knowledge_discrepancies (
+        id                   TEXT PRIMARY KEY,
+        conversation_id      TEXT DEFAULT '',
+        session_id           TEXT DEFAULT '',
+        user_id              TEXT DEFAULT '',
+        status               TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'dismissed', 'resolved')) DEFAULT 'pending',
+        priority             TEXT NOT NULL CHECK(priority IN ('low', 'normal', 'high', 'urgent')) DEFAULT 'normal',
+        discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general')) DEFAULT 'outdated_law',
+        bot_statement        TEXT NOT NULL,
+        user_correction      TEXT NOT NULL,
+        cited_sources_json   TEXT DEFAULT '[]',
+        frequency_count      INTEGER NOT NULL DEFAULT 1,
+        dedup_key            TEXT DEFAULT '',
+        admin_note           TEXT DEFAULT '',
+        verified_override_id TEXT DEFAULT '',
+        created_at           DOUBLE PRECISION NOT NULL,
+        updated_at           DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_discrepancies_status ON knowledge_discrepancies(status);
+    CREATE INDEX IF NOT EXISTS idx_discrepancies_dedup ON knowledge_discrepancies(dedup_key);
+
+    CREATE TABLE IF NOT EXISTS corpus_tombstones (
+        id            TEXT PRIMARY KEY,
+        source_uri    TEXT NOT NULL,
+        chunk_id      TEXT DEFAULT '',
+        reason        TEXT DEFAULT '',
+        superseded_by TEXT DEFAULT '',
+        created_at    DOUBLE PRECISION NOT NULL,
+        created_by    TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_tombstones_source ON corpus_tombstones(source_uri);
+    CREATE INDEX IF NOT EXISTS idx_tombstones_chunk ON corpus_tombstones(chunk_id);
+
+    CREATE TABLE IF NOT EXISTS statutory_precedences (
+        id                TEXT PRIMARY KEY,
+        topic             TEXT NOT NULL,
+        rule_statement    TEXT NOT NULL,
+        statute_reference TEXT DEFAULT '',
+        enabled           BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at        DOUBLE PRECISION NOT NULL,
+        updated_at        DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_statutory_precedences_enabled ON statutory_precedences(enabled);
+
     CREATE TABLE IF NOT EXISTS conversation_topics (
         conversation_id TEXT PRIMARY KEY,
         topic_id        TEXT NOT NULL,
@@ -1846,6 +1890,460 @@ def delete_answer_override(override_id: str) -> bool:
         touched = cur.rowcount > 0
         conn.commit()
     return touched
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Discrepancies & Reporting
+# ---------------------------------------------------------------------------
+def _compute_discrepancy_dedup_key(bot_statement: str, user_correction: str) -> str:
+    from .cms import normalize_query
+    b = normalize_query(bot_statement)[:80]
+    u = normalize_query(user_correction)[:80]
+    return _hashlib.sha256(f"{b}|{u}".encode("utf-8")).hexdigest()[:16]
+
+
+def create_or_increment_discrepancy(
+    bot_statement: str,
+    user_correction: str,
+    *,
+    conversation_id: str = "",
+    session_id: str = "",
+    user_id: str = "",
+    discrepancy_type: str = "outdated_law",
+    cited_sources: list[str] | None = None,
+    priority: str = "normal",
+) -> dict[str, Any]:
+    from .guardrails import redact_pii_text
+
+    bot_statement = redact_pii_text(str(bot_statement or "").strip())
+    user_correction = redact_pii_text(str(user_correction or "").strip())
+    if not bot_statement or not user_correction:
+        raise ValueError("bot_statement and user_correction are required")
+
+    dedup_key = _compute_discrepancy_dedup_key(bot_statement, user_correction)
+    pool = _get_pool()
+    if pool is None:
+        return {"id": "", "status": "failed", "dedup_key": dedup_key}
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, frequency_count, priority FROM knowledge_discrepancies
+               WHERE dedup_key = %s AND status = 'pending'
+               ORDER BY created_at DESC LIMIT 1""",
+            (dedup_key,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            rep_id = str(existing[0])
+            freq = int(existing[1]) + 1
+            new_priority = "high" if freq >= 3 else existing[2]
+            cur.execute(
+                """UPDATE knowledge_discrepancies
+                   SET frequency_count = %s, priority = %s, updated_at = %s
+                   WHERE id = %s""",
+                (freq, new_priority, now, rep_id),
+            )
+            conn.commit()
+            return {
+                "id": rep_id,
+                "status": "pending",
+                "frequency_count": freq,
+                "priority": new_priority,
+                "dedup_key": dedup_key,
+                "reused_existing": True,
+            }
+
+        rep_id = f"kb_{_uuid.uuid4().hex[:12]}"
+        sources_json = _json.dumps(cited_sources or [], ensure_ascii=False)
+        cur.execute(
+            """INSERT INTO knowledge_discrepancies (
+                id, conversation_id, session_id, user_id, status, priority,
+                discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                frequency_count, dedup_key, admin_note, verified_override_id,
+                created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, 1, %s, '', '', %s, %s)""",
+            (
+                rep_id,
+                conversation_id or "",
+                session_id or "",
+                user_id or "",
+                priority,
+                discrepancy_type,
+                bot_statement,
+                user_correction,
+                sources_json,
+                dedup_key,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        return {
+            "id": rep_id,
+            "status": "pending",
+            "frequency_count": 1,
+            "priority": priority,
+            "dedup_key": dedup_key,
+            "reused_existing": False,
+        }
+
+
+def get_discrepancy(report_id: str) -> dict[str, Any] | None:
+    rid = (report_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not rid:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, conversation_id, session_id, user_id, status, priority,
+                      discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                      frequency_count, dedup_key, admin_note, verified_override_id,
+                      created_at, updated_at
+               FROM knowledge_discrepancies WHERE id = %s""",
+            (rid,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            sources = _json.loads(row[9])
+        except Exception:
+            sources = []
+        return {
+            "id": row[0],
+            "conversation_id": row[1],
+            "session_id": row[2],
+            "user_id": row[3],
+            "status": row[4],
+            "priority": row[5],
+            "discrepancy_type": row[6],
+            "bot_statement": row[7],
+            "user_correction": row[8],
+            "cited_sources": sources,
+            "frequency_count": row[10],
+            "dedup_key": row[11],
+            "admin_note": row[12],
+            "verified_override_id": row[13],
+            "created_at": row[14],
+            "updated_at": row[15],
+        }
+
+
+def list_discrepancies(
+    status: str | None = None,
+    priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        query = """SELECT id, conversation_id, session_id, user_id, status, priority,
+                          discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                          frequency_count, dedup_key, admin_note, verified_override_id,
+                          created_at, updated_at
+                   FROM knowledge_discrepancies"""
+        clauses = []
+        params: list[Any] = []
+        if status:
+            clauses.append("status = %s")
+            params.append(status)
+        if priority:
+            clauses.append("priority = %s")
+            params.append(priority)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY frequency_count DESC, updated_at DESC LIMIT %s OFFSET %s"
+        params.extend([max(1, min(limit, 200)), max(0, offset)])
+        cur.execute(query, tuple(params))
+        out = []
+        for row in cur.fetchall():
+            try:
+                sources = _json.loads(row[9])
+            except Exception:
+                sources = []
+            out.append(
+                {
+                    "id": row[0],
+                    "conversation_id": row[1],
+                    "session_id": row[2],
+                    "user_id": row[3],
+                    "status": row[4],
+                    "priority": row[5],
+                    "discrepancy_type": row[6],
+                    "bot_statement": row[7],
+                    "user_correction": row[8],
+                    "cited_sources": sources,
+                    "frequency_count": row[10],
+                    "dedup_key": row[11],
+                    "admin_note": row[12],
+                    "verified_override_id": row[13],
+                    "created_at": row[14],
+                    "updated_at": row[15],
+                }
+            )
+        return out
+
+
+def update_discrepancy_status(
+    report_id: str,
+    status: str,
+    *,
+    admin_note: str = "",
+    verified_override_id: str = "",
+) -> bool:
+    rid = (report_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not rid or status not in ("pending", "verified", "dismissed", "resolved"):
+        return False
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """UPDATE knowledge_discrepancies
+               SET status = %s, admin_note = COALESCE(NULLIF(%s, ''), admin_note),
+                   verified_override_id = COALESCE(NULLIF(%s, ''), verified_override_id),
+                   updated_at = %s
+               WHERE id = %s""",
+            (status, admin_note, verified_override_id, now, rid),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_discrepancy_stats() -> dict[str, Any]:
+    pool = _get_pool()
+    if pool is None:
+        return {"total": 0, "pending": 0, "verified": 0, "dismissed": 0}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'pending'")
+        pending = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'verified'")
+        verified = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'dismissed'")
+        dismissed = cur.fetchone()[0]
+        return {
+            "total": total,
+            "pending": pending,
+            "verified": verified,
+            "dismissed": dismissed,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Corpus Tombstones (Solution B)
+# ---------------------------------------------------------------------------
+def add_corpus_tombstone(
+    source_uri: str,
+    chunk_id: str = "",
+    *,
+    reason: str = "",
+    superseded_by: str = "",
+    created_by: str = "",
+) -> dict[str, Any]:
+    uri = str(source_uri or "").strip()
+    if not uri and not chunk_id:
+        raise ValueError("source_uri or chunk_id is required")
+    pool = _get_pool()
+    if pool is None:
+        return {}
+    tid = f"tomb_{_uuid.uuid4().hex[:12]}"
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO corpus_tombstones (id, source_uri, chunk_id, reason, superseded_by, created_at, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (tid, uri, str(chunk_id or "").strip(), reason, superseded_by, now, created_by),
+        )
+        conn.commit()
+    return {
+        "id": tid,
+        "source_uri": uri,
+        "chunk_id": chunk_id,
+        "reason": reason,
+        "superseded_by": superseded_by,
+        "created_at": now,
+        "created_by": created_by,
+    }
+
+
+def list_corpus_tombstones(limit: int = 200) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, source_uri, chunk_id, reason, superseded_by, created_at, created_by
+               FROM corpus_tombstones ORDER BY created_at DESC LIMIT %s""",
+            (max(1, min(limit, 500)),),
+        )
+        return [
+            {
+                "id": r[0],
+                "source_uri": r[1],
+                "chunk_id": r[2],
+                "reason": r[3],
+                "superseded_by": r[4],
+                "created_at": r[5],
+                "created_by": r[6],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+def delete_corpus_tombstone(tombstone_id: str) -> bool:
+    tid = (tombstone_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not tid:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM corpus_tombstones WHERE id = %s", (tid,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_active_corpus_tombstones() -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, source_uri, chunk_id, reason, superseded_by FROM corpus_tombstones")
+        return [
+            {
+                "id": r[0],
+                "source_uri": r[1],
+                "chunk_id": r[2],
+                "reason": r[3],
+                "superseded_by": r[4],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Statutory Precedences (Solution C)
+# ---------------------------------------------------------------------------
+def add_statutory_precedence(
+    topic: str,
+    rule_statement: str,
+    *,
+    statute_reference: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    topic = str(topic or "").strip()
+    rule = str(rule_statement or "").strip()
+    if not topic or not rule:
+        raise ValueError("topic and rule_statement are required")
+    pool = _get_pool()
+    if pool is None:
+        return {}
+    pid = f"prec_{_uuid.uuid4().hex[:12]}"
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO statutory_precedences (id, topic, rule_statement, statute_reference, enabled, created_at, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (pid, topic, rule, statute_reference, enabled, now, now),
+        )
+        conn.commit()
+    return {
+        "id": pid,
+        "topic": topic,
+        "rule_statement": rule,
+        "statute_reference": statute_reference,
+        "enabled": enabled,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def list_statutory_precedences(enabled_only: bool = False) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        query = """SELECT id, topic, rule_statement, statute_reference, enabled, created_at, updated_at
+                   FROM statutory_precedences"""
+        if enabled_only:
+            query += " WHERE enabled IS TRUE"
+        query += " ORDER BY updated_at DESC"
+        cur.execute(query)
+        return [
+            {
+                "id": r[0],
+                "topic": r[1],
+                "rule_statement": r[2],
+                "statute_reference": r[3],
+                "enabled": bool(r[4]),
+                "created_at": r[5],
+                "updated_at": r[6],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+def update_statutory_precedence(
+    precedence_id: str,
+    *,
+    enabled: bool | None = None,
+    rule_statement: str | None = None,
+    statute_reference: str | None = None,
+) -> bool:
+    pid = (precedence_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not pid:
+        return False
+    now = _time.time()
+    clauses = ["updated_at = %s"]
+    params: list[Any] = [now]
+    if enabled is not None:
+        clauses.append("enabled = %s")
+        params.append(enabled)
+    if rule_statement is not None:
+        clauses.append("rule_statement = %s")
+        params.append(rule_statement.strip())
+    if statute_reference is not None:
+        clauses.append("statute_reference = %s")
+        params.append(statute_reference.strip())
+    params.append(pid)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(f"UPDATE statutory_precedences SET {', '.join(clauses)} WHERE id = %s", tuple(params))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_statutory_precedence(precedence_id: str) -> bool:
+    pid = (precedence_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not pid:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM statutory_precedences WHERE id = %s", (pid,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_active_statutory_precedences() -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, topic, rule_statement, statute_reference
+               FROM statutory_precedences WHERE enabled IS TRUE
+               ORDER BY updated_at DESC"""
+        )
+        return [
+            {
+                "id": r[0],
+                "topic": r[1],
+                "rule_statement": r[2],
+                "statute_reference": r[3],
+            }
+            for r in cur.fetchall()
+        ]
 
 
 # ---------------------------------------------------------------------------

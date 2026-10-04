@@ -5071,6 +5071,9 @@ class ChatModel:
         """Return a shallow copy with a production-safe user-facing reply and localized metadata."""
         out = dict(result)
         out["reply"] = self._finalize_reply(str(out.get("reply", "")))
+        ack = str(out.get("discrepancy_ack") or "").strip()
+        if ack and ack not in out["reply"]:
+            out["reply"] = f"{ack}\n\n{out['reply']}".strip()
         locale = str(out.get("locale") or "en")
         if locale not in ("", "en"):
             if "next_actions" in out and isinstance(out["next_actions"], list):
@@ -7802,6 +7805,54 @@ class ChatModel:
                 except Exception:
                     logger.debug("Failed to fetch conversation history", exc_info=True)
 
+            # 0a. Check for factual dispute against previous turn (Auto Bug / Knowledge Discrepancy Reporting)
+            discrepancy_payload = None
+            discrepancy_ack_prefix = ""
+            if flags.is_enabled("knowledge_discrepancy_reporting") and conversation_history:
+                try:
+                    last_turn = conversation_history[-1] if conversation_history else {}
+                    prev_bot_reply = str(last_turn.get("bot_reply") or "").strip()
+                    if prev_bot_reply:
+                        from .discrepancy_detector import detect_discrepancy, format_discrepancy_acknowledgement
+
+                        det = detect_discrepancy(message, prev_bot_reply)
+                        if det.is_dispute:
+                            prev_sources = last_turn.get("sources") or []
+                            rep = db.create_or_increment_discrepancy(
+                                bot_statement=det.bot_statement,
+                                user_correction=det.user_correction,
+                                conversation_id=conversation_id or "",
+                                session_id=session_id or "",
+                                user_id=user_id or "",
+                                discrepancy_type=det.discrepancy_type,
+                                cited_sources=prev_sources,
+                                priority=det.suggested_priority,
+                            )
+                            discrepancy_payload = {
+                                "id": rep.get("id"),
+                                "status": rep.get("status", "pending"),
+                                "frequency_count": rep.get("frequency_count", 1),
+                                "discrepancy_type": det.discrepancy_type,
+                                "reused_existing": rep.get("reused_existing", False),
+                            }
+                            eff_loc = requested_locale or "en"
+                            discrepancy_ack_prefix = format_discrepancy_acknowledgement(
+                                rep.get("id", ""),
+                                baseline_topic="indexed statutory guidance",
+                                locale=eff_loc,
+                            )
+                except Exception:
+                    logger.debug("Discrepancy detection hook failed", exc_info=True)
+
+            def _with_discrepancy(res: dict[str, Any]) -> dict[str, Any]:
+                if discrepancy_payload and not res.get("discrepancy_report"):
+                    res["discrepancy_report"] = discrepancy_payload
+                if discrepancy_ack_prefix:
+                    rep_text = str(res.get("reply") or "").strip()
+                    if discrepancy_ack_prefix not in rep_text:
+                        res["reply"] = f"{discrepancy_ack_prefix}\n\n{rep_text}".strip()
+                return self._finalize_result(res)
+
             # 0b. Query rewriting — spell correction, abbreviation expansion,
             #     coreference resolution from history (Phase 4)
             with trace_stage("query_rewrite", timings=timings):
@@ -7815,7 +7866,7 @@ class ChatModel:
 
                 override = _cms.lookup(rewritten)
                 if override:
-                    return self._finalize_result(
+                    return _with_discrepancy(
                         self._deterministic_result(
                             reply=str(override.get("reply") or ""),
                             curated=True,
@@ -8187,7 +8238,7 @@ class ChatModel:
                     cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
                 if cached:
                     logger.info("generate: cache HIT (query_length=%d)", len(message))
-                    return self._finalize_result({
+                    return _with_discrepancy({
                         **cached,
                         "conversation_id": thread_id,
                         "locale": locale,
@@ -9304,7 +9355,7 @@ class ChatModel:
             trace_ctx=trace_ctx,
         )
 
-        return result
+        return _with_discrepancy(result)
 
     # -- Audit helper (Phase 21) -------------------------------------
     def _audit_turn(
@@ -9667,7 +9718,7 @@ class ChatModel:
         if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
             if cached:
-                return self._finalize_result({
+                return _with_discrepancy({
                     **cached,
                     "conversation_id": thread_id,
                     "locale": locale,
@@ -9687,7 +9738,7 @@ class ChatModel:
                 locale=locale,
             )
             if route_decision.route == AgentRoute.CLARIFY:
-                return {
+                return _with_discrepancy({
                     "reply": route_decision.clarification_question
                     or CLARIFICATION_PROMPT,
                     "sources": [],
@@ -9704,9 +9755,9 @@ class ChatModel:
                         agent_role="clarification_agent",
                         suspended_workflow=self._get_suspended_workflow_name(thread_id),
                     ),
-                "_hits": [],
-                "_history": [],
-            }
+                    "_hits": [],
+                    "_history": [],
+                })
 
         # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
         conv_res_s = handle_conversational_turn(message, locale)

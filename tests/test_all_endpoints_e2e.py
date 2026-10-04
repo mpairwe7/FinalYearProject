@@ -127,6 +127,18 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/overrides"),
     ("PUT", "/v1/admin/overrides"),
     ("DELETE", "/v1/admin/overrides/{override_id}"),
+    ("GET", "/v1/admin/discrepancies"),
+    ("GET", "/v1/admin/discrepancies/stats"),
+    ("GET", "/v1/admin/discrepancies/{report_id}"),
+    ("POST", "/v1/admin/discrepancies/{report_id}/verify"),
+    ("POST", "/v1/admin/discrepancies/{report_id}/dismiss"),
+    ("GET", "/v1/admin/tombstones"),
+    ("POST", "/v1/admin/tombstones"),
+    ("DELETE", "/v1/admin/tombstones/{tombstone_id}"),
+    ("GET", "/v1/admin/precedences"),
+    ("POST", "/v1/admin/precedences"),
+    ("PATCH", "/v1/admin/precedences/{precedence_id}"),
+    ("DELETE", "/v1/admin/precedences/{precedence_id}"),
     ("GET", "/v1/admin/outbox"),
     ("GET", "/v1/admin/audit/events"),
     ("GET", "/v1/admin/audit/verify"),
@@ -263,6 +275,18 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
     ("PUT", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
     ("DELETE", "/v1/admin/overrides/{override_id}"): "App.backend.tests.test_remaining_gaps",
+    ("GET", "/v1/admin/discrepancies"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/discrepancies/stats"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/discrepancies/{report_id}"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/discrepancies/{report_id}/verify"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/discrepancies/{report_id}/dismiss"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/tombstones"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/tombstones"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("DELETE", "/v1/admin/tombstones/{tombstone_id}"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/precedences"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/precedences"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("PATCH", "/v1/admin/precedences/{precedence_id}"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("DELETE", "/v1/admin/precedences/{precedence_id}"): "App.backend.tests.test_discrepancy_and_precedence",
     ("GET", "/v1/admin/outbox"): "App.backend.tests.test_remaining_gaps",
     ("GET", "/v1/admin/audit/events"): "test_auditor_controls:test_auditor_reads_the_trail_and_filters_it",
     ("GET", "/v1/admin/audit/verify"): "test_auditor_controls:test_verify_detects_a_tampered_row",
@@ -430,10 +454,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (94 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (106 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 94, f"expected 94 HTTP endpoints, found {len(http)}"
+    assert len(http) == 106, f"expected 106 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
