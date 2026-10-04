@@ -7931,6 +7931,91 @@ class ChatModel:
                 else:
                     rewritten = normalize_query(message)
 
+            # 0b-2. Omnichannel Case & Discrepancy Status Lookup (TIC-... / KB-...)
+            ref_match = re.search(r"\b(TIC-[A-Z0-9]{6,12})\b", message, re.I)
+            if ref_match:
+                t_ref = ref_match.group(1).upper()
+                try:
+                    tickets = db.list_tickets(q=t_ref, limit=1)
+                    if tickets:
+                        t = tickets[0]
+                        st = str(t.get("status") or "open").capitalize()
+                        team = t.get("team") or "URA Support"
+                        officer_reply = str(t.get("officer_reply") or "").strip()
+                        if officer_reply:
+                            case_reply = (
+                                f"**Case Status for {t_ref}**:\n\n"
+                                f"- **Status**: Resolved\n"
+                                f"- **Officer Response**: {officer_reply}\n\n"
+                                f"If you need further assistance with this case, you can reply directly here or call the URA Contact Centre at 0800 117 000."
+                            )
+                        else:
+                            case_reply = (
+                                f"**Case Status for {t_ref}**:\n\n"
+                                f"- **Status**: {st}\n"
+                                f"- **Assigned Team**: {team}\n"
+                                f"- **Summary**: {t.get('reason') or 'Taxpayer inquiry'}\n\n"
+                                f"A URA officer is currently reviewing your case. If you have additional documents or updates, please share them here."
+                            )
+                        return _with_discrepancy(
+                            self._deterministic_result(
+                                reply=case_reply,
+                                curated=True,
+                                hits=[],
+                                sources=["ura_support_case"],
+                                citations=[],
+                                retrieval_mode="support_case",
+                                thread_id=thread_id,
+                                locale=locale,
+                                agent_role="support_triage",
+                            )
+                        )
+                except Exception:
+                    logger.debug("Failed ticket reference lookup", exc_info=True)
+
+            disc_match = re.search(r"\b(KB-[A-Z0-9]{6,14})\b", message, re.I)
+            if disc_match:
+                k_ref = disc_match.group(1).upper()
+                try:
+                    raw_id = k_ref.replace("KB-", "kb_").lower()
+                    disc = db.get_discrepancy(raw_id)
+                    if not disc:
+                        discs = db.list_discrepancies(limit=200)
+                        matching = [d for d in discs if d.get("id", "").upper().endswith(k_ref[3:])]
+                        disc = matching[0] if matching else None
+                    if disc:
+                        st = str(disc.get("status") or "pending").capitalize()
+                        admin_note = disc.get("admin_note") or ""
+                        if disc.get("status") == "verified":
+                            disc_reply = (
+                                f"**Knowledge Review Report {k_ref}**:\n\n"
+                                f"- **Status**: Verified & Patched\n"
+                                f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
+                                f"- **Resolution**: The URA tax policy and technical review team confirmed this legal update. An authoritative override has been deployed to the knowledge base."
+                            )
+                        else:
+                            disc_reply = (
+                                f"**Knowledge Review Report {k_ref}**:\n\n"
+                                f"- **Status**: {st}\n"
+                                f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
+                                f"- **Note**: {admin_note or 'Under active review against current statutory instruments and gazettes.'}"
+                            )
+                        return _with_discrepancy(
+                            self._deterministic_result(
+                                reply=disc_reply,
+                                curated=True,
+                                hits=[],
+                                sources=["knowledge_review_registry"],
+                                citations=[],
+                                retrieval_mode="discrepancy_status",
+                                thread_id=thread_id,
+                                locale=locale,
+                                agent_role="knowledge_qa",
+                            )
+                        )
+                except Exception:
+                    logger.debug("Failed discrepancy reference lookup", exc_info=True)
+
             if flags.is_enabled("answer_overrides"):
                 from . import cms as _cms
 

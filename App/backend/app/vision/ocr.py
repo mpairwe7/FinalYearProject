@@ -416,16 +416,60 @@ def extract_national_id_card_data(text: str) -> dict[str, Any]:
     }
 
 
+def normalize_thermal_receipt_text(text: str) -> str:
+    """Clean up common thermal receipt & phone camera OCR artifacts.
+
+    Handles:
+    - Spaced acronyms like 'V A T', 'T I N', 'E F R I S', 'F D N', 'P R N'
+    - Confused letters/numbers in numeric contexts (e.g. FDN: O100... -> 0100...)
+    - Line noise and erratic spacing around colons
+    """
+    if not text:
+        return ""
+    cleaned = text
+    spaced_acronyms = [
+        (r"\bE\s+F\s+R\s+I\s+S\b", "EFRIS"),
+        (r"\bF\s+D\s+N\b", "FDN"),
+        (r"\bP\s+R\s+N\b", "PRN"),
+        (r"\bV\s+A\s+T\b", "VAT"),
+        (r"\bT\s+I\s+N\b", "TIN"),
+        (r"\bU\s+R\s+A\b", "URA"),
+    ]
+    for pattern, replacement in spaced_acronyms:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+
+    def _fix_fdn(m: re.Match) -> str:
+        prefix = m.group(0).split(":")[0] if ":" in m.group(0) else "FDN"
+        val = m.group(1).replace("O", "0").replace("o", "0").replace("I", "1").replace("l", "1").replace(" ", "")
+        return f"{prefix}: {val}"
+
+    cleaned = re.sub(r"(?:FDN|Fiscal\s+Document\s+Number)[:\s#]*([A-Za-z0-9\s-]{10,28})", _fix_fdn, cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
 def extract_prn_numbers(text: str) -> list[str]:
     """Extract Uganda Payment Registration Numbers (PRNs: 12-15 digits, typically starts with 2)."""
-    matches = re.findall(r"(?:PRN[:\s#]*)?\b(2\d{11,14})\b", text, re.I)
-    return list(set(matches))
+    norm_text = normalize_thermal_receipt_text(text)
+    matches = set(re.findall(r"(?:PRN[:\s#]*)?\b(2\d{11,14})\b", norm_text, re.I))
+    spaced = re.findall(r"(?:PRN[:\s#]*)?\b(2\d{3}[-\s]\d{4}[-\s]\d{4,6})\b", norm_text, re.I)
+    for s in spaced:
+        matches.add(re.sub(r"[-\s]", "", s))
+    return list(matches)
 
 
 def extract_efris_invoice_numbers(text: str) -> list[str]:
-    """Extract EFRIS fiscal receipt and invoice reference numbers."""
-    matches = re.findall(r"\b(?:FD|INV|EF)[A-Z0-9]{8,18}\b", text, re.I)
-    return list(set(matches))
+    """Extract EFRIS fiscal receipt and invoice reference numbers (including 20-digit FDNs)."""
+    norm_text = normalize_thermal_receipt_text(text)
+    matches = set()
+    matches.update(re.findall(r"\b(?:FD|INV|EF)[A-Z0-9]{8,24}\b", norm_text, re.I))
+    matches.update(re.findall(r"\b(0\d{19,23})\b", norm_text))
+    matches.update(re.findall(r"\b(\d{10}-\d{4}-\d{5,8})\b", norm_text))
+    labeled = re.findall(r"(?:FDN|Fiscal\s+Document\s+Number)[:\s#]*([A-Z0-9-]{10,25})", norm_text, re.I)
+    for m in labeled:
+        clean_m = m.strip().replace(" ", "")
+        if re.search(r"\d{6,}", clean_m):
+            matches.add(clean_m)
+    return list(matches)
 
 
 def extract_ugx_amounts(text: str) -> list[str]:

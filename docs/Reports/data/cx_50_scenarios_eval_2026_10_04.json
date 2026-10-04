@@ -1,14 +1,14 @@
 {
-  "timestamp": 1791115437.0176802,
-  "date": "2026-10-04 12:03:57 UTC",
+  "timestamp": 1791116373.1600935,
+  "date": "2026-10-04 12:19:33 UTC",
   "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
   "overall_cx_score_pct": 100.0,
   "scenarios_total": 50,
   "scenarios_passed": 50,
   "latency_stats": {
-    "avg_s": 0.92,
-    "p50_s": 0.33,
-    "p95_s": 6.1
+    "avg_s": 1.76,
+    "p50_s": 0.38,
+    "p95_s": 7.7
   },
   "category_breakdown": {
     "Interactive Guided Workflow": {
@@ -50,13 +50,13 @@
       "title": "Individual TIN Registration (Privacy-Preserving Stepper)",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 1.01,
+      "total_time_s": 1.04,
       "turns": [
         {
           "turn": 1,
           "user_message": "Help me register for a TIN",
           "passed": true,
-          "elapsed_s": 0.36,
+          "elapsed_s": 0.39,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -80,7 +80,7 @@
           "turn": 3,
           "user_message": "yes",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.33,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 3,
@@ -95,13 +95,13 @@
       "title": "Company Non-Individual TIN Application Workflow",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.52,
       "turns": [
         {
           "turn": 1,
           "user_message": "Help me apply for a TIN for my company",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.52,
           "retrieval_mode": "faq_priority",
           "workflow_active": false,
           "resources_count": 3,
@@ -116,13 +116,13 @@
       "title": "Tax Clearance Certificate (TCC) Application Journey",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "Guide me through getting a tax clearance certificate",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.35,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -158,13 +158,13 @@
       "title": "Motor Vehicle Registration & Transfer Workflow",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "Guide me through registering my imported car",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.34,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -200,13 +200,13 @@
       "title": "Customs Import Entry & IM4 Clearance Workflow",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.32,
       "turns": [
         {
           "turn": 1,
           "user_message": "Guide me through customs clearance",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.32,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -221,13 +221,13 @@
       "title": "Formal Tax Assessment Objection / Dispute Filing",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "Help me file an objection against an unfair tax assessment",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.35,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -242,13 +242,13 @@
       "title": "Bonded Warehouse (BWIMS) IM7 Cargo Guidance",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "I need guidance on bonded warehouse goods under IM7",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.36,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 1,
@@ -263,13 +263,13 @@
       "title": "EFRIS Invoice & Compliance Audit Checklist",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.35,
+      "total_time_s": 0.38,
       "turns": [
         {
           "turn": 1,
           "user_message": "Guide me to check if my invoice complies with EFRIS rules",
           "passed": true,
-          "elapsed_s": 0.35,
+          "elapsed_s": 0.38,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 3,
@@ -284,13 +284,13 @@
       "title": "Standard Resident PAYE on 5,000,000 UGX Monthly Salary",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate my PAYE on a gross monthly salary of 5,000,000 UGX",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -305,13 +305,13 @@
       "title": "High-Income PAYE on 12,000,000 UGX (40% Super Bracket)",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.37,
       "turns": [
         {
           "turn": 1,
           "user_message": "How much PAYE will I pay on 12,000,000 UGX salary per month?",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.37,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -326,13 +326,13 @@
       "title": "Non-Resident Employee PAYE Calculation (3,000,000 UGX)",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.38,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate PAYE for a non-resident employee earning 3,000,000 UGX gross monthly",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.38,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -347,13 +347,13 @@
       "title": "Standard 18% VAT Addition on 25,000,000 UGX Supply",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.33,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate 18% VAT on goods worth 25,000,000 UGX",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.33,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -368,13 +368,13 @@
       "title": "VAT-Inclusive Extraction from Gross Total (59,000,000 UGX)",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "How much VAT is included in 59,000,000 UGX?",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.35,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -389,13 +389,13 @@
       "title": "Individual Rental Income Tax on 30,000,000 UGX Annual Rent",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate individual rental tax on 30,000,000 UGX annual rental income",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -410,13 +410,13 @@
       "title": "Resident Professional Fees Withholding Tax (15,000,000 UGX)",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate withholding tax on an invoice of 15,000,000 UGX for consultancy services to a resident company",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.36,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -431,13 +431,13 @@
       "title": "Commercial Building Sale Capital Gains Tax",
       "category": "Deterministic Tax Computation",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate capital gains tax on a commercial warehouse bought for 100,000,000 UGX and sold for 160,000,000 UGX",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.36,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -452,19 +452,19 @@
       "title": "Small Bakery EFRIS Enforcement Threat & 10M Penalty Panic",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 3.52,
       "turns": [
         {
           "turn": 1,
           "user_message": "I started a small bakery in Mukono 8 months ago, using my personal savings and some money sent by my sister in the UK. L",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 3.52,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 3,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "You are correct to seek clarification from the URA field office, as the rules have changed significantly. Here’s what you should do:  1. **Register for EFRIS**: Since you operate i"
+          "snippet": "You are correct—businesses with [1] annual sales below UGX 10 million are exempt from **EFRIS**. However, since you are already registered for **VAT**, you must comply with **EFRIS"
         }
       ]
     },
@@ -473,13 +473,13 @@
       "title": "Stranded Imported Car at Malaba & Rogue Clearing Agent",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.36,
+      "total_time_s": 0.41,
       "turns": [
         {
           "turn": 1,
           "user_message": "I imported a 2017 car through Mombasa and it arrived at Malaba customs. My clearing agent took 8 million shillings from ",
           "passed": true,
-          "elapsed_s": 0.36,
+          "elapsed_s": 0.41,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 1,
@@ -494,13 +494,13 @@
       "title": "Remote Software Engineer Receiving Foreign USD Remittances",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.41,
       "turns": [
         {
           "turn": 1,
           "user_message": "I am a software engineer in Jinja freelancing remotely for tech companies in Germany and the US. They wire money to my E",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.41,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -515,13 +515,13 @@
       "title": "Landlord-Tenant Agency Notice Dispute & Eviction Threat",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.4,
       "turns": [
         {
           "turn": 1,
           "user_message": "My landlord locked my shop in Kampala because URA served an agency notice to my bank and deducted my rent payments direc",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.4,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -536,13 +536,13 @@
       "title": "Ancestral Agricultural Land Sale & Family Estate Dispute",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.39,
       "turns": [
         {
           "turn": 1,
           "user_message": "Our family in Mbarara recently sold 5 acres of ancestral farm land that belonged to our late grandfather to pay universi",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.39,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -557,13 +557,13 @@
       "title": "Lake Victoria Fish Exporter Cross-Border EAC Question",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.39,
       "turns": [
         {
           "turn": 1,
           "user_message": "I buy fresh fish from fishermen in Busia and export it across the border to Kisumu, Kenya. A customs official at the bor",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.39,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -578,19 +578,19 @@
       "title": "Retail Hardware Double-Taxation Claim on Construction Materials",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.36,
+      "total_time_s": 7.96,
       "turns": [
         {
           "turn": 1,
           "user_message": "I supply cement to a government school in Gulu. The manufacturer charged me 18% VAT when I bought the cement. When the s",
           "passed": true,
-          "elapsed_s": 0.36,
+          "elapsed_s": 7.96,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 3,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "You are not being double-taxed. Here’s how you claim your input tax credit on e-Tax:  1. **Claim the Credit**: Log into the URA e-Tax Portal and navigate to the \"Claims\" section. S"
+          "snippet": "You are not being double taxed. Here’s how you claim your input tax credit on e-Tax:  1. **Claim the Credit**: Log into the E-FRIS Portal and navigate to the \"Claims\" section. Sele"
         }
       ]
     },
@@ -599,13 +599,13 @@
       "title": "NGO Medical Clinic Receiving International Grant Funds",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.35,
+      "total_time_s": 0.4,
       "turns": [
         {
           "turn": 1,
           "user_message": "We run a registered non-profit medical clinic in Arua providing free malaria treatment. We just received a 100,000 USD g",
           "passed": true,
-          "elapsed_s": 0.35,
+          "elapsed_s": 0.4,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -620,13 +620,13 @@
       "title": "Mobile Money Agent Ledger & 0.5% Cash-Out Reconciliation",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.38,
       "turns": [
         {
           "turn": 1,
           "user_message": "I operate a telecom mobile money booth in Wakiso. Every customer withdrawal pays 0.5% excise duty. Now URA says I must f",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.38,
           "retrieval_mode": "faq_priority",
           "workflow_active": false,
           "resources_count": 3,
@@ -641,13 +641,13 @@
       "title": "Sole Proprietor Incorporating Business & Transferring Fleet",
       "category": "Narrative Story Resolution",
       "passed": true,
-      "total_time_s": 0.35,
+      "total_time_s": 0.41,
       "turns": [
         {
           "turn": 1,
           "user_message": "I have been running my transport business as a sole proprietor for 5 years. I just incorporated a private limited compan",
           "passed": true,
-          "elapsed_s": 0.35,
+          "elapsed_s": 0.41,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 1,
@@ -662,13 +662,13 @@
       "title": "Downloadable Return Templates & eTax Portal Hub",
       "category": "Actionable Resource Delivery",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "Where can I download the return filing form templates and log in?",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.36,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 1,
@@ -683,13 +683,13 @@
       "title": "EFRIS Fiscal Invoicing Portal & FDN Verification Tool",
       "category": "Actionable Resource Delivery",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "I need the direct portal link to verify an EFRIS receipt FDN and login to my EFRIS account",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.35,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 3,
@@ -704,13 +704,13 @@
       "title": "e-Services Make a Payment & Bank PRN Slip Delivery",
       "category": "Actionable Resource Delivery",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "Provide me with the official URA links to pay my tax assessment and generate a PRN",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -725,13 +725,13 @@
       "title": "Motor Vehicle Transfer Form & Logbook Search Portal",
       "category": "Actionable Resource Delivery",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "Where do I access the motor vehicle ownership transfer form and verify a logbook online?",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.36,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 3,
@@ -746,13 +746,13 @@
       "title": "Withholding Tax Exemption Application Portal & Guidelines",
       "category": "Actionable Resource Delivery",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "Give me the link and application procedure to apply for withholding tax exemption certificate",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.34,
           "retrieval_mode": "education",
           "workflow_active": false,
           "resources_count": 3,
@@ -767,13 +767,13 @@
       "title": "Emergency Bank Freeze & Third-Party Agency Notice Relief",
       "category": "Empathetic Crisis Guidance",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "I am terrified! URA issued an agency notice on my bank account and froze my funds. What can I do?",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.35,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -788,13 +788,13 @@
       "title": "Late Filing Penalty Panic & Voluntary Disclosure Relief",
       "category": "Empathetic Crisis Guidance",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.33,
       "turns": [
         {
           "turn": 1,
           "user_message": "I missed the filing deadline and I cannot afford these heavy penalties, please help me out!",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.33,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -809,19 +809,19 @@
       "title": "Bribery Attempt & Fraudulent Officer Reporting (Integrity Line)",
       "category": "Empathetic Crisis Guidance",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 6.4,
       "turns": [
         {
           "turn": 1,
           "user_message": "A man claiming to be a URA revenue officer says if I don't give him 2 million in cash right now, he will shut down my cl",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 6.4,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "To report this, you should contact the URA enforcement team directly at the telephone number 0772 140 000 or 0772 140 001. They will guide you on how to proceed.  --- *Note: This r"
+          "snippet": "To report this, follow these steps:  1. **Contact the URA Fraud Hotline**: Call the URA fraud hotline at 0800 117 000 or send a message to 0772 140 000. This is the official line f"
         }
       ]
     },
@@ -830,13 +830,13 @@
       "title": "Distress Warrant & Court Bailiff Seizure Fear",
       "category": "Empathetic Crisis Guidance",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.38,
       "turns": [
         {
           "turn": 1,
           "user_message": "Court bailiffs arrived with a URA distress warrant threatening to carry away my printing machines tomorrow morning. What",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.38,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -851,19 +851,19 @@
       "title": "Taxpayer Requests Immediate Human Officer Escalation",
       "category": "Empathetic Crisis Guidance",
       "passed": true,
-      "total_time_s": 0.35,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "I need to talk to a human URA officer right now regarding my audit dispute.",
           "passed": true,
-          "elapsed_s": 0.35,
+          "elapsed_s": 0.36,
           "retrieval_mode": "escalated",
           "workflow_active": false,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket 475a60d7) — meanwhile, you can also reach URA directly at https://ura.go.ug or via t"
+          "snippet": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket f998ade5) — meanwhile, you can also reach URA directly at https://ura.go.ug or via t"
         }
       ]
     },
@@ -872,13 +872,13 @@
       "title": "Taxpayer Challenges Outdated VAT Rate",
       "category": "Closed-Loop Bug Reporting",
       "passed": true,
-      "total_time_s": 6.1,
+      "total_time_s": 7.23,
       "turns": [
         {
           "turn": 1,
           "user_message": "What is the VAT rate in Uganda?",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -890,7 +890,7 @@
           "turn": 2,
           "user_message": "No, that is incorrect. Under the 2023 Amendment Act, the rate was changed to 6% instead of 18%.",
           "passed": true,
-          "elapsed_s": 5.78,
+          "elapsed_s": 6.89,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -905,13 +905,13 @@
       "title": "Taxpayer Challenges Mandatory VAT Registration Threshold",
       "category": "Closed-Loop Bug Reporting",
       "passed": true,
-      "total_time_s": 2.76,
+      "total_time_s": 6.59,
       "turns": [
         {
           "turn": 1,
           "user_message": "What is the annual threshold to register for VAT?",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.37,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -923,7 +923,7 @@
           "turn": 2,
           "user_message": "Actually, that is outdated. The law was updated recently and the threshold is no longer what you said.",
           "passed": true,
-          "elapsed_s": 2.41,
+          "elapsed_s": 6.23,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -938,7 +938,7 @@
       "title": "Taxpayer Challenges Repealed Motor Vehicle Form Number",
       "category": "Closed-Loop Bug Reporting",
       "passed": true,
-      "total_time_s": 2.28,
+      "total_time_s": 2.51,
       "turns": [
         {
           "turn": 1,
@@ -956,7 +956,7 @@
           "turn": 2,
           "user_message": "You are wrong, that form was abolished and replaced by an online e-service with no paper form.",
           "passed": true,
-          "elapsed_s": 1.93,
+          "elapsed_s": 2.16,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -971,7 +971,7 @@
       "title": "Taxpayer Challenges Withholding Tax Rate on Rental Income",
       "category": "Closed-Loop Bug Reporting",
       "passed": true,
-      "total_time_s": 1.98,
+      "total_time_s": 2.4,
       "turns": [
         {
           "turn": 1,
@@ -989,7 +989,7 @@
           "turn": 2,
           "user_message": "That is wrong, under the new amendment it is 10% instead of 15%.",
           "passed": true,
-          "elapsed_s": 1.66,
+          "elapsed_s": 2.08,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -1004,13 +1004,13 @@
       "title": "Luganda TIN Guidance & Step Breakdown",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 0.35,
+      "total_time_s": 5.89,
       "turns": [
         {
           "turn": 1,
           "user_message": "Nnyamba okufuna TIN yange ey'obuntu, nkoze ntya?",
           "passed": true,
-          "elapsed_s": 0.35,
+          "elapsed_s": 5.89,
           "retrieval_mode": "faq_priority",
           "workflow_active": false,
           "resources_count": 0,
@@ -1025,13 +1025,13 @@
       "title": "Luganda PAYE Take-Home Salary Explanation",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 6.15,
+      "total_time_s": 6.66,
       "turns": [
         {
           "turn": 1,
           "user_message": "Bansasula emitwalo amakumi ataano (500,000 UGX) buli mwezi. Nsasula omusolo gwa PAYE mmeka?",
           "passed": true,
-          "elapsed_s": 6.15,
+          "elapsed_s": 6.66,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -1046,13 +1046,13 @@
       "title": "Luganda EFRIS Guidance for Small Market Vendors",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 0.87,
+      "total_time_s": 7.7,
       "turns": [
         {
           "turn": 1,
           "user_message": "Nnina edduuka mu katale k'e Nakasero. Nteekwa okukozesa EFRIS okukola lisiti?",
           "passed": true,
-          "elapsed_s": 0.87,
+          "elapsed_s": 7.7,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 3,
@@ -1067,19 +1067,19 @@
       "title": "Swahili 18% VAT Mathematical Calculation",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 5.52,
       "turns": [
         {
           "turn": 1,
           "user_message": "Hesabu kiasi cha VAT ya 18% kwa bidhaa za thamani ya shilingi 10,000,000 UGX",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 5.52,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "**Kuhesabu kodi ya thamani (VAT) (FY2026-27)**  - Jumla ya kiasi: UGX 10,000,000   - Kodi ya Ongezeko la Thamani kwa 18%: **UGX 1,800,000**   - Jumla (kodi ikiwemo): **UGX 11,800,0"
+          "snippet": "**Kuhesabu kodi ya thamani (VAT) (FY2026-27)**  - Kiasi cha kodi: UGX 10,000,000   - Kodi ya Ongezeko la Thamani (18%): **UGX 1,800,000**   - Jumla (kodi ikiwemo): **UGX 11,800,000"
         }
       ]
     },
@@ -1088,13 +1088,13 @@
       "title": "Swahili Customs Clearance Guidance for East African Trader",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 10.61,
+      "total_time_s": 11.2,
       "turns": [
         {
           "turn": 1,
           "user_message": "Ninaingiza bidhaa kutoka Kenya kupitia mpaka wa Malaba. Nawezaje kulipa ushuru wa forodha na kupata kibali?",
           "passed": true,
-          "elapsed_s": 10.61,
+          "elapsed_s": 11.2,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -1109,13 +1109,13 @@
       "title": "Turnover Threshold Boundary Probe (149M vs 150M UGX)",
       "category": "Statutory Boundary Probing",
       "passed": true,
-      "total_time_s": 0.38,
+      "total_time_s": 0.37,
       "turns": [
         {
           "turn": 1,
           "user_message": "My hardware business earned 149,000,000 UGX in the last 12 months. Am I legally required to register for VAT tomorrow?",
           "passed": true,
-          "elapsed_s": 0.38,
+          "elapsed_s": 0.37,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -1130,13 +1130,13 @@
       "title": "Unprocessed Agricultural Produce vs Packaged Supply Exemption",
       "category": "Statutory Boundary Probing",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "Do I charge 18% VAT on selling raw fresh cassava from my farm versus selling packaged cassava flour in a supermarket?",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.35,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
@@ -1151,13 +1151,13 @@
       "title": "Zero-Rated Goods vs Exempt Supplies Distinction",
       "category": "Statutory Boundary Probing",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "What is the practical difference between zero-rated VAT supplies and exempt supplies when claiming input tax credits?",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.36,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
