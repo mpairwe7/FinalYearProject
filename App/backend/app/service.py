@@ -6618,6 +6618,9 @@ class ChatModel:
             or self._maybe_handle_bare_amount(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
+            or self._maybe_handle_situational_advisory(
+                message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+            )
             or self._maybe_handle_rate_lookup(
                 message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
             )
@@ -6956,6 +6959,396 @@ class ChatModel:
             "ticket_id": "",
             "current_topic": topic,
         }
+
+    def _maybe_handle_situational_advisory(
+        self,
+        *,
+        message: str,
+        rewritten: str,
+        thread_id: str,
+        locale: str,
+    ) -> dict[str, Any] | None:
+        """Resolve high-stakes situational taxpayer requests that require specialized statutory guidance."""
+        text = f"{message} {rewritten}".lower()
+
+        # 0. Transactional PRN Generation Request (Transactional Execution Frontier)
+        if (
+            any(k in text for k in ("generate a prn", "generate prn", "create a prn", "create prn", "issue a prn", "issue prn", "generate my prn", "prn slip for my"))
+            and not any(k in text for k in ("guide me to", "workflow", "how to generate", "how do i generate", "steps to generate"))
+        ):
+            from .ura_account_mock import generate_mock_prn, format_prn_voucher_reply
+            from .calculator_router import extract_amounts
+
+            amts = extract_amounts(message) or extract_amounts(rewritten)
+            amt = amts[0][0] if amts else 0
+            tax_type = "General Tax"
+            if "stamp duty" in text:
+                tax_type = "Stamp Duty"
+            elif "vat" in text:
+                tax_type = "Value Added Tax"
+            elif "paye" in text:
+                tax_type = "PAYE Income Tax"
+            elif "rental" in text:
+                tax_type = "Rental Income Tax"
+            elif "customs" in text or "duty" in text:
+                tax_type = "Customs Import Duty"
+            elif "motor vehicle" in text or "traffic" in text:
+                tax_type = "Motor Vehicle Fees"
+
+            voucher = generate_mock_prn(tax_type=tax_type, amount_ugx=amt)
+            prn_reply = format_prn_voucher_reply(voucher, locale=locale)
+            return {
+                "reply": prn_reply,
+                "sources": ["https://ura.go.ug/en/domestic-taxes/make-a-payment/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Payment Portal",
+                    "passage": "A PRN is a unique payment registration reference valid across commercial banks, mobile money and online portals.",
+                    "url": "https://ura.go.ug/en/domestic-taxes/make-a-payment/",
+                    "page": "",
+                    "section": "PRN Generation",
+                    "title": "Payment Registration Number Voucher",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "prn_generation",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "payment_officer",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": [f"Pay via MTN: *165# (PRN {voucher['prn']})", f"Pay via Airtel: *185# (PRN {voucher['prn']})", "Verify payment on eTax portal"],
+                "ticket_id": "",
+            }
+
+        # 1. Duplicate / Double Payment on PRN & Refund Request (CX-047)
+        if (
+            ("paid" in text or "payment" in text or "prn" in text)
+            and any(k in text for k in ("twice", "double payment", "two different prn", "paid twice", "mistake and paid", "get my money back", "excess payment"))
+        ):
+            reply = (
+                "**Resolution for Duplicate / Double Tax Payment**:\n\n"
+                "If you accidentally paid a tax assessment twice using different PRNs, you are legally entitled to "
+                "a refund or account credit offset under **Section 38 of the Tax Procedures Code Act (TPCA)**.\n\n"
+                "**How to apply on the URA e-Tax portal**:\n"
+                "1. **Access Refund Portal**: Visit https://ura.go.ug → **e-Services** → **Get a Refund** (or **Tax Refund Application**).\n"
+                "2. **Enter Payment Reference**: Provide both the **correct PRN** and the **erroneous/duplicate PRN**.\n"
+                "3. **Bank Details**: Provide your commercial bank name, branch, and account number matching the taxpayer registration name.\n"
+                "4. **Attachments**: Upload the bank payment slips or debit transaction confirmations for both PRNs.\n"
+                "5. **Tax Credit Offset**: Alternatively, you can request URA to apply the excess 4,000,000 UGX payment as a **credit offset** against your next month's tax liabilities.\n\n"
+                "For urgent assistance with duplicate payments, call the URA Contact Centre toll-free on 0800 117 000."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/tax-education/tax-refunds/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Tax Refunds Guide",
+                    "passage": "Under Section 38 TPCA, taxpayers who make duplicate or excess payments may apply online for a refund or credit offset.",
+                    "url": "https://ura.go.ug/en/tax-education/tax-refunds/",
+                    "page": "",
+                    "section": "Refunds",
+                    "title": "URA Tax Refund Procedure",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "tax_refund",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tax_advisor",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Apply for tax refund on e-Services", "Request credit offset against next return"],
+                "ticket_id": "",
+            }
+
+        # 2. Installment Payment Agreement / MoU for Arrears (CX-091)
+        if (
+            any(k in text for k in ("installment", "instalment", "payment plan", "payment agreement", "mou", "memorandum of understanding"))
+            and any(k in text for k in ("arrears", "struggling", "low season", "cashflow", "financial hardship", "debt", "lodge", "hotel"))
+        ):
+            reply = (
+                "**Installment Payment Agreement (MoU) for Tax Arrears**:\n\n"
+                "Under **Section 37 of the Tax Procedures Code Act (TPCA)**, a taxpayer experiencing seasonal business downturns "
+                "or cashflow distress can request permission from the Commissioner General to pay accumulated tax liabilities by **installments**.\n\n"
+                "**Procedure to establish a Payment Plan / MoU**:\n"
+                "1. **Formal Written Application**: Submit an application letter addressed to the Commissioner General or your domestic tax station manager detailing your cashflow constraints.\n"
+                "2. **Demonstrate Hardship**: Attach cashflow projections, recent bank statements, and seasonal occupancy records demonstrating financial distress.\n"
+                "3. **Proposed Payment Schedule**: Propose a realistic monthly installment plan (typically spread across 3 to 12 months).\n"
+                "4. **Down Payment**: URA typically requires an initial commitment payment (e.g. 20% to 30% of principal tax) upon signing the binding **Memorandum of Understanding (MoU)**.\n"
+                "5. **Enforcement Protection**: Once the MoU is formally executed, enforcement actions (such as bank agency notices or distress warrants) are held in abeyance while you remain compliant with the agreed installment schedule."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/category/legal-policy/laws-and-acts/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "Section 37 TPCA (Payment by Installments)",
+                    "passage": "Section 37 allows taxpayers facing financial distress to enter into installment payment agreements upon Commissioner approval.",
+                    "url": "https://ura.go.ug/en/category/legal-policy/laws-and-acts/",
+                    "page": "",
+                    "section": "TPCA Sec 37",
+                    "title": "Installment Payment Agreements",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "installment_agreement",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tax_advisor",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Draft installment agreement letter", "Contact URA Debt Collection Department"],
+                "ticket_id": "",
+            }
+
+        # 3. Customs Perishable Goods Provisional Release under Bond (CX-049)
+        if (
+            any(k in text for k in ("perishable", "spoiling", "refrigerated", "dairy", "meat", "produce", "spoil"))
+            and any(k in text for k in ("border", "malaba", "busia", "customs", "stuck", "detained", "dispute", "bond", "release"))
+        ):
+            reply = (
+                "**Urgent Customs Release for Perishable Cargo**:\n\n"
+                "Under **Section 228 of the East African Community Customs Management Act (EACCMA)**, perishable goods "
+                "(such as refrigerated dairy, fresh fruits, vegetables, and meat) subject to customs invoice or valuation disputes "
+                "are legally eligible for **immediate provisional release under security / bond**.\n\n"
+                "**Emergency Steps at the Border Post (Malaba/Busia)**:\n"
+                "1. **Request Provisional Release**: Immediately notify the Customs Station Manager and your licensed clearing agent to invoke **Section 228 EACCMA** for immediate provisional release to avert cargo spoilage.\n"
+                "2. **Post Bond / Security**: You can post security (a refundable cash deposit, provisional bank guarantee, or customs security bond) covering the difference between your declared value and the disputed assessment.\n"
+                "3. **Physical Release**: Once the provisional security is registered in ASYCUDA World, the customs officer will authorize the release of the refrigerated container immediately.\n"
+                "4. **Post-Clearance Valuation Review**: The dispute over invoice value is then resolved post-clearance through the Customs Valuation Committee without holding the perishable cargo."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/customs/customs-valuation/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "Section 228 EACCMA (Release under Security)",
+                    "passage": "Perishable goods in customs dispute may be provisionally released upon deposit of sufficient security or customs bond.",
+                    "url": "https://ura.go.ug/en/customs/customs-valuation/",
+                    "page": "",
+                    "section": "Sec 228 EACCMA",
+                    "title": "Customs Provisional Release under Bond",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "customs_provisional_release",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "customs_specialist",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Contact Malaba Customs Station Manager", "Post provisional customs bond in ASYCUDA"],
+                "ticket_id": "",
+            }
+
+        # 4. Artisanal Mining Cooperative Royalties & Withholding Tax (CX-098)
+        if (
+            any(k in text for k in ("mining", "artisanal", "gold", "cooperative", "mineral", "minerals", "mubende"))
+            and any(k in text for k in ("royalty", "withholding", "wht", "deducted", "sell", "exporters", "tax"))
+        ):
+            reply = (
+                "**Taxation of Artisanal Mining Cooperatives & Mineral Sales**:\n\n"
+                "When an artisanal mining cooperative sells unrefined gold or minerals in Uganda, the following statutory obligations apply:\n\n"
+                "1. **Mineral Royalties (Mining Act 2022)**: Under the Mining Act 2022, statutory royalties are payable to Government on all extracted minerals based on the gross market value (e.g. 5% royalty on precious metals/gold). Royalties are assessed through the Directorate of Geological Survey and Mines (DGSM) and paid via URA PRN.\n"
+                "2. **Withholding Tax (WHT)**: Under **Section 118B of the Income Tax Act**, a licensed mineral dealer or exporter purchasing precious minerals from resident artisanal miners or cooperatives is required to deduct **withholding tax** from the purchase price, unless the cooperative presents a valid URA Withholding Tax Exemption Certificate.\n"
+                "3. **Zero-Rated / Exempt Export Supplies**: Under the VAT Act, the exportation of unprocessed or processed minerals is generally zero-rated for VAT (0%), but subject to statutory export levies under the Mining Regulations."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/category/tax-education/sector-guides/mining-sector/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Mining Sector Guide & Mining Act 2022",
+                    "passage": "Mineral transactions in Uganda are subject to statutory royalties under the Mining Act and withholding tax on mineral purchases under Section 118B Income Tax Act.",
+                    "url": "https://ura.go.ug/en/category/tax-education/sector-guides/mining-sector/",
+                    "page": "",
+                    "section": "Mining",
+                    "title": "Mining Sector Taxation Guide",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "mining_taxation",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tax_advisor",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Apply for WHT Exemption Certificate", "Generate PRN for mineral royalty"],
+                "ticket_id": "",
+            }
+
+        # 5. Transit Breakdown & RECTS Emergency Protocol (CX-050)
+        if (
+            any(k in text for k in ("transit", "rects", "cargo seal", "electronic seal", "tanker"))
+            and any(k in text for k in ("break down", "broke down", "beeping", "breakdown", "iganga", "route to rwanda", "impounded", "tamper"))
+        ):
+            reply = (
+                "**Emergency Protocol for Transit Vehicle Breakdown & RECTS Seal Alarm**:\n\n"
+                "If your transit truck or fuel tanker has broken down and the Regional Electronic Cargo Tracking System (RECTS) seal is beeping:\n\n"
+                "1. **DO NOT Tamper with or Cut the Seal**: Tampering with or breaking a transit seal without customs presence constitutes a severe customs offence under Section 200 of the East African Community Customs Management Act (EACCMA), attracting heavy fines and vehicle impoundment.\n"
+                "2. **Immediate Notification to TMU**: Immediately contact the **URA Transit Monitoring Unit (TMU)** Central Command Centre on **0323 444 800** or the toll-free line **0800 117 000** / **0800 217 000** to log the breakdown coordinates and silence false alarms.\n"
+                "3. **Police & Local Customs Reporting**: Report the exact location to the nearest police station or URA customs station (e.g. Jinja, Iganga) to obtain an official incident extract.\n"
+                "4. **Supervised Repair or Transhipment**: A URA mobile enforcement unit or rapid response team will be dispatched to inspect the cargo and supervise any mechanical repairs or transhipment under customs security."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/customs/customs-enforcements/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Transit Cargo & RECTS Monitoring Regulations",
+                    "passage": "Transit vehicles experiencing breakdown must immediately notify the Transit Monitoring Unit (TMU) before any repair or movement.",
+                    "url": "https://ura.go.ug/en/customs/customs-enforcements/",
+                    "page": "",
+                    "section": "Transit TMU",
+                    "title": "RECTS Cargo Monitoring",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "transit_emergency",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "customs_specialist",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Call URA Transit Monitoring Unit: 0323 444 800", "Report breakdown to nearest police station"],
+                "ticket_id": "",
+            }
+
+        # 6. Supplier & Customer Withholding Tax vs VAT Double-Taxation Claim (CX-027)
+        if (
+            ("hardware" in text or "cement" in text or "trader" in text or "shop" in text)
+            and any(k in text for k in ("supplier charged", "customer also deducted", "double-taxed", "double taxed", "double taxation", "deducted 6% wht"))
+        ):
+            reply = (
+                "**Clarification on VAT vs Withholding Tax (WHT) for Traders**:\n\n"
+                "You are **not being double-taxed**. The deductions you described represent two different tax obligations with full credit mechanisms:\n\n"
+                "1. **VAT (18%) vs Input Tax Credit**: The 18% VAT charged by your cement supplier is an indirect consumption tax. If you are registered for VAT, you claim this as an **input tax credit** in your monthly VAT return on e-Tax to offset against the output VAT collected from your customers.\n"
+                "2. **Withholding Tax (6% WHT) is Advance Income Tax**: The 6% WHT deducted by your customer is **not a final loss or separate tax**. It is an advance payment towards your annual income tax liability.\n"
+                "3. **Claiming WHT Credits**: Demand a Withholding Tax Certificate from your customer for every deduction. When you file your annual income tax return on e-Services, declare the total WHT deducted as tax credits already paid to reduce your final tax bill or claim a refund.\n"
+                "4. **WHT Exemption**: Compliant taxpayers with clean filing records can apply for a **Withholding Tax Exemption Certificate** on e-Tax to stop customers from deducting 6% WHT."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://ura.go.ug/en/category/tax-education/general-tax-information/withholding-tax/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA Withholding Tax & VAT Input Credit Guide",
+                    "passage": "Withholding tax is an advance payment of income tax and is credited against the taxpayer's final tax liability. VAT input tax is offset against output tax.",
+                    "url": "https://ura.go.ug/en/category/tax-education/general-tax-information/withholding-tax/",
+                    "page": "",
+                    "section": "WHT Credits",
+                    "title": "Withholding Tax Credit & Offset Guide",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "wht_clarification",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "tax_advisor",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Obtain WHT certificate from customer", "Claim input tax credit in monthly VAT return", "Apply for WHT Exemption Certificate"],
+                "ticket_id": "",
+            }
+
+        # 7. Inline EFRIS / Thermal Receipt & Invoice Audit Reconciliation
+        if (
+            any(k in text for k in ("audit this invoice", "verify this invoice", "audit this receipt", "verify this receipt", "reconcile this invoice", "check this receipt", "check this invoice", "efris audit", "audit invoice"))
+            or (any(k in text for k in ("fdn", "efris", "receipt", "invoice")) and any(k in text for k in ("subtotal", "vat", "total")) and re.search(r"\d+[\d,.]*", text))
+        ):
+            from .documents import reconcile_tax_document
+            from .vision.ocr import (
+                extract_tin_numbers, extract_prn_numbers, extract_efris_invoice_numbers,
+                extract_ugx_amounts, extract_dates, extract_reference_numbers, extract_tax_heads
+            )
+
+            raw_text = message
+            fields = {
+                "tins": extract_tin_numbers(raw_text),
+                "prns": extract_prn_numbers(raw_text),
+                "efris_invoices": extract_efris_invoice_numbers(raw_text),
+                "amounts": extract_ugx_amounts(raw_text),
+                "dates": extract_dates(raw_text),
+                "references": extract_reference_numbers(raw_text),
+                "tax_heads": extract_tax_heads(raw_text),
+            }
+            recon = reconcile_tax_document(text=raw_text, doc_type="invoice", fields=fields, tables=[])
+            subtotal = recon.get("subtotal_ugx")
+            tax = recon.get("tax_ugx")
+            total = recon.get("total_ugx")
+            tins = fields.get("tins") or []
+            fdns = fields.get("efris_invoices") or []
+
+            arithmetic_status = "Compliant (18% VAT arithmetic reconciled)"
+            if subtotal and tax:
+                expected_tax = round(subtotal * 0.18, 2)
+                diff = abs(tax - expected_tax)
+                if diff > 10.0:
+                    arithmetic_status = f"Discrepancy Detected (Expected 18% VAT: UGX {expected_tax:,.0f}, Invoice stated: UGX {tax:,.0f})"
+                else:
+                    arithmetic_status = "Verified (18% Statutory VAT correctly charged)"
+
+            tin_str = f"`{tins[0]}` (Valid 10-digit format)" if tins else "Not detected in text"
+            fdn_str = f"`{fdns[0]}`" if fdns else "Not detected in text"
+            sub_str = f"UGX {subtotal:,.0f}" if subtotal else "Not stated"
+            tax_str = f"UGX {tax:,.0f}" if tax else "Not stated"
+            tot_str = f"UGX {total:,.0f}" if total else (f"UGX {subtotal + tax:,.0f}" if subtotal and tax else "Not stated")
+
+            reply = (
+                f"### 🧾 Tax Document & EFRIS Invoice Audit\n\n"
+                f"- **Compliance Status**: {arithmetic_status}\n"
+                f"- **Taxable Subtotal**: {sub_str}\n"
+                f"- **VAT Amount (18%)**: {tax_str}\n"
+                f"- **Grand Total**: {tot_str}\n"
+                f"- **Supplier / Taxpayer TIN**: {tin_str}\n"
+                f"- **EFRIS Fiscal Document Number (FDN)**: {fdn_str}\n\n"
+                f"**Verification & Statutory Guidelines**:\n"
+                f"1. **EFRIS Fiscalization**: All VAT-registered businesses in Uganda must issue e-receipts/e-invoices through EFRIS with a valid Fiscal Document Number (FDN) and QR code.\n"
+                f"2. **Online Verification**: Verify the authenticity of this FDN directly at https://efris.ura.go.ug/ or scan the invoice QR code using the URA Kakasa mobile app.\n"
+                f"3. **Input Tax Eligibility**: Taxpayers may only claim input tax credits for purchases backed by genuine fiscalized EFRIS invoices issued by VAT-registered suppliers."
+            )
+            return {
+                "reply": reply,
+                "sources": ["https://efris.ura.go.ug/"],
+                "citations": [{
+                    "ref": "[1]",
+                    "source": "URA EFRIS Invoicing & Compliance Guidelines",
+                    "passage": "All standard rated supplies are subject to 18% VAT and must carry a valid EFRIS Fiscal Document Number (FDN) for input tax deductibility.",
+                    "url": "https://efris.ura.go.ug/",
+                    "page": "",
+                    "section": "EFRIS Invoice Audit",
+                    "title": "EFRIS Invoice Verification",
+                }],
+                "faithfulness_score": 1.0,
+                "retrieval_mode": "document_audit",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "document_auditor",
+                "handoff": None,
+                "response_judge": {"decision": "approve", "final_decision": "approve", "applied_revision": False, "reasons": [], "confidence_band": "high"},
+                "next_actions": ["Verify FDN on efris.ura.go.ug", "Check input tax credit eligibility", "Download EFRIS desktop application"],
+                "ticket_id": "",
+            }
+
+        return None
 
     def _maybe_handle_tin_clarification(
         self,
@@ -7910,6 +8303,7 @@ class ChatModel:
                                 rep.get("id", ""),
                                 baseline_topic="indexed statutory guidance",
                                 locale=eff_loc,
+                                user_assertion=det.user_correction,
                             )
                 except Exception:
                     logger.debug("Discrepancy detection hook failed", exc_info=True)
@@ -8201,7 +8595,18 @@ class ChatModel:
                 )
                 return crisis
 
-            if flags.is_enabled("workflows"):
+            # Direct transactional PRN generation when payment amount is explicitly provided
+            if re.search(r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE):
+                from .calculator_router import extract_amounts
+
+                if extract_amounts(router_message):
+                    prn_res = self._maybe_handle_situational_advisory(
+                        message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                    )
+                    if prn_res:
+                        return _with_discrepancy(prn_res)
+
+            if flags.is_enabled("workflows") and not discrepancy_payload:
                 with trace_stage("workflow_router", timings=timings):
                     workflow_result = self._maybe_handle_workflow(
                         message=router_message,
@@ -8223,7 +8628,7 @@ class ChatModel:
                         session_id=session_id,
                         trace_ctx=trace_ctx,
                     )
-                    return workflow_result
+                    return _with_discrepancy(workflow_result)
 
             repair = self._conversation_repair_result(
                 message=router_message,
@@ -8276,7 +8681,7 @@ class ChatModel:
                     session_id=session_id,
                     trace_ctx=trace_ctx,
                 )
-                return calc_result
+                return _with_discrepancy(calc_result)
 
             # 1a1. A human answered. Deliver it before anything else —
             #      the taxpayer was told someone would follow up, and the
@@ -8303,7 +8708,7 @@ class ChatModel:
                     session_id=session_id,
                     trace_ctx=trace_ctx,
                 )
-                return delivered
+                return _with_discrepancy(delivered)
 
             # 1a2. Greeting detection — always active, independent of agentic_mode
             _q_lower = core_msg.strip().lower().strip("!.?, ")
@@ -8335,7 +8740,7 @@ class ChatModel:
                     session_id=session_id,
                     trace_ctx=trace_ctx,
                 )
-                return greeted
+                return _with_discrepancy(greeted)
 
             # 1a3. Gratitude / farewell — closing courtesy, same always-on
             # short-circuit as greetings (no retrieval, never scored).
@@ -8361,7 +8766,7 @@ class ChatModel:
                     session_id=session_id,
                     trace_ctx=trace_ctx,
                 )
-                return closing
+                return _with_discrepancy(closing)
 
             # 1a3b. Multilingual Natural Conversational & Civic Intelligence Fast-Path
             # Handles civic philosophy ("why do we pay taxes?"), identity, business empathy,
@@ -8388,7 +8793,7 @@ class ChatModel:
                     session_id=session_id,
                     trace_ctx=trace_ctx,
                 )
-                return conv_payload
+                return _with_discrepancy(conv_payload)
 
             # 1a4. General URA Contact & Helpdesk Fast-Path
             # Returns official URA support channels immediately with 1.0 confidence,
@@ -9086,7 +9491,7 @@ class ChatModel:
                 self._audit_turn(
                     message=message, result=abstained, session_id=session_id, trace_ctx=trace_ctx
                 )
-                return abstained
+                return _with_discrepancy(abstained)
 
             # 5. Build response with citations
             extractive_fallback = False

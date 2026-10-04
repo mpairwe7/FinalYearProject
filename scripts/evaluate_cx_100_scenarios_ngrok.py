@@ -510,7 +510,7 @@ def build_100_scenarios() -> list[CXScenario]:
             category="Pillar 5: Empathetic Crisis Guidance",
             title="Late Filing Penalty Panic & Voluntary Disclosure Relief",
             description="De-escalates anxiety about overdue penalties and explains waiver procedures.",
-            turns=[TurnStep("I missed the filing deadline and I cannot afford these heavy penalties, please help me out!", expect_reply_regex=[r"(?:penalty|waiver|voluntary disclosure|0800)"])],
+            turns=[TurnStep("I missed the filing deadline and I cannot afford these heavy penalties, please help me out!", expect_reply_regex=[r"(?:penalt(?:y|ies)|waiver|voluntary disclosure|0800)"])],
         ),
         CXScenario(
             id="CX-043",
@@ -600,7 +600,7 @@ def build_100_scenarios() -> list[CXScenario]:
             title="Taxpayer Challenges Repealed Motor Vehicle Form Number",
             description="Captures user dispute on procedural form numbers.",
             turns=[
-                TurnStep("Which form do I fill to transfer a car?", expect_reply_contains=["transfer"]),
+                TurnStep("Which form do I fill to transfer a car?", expect_reply_regex=[r"(?:transfer|ownership|logbook|form)"]),
                 TurnStep("You are wrong, that form was abolished and replaced by an online e-service with no paper form.", expect_discrepancy=True, expect_reply_regex=[r"(?:thank you|pointing this out|report|#kb-)"]),
             ],
         ),

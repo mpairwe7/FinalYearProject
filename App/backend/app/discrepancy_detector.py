@@ -227,24 +227,26 @@ def format_discrepancy_acknowledgement(
     report_id: str,
     baseline_topic: str = "current URA statutory schedules",
     locale: str = "en",
+    user_assertion: str = "",
 ) -> str:
     """Generate an objective, appreciative, and anti-sycophantic conversational acknowledgment."""
     short_id = report_id[-8:] if len(report_id) >= 8 else report_id
+    assertion_note = f"\n\nWe have recorded your assertion: \"{user_assertion[:200]}\"." if user_assertion else ""
     if locale == "lg":
         return (
             f"Webale nnyo okulambika kino! Okusinziira ku mateeka n'entegeka za URA ezikozesebwa kati, "
             f"ebisangiddwawo byandiba nga byakyusibwa. Ntaddeyo alipoota y'okwetegereza ekyakyusiddwa "
-            f"(#KB-{short_id}) eri ttiimu y'ebyamateeka n'ebisolo okugikakasa."
+            f"(#KB-{short_id}) eri ttiimu y'ebyamateeka n'ebisolo okugikakasa.{assertion_note}"
         )
     if locale == "sw":
         return (
             f"Asante sana kwa kuonyesha jambo hili! Kulingana na miongozo ya sasa ya URA, "
             f"kunaweza kuwa na mabadiliko ya kisheria au viwango. Nimewasilisha ripoti ya uhakiki "
-            f"(#KB-{short_id}) kwa timu yetu ya kiufundi ili kuthibitisha."
+            f"(#KB-{short_id}) kwa timu yetu ya kiufundi ili kuthibitisha.{assertion_note}"
         )
     return (
         f"Thank you for pointing this out! Based on our {baseline_topic}, "
         f"tax statutory provisions and rates are subject to periodic amendments. "
         f"I have automatically submitted a Knowledge Discrepancy Report (**#KB-{short_id}**) "
-        f"for our tax policy and technical review team to verify against the latest gazettes."
+        f"for our tax policy and technical review team to verify against the latest gazettes.{assertion_note}"
     )

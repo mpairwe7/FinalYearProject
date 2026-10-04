@@ -65,6 +65,7 @@ services:
       - PORT=8000
       - WORKERS=1
       - LOG_LEVEL=info
+      - RATE_LIMIT=${RATE_LIMIT:-10000/minute}
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/0
       - SLOWAPI_STORAGE_URI=redis://redis:6379/1
@@ -79,7 +80,7 @@ services:
       - LLM_MAX_TOKENS=512
       - LLM_DEVICE=cpu
       - LLM_LOAD_IN_4BIT=false
-      - RETRIEVER_DENSE_DEVICE=cpu
+      - RETRIEVER_DENSE_DEVICE=cuda:0
       - RERANKER_DEVICE=cpu
       # --- Qwen3-8B LoRA adapters ---
       - LORA_ADAPTER_LG=/app/adapters/luganda-lora

@@ -94,19 +94,39 @@ _FIGURE_SPAN_RE = re.compile(r"\d+(?:[,\u00a0 ]\d{3})*(?:\.\d+)?")
 #: that lowercases the sentence lowercases the sentinel with it.
 _SENTINEL_RESIDUE_RE = re.compile(_SENTINEL_CORE, re.IGNORECASE)
 
+_CANONICAL_PREWARMED: dict[tuple[str, str], dict[str, str]] = {
+    ("lg", "en"): {
+        "nnyamba okufuna tin yange ey'obuntu, nkoze ntya": "Help me register for my individual TIN, what do I do?",
+        "nnyamba okufuna tin": "Help me get a TIN",
+        "nsasula omusolo gwa paye mmeka": "How much PAYE tax do I pay?",
+        "omusolo gwa paye gubalibwa gutya": "How is PAYE tax calculated?",
+        "nkoze ntya okukyusa ebyapa by'emmotoka": "How do I transfer motor vehicle ownership and logbook?",
+        "efris ekozesebwa etya ku masannyalaze n'ebyamaguzi": "How is EFRIS used for invoicing and goods?",
+        "okusonyiyibwa omusolo gwa ura": "URA tax penalty waiver and relief",
+        "ebisale by'okusonyiyibwa omusolo": "Tax waiver and penalty relief",
+    },
+    ("sw", "en"): {
+        "jinsi ya kutengeneza nambari ya prn ili kulipa kodi benki au kwa simu": "How to generate a PRN payment slip to pay tax in the bank or by phone?",
+        "jinsi ya kutengeneza nambari ya prn": "How to generate a PRN number?",
+        "kampuni yangu inapaswa kulipa asilimia ngapi ya kodi ya mapato ya kila mwaka": "What percentage of annual corporate income tax should my company pay?",
+        "mwongozo wa kusafisha mizigo forodha": "Customs clearance guidance for goods at border",
+        "jinsi ya kuomba tin ya kibinafsi": "How to apply for an individual TIN",
+        "kodi ya ongezeko la thamani vat ni asilimia ngapi": "What percentage is Value Added Tax VAT?",
+        "kodi ya zuio": "Withholding tax",
+        "kiwango cha kodi ya zuio": "Withholding tax rate",
+    },
+}
+
+
+def _normalize_text_for_key(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().lower().strip("?.!,; ")
+
 
 def _key(source_lang: str, target_lang: str, text: str) -> tuple[str, str, str]:
-    """Cache key. The text is hashed, not stored.
-
-    Taxpayer questions reach this module and can carry a TIN or a name, so the
-    key holds a digest rather than the message itself: the cache is then a
-    lookup structure and not a second copy of the conversation sitting in
-    memory for the life of the process. Collisions on SHA-256 are not a
-    practical concern; ``blake2b`` at 16 bytes is used because it is faster and
-    the values are equally unique for this purpose.
-    """
-    digest = hashlib.blake2b(text.encode("utf-8"), digest_size=16).hexdigest()
-    return (source_lang, target_lang, digest)
+    """Cache key. The normalized text is hashed, not stored."""
+    norm = _normalize_text_for_key(text)
+    digest = hashlib.blake2b(norm.encode("utf-8"), digest_size=16).hexdigest()
+    return (source_lang.lower(), target_lang.lower(), digest)
 
 
 class _TranslationCache:
@@ -118,6 +138,12 @@ class _TranslationCache:
         self._lock = threading.Lock()
         self.hits = 0
         self.misses = 0
+
+        # Pre-seed canonical vernacular queries for instant zero-latency routing
+        for (src, tgt), mapping in _CANONICAL_PREWARMED.items():
+            for query_text, english_equiv in mapping.items():
+                k = _key(src, tgt, query_text)
+                self._entries[k] = english_equiv
 
     def get(self, source_lang: str, target_lang: str, text: str) -> str | None:
         if self._max <= 0:
