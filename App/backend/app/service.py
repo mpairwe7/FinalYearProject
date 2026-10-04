@@ -7970,6 +7970,26 @@ class ChatModel:
                                 agent_role="support_triage",
                             )
                         )
+                    else:
+                        case_reply = (
+                            f"**Case Status for {t_ref}**:\n\n"
+                            f"No active record was found matching reference `{t_ref}` in the URA ticket queue. "
+                            f"Please verify the reference code provided on your SMS, email confirmation, or call summary, "
+                            f"or contact the URA Contact Centre at 0800 117 000 / 0800 217 000 for direct assistance."
+                        )
+                        return _with_discrepancy(
+                            self._deterministic_result(
+                                reply=case_reply,
+                                curated=True,
+                                hits=[],
+                                sources=["ura_support_case"],
+                                citations=[],
+                                retrieval_mode="support_case",
+                                thread_id=thread_id,
+                                locale=locale,
+                                agent_role="support_triage",
+                            )
+                        )
                 except Exception:
                     logger.debug("Failed ticket reference lookup", exc_info=True)
 
@@ -8000,6 +8020,26 @@ class ChatModel:
                                 f"- **Topic**: {disc.get('discrepancy_type', '').replace('_', ' ').title()}\n"
                                 f"- **Note**: {admin_note or 'Under active review against current statutory instruments and gazettes.'}"
                             )
+                        return _with_discrepancy(
+                            self._deterministic_result(
+                                reply=disc_reply,
+                                curated=True,
+                                hits=[],
+                                sources=["knowledge_review_registry"],
+                                citations=[],
+                                retrieval_mode="discrepancy_status",
+                                thread_id=thread_id,
+                                locale=locale,
+                                agent_role="knowledge_qa",
+                            )
+                        )
+                    else:
+                        disc_reply = (
+                            f"**Knowledge Review Report {k_ref}**:\n\n"
+                            f"No discrepancy report was found matching reference `{k_ref}`. "
+                            f"If you encountered an inaccurate rate or outdated statutory provision, "
+                            f"please state what was incorrect and our system will log a new review report for technical verification."
+                        )
                         return _with_discrepancy(
                             self._deterministic_result(
                                 reply=disc_reply,

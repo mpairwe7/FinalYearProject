@@ -1,0 +1,2301 @@
+{
+  "timestamp": 1791122743.3884284,
+  "date": "2026-10-04 14:05:43 UTC",
+  "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
+  "overall_cx_score_pct": 100.0,
+  "scenarios_total": 100,
+  "scenarios_passed": 100,
+  "latency_stats": {
+    "avg_s": 2.28,
+    "p50_s": 0.57,
+    "p95_s": 11.37
+  },
+  "category_breakdown": {
+    "Pillar 1: Guided Workflows": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 2: Deterministic Computations": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 3: Narrative Stories": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 4: Actionable Resources": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 5: Empathetic Crisis Guidance": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 6: Closed-Loop Bug Reporting": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 7: Multilingual Fulfillment": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 8: Statutory Boundary Probing": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 9: Omnichannel Tracking": {
+      "total": 10,
+      "passed": 10
+    },
+    "Pillar 10: Advanced Advisory": {
+      "total": 10,
+      "passed": 10
+    }
+  },
+  "detailed_results": [
+    {
+      "id": "CX-001",
+      "title": "Individual TIN Registration (Privacy-Preserving Stepper)",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 1.27,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Help me register for a TIN",
+          "passed": true,
+          "elapsed_s": 0.62,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the TIN Registration Guide process step by step.  Which application are you preparing for: an **individual**, a **company**, or an **NGO**? Please do not sh"
+        },
+        {
+          "turn": 2,
+          "user_message": "individual",
+          "passed": true,
+          "elapsed_s": 0.33,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Do you have the original identification or organization registration documents ready to use in the secure URA portal? (yes/no)"
+        },
+        {
+          "turn": 3,
+          "user_message": "yes",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "This chat has not created or submitted a TIN application. Continue at the official URA portal: https://ura.go.ug → eServices → TIN Registration. Use the individual route for a pers"
+        }
+      ]
+    },
+    {
+      "id": "CX-002",
+      "title": "Company Non-Individual TIN Application Guidance",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.86,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Help me apply for a TIN for my company",
+          "passed": true,
+          "elapsed_s": 0.86,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To register an **organisation** (company, NGO, partnership) for a TIN:  1. Go to ura.go.ug 2. Choose the standard **Non-Individual TIN registration** option 3. Fill in the organisa"
+        }
+      ]
+    },
+    {
+      "id": "CX-003",
+      "title": "Tax Clearance Certificate (TCC) Guided Journey",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me through getting a tax clearance certificate",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Tax Clearance Certificate process step by step.  Is the certificate for an **individual**, a **company** or a **partnership**?"
+        }
+      ]
+    },
+    {
+      "id": "CX-004",
+      "title": "Payment Registration Number (PRN) Generation Stepper",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me to generate a PRN for payment",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Payment Assistance process step by step.  Which tax type or liability are you paying for?"
+        }
+      ]
+    },
+    {
+      "id": "CX-005",
+      "title": "Motor Vehicle Registration & Ownership Transfer Workflow",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me through registering my imported car",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Motor Vehicle Registration process step by step.  Is this a **first registration** (a vehicle entering Uganda, or never registered here), or an **alread"
+        }
+      ]
+    },
+    {
+      "id": "CX-006",
+      "title": "VAT Monthly Return Filing Walkthrough",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.5,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Walk me through filing my VAT return",
+          "passed": true,
+          "elapsed_s": 0.5,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Return Filing process step by step.  Are you filing as an **individual**, a **company**, or an **NGO**?"
+        }
+      ]
+    },
+    {
+      "id": "CX-007",
+      "title": "Customs Import Entry & IM4 Clearance Workflow",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.5,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me through customs clearance",
+          "passed": true,
+          "elapsed_s": 0.5,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Customs Clearance process step by step.  Is this an **import** or an **export** clearance?"
+        }
+      ]
+    },
+    {
+      "id": "CX-008",
+      "title": "Formal Tax Assessment Objection / Dispute Filing",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.52,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Help me file an objection against an unfair tax assessment",
+          "passed": true,
+          "elapsed_s": 0.52,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Objection or Dispute process step by step.  What is the assessment, objection, or notice reference number?"
+        }
+      ]
+    },
+    {
+      "id": "CX-009",
+      "title": "Bonded Warehouse (BWIMS) IM7 Cargo Guidance",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I need guidance on bonded warehouse goods under IM7",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To export goods from a bonded warehouse under the IM7 regime, follow these steps:  1. **Request Removal from Bond**: Submit a request to remove the goods from the bond for export. "
+        }
+      ]
+    },
+    {
+      "id": "CX-010",
+      "title": "EFRIS Invoice & Compliance Audit Checklist",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me to check if my invoice complies with EFRIS rules",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To check if your invoice complies with the Electronic Fiscal Receipting and Invoicing System (EFRIS) rules, ensure it meets the following criteria:  1. **Issuance**: Is the invoice"
+        }
+      ]
+    },
+    {
+      "id": "CX-011",
+      "title": "Standard Resident PAYE on 5,000,000 UGX Monthly Salary",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.52,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate my PAYE on a gross monthly salary of 5,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.52,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**PAYE calculation (FY2026-27)**  - Gross monthly salary: UGX 5,000,000 - PAYE due (27.8% effective): **UGX 1,388,250** per month - Net take-home: **UGX 3,611,750** - Band applied:"
+        }
+      ]
+    },
+    {
+      "id": "CX-012",
+      "title": "High-Income PAYE on 12,000,000 UGX (40% Super Bracket)",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How much PAYE will I pay on 12,000,000 UGX salary per month?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**PAYE calculation (FY2026-27)**  - Gross monthly salary: UGX 12,000,000 - PAYE due (30.7% effective): **UGX 3,688,250** per month - Net take-home: **UGX 8,311,750** - Band applied"
+        }
+      ]
+    },
+    {
+      "id": "CX-013",
+      "title": "Non-Resident Employee PAYE Calculation (3,000,000 UGX)",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate PAYE for a non-resident employee earning 3,000,000 UGX gross monthly",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**PAYE calculation — non-resident (FY2026-27)**  - Gross monthly salary: UGX 3,000,000 - PAYE due (27.5% effective): **UGX 825,500** per month - Net take-home: **UGX 2,174,500** - "
+        }
+      ]
+    },
+    {
+      "id": "CX-014",
+      "title": "Standard 18% VAT Addition on 25,000,000 UGX Supply",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate 18% VAT on goods worth 25,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**VAT calculation (FY2026-27)**  - Net amount: UGX 25,000,000 - VAT at 18%: **UGX 4,500,000** - Gross (VAT-inclusive): **UGX 29,500,000** - Statutory Basis: Value Added Tax Act  _A"
+        }
+      ]
+    },
+    {
+      "id": "CX-015",
+      "title": "VAT-Inclusive Extraction from Gross Total (59,000,000 UGX)",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How much VAT is included in 59,000,000 UGX?",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**VAT calculation (FY2026-27)**  - Net amount: UGX 50,000,000 - VAT at 18%: **UGX 9,000,000** - Gross (VAT-inclusive): **UGX 59,000,000** - Statutory Basis: Value Added Tax Act  Fi"
+        }
+      ]
+    },
+    {
+      "id": "CX-016",
+      "title": "Individual Rental Income Tax on 30,000,000 UGX Annual Rent",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate individual rental tax on 30,000,000 UGX annual rental income",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Rental income tax — individual (FY2026-27)**  - Gross annual rent: UGX 30,000,000 - Tax-free threshold: UGX 2,820,000 per year - Taxable amount: UGX 27,180,000 - Tax at 12%: **UG"
+        }
+      ]
+    },
+    {
+      "id": "CX-017",
+      "title": "Resident Professional Fees Withholding Tax (15,000,000 UGX)",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate withholding tax on an invoice of 15,000,000 UGX for consultancy services to a resident company",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Withholding tax — services (FY2026-27)**  - Gross payment: UGX 15,000,000 - WHT at 6%: **UGX 900,000** - Net payable to payee: UGX 14,100,000 - Statutory Basis: Income Tax Act  F"
+        }
+      ]
+    },
+    {
+      "id": "CX-018",
+      "title": "Commercial Building Sale Capital Gains Tax",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate capital gains tax on a commercial warehouse bought for 100,000,000 UGX and sold for 160,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Capital gains calculation (FY2026-27)**  - Sale price: UGX 160,000,000 - Cost base: UGX 100,000,000 - Gain: UGX 60,000,000 - Tax at 30%: **UGX 18,000,000** - Statutory Basis: Inc"
+        }
+      ]
+    },
+    {
+      "id": "CX-019",
+      "title": "Goods Supply Withholding Tax on 10,000,000 UGX",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.51,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate withholding tax on supply of commercial office furniture worth 10,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.51,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Withholding tax — goods (FY2026-27)**  - Gross payment: UGX 10,000,000 - WHT at 6%: **UGX 600,000** - Net payable to payee: UGX 9,400,000 - Statutory Basis: Income Tax Act  Figur"
+        }
+      ]
+    },
+    {
+      "id": "CX-020",
+      "title": "Small Business Presumptive Tax Calculation (35,000,000 UGX)",
+      "category": "Pillar 2: Deterministic Computations",
+      "passed": true,
+      "total_time_s": 0.51,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate presumptive tax for my retail grocery shop with annual gross turnover of 35,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.51,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The presumptive tax for your retail grocery shop with an annual gross turnover of 35,000,000 Ugandan Shillings (UGX) falls within the range of UGX [10 million–30 million]. Accordin"
+        }
+      ]
+    },
+    {
+      "id": "CX-021",
+      "title": "Small Bakery EFRIS Enforcement Threat & 10M Penalty Panic",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.59,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I started a small bakery in Mukono 8 months ago, using my personal savings and some money sent by my sister in the UK. L",
+          "passed": true,
+          "elapsed_s": 0.59,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "You should register for the EFR [1]IS system to avoid penalties. Here’s how to proceed:  1. **Register for EFRIS**: Access the EFRIS portal at [www.ura.go.ug](http://www.ura.go.ug)"
+        }
+      ]
+    },
+    {
+      "id": "CX-022",
+      "title": "Stranded Imported Car at Malaba & Rogue Clearing Agent",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.59,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I imported a 2017 car through Mombasa and it arrived at Malaba customs. My clearing agent took 8 million shillings from ",
+          "passed": true,
+          "elapsed_s": 0.59,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "assistant To resolve this issue and avoid your vehicle being auctioned, you should take the following steps:  1. **Contact URA**: Reach out to the Uganda Revenue Authority (URA) di"
+        }
+      ]
+    },
+    {
+      "id": "CX-023",
+      "title": "Remote Software Engineer Receiving Foreign USD Remittances",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.6,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I am a software engineer in Jinja freelancing remotely for tech companies in Germany and the US. They wire money to my E",
+          "passed": true,
+          "elapsed_s": 0.6,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party Agency Notice** to any person or commercial bank holding funds on behalf of "
+        }
+      ]
+    },
+    {
+      "id": "CX-024",
+      "title": "Landlord-Tenant Agency Notice Dispute & Eviction Threat",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.6,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "My landlord locked my shop in Kampala because URA served an agency notice to my bank and deducted my rent payments direc",
+          "passed": true,
+          "elapsed_s": 0.6,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I'm sorry you're going through this — let's look at what options you have.  **Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party "
+        }
+      ]
+    },
+    {
+      "id": "CX-025",
+      "title": "Ancestral Agricultural Land Sale & Family Estate Dispute",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.6,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Our family in Mbarara recently sold 5 acres of ancestral farm land that belonged to our late grandfather to pay universi",
+          "passed": true,
+          "elapsed_s": 0.6,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Capital gains are taxed at 30%** (FY2026-27) — the gain is included in chargeable income.  - Statutory Basis: Income Tax Act  That comes from the official URA FY2026-27 rate tabl"
+        }
+      ]
+    },
+    {
+      "id": "CX-026",
+      "title": "Lake Victoria Fish Exporter Cross-Border EAC Question",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I buy fresh fish from fishermen in Busia and export it across the border to Kisumu, Kenya. A customs official at the bor",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Fish exports within the East African Community are zero-rated for Value Added Tax (VAT) according to the provisions of the East African Community Customs Management Act, 2004. This"
+        }
+      ]
+    },
+    {
+      "id": "CX-027",
+      "title": "Retail Hardware Double-Taxation Claim on Construction Materials",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I supply cement to a government school in Gulu. The manufacturer charged me 18% VAT when I bought the cement. When the s",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "You are not being double-taxed. Here’s why:  - **VAT on Purchases**: When you buy the cement, you pay 18% VAT to the manufacturer. This is recorded on your e-invoice.  - **Withhold"
+        }
+      ]
+    },
+    {
+      "id": "CX-028",
+      "title": "NGO Medical Clinic Receiving International Grant Funds",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.59,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We run a registered non-profit medical clinic in Arua providing free malaria treatment. We just received a 100,000 USD g",
+          "passed": true,
+          "elapsed_s": 0.59,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The $100,000 USD grant from a charity in the Netherlands is generally **not** taxable income in Uganda, provided it is used exclusively for charitable, educational, or religious ac"
+        }
+      ]
+    },
+    {
+      "id": "CX-029",
+      "title": "Mobile Money Agent Ledger & 0.5% Cash-Out Reconciliation",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I operate a telecom mobile money booth in Wakiso. Every customer withdrawal pays 0.5% excise duty. Now URA says I must f",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To file your annual tax return:  1. Login ura.go.ug with TIN/password → e-services → e-returns → select return type and download template 2. Enable macros, fill without renaming or"
+        }
+      ]
+    },
+    {
+      "id": "CX-030",
+      "title": "Sole Proprietor Incorporating Business & Transferring Fleet",
+      "category": "Pillar 3: Narrative Stories",
+      "passed": true,
+      "total_time_s": 0.61,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I have been running my transport business as a sole proprietor for 5 years. I just incorporated a private limited compan",
+          "passed": true,
+          "elapsed_s": 0.61,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "When transferring your 3 delivery vans from your personal name to your newly incorporated company name, you will incur a stamp duty of 30% of the total value of the property being "
+        }
+      ]
+    },
+    {
+      "id": "CX-031",
+      "title": "Downloadable Return Templates & eTax Portal Hub",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Where can I download the return filing form templates and log in?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To download the return filing form templates and log in, follow these steps:  1. **Download the Template**: Visit the URA web portal at [www.ura.go.ug](http://www.ura.go.ug) and na"
+        }
+      ]
+    },
+    {
+      "id": "CX-032",
+      "title": "EFRIS Fiscal Invoicing Portal & FDN Verification Tool",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I need the direct portal link to verify an EFRIS receipt FDN and login to my EFRIS account",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To verify an Electronic Fiscal Receipting and Invoicing System (**EFRIS**) receipt FDN, go to the **EFRIS** portal at [portal.ura.go.ug](https://portal.ura.go.ug) > Document Authen"
+        }
+      ]
+    },
+    {
+      "id": "CX-033",
+      "title": "e-Services Make a Payment & Bank PRN Slip Delivery",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Provide me with the official URA links to pay my tax assessment and generate a PRN",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**To pay taxes using a Payment Registration Number (PRN)**, generate the PRN on the URA portal (ura.go.ug). You can complete payment at any commercial bank branch (benki) or via mo"
+        }
+      ]
+    },
+    {
+      "id": "CX-034",
+      "title": "Motor Vehicle Transfer Form & Logbook Search Portal",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Where do I access the motor vehicle ownership transfer form and verify a logbook online?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To access the motor vehicle ownership transfer form and verify a logbook online, follow these steps:  1. **Motor Vehicle Ownership Transfer Form**: Visit the URA website at [portal"
+        }
+      ]
+    },
+    {
+      "id": "CX-035",
+      "title": "Withholding Tax Exemption Application Portal & Guidelines",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Give me the link and application procedure to apply for withholding tax exemption certificate",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "education",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "### 📚 Taxpayer Education: Withholding tax (WHT)  WHT is tax deducted at source by the payer, who remits it to URA and gives the payee a credit for it. For most business payments it"
+        }
+      ]
+    },
+    {
+      "id": "CX-036",
+      "title": "Advance Tax on Commercial Passenger Vehicles Portal",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Where do I generate a PRN for advance tax on my 14-seater passenger taxi?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To generate a **PRN** for advance tax on your 14-seater passenger taxi,[1] go to the URA website (portal.ura.go.ug) > e-Services > Make a Payment > Generate a Payment Slip. Select "
+        }
+      ]
+    },
+    {
+      "id": "CX-037",
+      "title": "Digital Tax Stamps (DTS) & Kakasa Verification Mobile Link",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Where can I download the Kakasa app to verify digital tax stamps on beverages?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To download the URA Kakasa app for verifying digital tax stamps on beverages, go to the Google Play Store or Apple App Store and search for “URA Kakasa”. [1]  If you get stuck at a"
+        }
+      ]
+    },
+    {
+      "id": "CX-038",
+      "title": "Authorized Economic Operator (AEO) Application Guide",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Give me the documentation checklist and portal link to apply for Authorized Economic Operator status",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To apply for the AEO status, you need to follow these steps:  1. **Expression of Interest**: Submit a written expression of interest to the Commissioner Customs Department or throu"
+        }
+      ]
+    },
+    {
+      "id": "CX-039",
+      "title": "Customs Single Window ASYCUDA Portal Access",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.52,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Provide the portal link for ASYCUDA World customs entry declaration",
+          "passed": true,
+          "elapsed_s": 0.52,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The ASYCUDA World customs entry declaration portal is **http://asyworld.ura.go.ug**. [1]  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email service"
+        }
+      ]
+    },
+    {
+      "id": "CX-040",
+      "title": "Local Excise Duty (LED) Monthly Return Template",
+      "category": "Pillar 4: Actionable Resources",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Where do I download the Local Excise Duty monthly return template?",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To download the Local Excise Duty monthly return template, go to the URA portal at [portal.ura.go.ug](https://portal.ura.go.ug) > e-Services > Excise Duty > Download Monthly Return"
+        }
+      ]
+    },
+    {
+      "id": "CX-041",
+      "title": "Emergency Bank Freeze & Third-Party Agency Notice Relief",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I am terrified! URA issued an agency notice on my bank account and froze my funds. What can I do?",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I'm sorry you're going through this — let's look at what options you have.  **Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party "
+        }
+      ]
+    },
+    {
+      "id": "CX-042",
+      "title": "Late Filing Penalty Panic & Voluntary Disclosure Relief",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.52,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I missed the filing deadline and I cannot afford these heavy penalties, please help me out!",
+          "passed": true,
+          "elapsed_s": 0.52,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I understand your concern about missing the filing deadline and the associated penalties. Here's a clearer breakdown based on the information available:  1. **Late Filing Penalty**"
+        }
+      ]
+    },
+    {
+      "id": "CX-043",
+      "title": "Bribery Attempt & Fraudulent Officer Reporting (Integrity Line)",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "A man claiming to be a URA revenue officer says if I don't give him 2 million in cash right now, he will shut down my cl",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To report this, follow these steps:  1. **Contact the URA Office**: Call the URA customer care line at 0800 117 000 or 0800 217 000. They can guide you on reporting suspicious indi"
+        }
+      ]
+    },
+    {
+      "id": "CX-044",
+      "title": "Distress Warrant & Court Bailiff Seizure Fear",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Court bailiffs arrived with a URA distress warrant threatening to carry away my printing machines tomorrow morning. What",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "You have the right to object to the enforcement action by filing a notice of intention to object to enforcement within 14 days of receiving the notice of intention to enforce. You "
+        }
+      ]
+    },
+    {
+      "id": "CX-045",
+      "title": "Taxpayer Requests Immediate Human Officer Escalation",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.68,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I need to talk to a human URA officer right now regarding my audit dispute.",
+          "passed": true,
+          "elapsed_s": 0.68,
+          "retrieval_mode": "escalated",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "You deserve a definitive answer on this, so I've flagged it for a URA officer to review (ticket df720741) — meanwhile, you can also reach URA directly at https://ura.go.ug or via t"
+        }
+      ]
+    },
+    {
+      "id": "CX-046",
+      "title": "Comprehensive Audit Notice Panic & Preparation Roadmap",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I received a formal comprehensive audit notice from URA for the last 3 years. I am shaking with anxiety. What are my rig",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Your Rights as a Taxpayer in Uganda**  As a taxpayer in Uganda, you have several rights and obligations outlined in the URA Taxpayers' Charter. Here are some key points:  ### 🌱 *"
+        }
+      ]
+    },
+    {
+      "id": "CX-047",
+      "title": "Accidental Double Payment & Excess PRN Refund Request",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I made a terrible mistake and paid my 4,000,000 UGX tax assessment twice using two different PRNs. How do I get my money",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To get your money back after mistakenly paying your UGX 4,000,000 tax assessment twice, follow these steps:  1. **Contact URA Customer Care**: Call their toll-free line 0800 117 00"
+        }
+      ]
+    },
+    {
+      "id": "CX-048",
+      "title": "Identity Theft / Fraudulent TIN Registration Discovery",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 1.18,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Someone used my stolen National ID card to register a company TIN without my permission and accrued 20 million in tax ar",
+          "passed": true,
+          "elapsed_s": 1.18,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I know deadlines can be stressful, so here's the quickest way forward.  To register an **organisation** (company, NGO, partnership) for a TIN:  1. Go to ura.go.ug 2. Choose the sta"
+        }
+      ]
+    },
+    {
+      "id": "CX-049",
+      "title": "Detained Perishable Cargo at Customs Border Post",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "My refrigerated container of dairy products is stuck at Malaba border. The officer disputed the invoice and it is spoili",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Your refrigerated container of dairy products is subject to customs regulations. While a bond could potentially expedite release, it requires meeting specific conditions:  - **Expo"
+        }
+      ]
+    },
+    {
+      "id": "CX-050",
+      "title": "Impounded Transit Truck Breakdown on Northern Corridor",
+      "category": "Pillar 5: Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Our transit fuel tanker broke down in Iganga en route to Rwanda and the electronic cargo seal (RECTS) is beeping. How do",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To notify URA about your truck's breakdown and the issue with the Electronic Cargo Tracking System (ECTS/RECTS), you should call the URA Toll-Free Line: 0800117000 or 0800217000. T"
+        }
+      ]
+    },
+    {
+      "id": "CX-051",
+      "title": "Taxpayer Challenges Outdated VAT Rate",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 10.0,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the VAT rate in Uganda?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is 18% (18%)** (FY2026-27). Value Added Tax is charged at 18% on taxable supplies of goods and servic"
+        },
+        {
+          "turn": 2,
+          "user_message": "No, that is incorrect. Under the 2023 Amendment Act, the rate was changed to 6% instead of 18%.",
+          "passed": true,
+          "elapsed_s": 9.48,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-052",
+      "title": "Taxpayer Challenges Mandatory VAT Registration Threshold",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 4.69,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the annual threshold to register for VAT?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**VAT registration is compulsory once annual taxable turnover reaches UGX 300,000,000 (or UGX 150,000,000 under Section 7 baseline)** (FY2026-27). Below that, registration is volun"
+        },
+        {
+          "turn": 2,
+          "user_message": "Actually, that is outdated. The law was updated recently and the threshold is no longer what you said.",
+          "passed": true,
+          "elapsed_s": 4.16,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-053",
+      "title": "Taxpayer Challenges Repealed Motor Vehicle Form Number",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 8.07,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Which form do I fill to transfer a car?",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To transfer a car, you will need to fill out the **Motor Vehicle Transfer Form (Form TR VII)**. This form is used to facilitate the legal transfer of ownership of a motor vehicle f"
+        },
+        {
+          "turn": 2,
+          "user_message": "You are wrong, that form was abolished and replaced by an online e-service with no paper form.",
+          "passed": true,
+          "elapsed_s": 7.5,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-054",
+      "title": "Taxpayer Challenges Withholding Tax Rate on Rental Income",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 3.1,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the withholding tax rate on dividends?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**WHT on dividends is 15%** (FY2026-27), withheld at source.  - Statutory Basis: Income Tax Act  That comes from the official URA FY2026-27 rate table.  If you get stuck at any ste"
+        },
+        {
+          "turn": 2,
+          "user_message": "That is wrong, under the new amendment it is 10% instead of 15%.",
+          "passed": true,
+          "elapsed_s": 2.55,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-055",
+      "title": "Taxpayer Challenges Resident Corporation Tax Rate",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 4.45,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the corporate income tax rate in Uganda?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The standard rate of Corporation Tax (kodi ya mapato ya shirika) in Uganda is 30% (30%)** (FY2026-27), applied to a company's annual chargeable income.  - Statutory Basis: Income"
+        },
+        {
+          "turn": 2,
+          "user_message": "No, that rate changed under the latest budget speech to 25%.",
+          "passed": true,
+          "elapsed_s": 3.9,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-056",
+      "title": "Taxpayer Challenges Legal Services Withholding Tax",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 7.72,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the withholding tax rate on legal fees?",
+          "passed": true,
+          "elapsed_s": 0.5,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Withholding tax (WHT) rates (FY2026-27):**  - Services: **6%** - Goods: **6%** - Management fees: **15%** - Dividends: **15%** - Royalties: **15%** - Payments to public entertain"
+        },
+        {
+          "turn": 2,
+          "user_message": "That is incorrect, withholding on lawyers was suspended last month.",
+          "passed": true,
+          "elapsed_s": 7.22,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-057",
+      "title": "Taxpayer Challenges Mobile Money Withdrawal Duty",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 10.46,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the excise duty rate on mobile money cash withdrawals?",
+          "passed": true,
+          "elapsed_s": 0.6,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The excise duty rate on mobile money cash withdrawals is 0.5%** (FY2026-27) of the transaction value under the Excise Duty Act. Deposits and transfers are not subject to this wit"
+        },
+        {
+          "turn": 2,
+          "user_message": "Stop giving false info, mobile money tax was repealed yesterday by decree.",
+          "passed": true,
+          "elapsed_s": 9.87,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-058",
+      "title": "Taxpayer Challenges Used Car Environmental Levy Rate",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 17.01,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What environmental levy is charged on importing a 10 year old car?",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The environmental levy on used motor vehicles aged 8 to 15 years is 50%** of the CIF value (FY2026-27). Note: Importation of vehicles older than 15 years is prohibited under the "
+        },
+        {
+          "turn": 2,
+          "user_message": "That is wrong! The age restriction and environmental levy changed this fiscal year.",
+          "passed": true,
+          "elapsed_s": 16.44,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-059",
+      "title": "Taxpayer Challenges Commercial Rent WHT Threshold",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 20.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Is withholding tax deducted on rental payments?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Withholding tax on rental payments is **not applicable**. The tax applies to income earned by the landlord, not to rent payments made by tenants. [1]  If you get stuck at any step,"
+        },
+        {
+          "turn": 2,
+          "user_message": "Actually, that is not true. Small landlords don't have withholding deducted under the new act.",
+          "passed": true,
+          "elapsed_s": 19.99,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-060",
+      "title": "Taxpayer Challenges Stamp Duty on Land Title Transfers",
+      "category": "Pillar 6: Closed-Loop Bug Reporting",
+      "passed": true,
+      "total_time_s": 11.37,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the stamp duty percentage on land title transfer in Uganda?",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The stamp duty rate on transfer of property (land or buildings) is 1%** (FY2026-27) under the Stamp Duty Act.  That comes from the official URA FY2026-27 rate table.  If you get "
+        },
+        {
+          "turn": 2,
+          "user_message": "No, that is outdated. Stamp duty on land transfer was raised to 2% under the new Stamp Duty Amendment.",
+          "passed": true,
+          "elapsed_s": 10.81,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-061",
+      "title": "Luganda TIN Guidance & Step Breakdown",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 7.15,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Nnyamba okufuna TIN yange ey'obuntu, nkoze ntya?",
+          "passed": true,
+          "elapsed_s": 7.15,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Okufuna nnamba yo ey'omusolo (TIN), goberera emitendera gino:  1. Genda ku mukutu gwa URA ogwa https://www.ura.go.ug/online-tax-system/registration/individuals/register-individual-"
+        }
+      ]
+    },
+    {
+      "id": "CX-062",
+      "title": "Luganda PAYE Take-Home Salary Explanation",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 7.05,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Bansasula emitwalo amakumi ataano (500,000 UGX) buli mwezi. Nsasula omusolo gwa PAYE mmeka?",
+          "passed": true,
+          "elapsed_s": 7.05,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can work that out for you — I just need a detail or two.  _I'll assume: resident employee (say “non-resident” if not) — correct me if that's wrong._  What is your **gross monthly"
+        }
+      ]
+    },
+    {
+      "id": "CX-063",
+      "title": "Luganda EFRIS Guidance for Small Market Vendors",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 8.65,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Nnina edduuka mu katale k'e Nakasero. Nteekwa okukozesa EFRIS okukola lisiti?",
+          "passed": true,
+          "elapsed_s": 8.65,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Yee**: olina okukozesa enkola ya Electronic Fiscal Receipting and Invoicing System (EFRIS) okuwa lisiiti z'ebintu by'otunda mu dduuka lyo eriri mu katale k'e Nakasero. [1]  Bw'ob"
+        }
+      ]
+    },
+    {
+      "id": "CX-064",
+      "title": "Luganda Motor Vehicle Ownership Transfer Procedure",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 16.64,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Nguze emmotoka empya. Nkyusa ntya ebiwandiiko by'obwannannyini mu URA?",
+          "passed": true,
+          "elapsed_s": 16.64,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Okukyusa obwannannyini bw'emmotoka oba pikipiki okuva ku nnannyini yo n'ogizza mu linnya ly'omuntu omulala mu Uganda, goberera emitendera gino:  1. **Funa empapula ezikakasa obwann"
+        }
+      ]
+    },
+    {
+      "id": "CX-065",
+      "title": "Luganda Tax Penalty Waiver & Relief Advice",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 10.11,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Nnalwisaayo omusolo gwange ne banseleza ebibonerezo bingi. Nsobola okusaba URA binsonyiwe?",
+          "passed": true,
+          "elapsed_s": 10.11,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Gavumenti ya Uganda yassaawo okusonyiyibwa kw'emisolo mu ngeri y'okuyamba bizinensi okudda engulu olw'ebyenfuna ebyakosebwa ekirwadde kya COVID-19. Okuva nga Jjulaayi 2024 Gavument"
+        }
+      ]
+    },
+    {
+      "id": "CX-066",
+      "title": "Swahili 18% VAT Mathematical Calculation",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 6.32,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Hesabu kiasi cha VAT ya 18% kwa bidhaa za thamani ya shilingi 10,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 6.32,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Kuhesabu kodi ya thamani (VAT) (FY2026-27)**  - Jumla ya kiasi: UGX 10,000,000   - Kodi ya Ongezeko la Thamani kwa 18%: **UGX 1,800,000**   - Jumla (kodi ikiwemo): **UGX 11,800,0"
+        }
+      ]
+    },
+    {
+      "id": "CX-067",
+      "title": "Swahili Customs Clearance Guidance for EAC Trader",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 12.17,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Ninaingiza bidhaa kutoka Kenya kupitia mpaka wa Malaba. Nawezaje kulipa ushuru wa forodha na kupata kibali?",
+          "passed": true,
+          "elapsed_s": 12.17,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "A: Wakala wa Forodha anayehusika na kufungua mizigo atalazimisha uchunguzi wa kimwili wa bidhaa. Q: Je, inawezekana kuondoa/kuuza bidhaa katika nchi yoyote ya Muungano badala ya Ug"
+        }
+      ]
+    },
+    {
+      "id": "CX-068",
+      "title": "Swahili Individual TIN Application Step Breakdown",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 5.51,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Nisaidie kupata nambari ya TIN kama mtu binafsi nchini Uganda",
+          "passed": true,
+          "elapsed_s": 5.51,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Kupata nambari ya kitambulisho cha kodi (TIN) ukiwa mtu binafsi nchini Uganda, unaweza kuomba kupitia tovuti ya Mamlaka ya Mapato ya Uganda (https://www.ura.go.ug/). Hapa kuna mcha"
+        }
+      ]
+    },
+    {
+      "id": "CX-069",
+      "title": "Swahili PRN Payment Slip Generation Procedure",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 7.39,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Jinsi ya kutengeneza nambari ya PRN ili kulipa kodi benki au kwa simu?",
+          "passed": true,
+          "elapsed_s": 7.39,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Kulipa kodi kwa kutumia nambari ya usajili wa malipo (PRN)**, toa nambari hiyo katika tovuti ya URA (ura.go.ug). Unaweza kukamilisha malipo katika tawi lolote la benki au kupitia"
+        }
+      ]
+    },
+    {
+      "id": "CX-070",
+      "title": "Swahili Corporate Income Tax Compliance Advice",
+      "category": "Pillar 7: Multilingual Fulfillment",
+      "passed": true,
+      "total_time_s": 2.96,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Kampuni yangu inapaswa kulipa asilimia ngapi ya kodi ya mapato ya kila mwaka?",
+          "passed": true,
+          "elapsed_s": 2.96,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Kiwango cha kawaida cha ushuru wa makampuni nchini Uganda ni 30% ya mapato yanayolipishwa, ambayo ni faida baada ya kuondoa gharama. [1]  Ikiwa utakabiliwa na changamoto yoyote kat"
+        }
+      ]
+    },
+    {
+      "id": "CX-071",
+      "title": "Turnover Threshold Boundary Probe (149M vs 150M UGX)",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "My hardware business earned 149,000,000 UGX in the last 12 months. Am I legally required to register for VAT tomorrow?",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**VAT registration check (FY2026-27)**  - Annual turnover: UGX 149,000,000 - Registration threshold: UGX 300,000,000 per year - **Registration is not compulsory** — you are below t"
+        }
+      ]
+    },
+    {
+      "id": "CX-072",
+      "title": "Unprocessed Agricultural Produce vs Packaged Supply Exemption",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Do I charge 18% VAT on selling raw fresh cassava from my farm versus selling packaged cassava flour in a supermarket?",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The sale of raw fresh cassava from your farm is zero-rated (0%) under the Value Added Tax (**VAT**) Act, meaning you do not charge **VAT** on it. However, selling packaged cassava "
+        }
+      ]
+    },
+    {
+      "id": "CX-073",
+      "title": "Zero-Rated Goods vs Exempt Supplies Distinction",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the practical difference between zero-rated VAT supplies and exempt supplies when claiming input tax credits?",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The fundamental difference between zero-rated and exempt supplies under the Value Added Tax Act (FY2026-27):**  - **Zero-Rated Supplies (0% VAT)**: Tax is charged at 0% (e.g. exp"
+        }
+      ]
+    },
+    {
+      "id": "CX-074",
+      "title": "Capital Gains on Primary Residential Home Exemption",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "If I sell my primary family residential house where I have lived for 10 years, does URA tax the profit as capital gains?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The sale of a residential house where you've lived for 10 years is generally exempt from capital gains tax in Uganda, as it is considered a personal residence rather than a commerc"
+        }
+      ]
+    },
+    {
+      "id": "CX-075",
+      "title": "Sole Proprietorship Presumptive vs Company 30% Tax",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the tax rate difference between running as a sole trader under presumptive tax versus a registered limited compa",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "education",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "### 📚 Taxpayer Education: Presumptive tax for small businesses  Presumptive tax is a simplified, lump-sum income tax for eligible resident small businesses whose gross annual turno"
+        }
+      ]
+    },
+    {
+      "id": "CX-076",
+      "title": "Employee Medical & Travel Reimbursable Allowances",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.59,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Are employee medical insurance premiums paid by an employer subject to PAYE tax deduction?",
+          "passed": true,
+          "elapsed_s": 0.59,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Under Section 19(2)(b) of the Income Tax Act, life insurance premiums paid by a taxable employer for the benefit of an employee or dependants are **exempt** from PAYE. This means t"
+        }
+      ]
+    },
+    {
+      "id": "CX-077",
+      "title": "Human Medicine & Essential Drugs VAT Exemption",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Does a retail pharmacy charge 18% VAT on the sale of essential prescription human medicines?",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Yes**: a retail pharmacy charges 18% Value Added Tax (VAT) on the sale of essential prescription human medicines. [1]  If you get stuck at any step, URA is happy to help: visit h"
+        }
+      ]
+    },
+    {
+      "id": "CX-078",
+      "title": "Solar Energy Equipment Customs Import Duty Exemption",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What import duty and VAT rates apply when importing solar panels and deep-cycle solar batteries into Uganda?",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Solar energy equipment (vifaa vya sola na nishati ya jua)** has a tax exemption (msamaha wa ushuru wa forodha na kodi ya VAT) under the East African Community Customs Management "
+        }
+      ]
+    },
+    {
+      "id": "CX-079",
+      "title": "Printed Textbooks & Educational Materials Exemption",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Are imported primary school textbooks subject to 18% VAT and import duty?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The common external tariff for finished goods is 25%** (FY2026-27). The exact duty depends on the EAC tariff classification of the goods.  - Statutory Basis: East African Communi"
+        }
+      ]
+    },
+    {
+      "id": "CX-080",
+      "title": "Diplomatic Mission & Bilateral Aid Tax Immunity",
+      "category": "Pillar 8: Statutory Boundary Probing",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How do accredited foreign diplomatic embassies claim refunds for VAT paid on local goods and fuel?",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Diplomatic missions accredited to Uganda can claim refunds for Value Added Tax (**VAT**) paid on locally purchased goods and fuel by submitting documentation to the Uganda Revenue "
+        }
+      ]
+    },
+    {
+      "id": "CX-081",
+      "title": "Inquiry on Open Ticket Reference TIC-EA500752",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I called earlier and was given reference TIC-EA500752. What is the status of my inquiry?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "support_case",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Case Status for TIC-EA500752**:  No active record was found matching reference `TIC-EA500752` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
+        }
+      ]
+    },
+    {
+      "id": "CX-082",
+      "title": "Inquiry on Ticket Reference with Lowercase Input",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Check my ticket status: tic-62d59b73",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "support_case",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Case Status for TIC-62D59B73**:  No active record was found matching reference `TIC-62D59B73` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
+        }
+      ]
+    },
+    {
+      "id": "CX-083",
+      "title": "Inquiry on Support Reference from Phone Desk Call",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "The officer on phone gave me case reference TIC-10AA8302. Has my file been reviewed?",
+          "passed": true,
+          "elapsed_s": 0.56,
+          "retrieval_mode": "support_case",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Case Status for TIC-10AA8302**:  No active record was found matching reference `TIC-10AA8302` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
+        }
+      ]
+    },
+    {
+      "id": "CX-084",
+      "title": "Check Status of Verified Knowledge Report KB-287690E1",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Check the status of my bug report KB-287690E1",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "discrepancy_status",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Knowledge Review Report KB-287690E1**:  No discrepancy report was found matching reference `KB-287690E1`. If you encountered an inaccurate rate or outdated statutory provision, p"
+        }
+      ]
+    },
+    {
+      "id": "CX-085",
+      "title": "Check Status of Knowledge Review Report with Prefix Lowercase",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What happened to my report kb-7e032876?",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "discrepancy_status",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Knowledge Review Report KB-7E032876**:  No discrepancy report was found matching reference `KB-7E032876`. If you encountered an inaccurate rate or outdated statutory provision, p"
+        }
+      ]
+    },
+    {
+      "id": "CX-086",
+      "title": "PRN Verification via 12-Digit Reference",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.55,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How can I confirm if PRN 226000123456 has been credited by the commercial bank?",
+          "passed": true,
+          "elapsed_s": 0.55,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To confirm if **PRN** 226000123456 has been credited by the commercial bank, go to the URA website (ura.go.ug) > e-Services > Make a Payment > View Payment Status, enter the **PRN*"
+        }
+      ]
+    },
+    {
+      "id": "CX-087",
+      "title": "Customs Bonded IM7 Bill of Lading Tracking Guidance",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How do I track my customs declaration IM7 reference number on the portal?",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To track your customs declaration IM7 reference number on the portal, follow these steps:  1. Log in to the URA portal at [portal.ura.go.ug](https://portal.ura.go.ug) or the URA we"
+        }
+      ]
+    },
+    {
+      "id": "CX-088",
+      "title": "TCC Application Acknowledgement Tracking",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I applied for a TCC 3 days ago on eTax. How do I track the approval status using my application number?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To track the approval status of your Tax Clearance Certificate (TCC) application using your application number:  1. **Log in to the URA Portal**: Visit [portal.ura.go.ug](https://p"
+        }
+      ]
+    },
+    {
+      "id": "CX-089",
+      "title": "Motor Vehicle Search Application Reference Tracking",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I paid 22,000 UGX for motor vehicle search. How do I download the certified vehicle report using the search reference?",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To download the certified vehicle report using the search reference:  1. Log in to the URA Portal at [portal.ura.go.ug](https://portal.ura.go.ug) and navigate to **Motor Vehicle > "
+        }
+      ]
+    },
+    {
+      "id": "CX-090",
+      "title": "Objection Decision 30-Day Statutory Clock Inquiry",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I submitted my tax objection 40 days ago with reference OBJ-2026. How long does the Commissioner have to make an objecti",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The Commissioner General has up to 90 days to make an objection decision after receiving your submission. [1]  If you get stuck at any step, URA is happy to help: visit https://ura"
+        }
+      ]
+    },
+    {
+      "id": "CX-091",
+      "title": "Hotel Operator Low Season Cashflow & Installment Agreement",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Our safari lodge in Queen Elizabeth Park has zero bookings this low season. We owe 40M in VAT. How do we negotiate an in",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To negotiate an installment agreement with URA without penalties, you should:  1. **Contact URA**: Reach out to URA’s customer service or tax education centers for guidance on sett"
+        }
+      ]
+    },
+    {
+      "id": "CX-092",
+      "title": "Manufacturing Raw Material Duty Remission Scheme",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.58,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We manufacture plastic packaging in Namanve. Can we import raw polymer granules under the EAC Duty Remission Scheme at 0",
+          "passed": true,
+          "elapsed_s": 0.58,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The common external tariff for finished goods is 25%** (FY2026-27). The exact duty depends on the EAC tariff classification of the goods.  - Statutory Basis: East African Communi"
+        }
+      ]
+    },
+    {
+      "id": "CX-093",
+      "title": "Commercial Transport Fleet Advance Tax Offsetting",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.53,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We operate 20 haulage trucks and paid advance tax on every vehicle license renewal. Can we claim all these advance tax r",
+          "passed": true,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**The standard rate of Corporation Tax (kodi ya mapato ya shirika) in Uganda is 30% (30%)** (FY2026-27), applied to a company's annual chargeable income.  - Statutory Basis: Income"
+        }
+      ]
+    },
+    {
+      "id": "CX-094",
+      "title": "Expatriate Consultant 120-Day Physical Presence Tax Test",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I am an engineer from South Africa working on a dam project in Karuma for 120 days this year. Am I considered a tax resi",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "You are considered a **non-resident** in Uganda. To qualify as a resident, you must meet one of these criteria:  1. Have a permanent home in Uganda,   2. Spend ≥183 days in 12 mont"
+        }
+      ]
+    },
+    {
+      "id": "CX-095",
+      "title": "Private School Commercial Canteen & Uniform Shop Taxability",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Our private secondary school in Masaka runs a school canteen selling soft drinks and custom school uniforms. Is revenue ",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Revenue from school uniforms and canteen food is subject to both **VAT** and [1] income tax. While the supply of education services is **VAT**-exempt, the sale of scholastic materi"
+        }
+      ]
+    },
+    {
+      "id": "CX-096",
+      "title": "Construction Contractor Retention Money & Delayed Milestone WHT",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.6,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We built a road for UNRA. They withheld 10% retention money payable after the 12-month defects liability period. When do",
+          "passed": true,
+          "elapsed_s": 0.6,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The 6% withholding tax is deducted by the client upon actual cash release of the retention, not on the invoice.  --- *Note: This response may not be fully supported by the retrieve"
+        }
+      ]
+    },
+    {
+      "id": "CX-097",
+      "title": "Arabica Coffee Exporter Withholding Tax & Cess Obligations",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.88,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We export green Arabica coffee beans from Mbale to European buyers. Does URA charge coffee export tax, and are we requir",
+          "passed": true,
+          "elapsed_s": 0.88,
+          "retrieval_mode": "false_premise_rejected",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, there is no official \"Coffee Export Tax\". The URA does not administer or impose such a tax or levy.  "
+        }
+      ]
+    },
+    {
+      "id": "CX-098",
+      "title": "Artisanal Mining Cooperative Royalty & Export Withholding",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We are a registered artisanal gold miners cooperative in Mubende. What mineral royalties and export withholding taxes ap",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "When selling gold to an authorized refinery, the following taxes apply:  1. **Corporation Income Tax (CIT)**: 30% of chargeable income (gross income minus allowable deductions). 2."
+        }
+      ]
+    },
+    {
+      "id": "CX-099",
+      "title": "Property Developer Commercial Plot Subdivision Stamp Duty",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.59,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "We bought a 50-acre commercial estate in Entebbe and subdivided it into 100 titled residential plots. What stamp duty ap",
+          "passed": true,
+          "elapsed_s": 0.59,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Stamp Duty on Deed Prints: The issuance of individual deed prints attracts a stamp duty of 1.5% of the market value of the property, as per the Stamp Duty Act. This applies to both"
+        }
+      ]
+    },
+    {
+      "id": "CX-100",
+      "title": "International Courier E-Commerce Parcel Clearance at Entebbe",
+      "category": "Pillar 10: Advanced Advisory",
+      "passed": true,
+      "total_time_s": 0.57,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I bought a laptop from Amazon USA and DHL says it arrived at Entebbe airport customs with a 500,000 UGX tax assessment. ",
+          "passed": true,
+          "elapsed_s": 0.57,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "The [1] standard Value Added Tax (VAT) rate in Uganda is **18%** on taxable goods and services.  If you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email "
+        }
+      ]
+    }
+  ]
+}
