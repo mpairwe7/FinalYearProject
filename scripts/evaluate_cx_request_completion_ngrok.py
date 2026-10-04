@@ -77,8 +77,8 @@ def build_scenarios() -> list[CXScenario]:
         CXScenario(
             id="CX-FLOW-01",
             category="Interactive Guided Workflow",
-            title="Individual TIN Registration Flow (Progressive Slot-Filling & Validation)",
-            description="Tests step-by-step guidance from category selection to legal name, NIN collection, and format validation.",
+            title="Individual TIN Registration Flow (Privacy-Preserving Guided Journey)",
+            description="Tests step-by-step guidance from category selection to document confirmation and secure portal handoff.",
             turns=[
                 TurnStep(
                     user_message="Help me register for a TIN",
@@ -92,22 +92,15 @@ def build_scenarios() -> list[CXScenario]:
                     user_message="individual",
                     expect_mode="workflow",
                     expect_workflow="TIN Registration",
-                    expect_step_id="collect_name",
-                    expect_reply_contains=["legal name", "national ID"],
+                    expect_step_id="collect_documents_ready",
+                    expect_reply_contains=["original identification", "yes/no"],
                 ),
                 TurnStep(
-                    user_message="Mugisha Daniel",
+                    user_message="yes",
                     expect_mode="workflow",
                     expect_workflow="TIN Registration",
-                    expect_step_id="collect_nin",
-                    expect_reply_contains=["National Identification Number", "NIN"],
-                ),
-                TurnStep(
-                    user_message="CM84ABCDE8400J",
-                    expect_mode="workflow",
-                    expect_workflow="TIN Registration",
-                    expect_step_id="collect_phone",
-                    expect_reply_contains=["phone number"],
+                    expect_step_id="summary",
+                    expect_reply_contains=["https://ura.go.ug"],
                 ),
             ],
         ),
@@ -240,13 +233,13 @@ def build_scenarios() -> list[CXScenario]:
             description="Tests that when a user disputes a factual claim in turn 2, the AI thanks them and files a Knowledge Report #KB-XXX.",
             turns=[
                 TurnStep(
-                    user_message="What is the VAT registration turnover threshold?",
-                    expect_reply_contains=["threshold"],
+                    user_message="What is the VAT rate in Uganda?",
+                    expect_reply_contains=["VAT"],
                 ),
                 TurnStep(
-                    user_message="No, that is incorrect. Under the 2023 Amendment Act, the mandatory VAT threshold was raised to 150 million UGX.",
+                    user_message="No, that is incorrect. Under the 2023 Amendment Act, the rate was changed to 6% instead of 18%.",
                     expect_discrepancy=True,
-                    expect_reply_regex=[r"(?:thank you|pointing this out|report|#kb-)", r"150"],
+                    expect_reply_regex=[r"(?:thank you|pointing this out|report|#kb-)", r"6%"],
                 ),
             ],
         ),
@@ -279,6 +272,76 @@ def build_scenarios() -> list[CXScenario]:
                     user_message="Hesabu kiasi cha VAT ya 18% kwa bidhaa za thamani ya shilingi 10,000,000 UGX",
                     expect_mode="calculator",
                     expect_reply_contains=["1,800,000"],
+                )
+            ],
+        ),
+
+        # =====================================================================
+        # CATEGORY 7: Complex Narrative Story Problem-Solving (Real-world CX)
+        # =====================================================================
+        CXScenario(
+            id="CX-STORY-01",
+            category="Narrative Story Resolution",
+            title="Small Bakery EFRIS Enforcement & Penalty Anxiety Story",
+            description="Taxpayer shares personal story about opening bakery in Mukono with UK sister help, facing 10M EFRIS penalty threat.",
+            turns=[
+                TurnStep(
+                    user_message=(
+                        "I started a small bakery in Mukono 8 months ago, using my personal savings and some money sent by my sister in the UK. "
+                        "Last week, a field officer visited and told me I must use EFRIS and threatened me with a 10 million penalty because I don't have electronic receipts. "
+                        "I have not even reached 35 million in total annual sales. What should I do right now?"
+                    ),
+                    expect_reply_regex=[r"(?:efris|vat|threshold|penalty|objection|ura)"],
+                    expect_resources_min=1,
+                )
+            ],
+        ),
+        CXScenario(
+            id="CX-STORY-02",
+            category="Narrative Story Resolution",
+            title="Abandoned Vehicle in Bonded Warehouse & Rogue Agent Story",
+            description="Importer in Malaba with rogue clearing agent facing imminent 14-day auction notice on imported car.",
+            turns=[
+                TurnStep(
+                    user_message=(
+                        "I imported a 2017 car through Mombasa and it arrived at Malaba customs. "
+                        "My clearing agent took 8 million shillings from me and disappeared with the papers. "
+                        "Now the bonded warehouse manager says my vehicle has only 14 days before it gets auctioned. "
+                        "How do I clear the vehicle myself with URA, compute the duties, and stop the auction?"
+                    ),
+                    expect_reply_regex=[r"(?:customs|duty|warehouse|prn|ura|agent)"],
+                    expect_resources_min=1,
+                )
+            ],
+        ),
+        CXScenario(
+            id="CX-STORY-03",
+            category="Narrative Story Resolution",
+            title="Remote Tech Freelancer Foreign USD Inward Remittance Story",
+            description="Freelancer in Jinja getting USD from overseas tech clients receives URA inquiry on bank credits.",
+            turns=[
+                TurnStep(
+                    user_message=(
+                        "I am a software engineer in Jinja freelancing remotely for tech companies in Germany and the US. "
+                        "They wire money to my Equity Bank account in USD. URA sent me an inquiry asking about unexplained bank deposits. "
+                        "Do I have to charge 18% VAT or is foreign service zero-rated, and how should I report this income?"
+                    ),
+                    expect_reply_regex=[r"(?:export|zero-rated|income|vat|deduct|ura)"],
+                )
+            ],
+        ),
+        CXScenario(
+            id="CX-STORY-04",
+            category="Narrative Story Resolution",
+            title="Landlord-Tenant Agency Notice Conflict & Eviction Threat Story",
+            description="Tenant's rent was garnished by URA via Section 40 Agency Notice for landlord's arrears, landlord threatens eviction.",
+            turns=[
+                TurnStep(
+                    user_message=(
+                        "My landlord locked my shop in Kampala because URA served an agency notice to my bank and deducted my rent payments directly to pay his tax arrears. "
+                        "Now the landlord claims I never paid him rent and is threatening eviction. Am I legally protected by URA?"
+                    ),
+                    expect_reply_regex=[r"(?:agency\s+notice|section\s+40|indemnif|protect|rent)"],
                 )
             ],
         ),

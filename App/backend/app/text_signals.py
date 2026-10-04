@@ -360,13 +360,19 @@ _FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 
 _UGANDA_RE = re.compile(
-    r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b",
+    r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b"
+    r"|\bmukono\b|\bwakiso\b|\bkasese\b|\bfort\s+portal\b|\bkabale\b|\bhoima\b|\blira\b|\barua\b|\btororo\b|\bmasindi\b|\bsoroti\b"
+    r"|\befris\b|\bdts\b|\bkakasa\b|\btin\b|\bprn\b|\bpaye\b|\bursb\b|\bbwims\b|\bugx\b|\bshillings?\b",
     re.IGNORECASE,
 )
 
 
 _EXPORT_TO_FOREIGN_RE = re.compile(
     r"\b(?:\w*export\w*|\w*import\w*|\w*agiza\w*|\w*safirisha\w*|\w*ingiza\w*|\w*fulumya\w*)\b.*?\b(?:to|from|kutoka|okuva(?:\s+mu)?)\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|china|japan|uae|dubai|india|uk|usa|us)\b",
+    re.IGNORECASE,
+)
+_REMITTANCE_OR_SOURCE_RE = re.compile(
+    r"\b(?:sent\s+by|money\s+(?:from|sent)|sister\s+in|brother\s+in|family\s+in|relative\s+in|mother\s+in|father\s+in|parents?\s+in|remittance|gift\s+from|freelanc\w*\s+for|remote\w*\s+for|contract\w*\s+for|client\w*\s+in|customer\w*\s+in|company\s+in|employer\s+in)\b",
     re.IGNORECASE,
 )
 _PURE_FOREIGN_TAX_RE = re.compile(
@@ -386,9 +392,9 @@ def detect_foreign_jurisdiction(message: str) -> str:
     text = message or ""
     if not text.strip() or _UGANDA_RE.search(text):
         return ""
-    # Cross-border export/import trade operations (e.g. "When we export goods to Kenya, what VAT applies?")
-    # are governed by URA's export/customs tax rules (zero-rated export) rather than foreign domestic tax law.
-    if _EXPORT_TO_FOREIGN_RE.search(text) and not _PURE_FOREIGN_TAX_RE.search(text):
+    # Cross-border export/import trade operations or foreign remittances/clients in stories
+    # are governed by URA domestic/customs tax rules rather than foreign domestic tax law.
+    if (_EXPORT_TO_FOREIGN_RE.search(text) or _REMITTANCE_OR_SOURCE_RE.search(text)) and not _PURE_FOREIGN_TAX_RE.search(text):
         return ""
     for name, pattern in _FOREIGN_JURISDICTION_RES:
         if pattern.search(text):

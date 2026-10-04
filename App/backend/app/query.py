@@ -1127,8 +1127,16 @@ def rewrite(
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|[—–:;]\s+")
 
 
+_TAX_KEYWORD_RE = re.compile(
+    r"\b(?:tax|vat|efris|tin|prn|paye|dts|duty|customs|penalty|receipt|invoice|"
+    r"assessment|objection|appeal|waiver|threshold|turnover|sales|audit|withholding|"
+    r"registration|filing|returns?|income|company|salary|clearance)\b",
+    re.IGNORECASE,
+)
+
+
 def extract_question_span(text: str) -> str:
-    """Return only the interrogative sentence(s) in *text*, or "" if none.
+    """Return the interrogative sentence(s) in *text*, enriched with core tax context if generic.
 
     Distress-framed messages ("I've tried three times and it still doesn't
     work!! What is EFRIS?", "I'm worried — What is EFRIS?") combine
@@ -1138,9 +1146,22 @@ def extract_question_span(text: str) -> str:
     a distressed turn should retrieve on this extracted span instead of the
     full rewritten text.
     """
-    sentences = _SENTENCE_BOUNDARY_RE.split((text or "").strip())
-    questions = [s.strip() for s in sentences if s.strip().endswith("?")]
-    return " ".join(questions)
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    sentences = [s.strip() for s in _SENTENCE_BOUNDARY_RE.split(raw) if s.strip()]
+    questions = [s for s in sentences if s.endswith("?")]
+    if not questions:
+        return ""
+
+    q_text = " ".join(questions)
+    # If the extracted question is generic ("What should I do?", "Can they do this?"),
+    # enrich it with prior sentences from the story that contain key tax entities:
+    if not _TAX_KEYWORD_RE.search(q_text):
+        context_sentences = [s for s in sentences if not s.endswith("?") and _TAX_KEYWORD_RE.search(s)]
+        if context_sentences:
+            return f"{' '.join(context_sentences[-2:])} {q_text}"
+    return q_text
 
 
 # ---------------------------------------------------------------------------

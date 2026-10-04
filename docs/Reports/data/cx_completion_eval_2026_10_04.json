@@ -1,10 +1,10 @@
 {
-  "timestamp": 1791107181.1698925,
-  "date": "2026-10-04 09:46:21 UTC",
+  "timestamp": 1791114548.3766341,
+  "date": "2026-10-04 11:49:08 UTC",
   "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
-  "overall_cx_score_pct": 91.7,
-  "scenarios_total": 12,
-  "scenarios_passed": 11,
+  "overall_cx_score_pct": 100.0,
+  "scenarios_total": 16,
+  "scenarios_passed": 16,
   "category_breakdown": {
     "Interactive Guided Workflow": {
       "total": 3,
@@ -24,24 +24,40 @@
     },
     "Closed-Loop Bug Reporting": {
       "total": 1,
-      "passed": 0
+      "passed": 1
     },
     "Multilingual Task Fulfillment": {
       "total": 2,
       "passed": 2
+    },
+    "Narrative Story Resolution": {
+      "total": 4,
+      "passed": 4
     }
   },
   "detailed_results": [
     {
       "id": "CX-FLOW-01",
-      "title": "Individual TIN Registration Flow (Progressive Slot-Filling & Validation)",
+      "title": "Individual TIN Registration Flow (Privacy-Preserving Guided Journey)",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 1.33,
+      "total_time_s": 1.09,
       "turns": [
         {
           "turn": 1,
           "user_message": "Help me register for a TIN",
+          "passed": true,
+          "elapsed_s": 0.42,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the TIN Registration Guide process step by step.  Which application are you preparing for: an **individual**, a **company**, or an **NGO**? Please do not sh"
+        },
+        {
+          "turn": 2,
+          "user_message": "individual",
           "passed": true,
           "elapsed_s": 0.35,
           "retrieval_mode": "workflow",
@@ -49,43 +65,19 @@
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "I can guide you through the TIN Registration process step by step.  Are you registering as an **individual**, a **company**, or an **NGO**?"
-        },
-        {
-          "turn": 2,
-          "user_message": "individual",
-          "passed": true,
-          "elapsed_s": 0.32,
-          "retrieval_mode": "workflow",
-          "workflow_active": true,
-          "resources_count": 0,
-          "discrepancy_logged": false,
-          "failures": [],
-          "snippet": "What is your full legal name (as it appears on your national ID or certificate of incorporation)?"
+          "snippet": "Do you have the original identification or organization registration documents ready to use in the secure URA portal? (yes/no)"
         },
         {
           "turn": 3,
-          "user_message": "Mugisha Daniel",
+          "user_message": "yes",
           "passed": true,
           "elapsed_s": 0.33,
           "retrieval_mode": "workflow",
           "workflow_active": true,
-          "resources_count": 0,
+          "resources_count": 3,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "Please provide your National Identification Number (NIN). Format: CM or CF followed by 2 digits, 5 letters, 5 digits, and 1 letter (e.g. CM84ABN8400J)."
-        },
-        {
-          "turn": 4,
-          "user_message": "CM84ABCDE8400J",
-          "passed": true,
-          "elapsed_s": 0.32,
-          "retrieval_mode": "workflow",
-          "workflow_active": true,
-          "resources_count": 0,
-          "discrepancy_logged": false,
-          "failures": [],
-          "snippet": "What is your phone number? (e.g. 0771234567 or +256771234567)"
+          "snippet": "This chat has not created or submitted a TIN application. Continue at the official URA portal: https://ura.go.ug → eServices → TIN Registration. Use the individual route for a pers"
         }
       ]
     },
@@ -94,13 +86,13 @@
       "title": "Tax Clearance Certificate (TCC) Guided Journey",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.31,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "Guide me through getting a tax clearance certificate",
           "passed": true,
-          "elapsed_s": 0.31,
+          "elapsed_s": 0.35,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -115,13 +107,13 @@
       "title": "Payment PRN Generation Workflow",
       "category": "Interactive Guided Workflow",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.35,
       "turns": [
         {
           "turn": 1,
           "user_message": "Guide me to generate a PRN for payment",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.35,
           "retrieval_mode": "workflow",
           "workflow_active": true,
           "resources_count": 0,
@@ -136,13 +128,13 @@
       "title": "PAYE Salary Calculation with Net Take-Home Pay (5,000,000 UGX)",
       "category": "Tax Calculator & Net Take-Home",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.52,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate my PAYE on a gross monthly salary of 5,000,000 UGX",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.52,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -157,13 +149,13 @@
       "title": "Commercial Rental Income Tax Computation (20,000,000 UGX)",
       "category": "Tax Calculator & Net Take-Home",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "Calculate rental tax on 20,000,000 UGX annual rental income for an individual",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 3,
@@ -178,13 +170,13 @@
       "title": "VAT 18% Addition and Extraction (10,000,000 UGX)",
       "category": "Tax Calculator & Net Take-Home",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 0.34,
       "turns": [
         {
           "turn": 1,
           "user_message": "How much is 18% VAT on goods worth 10,000,000 UGX?",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -199,19 +191,19 @@
       "title": "Return Filing Forms & eTax Portal Deep-Links",
       "category": "Actionable Resource Delivery",
       "passed": true,
-      "total_time_s": 0.34,
+      "total_time_s": 0.37,
       "turns": [
         {
           "turn": 1,
           "user_message": "Where can I download the return filing form templates and log in?",
           "passed": true,
-          "elapsed_s": 0.34,
+          "elapsed_s": 0.37,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 1,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "To download the return filing form templates and log in:  1. **Download the Template**: Visit the URA web portal (https://www.ura.go.ug) > Click on **Download Online Forms** under "
+          "snippet": "To download the return filing form templates and log in, follow these steps:  1. **Download the Template**: Visit the URA web portal ([https://www.ura.go.ug](https://www.ura.go.ug)"
         }
       ]
     },
@@ -220,13 +212,13 @@
       "title": "Bank Account Agency Notice & Fund Freeze De-escalation",
       "category": "Empathetic Crisis Guidance",
       "passed": true,
-      "total_time_s": 0.33,
+      "total_time_s": 0.36,
       "turns": [
         {
           "turn": 1,
           "user_message": "I am terrified! URA issued an agency notice on my bank account and froze my funds. What can I do?",
           "passed": true,
-          "elapsed_s": 0.33,
+          "elapsed_s": 0.36,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
@@ -253,7 +245,7 @@
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "I'm sorry to hear that you're facing penalties for missing the filing deadline. While I can't eliminate the penalties, I can guide you on how to minimize them.  First, I recommend "
+          "snippet": "I'm really sorry to hear that you're facing this challenge. While I can't remove the penalty, I can guide you on how to minimize the impact and avoid future issues. Here's what you"
         }
       ]
     },
@@ -261,37 +253,32 @@
       "id": "CX-BUG-01",
       "title": "Taxpayer Challenges Outdated Rate (Conversational Auto-Bug Reporting)",
       "category": "Closed-Loop Bug Reporting",
-      "passed": false,
-      "total_time_s": 2.23,
+      "passed": true,
+      "total_time_s": 10.02,
       "turns": [
         {
           "turn": 1,
-          "user_message": "What is the VAT registration turnover threshold?",
-          "passed": false,
-          "elapsed_s": 0.33,
+          "user_message": "What is the VAT rate in Uganda?",
+          "passed": true,
+          "elapsed_s": 0.34,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
           "discrepancy_logged": false,
-          "failures": [
-            "Reply missing text: 'threshold'"
-          ],
-          "snippet": "**VAT registration is compulsory once annual taxable turnover reaches UGX 300,000,000 (or UGX 150,000,000 under Section 7 baseline)** (FY2026-27). Below that, registration is volun"
+          "failures": [],
+          "snippet": "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is 18% (18%)** (FY2026-27). Value Added Tax is charged at 18% on taxable supplies of goods and servic"
         },
         {
           "turn": 2,
-          "user_message": "No, that is incorrect. Under the 2023 Amendment Act, the mandatory VAT threshold was raised to 150 million UGX.",
-          "passed": false,
-          "elapsed_s": 1.9,
+          "user_message": "No, that is incorrect. Under the 2023 Amendment Act, the rate was changed to 6% instead of 18%.",
+          "passed": true,
+          "elapsed_s": 9.68,
           "retrieval_mode": "hybrid",
           "workflow_active": false,
           "resources_count": 0,
-          "discrepancy_logged": false,
-          "failures": [
-            "Reply failed regex match: '(?:thank you|pointing this out|report|#kb-)'",
-            "Expected discrepancy report (#KB-) to be emitted"
-          ],
-          "snippet": "The VAT registration threshold is **150 million UGX annually** (or **37.5 million UGX in any 3 consecutive months**). This means businesses must register for VAT if their turnover "
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
         }
       ]
     },
@@ -300,19 +287,19 @@
       "title": "Luganda TIN Guidance & Step Breakdown",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 0.35,
+      "total_time_s": 6.56,
       "turns": [
         {
           "turn": 1,
           "user_message": "Nnyamba okufuna TIN yange ey'obuntu, nkoze ntya?",
           "passed": true,
-          "elapsed_s": 0.35,
+          "elapsed_s": 6.56,
           "retrieval_mode": "faq_priority",
           "workflow_active": false,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "Okufuna nnamba yo ey'omusolo (TIN), goberera emitendera gino:  1. Genda ku mukutu gwa URA ogwa https://www.ura.go.ug/online-tax-system/registration/individuals/register-individual-"
+          "snippet": "Okufuna nnamba yo ey'omusolo (TIN), osobola okukozesa emitendera gino wammanga:  1. **Genda ku Website ya URA**: Genda ku www.ura.go.ug](http://www.ura.go.ug) oba kozesa app ya URA"
         }
       ]
     },
@@ -321,19 +308,103 @@
       "title": "Swahili VAT Calculation and Explanation",
       "category": "Multilingual Task Fulfillment",
       "passed": true,
-      "total_time_s": 0.32,
+      "total_time_s": 4.53,
       "turns": [
         {
           "turn": 1,
           "user_message": "Hesabu kiasi cha VAT ya 18% kwa bidhaa za thamani ya shilingi 10,000,000 UGX",
           "passed": true,
-          "elapsed_s": 0.32,
+          "elapsed_s": 4.53,
           "retrieval_mode": "calculator",
           "workflow_active": false,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "**Kuhesabu kodi ya thamani (VAT) (FY2026-27)**  - Kiasi cha kodi: UGX 10,000,000   - Kodi ya Ongezeko la Thamani (18%): **UGX 1,800,000**   - Jumla (kodi ikiwemo): **UGX 11,800,000"
+          "snippet": "**Kuhesabu kodi ya thamani (VAT) (FY2026-27)**  - Jumla ya kiasi: UGX 10,000,000   - Kodi ya Ongezeko la Thamani kwa 18%: **UGX 1,800,000**   - Jumla (kodi ikiwemo): **UGX 11,800,0"
+        }
+      ]
+    },
+    {
+      "id": "CX-STORY-01",
+      "title": "Small Bakery EFRIS Enforcement & Penalty Anxiety Story",
+      "category": "Narrative Story Resolution",
+      "passed": true,
+      "total_time_s": 9.6,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I started a small bakery in Mukono 8 months ago, using my personal savings and some money sent by my sister in the UK. Last week, a field officer visited and told me I must use EFRIS and threatened me with a 10 million penalty because I don't have electronic receipts. I have not even reached 35 million in total annual sales. What should I do right now?",
+          "passed": true,
+          "elapsed_s": 9.6,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "You are correct to seek clarification from the URA field office, as the rules have changed significantly. Here’s what you should do:  1. **Register for EFRIS**: Since you operate i"
+        }
+      ]
+    },
+    {
+      "id": "CX-STORY-02",
+      "title": "Abandoned Vehicle in Bonded Warehouse & Rogue Agent Story",
+      "category": "Narrative Story Resolution",
+      "passed": true,
+      "total_time_s": 10.2,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I imported a 2017 car through Mombasa and it arrived at Malaba customs. My clearing agent took 8 million shillings from me and disappeared with the papers. Now the bonded warehouse manager says my vehicle has only 14 days before it gets auctioned. How do I clear the vehicle myself with URA, compute the duties, and stop the auction?",
+          "passed": true,
+          "elapsed_s": 10.2,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "[1] To clear the vehicle yourself with URA, you’ll need to:  1. **Contact URA Malaba**: Visit their office or website ([www.ura.go.ug](http://www.ura.go.ug)) to initiate the cleara"
+        }
+      ]
+    },
+    {
+      "id": "CX-STORY-03",
+      "title": "Remote Tech Freelancer Foreign USD Inward Remittance Story",
+      "category": "Narrative Story Resolution",
+      "passed": true,
+      "total_time_s": 0.43,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I am a software engineer in Jinja freelancing remotely for tech companies in Germany and the US. They wire money to my Equity Bank account in USD. URA sent me an inquiry asking about unexplained bank deposits. Do I have to charge 18% VAT or is foreign service zero-rated, and how should I report this income?",
+          "passed": true,
+          "elapsed_s": 0.43,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party Agency Notice** to any person or commercial bank holding funds on behalf of "
+        }
+      ]
+    },
+    {
+      "id": "CX-STORY-04",
+      "title": "Landlord-Tenant Agency Notice Conflict & Eviction Threat Story",
+      "category": "Narrative Story Resolution",
+      "passed": true,
+      "total_time_s": 0.41,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "My landlord locked my shop in Kampala because URA served an agency notice to my bank and deducted my rent payments directly to pay his tax arrears. Now the landlord claims I never paid him rent and is threatening eviction. Am I legally protected by URA?",
+          "passed": true,
+          "elapsed_s": 0.41,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I'm sorry you're going through this — let's look at what options you have.  **Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party "
         }
       ]
     }
