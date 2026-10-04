@@ -1,0 +1,341 @@
+{
+  "timestamp": 1791107181.1698925,
+  "date": "2026-10-04 09:46:21 UTC",
+  "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
+  "overall_cx_score_pct": 91.7,
+  "scenarios_total": 12,
+  "scenarios_passed": 11,
+  "category_breakdown": {
+    "Interactive Guided Workflow": {
+      "total": 3,
+      "passed": 3
+    },
+    "Tax Calculator & Net Take-Home": {
+      "total": 3,
+      "passed": 3
+    },
+    "Actionable Resource Delivery": {
+      "total": 1,
+      "passed": 1
+    },
+    "Empathetic Crisis Guidance": {
+      "total": 2,
+      "passed": 2
+    },
+    "Closed-Loop Bug Reporting": {
+      "total": 1,
+      "passed": 0
+    },
+    "Multilingual Task Fulfillment": {
+      "total": 2,
+      "passed": 2
+    }
+  },
+  "detailed_results": [
+    {
+      "id": "CX-FLOW-01",
+      "title": "Individual TIN Registration Flow (Progressive Slot-Filling & Validation)",
+      "category": "Interactive Guided Workflow",
+      "passed": true,
+      "total_time_s": 1.33,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Help me register for a TIN",
+          "passed": true,
+          "elapsed_s": 0.35,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the TIN Registration process step by step.  Are you registering as an **individual**, a **company**, or an **NGO**?"
+        },
+        {
+          "turn": 2,
+          "user_message": "individual",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "What is your full legal name (as it appears on your national ID or certificate of incorporation)?"
+        },
+        {
+          "turn": 3,
+          "user_message": "Mugisha Daniel",
+          "passed": true,
+          "elapsed_s": 0.33,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Please provide your National Identification Number (NIN). Format: CM or CF followed by 2 digits, 5 letters, 5 digits, and 1 letter (e.g. CM84ABN8400J)."
+        },
+        {
+          "turn": 4,
+          "user_message": "CM84ABCDE8400J",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "What is your phone number? (e.g. 0771234567 or +256771234567)"
+        }
+      ]
+    },
+    {
+      "id": "CX-FLOW-02",
+      "title": "Tax Clearance Certificate (TCC) Guided Journey",
+      "category": "Interactive Guided Workflow",
+      "passed": true,
+      "total_time_s": 0.31,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me through getting a tax clearance certificate",
+          "passed": true,
+          "elapsed_s": 0.31,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Tax Clearance Certificate process step by step.  Is the certificate for an **individual**, a **company** or a **partnership**?"
+        }
+      ]
+    },
+    {
+      "id": "CX-FLOW-03",
+      "title": "Payment PRN Generation Workflow",
+      "category": "Interactive Guided Workflow",
+      "passed": true,
+      "total_time_s": 0.32,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me to generate a PRN for payment",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Payment Assistance process step by step.  Which tax type or liability are you paying for?"
+        }
+      ]
+    },
+    {
+      "id": "CX-CALC-01",
+      "title": "PAYE Salary Calculation with Net Take-Home Pay (5,000,000 UGX)",
+      "category": "Tax Calculator & Net Take-Home",
+      "passed": true,
+      "total_time_s": 0.33,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate my PAYE on a gross monthly salary of 5,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.33,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**PAYE calculation (FY2026-27)**  - Gross monthly salary: UGX 5,000,000 - PAYE due (27.8% effective): **UGX 1,388,250** per month - Net take-home: **UGX 3,611,750** - Band applied:"
+        }
+      ]
+    },
+    {
+      "id": "CX-CALC-02",
+      "title": "Commercial Rental Income Tax Computation (20,000,000 UGX)",
+      "category": "Tax Calculator & Net Take-Home",
+      "passed": true,
+      "total_time_s": 0.32,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Calculate rental tax on 20,000,000 UGX annual rental income for an individual",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Rental income tax — individual (FY2026-27)**  - Gross annual rent: UGX 20,000,000 - Tax-free threshold: UGX 2,820,000 per year - Taxable amount: UGX 17,180,000 - Tax at 12%: **UG"
+        }
+      ]
+    },
+    {
+      "id": "CX-CALC-03",
+      "title": "VAT 18% Addition and Extraction (10,000,000 UGX)",
+      "category": "Tax Calculator & Net Take-Home",
+      "passed": true,
+      "total_time_s": 0.32,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How much is 18% VAT on goods worth 10,000,000 UGX?",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**VAT calculation (FY2026-27)**  - Net amount: UGX 10,000,000 - VAT at 18%: **UGX 1,800,000** - Gross (VAT-inclusive): **UGX 11,800,000** - Statutory Basis: Value Added Tax Act  _A"
+        }
+      ]
+    },
+    {
+      "id": "CX-RES-01",
+      "title": "Return Filing Forms & eTax Portal Deep-Links",
+      "category": "Actionable Resource Delivery",
+      "passed": true,
+      "total_time_s": 0.34,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Where can I download the return filing form templates and log in?",
+          "passed": true,
+          "elapsed_s": 0.34,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To download the return filing form templates and log in:  1. **Download the Template**: Visit the URA web portal (https://www.ura.go.ug) > Click on **Download Online Forms** under "
+        }
+      ]
+    },
+    {
+      "id": "CX-EMPATHY-01",
+      "title": "Bank Account Agency Notice & Fund Freeze De-escalation",
+      "category": "Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.33,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I am terrified! URA issued an agency notice on my bank account and froze my funds. What can I do?",
+          "passed": true,
+          "elapsed_s": 0.33,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I'm sorry you're going through this — let's look at what options you have.  **Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party "
+        }
+      ]
+    },
+    {
+      "id": "CX-EMPATHY-02",
+      "title": "Distressed Taxpayer Facing Late Filing Penalties",
+      "category": "Empathetic Crisis Guidance",
+      "passed": true,
+      "total_time_s": 0.35,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I missed the filing deadline and I cannot afford these heavy penalties, please help me out!",
+          "passed": true,
+          "elapsed_s": 0.35,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I'm sorry to hear that you're facing penalties for missing the filing deadline. While I can't eliminate the penalties, I can guide you on how to minimize them.  First, I recommend "
+        }
+      ]
+    },
+    {
+      "id": "CX-BUG-01",
+      "title": "Taxpayer Challenges Outdated Rate (Conversational Auto-Bug Reporting)",
+      "category": "Closed-Loop Bug Reporting",
+      "passed": false,
+      "total_time_s": 2.23,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What is the VAT registration turnover threshold?",
+          "passed": false,
+          "elapsed_s": 0.33,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [
+            "Reply missing text: 'threshold'"
+          ],
+          "snippet": "**VAT registration is compulsory once annual taxable turnover reaches UGX 300,000,000 (or UGX 150,000,000 under Section 7 baseline)** (FY2026-27). Below that, registration is volun"
+        },
+        {
+          "turn": 2,
+          "user_message": "No, that is incorrect. Under the 2023 Amendment Act, the mandatory VAT threshold was raised to 150 million UGX.",
+          "passed": false,
+          "elapsed_s": 1.9,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [
+            "Reply failed regex match: '(?:thank you|pointing this out|report|#kb-)'",
+            "Expected discrepancy report (#KB-) to be emitted"
+          ],
+          "snippet": "The VAT registration threshold is **150 million UGX annually** (or **37.5 million UGX in any 3 consecutive months**). This means businesses must register for VAT if their turnover "
+        }
+      ]
+    },
+    {
+      "id": "CX-VERNACULAR-01",
+      "title": "Luganda TIN Guidance & Step Breakdown",
+      "category": "Multilingual Task Fulfillment",
+      "passed": true,
+      "total_time_s": 0.35,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Nnyamba okufuna TIN yange ey'obuntu, nkoze ntya?",
+          "passed": true,
+          "elapsed_s": 0.35,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Okufuna nnamba yo ey'omusolo (TIN), goberera emitendera gino:  1. Genda ku mukutu gwa URA ogwa https://www.ura.go.ug/online-tax-system/registration/individuals/register-individual-"
+        }
+      ]
+    },
+    {
+      "id": "CX-VERNACULAR-02",
+      "title": "Swahili VAT Calculation and Explanation",
+      "category": "Multilingual Task Fulfillment",
+      "passed": true,
+      "total_time_s": 0.32,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Hesabu kiasi cha VAT ya 18% kwa bidhaa za thamani ya shilingi 10,000,000 UGX",
+          "passed": true,
+          "elapsed_s": 0.32,
+          "retrieval_mode": "calculator",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Kuhesabu kodi ya thamani (VAT) (FY2026-27)**  - Kiasi cha kodi: UGX 10,000,000   - Kodi ya Ongezeko la Thamani (18%): **UGX 1,800,000**   - Jumla (kodi ikiwemo): **UGX 11,800,000"
+        }
+      ]
+    }
+  ]
+}
