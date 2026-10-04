@@ -1,5 +1,5 @@
 # Standalone Dockerfile for URA Enterprise Systems & MCP Gateway
-FROM python:3.11.16-slim-bookworm
+FROM python:3.14.7-slim-bookworm
 
 WORKDIR /app
 
