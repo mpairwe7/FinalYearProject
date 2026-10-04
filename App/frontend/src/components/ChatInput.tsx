@@ -483,7 +483,7 @@ function ChatInputInner({
                   }`}
                   onClick={() => setShowAttachMenu((prev) => !prev)}
                   disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
-                  aria-label="Attach a document (PDF, Word, Excel, CSV, or image), take a photo, or add connector"
+                  aria-label="Attach a document (PDF, Word, Excel, CSV, or image) or take a photo"
                   aria-haspopup="dialog"
                   aria-expanded={showAttachMenu}
                   title="Add to conversation"
