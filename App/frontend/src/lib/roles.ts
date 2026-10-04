@@ -157,7 +157,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     href: "/admin/discrepancies",
     label: "Knowledge & Bug Reports",
     navLabel: "Bug Reports",
-    group: "triage",
+    group: "configure",
     blurb: "Taxpayer-reported inaccuracies and knowledge discrepancies",
     roles: ["ura_staff", "ura_admin", "ura_auditor"],
   },

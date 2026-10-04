@@ -9788,7 +9788,7 @@ class ChatModel:
         if cache_allowed and flags.is_enabled("semantic_cache"):
             cached = self._cache.get(rewritten, locale=locale, tenant_id=tenant_id or "default")
             if cached:
-                return _with_discrepancy({
+                return self._finalize_result({
                     **cached,
                     "conversation_id": thread_id,
                     "locale": locale,
@@ -9808,7 +9808,7 @@ class ChatModel:
                 locale=locale,
             )
             if route_decision.route == AgentRoute.CLARIFY:
-                return _with_discrepancy({
+                return {
                     "reply": route_decision.clarification_question
                     or CLARIFICATION_PROMPT,
                     "sources": [],
@@ -9827,7 +9827,7 @@ class ChatModel:
                     ),
                     "_hits": [],
                     "_history": [],
-                })
+                }
 
         # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
         conv_res_s = handle_conversational_turn(message, locale)

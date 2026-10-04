@@ -131,7 +131,7 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
   return (
     <OpsPage
       title="Knowledge & Bug Reports"
-      subtitle="Taxpayer-reported factual inaccuracies, outdated laws, and automated verification."
+      description="Taxpayer-reported factual inaccuracies, outdated laws, and automated verification."
       actions={
         <button
           type="button"
@@ -144,16 +144,16 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
       }
     >
       <div className="ops-stats-grid">
-        <StatCard title="Total Discrepancies" value={stats.total} tone="default" />
-        <StatCard title="Pending Review" value={stats.pending} tone={stats.pending > 0 ? "warn" : "default"} />
-        <StatCard title="Verified & Patched" value={stats.verified} tone="good" />
-        <StatCard title="Dismissed / N/A" value={stats.dismissed} tone="default" />
+        <StatCard label="Total Discrepancies" value={stats.total} />
+        <StatCard label="Pending Review" value={stats.pending} />
+        <StatCard label="Verified & Patched" value={stats.verified} />
+        <StatCard label="Dismissed / N/A" value={stats.dismissed} />
       </div>
 
       <OpsPanel
         title="Reported Inaccuracies"
-        description="Conversational pushbacks detected from taxpayer turns with cited evidence."
-        actions={
+        note="Conversational pushbacks detected from taxpayer turns with cited evidence."
+        end={
           <div className="ops-segmented-control" role="group" aria-label="Status filter">
             {["all", "pending", "verified", "dismissed"].map((s) => (
               <button
@@ -168,12 +168,12 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
           </div>
         }
       >
-        {isLoading && <SkeletonRows count={4} />}
-        {error && <ErrorState message="Failed to load discrepancy reports" onRetry={() => refetch()} />}
+        {isLoading && <SkeletonRows rows={4} />}
+        {error && <ErrorState title="Error" body="Failed to load discrepancy reports" onRetry={() => refetch()} />}
         {!isLoading && !error && reports.length === 0 && (
           <EmptyState
             title="No discrepancy reports found"
-            description="When taxpayers challenge bot answers with updated facts or rates, reports appear here."
+            body="When taxpayers challenge bot answers with updated facts or rates, reports appear here."
           />
         )}
 
@@ -423,7 +423,7 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
       {/* Active Precedences (Solution C) */}
       <OpsPanel
         title="Active Statutory Precedences (Solution C)"
-        description="Prompt-injected legal rules that strictly supersede older retrieved passages across all queries."
+        note="Prompt-injected legal rules that strictly supersede older retrieved passages across all queries."
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {precData?.precedences.map((p) => (
@@ -463,7 +463,7 @@ function DiscrepanciesWorkbench({ who }: { who: StaffIdentity }) {
       {/* Corpus Tombstones (Solution B) */}
       <OpsPanel
         title="Corpus Tombstones (Solution B)"
-        description="Outdated document passages filtered out from retrieval results across all queries."
+        note="Outdated document passages filtered out from retrieval results across all queries."
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {tombData?.tombstones.map((t) => (
