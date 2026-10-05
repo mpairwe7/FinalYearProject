@@ -14,6 +14,7 @@ The platform implements the **MCP `2026-07-28` specification**:
 - **Request Metadata (`_meta`)**: Every request carries `io.modelcontextprotocol/protocolVersion` (`2026-07-28`), client capabilities, and URA vendor context (`ug.go.ura.chatbot/{tenantId,userId,userRole,callId}`).
 - **Header-Body Integrity**: Outbound and inbound requests validate `Mcp-Method` and `Mcp-Name` against the JSON-RPC payload to prevent gateway smuggling.
 - **Transport Routing**: By default, namespaces execute via `InProcessTransport`. Setting `MCP_SERVER_URL_<NAMESPACE>` binds the namespace to a remote `HttpTransport` with persistent connection pooling and W3C `traceparent` propagation.
+- **Mutual TLS (mTLS) & DMZ Isolation**: Remote HTTP transports support mTLS client certificate authentication configured via `MCP_CLIENT_CERT_PATH`, `MCP_CLIENT_KEY_PATH`, and `MCP_CA_CERT_PATH`. System connectors (`dts`, `payment`, `tin`, `ursb`, `bwims`, `efris`) deployable as standalone FastMCP services via `docker-compose.mcp.yml`.
 
 ### 1.2 Registered Namespaces & Tools
 The system manages 28 registered tools across core tax calculators, statutory rate lookups, knowledge search, tasks, and system connectors:
