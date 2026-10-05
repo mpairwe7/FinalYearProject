@@ -370,13 +370,54 @@ def generate_w3c_traceparent() -> str:
         if span_ctx and span_ctx.is_valid:
             flags = f"{span_ctx.trace_flags:02x}"
             return f"00-{span_ctx.trace_id:032x}-{span_ctx.span_id:016x}-{flags}"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Active span traceparent extraction skipped: %s", exc)
 
     # High-entropy fallback trace and span identifiers conforming to W3C
     trace_id = os.urandom(16).hex()
     span_id = os.urandom(8).hex()
     return f"00-{trace_id}-{span_id}-01"
+
+
+def extract_trace_context(headers: dict[str, str] | None = None) -> Any:
+    """Extract W3C traceparent and tracestate from inbound request headers."""
+    h = dict(headers or {})
+    try:
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+        return TraceContextTextMapPropagator().extract(carrier=h)
+    except Exception:
+        return None
+
+
+def get_current_trace_id() -> str:
+    """Return the active 32-char hex trace_id or empty string."""
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span:
+            ctx = span.get_span_context()
+            if ctx and ctx.is_valid:
+                return f"{ctx.trace_id:032x}"
+    except Exception as exc:
+        logger.debug("Failed to resolve active trace_id: %s", exc)
+    return ""
+
+
+def get_current_span_id() -> str:
+    """Return the active 16-char hex span_id or empty string."""
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        if span:
+            ctx = span.get_span_context()
+            if ctx and ctx.is_valid:
+                return f"{ctx.span_id:016x}"
+    except Exception as exc:
+        logger.debug("Failed to resolve active span_id: %s", exc)
+    return ""
 
 
 def inject_trace_context(headers: dict[str, str] | None = None) -> dict[str, str]:
@@ -386,9 +427,10 @@ def inject_trace_context(headers: dict[str, str] | None = None) -> dict[str, str
         from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
         TraceContextTextMapPropagator().inject(h)
-    except Exception:
-        if "traceparent" not in h and "Traceparent" not in h:
-            h["traceparent"] = generate_w3c_traceparent()
+    except Exception as exc:
+        logger.debug("TraceContextTextMapPropagator injection failed: %s", exc)
+    if "traceparent" not in h and "Traceparent" not in h:
+        h["traceparent"] = generate_w3c_traceparent()
     return h
 
 

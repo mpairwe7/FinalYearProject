@@ -17,9 +17,11 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | Module | Role |
 | --- | --- |
 | `agents/` | Supervisor, golden-set routing, LangGraph |
+| `routes/` | Modular domain APIRouters (`connectors.py`, `offline.py`) |
 | `tools/` | Registered tools (`ToolRegistry`) |
 | `mcp/` | MCP client + tax-calculator server |
 | `guardrails.py` | Input/output OWASP LLM01–09 |
+| `logging_config.py` | Structured JSON logging + OTel trace correlation + PII scrubber |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
 | `flags.py` | Registry + rollout; do not add a flag here only |
 

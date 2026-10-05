@@ -119,15 +119,14 @@ from .speech_service import (
 )
 from .workflows.registry import WorkflowRegistry
 
+from .logging_config import configure_logging
+
 logger = logging.getLogger(__name__)
 _APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
 _APP_LOGGER = logging.getLogger("app")
 _APP_LOGGER.setLevel(_APP_LOG_LEVEL)
 if not _APP_LOGGER.handlers:
-    _APP_HANDLER = logging.StreamHandler()
-    _APP_HANDLER.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
+    _APP_HANDLER = configure_logging()
     _APP_LOGGER.addHandler(_APP_HANDLER)
 _APP_LOGGER.propagate = False
 
@@ -895,7 +894,7 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID", "traceparent", "tracestate"],
 )
 
 # GZip compression middleware (low-bandwidth & mobile 2G/3G optimization)
@@ -933,19 +932,44 @@ async def security_headers(request: Request, call_next):
     request_id = raw_id if _REQUEST_ID_RE.match(raw_id) else str(uuid.uuid4())
     # Stash on request.state so handlers can read it without re-parsing headers
     request.state.request_id = request_id
+
+    # W3C Distributed Tracing context propagation (OpenTelemetry 2026 standard)
+    from .tracing import extract_trace_context, generate_w3c_traceparent
+
+    trace_token = None
+    inbound_trace_ctx = extract_trace_context(dict(request.headers))
+    if inbound_trace_ctx is not None:
+        try:
+            from opentelemetry import context as otel_context
+
+            trace_token = otel_context.attach(inbound_trace_ctx)
+        except Exception:
+            trace_token = None
+
     logger.info(
         "request  request_id=%s method=%s path=%s",
         request_id,
         request.method,
         request.url.path,
     )
-    response: Response = await call_next(request)
+    try:
+        response: Response = await call_next(request)
+    finally:
+        if trace_token is not None:
+            try:
+                from opentelemetry import context as otel_context
+
+                otel_context.detach(trace_token)
+            except Exception:
+                pass
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Request-ID"] = request_id
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+    response.headers["traceparent"] = generate_w3c_traceparent()
     return response
 
 
@@ -1181,8 +1205,13 @@ async def chat_stream(
                 }
                 continue
             if event_type == "_log":
-                _log_stream_conversation(
-                    body, session_id, payload, user_id=ctx.user_id or "", tenant_id=ctx.tenant_id
+                await asyncio.to_thread(
+                    _log_stream_conversation,
+                    body,
+                    session_id,
+                    payload,
+                    user_id=ctx.user_id or "",
+                    tenant_id=ctx.tenant_id,
                 )
                 continue
             if event_type.startswith("translation."):
@@ -1266,6 +1295,22 @@ def _log_stream_conversation(
     result = log_payload.get("result") or {}
     full_reply = log_payload.get("full_reply", "")
     elapsed_ms = log_payload.get("elapsed_ms", 0.0)
+
+    try:
+        mode = result.get("retrieval_mode") or "unknown"
+        if mode:
+            metrics.inc("retrieval_mode_total", labels={"mode": str(mode)})
+        faith = result.get("faithfulness_score")
+        if faith is not None:
+            metrics.observe("faithfulness_score", float(faith))
+        if result.get("escalation_required") or result.get("handoff"):
+            metrics.inc("escalation_required_total")
+        if elapsed_ms > 0:
+            metrics.observe("chat_response_time_ms", elapsed_ms)
+        metrics.inc("chat_requests_total")
+    except Exception:
+        logger.debug("Stream metrics emission failed", exc_info=True)
+
     try:
         db.log_conversation(
             session_id=session_id or None,
@@ -2026,6 +2071,18 @@ async def voice_chat(
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
 
+    try:
+        mode = chat_result.get("retrieval_mode") or "unknown"
+        if mode:
+            metrics.inc("retrieval_mode_total", labels={"mode": str(mode)})
+        faith = chat_result.get("faithfulness_score")
+        if faith is not None:
+            metrics.observe("faithfulness_score", float(faith))
+        if chat_result.get("escalation_required") or chat_result.get("handoff"):
+            metrics.inc("escalation_required_total")
+    except Exception:
+        logger.debug("Voice metrics recording failed", exc_info=True)
+
     # Safe citation parsing — malformed dicts must not crash the response
     safe_citations = []
     for c in chat_result.get("citations", []):
@@ -2038,7 +2095,8 @@ async def voice_chat(
     try:
         from .service import ChatModel as _CM
 
-        db.log_conversation(
+        await asyncio.to_thread(
+            db.log_conversation,
             session_id=session_id,
             conversation_id=chat_result.get("conversation_id") or conversation_id,
             user_id=ctx.user_id or "",
@@ -3672,7 +3730,7 @@ async def update_ticket_endpoint(
             pass
 
     if officer_reply and not officer_reply_localized:
-        ticket = db.get_ticket(ticket_id)
+        ticket = await asyncio.to_thread(db.get_ticket, ticket_id)
         if ticket:
             t_loc = (locale or ticket.get("locale") or "en").lower().strip()
             if t_loc not in ("", "en"):
@@ -3682,7 +3740,8 @@ async def update_ticket_endpoint(
                 except Exception:
                     logger.debug("auto-localizing officer reply failed", exc_info=True)
 
-    ok = db.update_ticket(
+    ok = await asyncio.to_thread(
+        db.update_ticket,
         ticket_id,
         status=status,
         assignee=assignee,
@@ -4553,280 +4612,13 @@ def list_quantized_models(
 
 
 # ---------------------------------------------------------------------------
-# Offline RAG (Phase 25)
+# Modular domain route handlers (2026 clean architecture)
 # ---------------------------------------------------------------------------
+from .routes.connectors import router as connectors_router
+from .routes.offline import router as offline_router
 
-
-@app.get("/v1/offline/status", response_model=OfflineStatusResponse, tags=["offline"])
-@limiter.limit("60/minute")
-def offline_status(
-    request: Request,
-    _ctx: AuthContext = Depends(current_user),
-) -> OfflineStatusResponse:
-    """Get offline bundle availability and sync status.
-
-    Feature-flagged behind ``FLAG_OFFLINE_RAG``.
-    """
-    from .flags import flags
-    from .models import OfflineBundleInfo
-
-    if not flags.is_enabled("offline_rag"):
-        return OfflineStatusResponse(available=False)
-
-    from .offline_bundle import BundleManager
-
-    manager = BundleManager()
-    info = manager.get_info()
-
-    bundle_info = None
-    if info.available:
-        bundle_info = OfflineBundleInfo(
-            version=info.version,
-            size_bytes=info.size_bytes,
-            size_mb=info.size_mb,
-            passage_count=info.passage_count,
-            index_dim=info.index_dim,
-            sha256=info.sha256,
-            created_at=info.created_at,
-            min_app_version=info.min_app_version,
-        )
-
-    return OfflineStatusResponse(
-        available=info.available,
-        bundle=bundle_info,
-        sync_enabled=flags.is_enabled("offline_sync"),
-    )
-
-
-@app.post("/v1/offline/sync", response_model=OfflineSyncResponse, tags=["offline"])
-@limiter.limit("10/minute")
-def offline_sync(
-    body: OfflineSyncRequest,
-    request: Request,
-    _ctx: AuthContext = Depends(current_user),
-) -> OfflineSyncResponse:
-    """Compute delta sync for a client's offline bundle.
-
-    Client sends its current version + chunk hashes; server returns
-    only the changed chunks.  Feature-flagged behind ``FLAG_OFFLINE_SYNC``.
-    """
-    from .flags import flags
-
-    if not flags.is_enabled("offline_sync"):
-        raise HTTPException(
-            status_code=404,
-            detail="Offline sync is disabled (FLAG_OFFLINE_SYNC=false)",
-        )
-
-    from .offline_sync import OfflineSyncEngine, SyncEvent
-
-    engine = OfflineSyncEngine()
-    if not engine.initialize():
-        raise HTTPException(status_code=503, detail="Sync engine not available")
-
-    t0 = time.perf_counter()
-    delta = engine.compute_delta(
-        client_version=body.client_version,
-        client_chunk_hashes=body.client_chunk_hashes,
-        max_download_bytes=body.max_download_bytes,
-    )
-    duration = time.perf_counter() - t0
-
-    # Record sync event
-    engine.record_sync(SyncEvent(
-        device_id=body.device_id,
-        client_version=body.client_version,
-        server_version=delta.server_version,
-        sync_type="full" if delta.needs_full_sync else "delta",
-        chunks_sent=len(delta.changed_chunks),
-        bytes_sent=delta.total_download_bytes,
-        duration_s=round(duration, 3),
-        timestamp=time.time(),
-    ))
-
-    return OfflineSyncResponse(
-        server_version=delta.server_version,
-        needs_full_sync=delta.needs_full_sync,
-        changed_chunks=delta.changed_chunks,
-        deleted_chunk_ids=delta.deleted_chunk_ids,
-        total_download_bytes=delta.total_download_bytes,
-        estimated_sync_seconds=delta.estimated_sync_seconds,
-    )
-
-
-@app.get("/v1/offline/bundle", tags=["offline"])
-@limiter.limit("5/minute")
-def download_offline_bundle(
-    request: Request,
-    _ctx: AuthContext = Depends(current_user),
-):
-    """Download the latest offline RAG bundle.
-
-    Returns the compressed bundle archive for offline use.
-    Feature-flagged behind ``FLAG_OFFLINE_BUNDLE_API``.
-    """
-    from .flags import flags
-
-    if not flags.is_enabled("offline_bundle_api"):
-        raise HTTPException(
-            status_code=404,
-            detail="Offline bundle API is disabled (FLAG_OFFLINE_BUNDLE_API=false)",
-        )
-
-    from .offline_bundle import BundleManager
-
-    manager = BundleManager()
-    bundle_path = manager.get_bundle_path()
-
-    if bundle_path is None or not bundle_path.exists():
-        raise HTTPException(status_code=404, detail="No offline bundle available")
-
-    from fastapi.responses import FileResponse
-
-    size = bundle_path.stat().st_size
-    manager.record_download(size)
-    metrics.inc("offline_bundle_downloads_total")
-
-    return FileResponse(
-        path=str(bundle_path),
-        media_type="application/gzip",
-        filename=bundle_path.name,
-        headers={
-            "Content-Length": str(size),
-            "X-Bundle-Version": manager.get_info().version,
-        },
-    )
-
-
-# ---------------------------------------------------------------------------
-# Connectors (EFRIS, Digital Tax Stamps)
-# ---------------------------------------------------------------------------
-
-
-@app.get("/v1/connectors", tags=["connectors"], dependencies=[Depends(require_admin_access)])
-def list_system_connectors() -> dict[str, Any]:
-    """List staff-only connector health and simulator metrics."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    return {
-        "ok": True,
-        "live": False,
-        "mode": "simulation",
-        "connectors": orchestrator.get_connectors_summary(),
-        "health": orchestrator.health_check(),
-    }
-
-
-@app.post("/v1/connectors/{name}/toggle", tags=["connectors"])
-def toggle_system_connector(
-    name: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
-    ctx: AuthContext = Depends(require_admin_access),
-) -> dict[str, Any]:
-    """Enable or disable a built-in connector from the staff console."""
-    _require_staff_writer(ctx)
-    if os.getenv("APP_ENV", "development").lower() == "production":
-        raise HTTPException(
-            status_code=409,
-            detail="Local simulator connectors cannot be enabled in production.",
-        )
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    enable = payload.get("enable", True)
-    if not isinstance(enable, bool):
-        raise HTTPException(status_code=422, detail="enable must be a boolean")
-    return orchestrator.toggle_connector(name, enable)
-
-
-@app.get("/v1/connectors/{name}/records", tags=["connectors"])
-def inspect_connector_database(
-    name: str,
-    limit: int = Query(5, ge=1, le=50),
-    _ctx: AuthContext = Depends(require_admin_access),
-) -> dict[str, Any]:
-    """Retire raw connector record inspection; use aggregate connector health instead."""
-    del name, limit, _ctx
-    raise HTTPException(
-        status_code=410,
-        detail="Raw connector records are not exposed. Use /v1/connectors for aggregate simulator health.",
-    )
-
-
-@app.post("/v1/connectors/{name}/test", tags=["connectors"], dependencies=[Depends(require_admin_access)])
-def test_system_connector(name: str) -> dict[str, Any]:
-    """Run an active diagnostic ping and capability handshake on the connector."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    res = orchestrator.test_connector(name)
-    if not res.get("ok") and "not found" in res.get("error", "").lower():
-        raise HTTPException(status_code=404, detail=res["error"])
-    return res
-
-
-@app.post("/v1/connectors/{name}/configure", tags=["connectors"])
-def configure_system_connector(
-    name: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
-    ctx: AuthContext = Depends(require_admin_access),
-) -> dict[str, Any]:
-    """Configure endpoint, credentials, or live/sandbox mode for a connector."""
-    _require_staff_writer(ctx)
-    from .plugins import get_orchestrator
-    from .auth.vault import get_token_vault
-
-    vault = get_token_vault()
-    clean_payload = dict(payload)
-    if "api_key" in clean_payload and clean_payload["api_key"]:
-        raw_key = str(clean_payload["api_key"])
-        clean_payload["encrypted_key"] = vault.encrypt_secret(raw_key)
-        clean_payload["api_key"] = vault.mask_secret(raw_key)
-
-    orchestrator = get_orchestrator()
-    res = orchestrator.configure_connector(name, clean_payload)
-    if not res.get("ok") and "not found" in res.get("error", "").lower():
-        raise HTTPException(status_code=404, detail=res["error"])
-    safe_uid = re.sub(r"[^a-zA-Z0-9_-]", "", str(ctx.user_id))[:64]
-    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "", str(name))[:64]
-    logger.info("Admin %s updated connector %s configuration", safe_uid, safe_name)
-    return res
-
-
-@app.post("/v1/connectors/register", tags=["connectors"], dependencies=[Depends(require_admin_access)])
-def register_external_connector(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-    """Reject unverified dynamic servers unless explicitly pre-configured with security validation."""
-    if not payload or not payload.get("name"):
-        raise HTTPException(
-            status_code=410,
-            detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
-        )
-    # Enterprise SSRF validation for registered endpoints
-    endpoint_url = str(payload.get("endpoint_url", "")).strip()
-    if endpoint_url:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(endpoint_url)
-        hostname = (parsed.hostname or "").lower()
-        if os.getenv("APP_ENV", "development").lower() == "production":
-            if parsed.scheme != "https":
-                raise HTTPException(status_code=400, detail="Production connectors require HTTPS.")
-            if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254") or hostname.startswith("10.") or hostname.startswith("192.168."):
-                raise HTTPException(status_code=400, detail="Private network endpoints are rejected in production.")
-
-    from .auth.vault import get_token_vault
-    vault = get_token_vault()
-    masked_key = vault.mask_secret(str(payload.get("api_key", ""))) if payload.get("api_key") else ""
-
-    return {
-        "ok": True,
-        "id": payload["name"],
-        "registered": True,
-        "mode": payload.get("mode", "simulation"),
-        "protocol": payload.get("protocol", "mcp"),
-        "masked_key": masked_key,
-    }
+app.include_router(offline_router)
+app.include_router(connectors_router)
 
 
 # ---------------------------------------------------------------------------

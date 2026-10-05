@@ -187,3 +187,82 @@ class GraphRuntime:
             steps += 1
 
         return state
+
+    async def arun(self, state: AgentGraphState, thread_id: str = "") -> AgentGraphState:
+        """Asynchronously dispatch nodes without blocking the asyncio event loop."""
+        import asyncio
+        import inspect
+
+        current = self._entry
+        steps = 0
+        while current != END:
+            if steps >= self._max_steps:
+                logger.warning("GraphRuntime: max_steps=%d reached", self._max_steps)
+                state.outcome = GraphOutcome.TRUNCATED
+                break
+
+            node = self._nodes.get(current)
+            if node is None:
+                logger.error("GraphRuntime: unknown node %r", current)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"unknown node: {current}"
+                break
+
+            t0 = time.perf_counter()
+            try:
+                if inspect.iscoroutinefunction(node):
+                    result = await node(state)
+                else:
+                    outcome = node(state)
+                    if inspect.isawaitable(outcome):
+                        result = await outcome
+                    else:
+                        result = outcome
+            except Exception as e:  # noqa: BLE001
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                state.record(current, elapsed_ms, status="error", error_type=type(e).__name__)
+                logger.exception("GraphRuntime: node %s raised", current)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: {type(e).__name__}: {e}"
+                break
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+
+            if not isinstance(result, NodeResult):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidNodeResult")
+                logger.error("GraphRuntime: node %s returned %s, expected NodeResult", current, type(result).__name__)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: node returned {type(result).__name__}, expected NodeResult"
+                break
+            if not isinstance(result.next_node, str) or (
+                result.next_node != END and result.next_node not in self._nodes
+            ):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidTransition")
+                logger.error("GraphRuntime: node %s selected unknown node %r", current, result.next_node)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"unknown node: {result.next_node}"
+                break
+            if result.outcome is not None and not isinstance(result.outcome, GraphOutcome):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidOutcome")
+                logger.error("GraphRuntime: node %s returned invalid outcome %r", current, result.outcome)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: invalid graph outcome"
+                break
+
+            state.record(current, elapsed_ms, status="ok")
+
+            if self._checkpointer and thread_id:
+                try:
+                    await asyncio.to_thread(
+                        self._checkpointer.save_checkpoint, thread_id, steps, current, state.to_dict()
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("GraphRuntime: checkpoint save skipped: %s", exc)
+
+            if result.outcome is not None:
+                state.outcome = result.outcome
+            if result.next_node == END:
+                break
+            current = result.next_node
+            steps += 1
+
+        return state

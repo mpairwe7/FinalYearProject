@@ -861,7 +861,8 @@ def init_db() -> None:
             last_seq     INTEGER NOT NULL,
             merkle_root  TEXT NOT NULL,
             created_at   REAL NOT NULL,
-            head_hash    TEXT NOT NULL DEFAULT ''
+            head_hash    TEXT NOT NULL DEFAULT '',
+            tsa_token    TEXT DEFAULT ''
         );
         -- The unique (tenant_id, seq) and (tenant_id, first_seq) indexes are
         -- created by audit/ledger.py, guarded: an older ledger may already
@@ -914,6 +915,15 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "modality", "TEXT DEFAULT 'text'")
     _ensure_column(conn, "tickets", "user_query_en", "TEXT DEFAULT ''")
     _ensure_column(conn, "tickets", "officer_reply_localized", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "feedback", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "analytics_events", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "sessions", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "audit_anchors", "tsa_token", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_tenant ON tickets(tenant_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_tenant ON analytics_events(tenant_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, last_active_at)")
     # Which route / journey step produced a rated reply (journey analytics).
     _ensure_column(conn, "feedback", "retrieval_mode", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "workflow_id", "TEXT DEFAULT ''")
@@ -1838,6 +1848,7 @@ def create_ticket(
     modality: str = "text",
     user_query_en: str = "",
     officer_reply_localized: str = "",
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -1867,8 +1878,8 @@ def create_ticket(
                                     handoff_json, response_judge_json, transcript_json,
                                     user_id, team, assignee, staff_note,
                                     locale, modality, user_query_en, officer_reply_localized,
-                                    created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?)""",
+                                    created_at, updated_at, tenant_id)
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -1888,6 +1899,7 @@ def create_ticket(
                 officer_reply_localized or "",
                 now,
                 now,
+                tenant_id or "default",
             ),
         )
         conn.commit()
@@ -1910,6 +1922,7 @@ def create_ticket(
         "user_query_en": user_query_en or "",
         "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
+        "tenant_id": tenant_id or "default",
     }
 
 
@@ -1923,6 +1936,7 @@ def list_tickets(
     modality: str | None = None,
     q: str | None = None,
     user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
 
@@ -1945,18 +1959,21 @@ def list_tickets(
         "       assignee, staff_note, created_at, updated_at, user_id, team, "
         "       officer_reply, reply_at, reply_delivered_at, "
         "       first_response_at, resolved_at, "
-        "       locale, modality, user_query_en, officer_reply_localized "
+        "       locale, modality, user_query_en, officer_reply_localized, tenant_id "
         "FROM tickets"
     )
     params: list[Any] = []
+    if tenant_id:
+        sql += " WHERE tenant_id = ?"
+        params.append(tenant_id)
     if status:
-        sql += " WHERE status = ?"
+        sql += " AND status = ?" if (" WHERE " in sql) else " WHERE status = ?"
         params.append(status)
     if priority:
-        sql += " AND priority = ?" if (status or params) else " WHERE priority = ?"
+        sql += " AND priority = ?" if (" WHERE " in sql) else " WHERE priority = ?"
         params.append(priority)
     if team:
-        sql += " AND team = ?" if (status or params) else " WHERE team = ?"
+        sql += " AND team = ?" if (" WHERE " in sql) else " WHERE team = ?"
         params.append(team)
     if locale:
         sql += " AND locale = ?" if (status or params) else " WHERE locale = ?"

@@ -139,6 +139,11 @@ and the `row_hash` of the last row (which commits to everything before it).
   logs, it puts the seal outside this database, so rewriting the ledger *and*
   its seal table together still disagrees with the log archive. Keep that log
   stream on write-once retention.
+- **Cryptographic TSA witness (RFC 3161).** When `AUDIT_TSA_URL` is configured,
+  sealing queries an external Time Stamping Authority with the range's Merkle
+  root hash. The returned cryptographic timestamp token (`tsa_token`) is stored
+  durably in `audit_anchors` and checked during `verify_anchor()`, providing
+  independent third-party proof that the range existed prior to the timestamp.
 
 Rows written after the newest seal are protected only by the chain: deleting
 the newest rows from the end leaves no break until the next seal. The seal

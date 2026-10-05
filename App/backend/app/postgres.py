@@ -410,14 +410,18 @@ def init_db() -> None:
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_conversations_tenant_thread ON conversations(tenant_id, conversation_id)")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             # Which route / journey step produced a rated reply (journey analytics).
             for _col in ("retrieval_mode", "workflow_id", "step_id"):
                 cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} TEXT DEFAULT ''")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
             cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             for _col, _ddl in (
                 ("officer_reply", "TEXT DEFAULT ''"),
                 ("reply_at", "DOUBLE PRECISION DEFAULT 0"),
@@ -1119,7 +1123,7 @@ _TICKET_COLUMNS = (
     "user_query, bot_reply, handoff_json, response_judge_json, "
     "assignee, staff_note, created_at, updated_at, user_id, team, "
     "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at, "
-    "locale, modality, user_query_en, officer_reply_localized"
+    "locale, modality, user_query_en, officer_reply_localized, tenant_id"
 )
 #: Detail view — the transcript is the point of the ticket.
 _TICKET_COLUMNS_FULL = _TICKET_COLUMNS + ", transcript_json"
@@ -1166,6 +1170,7 @@ def create_ticket(
     modality: str = "text",
     user_query_en: str = "",
     officer_reply_localized: str = "",
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r -> 'normal'", priority)
@@ -1193,8 +1198,8 @@ def create_ticket(
                                         handoff_json, response_judge_json, transcript_json,
                                         user_id, team, assignee, staff_note,
                                         locale, modality, user_query_en, officer_reply_localized,
-                                        created_at, updated_at)
-                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s,%s,%s,%s,%s)""",
+                                        created_at, updated_at, tenant_id)
+                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     ticket_id,
                     conversation_id,
@@ -1214,6 +1219,7 @@ def create_ticket(
                     officer_reply_localized or "",
                     now,
                     now,
+                    tenant_id or "default",
                 ),
             )
         conn.commit()
@@ -1232,6 +1238,7 @@ def create_ticket(
         "user_query_en": user_query_en or "",
         "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
+        "tenant_id": tenant_id or "default",
     }
 
 
@@ -1245,6 +1252,7 @@ def list_tickets(
     modality: str | None = None,
     q: str | None = None,
     user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
     if pool is None:
@@ -1253,14 +1261,17 @@ def list_tickets(
     offset = max(0, int(offset))
     sql = f"SELECT {_TICKET_COLUMNS} FROM tickets"  # nosec B608 # noqa: S608
     params: list[Any] = []
+    if tenant_id:
+        sql += " WHERE tenant_id = %s"
+        params.append(tenant_id)
     if status:
-        sql += " WHERE status = %s"
+        sql += " AND status = %s" if (" WHERE " in sql) else " WHERE status = %s"
         params.append(status)
     if priority:
-        sql += " AND priority = %s" if (status or params) else " WHERE priority = %s"
+        sql += " AND priority = %s" if (" WHERE " in sql) else " WHERE priority = %s"
         params.append(priority)
     if team:
-        sql += " AND team = %s" if (status or params) else " WHERE team = %s"
+        sql += " AND team = %s" if (" WHERE " in sql) else " WHERE team = %s"
         params.append(team)
     if locale:
         sql += " AND locale = %s" if (status or params) else " WHERE locale = %s"
