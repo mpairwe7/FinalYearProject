@@ -368,7 +368,8 @@ def generate_w3c_traceparent() -> str:
         span = trace.get_current_span()
         span_ctx = span.get_span_context() if span else None
         if span_ctx and span_ctx.is_valid:
-            return f"00-{span_ctx.trace_id:032x}-{span_ctx.span_id:016x}-01"
+            flags = f"{span_ctx.trace_flags:02x}"
+            return f"00-{span_ctx.trace_id:032x}-{span_ctx.span_id:016x}-{flags}"
     except Exception:
         pass
 
@@ -379,10 +380,15 @@ def generate_w3c_traceparent() -> str:
 
 
 def inject_trace_context(headers: dict[str, str] | None = None) -> dict[str, str]:
-    """Inject W3C traceparent headers into outbound HTTP or MCP request headers."""
+    """Inject W3C traceparent and tracestate headers into outbound HTTP or MCP request headers."""
     h = dict(headers or {})
-    if "traceparent" not in h and "Traceparent" not in h:
-        h["traceparent"] = generate_w3c_traceparent()
+    try:
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+        TraceContextTextMapPropagator().inject(h)
+    except Exception:
+        if "traceparent" not in h and "Traceparent" not in h:
+            h["traceparent"] = generate_w3c_traceparent()
     return h
 
 

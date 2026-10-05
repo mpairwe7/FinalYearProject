@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -385,12 +386,43 @@ class PaymentConnector(SystemConnector):
             ),
         ]
 
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        if uri == "payments://prn/status":
+            stats = self._service.get_stats()
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({"description": "Payment Registration Number Status Specification", "stats": stats}),
+                    }
+                ]
+            }
+        raise KeyError(f"Payment resource not found: '{uri}'")
+
     def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
         """Cancel or void a previously generated PRN or payment transaction."""
-        prn = action_payload.get("prn")
-        if prn:
+        supported = ("payment_generate_prn", "payment_checkout_settle", "generate_prn", "checkout", "prn_cancel")
+        if action_type not in supported:
+            return {"ok": False, "supported": False, "message": f"Cannot compensate '{action_type}'"}
+
+        prn = str(action_payload.get("prn") or "").strip()
+        if not prn:
+            return {"ok": False, "error": "prn is required in action_payload"}
+
+        # Verify PRN existence in database
+        rec = self._service.database.get_prn(prn)
+        if rec is None:
+            return {"ok": False, "error": f"PRN '{prn}' not found"}
+
+        # Cancel PRN in database
+        try:
+            conn = self._service.database._get_connection()
+            with conn:
+                conn.execute("UPDATE payment_prns SET status = 'CANCELLED' WHERE prn = ?", (prn,))
             return {"ok": True, "action": "prn_cancelled", "prn": prn, "message": f"PRN {prn} successfully cancelled"}
-        return {"ok": False, "supported": False, "message": f"Cannot compensate '{action_type}'"}
+        except Exception as exc:
+            return {"ok": False, "error": f"Failed to cancel PRN {prn}: {exc}"}
 
     def shutdown(self) -> None:
         self._healthy = False

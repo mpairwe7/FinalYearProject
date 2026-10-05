@@ -184,6 +184,12 @@ class PluginOrchestrator:
         if endpoint_url:
             setattr(p, "endpoint_url", str(endpoint_url))
 
+        encrypted_key = config.get("encrypted_key")
+        if encrypted_key:
+            setattr(p, "encrypted_key", str(encrypted_key))
+            if hasattr(p.connector, "set_credentials"):
+                p.connector.set_credentials(str(encrypted_key))
+
         return {
             "ok": True,
             "id": p.metadata.name,
@@ -226,13 +232,14 @@ class PluginOrchestrator:
 
     def read_connector_resource(self, uri: str) -> dict[str, Any] | None:
         """Fetch read-only content for a connector resource matching uri."""
-        scheme = uri.split("://")[0].lower() if "://" in uri else ""
         for plugin in self._plugins.values():
-            if plugin.status == PluginStatus.ACTIVE and plugin.connector.system_name == scheme:
-                try:
-                    return plugin.connector.read_resource(uri)
-                except KeyError:
-                    pass
+            if plugin.status == PluginStatus.ACTIVE:
+                uris = {r.uri for r in plugin.connector.get_resources()}
+                if uri in uris:
+                    try:
+                        return plugin.connector.read_resource(uri)
+                    except KeyError:
+                        pass
         return None
 
     def wire_tools(self, registry: Any = None) -> list[str]:

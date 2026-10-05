@@ -73,7 +73,7 @@ class TokenVault:
             decrypted = aesgcm.decrypt(nonce, ct, None)
             return decrypted.decode("utf-8")
         except Exception as exc:
-            logger.error("Failed to decrypt vaulted secret: %s", exc)
+            logger.error("Failed to decrypt vaulted secret (%s)", type(exc).__name__)
             return ""
 
     @staticmethod

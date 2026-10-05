@@ -115,15 +115,18 @@ def _extract_amount_from_args(arguments: dict[str, Any] | None) -> float | None:
         return None
     for key in ("amount_ugx", "amount", "total_ugx", "total", "payment_amount", "gross_amount"):
         val = arguments.get(key)
-        if isinstance(val, (int, float)) and val > 0:
-            return float(val)
+        try:
+            if isinstance(val, (int, float)) and val > 0:
+                return float(val)
+        except (OverflowError, ValueError):
+            return None
         if isinstance(val, str):
             clean = val.replace(",", "").replace("UGX", "").replace("ugx", "").strip()
             try:
                 parsed = float(clean)
                 if parsed > 0:
                     return parsed
-            except ValueError:
+            except (ValueError, OverflowError):
                 pass
     return None
 
@@ -187,13 +190,16 @@ def authorize_tool_call(
                 reasons.append(f"{scope} consent required")
 
     # 2026 Blast Radius & Monetary Ceilings (NIST / OWASP LLM06)
-    amount_ugx = _extract_amount_from_args(arguments)
-    if amount_ugx is not None and amount_ugx > MAX_TRANSACTION_CEILING_UGX:
-        if user_role != "ura_admin":
-            reasons.append(
-                f"transaction amount UGX {amount_ugx:,.0f} exceeds session ceiling "
-                f"(UGX {MAX_TRANSACTION_CEILING_UGX:,.0f}); requires supervisor approval"
-            )
+    # Applied to transactional tools (actions/writes with elevated risk or requires_confirmation)
+    is_transactional = (normalized_risk in ("high", "critical")) or bool(requires_confirmation)
+    if is_transactional:
+        amount_ugx = _extract_amount_from_args(arguments)
+        if amount_ugx is not None and amount_ugx > MAX_TRANSACTION_CEILING_UGX:
+            if user_role != "ura_admin":
+                reasons.append(
+                    f"transaction amount UGX {amount_ugx:,.0f} exceeds session ceiling "
+                    f"(UGX {MAX_TRANSACTION_CEILING_UGX:,.0f}); requires supervisor approval"
+                )
 
     needs_confirmation = (
         requires_confirmation if requires_confirmation is not None else normalized_risk == "critical"
