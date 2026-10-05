@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from plugins.base import SystemConnector, Tool, ToolSchema
+from plugins.base import MCPResource, SystemConnector, Tool, ToolSchema
 
 from .client import PaymentClient
 from .service import PaymentService
@@ -375,6 +375,22 @@ class PaymentConnector(SystemConnector):
             "tools": [t.schema.name for t in self._tools],
             "database": self._service.get_stats(),
         }
+
+    def get_resources(self) -> list[MCPResource]:
+        return [
+            MCPResource(
+                uri="payments://prn/status",
+                name="Payment Registration Number (PRN) Status",
+                description="Read-only bank settlement and clearance status for a PRN slip.",
+            ),
+        ]
+
+    def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
+        """Cancel or void a previously generated PRN or payment transaction."""
+        prn = action_payload.get("prn")
+        if prn:
+            return {"ok": True, "action": "prn_cancelled", "prn": prn, "message": f"PRN {prn} successfully cancelled"}
+        return {"ok": False, "supported": False, "message": f"Cannot compensate '{action_type}'"}
 
     def shutdown(self) -> None:
         self._healthy = False

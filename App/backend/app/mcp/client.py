@@ -347,6 +347,7 @@ class MCPClient:
             allowed_roles=tuple(_meta_of(descriptor, "allowedRoles", ()) or ()),
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
             requires_confirmation=requires_confirmation and confirmed,
+            arguments=args,
         )
         if not policy["allowed"]:
             return finish(

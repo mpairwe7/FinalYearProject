@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 
 from app.mcp import get_client, reset_client
-from app.mcp.policy import authorize_tool_call
+from app.mcp.policy import authorize_tool_call, reset_velocity_tracker
 from app.tools import ToolRegistry
 
 
@@ -51,6 +51,61 @@ class MCPPolicyTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.result["error"], "URA action API is not configured")
         self.assertFalse(result.result["configured"])
+
+    def test_transaction_ceiling_caps_enforced_for_non_admin(self) -> None:
+        reset_velocity_tracker()
+        policy = authorize_tool_call(
+            name="payment_checkout_settle",
+            risk="critical",
+            user_role="verified_taxpayer",
+            granted_purposes=["ura_account_access", "ura_actions"],
+            user_id="user-1",
+            confirmed=True,
+            idempotency_key="k-1",
+            arguments={"amount_ugx": 90000000.0},
+        )
+        self.assertFalse(policy["allowed"])
+        self.assertTrue(any("exceeds session ceiling" in r for r in policy["reasons"]))
+
+        # Admin is exempt from transaction ceiling
+        admin_policy = authorize_tool_call(
+            name="payment_checkout_settle",
+            risk="critical",
+            user_role="ura_admin",
+            granted_purposes=["ura_account_access", "ura_actions"],
+            user_id="admin-1",
+            confirmed=True,
+            idempotency_key="k-admin",
+            arguments={"amount_ugx": 90000000.0},
+        )
+        self.assertTrue(admin_policy["allowed"])
+
+    def test_critical_action_velocity_limit(self) -> None:
+        reset_velocity_tracker()
+        for i in range(10):
+            res = authorize_tool_call(
+                name="ura_action_proposal",
+                risk="critical",
+                user_role="verified_taxpayer",
+                granted_purposes=["ura_account_access", "ura_actions"],
+                user_id="busy-user",
+                confirmed=True,
+                idempotency_key=f"idem-{i}",
+            )
+            self.assertTrue(res["allowed"], f"Call {i} should be allowed")
+
+        # 11th call exceeds hourly limit
+        exceeded = authorize_tool_call(
+            name="ura_action_proposal",
+            risk="critical",
+            user_role="verified_taxpayer",
+            granted_purposes=["ura_account_access", "ura_actions"],
+            user_id="busy-user",
+            confirmed=True,
+            idempotency_key="idem-11",
+        )
+        self.assertFalse(exceeded["allowed"])
+        self.assertTrue(any("velocity limit exceeded" in r for r in exceeded["reasons"]))
 
 
 class DeclarationDrivenPolicyTests(unittest.TestCase):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from plugins.base import SystemConnector, Tool, ToolSchema
+from plugins.base import MCPResource, SystemConnector, Tool, ToolSchema
 
 from .client import EfrisClient
 from .service import EfrisService
@@ -405,6 +405,35 @@ class EfrisConnector(SystemConnector):
             "tools": [t.schema.name for t in self._tools],
             "database": self._service.get_stats(),
         }
+
+    def get_resources(self) -> list[MCPResource]:
+        return [
+            MCPResource(
+                uri="efris://taxpayers/profile",
+                name="EFRIS Taxpayer Fiscal Status",
+                description="Read-only fiscal profile, VAT registration status, and active devices by TIN.",
+            ),
+            MCPResource(
+                uri="efris://inventory/stock",
+                name="EFRIS Product Stock Ledger",
+                description="Read-only inventory balance and commodity classification codes.",
+            ),
+        ]
+
+    def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
+        """Issue an offsetting EFRIS credit note to reverse a mistakenly issued invoice."""
+        if action_type in ("efris_fiscal_invoice", "issue"):
+            fdn = action_payload.get("fdn") or action_payload.get("original_fdn")
+            seller_tin = action_payload.get("seller_tin")
+            if fdn and seller_tin:
+                res = self._client.create_credit_note(
+                    original_fdn=fdn,
+                    seller_tin=seller_tin,
+                    reason="compensation_rollback",
+                    description="Automated Saga rollback compensation",
+                )
+                return {"ok": res.get("ok", False), "action": "credit_note_issued", "details": res}
+        return {"ok": False, "supported": False, "message": f"Cannot compensate '{action_type}'"}
 
     def shutdown(self) -> None:
         self._healthy = False
