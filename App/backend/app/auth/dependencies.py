@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import Depends, Header, HTTPException, Request
 
 from ..flags import flags
-from .jwt_auth import JWTAuthError, JWTVerifier
+from .jwt_auth import APP_ENV, JWTAuthError, JWTVerifier
 from .models import AuthUser
 
 logger = logging.getLogger(__name__)
