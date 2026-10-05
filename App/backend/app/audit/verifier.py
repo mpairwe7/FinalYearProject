@@ -220,8 +220,22 @@ def verify_anchor(anchor: dict[str, Any], tenant_id: str = "default") -> AnchorB
     if head_hash and rows[-1]["row_hash"] != head_hash:
         return _break("head_hash mismatch: the chain was rewritten under the seal")
     tsa_token = str(anchor.get("tsa_token") or "").strip()
-    if tsa_token and len(tsa_token) < 8:
-        return _break("tsa_token format invalid or truncated")
+    if tsa_token:
+        from .tsa import TimestampError, seal_statement, verify_stored_token
+
+        statement = seal_statement(
+            tenant_id=tenant_id,
+            first_seq=first,
+            last_seq=last,
+            merkle_root=str(anchor["merkle_root"]),
+            head_hash=head_hash,
+        )
+        try:
+            # None: a value stored before RFC 3161 support, which proves nothing
+            # and is ignored rather than trusted.
+            verify_stored_token(tsa_token, statement)
+        except TimestampError as exc:
+            return _break(f"timestamp token does not verify: {exc}")
     return None
 
 

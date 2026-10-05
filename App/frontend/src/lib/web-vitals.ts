@@ -1,232 +1,101 @@
 /**
- * Core Web Vitals Monitoring
+ * Core Web Vitals from real users, measured by Google's `web-vitals` library.
  *
- * Tracks three key metrics for responsive design & performance:
- * - LCP (Largest Contentful Paint): How quickly main content loads
- * - FID/INP (Interaction to Next Paint): Responsiveness to user input
- * - CLS (Cumulative Layout Shift): Visual stability during page load
+ * This replaced a hand-rolled PerformanceObserver collector that measured the
+ * wrong things — INP as the longest event in each observer batch, CLS without
+ * session windows, an FCP observer on an entry type that does not exist — and
+ * beaconed to an endpoint the API never served. The library implements each
+ * metric's definition, including soft navigations (`reportSoftNavs`) in this
+ * client-routed app.
  *
- * These metrics are critical for responsive design because they
- * measure actual performance on different devices/networks.
+ * Reports are queued and sent in batches when the page is hidden, to
+ * `/api/v1/telemetry/vitals` (the Next.js rewrite of the API's
+ * `/v1/telemetry/vitals`), and only with analytics consent. Each report is the
+ * metric, its value and rating, the pathname (the API folds ids out of it)
+ * and the navigation type — nothing that identifies the visitor. The API
+ * aggregates them into `ura_web_vitals_*` histograms; dashboards read the
+ * 75th percentile, the threshold Core Web Vitals are assessed at.
  */
 
-export interface WebVitals {
-  name: 'LCP' | 'FID' | 'INP' | 'CLS' | 'TTFB';
+import { onCLS, onFCP, onINP, onLCP, onTTFB, type Metric } from 'web-vitals';
+import { hasAnalyticsConsent } from '@/lib/analyticsConsent';
+
+export const VITALS_ENDPOINT = '/api/v1/telemetry/vitals';
+const MAX_BATCH = 20;
+
+export interface VitalReport {
+  name: Metric['name'];
   value: number;
-  rating: 'good' | 'needs-improvement' | 'poor';
-  delta: number;
-  id: string;
-  navigationType: 'navigate' | 'reload' | 'back-forward' | 'restore';
+  rating: Metric['rating'];
+  route: string;
+  navigation_type: string;
 }
 
-export interface VitalsThresholds {
-  good: number;
-  poor: number;
-}
+let queue: VitalReport[] = [];
+let started = false;
 
-/**
- * Web Vitals thresholds (in milliseconds for timing, 0-1 for CLS)
- * Based on Google's Core Web Vitals assessment criteria
- */
-export const VITALS_THRESHOLDS: Record<string, VitalsThresholds> = {
-  LCP: { good: 2500, poor: 4000 },      // Largest Contentful Paint
-  FID: { good: 100, poor: 300 },        // First Input Delay
-  INP: { good: 200, poor: 500 },        // Interaction to Next Paint
-  CLS: { good: 0.1, poor: 0.25 },       // Cumulative Layout Shift
-  TTFB: { good: 600, poor: 1800 },      // Time to First Byte
-};
-
-/**
- * Initialize Core Web Vitals tracking
- * Reports metrics to console (in dev) and optional endpoint
- */
-export function initWebVitalsTracking(_endpoint?: string): void {
-  if (typeof window === 'undefined') return;
-
-  // Detect if we can use the Web Vitals API
-  if ('web-vital' in window || 'PerformanceObserver' in window) {
-    trackLCP();
-    trackINP();
-    trackCLS();
-    trackFCP();
-  }
-}
-
-/**
- * Track LCP (Largest Contentful Paint)
- * Measures how quickly the main content loads
- */
-function trackLCP(): void {
-  const observer = new PerformanceObserver((list) => {
-    const entries = list.getEntries();
-    const lastEntry = entries[entries.length - 1] as LargestContentfulPaint;
-
-    const value = lastEntry.renderTime || lastEntry.startTime || 0;
-    const rating = getRating('LCP', value);
-
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`LCP: ${value.toFixed(0)}ms (${rating})`);
-    }
-
-    // Send to analytics if needed
-    reportWebVital({ name: 'LCP', value, rating, entryType: lastEntry.entryType });
-  });
-
-  observer.observe({ entryTypes: ['largest-contentful-paint'] });
-}
-
-/**
- * Track INP (Interaction to Next Paint)
- * Measures responsiveness to user interactions
- */
-function trackINP(): void {
-  const observer = new PerformanceObserver((list) => {
-    let maxDuration = 0;
-
-    for (const entry of list.getEntries()) {
-      const duration = (entry as PerformanceEventTiming).duration;
-      if (duration > maxDuration) {
-        maxDuration = duration;
-      }
-    }
-
-    if (maxDuration > 0) {
-      const rating = getRating('INP', maxDuration);
-
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`INP: ${maxDuration.toFixed(0)}ms (${rating})`);
-      }
-
-      reportWebVital({ name: 'INP', value: maxDuration, rating, entryType: 'event' });
-    }
-  });
-
-  observer.observe({ entryTypes: ['event'], buffered: true });
-}
-
-/**
- * Track CLS (Cumulative Layout Shift)
- * Measures visual stability
- */
-function trackCLS(): void {
-  let clsValue = 0;
-  const observer = new PerformanceObserver((list) => {
-    for (const entry of list.getEntries()) {
-      if (!(entry as LayoutShift).hadRecentInput) {
-        clsValue += (entry as LayoutShift).value;
-      }
-    }
-
-    const rating = getRating('CLS', clsValue);
-
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`CLS: ${clsValue.toFixed(3)} (${rating})`);
-    }
-
-    reportWebVital({ name: 'CLS', value: clsValue, rating, entryType: 'layout-shift' });
-  });
-
-  observer.observe({ entryTypes: ['layout-shift'], buffered: true });
-}
-
-/**
- * Track FCP (First Contentful Paint)
- * Measures when first content appears
- */
-function trackFCP(): void {
-  const observer = new PerformanceObserver((list) => {
-    const entries = list.getEntries();
-    const lastEntry = entries[entries.length - 1];
-
-    const value = lastEntry.startTime;
-    const rating = getRating('TTFB', value);
-
-    if (process.env.NODE_ENV === 'development') {
-      console.log(`FCP: ${value.toFixed(0)}ms (${rating})`);
-    }
-
-    reportWebVital({ name: 'TTFB', value, rating, entryType: lastEntry.entryType });
-  });
-
-  observer.observe({ entryTypes: ['first-contentful-paint'] });
-}
-
-/**
- * Determine rating (good/needs-improvement/poor) based on thresholds
- */
-function getRating(
-  metric: 'LCP' | 'FID' | 'INP' | 'CLS' | 'TTFB',
-  value: number
-): 'good' | 'needs-improvement' | 'poor' {
-  const thresholds = VITALS_THRESHOLDS[metric];
-  if (!thresholds) return 'poor';
-
-  if (value <= thresholds.good) return 'good';
-  if (value <= thresholds.poor) return 'needs-improvement';
-  return 'poor';
-}
-
-/**
- * Report Web Vital to console or analytics endpoint
- */
-interface VitalReport {
-  name: string;
-  value: number;
-  rating: string;
-  entryType: string;
-}
-
-function reportWebVital(vital: VitalReport): void {
-  if (typeof window === 'undefined') return;
-  if (process.env.NODE_ENV === 'development') {
-    // Helpful dev feedback for Core Web Vitals
-    console.debug(`[Web Vitals] ${vital.name}: ${Math.round(vital.value)}ms (${vital.rating})`);
-  } else if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-    try {
-      const payload = JSON.stringify({
-        metric: vital.name,
-        value: Math.round(vital.value),
-        rating: vital.rating,
-        url: window.location.pathname,
-        timestamp: Date.now(),
-      });
-      navigator.sendBeacon('/api/v1/telemetry/vitals', payload);
-    } catch {
-      // Non-blocking telemetry
-    }
-  }
-}
-
-interface WebVitalsSnapshot {
-  lcp: PerformanceEntry | undefined;
-  inp: PerformanceEntry[];
-  cls: PerformanceEntry[];
-  fcp: PerformanceEntry | undefined;
-}
-
-/**
- * Get current Web Vitals snapshot for testing
- */
-export async function getWebVitalsSnapshot(): Promise<WebVitalsSnapshot> {
-  if (typeof window === 'undefined') return { lcp: undefined, inp: [], cls: [], fcp: undefined };
-
-  const entries = performance.getEntries();
+export function toReport(metric: Metric, pathname: string): VitalReport {
   return {
-    lcp: entries.find((e) => e.entryType === 'largest-contentful-paint'),
-    inp: entries.filter((e) => e.entryType === 'event' && (e as PerformanceEventTiming).duration > 100),
-    cls: entries.filter((e) => e.entryType === 'layout-shift'),
-    fcp: entries.find((e) => e.name === 'first-contentful-paint'),
+    name: metric.name,
+    // CLS is a unitless score; the others are milliseconds.
+    value: metric.name === 'CLS' ? Math.round(metric.value * 10_000) / 10_000 : Math.round(metric.value),
+    rating: metric.rating,
+    route: pathname,
+    navigation_type: metric.navigationType,
   };
 }
 
-// Type definitions for layout shift
-interface LayoutShift extends PerformanceEntry {
-  value: number;
-  hadRecentInput: boolean;
+function send(body: string): void {
+  try {
+    if (navigator.sendBeacon?.(VITALS_ENDPOINT, new Blob([body], { type: 'application/json' }))) return;
+  } catch {
+    // fall through to fetch
+  }
+  void fetch(VITALS_ENDPOINT, {
+    method: 'POST',
+    body,
+    headers: { 'Content-Type': 'application/json' },
+    keepalive: true,
+  }).catch(() => undefined);
 }
 
-// Type definitions for LCP
-interface LargestContentfulPaint extends PerformanceEntry {
-  renderTime: number;
-  startTime: number;
+/** Send everything queued, in batches the API accepts. */
+export function flushVitals(transport: (body: string) => void = send): void {
+  while (queue.length > 0) {
+    const batch = queue.slice(0, MAX_BATCH);
+    queue = queue.slice(MAX_BATCH);
+    transport(JSON.stringify({ metrics: batch }));
+  }
+}
+
+/** Queue one measurement (dropped without analytics consent). */
+export function recordVital(metric: Metric, pathname: string = window.location.pathname): void {
+  if (process.env.NODE_ENV === 'development') {
+    console.debug(`[Web Vitals] ${metric.name}: ${metric.value.toFixed(metric.name === 'CLS' ? 3 : 0)} (${metric.rating})`);
+  }
+  if (!hasAnalyticsConsent()) return;
+  queue.push(toReport(metric, pathname));
+  if (queue.length >= MAX_BATCH) flushVitals();
+}
+
+export function initWebVitalsTracking(): void {
+  if (typeof window === 'undefined' || started) return;
+  started = true;
+  const onMetric = (metric: Metric) => recordVital(metric);
+  const opts = { reportSoftNavs: true };
+  onLCP(onMetric, opts);
+  onINP(onMetric, opts);
+  onCLS(onMetric, opts);
+  onFCP(onMetric, opts);
+  onTTFB(onMetric, opts);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushVitals();
+  });
+  window.addEventListener('pagehide', () => flushVitals());
+}
+
+/** Test seam: forget queued reports and the started flag. */
+export function resetVitalsForTests(): void {
+  queue = [];
+  started = false;
 }

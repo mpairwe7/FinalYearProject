@@ -43,7 +43,9 @@ except ImportError:  # pragma: no cover – uvicorn always present at runtime
 
 from . import database as db
 from . import documents
-from .analytics import AnalyticsMiddleware, metrics
+from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
+from .security_events import record_http_security_event
+from .tracing import current_traceresponse
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import (
     ConsentGrantRequest,
@@ -119,16 +121,12 @@ from .speech_service import (
 )
 from .workflows.registry import WorkflowRegistry
 
-from .logging_config import configure_logging
+from .logging_config import REQUEST_ID, install_logging
 
 logger = logging.getLogger(__name__)
-_APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
-_APP_LOGGER = logging.getLogger("app")
-_APP_LOGGER.setLevel(_APP_LOG_LEVEL)
-if not _APP_LOGGER.handlers:
-    _APP_HANDLER = configure_logging()
-    _APP_LOGGER.addHandler(_APP_HANDLER)
-_APP_LOGGER.propagate = False
+# One structured handler on the root logger: the API's, uvicorn's and every
+# library's records share the format, the request id and the PII scrubbing.
+install_logging()
 
 # ---------------------------------------------------------------------------
 # Production environment validation (NIST SSDF PO.1.1)
@@ -145,6 +143,10 @@ _RETENTION_CLEANUP_INTERVAL_SECONDS = max(
 # How often the audit ledger's new rows are sealed (Merkle root + chain head).
 # 0 turns the schedule off; sealing on demand from /admin/audit still works.
 _AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
+# How often recent conversations are re-scored by the evaluation harness so
+# ``ura_eval_metric_passed`` (and the UraEvalRegression alert) stays current.
+# 0 turns the schedule off; ``POST /v1/evaluate`` still runs one on demand.
+_ONLINE_EVAL_INTERVAL_SECONDS = max(0, int(os.getenv("ONLINE_EVAL_INTERVAL_SECONDS", "21600")))
 # Above this many rows the auditor's integrity check re-checks the newest seal
 # and the rows after it instead of the whole chain; the full walk runs offline.
 _AUDIT_VERIFY_FULL_MAX_ROWS = max(1, int(os.getenv("AUDIT_VERIFY_FULL_MAX_ROWS", "200000")))
@@ -160,6 +162,16 @@ def _production_flag_enabled(name: str) -> bool:
     if val is None:
         return True
     return val.lower() in ("1", "true", "yes", "on")
+
+
+def _is_world_writable(path: str) -> bool:
+    """True when *path* exists and any local user may write to it."""
+    import stat
+
+    try:
+        return bool(os.stat(path).st_mode & stat.S_IWOTH)
+    except OSError:
+        return False
 
 
 def _validate_production_env() -> None:
@@ -334,6 +346,25 @@ def _validate_production_env() -> None:
             "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
             f"(got {data_dir!r}; ephemeral or relative paths are not durable)."
         )
+    if data_dir and _is_world_writable(data_dir):
+        errors.append(
+            "ANALYTICS_DB_DIR is world-writable; it holds the audit ledger and transcripts, "
+            "so any local user could rewrite them. Restrict it to the service account (e.g. 0750)."
+        )
+
+    # A timestamp the seal cannot verify later is not evidence. The trust
+    # anchors make tokens checkable offline (audit/tsa.py).
+    if os.getenv("AUDIT_TSA_URL", "").strip():
+        ca_bundle = os.getenv("AUDIT_TSA_CA_CERT", "").strip()
+        if not ca_bundle or not os.path.isfile(ca_bundle):
+            errors.append(
+                "AUDIT_TSA_URL is set but AUDIT_TSA_CA_CERT does not name a readable PEM bundle "
+                "of the TSA's trust anchors; timestamp tokens could not be verified."
+            )
+
+    metrics_token = os.getenv("METRICS_TOKEN", "")
+    if metrics_token and len(metrics_token) < 32:
+        errors.append("METRICS_TOKEN must be at least 32 characters (it guards /metrics).")
 
     for redis_env in ("REDIS_URL", "SLOWAPI_STORAGE_URI"):
         redis_url = os.getenv(redis_env, "")
@@ -429,6 +460,17 @@ def _initialize_analytics_database() -> None:
     try:
         db.init_db()
         logger.info("Analytics database ready")
+        data_dir = os.getenv("ANALYTICS_DB_DIR", "")
+        world_writable = bool(data_dir) and _is_world_writable(data_dir)
+        metrics.set_gauge("storage_world_writable", int(world_writable))
+        if world_writable:
+            # Production refuses to start like this (_validate_production_env);
+            # elsewhere it is a loud warning and a gauge the alerts watch.
+            logger.warning(
+                "ANALYTICS_DB_DIR is world-writable; the audit ledger and transcripts can be "
+                "rewritten by any local user",
+                extra={"event": "storage.world_writable", "path": data_dir},
+            )
 
         if _should_seed():
             try:
@@ -554,11 +596,25 @@ async def lifespan(app: FastAPI):
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 
+    # Which build is answering: read by the audit provenance block and
+    # exported as ``ura_build_info`` so a dashboard can line a regression up
+    # with a deploy.
+    os.environ.setdefault("APP_VERSION", app.version)
+    metrics.set_gauge(
+        "build_info",
+        1,
+        labels={
+            "version": app.version,
+            "revision": os.getenv("APP_BUILD_SHA", "") or "unknown",
+            "environment": os.getenv("APP_ENV", "development"),
+        },
+    )
+
     # OpenTelemetry GenAI tracing (opt-in via OTEL_ENABLED=true)
     try:
         from .tracing import init_tracing
 
-        init_tracing()
+        init_tracing(app)
     except Exception:
         logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 
@@ -708,7 +764,11 @@ async def lifespan(app: FastAPI):
         try:
             run_retention_cleanup()
         except Exception:
+            metrics.inc("retention_runs_total", labels={"status": "failed"})
             logger.error("Retention cleanup failed; continuing without it", exc_info=True)
+            return
+        metrics.inc("retention_runs_total", labels={"status": "ok"})
+        metrics.set_gauge("retention_last_success_timestamp_seconds", time.time())
 
     _run_retention_cleanup_guarded()
     retention_stop = asyncio.Event()
@@ -743,11 +803,28 @@ async def lifespan(app: FastAPI):
         if _AUDIT_SEAL_INTERVAL_SECONDS > 0
         else None
     )
+
+    async def _online_eval_loop() -> None:
+        """Re-score recent conversations on a schedule (every replica may run it)."""
+        while True:
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=_ONLINE_EVAL_INTERVAL_SECONDS)
+                return
+            except TimeoutError:
+                await asyncio.to_thread(_run_online_evaluation)
+            except asyncio.CancelledError:
+                return
+
+    eval_task = (
+        asyncio.create_task(_online_eval_loop(), name="online-eval")
+        if _ONLINE_EVAL_INTERVAL_SECONDS > 0
+        else None
+    )
     try:
         yield
     finally:
         retention_stop.set()
-        for task in (retention_task, seal_task):
+        for task in (retention_task, seal_task, eval_task):
             if task is None:
                 continue
             task.cancel()
@@ -895,6 +972,8 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID", "traceparent", "tracestate"],
+    # So a cross-origin client can quote the request and trace in a bug report.
+    expose_headers=["X-Request-ID", "traceresponse"],
 )
 
 # GZip compression middleware (low-bandwidth & mobile 2G/3G optimization)
@@ -932,36 +1011,18 @@ async def security_headers(request: Request, call_next):
     request_id = raw_id if _REQUEST_ID_RE.match(raw_id) else str(uuid.uuid4())
     # Stash on request.state so handlers can read it without re-parsing headers
     request.state.request_id = request_id
-
-    # W3C Distributed Tracing context propagation (OpenTelemetry 2026 standard)
-    from .tracing import extract_trace_context, generate_w3c_traceparent
-
-    trace_token = None
-    inbound_trace_ctx = extract_trace_context(dict(request.headers))
-    if inbound_trace_ctx is not None:
-        try:
-            from opentelemetry import context as otel_context
-
-            trace_token = otel_context.attach(inbound_trace_ctx)
-        except Exception:
-            trace_token = None
-
-    logger.info(
-        "request  request_id=%s method=%s path=%s",
-        request_id,
-        request.method,
-        request.url.path,
-    )
+    # Every log record written while serving this request carries the id
+    # (logging_config.RequestContextFilter). Inbound W3C traceparent is
+    # handled by the OpenTelemetry FastAPI instrumentation when tracing is on.
+    request_id_token = REQUEST_ID.set(request_id)
     try:
+        logger.info("request method=%s path=%s", request.method, request.url.path)
         response: Response = await call_next(request)
+        traceresponse = current_traceresponse()
+        # 401 / 403 / 429 become OWASP-vocabulary security events (logged and counted).
+        record_http_security_event(request, response.status_code, route_label(request))
     finally:
-        if trace_token is not None:
-            try:
-                from opentelemetry import context as otel_context
-
-                otel_context.detach(trace_token)
-            except Exception:
-                pass
+        REQUEST_ID.reset(request_id_token)
 
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -969,7 +1030,9 @@ async def security_headers(request: Request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Request-ID"] = request_id
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
-    response.headers["traceparent"] = generate_w3c_traceparent()
+    if traceresponse:
+        # W3C Trace Context Level 2: lets a client quote the trace of this request.
+        response.headers["traceresponse"] = traceresponse
     return response
 
 
@@ -1092,9 +1155,11 @@ def chat(
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
         attachments=attachments or None,
+        channel="rest",
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
+    record_chat_turn(result, elapsed_ms=elapsed_ms, channel="rest")
 
     # Classify to get topic tag for analytics
     topic_tag = ""
@@ -1129,9 +1194,8 @@ def chat(
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
 
-    # Track escalation events
+    # Durable escalation event for consented users (the counter is in record_chat_turn)
     if result.get("escalation_required"):
-        metrics.inc("escalation_total")
         if ctx.authenticated and db.has_active_consent(ctx.user_id, "analytics"):
             try:
                 db.track_event(
@@ -1193,6 +1257,7 @@ async def chat_stream(
             request_id=request_id,
             user_id=ctx.user_id or None,
             tenant_id=ctx.tenant_id,
+            channel="sse",
             should_continue=lambda: _sse_not_disconnected(request),
             sentence_batching=True,  # SSE keeps historical behaviour
             user_role=getattr(ctx, "role", "public"),
@@ -1289,27 +1354,16 @@ def _log_stream_conversation(
     user_id: str = "",
     tenant_id: str = "default",
 ) -> None:
-    """Mirror the old SSE ``finally`` block — log to analytics DB."""
+    """Mirror the old SSE ``finally`` block — log to analytics DB.
+
+    Turn metrics and the audit row are recorded by ``service.run_chat_turn``
+    itself, for every streaming transport alike.
+    """
     from .service import ChatModel as _CM
 
     result = log_payload.get("result") or {}
     full_reply = log_payload.get("full_reply", "")
     elapsed_ms = log_payload.get("elapsed_ms", 0.0)
-
-    try:
-        mode = result.get("retrieval_mode") or "unknown"
-        if mode:
-            metrics.inc("retrieval_mode_total", labels={"mode": str(mode)})
-        faith = result.get("faithfulness_score")
-        if faith is not None:
-            metrics.observe("faithfulness_score", float(faith))
-        if result.get("escalation_required") or result.get("handoff"):
-            metrics.inc("escalation_required_total")
-        if elapsed_ms > 0:
-            metrics.observe("chat_response_time_ms", elapsed_ms)
-        metrics.inc("chat_requests_total")
-    except Exception:
-        logger.debug("Stream metrics emission failed", exc_info=True)
 
     try:
         db.log_conversation(
@@ -2019,6 +2073,7 @@ async def voice_chat(
         request_id=getattr(request.state, "request_id", None),
         user_id=ctx.user_id or None,
         tenant_id=ctx.tenant_id,
+        channel="voice",
     )
     llm_latency = time.perf_counter() - t_llm
     reply_text = chat_result.get("reply", "")
@@ -2071,17 +2126,7 @@ async def voice_chat(
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
 
-    try:
-        mode = chat_result.get("retrieval_mode") or "unknown"
-        if mode:
-            metrics.inc("retrieval_mode_total", labels={"mode": str(mode)})
-        faith = chat_result.get("faithfulness_score")
-        if faith is not None:
-            metrics.observe("faithfulness_score", float(faith))
-        if chat_result.get("escalation_required") or chat_result.get("handoff"):
-            metrics.inc("escalation_required_total")
-    except Exception:
-        logger.debug("Voice metrics recording failed", exc_info=True)
+    record_chat_turn(chat_result, elapsed_ms=total_latency * 1000, channel="voice")
 
     # Safe citation parsing — malformed dicts must not crash the response
     safe_citations = []
@@ -2334,6 +2379,17 @@ def _require_staff_writer(ctx: AuthContext) -> None:
         raise HTTPException(status_code=403, detail="read-only role")
 
 
+def _run_online_evaluation() -> None:
+    """One scheduled evaluation run; failures are counted, never raised."""
+    try:
+        from .evaluation import record_eval_report, run_evaluation
+
+        record_eval_report(run_evaluation())
+    except Exception:
+        metrics.inc("eval_runs_failed_total")
+        logger.exception("Scheduled online evaluation failed; will retry next interval")
+
+
 def _seal_audit_ledgers() -> int:
     """Seal every tenant's unsealed audit rows; returns how many seals were made.
 
@@ -2359,6 +2415,7 @@ def _seal_audit_ledgers() -> int:
             if ledger.seal_pending(tenant) is not None:
                 made += 1
                 metrics.inc("audit_seals_total", labels={"trigger": "schedule"})
+                metrics.set_gauge("audit_last_seal_timestamp_seconds", time.time())
         except Exception:
             metrics.inc("audit_seal_failed_total")
             logger.exception("Scheduled audit seal failed for tenant %s; will retry next interval", tenant)
@@ -2927,17 +2984,88 @@ def analytics_comparison(
     return {"dimension": dimension, "period_days": days, "segments": []}
 
 
+def _has_valid_metrics_token(request: Request) -> bool:
+    """True when the request presents ``METRICS_TOKEN`` (the scrape credential).
+
+    A dedicated, read-only secret: Prometheus needs to read ``/metrics`` and
+    nothing else, so it should not hold a staff login or the break-glass
+    ``INDEX_API_KEY``. Compared in constant time and never logged.
+    """
+    token = os.getenv("METRICS_TOKEN", "")
+    if not token:
+        return False
+    return hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {token}")
+
+
+def require_metrics_reader(request: Request) -> AuthContext:
+    """``/metrics`` access: the scrape token, else the usual staff/operator check."""
+    if _has_valid_metrics_token(request):
+        return AuthContext()
+    return require_admin_access(request)
+
+
 @app.get("/metrics", tags=["system"])
 @limiter.limit("30/minute")
 def prometheus_metrics(
     request: Request,
-    _ctx: AuthContext = Depends(require_admin_access),
+    _ctx: AuthContext = Depends(require_metrics_reader),
 ) -> PlainTextResponse:
-    """Prometheus-compatible metrics endpoint."""
-    return PlainTextResponse(
-        content=metrics.to_prometheus(),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
+    """Prometheus metrics, aggregated across every API worker process."""
+    return PlainTextResponse(content=metrics.to_prometheus(), media_type=METRICS_CONTENT_TYPE)
+
+
+# ---------------------------------------------------------------------------
+# Real-user monitoring from the web client (app.client_telemetry)
+# ---------------------------------------------------------------------------
+async def _telemetry_body(request: Request) -> bytes:
+    """The raw body, refused early when oversized.
+
+    Read raw rather than as a JSON body parameter: ``navigator.sendBeacon``
+    with a string posts ``text/plain``, which FastAPI's JSON binding rejects.
+    """
+    from .client_telemetry import MAX_BODY_BYTES
+
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="telemetry payload too large")
+    body = await request.body()
+    if len(body) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="telemetry payload too large")
+    return body
+
+
+@app.post("/v1/telemetry/vitals", status_code=204, tags=["telemetry"])
+@limiter.limit("60/minute")
+async def telemetry_vitals(request: Request) -> Response:
+    """Core Web Vitals measured in the browser (anonymous; aggregated on /metrics)."""
+    from pydantic import ValidationError
+
+    from .client_telemetry import WebVitalsBatch, record_web_vitals
+
+    body = await _telemetry_body(request)
+    try:
+        batch = WebVitalsBatch.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid vitals payload") from exc
+    record_web_vitals(batch)
+    return Response(status_code=204)
+
+
+@app.post("/v1/telemetry/errors", status_code=204, tags=["telemetry"])
+@limiter.limit("30/minute")
+async def telemetry_errors(request: Request) -> Response:
+    """An uncaught client error or error-boundary render failure (anonymous, scrubbed)."""
+    from pydantic import ValidationError
+
+    from .client_telemetry import ClientError, record_client_error
+
+    body = await _telemetry_body(request)
+    try:
+        report = ClientError.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid error report") from exc
+    record_client_error(report)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -2959,15 +3087,10 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be 1..365")
 
-    from .evaluation import run_evaluation
+    from .evaluation import record_eval_report, run_evaluation
 
     report = run_evaluation(sample_size=sample_size, days=days)
-    for m in report.metrics:
-        metrics.observe(
-            "ura_eval_metric",
-            m.value,
-            labels={"name": m.name, "backend": report.backend},
-        )
+    record_eval_report(report)
     return report.to_dict()
 
 
@@ -3650,6 +3773,7 @@ def audit_seal_endpoint(
     if anchor is None:
         return AuditSealResponse(sealed=False, anchor=None)
     metrics.inc("audit_seals_total", labels={"trigger": "manual"})
+    metrics.set_gauge("audit_last_seal_timestamp_seconds", time.time())
     _audit_staff_action(
         ctx,
         "audit.sealed",
@@ -4738,6 +4862,7 @@ async def voice_vision_chat(
         locale=language,
         user_id=ctx.user_id or None,
         tenant_id=ctx.tenant_id,
+        channel="multimodal",
     )
     llm_latency = time.perf_counter() - t_llm
 

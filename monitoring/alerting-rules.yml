@@ -1,86 +1,341 @@
-# Alerting rules — URA Chatbot (2026)
-# Aligned with: MONITORING.md §4, SLO targets from DEPLOYMENT.md
+# Alerting rules — URA Chatbot. Loaded by monitoring/prometheus.yml; routed by
+# monitoring/alertmanager.yml. Unit-tested by monitoring/tests/*.test.yml and
+# checked against the metrics the API really exports by
+# tests/test_monitoring_config.py — a rule naming a series the API never
+# emits, or a label it does not carry, fails CI instead of staying silent.
+#
+# Every ratio aggregates with sum() before dividing: dividing raw series
+# matches each error series with its own request series (always 1.0).
+#
+# severity: critical pages; warning opens a ticket. runbook_url points at the
+# section of docs/MONITORING.md (or a runbook) that says what to do.
 groups:
-  - name: ura-chatbot-slos
-    interval: 30s
+  - name: ura-availability
     rules:
-      # SLO: Error rate < 1%
-      - alert: HighErrorRate
-        expr: |
-          (
-            rate(ura_http_errors_total[5m])
-            / rate(ura_http_requests_total[5m])
-          ) > 0.01
-        for: 5m
-        labels:
-          severity: warning
-          team: backend
-        annotations:
-          summary: "Error rate exceeds 1% SLO"
-          description: "Error rate is {{ $value | humanizePercentage }} over the last 5m."
-          runbook: "docs/MONITORING.md#slow-responses"
-
-      # SLO: p95 latency < 2s for /v1/chat
-      - alert: HighChatLatency
-        expr: |
-          histogram_quantile(0.95,
-            rate(ura_chat_response_time_ms_bucket{path="/v1/chat"}[5m])
-          ) > 2000
-        for: 5m
-        labels:
-          severity: warning
-          team: backend
-        annotations:
-          summary: "Chat p95 latency exceeds 2s SLO"
-          description: "p95 latency is {{ $value }}ms over the last 5m."
-
-      # SLO: Availability > 99.9%
-      - alert: LowAvailability
-        expr: |
-          (
-            1 - (
-              rate(ura_http_errors_total{status=~"5.."}[1h])
-              / rate(ura_http_requests_total[1h])
-            )
-          ) < 0.999
-        for: 1h
+      - alert: UraApiDown
+        expr: up{job="ura-api"} == 0
+        for: 2m
         labels:
           severity: critical
           team: backend
         annotations:
-          summary: "Availability below 99.9% SLO"
+          summary: "The API cannot be scraped"
+          description: "Prometheus has not read /metrics for 2 minutes: the API is down, or the scrape token is wrong (401)."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#api-down-or-unscrapeable"
 
-      # Escalation rate > 10% warrants investigation
-      - alert: HighEscalationRate
+      - alert: UraAvailabilityBudgetBurnFast
         expr: |
-          (
-            rate(ura_escalation_total[15m])
-            / rate(ura_chat_requests_total[15m])
-          ) > 0.10
-        for: 15m
+          (ura:http_errors_5xx:ratio_rate1h > (14.4 * 0.001) and ura:http_errors_5xx:ratio_rate5m > (14.4 * 0.001))
+          or
+          (ura:http_errors_5xx:ratio_rate6h > (6 * 0.001) and ura:http_errors_5xx:ratio_rate30m > (6 * 0.001))
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "5xx responses are burning the 99.9% availability budget fast"
+          description: "At this rate the 30-day error budget is gone within days (1h/5m or 6h/30m window pair above threshold)."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#high-error-rate"
+
+      - alert: UraAvailabilityBudgetBurnSlow
+        expr: |
+          (ura:http_errors_5xx:ratio_rate1d > (3 * 0.001) and ura:http_errors_5xx:ratio_rate2h > (3 * 0.001))
+          or
+          (ura:http_errors_5xx:ratio_rate3d > 0.001 and ura:http_errors_5xx:ratio_rate6h > 0.001)
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "5xx responses are slowly eating the availability budget"
+          description: "The 1d/2h or 3d/6h error ratio is above the sustainable rate for a 99.9% objective."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#high-error-rate"
+
+      - alert: UraProbeFailing
+        expr: probe_success == 0
+        for: 3m
+        labels:
+          severity: critical
+          team: platform
+        annotations:
+          summary: "Synthetic probe failing: {{ $labels.instance }}"
+          description: "The blackbox exporter cannot get a 2xx from {{ $labels.instance }}."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#api-down-or-unscrapeable"
+
+  - name: ura-latency
+    rules:
+      - alert: UraChatLatencyBudgetBurnFast
+        expr: |
+          (ura:chat_turns_slow:ratio_rate1h > (14.4 * 0.05) and ura:chat_turns_slow:ratio_rate5m > (14.4 * 0.05))
+          or
+          (ura:chat_turns_slow:ratio_rate6h > (6 * 0.05) and ura:chat_turns_slow:ratio_rate30m > (6 * 0.05))
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Too many chat turns are slower than 3 s"
+          description: "The share of turns over the NFR-01 3 s objective is burning the 5% latency budget fast."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#slow-responses"
+
+      - alert: UraChatLatencyP99High
+        expr: ura:chat_response_time_ms:p99_5m > 15000
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Chat p99 above 15 s"
+          description: "p99 = {{ $value | humanize }} ms over 5m."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#slow-responses"
+
+      - alert: UraLlmTimeToFirstTokenHigh
+        expr: ura:llm_time_to_first_token_seconds:p95_5m > 3
+        for: 10m
         labels:
           severity: warning
           team: ml
         annotations:
-          summary: "Escalation rate above 10% — check retrieval quality"
+          summary: "LLM time to first token p95 above 3 s ({{ $labels.provider }})"
+          description: "Streaming answers start late; check the vLLM queue (vllm:num_requests_waiting) and GPU memory."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#llm-serving"
 
-      # Faithfulness degradation
-      - alert: LowFaithfulness
-        expr: |
-          avg(ura_faithfulness_score) < 0.5
+      - alert: UraLlmErrorRateHigh
+        expr: ura:llm_requests_error:ratio_rate10m > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "More than 5% of {{ $labels.provider }} model calls fail"
+          description: "Model calls are erroring; answers fall back to extractive or cloud tiers."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#llm-serving"
+
+  - name: ura-quality
+    rules:
+      - alert: UraFaithfulnessLow
+        expr: ura:faithfulness_score:mean_30m < 0.5
         for: 30m
         labels:
           severity: warning
           team: ml
         annotations:
-          summary: "Average faithfulness score dropped below 0.5"
-          description: "Current avg: {{ $value }}. Check Qdrant index freshness."
+          summary: "Mean faithfulness below 0.5"
+          description: "30m mean = {{ $value | humanize }}. Check index freshness and retrieval mode."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#llm-errors--hallucinations"
+
+      - alert: UraEvalRegression
+        expr: ura_eval_metric_passed == 0
+        for: 5m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Online evaluation below threshold: {{ $labels.name }}"
+          description: "The scheduled evaluation of recent conversations reported {{ $labels.name }} under its threshold."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#online-evaluation"
+
+      - alert: UraEvalStale
+        expr: time() - ura_eval_last_run_timestamp_seconds > 2 * 21600 + 3600
+        for: 15m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "Online evaluation has not run for over 13 hours"
+          description: "ONLINE_EVAL_INTERVAL_SECONDS is 6h by default; two runs have been missed."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#online-evaluation"
+
+      - alert: UraEscalationRateHigh
+        expr: ura:chat_turns:escalation_ratio_1h > 0.10
+        for: 30m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "More than 10% of turns are handed to a person"
+          description: "Containment is falling; look at which topics escalate."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#conversation-outcomes"
+
+      - alert: UraAbstentionRateHigh
+        expr: ura:chat_turns:abstention_ratio_1h > 0.25
+        for: 1h
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "More than a quarter of turns abstain"
+          description: "Taxpayers are asking about things the corpus does not cover — a knowledge gap, not an outage."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/corpus-coverage.md"
+
+      - alert: UraRetrievalDegraded
+        expr: ura:retrieval_keyword_fallback:ratio_rate10m > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "Retrieval fell back to keyword mode"
+          description: "More than 20% of turns use the keyword fallback — check Qdrant."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#failed-retrievals"
+
+  - name: ura-audit-and-compliance
+    rules:
+      - alert: AuditChainBreakDetected
+        expr: increase(ura_audit_chain_breaks_total[15m]) > 0
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "The audit trail failed its integrity check"
+          description: "An event or a seal no longer matches its fingerprint. Treat as a security incident: snapshot the database before anything else and do not seal."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/audit-trail.md#when-the-check-fails"
+
+      - alert: AuditAppendFailing
+        expr: sum(increase(ura_audit_append_failed_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Actions are not reaching the audit trail"
+          description: "Appends to the audit ledger are failing; answers and staff actions still succeed but leave no record."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/audit-trail.md#what-is-recorded"
+
+      - alert: AuditSealFailing
+        expr: increase(ura_audit_seal_failed_total[2h]) > 0
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Scheduled audit sealing is failing"
+          description: "New audit rows are protected only by the chain until a seal succeeds."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/audit-trail.md#seals"
+
+      - alert: AuditTimestampFailing
+        expr: sum(increase(ura_audit_tsa_failures_total[2h])) > 0
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Seals are being written without an RFC 3161 timestamp"
+          description: "The TSA at AUDIT_TSA_URL could not be reached or returned a token that did not verify."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/audit-trail.md#trusted-timestamps-rfc-3161"
+
+      - alert: StorageWorldWritable
+        expr: max(ura_storage_world_writable) == 1
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "The analytics/audit directory is world-writable"
+          description: "Any local user can rewrite the audit ledger and transcripts. Restrict ANALYTICS_DB_DIR to the service account."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/audit-trail.md#storage-permissions"
+
+      - alert: RetentionJobFailing
+        expr: sum(increase(ura_retention_runs_total{status="failed"}[3h])) > 0
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Personal-data retention cleanup is failing"
+          description: "Expired conversations, documents and voice data are not being purged (DPPA 2019 storage limitation)."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#retention"
+
+      - alert: RetentionJobStale
+        expr: time() - max(ura_retention_last_success_timestamp_seconds) > 3 * 3600
+        for: 15m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "Retention cleanup has not succeeded for 3 hours"
+          description: "RETENTION_CLEANUP_INTERVAL_SECONDS is 1h by default."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#retention"
+
+  - name: ura-security
+    rules:
+      - alert: AuthenticationFailureSpike
+        expr: sum(rate(ura_security_events_total{event="authn_login_fail"}[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Sustained authentication failures (> 1/s)"
+          description: "Possible credential stuffing or an expired IdP signing key. Read the authn_login_fail log events."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#security-events"
+
+      - alert: AuthorizationFailureSpike
+        expr: sum(rate(ura_security_events_total{event="authz_fail"}[5m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Sustained authorisation denials"
+          description: "Someone keeps calling endpoints their role does not allow. Read the authz_fail log events for the actor."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#security-events"
+
+  - name: ura-dependencies
+    rules:
+      - alert: QdrantDown
+        expr: up{job="qdrant"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Qdrant unreachable"
+          description: "Retrieval falls back to keyword search over the FAQ until Qdrant returns."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#failed-retrievals"
+
+      - alert: RedisDown
+        expr: redis_up == 0 or up{job="redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Redis unreachable"
+          description: "Rate limits and the response cache fall back to per-worker memory."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#dependencies"
+
+      - alert: VllmDown
+        expr: up{job="vllm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: ml
+        annotations:
+          summary: "vLLM server {{ $labels.server }} is not answering"
+          description: "Generation falls back to the cloud chain or to extractive answers."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#llm-serving"
+
+      - alert: VllmQueueBacklog
+        expr: max by (server) (vllm:num_requests_waiting) > 8
+        for: 5m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "vLLM has a request backlog on {{ $labels.server }}"
+          description: "{{ $value }} requests waiting; the GPU is saturated (see docs/runbooks/capacity-slo.md)."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/capacity-slo.md"
+
+      - alert: GpuMemoryNearlyFull
+        expr: DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE) > 0.97
+        for: 10m
+        labels:
+          severity: warning
+          team: ml
+        annotations:
+          summary: "GPU {{ $labels.gpu }} memory above 97%"
+          description: "The next model load or KV-cache growth will fail with out-of-memory."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#llm-serving"
 
   # Index lifecycle / disaster-recovery signals are emitted by the API from
   # atomically-written status records. This lets Prometheus observe short-lived
   # reindex and backup containers without an additional exporter.
   - name: ura-qdrant-index-lifecycle
-    interval: 30s
     rules:
       - alert: QdrantIndexDrift
         expr: ura_qdrant_index_drift > 0
@@ -91,7 +346,7 @@ groups:
         annotations:
           summary: "Serving Qdrant index no longer matches the shipped corpus"
           description: "Freshness reported source/index drift or a missing index binding."
-          runbook: "docs/runbooks/qdrant-staged-rebuild.md"
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
       - alert: QdrantRebuildFailed
         expr: ura_qdrant_rebuild_failed > 0
@@ -102,10 +357,10 @@ groups:
         annotations:
           summary: "Staged Qdrant rebuild failed before promotion"
           description: "The serving alias is unchanged; inspect the candidate build and rerun safely."
-          runbook: "docs/runbooks/qdrant-staged-rebuild.md"
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
-      - alert: QdrantSparseQueryErrors
-        expr: rate(qdrant_query_errors_total[5m]) > 0
+      - alert: QdrantQueryErrors
+        expr: sum(rate(ura_qdrant_query_errors_total[5m])) > 0
         for: 5m
         labels:
           severity: warning
@@ -113,9 +368,10 @@ groups:
         annotations:
           summary: "Qdrant query errors are occurring"
           description: "The retriever is recording Qdrant query failures. Check server health and collection state."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
       - alert: QdrantQueryLatencyHigh
-        expr: qdrant_query_duration_seconds{quantile="0.95"} > 0.5
+        expr: histogram_quantile(0.95, sum by (le) (rate(ura_qdrant_query_duration_seconds_bucket[5m]))) > 0.5
         for: 10m
         labels:
           severity: warning
@@ -123,6 +379,7 @@ groups:
         annotations:
           summary: "Qdrant p95 query latency exceeds 500ms"
           description: "The API-side Qdrant query p95 has remained above the retrieval SLO."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
       - alert: QdrantServerQueryLatencyHigh
         expr: |
@@ -141,6 +398,7 @@ groups:
         annotations:
           summary: "Qdrant server p95 query latency exceeds 500ms"
           description: "Qdrant's own /points/query latency histogram is above the retrieval SLO."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
       - alert: QdrantCollectionUnexpectedlySmall
         expr: (sum(collection_points) or vector(0)) <= 1
@@ -151,6 +409,7 @@ groups:
         annotations:
           summary: "Qdrant collection contains only the lifecycle sentinel or no data"
           description: "The vector collection may have been lost or built from an empty corpus."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
       - alert: QdrantHostDiskLow
         expr: |
@@ -166,6 +425,7 @@ groups:
         annotations:
           summary: "Host disk headroom below 15%; Qdrant persistence is at risk"
           description: "Free space is below 15% on a persistent host filesystem. Free capacity before Qdrant compaction, backups, or rebuilds fail."
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md"
 
       - alert: QdrantBackupMissingOrFailed
         expr: |
@@ -182,7 +442,7 @@ groups:
         annotations:
           summary: "Qdrant retained snapshot backup is missing, failed, or stale"
           description: "A daily snapshot has not completed successfully within 26 hours."
-          runbook: "docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"
 
       - alert: QdrantRestoreDrillFailedOrStale
         expr: |
@@ -199,37 +459,4 @@ groups:
         annotations:
           summary: "Qdrant restore drill failed or has not completed in 35 days"
           description: "Run the restore drill before relying on the retained snapshots for recovery."
-          runbook: "docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"
-
-  - name: ura-audit-trail
-    rules:
-      - alert: AuditChainBreakDetected
-        expr: increase(audit_chain_breaks_total[15m]) > 0
-        labels:
-          severity: critical
-          team: security
-        annotations:
-          summary: "The audit trail failed its integrity check"
-          description: "An event or a seal no longer matches its fingerprint. Treat as a security incident: snapshot the database before anything else and do not seal."
-          runbook: "docs/runbooks/audit-trail.md#when-the-check-fails"
-
-      - alert: AuditAppendFailing
-        expr: increase(audit_append_failed_total[15m]) > 0
-        for: 5m
-        labels:
-          severity: warning
-          team: security
-        annotations:
-          summary: "Staff actions are not reaching the audit trail"
-          description: "Appends to the audit ledger are failing; the actions still succeed but leave no record."
-          runbook: "docs/runbooks/audit-trail.md#what-is-recorded"
-
-      - alert: AuditSealFailing
-        expr: increase(audit_seal_failed_total[2h]) > 0
-        labels:
-          severity: warning
-          team: security
-        annotations:
-          summary: "Scheduled audit sealing is failing"
-          description: "New audit rows are protected only by the chain until a seal succeeds."
-          runbook: "docs/runbooks/audit-trail.md#seals"
+          runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/qdrant-staged-rebuild.md#backup-and-restore-drill"

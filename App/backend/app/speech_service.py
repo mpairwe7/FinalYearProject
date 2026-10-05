@@ -1732,6 +1732,24 @@ class SpeechModel:
         voice: str | None = None,
         language: str = "en",
     ) -> SynthesizeResult:
+        """Synthesize text to WAV bytes marked as AI-generated (``app.ai_disclosure``).
+
+        Every backend's WAV leaves here with an IPTC ``trainedAlgorithmicMedia``
+        INFO chunk, whichever endpoint returns it.
+        """
+        result = self._synthesize_unmarked(text, voice=voice, language=language)
+        if result.audio:
+            from .ai_disclosure import mark_wav
+
+            result = replace(result, audio=mark_wav(result.audio, generator=result.backend))
+        return result
+
+    def _synthesize_unmarked(
+        self,
+        text: str,
+        voice: str | None = None,
+        language: str = "en",
+    ) -> SynthesizeResult:
         """Synthesize text to WAV bytes.
 
         Fallback chain (local-first for production):

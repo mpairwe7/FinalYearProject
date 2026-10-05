@@ -26,7 +26,6 @@ via the existing :mod:`database` dispatch.
 
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -138,35 +137,41 @@ class AuditEvent:
         )
 
 
-def request_rfc3161_timestamp(imprint_sha256: str, tsa_url: str = "") -> str | None:
-    """Request an RFC 3161 cryptographic timestamp token for an audit seal hash."""
-    url = tsa_url or os.getenv("AUDIT_TSA_URL", "")
-    if not url:
-        return None
-    try:
-        import httpx
+def _timestamp_seal(anchor: dict[str, Any]) -> str:
+    """RFC 3161 token for a seal from ``AUDIT_TSA_URL``, or ``""``.
 
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/timestamp-reply, application/json",
-        }
-        resp = httpx.post(
-            url,
-            json={"hash": imprint_sha256, "algorithm": "sha256", "version": "1"},
-            headers=headers,
-            timeout=3.0,
+    A seal is still written when the TSA cannot be reached — the chain and
+    Merkle root stand on their own — but the miss is counted
+    (``ura_audit_tsa_failures_total``) and logged, so a deployment that relies
+    on timestamps notices it is not getting them.
+    """
+    tsa_url = os.getenv("AUDIT_TSA_URL", "").strip()
+    if not tsa_url:
+        return ""
+    from ..analytics import metrics
+    from .tsa import request_timestamp, seal_statement
+
+    statement = seal_statement(
+        tenant_id=anchor["tenant_id"],
+        first_seq=anchor["first_seq"],
+        last_seq=anchor["last_seq"],
+        merkle_root=anchor["merkle_root"],
+        head_hash=anchor["head_hash"],
+    )
+    try:
+        token = request_timestamp(statement, tsa_url)
+    except Exception as exc:
+        metrics.inc("audit_tsa_failures_total", labels={"reason": type(exc).__name__})
+        logger.warning(
+            "RFC 3161 timestamp for seal %s seq=%d..%d failed: %s",
+            anchor["tenant_id"],
+            anchor["first_seq"],
+            anchor["last_seq"],
+            exc,
         )
-        if resp.status_code in (200, 201):
-            ct = resp.headers.get("content-type", "")
-            if "timestamp-reply" in ct or "octet-stream" in ct:
-                return base64.b64encode(resp.content).decode("ascii")
-            if ct.startswith("application/json"):
-                data = resp.json()
-                return str(data.get("token") or data.get("timestamp_token") or resp.text[:256])
-            return str(resp.text[:256])
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("RFC 3161 TSA timestamp witness unavailable: %s", exc)
-    return None
+        return ""
+    metrics.inc("audit_tsa_tokens_total")
+    return token
 
 
 class AuditLedger:
@@ -499,10 +504,7 @@ class AuditLedger:
             "head_hash": str(head["row_hash"]) if head else "",
             "created_at": time.time(),
         }
-        tsa_url = os.getenv("AUDIT_TSA_URL", "")
-        tsa_token = request_rfc3161_timestamp(merkle, tsa_url) if tsa_url else None
-        if tsa_token:
-            anchor["tsa_token"] = tsa_token
+        anchor["tsa_token"] = _timestamp_seal(anchor)
         try:
             db.execute(
                 """INSERT INTO audit_anchors
@@ -533,6 +535,15 @@ class AuditLedger:
             last_seq,
             anchor["merkle_root"],
             anchor["head_hash"],
+            extra={
+                "event": "audit.seal",
+                "tenant_id": tenant_id,
+                "first_seq": first_seq,
+                "last_seq": last_seq,
+                "merkle_root": anchor["merkle_root"],
+                "head_hash": anchor["head_hash"],
+                "timestamped": bool(anchor["tsa_token"]),
+            },
         )
         return anchor
 

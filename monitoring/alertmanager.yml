@@ -1,0 +1,31 @@
+# Alertmanager — where firing alerts go. Loaded by the `monitoring` profile.
+#
+# Every alert is delivered to one webhook: the URL comes from the compose
+# secret `alertmanager_webhook_url` (env ALERTMANAGER_WEBHOOK_URL), so no
+# endpoint or token is committed. Point it at the team's chat relay, an
+# ntfy topic or an incident tool's generic webhook. Critical alerts repeat
+# hourly until resolved; warnings every 4 hours. See docs/MONITORING.md §6.
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: ops-webhook
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="critical"']
+      receiver: ops-webhook
+      repeat_interval: 1h
+
+inhibit_rules:
+  # While the API cannot be scraped, its other backend alerts are symptoms.
+  - source_matchers: ['alertname="UraApiDown"']
+    target_matchers: ['team="backend"', 'alertname!="UraApiDown"']
+
+receivers:
+  - name: ops-webhook
+    webhook_configs:
+      - url_file: /run/secrets/alertmanager_webhook_url
+        send_resolved: true

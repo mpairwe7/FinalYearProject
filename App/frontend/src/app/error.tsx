@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Next.js 15 App Router error boundary.
+ * App Router error boundary (segment level).
  *
  * Catches uncaught errors in the chat tree and renders a recoverable
  * fallback with a reset button.  This is the segment-level boundary —
@@ -11,6 +11,8 @@
 
 import { useEffect } from "react";
 
+import { reportClientError } from "@/lib/client-errors";
+
 interface ErrorBoundaryProps {
   error: Error & { digest?: string };
   reset: () => void;
@@ -18,29 +20,9 @@ interface ErrorBoundaryProps {
 
 export default function ErrorBoundary({ error, reset }: ErrorBoundaryProps) {
   useEffect(() => {
-    // Surface to server logs / analytics.  We intentionally do NOT send
-    // the full error message because it may contain user input (PII).
-    // The digest is a stable hash Next.js emits for correlation.
-    if (typeof window !== "undefined") {
-      console.error("[ura-chatbot] app error", { digest: error.digest });
-      // Fire-and-forget analytics beacon
-      try {
-        navigator.sendBeacon?.(
-          `/api/v1/analytics/event`,
-          new Blob(
-            [
-              JSON.stringify({
-                event_type: "frontend_error",
-                event_data: { digest: error.digest ?? "", source: "error_boundary" },
-              }),
-            ],
-            { type: "application/json" },
-          ),
-        );
-      } catch {
-        // Best-effort; ignore
-      }
-    }
+    // Reported without the message — it may contain user input (PII). The
+    // digest is the stable hash Next.js also prints in the server log.
+    reportClientError("boundary", error, error.digest ?? "");
   }, [error]);
 
   return (

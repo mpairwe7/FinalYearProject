@@ -45,7 +45,7 @@ these appends one hash-chained row to `audit_events`:
 | `staff.ticket_updated` | A ticket change is accepted | `ticket_id`, changed `status` / `assignee` / `priority` / `locale`, `staff_note_chars`, `officer_reply_chars` |
 | `staff.flag_set` / `staff.flag_cleared` | A flag is toggled or reset | `flag`, `enabled` |
 | `staff.override_saved` / `staff.override_deleted` | A staff-written answer changes | `override_id`, `enabled` |
-| `generate` | The assistant answers (existing) | hashes of question and reply, route, scores |
+| `generate` | The assistant answers — on **every** transport: `/v1/chat`, the SSE stream, the WebSocket stream, voice chat, multimodal and the call receptionist (field `channel`) | see [The answer record](#the-answer-record) |
 | `tool_confirm` | A taxpayer confirms or refuses an action (existing) | tool, decision |
 | `staff.call_reviewed` | A call is rated | `call_id`, `rating`, `note_chars` |
 | `voice_staff_viewed_call` | A call and its transcript are opened (call detail, or the live call view) | call id (`session_id`) |
@@ -70,8 +70,32 @@ empty — every call-desk action read as done by nobody on `/admin/audit` — an
 a failed chain was only a debug line; it is now counted like any other append.
 **Content is never copied into the ledger**: a reply or a note is recorded as
 its length, so the audit trail adds no second copy of taxpayer data. A failed
-append is logged and counted (`audit_append_failed_total` on `/metrics`) —
-alert on any increase.
+append — staff action, tool confirmation or answer — is logged at WARNING and
+counted (`ura_audit_append_failed_total{event_type}` on `/metrics`); the
+`AuditAppendFailing` alert fires on any increase. Before 2026-10-06 a failed
+`generate` append was a DEBUG line and counted nowhere.
+
+### The answer record
+
+One `generate` row per answered turn, written once the reply is final — after
+translation, so `reply_sha256` is the digest of the text the taxpayer
+actually received (it used to be taken on the English draft). Before
+2026-10-06 only `/v1/chat` wrote these rows; the streamed answers the web
+client uses by default left no record (gap G103). Payload (`schema: 2`):
+
+| Field | What it pins |
+| --- | --- |
+| `channel` | `rest`, `sse`, `ws`, `voice`, `multimodal`, `call` |
+| `outcome` | `answered`, `abstained`, `clarification`, `escalated`, `blocked`, `out_of_scope` |
+| `query_sha256`, `reply_sha256`, `reply_locale` | What was asked and served (digests only) |
+| `retrieval_mode`, `sources`, `citation_sha256[]` | Which documents grounded it (citation digest = source, page, section and passage) |
+| `faithfulness_score`, `response_judge`, `escalation_*` | The guards' verdicts |
+| `model`, `usage` | The model and its token usage — `source: provider` when the model server reported it, `estimate` otherwise |
+| `tool_calls`, `tool_iterations`, `agent_route`, `ticket_id` | Agentic steps and any handoff |
+| `flag_variants_sha256` | The experiment arms the turn ran under |
+| `provenance` | `app_version`, `build_sha` (the image's git commit), `prompt_template_sha256`, `index_corpus_hash` |
+
+Rows with `schema` absent are the older layout (no channel or provenance).
 
 ## Read it
 
@@ -129,7 +153,8 @@ and the `row_hash` of the last row (which commits to everything before it).
   `AUDIT_SEAL_INTERVAL_SECONDS` (default 3600; `0` turns the schedule off)
   while `audit_ledger` is on. Seals are unique by their first sequence
   number, so replicas that race produce one seal, not several. Counters:
-  `audit_seals_total{trigger="schedule"|"manual"}`, `audit_seal_failed_total`.
+  `ura_audit_seals_total{trigger="schedule"|"manual"}`, `ura_audit_seal_failed_total`,
+  `ura_audit_last_seal_timestamp_seconds`.
 - **On demand.** "Seal now" on `/admin/audit` (`POST /v1/admin/audit/seal`).
   Seal before exporting evidence, so the export ends inside a sealed range.
   The seal and the check that follows are themselves recorded, so the page
@@ -139,15 +164,59 @@ and the `row_hash` of the last row (which commits to everything before it).
   logs, it puts the seal outside this database, so rewriting the ledger *and*
   its seal table together still disagrees with the log archive. Keep that log
   stream on write-once retention.
-- **Cryptographic TSA witness (RFC 3161).** When `AUDIT_TSA_URL` is configured,
-  sealing queries an external Time Stamping Authority with the range's Merkle
-  root hash. The returned cryptographic timestamp token (`tsa_token`) is stored
-  durably in `audit_anchors` and checked during `verify_anchor()`, providing
-  independent third-party proof that the range existed prior to the timestamp.
+- **A trusted timestamp** from an independent Time-Stamping Authority, when
+  configured — see [the next section](#trusted-timestamps-rfc-3161).
 
 Rows written after the newest seal are protected only by the chain: deleting
 the newest rows from the end leaves no break until the next seal. The seal
 interval bounds that window.
+
+## Trusted timestamps (RFC 3161)
+
+With `AUDIT_TSA_URL` set, every seal asks a Time-Stamping Authority to sign
+the SHA-256 of the seal statement
+`ura-audit-seal:v1|tenant=…|first=…|last=…|merkle_root=…|head_hash=…` — the
+range, its Merkle root **and** the chain head. The TSA's signed token proves
+the seal existed, unchanged, at the TSA's time; someone who rewrites the
+ledger and its seal table afterwards cannot produce a matching token.
+
+`app/audit/tsa.py` speaks the protocol directly: a DER `TimeStampReq` with a
+random nonce and `certReq`, posted as `application/timestamp-query`. Before a
+token is stored (`audit_anchors.tsa_token`, prefixed `rfc3161:v1:`) and again
+by every integrity check, it is verified: PKI status, imprint and nonce, the
+CMS signed attributes (content type, message digest), the signature against
+the TSA certificate carried in the token, the signing-certificate binding
+(ESSCertID/v2), the `timeStamping` extended key usage, validity at `genTime`
+and — with `AUDIT_TSA_CA_CERT` — the chain to a configured trust anchor. A
+token that fails any step is a break ("timestamp token does not verify").
+RSA PKCS#1 v1.5 and ECDSA tokens are supported; RSASSA-PSS is reported as
+unsupported rather than accepted.
+
+| Variable | Example |
+| --- | --- |
+| `AUDIT_TSA_URL` | `http://timestamp.digicert.com`, `http://timestamp.sectigo.com`, `https://freetsa.org/tsr` |
+| `AUDIT_TSA_CA_CERT` | A PEM bundle holding the TSA's root (e.g. `/etc/ssl/certs/ca-certificates.crt` for the commercial TSAs above). Production refuses to start with a TSA and no bundle. |
+
+A TSA that cannot be reached does not stop sealing: the seal is written
+without a token, `ura_audit_tsa_failures_total{reason}` counts the miss and
+`AuditTimestampFailing` alerts. Values stored before 2026-10-06 (the earlier
+client posted JSON, which no TSA speaks, and stored whatever came back) are
+not treated as evidence: they are ignored, neither trusted nor reported as
+breaks.
+
+**Verified live, 2026-10-06:** tokens from DigiCert and Sectigo verified end
+to end, chain included, against the system trust store; a one-byte change to
+the sealed statement was rejected.
+
+## Storage permissions
+
+The ledger lives in the analytics database under `ANALYTICS_DB_DIR`. If that
+directory or its files are world-writable, any local user can rewrite rows
+and seals together. The API exports `ura_storage_world_writable` (alert
+`StorageWorldWritable`) and logs a warning at startup; production refuses to
+start. Fix it with ownership by the service user (uid 10001 in the images) and
+`chmod 750` on the directory, `640` on the files — on a bind mount, do this
+while the API is stopped.
 
 ## When the check fails
 
@@ -210,8 +279,9 @@ GPU_ID=2 VLLM_GPU_ID=5 SUNFLOWER_GPU_ID=5 docker compose \
   -f /tmp/audit-live.override.yml up -d --no-deps --no-build api
 ```
 
-A scheduled seal shows as an `audit seal tenant=… seq=a..b …` log line and as
-`audit_seals_total{trigger="schedule"}` on `/metrics`. Recreate the api
+A scheduled seal shows as an `audit seal tenant=… seq=a..b …` log line
+(`event=audit.seal` in the JSON `attributes`) and as
+`ura_audit_seals_total{trigger="schedule"}` on `/metrics`. Recreate the api
 without the override afterwards to put the stack back.
 
 **Result, 2026-09-29** (branch build on the local GPU stack): 12/12 probe

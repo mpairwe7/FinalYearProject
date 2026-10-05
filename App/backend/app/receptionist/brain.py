@@ -756,6 +756,7 @@ class UraReceptionistBrain(LLMService):
             locale="en",
             user_id=self.room.state.user_id,
             tenant_id=self.room.state.tenant_id,
+            channel="call",
         )
 
         # Read for a crisis only now that it is in English: the call's crisis
@@ -900,6 +901,7 @@ class UraReceptionistBrain(LLMService):
                     locale=self.room.state.locale,
                     user_id=self.room.state.user_id,
                     tenant_id=self.room.state.tenant_id,
+                    channel="call",
                 )
             )
 

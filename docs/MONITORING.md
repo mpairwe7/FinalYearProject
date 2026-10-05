@@ -1,545 +1,406 @@
 # Monitoring & Observability Guide
 
-Production observability for the URA Chatbot FastAPI backend, covering
-distributed tracing, metrics, log aggregation, and LLM-specific monitoring.
+How the URA chatbot is measured, alerted on and traced, and what to do when an
+alert fires. Rewritten 2026-10-06 after an audit found the previous pipeline
+dark end to end (gaps G99–G110 in
+[`GAPS_AND_AGENTIC_ROADMAP.md`](GAPS_AND_AGENTIC_ROADMAP.md)): Prometheus got
+401 from `/metrics`, counters differed per uvicorn worker, alert rules matched
+no series, and nothing routed an alert anywhere.
 
-## Quick Start
+Everything below is checked in CI: rule logic by `promtool test rules`
+(`monitoring/tests/`), and the agreement between rules, dashboard, SLOs,
+runbook links and the metrics the code really emits by
+`tests/test_monitoring_config.py`.
 
-```bash
-# Start the full monitoring stack (Prometheus + Grafana + Jaeger)
-docker compose --profile monitoring up -d
-
-# Access:
-#   Prometheus:  http://localhost:9090
-#   Grafana:     http://localhost:3001  (admin / ura2026)
-#   Jaeger:      http://localhost:16686
-```
-
-Dashboards and datasources are auto-provisioned from `monitoring/grafana/provisioning/`.
-Alert rules are loaded from `monitoring/alerting-rules.yml` (17 rules: 5 SLO,
-9 Qdrant index lifecycle, and 3 audit-trail rules — a failed integrity check,
-failing appends and failing scheduled seals; see
-[`runbooks/audit-trail.md`](runbooks/audit-trail.md)). Check them with
-`promtool check rules monitoring/alerting-rules.yml`.
-
----
-
-## 1. Architecture Overview
-
-```
-                        +-------------+
-   FastAPI App          |   Jaeger /  |
-  +--------------+      |   Tempo     |
-  | tracing.py   |----->| (OTLP gRPC)|      +----------+
-  | (OTel SDK)   |      +-------------+      | Grafana  |
-  +--------------+                            | Dashboards|
-  | analytics.py |----> /metrics -----------> | <--------+
-  | (Prometheus  |      (text exposition)     +----------+
-  |  middleware)  |                                 ^
-  +--------------+      +-------------+            |
-  | logging_config|----->| Loki / ELK  |------------+
-  | JSON logs    |      +-------------+
-  +--------------+
-```
-
-| Signal  | Producer                     | Collector        | Storage/UI       |
-|---------|------------------------------|------------------|------------------|
-| Traces  | `tracing.py` (OpenTelemetry) | OTLP gRPC :4317  | Jaeger / Tempo   |
-| Metrics | `analytics.py` (Prometheus)  | Prometheus scrape | Prometheus + Grafana |
-| Logs    | `logging_config.py` JSON     | Promtail / Filebeat | Loki / Elasticsearch |
-
----
-
-## 2. Enabling Observability
-
-### Environment variables (`.env`)
+## Quick start
 
 ```bash
-# OpenTelemetry (opt-in)
-OTEL_ENABLED=true
-OTEL_SERVICE_NAME=ura-chatbot-api
-OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+# .env (never committed): the API and Prometheus share the scrape token
+METRICS_TOKEN=$(openssl rand -hex 32)
+GRAFANA_PASSWORD=$(openssl rand -base64 24)
+ALERTMANAGER_WEBHOOK_URL=https://<your chat relay / ntfy topic / incident webhook>
+OTEL_ENABLED=true                                   # traces + OTLP logs
 
-# Logging
-LOG_LEVEL=info          # production: info, debug only in dev
-LOG_FORMAT=json         # production: json (OTel Log Data Model with PII scrubbing), dev: text
+docker compose --profile monitoring up -d            # + --profile monitoring-gpu for DCGM
 ```
 
-`tracing.py` reads these on startup inside the FastAPI lifespan handler
-(`main.py` -> `init_tracing()`). When `OTEL_ENABLED=false` (default), all
-tracing and metric helpers are no-ops with zero overhead.
+| UI | Address (bound to 127.0.0.1 — tunnel or proxy with auth to reach it) |
+| --- | --- |
+| Grafana | http://127.0.0.1:3001 (user `admin`, password `GRAFANA_PASSWORD`) |
+| Prometheus | http://127.0.0.1:9090 |
+| Alertmanager | http://127.0.0.1:9093 |
+| Jaeger | http://127.0.0.1:16686 |
+| Loki (API) | http://127.0.0.1:3100 |
 
-### Required packages
+There is no committed default password. An unset `GRAFANA_PASSWORD` leaves
+Grafana's first-login password, which it makes you change.
+
+## 1. Architecture
 
 ```
-opentelemetry-api
-opentelemetry-sdk
-opentelemetry-exporter-otlp-proto-grpc
+ uvicorn workers (N)                          monitoring profile
+ ┌──────────────────────┐   scrape + Bearer METRICS_TOKEN   ┌────────────┐   ┌──────────────┐
+ │ app.analytics facade ├──────────── /metrics ────────────►│ Prometheus ├──►│ Alertmanager ├──► webhook
+ │ (prometheus_client,  │  (all workers aggregated)          │  rules,    │   └──────────────┘
+ │  PROMETHEUS_MULTI-   │                                    │  SLO burn  │◄── blackbox, redis-, node-,
+ │  PROC_DIR)           │                                    └─────┬──────┘    dcgm-exporter, vLLM
+ │ app.tracing (OTel)   ├── OTLP gRPC ──► OTel Collector ──► Jaeger │ (traces, tail-sampled)
+ │ app.logging_config   ├── OTLP logs ──►       │       ──► Loki    │ (logs, 93 days)
+ │ stdout JSON lines    │                       └──── :8889 ──► Prometheus (gen_ai.* metrics)
+ └──────────────────────┘                                          ▼
+                                                                Grafana (Prometheus + Loki + Jaeger, linked)
 ```
 
-These are optional dependencies; the app functions without them (`ImportError`
-is caught gracefully in `tracing.py`).
+| Signal | Producer | Transport | Store / UI |
+| --- | --- | --- | --- |
+| Metrics | `App/backend/app/analytics.py` (prometheus_client) | Prometheus scrape of `/metrics` with `METRICS_TOKEN` | Prometheus, Grafana |
+| GenAI metrics | `App/backend/app/tracing.py` | OTLP → Collector → `:8889` | Prometheus |
+| Traces | `tracing.py` + FastAPI/httpx instrumentation | OTLP → Collector (tail sampling) | Jaeger |
+| Logs | `logging_config.py` (root handler) | stdout JSON **and** OTLP → Collector | platform log pane; Loki |
+| Real users | `App/frontend/src/lib/web-vitals.ts`, `client-errors.ts` | `POST /v1/telemetry/{vitals,errors}` | Prometheus |
+| Synthetic | blackbox exporter | HTTP probes of `/health`, `/ready`, the frontend | Prometheus |
 
----
+Single-container deployments (Crane Cloud, the HF Space) have no Collector:
+logs go to stdout as JSON (the platform captures them) and `/metrics` is
+readable with `METRICS_TOKEN` by any external Prometheus.
 
-## 3. Key Metrics
+## 2. Configuration
 
-All metrics are emitted by the `MetricsStore` singleton in
-`App/backend/app/analytics.py` and exposed at `GET /metrics`. Metrics are
-dual-emitted with both bare and `ura_` prefixed names (e.g. `http_requests_total`
-and `ura_http_requests_total`). Latency and duration metrics also emit standard
-Prometheus histogram bucket series (`_bucket{le="..."}`) alongside summaries to
-support `histogram_quantile` evaluation in alerting rules and Grafana panels.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `METRICS_TOKEN` | unset | Bearer credential for `/metrics` (≥ 32 chars in production). Unset: only staff/operator auth can read it. |
+| `PROMETHEUS_MULTIPROC_DIR` | `/tmp/ura-prometheus` (set by `entrypoint.sh` / supervisord) | Where each uvicorn worker writes samples; emptied before workers start. |
+| `METRICS_MAX_SERIES_PER_METRIC` | `500` | Label sets per metric before new ones fold into `__other__`. |
+| `OTEL_ENABLED` | `false` | Traces, OTLP logs and GenAI metrics. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://otel-collector:4317` (compose) | Collector address. |
+| `OTEL_TRACES_SAMPLER` / `_ARG` | parent-based always-on | Standard OTel sampling; the Collector tail-samples further. |
+| `OTEL_LOGS_EXPORTER` | `otlp` | `none` keeps logs on stdout only. |
+| `LOG_FORMAT` | `json` in production and compose, else text | `json` \| `text`. |
+| `LOG_LEVEL` | `info` | Root and `app.*` level; `httpx`/`httpcore` stay at WARNING. |
+| `ONLINE_EVAL_INTERVAL_SECONDS` | `21600` | Scheduled evaluation of recent conversations; `0` = off. |
+| `ALERTMANAGER_WEBHOOK_URL` | unset | Where every alert is delivered (compose secret). |
+| `AUDIT_TSA_URL`, `AUDIT_TSA_CA_CERT` | unset | RFC 3161 timestamps on audit seals ([runbook](runbooks/audit-trail.md#trusted-timestamps-rfc-3161)). |
 
-### HTTP layer (AnalyticsMiddleware)
+## 3. Metrics
 
-| Metric                       | Type      | Labels                       | Description                     |
-|------------------------------|-----------|------------------------------|---------------------------------|
-| `http_requests_total`        | counter   | `method`, `path`, `status`   | Total HTTP requests             |
-| `http_request_duration_ms`   | summary   | `method`, `path`             | Request latency histogram       |
-| `http_errors_total`          | counter   | `method`, `path`, `status`   | Requests returning >= 400       |
+All API metrics go through the facade in `app/analytics.py`:
+`metrics.inc(name, labels=…)`, `metrics.observe(name, value, labels=…)`,
+`metrics.set_gauge(…)`, `metrics.add_gauge(…)`. Rules the facade enforces:
 
-### Chat / RAG layer
+* **One namespace.** Every family is exported as `ura_<name>` exactly once.
+  The bare-name duplicates the old store emitted are gone.
+* **Real histograms.** Cumulative buckets chosen by unit suffix (`_ms`,
+  `_seconds`/`_s`, `_bytes`, scores 0–1). `histogram_quantile()` and `rate()`
+  are valid; nothing is recomputed from a sliding window.
+* **All workers.** With `PROMETHEUS_MULTIPROC_DIR` set, one scrape returns the
+  sum over every uvicorn worker. Up/down gauges (active connections) use
+  `livesum`; latest-value gauges (`build_info`, eval results, timestamps) use
+  `mostrecent`.
+* **Bounded labels.** Request metrics are labelled with the route template
+  (`/v1/tickets/{ticket_id}`, or `__unmatched__` for 404s), never the raw path.
+  Over `METRICS_MAX_SERIES_PER_METRIC` label sets per family, new ones fold
+  into `__other__`.
 
-| Metric                       | Type      | Labels       | Description                             |
-|------------------------------|-----------|--------------|-----------------------------------------|
-| `chat_requests_total`        | counter   | --           | Total `/v1/chat` requests               |
-| `chat_response_time_ms`      | summary   | --           | End-to-end chat latency                 |
-| `retrieval_mode_total`       | counter   | `mode`       | Distribution: `hybrid`, `keyword`, etc. |
-| `faithfulness_score`         | summary   | --           | Grounding faithfulness (0-1)            |
-| `escalation_total`           | counter   | --           | Human-escalation events                 |
-| `escalation_required_total`  | counter   | --           | Escalation flagged in middleware         |
-| `escalation_requested_total` | counter   | `outcome`    | **Taxpayer-initiated** handoff (`POST /v1/escalate`): `created`, `reused`, `queue_disabled`, `failed` |
-| `feedback_total`             | counter   | `rating`     | User feedback (`up` / `down`)           |
-| `classification_errors_total`| counter   | --           | Classifier failures during chat         |
+The staff analytics page reads `GET /v1/analytics/dashboard`, which takes the
+same aggregated view (`metrics.snapshot()`), so it no longer shows one random
+worker's numbers.
 
-### Answer-integrity counters
+### HTTP and chat turns
 
-These count the times a guard withheld or replaced something rather than
-serving it. A rising number is not a failure of the guard — it is the guard
-working — but a *sustained* rise says the generation or translation tier has
-degraded.
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `ura_http_requests_total` | counter | `method`, `path` (route template), `status` | Every request |
+| `ura_http_request_duration_ms` | histogram | `method`, `path` | Time to response headers |
+| `ura_http_errors_total` | counter | `method`, `path`, `status` | Responses ≥ 400 |
+| `ura_chat_turns_total` | counter | `channel`, `outcome` | One per chat turn on **every** transport. `channel`: `rest`, `sse`, `ws`, `voice`. `outcome`: `answered`, `abstained`, `clarification`, `escalated`, `blocked`, `out_of_scope`, `error` |
+| `ura_chat_response_time_ms` | histogram | `channel`, `mode` | Whole-turn latency; `mode` is the retrieval mode |
+| `ura_retrieval_mode_total` | counter | `mode` | Retrieval mode per turn |
+| `ura_faithfulness_score` | histogram | — | Grounding score per scored turn |
+| `ura_escalation_required_total` | counter | `channel` | Turns handed to a person |
+| `ura_escalation_requested_total` | counter | `outcome` | Taxpayer-initiated handoffs (`POST /v1/escalate`) |
+| `ura_feedback_total` | counter | `rating` | Thumbs up/down |
+| `ura_chat_ws_active_connections`, `ura_voice_*` | gauge / counter / histogram | — | WebSocket and voice sessions (were never exposed before) |
 
-`reply_localization_protected_retry_total` reads differently from the rest of
-this table: it counts a *recovered* condition, not a served failure. Figures
-are masked before translation (`mt.protect_figures`), and a tier that cannot
-carry the sentinels is retried unprotected, so a steady low rate here is the
-mechanism working as designed. What matters is the shape. A `reason` of
-`sentinel_residue` climbing for one locale says that locale's MT tier mangles
-the sentinels and is running every figure-bearing reply through two round
-trips — a latency problem, not a correctness one, and the reason to look at
-`REPLY_MT_BACKEND` for that locale. `reply_localization_figures_changed_total`
-rising *alongside* it is the correctness signal: both passes failed and the
-taxpayer got English.
+Answer-integrity counters (`ura_contradicted_reply_withheld_total`,
+`ura_reply_localization_figures_changed_total{locale}`,
+`ura_reply_localization_protected_retry_total{locale,reason}`,
+`ura_numeric_verification_rejected_total`, `ura_numeric_revision_*`) count
+times a guard withheld or replaced something. A rising count is the guard
+working; a *sustained* rise says a generation or translation tier degraded.
+`protected_retry` counts a recovered condition: figures are masked before
+translation and retried unmasked when the tier mangles the sentinels.
 
-| Metric                                    | Type    | Labels   | Description |
-|-------------------------------------------|---------|----------|-------------|
-| `contradicted_reply_withheld_total`        | counter | --       | An answer whose figures contradicted its cited passage was replaced rather than shown (`service.withhold_if_contradicted`) |
-| `reply_localization_figures_changed_total` | counter | `locale` | A translation changed or dropped a money amount or percentage, so the English text was served instead (`mt.figures_survived`). Counted only after the unprotected retry has also failed, so it means the answer really did reach the taxpayer in English |
-| `reply_localization_protected_retry_total` | counter | `locale`, `reason` | The figure-masked translation pass was unusable and was retried unprotected (`mt.protect_figures`). `reason` is `sentinel_residue` (the tier echoed or mangled a sentinel), `figures_changed` (it dropped one), `collapsed`, `mt_failed` or `empty`. Not a taxpayer-visible failure on its own — the retry usually succeeds |
-| `numeric_verification_rejected_total`      | counter | --       | A money figure disagreed with the calculator that produced it |
-| `numeric_revision_fixed_total`             | counter | --       | The one bounded revision corrected it |
-| `numeric_revision_failed_total`            | counter | --       | The revision did not correct it |
+### Models, tools and quality
 
-`escalation_requested_total{outcome="queue_disabled"}` above zero means
-taxpayers are asking for a person on a deployment where `ticket_queue` is off —
-they are being given the contact-centre number instead, and nobody is picking
-those requests up.
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `ura_llm_requests_total` | counter | `provider`, `model`, `operation`, `status` | Every model call (vLLM, Workers AI, Gemini) |
+| `ura_llm_request_duration_seconds` | histogram | `provider`, `model`, `operation` | Call duration |
+| `ura_llm_time_to_first_token_seconds` | histogram | same | Streaming calls only |
+| `ura_llm_tokens_total` | counter | same + `type` (`input`/`output`) | From the provider's `usage` block — not a word count |
+| `ura_tool_calls_total`, `ura_tool_call_duration_seconds` | counter / histogram | `tool`, `status` | Every MCP tool call |
+| `ura_model_usage_total`, `ura_model_fallback_total`, `ura_model_tier_total` | counter | `task`, `model`, … | Routing decisions (`providers/routing.py`) |
+| `ura_eval_metric{name,backend}`, `ura_eval_metric_passed{name}` | gauge | | Latest online evaluation (§8) |
+| `ura_eval_last_run_timestamp_seconds`, `ura_eval_samples` | gauge | | When it ran, on how many turns |
+| `ura_web_vitals_ms{metric,rating,route}`, `ura_web_vitals_cls{rating,route}` | histogram | | Real-user Core Web Vitals |
+| `ura_client_errors_total{kind,route}` | counter | | Browser errors and error-boundary renders |
 
-### OpenTelemetry metrics (via `tracing.py`, exported to OTLP)
+### Audit, security and housekeeping
 
-| Metric                           | Type      | Attributes              |
-|----------------------------------|-----------|-------------------------|
-| `gen_ai.client.token.usage`      | counter   | `gen_ai.token.type`     |
-| `gen_ai.retrieval.duration`      | histogram | --                      |
-| `gen_ai.retrieval.results`       | counter   | --                      |
+| Metric | Labels | Meaning |
+| --- | --- | --- |
+| `ura_audit_append_failed_total` | `event_type` | Ledger appends that failed — including `generate` (answers) |
+| `ura_audit_seals_total`, `ura_audit_seal_failed_total` | `trigger` | Seals made / failed |
+| `ura_audit_last_seal_timestamp_seconds` | — | Last successful seal |
+| `ura_audit_chain_breaks_total` | `scope` | Integrity check found a break |
+| `ura_audit_tsa_tokens_total`, `ura_audit_tsa_failures_total` | `reason` | RFC 3161 timestamps obtained / missed |
+| `ura_security_events_total` | `event` | OWASP-vocabulary security events (§6) |
+| `ura_retention_runs_total`, `ura_retention_last_success_timestamp_seconds` | `status` | Personal-data retention job |
+| `ura_storage_world_writable` | — | 1 when `ANALYTICS_DB_DIR` is world-writable |
+| `ura_build_info` | `version`, `revision`, `environment` | Which build is answering |
+| `ura_qdrant_index_*`, `ura_qdrant_backup_*`, `ura_qdrant_restore_drill_*` | — | Index lifecycle (read from status files at scrape time) |
 
----
+## 4. SLOs and alerting
 
-## 4. Prometheus Setup
+The SLOs are defined once, in OpenSLO v1:
+[`monitoring/slo/ura-chatbot.openslo.yaml`](../monitoring/slo/ura-chatbot.openslo.yaml).
 
-### Scrape config (`prometheus.yml`)
+| SLO | Objective | Window | SLI (recording rule) |
+| --- | --- | --- | --- |
+| API availability | 99.9% of requests not 5xx | 30 days | `ura:http_errors_5xx:ratio_rate{5m,30m,1h,2h,6h,1d,3d}` |
+| Chat latency (NFR-01) | 95% of turns within 3 s | 30 days | `ura:chat_turns_slow:ratio_rate{5m,30m,1h,6h}` |
 
-```yaml
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+The p95 targets that used to disagree (2 s here, 3 s in k6) are now one: the
+3 s NFR-01 objective, measured as a share of turns. Generation latency is
+reported apart (`ura:chat_response_time_ms:p95_by_mode_5m`): one A6000 does
+not meet 3 s for hybrid generation from 4 concurrent turns
+([capacity-slo](runbooks/capacity-slo.md)), and a blended figure hides that.
 
-scrape_configs:
-  - job_name: "ura-chatbot-api"
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["api:8000"]
-        labels:
-          env: "production"
-          service: "ura-chatbot"
+Burn-rate alerts follow the multi-window, multi-burn-rate method (Google SRE
+workbook): page when the 1h **and** 5m windows burn faster than 14.4× the
+budget (or 6h and 30m faster than 6×); ticket on 1d/2h at 3× or 3d/6h at 1×.
 
-  - job_name: "qdrant"
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["qdrant:6333"]
-```
+`monitoring/alerting-rules.yml` holds 37 rules in seven groups:
+availability, latency, quality, audit-and-compliance, security, dependencies
+and the Qdrant index lifecycle. Each carries `severity` (`critical` pages,
+`warning` tickets), `team` and a `runbook_url` to a heading below or to a
+runbook. Ratios aggregate with `sum()` before dividing — the old rules
+divided each error series by its own request series and saw 100%.
 
-### Docker Compose addition
+Alertmanager (`monitoring/alertmanager.yml`) sends everything to the webhook
+in `ALERTMANAGER_WEBHOOK_URL`, critical alerts every hour until resolved,
+warnings every four. While `UraApiDown` fires, the API's other backend alerts
+are inhibited as symptoms.
 
-```yaml
-services:
-  prometheus:
-    image: prom/prometheus:v2.53.0
-    container_name: ura-prometheus
-    volumes:
-      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
-    networks:
-      - ura-network
-
-  grafana:
-    image: grafana/grafana:11.1.0
-    container_name: ura-grafana
-    ports:
-      - "3001:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana_data:/var/lib/grafana
-    networks:
-      - ura-network
-
-volumes:
-  grafana_data:
-```
-
-### Verifying the endpoint
+Test rule changes before pushing:
 
 ```bash
-curl -s http://localhost:8000/metrics | head -20
+docker run --rm -v "$PWD/monitoring:/m:ro" -w /m --entrypoint promtool \
+  prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
+python -m pytest tests/test_monitoring_config.py -q
 ```
 
-Expected output (Prometheus text exposition format):
+## 5. Tracing
 
-```
-# TYPE http_requests_total counter
-http_requests_total{method="GET",path="/health",status="200"} 42
-# TYPE http_request_duration_ms summary
-http_request_duration_ms{quantile="0.5",method="POST",path="/v1/chat"} 145.3200
-http_request_duration_ms{quantile="0.95",method="POST",path="/v1/chat"} 892.1100
-```
+Off unless `OTEL_ENABLED=true`. `app/tracing.py` sets up the SDK with
+`service.name`, `service.version`, `deployment.environment.name` and a
+per-worker `service.instance.id`, instruments FastAPI (server span per
+request; inbound W3C `traceparent` honoured) and httpx (client spans;
+`traceparent` injected into calls to vLLM, Qdrant, Sunbird, Cloudflare and MCP
+servers), and bridges Python logging to OTLP.
 
----
+GenAI attributes follow the OpenTelemetry GenAI semantic conventions, which
+are still at **Development** status (moved to
+`open-telemetry/semantic-conventions-genai` in June 2026) — expect renames:
 
-## 5. Grafana Dashboards
+| Span | Name | Key attributes |
+| --- | --- | --- |
+| Turn | `invoke_agent ura-assistant` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.usage.*` (turn total), `rag.stage.*.duration_ms`, events `gen_ai.evaluation.result` |
+| Pipeline stage | `rag.<stage>` | `rag.<stage>.duration_ms` |
+| Model call | `chat <model>` | `gen_ai.provider.name` (`vllm`, `cloudflare.workers_ai`, `gcp.gemini`), `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`/`output_tokens`, `gen_ai.response.finish_reasons`, `error.type` |
+| Tool call | `execute_tool <tool>` | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type` |
 
-### Recommended panels
+OTel metrics `gen_ai.client.operation.duration` (s) and
+`gen_ai.client.token.usage` ({token}) are histograms, as the conventions
+specify. Prompt and completion text are never recorded.
 
-| Panel                 | Query (PromQL)                                                                     |
-|-----------------------|------------------------------------------------------------------------------------|
-| Request rate          | `rate(http_requests_total[5m])`                                                    |
-| Error rate (%)        | `rate(http_errors_total[5m]) / rate(http_requests_total[5m]) * 100`                |
-| p95 latency           | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}`                        |
-| Chat throughput       | `rate(chat_requests_total[5m])`                                                    |
-| Cache hit ratio       | `rate(retrieval_mode_total{mode="cache"}[5m]) / rate(chat_requests_total[5m])`     |
-| Faithfulness dist.    | `faithfulness_score{quantile="0.5"}` (median, p95, p99)                            |
-| Escalation rate       | `rate(escalation_total[5m])`                                                       |
-| Taxpayers asking for a person | `rate(escalation_requested_total[15m])` grouped by `outcome`               |
-| Answers withheld      | `rate(contradicted_reply_withheld_total[1h])`                                      |
-| Translations refused  | `rate(reply_localization_figures_changed_total[1h])` grouped by `locale`           |
-| Figure masking not carried | `rate(reply_localization_protected_retry_total[1h])` grouped by `locale`, `reason` |
-| Retrieval mode split  | `rate(retrieval_mode_total[5m])` grouped by `mode`                                 |
-| Token usage           | `rate(gen_ai_client_token_usage[5m])` by `gen_ai.token.type`                       |
-| Qdrant query latency  | `gen_ai_retrieval_duration` (histogram from OTLP)                                  |
-| Feedback ratio        | `rate(feedback_total{rating="up"}[1h]) / rate(feedback_total[1h])`                 |
+Responses carry `X-Request-ID` and, when a span is active, a W3C
+`traceresponse` header (both exposed to browsers through CORS). The API no
+longer returns a `traceparent` it invented. The Collector keeps every errored
+or slower-than-3 s trace and 25% of the rest.
 
-### Dashboard layout (3 rows)
+## 6. Logging
 
-1. **Service Health** -- Request rate, error rate, p95 latency, uptime
-2. **RAG Pipeline** -- Retrieval mode split, Qdrant latency, cache hit ratio, faithfulness
-3. **LLM & Safety** -- Token usage, escalation rate, guardrail triggers, feedback ratio
+`app/logging_config.install_logging()` puts one handler on the **root**
+logger, so the API's records, uvicorn's access and error lines and every
+library's records share one format. JSON lines (production, compose) carry:
 
----
-
-## 6. Alerting Rules
-
-Save as `alert_rules.yml` and load in Prometheus via `rule_files:`.
-
-```yaml
-groups:
-  - name: ura_chatbot_alerts
-    rules:
-
-      # Error rate > 1% sustained for 5 minutes
-      - alert: HighErrorRate
-        expr: |
-          (
-            rate(http_errors_total[5m])
-            / rate(http_requests_total[5m])
-          ) > 0.01
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Error rate above 1% for 5 minutes"
-          description: "Current error rate: {{ $value | humanizePercentage }}"
-
-      # p95 chat latency > 2 seconds for 5 minutes
-      - alert: HighChatLatency
-        expr: |
-          http_request_duration_ms{quantile="0.95",path="/v1/chat"} > 2000
-        for: 5m
-        labels:
-          severity: warning
-        annotations:
-          summary: "p95 chat latency exceeds 2 seconds"
-
-      # Availability < 99.9% over 1 hour
-      - alert: LowAvailability
-        expr: |
-          (
-            1 - (
-              rate(http_errors_total{status=~"5.."}[1h])
-              / rate(http_requests_total[1h])
-            )
-          ) < 0.999
-        for: 5m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Service availability below 99.9% SLO"
-
-      # Disk usage > 80% (node_exporter required)
-      - alert: HighDiskUsage
-        expr: |
-          (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) < 0.2
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Root disk usage above 80%"
-
-      # Escalation rate spike
-      - alert: HighEscalationRate
-        expr: |
-          rate(escalation_total[15m]) > 0.1
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Sustained high human-escalation rate"
+```json
+{"timestamp": "2026-10-06T08:15:02.113+00:00", "level": "WARNING", "severity_text": "WARNING",
+ "severity_number": 13, "logger": "app.security", "message": "security event authz_fail",
+ "service": "ura-chatbot-api", "service.version": "1.2.0", "deployment.environment": "production",
+ "trace_id": "…", "span_id": "…", "request_id": "7d1c…",
+ "attributes": {"event": "authz_fail", "http_route": "/v1/admin/tickets", "http_status": 403, "actor": "…"}}
 ```
 
----
+* `request_id` is on every record written while serving a request (a context
+  variable set by the request middleware), not only the access line.
+* Anything passed with `extra=` lands in `attributes`. Search Loki with
+  `{service_name="ura-chatbot-api"} | event="audit.seal"` and the like.
+* Redaction (`guardrails.redact_pii_text`) covers the message, its arguments,
+  `extra` fields and tracebacks, on stdout and OTLP alike. It is pattern-based
+  (TINs, phone numbers, e-mails, NINs, cards) and cannot recognise names, so
+  code must still not log free text it does not need.
+* Loki keeps logs 93 days. A local Loki volume is not write-once storage —
+  ship the same stream to object storage with object lock where logs are
+  audit evidence ([audit-trail runbook](runbooks/audit-trail.md#seals)).
 
-## 7. SLO Definitions
+### Security events
 
-These targets are **published, not yet enforced as a single measured
-SLI**. k6 (`tests/load/k6-chat-slo.js`) and
-`monitoring/prometheus-rules.yaml` use **p95 &lt; 3s**; this table and
-`monitoring/alerting-rules.yml` use **p95 &lt; 2s**. Measured 2026-08-19
-(`App/docs/traceability/capacity-envelope-2026-08-19.md`): FAQ/calculator
-p95 is tens of ms; **uncached hybrid generation p95 already exceeds 3s
-at 4 concurrent** on one A6000. Do not treat a blended `/v1/chat` p95 as
-the generation SLO.
+401, 403 and 429 responses are logged as OWASP Logging Vocabulary events by
+`app/security_events.py` and counted in `ura_security_events_total{event}`:
+`authn_login_fail` (with the token rejection reason), `authz_fail`,
+`excess_rate_limit_exceeded`. Records name the route, status and authenticated
+actor; never the token or client IP.
 
-| SLO              | Target  | Window   | Metric basis                                                  |
-|-------------------|---------|----------|---------------------------------------------------------------|
-| Availability      | 99.9%   | 30 days  | `1 - (5xx responses / total requests)`                        |
-| Latency (chat, blended) | p95 < 2s (table) / < 3s (k6 NFR-01) | 30 days | `http_request_duration_ms{quantile="0.95",path="/v1/chat"}` — dominated by FAQ/calculator unless sliced by `retrieval_mode` |
-| Latency (hybrid generation) | p95 < 3s is NFR-01; **unmet from 4 concurrent** on one A6000 vLLM | 30 days | measure `retrieval_mode=hybrid` only |
-| Error budget      | 0.1%    | 30 days  | Max 43.2 minutes of downtime / month                          |
-| Faithfulness      | median > 0.6 | 7 days | `faithfulness_score{quantile="0.5"}`                      |
+## 7. Real-user monitoring
 
-### Error budget burn-rate alerting
+The browser measures Core Web Vitals with Google's `web-vitals` library (v6,
+soft navigations on) and posts batches to `POST /v1/telemetry/vitals` when the
+page is hidden — only with analytics consent. Uncaught errors, unhandled
+rejections and error-boundary renders go to `POST /v1/telemetry/errors`
+(error class, Next.js digest, script location, route; **never the message**).
+Both endpoints are anonymous, rate-limited and fold ids out of routes. The
+Next.js server logs `onRequestError` as JSON (`src/instrumentation.ts`).
 
-```
-Short window (1h):  burn rate > 14.4x  -> page
-Medium window (6h): burn rate >  6x    -> ticket
-Long window (3d):   burn rate >  1x    -> review
-```
+Thresholds are assessed at the **75th percentile** of real users (Core Web
+Vitals, unchanged for 2026):
 
----
+| Metric | Good | Poor |
+| --- | --- | --- |
+| LCP | ≤ 2.5 s | > 4 s |
+| INP | ≤ 200 ms | > 500 ms |
+| CLS | ≤ 0.1 | > 0.25 |
+| FCP | ≤ 1.8 s | > 3 s |
+| TTFB | ≤ 800 ms | > 1.8 s |
 
-## 8. LLM-Specific Observability
+Lighthouse CI (`lighthouse-live.yml`) stays as the lab check; the field data
+above is what users experience.
 
-### Token usage tracking
+## 8. Online evaluation
 
-`tracing.py` -> `record_token_usage()` emits `gen_ai.client.token.usage` with
-`gen_ai.token.type` = `input` | `output`. Track daily token consumption to
-manage costs and detect anomalous query patterns.
+Every `ONLINE_EVAL_INTERVAL_SECONDS` (6 h by default) each worker re-scores a
+sample of recent conversations with the evaluation harness
+(`app/evaluation.py`) and publishes `ura_eval_metric` /
+`ura_eval_metric_passed`. `POST /v1/evaluate` (ops key) runs one on demand.
+Offline, CI scores the golden sets (`ml.pipelines.evaluate_rag`); the
+production gate still runs with `--soft-fail` (open: make it fail on
+regression against a committed baseline — G110).
 
-```python
-# In service.py, after LLM generation:
-from .tracing import record_token_usage
-record_token_usage(prompt_tokens=est_prompt, completion_tokens=est_completion)
-```
+## 9. Dashboard
 
-### Guardrail trigger rates
+`monitoring/grafana/dashboards/ura-chatbot-overview.json` (provisioned):
+service health and SLOs (budget left, slow-turn share, p95 by transport and by
+mode, probes), conversations (outcomes, containment, retrieval mode,
+faithfulness, online evaluation, feedback), models and tools (tokens/s, time
+to first token, error ratio, fallbacks, tool calls, vLLM queue), audit,
+security and real users (audit health, security events, Web Vitals p75) and a
+Loki panel of security and audit events. Logs link to traces by `trace_id`
+and spans link back to their logs.
 
-Metric: `classification_errors_total`, `escalation_total`, plus structured log
-events from `guardrails.py` (`InputGuard.check()` and `OutputGuard` methods).
+## 10. Incident playbooks
 
-Key signals:
-- **Prompt injection blocks**: grep logs for `"injection_detected": true`
-- **Abstention rate**: `retrieval_mode_total{mode="abstained"}` / total chats
-- **PII redaction events**: structured log with `event=pii_redacted`
+### API down or unscrapeable
 
-### Faithfulness score distribution
+`UraApiDown` / `UraProbeFailing`. Check the probe first: if
+`probe_success{instance="http://api:8000/health"}` is 1 but `up{job="ura-api"}`
+is 0, the API is up and the scrape is being refused — compare
+`METRICS_TOKEN` in `.env` with the compose secret Prometheus mounts
+(`docker exec ura-prometheus cat /run/secrets/ura_metrics_token | wc -c`; never
+print it). Otherwise check `docker compose ps api` and the API's JSON logs.
 
-The `faithfulness_score` summary metric (emitted by `AnalyticsMiddleware`) gives
-p50/p95/p99. A drop in median faithfulness below 0.5 likely signals:
-- Stale or corrupted Qdrant index
-- Embedding model drift
-- New query patterns outside training distribution
+### High error rate
 
-Scoring semantics (2026-07): `compute_faithfulness` measures **content-token
-overlap (stopwords removed) over non-courtesy sentences** — greetings, empathy
-openers, contact footers, and follow-up suggestions are excluded from the
-ratio, so polite phrasing no longer depresses the score (`app/text_signals.py`
-holds the courtesy classifier). Deterministic curated KB answers (TIN
-registration / return filing) report **1.0 on both the REST and streaming
-paths**; non-factual turns (greeting/clarification/workflow/blocked) report
-`null` and are excluded from the summary. Expect the median to shift **up**
-after this change — re-baseline dashboards/alerts against post-deploy data.
+`UraAvailabilityBudgetBurnFast/Slow`. Break the 5xx down by route:
+`sum by (path, status) (rate(ura_http_requests_total{status=~"5.."}[5m]))`,
+then search the logs for `level="ERROR"` with the same `request_id`s. 4xx
+responses never count against the budget.
 
-### Escalation rate
+### Slow responses
 
-`escalation_total` fires when `OutputGuard.should_escalate()` returns `True`
-(faithfulness below `ESCALATION_THRESHOLD` or zero retrieval hits). Target: < 5%
-of chat sessions.
+`UraChatLatencyBudgetBurnFast` / `UraChatLatencyP99High`. Split
+`ura:chat_response_time_ms:p95_by_mode_5m` and `…_by_channel_5m`: generation
+modes point at the model (see LLM serving), FAQ/calculator modes at the API.
+Open a slow trace in Jaeger: the `rag.<stage>` spans show where the time went.
 
----
+### LLM serving
 
-## 9. Log Aggregation
-
-### Structured JSON logging
-
-Configure structlog (or stdlib) to emit JSON lines:
-
-```python
-import logging, json
-
-class JSONFormatter(logging.Formatter):
-    def format(self, record):
-        log = {
-            "timestamp": self.formatTime(record),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "request_id": getattr(record, "request_id", None),
-        }
-        if record.exc_info:
-            log["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log)
-```
-
-### Correlation via X-Request-ID
-
-The security headers middleware in `main.py` validates and propagates
-`X-Request-ID` on every response. Use this to correlate:
-
-1. **HTTP request log** (`main.py` middleware) -> `request_id=<uuid>`
-2. **OpenTelemetry span** -> set `trace_id` + `request_id` as span attribute
-3. **Application log** -> inject `request_id` via logging context
-
-```python
-# Correlation lookup in Grafana/Loki:
-#   {app="ura-chatbot"} | json | request_id="abc-123"
-```
-
-### Log levels (production)
-
-| Level   | Usage                                               |
-|---------|-----------------------------------------------------|
-| ERROR   | Unhandled exceptions, database failures              |
-| WARNING | Degraded retrieval, guardrail triggers, PII redacted |
-| INFO    | Request lifecycle, startup/shutdown, model load      |
-| DEBUG   | Cache hits, token counts, individual passage scores  |
-
-Production default: `LOG_LEVEL=info`. Set `LOG_LEVEL=debug` only in
-development or during incident investigation.
-
----
-
-## 10. Incident Response Playbook
-
-### Slow responses (p95 > 2s)
-
-1. **Check Grafana** -- `http_request_duration_ms{quantile="0.95"}` by path.
-2. **Identify stage** -- Look at OpenTelemetry trace in Jaeger:
-   - `rag.embed` slow? -> Embedding model resource contention.
-   - `rag.search` slow? -> Qdrant overloaded; check collection size and segment count.
-   - `rag.rerank` slow? -> Cross-encoder batch size too large; reduce `top_k`.
-   - `rag.generate` slow? -> LLM inference bottleneck; check GPU utilization.
-3. **Check per-stage timings** -- Each `trace_stage()` call records
-   `rag.<stage>.duration_ms` as a span attribute. The parent `rag.pipeline`
-   span aggregates all stage durations.
-
-```bash
-# Quick check via the analytics dashboard API:
-curl -s http://localhost:8000/v1/analytics/dashboard | python -m json.tool
-```
-
-### Failed retrievals
-
-1. **Symptom**: `retrieval_mode_total{mode="keyword"}` spikes (hybrid fallback).
-2. **Check Qdrant health**: `curl http://localhost:6333/healthz`
-3. **Check readiness endpoint**: `curl http://localhost:8000/ready`
-   - `retrieval_mode: "keyword"` confirms Qdrant is down.
-4. **Recovery**: Restart Qdrant container, then trigger re-index:
-   ```bash
-   curl -X POST http://localhost:8000/v1/index \
-     -H "Authorization: Bearer $INDEX_API_KEY"
-   ```
+`UraLlmTimeToFirstTokenHigh`, `UraLlmErrorRateHigh`, `VllmDown`,
+`VllmQueueBacklog`, `GpuMemoryNearlyFull`. Read `vllm:num_requests_waiting`
+and the DCGM GPU memory panel; a backlog with full KV cache is capacity, an
+error spike with an empty queue is the server. `ura_model_fallback_total`
+shows answers moving to the cloud chain.
 
 ### LLM errors / hallucinations
 
-1. **Symptom**: `faithfulness_score{quantile="0.5"}` drops below 0.5.
-2. **Check escalation rate**: `rate(escalation_total[1h])`.
-3. **Inspect traces**: Filter Jaeger for `gen_ai.faithfulness_score < 0.3`.
-4. **Common causes**:
-   - Qdrant index is stale -- re-index documents.
-   - Grounding threshold too low -- raise `GROUNDING_THRESHOLD` in `.env`.
-   - New topics not in knowledge base -- add relevant documents and re-index.
-5. **Guardrail check**: Verify `ABSTENTION_THRESHOLD` and
-   `ESCALATION_THRESHOLD` values in `.env` are appropriate.
+`UraFaithfulnessLow`. Check index freshness (`ura_qdrant_index_drift`), the
+retrieval mode mix and recent `generate` audit rows (their
+`provenance.index_corpus_hash` and `prompt_template_sha256` say which corpus
+and prompt answered).
 
-### High error rate (> 1%)
+### Online evaluation
 
-1. **Identify error codes**: `http_errors_total` by `status` label.
-2. **503 errors**: Model not initialized -- check startup logs.
-3. **429 errors**: Rate limiting -- review `RATE_LIMIT` setting.
-4. **500 errors**: Search logs by `request_id` for stack traces.
+`UraEvalRegression` / `UraEvalStale`. Run `POST /v1/evaluate` with the ops key
+for the full report (per-segment breakdown by topic, locale, taxpayer type and
+flag variant). Stale means the scheduled run is failing:
+`ura_eval_runs_failed_total` and the logs say why.
 
----
+### Conversation outcomes
 
-## 11. Real-User Monitoring (RUM) & Core Web Vitals Telemetry
+`UraEscalationRateHigh` / `UraAbstentionRateHigh`. Containment is
+`ura:chat_turns:containment_ratio_1h`. Rising abstention is a knowledge gap,
+not an outage: route the abstained questions to the corpus backlog
+([corpus coverage](runbooks/corpus-coverage.md)).
 
-The Next.js taxpayer and staff portal actively tracks client-side performance under real Ugandan mobile network conditions via `App/frontend/src/lib/web-vitals.ts` and `Providers.tsx`.
+### Failed retrievals
 
-### Monitored Metrics & Thresholds
+`UraRetrievalDegraded`, `QdrantDown`, `QdrantQueryErrors`. Check
+`curl http://localhost:6333/healthz` and `/ready` (`retrieval_mode: keyword`
+confirms Qdrant is down); restart Qdrant, then re-index if the collection is
+small ([qdrant staged rebuild](runbooks/qdrant-staged-rebuild.md)).
 
-| Metric | Full Name | Good | Needs Improvement | Poor |
-| --- | --- | --- | --- | --- |
-| **INP** | Interaction to Next Paint | $\le 200$ ms | $201 - 500$ ms | $> 500$ ms |
-| **LCP** | Largest Contentful Paint | $\le 2500$ ms | $2501 - 4000$ ms | $> 4000$ ms |
-| **CLS** | Cumulative Layout Shift | $\le 0.10$ | $0.11 - 0.25$ | $> 0.25$ |
-| **FCP** | First Contentful Paint | $\le 1800$ ms | $1801 - 3000$ ms | $> 3000$ ms |
-| **TTFB** | Time to First Byte | $\le 600$ ms | $601 - 1800$ ms | $> 1800$ ms |
+### Retention
 
-### Telemetry Pipeline
-1. **Collector (`web-vitals.ts`):** `initWebVitalsTracking()` mounts on root hydration and hooks into `PerformanceObserver` for `largest-contentful-paint`, `event` (INP duration > 100ms), and `layout-shift`.
-2. **Dispatch Mechanism:** Reports are beaconed using non-blocking `navigator.sendBeacon('/api/v1/telemetry/vitals', payload)` to ensure zero main-thread contention.
-3. **Development Observability:** Emits structured debug entries to the browser console (`[Web Vitals] INP: 82ms (good)`).
+`RetentionJobFailing` / `RetentionJobStale`. The hourly job purges expired
+conversations, documents, memory and voice data (DPPA 2019 storage
+limitation). The API logs which store failed (`Retention cleanup failed for
+store=…`); fix the store and the next run catches up.
 
----
+### Security events
 
-## Quick Reference: File Locations
+`AuthenticationFailureSpike` / `AuthorizationFailureSpike`. Query
+`{service_name="ura-chatbot-api"} | event="authn_login_fail"` in Loki: one
+`security_reason` repeated by everyone is an IdP or key problem; many
+attempts against one route is an attack — rate limits already apply, block at
+the edge if it continues.
 
-| File                                 | Purpose                              |
-|--------------------------------------|--------------------------------------|
-| `App/backend/app/tracing.py`        | OpenTelemetry setup, span/metric helpers |
-| `App/backend/app/analytics.py`      | Prometheus metrics store + middleware |
-| `App/backend/app/main.py`           | `/metrics` endpoint, X-Request-ID    |
-| `App/backend/app/guardrails.py`     | Security guardrails (alert signals)  |
-| `App/backend/app/service.py`        | RAG pipeline (trace instrumentation) |
-| `.env.example`                       | All observability env vars           |
-| `docker-compose.yml`                | Container orchestration              |
+### Dependencies
+
+`RedisDown`: rate limits and the response cache fall back to per-worker
+memory (limits are then per worker). `QdrantDown`: see Failed retrievals.
+
+## File locations
+
+| File | Purpose |
+| --- | --- |
+| `App/backend/app/analytics.py` | Metrics facade, request middleware, chat-turn recorder |
+| `App/backend/app/tracing.py` | OTel setup, GenAI spans/metrics, turn token usage |
+| `App/backend/app/logging_config.py` | Root JSON logging, request id, redaction |
+| `App/backend/app/security_events.py` | OWASP-vocabulary security events |
+| `App/backend/app/client_telemetry.py` | RUM endpoints' models and recording |
+| `App/backend/app/audit/turns.py`, `audit/tsa.py` | Audit rows per turn; RFC 3161 seals |
+| `monitoring/prometheus.yml`, `recording-rules.yml`, `alerting-rules.yml` | Scrape, SLIs, alerts |
+| `monitoring/alertmanager.yml`, `blackbox.yml`, `otel-collector.yaml`, `loki.yaml` | Routing, probes, OTLP pipeline, log store |
+| `monitoring/slo/ura-chatbot.openslo.yaml` | SLO definitions |
+| `monitoring/tests/alerting-rules.test.yml` | promtool unit tests |
+| `tests/test_monitoring_config.py` | Config ↔ code consistency |

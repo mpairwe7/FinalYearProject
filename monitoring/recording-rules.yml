@@ -1,0 +1,75 @@
+# Recording rules — the SLIs the alerts and dashboards read.
+#
+# SLOs (monitoring/slo/ura-chatbot.openslo.yaml is the source of truth):
+#   * availability  99.9 % of API requests are not 5xx           (30 days)
+#   * chat latency  95 % of chat turns finish within 3 s (NFR-01) (30 days)
+# Error-budget burn rates use the multi-window, multi-burn-rate method from
+# the Google SRE workbook, so each window below is used by an alert.
+groups:
+  - name: ura-sli-availability
+    interval: 30s
+    rules:
+      - record: ura:http_requests:rate5m
+        expr: sum(rate(ura_http_requests_total[5m]))
+      - record: ura:http_errors_5xx:ratio_rate5m
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[5m])) / sum(rate(ura_http_requests_total[5m]))
+      - record: ura:http_errors_5xx:ratio_rate30m
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[30m])) / sum(rate(ura_http_requests_total[30m]))
+      - record: ura:http_errors_5xx:ratio_rate1h
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[1h])) / sum(rate(ura_http_requests_total[1h]))
+      - record: ura:http_errors_5xx:ratio_rate2h
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[2h])) / sum(rate(ura_http_requests_total[2h]))
+      - record: ura:http_errors_5xx:ratio_rate6h
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[6h])) / sum(rate(ura_http_requests_total[6h]))
+      - record: ura:http_errors_5xx:ratio_rate1d
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[1d])) / sum(rate(ura_http_requests_total[1d]))
+      - record: ura:http_errors_5xx:ratio_rate3d
+        expr: sum(rate(ura_http_requests_total{status=~"5.."}[3d])) / sum(rate(ura_http_requests_total[3d]))
+
+  - name: ura-sli-latency
+    interval: 30s
+    rules:
+      # Share of chat turns slower than the 3 s objective. The 3000 ms bucket
+      # is one of the API's histogram boundaries (app/analytics.py).
+      - record: ura:chat_turns_slow:ratio_rate5m
+        expr: 1 - sum(rate(ura_chat_response_time_ms_bucket{le="3000.0"}[5m])) / sum(rate(ura_chat_response_time_ms_count[5m]))
+      - record: ura:chat_turns_slow:ratio_rate30m
+        expr: 1 - sum(rate(ura_chat_response_time_ms_bucket{le="3000.0"}[30m])) / sum(rate(ura_chat_response_time_ms_count[30m]))
+      - record: ura:chat_turns_slow:ratio_rate1h
+        expr: 1 - sum(rate(ura_chat_response_time_ms_bucket{le="3000.0"}[1h])) / sum(rate(ura_chat_response_time_ms_count[1h]))
+      - record: ura:chat_turns_slow:ratio_rate6h
+        expr: 1 - sum(rate(ura_chat_response_time_ms_bucket{le="3000.0"}[6h])) / sum(rate(ura_chat_response_time_ms_count[6h]))
+      # p95 per transport, and per retrieval mode: the blended figure is
+      # dominated by FAQ/calculator answers, generation is reported apart.
+      - record: ura:chat_response_time_ms:p95_by_channel_5m
+        expr: histogram_quantile(0.95, sum by (le, channel) (rate(ura_chat_response_time_ms_bucket[5m])))
+      - record: ura:chat_response_time_ms:p95_by_mode_5m
+        expr: histogram_quantile(0.95, sum by (le, mode) (rate(ura_chat_response_time_ms_bucket[5m])))
+      - record: ura:chat_response_time_ms:p99_5m
+        expr: histogram_quantile(0.99, sum by (le) (rate(ura_chat_response_time_ms_bucket[5m])))
+      - record: ura:llm_time_to_first_token_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, provider, model) (rate(ura_llm_time_to_first_token_seconds_bucket[5m])))
+      - record: ura:llm_request_duration_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (le, provider, model) (rate(ura_llm_request_duration_seconds_bucket[5m])))
+
+  - name: ura-sli-quality
+    interval: 60s
+    rules:
+      - record: ura:faithfulness_score:mean_30m
+        expr: sum(rate(ura_faithfulness_score_sum[30m])) / sum(rate(ura_faithfulness_score_count[30m]))
+      # Containment: turns the assistant answered itself, out of all turns
+      # that did not fail. Abstention and escalation are the two ways out.
+      - record: ura:chat_turns:containment_ratio_1h
+        expr: sum(rate(ura_chat_turns_total{outcome="answered"}[1h])) / sum(rate(ura_chat_turns_total{outcome!="error"}[1h]))
+      - record: ura:chat_turns:abstention_ratio_1h
+        expr: sum(rate(ura_chat_turns_total{outcome="abstained"}[1h])) / sum(rate(ura_chat_turns_total{outcome!="error"}[1h]))
+      - record: ura:chat_turns:escalation_ratio_1h
+        expr: sum(rate(ura_chat_turns_total{outcome="escalated"}[1h])) / sum(rate(ura_chat_turns_total{outcome!="error"}[1h]))
+      - record: ura:chat_turns:error_ratio_1h
+        expr: sum(rate(ura_chat_turns_total{outcome="error"}[1h])) / sum(rate(ura_chat_turns_total[1h]))
+      - record: ura:retrieval_keyword_fallback:ratio_rate10m
+        expr: sum(rate(ura_retrieval_mode_total{mode="keyword"}[10m])) / sum(rate(ura_retrieval_mode_total[10m]))
+      - record: ura:llm_requests_error:ratio_rate10m
+        expr: sum by (provider) (rate(ura_llm_requests_total{status="error"}[10m])) / sum by (provider) (rate(ura_llm_requests_total[10m]))
+      - record: ura:llm_tokens:rate5m
+        expr: sum by (provider, model, type) (rate(ura_llm_tokens_total[5m]))

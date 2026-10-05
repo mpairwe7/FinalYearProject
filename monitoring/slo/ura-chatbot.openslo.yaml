@@ -1,0 +1,78 @@
+# Service level objectives for the URA chatbot, in OpenSLO v1.
+# The recording and alerting rules (monitoring/*.yml) implement these;
+# tests/test_monitoring_config.py fails if their objectives drift apart.
+apiVersion: openslo/v1
+kind: Service
+metadata:
+  name: ura-chatbot
+  displayName: URA taxpayer assistant
+spec:
+  description: Taxpayer chat (web, WebSocket, voice) and the staff console API.
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: api-availability
+  displayName: API availability
+spec:
+  description: Share of API requests not answered with a 5xx.
+  service: ura-chatbot
+  indicator:
+    metadata:
+      name: api-non-5xx
+    spec:
+      ratioMetric:
+        counter: true
+        bad:
+          metricSource:
+            type: Prometheus
+            spec:
+              query: sum(ura_http_requests_total{status=~"5.."})
+        total:
+          metricSource:
+            type: Prometheus
+            spec:
+              query: sum(ura_http_requests_total)
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  budgetingMethod: Occurrences
+  objectives:
+    - displayName: 99.9% of requests succeed
+      target: 0.999
+---
+apiVersion: openslo/v1
+kind: SLO
+metadata:
+  name: chat-latency
+  displayName: Chat answer latency (NFR-01)
+spec:
+  description: >
+    Share of chat turns, on every transport, that finish within 3 seconds.
+    Generation-only latency is reported separately (p95 by retrieval mode):
+    one A6000 does not meet 3 s for hybrid generation from 4 concurrent
+    turns (docs/runbooks/capacity-slo.md).
+  service: ura-chatbot
+  indicator:
+    metadata:
+      name: chat-turns-within-3s
+    spec:
+      ratioMetric:
+        counter: true
+        good:
+          metricSource:
+            type: Prometheus
+            spec:
+              query: sum(ura_chat_response_time_ms_bucket{le="3000.0"})
+        total:
+          metricSource:
+            type: Prometheus
+            spec:
+              query: sum(ura_chat_response_time_ms_count)
+  timeWindow:
+    - duration: 30d
+      isRolling: true
+  budgetingMethod: Occurrences
+  objectives:
+    - displayName: 95% of turns within 3 s
+      target: 0.95

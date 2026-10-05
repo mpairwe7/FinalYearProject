@@ -109,6 +109,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/feedback/summary"),
     # --- Analytics ---
     ("POST", "/v1/analytics/event"),
+    ("POST", "/v1/telemetry/vitals"),
+    ("POST", "/v1/telemetry/errors"),
     ("GET", "/v1/analytics/dashboard"),
     ("GET", "/v1/analytics/comparison"),
     ("GET", "/v1/analytics/journeys"),
@@ -240,6 +242,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("PATCH", "/v1/feedback/{message_id}/comment"): "this:test_feedback_comment_roundtrip",
     ("GET", "/v1/feedback/summary"): "test_api_endpoints.FeedbackEndpoints",
     ("POST", "/v1/analytics/event"): "test_api_endpoints.AnalyticsEndpoints",
+    ("POST", "/v1/telemetry/vitals"): "App/backend/tests/test_observability_endpoints.py",
+    ("POST", "/v1/telemetry/errors"): "App/backend/tests/test_observability_endpoints.py",
     ("GET", "/v1/analytics/dashboard"): "test_api_endpoints.AnalyticsEndpoints",
     ("GET", "/v1/analytics/comparison"): "test_api_endpoints.AnalyticsEndpoints",
     ("GET", "/v1/analytics/journeys"): "test_guided_journeys_integration:test_journey_funnel_endpoint",
@@ -417,12 +421,30 @@ _AUDIO = b"\x00\x01" * 512  # tiny raw PCM16 payload
 # ---------------------------------------------------------------------------
 # 1. Route-table drift guard
 # ---------------------------------------------------------------------------
+def _iter_routes(routes, prefix: str = ""):
+    """Yield ``(prefix, route)``, descending into included routers.
+
+    FastAPI 0.141 made ``include_router`` lazy: ``app.routes`` holds one
+    ``_IncludedRouter`` per call instead of copies of its routes, so the
+    connector and offline routers vanished from a flat walk while still
+    serving requests.
+    """
+    for route in routes:
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            context = getattr(route, "include_context", None)
+            yield from _iter_routes(original.routes, prefix + (getattr(context, "prefix", "") or ""))
+            continue
+        yield prefix, route
+
+
 def _live_route_table() -> set[tuple[str, str]]:
     table: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for prefix, route in _iter_routes(app.routes):
         path = getattr(route, "path", None)
         if path is None:
             continue
+        path = prefix + path
         methods = getattr(route, "methods", None)
         if methods:
             for m in methods:
@@ -458,10 +480,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (108 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (110 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 108, f"expected 108 HTTP endpoints, found {len(http)}"
+    assert len(http) == 110, f"expected 110 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

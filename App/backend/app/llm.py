@@ -65,6 +65,7 @@ from typing import TYPE_CHECKING, Any, Final
 from .agents.loop_control import ToolCallBudget
 from .agents.prompts import specialist_prompt
 from .guardrails import scan_retrieved_text
+from .tracing import llm_call
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -1086,18 +1087,20 @@ def _vllm_generate(
         if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
             headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
 
-        if client is not None:
-            try:
-                resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
-                resp.raise_for_status()
-                payload = resp.json()
-            except Exception:
-                payload = None
+        with llm_call("chat", LLM_MODEL, "vllm") as call:
+            if client is not None:
+                try:
+                    resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
+                    resp.raise_for_status()
+                    payload = resp.json()
+                except Exception:
+                    payload = None
 
-        if payload is None:
-            req = _vllm_build_request(url, body, accept_stream=False)
-            with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
-                payload = _json.loads(resp.read().decode("utf-8"))
+            if payload is None:
+                req = _vllm_build_request(url, body, accept_stream=False)
+                with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
+                    payload = _json.loads(resp.read().decode("utf-8"))
+            call.response(payload)
 
         choices = payload.get("choices", [])
         if not choices:
@@ -1161,9 +1164,11 @@ async def async_vllm_generate(
 
         aclient = await _get_vllm_async_client(effective_timeout)
         if aclient is not None:
-            resp = await aclient.post(url, json=body_dict, headers=headers, timeout=effective_timeout)
-            resp.raise_for_status()
-            payload = resp.json()
+            with llm_call("chat", LLM_MODEL, "vllm") as call:
+                resp = await aclient.post(url, json=body_dict, headers=headers, timeout=effective_timeout)
+                resp.raise_for_status()
+                payload = resp.json()
+                call.response(payload)
             choices = payload.get("choices", [])
             if not choices:
                 return ""
@@ -1236,8 +1241,10 @@ def _vllm_chat_completion(
         body = _json.dumps(payload).encode("utf-8")
         url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
         req = _vllm_build_request(url, body, accept_stream=False)
-        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            data = _json.loads(resp.read().decode("utf-8"))
+        with llm_call("chat", LLM_MODEL, "vllm") as call:
+            with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+                data = _json.loads(resp.read().decode("utf-8"))
+            call.response(data)
         choices = data.get("choices", [])
         if not choices:
             return {"content": "", "tool_calls": []}
@@ -1290,6 +1297,34 @@ def _vllm_chat_completion(
 
 
 
+def _stream_tokens(lines: Any, call: Any, json_module: Any) -> Generator[str, None, None]:
+    """Yield content tokens from OpenAI-style SSE lines; record usage on *call*.
+
+    The request asks for ``stream_options.include_usage``, so the server's
+    last chunk carries the token counts (with an empty ``choices`` list).
+    """
+    for raw in lines:
+        line = raw.decode("utf-8", errors="ignore").strip() if isinstance(raw, bytes) else raw
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if data == "[DONE]":
+            return
+        try:
+            chunk = json_module.loads(data)
+        except Exception:
+            continue
+        if chunk.get("usage"):
+            call.response(chunk)
+        choices = chunk.get("choices") or [{}]
+        token = (choices[0].get("delta") or {}).get("content", "")
+        if choices[0].get("finish_reason"):
+            call.finish_reason = str(choices[0]["finish_reason"])
+        if token:
+            call.first_token()
+            yield token
+
+
 def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None, None]:
     """Stream tokens from vLLM /chat/completions with ``stream=true``.
 
@@ -1310,6 +1345,7 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
             "max_tokens": LLM_MAX_TOKENS,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": True,
+            "stream_options": {"include_usage": True},
             "chat_template_kwargs": {"enable_thinking": False},
         }
         body = _json.dumps(body_dict).encode("utf-8")
@@ -1321,42 +1357,25 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
         client = _get_vllm_client(VLLM_HTTP_TIMEOUT)
         if client is not None:
             try:
-                with client.stream("POST", url, content=body, headers=headers, timeout=VLLM_HTTP_TIMEOUT) as resp:
-                    for line in resp.iter_lines():
-                        if not line or not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if data == "[DONE]":
-                            return
-                        try:
-                            chunk = _json.loads(data)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {})
-                            token = delta.get("content", "")
-                            if token:
-                                yield token
-                        except Exception:
-                            continue
+                with (
+                    llm_call("chat", LLM_MODEL, "vllm", streaming=True) as call,
+                    client.stream("POST", url, content=body, headers=headers, timeout=VLLM_HTTP_TIMEOUT) as resp,
+                ):
+                    yield from _stream_tokens(resp.iter_lines(), call, _json)
                 return
+            except GeneratorExit:
+                raise
             except Exception:
                 logger.debug("httpx stream failed, falling back to urllib", exc_info=True)
 
         req = _vllm_build_request(url, body, accept_stream=True)
-        with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310
-            for line_bytes in resp:
-                line = line_bytes.decode("utf-8", errors="ignore").strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    return
-                try:
-                    chunk = _json.loads(data)
-                    delta = chunk.get("choices", [{}])[0].get("delta", {})
-                    token = delta.get("content", "")
-                    if token:
-                        yield token
-                except Exception:
-                    continue
+        with (
+            llm_call("chat", LLM_MODEL, "vllm", streaming=True) as call,
+            urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp,  # nosec B310 # noqa: S310
+        ):
+            yield from _stream_tokens(resp, call, _json)
+    except GeneratorExit:
+        raise
     except Exception:
         logger.exception("vLLM HTTP stream failed")
 
