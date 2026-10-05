@@ -234,8 +234,18 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
     try:
         claims = _get_verifier().verify(token)
     except JWTAuthError as e:
-        logger.info("JWT rejected: %s", e)
-        raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
+        verifier = _get_verifier()
+        if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
+            try:
+                from .jwt_auth import _hs256_verify
+
+                claims = _hs256_verify(token, verifier.dev_secret)
+            except Exception:
+                logger.info("JWT rejected: %s", e)
+                raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
+        else:
+            logger.info("JWT rejected: %s", e)
+            raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
 
     user = _claims_to_user(claims)
     ctx = AuthContext(authenticated=True, user=user, claims=claims)

@@ -4800,8 +4800,7 @@ class ChatModel:
             if key in cls._ACTION_TRANSLATIONS:
                 out.append(cls._ACTION_TRANSLATIONS[key])
             else:
-                loc = localize_reply(action.strip(), locale)
-                out.append(loc if loc else action)
+                out.append(action)
         return out
 
     @classmethod
@@ -4814,20 +4813,12 @@ class ChatModel:
             key_t = (title, locale)
             if key_t in cls._RESOURCE_TRANSLATIONS:
                 out["title"] = cls._RESOURCE_TRANSLATIONS[key_t]
-            else:
-                loc_t = localize_reply(title, locale)
-                if loc_t:
-                    out["title"] = loc_t
 
         desc = str(out.get("description") or "").strip()
         if desc:
             key_d = (desc, locale)
             if key_d in cls._RESOURCE_TRANSLATIONS:
                 out["description"] = cls._RESOURCE_TRANSLATIONS[key_d]
-            else:
-                loc_d = localize_reply(desc, locale)
-                if loc_d:
-                    out["description"] = loc_d
         return out
 
     _WORKFLOW_LOCALIZATIONS: dict[str, dict[str, dict[str, Any]]] = {

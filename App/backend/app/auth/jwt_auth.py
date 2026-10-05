@@ -300,10 +300,7 @@ class JWTVerifier:
         token_alg = (header.get("alg") or "").upper()
 
         if token_alg != self.alg:
-            if APP_ENV != "production" and token_alg == "HS256" and self.dev_secret:
-                claims = _hs256_verify(token, self.dev_secret)
-            else:
-                raise JWTAuthError(f"unexpected alg: {token_alg}")
+            raise JWTAuthError(f"unexpected alg: {token_alg}")
         elif self.alg == "RS256":
             claims = self._rs256_verify(token)
         elif self.alg == "HS256" and self.dev_secret:
