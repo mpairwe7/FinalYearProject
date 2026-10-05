@@ -225,6 +225,61 @@ class MCPClient:
         tool = ToolRegistry.get(name)
         return tool.to_openai_spec() if tool is not None else None
 
+    # -- Resources & Prompts (MCP 2026-07-28 Primitives) ---------------
+    def list_resources(self, namespace: str | None = None) -> list[dict[str, Any]]:
+        """List all read-only data resources exposed across MCP transports."""
+        resources: list[dict[str, Any]] = []
+        seen_uris: set[str] = set()
+        transports = (
+            [self._transports[namespace]]
+            if namespace and namespace in self._transports
+            else list(self._transports.values())
+        )
+        for transport in transports:
+            if hasattr(transport, "list_resources"):
+                for r in transport.list_resources():
+                    uri = r.get("uri")
+                    if uri and uri not in seen_uris:
+                        seen_uris.add(uri)
+                        resources.append(r)
+        return resources
+
+    def read_resource(self, uri: str, *, tenant_id: str = "default", user_id: str = "") -> dict[str, Any]:
+        """Read the contents of a URI-addressable MCP resource."""
+        scheme = uri.split("://")[0].lower() if "://" in uri else ""
+        transport = self._transports.get(scheme, self._transports.get("core", next(iter(self._transports.values()))))
+        if hasattr(transport, "read_resource"):
+            return transport.read_resource(uri)
+        raise LookupError(f"No transport supports reading resource URI '{uri}'")
+
+    def list_prompts(self, namespace: str | None = None) -> list[dict[str, Any]]:
+        """List all prompt templates exposed across MCP transports."""
+        prompts: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        transports = (
+            [self._transports[namespace]]
+            if namespace and namespace in self._transports
+            else list(self._transports.values())
+        )
+        for transport in transports:
+            if hasattr(transport, "list_prompts"):
+                for p in transport.list_prompts():
+                    p_name = p.get("name")
+                    if p_name and p_name not in seen_names:
+                        seen_names.add(p_name)
+                        prompts.append(p)
+        return prompts
+
+    def get_prompt(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fetch and instantiate a prompt template by name."""
+        for transport in self._transports.values():
+            if hasattr(transport, "get_prompt"):
+                try:
+                    return transport.get_prompt(name, arguments)
+                except LookupError:
+                    continue
+        raise LookupError(f"Prompt template '{name}' not found")
+
     def available_for(
         self,
         user_role: str = "public",
@@ -347,6 +402,7 @@ class MCPClient:
             allowed_roles=tuple(_meta_of(descriptor, "allowedRoles", ()) or ()),
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
             requires_confirmation=requires_confirmation and confirmed,
+            arguments=args,
         )
         if not policy["allowed"]:
             return finish(

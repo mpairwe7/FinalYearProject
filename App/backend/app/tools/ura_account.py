@@ -47,6 +47,7 @@ class UraAccountProfileTool(Tool):
                     "profile": {"type": "object"},
                     "error": {"type": "string"},
                 },
+                "required": ["ok"],
             },
             risk="high",
             namespace="ura_account",

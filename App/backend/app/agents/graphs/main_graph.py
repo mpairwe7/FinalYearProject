@@ -492,13 +492,8 @@ def node_respond(state: AgentGraphState) -> NodeResult:
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
-def build_main_graph() -> GraphRuntime:
-    """Construct the bounded main agent graph.
-
-    Upstream LangGraph adoption needs an explicit state adapter, conditional
-    edge mapping, checkpointer configuration, and idempotent side effects; the
-    current mutable-state nodes are not directly replay-safe.
-    """
+def build_main_graph(checkpointer: Any = None) -> GraphRuntime:
+    """Construct the bounded main agent graph with optional durable checkpointer."""
     nodes: dict[str, GraphNode] = {
         "route": node_route,
         "tool_rag_select": node_tool_rag_select,
@@ -509,4 +504,4 @@ def build_main_graph() -> GraphRuntime:
         "reflect": node_reflect,
         "respond": node_respond,
     }
-    return GraphRuntime(nodes=nodes, entry="route", max_steps=12)
+    return GraphRuntime(nodes=nodes, entry="route", max_steps=12, checkpointer=checkpointer)

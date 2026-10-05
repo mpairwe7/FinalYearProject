@@ -353,3 +353,57 @@ def record_voice_metrics(
             _voice_session_hist.record(session_duration_s)
     except Exception:
         logger.debug("Failed to record voice metrics", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# OpenTelemetry 1.30+ W3C Distributed Tracing & GenAI Tool Call Conventions
+# ---------------------------------------------------------------------------
+
+def generate_w3c_traceparent() -> str:
+    """Generate a standard W3C traceparent header value (version 00)."""
+    import os
+
+    try:
+        from opentelemetry import trace
+        span = trace.get_current_span()
+        span_ctx = span.get_span_context() if span else None
+        if span_ctx and span_ctx.is_valid:
+            flags = f"{span_ctx.trace_flags:02x}"
+            return f"00-{span_ctx.trace_id:032x}-{span_ctx.span_id:016x}-{flags}"
+    except Exception:
+        pass
+
+    # High-entropy fallback trace and span identifiers conforming to W3C
+    trace_id = os.urandom(16).hex()
+    span_id = os.urandom(8).hex()
+    return f"00-{trace_id}-{span_id}-01"
+
+
+def inject_trace_context(headers: dict[str, str] | None = None) -> dict[str, str]:
+    """Inject W3C traceparent and tracestate headers into outbound HTTP or MCP request headers."""
+    h = dict(headers or {})
+    try:
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+        TraceContextTextMapPropagator().inject(h)
+    except Exception:
+        if "traceparent" not in h and "Traceparent" not in h:
+            h["traceparent"] = generate_w3c_traceparent()
+    return h
+
+
+@contextmanager
+def trace_tool_call(tool_name: str, call_id: str = ""):
+    """Span for agent tool execution adhering to OpenTelemetry GenAI semconv."""
+    if _tracer is None:
+        yield
+        return
+    with _tracer.start_as_current_span(
+        f"gen_ai.tool.{tool_name}",
+        attributes={
+            "gen_ai.system": "ura_agent_mcp",
+            "gen_ai.tool.name": tool_name,
+            "gen_ai.tool.call.id": call_id or tool_name,
+        },
+    ):
+        yield

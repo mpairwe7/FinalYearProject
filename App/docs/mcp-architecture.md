@@ -155,17 +155,35 @@ on them without understanding our tool names.
 
 | Namespace | Tools | Risk | Deployment |
 |---|---|---|---|
-| `tax_calculator` | 8 calculators | low | 🟢 standalone server available |
+| `tax_calculator` | 9 calculators (incl. customs, excise) | low | 🟢 standalone server available |
 | `education` | `explain_tax_concept` | low | in-process |
 | `rates` | `lookup_rate`, `list_available_rates`, `compare_tax_years` | low | in-process |
 | `rag` | `search_ura_knowledge_base` | low | in-process |
 | `calendar` | `get_current_date`, `get_next_deadlines` | low | in-process |
 | `empathy` | `assess_emotional_tone` | low | in-process |
 | `tax_graph` | `graph_resolve_rate`, `graph_rate_history`, `graph_effective_on` | low | in-process (embedded) |
+| `portal_navigator` | `navigate_external_portal` | low | in-process |
+| `document_audit` | `audit_tax_document` | low | in-process / standalone |
 | `core` | `escalate_to_human` | medium | in-process |
 | `tasks` | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres/SQLite-backed |
+| `efris` | `efris_fiscal_invoice`, `efris_taxpayer_status`, `efris_stock_management`, `efris_credit_note` | low–critical | in-process plugin connector (simulated) |
+| `digital_tax_stamps`| `dts_verify_stamp`, `dts_order_stamps`, `dts_activate_stamps`, `dts_taxpayer_status` | low–critical | in-process plugin connector (simulated) |
+| `payment_system` | `payment_generate_prn`, `payment_view_status`, `payment_reactivate_prn`, `payment_checkout_settle`, `payment_verify_advance_tax` | low–critical | in-process plugin connector (simulated) |
+| `tin_registration` | `tin_search_verify`, `tin_apply_individual`, `tin_apply_non_individual`, `tin_tax_obligations` | low–critical | in-process plugin connector (simulated) |
+| `ursb` | `ursb_verify_business`, `ursb_register_business`, `ursb_compliance_status` | low–critical | in-process plugin connector (simulated) |
+| `bwims` | `bwims_consignment_status`, `bwims_warehouse_inventory`, `bwims_release_clearance` | low–critical | in-process plugin connector (simulated) |
 | `ura_account` | `ura_account_profile` | high | DMZ |
 | `ura_actions` | `ura_action_proposal` | critical | DMZ |
+
+## Enterprise Security Controls (2026 Standards)
+
+- **Monetary Transaction Ceilings (`MAX_TRANSACTION_CEILING_UGX`)**: Hard ceiling set at UGX 50,000,000. Any mutating transaction exceeding this ceiling is automatically rejected at the dispatch boundary unless initiated by a verified `ura_admin`.
+- **Distributed Sliding-Window Velocity Limiter**: Mutating critical tool actions are capped at 10 actions/hour per user (`MCP_MAX_CRITICAL_ACTIONS_PER_HOUR`). Enforced via Redis sorted sets (`mcp:velocity:{user_id}`) with resilient fallback to thread-safe in-process sliding windows. Tool discovery probes (`discovery-probe`) are exempt to prevent discovery from consuming runtime quotas.
+- **Token Vaulting (`TokenVault`)**: All sensitive API keys, bearer tokens, and connector credentials stored in state or databases are encrypted using AES-256-GCM envelope encryption with HKDF key derivation.
+- **Saga Distributed Compensation**: Connectors implement `SystemConnector.compensate()`, allowing coordinated rollback of multi-action transactional sagas when downstream steps fail.
+- **Strict Output Schemas**: All 28 registered tools declare explicit `output_schema` contracts guaranteeing the `ok: bool` property and strongly-typed return keys. Client-side validation verifies responses and logs drift before passing results to the LLM.
+- **Tool RAG Dense Auto-Injection**: During FastAPI startup (`lifespan`), the dense semantic embedder from `HybridRetriever` is auto-injected into `tool_rag.py`, enabling cosine similarity retrieval for tool selection alongside multilingual stem expansion.
+- **W3C Distributed Traceability**: Outbound HTTP tool invocations inject standard W3C `traceparent` headers for distributed OpenTelemetry GenAI request tracking.
 
 ## The `mcp_tax_calculator` server
 

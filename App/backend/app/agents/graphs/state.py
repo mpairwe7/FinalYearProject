@@ -113,3 +113,75 @@ class AgentGraphState:
             "reply_len": len(self.reply),
             "budget": self.budget.stats(),
         }
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serializable dict of graph state for durable checkpointing."""
+        return {
+            "query": self.query,
+            "rewritten_query": self.rewritten_query,
+            "locale": self.locale,
+            "top_k": self.top_k,
+            "context_summary": self.context_summary,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "role": self.role,
+            "granted_purposes": list(self.granted_purposes),
+            "plan": list(self.plan),
+            "plan_reason": self.plan_reason,
+            "tool_calls": list(self.tool_calls),
+            "observations": list(self.observations),
+            "skipped_tools": list(self.skipped_tools),
+            "iterations": self.iterations,
+            "max_iterations": self.max_iterations,
+            "retrieval_mode": self.retrieval_mode,
+            "faithfulness": self.faithfulness,
+            "reflect_count": self.reflect_count,
+            "handoff_count": self.handoff_count,
+            "reply": self.reply,
+            "outcome": self.outcome.value,
+            "error": self.error,
+            "clarification_question": self.clarification_question,
+            "escalation_reason": self.escalation_reason,
+            "ticket_id": self.ticket_id,
+            "agent_role": self.agent_role,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentGraphState:
+        """Reconstruct an AgentGraphState from a stored checkpoint dict."""
+        outcome_val = data.get("outcome", GraphOutcome.ANSWERED.value)
+        try:
+            outcome = GraphOutcome(outcome_val)
+        except ValueError:
+            outcome = GraphOutcome.ANSWERED
+
+        state = cls(
+            query=str(data.get("query", "")),
+            rewritten_query=str(data.get("rewritten_query", "")),
+            locale=str(data.get("locale", "en")),
+            top_k=int(data.get("top_k", 4)),
+            context_summary=str(data.get("context_summary", "")),
+            tenant_id=str(data.get("tenant_id", "default")),
+            user_id=str(data.get("user_id", "")),
+            role=str(data.get("role", "public")),
+            granted_purposes=list(data.get("granted_purposes", [])),
+            plan=list(data.get("plan", [])),
+            plan_reason=str(data.get("plan_reason", "")),
+            tool_calls=list(data.get("tool_calls", [])),
+            observations=list(data.get("observations", [])),
+            skipped_tools=list(data.get("skipped_tools", [])),
+            iterations=int(data.get("iterations", 0)),
+            max_iterations=int(data.get("max_iterations", 3)),
+            retrieval_mode=str(data.get("retrieval_mode", "keyword")),
+            faithfulness=float(data["faithfulness"]) if data.get("faithfulness") is not None else None,
+            reflect_count=int(data.get("reflect_count", 0)),
+            handoff_count=int(data.get("handoff_count", 0)),
+            reply=str(data.get("reply", "")),
+            outcome=outcome,
+            error=str(data.get("error", "")),
+            clarification_question=str(data.get("clarification_question", "")),
+            escalation_reason=str(data.get("escalation_reason", "")),
+            ticket_id=str(data.get("ticket_id", "")),
+            agent_role=str(data.get("agent_role", "graph_agent")),
+        )
+        return state

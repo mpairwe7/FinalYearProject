@@ -86,7 +86,7 @@ def _canonicalize_text(text: str) -> str:
 # the SYSTEM_PROMPT in llm.py — any signature line added there must also
 # appear here to remain detectable.
 _PROMPT_SIGNATURE_PHRASES: tuple[str, ...] = (
-    "URA Digital Assistant",
+    "You are the URA Digital Assistant",
     "official AI helper",
     "Answer ONLY from the provided context passages",
     "Do NOT use prior knowledge",

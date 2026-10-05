@@ -112,6 +112,7 @@ class SearchKnowledgeBaseTool(Tool):
                     "results": {"type": "array"},
                     "error": {"type": "string"},
                 },
+                "required": ["ok"],
             },
             risk="low",
             namespace="rag",

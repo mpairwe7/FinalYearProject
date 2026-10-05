@@ -80,6 +80,20 @@ This release closes critical customer experience (CX) and operational gaps ident
   - **Upgraded Staff Workbench (`/admin/connectors`)**: Added an **"+ Add Connector"** modal dialog, live diagnostic ping button with real-time RTT latency badges (`✓ Ping OK (12 ms · 4 MCP tools)`), settings modal, and visual environment indicators (`Live Production` vs `Simulation Mode`).
   - **Public Composer Clarification**: Public chat attachments focus strictly on document uploads (PDF, Word, Excel, CSV) and camera capture, while connector infrastructure is managed through `/admin/connectors` behind `StaffGuard`.
 
+### 2.7 October 2026 Standards Hardening: Blast Radius, Vaulting, and Saga Compensation
+* **OWASP LLM06 Excessive Agency Mitigation (`App/backend/app/mcp/policy.py`)**:
+  - Enforced monetary transaction ceilings (`MAX_TRANSACTION_CEILING_UGX` default 50M UGX), requiring supervisor/admin sign-off for proposals exceeding threshold.
+  - Implemented hourly critical action velocity limiters (`MCP_MAX_CRITICAL_ACTIONS_PER_HOUR` default 10/hour per user) using a thread-safe sliding window tracker.
+* **OpenTelemetry 1.30+ W3C Distributed Tracing (`App/backend/app/tracing.py`)**:
+  - Implemented `generate_w3c_traceparent()` and `inject_trace_context()` to propagate standard W3C `traceparent` headers into outbound connector requests.
+  - Added `trace_tool_call()` adhering to `gen_ai.system`, `gen_ai.tool.name`, and `gen_ai.tool.call.id` semconv.
+* **Anthropic MCP Resources Primitive & Universal Saga Compensation (`plugins/base.py`)**:
+  - Added `MCPResource` schema and `get_resources()` / `read_resource()` on `SystemConnector` to standardize read-only data access without LLM tool-call loops.
+  - Added `compensate_action()` interface on `SystemConnector` to standardize automated rollback (e.g. issuing offsetting EFRIS credit notes or cancelling PRNs).
+* **NIST SP 800-57 Token Vaulting (`App/backend/app/auth/vault.py`)**:
+  - Implemented `TokenVault` using authenticated AES-256-GCM cipher with cryptographic nonces to encrypt connector API keys and client secrets at rest.
+  - Implemented automated secret masking (`••••••••`) ensuring credentials are never exposed in transcripts, logs, or JSON responses.
+
 ---
 
 ## 3. Empirical Verification & Benchmark Scorecard

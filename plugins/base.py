@@ -40,6 +40,16 @@ class ToolSchema:
     idempotent: bool = True
     open_world: bool = False
 
+    def __post_init__(self) -> None:
+        if self.output_schema and isinstance(self.output_schema, dict):
+            if "properties" in self.output_schema and "ok" in self.output_schema["properties"]:
+                req = list(self.output_schema.get("required", []))
+                if "ok" not in req:
+                    req.append("ok")
+                    schema_copy = dict(self.output_schema)
+                    schema_copy["required"] = req
+                    object.__setattr__(self, "output_schema", schema_copy)
+
     def annotations(self) -> dict[str, Any]:
         """MCP annotations object for this tool."""
         return {
@@ -135,6 +145,24 @@ class PluginMetadata:
     documentation_url: str = ""
 
 
+@dataclass(frozen=True)
+class MCPResource:
+    """Standardized URI-addressable, read-only data source conforming to the MCP specification."""
+
+    uri: str
+    name: str
+    description: str = ""
+    mime_type: str = "application/json"
+
+    def to_mcp_dict(self) -> dict[str, Any]:
+        return {
+            "uri": self.uri,
+            "name": self.name,
+            "description": self.description,
+            "mimeType": self.mime_type,
+        }
+
+
 class SystemConnector(ABC):
     """Abstract connector bridging an external or internal system to the agentic URA framework."""
 
@@ -161,6 +189,18 @@ class SystemConnector(ABC):
     @abstractmethod
     def get_status(self) -> dict[str, Any]:
         """Return structured diagnostics and status for the connector."""
+
+    def get_resources(self) -> list[MCPResource]:
+        """Return the list of read-only MCP resources addressable through this connector."""
+        return []
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        """Fetch read-only resource contents matching the specified URI."""
+        raise KeyError(f"Resource '{uri}' not found on connector '{self.system_name}'")
+
+    def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
+        """Universal Saga compensation interface for rolling back a previously executed action."""
+        return {"ok": False, "supported": False, "message": f"Compensation for '{action_type}' not supported"}
 
     def shutdown(self) -> None:  # noqa: B027
         """Gracefully release connector resources."""

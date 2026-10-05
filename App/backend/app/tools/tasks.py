@@ -98,6 +98,20 @@ class TaskCreateTool(Tool):
             destructive=False,
             idempotent=True,
             open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "status": {"type": "string"},
+                    "progress": {"type": "number"},
+                    "replayed": {"type": "boolean"},
+                    "explanation": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(
@@ -149,6 +163,20 @@ class TaskGetTool(Tool):
             read_only=True,
             idempotent=True,
             open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "status": {"type": "string"},
+                    "progress": {"type": "number"},
+                    "result": {"type": "object"},
+                    "explanation": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(self, task_id: str) -> dict[str, Any]:
@@ -195,6 +223,18 @@ class TaskCancelTool(Tool):
             destructive=False,
             idempotent=True,
             open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "task_id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "cancelled": {"type": "boolean"},
+                    "explanation": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(self, task_id: str) -> dict[str, Any]:

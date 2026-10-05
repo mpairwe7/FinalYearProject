@@ -570,6 +570,12 @@ async def lifespan(app: FastAPI):
     try:
         app.state.model = ChatModel()
         logger.info("ChatModel ready – %d tags loaded", len(app.state.model._faq_index))
+        if app.state.model and getattr(app.state.model, "_retriever", None):
+            dense = getattr(app.state.model._retriever, "_dense_model", None)
+            if dense is not None:
+                from .mcp.tool_rag import inject_dense_model
+
+                inject_dense_model(dense)
     except Exception:
         logger.exception("ChatModel initialisation failed")
         app.state.model = None
@@ -4752,12 +4758,22 @@ def configure_system_connector(
     """Configure endpoint, credentials, or live/sandbox mode for a connector."""
     _require_staff_writer(ctx)
     from .plugins import get_orchestrator
+    from .auth.vault import get_token_vault
+
+    vault = get_token_vault()
+    clean_payload = dict(payload)
+    if "api_key" in clean_payload and clean_payload["api_key"]:
+        raw_key = str(clean_payload["api_key"])
+        clean_payload["encrypted_key"] = vault.encrypt_secret(raw_key)
+        clean_payload["api_key"] = vault.mask_secret(raw_key)
 
     orchestrator = get_orchestrator()
-    res = orchestrator.configure_connector(name, payload)
+    res = orchestrator.configure_connector(name, clean_payload)
     if not res.get("ok") and "not found" in res.get("error", "").lower():
         raise HTTPException(status_code=404, detail=res["error"])
-    _staff_call_event(ctx, name, "connector_configured")
+    safe_uid = re.sub(r"[^a-zA-Z0-9_-]", "", str(ctx.user_id))[:64]
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "", str(name))[:64]
+    logger.info("Admin %s updated connector %s configuration", safe_uid, safe_name)
     return res
 
 
@@ -4781,12 +4797,18 @@ def register_external_connector(payload: dict[str, Any] = Body(default_factory=d
                 raise HTTPException(status_code=400, detail="Production connectors require HTTPS.")
             if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254") or hostname.startswith("10.") or hostname.startswith("192.168."):
                 raise HTTPException(status_code=400, detail="Private network endpoints are rejected in production.")
+
+    from .auth.vault import get_token_vault
+    vault = get_token_vault()
+    masked_key = vault.mask_secret(str(payload.get("api_key", ""))) if payload.get("api_key") else ""
+
     return {
         "ok": True,
         "id": payload["name"],
         "registered": True,
         "mode": payload.get("mode", "simulation"),
         "protocol": payload.get("protocol", "mcp"),
+        "masked_key": masked_key,
     }
 
 

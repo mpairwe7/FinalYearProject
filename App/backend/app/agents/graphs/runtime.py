@@ -18,6 +18,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from .state import AgentGraphState, GraphOutcome
 
@@ -42,6 +43,31 @@ class NodeResult:
     note: str = ""
 
 
+class CheckpointStore:
+    """Base class for durable graph state checkpointers."""
+
+    def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+
+class InMemoryCheckpointStore(CheckpointStore):
+    """Process-local checkpoint store for tests and lightweight executions."""
+
+    def __init__(self) -> None:
+        self._checkpoints: dict[str, list[dict[str, Any]]] = {}
+
+    def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        entry = {"thread_id": thread_id, "step": step, "node": node_name, "state": dict(state_dict), "ts": time.time()}
+        self._checkpoints.setdefault(thread_id, []).append(entry)
+
+    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        entries = self._checkpoints.get(thread_id)
+        return entries[-1]["state"] if entries else None
+
+
 class GraphRuntime:
     """Dispatch loop for a list of named nodes.
 
@@ -50,6 +76,7 @@ class GraphRuntime:
     - Per-node duration tracking into state.trace
     - Structured exception capture — a failing node terminates
       with ``outcome=ERRORED`` rather than unwinding
+    - Optional durable checkpointing after each node transition
     """
 
     def __init__(
@@ -57,6 +84,7 @@ class GraphRuntime:
         nodes: Mapping[str, GraphNode],
         entry: str,
         max_steps: int = 12,
+        checkpointer: CheckpointStore | None = None,
     ) -> None:
         if not isinstance(nodes, Mapping) or not nodes:
             raise ValueError("nodes must be a non-empty mapping")
@@ -71,8 +99,9 @@ class GraphRuntime:
         self._nodes = dict(nodes)
         self._entry = entry
         self._max_steps = max_steps
+        self._checkpointer = checkpointer
 
-    def run(self, state: AgentGraphState) -> AgentGraphState:
+    def run(self, state: AgentGraphState, thread_id: str = "") -> AgentGraphState:
         current = self._entry
         steps = 0
         while current != END:
@@ -122,6 +151,12 @@ class GraphRuntime:
                 break
 
             state.record(current, elapsed_ms, status="ok")
+
+            if self._checkpointer and thread_id:
+                try:
+                    self._checkpointer.save_checkpoint(thread_id, steps, current, state.to_dict())
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("GraphRuntime: checkpoint save skipped: %s", exc)
 
             if result.outcome is not None:
                 state.outcome = result.outcome

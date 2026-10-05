@@ -1456,6 +1456,14 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     loc = (locale or "en").strip().lower().split("-")[0]
     if not text or loc in ("", "en"):
         return text
+    if loc == "sw":
+        from .receptionist.lexicon import normalize_swahili_tax_query
+
+        text = normalize_swahili_tax_query(text)
+    elif loc == "lg":
+        from .receptionist.lexicon import normalize_luganda_tax_query
+
+        text = normalize_luganda_tax_query(text)
     english = translate_query_for_retrieval(text, loc)
     if not english or english.casefold() == text.casefold():
         return text

@@ -184,6 +184,12 @@ class PluginOrchestrator:
         if endpoint_url:
             setattr(p, "endpoint_url", str(endpoint_url))
 
+        encrypted_key = config.get("encrypted_key")
+        if encrypted_key:
+            setattr(p, "encrypted_key", str(encrypted_key))
+            if hasattr(p.connector, "set_credentials"):
+                p.connector.set_credentials(str(encrypted_key))
+
         return {
             "ok": True,
             "id": p.metadata.name,
@@ -214,6 +220,27 @@ class PluginOrchestrator:
             if plugin.status == PluginStatus.ACTIVE:
                 tools.extend(plugin.connector.get_tools())
         return tools
+
+    def get_all_resources(self) -> list[dict[str, Any]]:
+        """Aggregate all read-only MCP resources across active connectors."""
+        resources: list[dict[str, Any]] = []
+        for plugin in self._plugins.values():
+            if plugin.status == PluginStatus.ACTIVE:
+                for r in plugin.connector.get_resources():
+                    resources.append(r.to_mcp_dict())
+        return resources
+
+    def read_connector_resource(self, uri: str) -> dict[str, Any] | None:
+        """Fetch read-only content for a connector resource matching uri."""
+        for plugin in self._plugins.values():
+            if plugin.status == PluginStatus.ACTIVE:
+                uris = {r.uri for r in plugin.connector.get_resources()}
+                if uri in uris:
+                    try:
+                        return plugin.connector.read_resource(uri)
+                    except KeyError:
+                        pass
+        return None
 
     def wire_tools(self, registry: Any = None) -> list[str]:
         """Wire all active connector tools into the agent ToolRegistry."""

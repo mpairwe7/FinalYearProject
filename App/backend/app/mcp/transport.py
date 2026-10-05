@@ -99,6 +99,97 @@ class InProcessTransport:
 
         return ToolRegistry.call(tool_name, arguments)
 
+    def list_resources(self) -> list[dict[str, Any]]:
+        resources: list[dict[str, Any]] = [
+            {
+                "uri": "ura://rates/current",
+                "name": "URA Statutory Tax Rates",
+                "description": "Official statutory tax rate table (VAT, PAYE, WHT, Corporation Tax)",
+                "mimeType": "application/json",
+            },
+            {
+                "uri": "ura://calendar/deadlines",
+                "name": "URA Tax Deadlines Calendar",
+                "description": "Upcoming statutory filing, withholding, and return deadlines calendar",
+                "mimeType": "application/json",
+            },
+        ]
+        try:
+            from plugins.orchestrator import get_orchestrator
+            resources.extend(get_orchestrator().get_all_resources())
+        except Exception:
+            pass
+        return resources
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        import json
+        if uri == "ura://rates/current":
+            from ..tax.tables import get_table
+            table = get_table()
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({"fiscal_year": table.fiscal_year, "status": table.status, "rates": table.rates, "currency": "UGX"}, default=str),
+                    }
+                ]
+            }
+        if uri == "ura://calendar/deadlines":
+            from ..tools import ToolRegistry
+            deadlines = ToolRegistry.call("get_next_deadlines", {})
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps(deadlines, default=str),
+                    }
+                ]
+            }
+        try:
+            from plugins.orchestrator import get_orchestrator
+            res = get_orchestrator().read_connector_resource(uri)
+            if res:
+                return {"contents": [res]}
+        except Exception:
+            pass
+        raise LookupError(f"Resource not found: '{uri}'")
+
+    def list_prompts(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "name": "vat_calculation_guide",
+                "description": "Guidance template for calculating and verifying standard 18% Value Added Tax in Uganda.",
+                "arguments": [{"name": "amount", "description": "Transaction amount in UGX", "required": True}],
+            },
+            {
+                "name": "tcc_tender_checklist",
+                "description": "Compliance checklist template for Tax Clearance Certificate applications.",
+                "arguments": [{"name": "entity_type", "description": "individual or company", "required": False}],
+            },
+        ]
+
+    def get_prompt(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        args = arguments or {}
+        if name == "vat_calculation_guide":
+            amt = args.get("amount", "your specified amount")
+            return {
+                "description": f"VAT Calculation Guide for {amt}",
+                "messages": [
+                    {"role": "user", "content": {"type": "text", "text": f"Guide me through calculating 18% VAT on {amt} UGX under Uganda VAT Act."}}
+                ],
+            }
+        if name == "tcc_tender_checklist":
+            ent = args.get("entity_type", "business")
+            return {
+                "description": f"Tax Clearance Certificate Checklist for {ent}",
+                "messages": [
+                    {"role": "user", "content": {"type": "text", "text": f"Provide the official URA compliance checklist for a {ent} TCC application."}}
+                ],
+            }
+        raise LookupError(f"Prompt template not found: '{name}'")
+
 
 class HttpTransport:
     """Streamable-HTTP transport to a remote MCP server.
@@ -259,6 +350,20 @@ class HttpTransport:
             "ok": not result.get("isError", False),
             "content": result.get("content", []),
         }
+
+    def list_resources(self) -> list[dict[str, Any]]:
+        result = self._request("resources/list", {"_meta": request_meta()})
+        return [r for r in result.get("resources", []) if isinstance(r, dict)]
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        return self._request("resources/read", {"uri": uri, "_meta": request_meta()})
+
+    def list_prompts(self) -> list[dict[str, Any]]:
+        result = self._request("prompts/list", {"_meta": request_meta()})
+        return [p for p in result.get("prompts", []) if isinstance(p, dict)]
+
+    def get_prompt(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("prompts/get", {"name": name, "arguments": arguments or {}, "_meta": request_meta()})
 
 
 def build_transports() -> dict[str, ToolTransport]:
