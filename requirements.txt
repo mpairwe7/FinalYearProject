@@ -27,7 +27,7 @@ qdrant-client>=1.17.1,<2.0.0
 # Verified instead that 3.3.2 works against
 # huggingface-hub 1.29.0 — `Dataset.from_list`, the only call the serving path
 # makes (App/backend/app/evaluation.py), round-trips fine.
-datasets==3.3.2
+datasets==5.0.1
 evaluate==0.4.6
 # CVE-2026-9856 / GHSA-xrqw-3rrv-vx5w: path traversal in `save_pretrained()`
 # on PreTrainedTokenizerBase and ProcessorMixin — `chat_template` dict keys were
