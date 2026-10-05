@@ -107,33 +107,70 @@ class MetricsStore:
         lines: list[str] = []
         declared_types: set[str] = set()
 
+        def _emit_type(metric_name: str, metric_type: str) -> None:
+            if metric_name not in declared_types:
+                lines.append(f"# TYPE {metric_name} {metric_type}")
+                declared_types.add(metric_name)
+
+        ms_buckets = (10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 3000.0, 5000.0, 10000.0, float("inf"))
+        s_buckets = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0, 30.0, float("inf"))
+
         with self._lock:
             for key, val in sorted(self._counters.items()):
                 name, labels = self._parse_key(key)
-                if name not in declared_types:
-                    lines.append(f"# TYPE {name} counter")
-                    declared_types.add(name)
-                lines.append(f"{name}{labels} {val}")
+                target_names = [name]
+                if not name.startswith("ura_"):
+                    target_names.append(f"ura_{name}")
+                for mname in target_names:
+                    _emit_type(mname, "counter")
+                    lines.append(f"{mname}{labels} {val}")
 
             for key, values in sorted(self._histograms.items()):
                 if not values:
                     continue
                 name, labels = self._parse_key(key)
-                if name not in declared_types:
-                    lines.append(f"# TYPE {name} summary")
-                    declared_types.add(name)
                 sv = sorted(values)
                 n = len(sv)
                 total = sum(sv)
-                for label, q in _QUANTILES:
-                    idx = min(int(n * q), n - 1)
-                    if labels:
-                        combined = f'quantile="{label}",{labels[1:-1]}'
-                        lines.append(f"{name}{{{combined}}} {sv[idx]:.4f}")
-                    else:
-                        lines.append(f'{name}{{quantile="{label}"}} {sv[idx]:.4f}')
-                lines.append(f"{name}_count{labels} {n}")
-                lines.append(f"{name}_sum{labels} {total:.4f}")
+                target_names = [name]
+                if not name.startswith("ura_"):
+                    target_names.append(f"ura_{name}")
+
+                for mname in target_names:
+                    _emit_type(mname, "summary")
+                    for label, q in _QUANTILES:
+                        idx = min(int(n * q), n - 1)
+                        if labels:
+                            combined = f'quantile="{label}",{labels[1:-1]}'
+                            lines.append(f"{mname}{{{combined}}} {sv[idx]:.4f}")
+                        else:
+                            lines.append(f'{mname}{{quantile="{label}"}} {sv[idx]:.4f}')
+                    lines.append(f"{mname}_count{labels} {n}")
+                    lines.append(f"{mname}_sum{labels} {total:.4f}")
+
+                    if any(term in mname for term in ("duration", "latency", "response_time", "first_byte", "time_ms")):
+                        _emit_type(f"{mname}_bucket", "histogram")
+                        buckets = ms_buckets if ("_ms" in mname or "duration_ms" in mname) else s_buckets
+                        labels_inner = labels[1:-1] if labels else ""
+                        for b in buckets:
+                            le_str = "+Inf" if b == float("inf") else f"{b:g}"
+                            b_count = sum(1 for v in sv if v <= b)
+                            bucket_lbl = f'le="{le_str}",{labels_inner}' if labels_inner else f'le="{le_str}"'
+                            lines.append(f"{mname}_bucket{{{bucket_lbl}}} {b_count}")
+
+            # Direct scalar gauges for score metrics
+            for key, values in sorted(self._histograms.items()):
+                if not values:
+                    continue
+                name, labels = self._parse_key(key)
+                if "faithfulness" in name or "score" in name:
+                    avg_val = round(sum(values) / len(values), 4)
+                    target_names = [name]
+                    if not name.startswith("ura_"):
+                        target_names.append(f"ura_{name}")
+                    for mname in target_names:
+                        _emit_type(mname, "gauge")
+                        lines.append(f"{mname}{labels} {avg_val}")
 
         lines.extend(_index_lifecycle_prometheus_metrics())
         return "\n".join(lines) + "\n"

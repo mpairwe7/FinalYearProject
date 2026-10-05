@@ -26,6 +26,7 @@ via the existing :mod:`database` dispatch.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -145,15 +146,24 @@ def request_rfc3161_timestamp(imprint_sha256: str, tsa_url: str = "") -> str | N
     try:
         import httpx
 
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/timestamp-reply, application/json",
+        }
         resp = httpx.post(
             url,
             json={"hash": imprint_sha256, "algorithm": "sha256", "version": "1"},
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=3.0,
         )
         if resp.status_code in (200, 201):
-            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            return str(data.get("token") or data.get("timestamp_token") or resp.text[:256])
+            ct = resp.headers.get("content-type", "")
+            if "timestamp-reply" in ct or "octet-stream" in ct:
+                return base64.b64encode(resp.content).decode("ascii")
+            if ct.startswith("application/json"):
+                data = resp.json()
+                return str(data.get("token") or data.get("timestamp_token") or resp.text[:256])
+            return str(resp.text[:256])
     except Exception as exc:  # noqa: BLE001
         logger.debug("RFC 3161 TSA timestamp witness unavailable: %s", exc)
     return None
@@ -210,6 +220,7 @@ class AuditLedger:
         )
         self._add_column("audit_events", "hash_version", "INTEGER NOT NULL DEFAULT 1")
         self._add_column("audit_anchors", "head_hash", "TEXT NOT NULL DEFAULT ''")
+        self._add_column("audit_anchors", "tsa_token", "TEXT DEFAULT ''")
         # Created separately: a ledger written before these existed may
         # already hold a forked chain (two rows with one seq). That must not
         # stop the service; the verifier reports the fork instead.
@@ -382,7 +393,7 @@ class AuditLedger:
         from .. import database as db
 
         return db.query_one(
-            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token
                FROM audit_anchors WHERE tenant_id = ?
                ORDER BY last_seq DESC LIMIT 1""",
             (tenant_id,),
@@ -393,7 +404,7 @@ class AuditLedger:
         from .. import database as db
 
         return db.query_all(
-            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token
                FROM audit_anchors WHERE tenant_id = ?
                ORDER BY first_seq ASC""",
             (tenant_id,),
@@ -495,8 +506,8 @@ class AuditLedger:
         try:
             db.execute(
                 """INSERT INTO audit_anchors
-                   (anchor_id, tenant_id, first_seq, last_seq, merkle_root, head_hash, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (anchor_id, tenant_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     anchor["anchor_id"],
                     anchor["tenant_id"],
@@ -505,6 +516,7 @@ class AuditLedger:
                     anchor["merkle_root"],
                     anchor["head_hash"],
                     anchor["created_at"],
+                    anchor.get("tsa_token", ""),
                 ),
             )
         except Exception as exc:

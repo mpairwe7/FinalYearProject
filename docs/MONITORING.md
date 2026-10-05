@@ -37,7 +37,7 @@ failing appends and failing scheduled seals; see
   | (Prometheus  |      (text exposition)     +----------+
   |  middleware)  |                                 ^
   +--------------+      +-------------+            |
-  | structlog    |----->| Loki / ELK  |------------+
+  | logging_config|----->| Loki / ELK  |------------+
   | JSON logs    |      +-------------+
   +--------------+
 ```
@@ -46,7 +46,7 @@ failing appends and failing scheduled seals; see
 |---------|------------------------------|------------------|------------------|
 | Traces  | `tracing.py` (OpenTelemetry) | OTLP gRPC :4317  | Jaeger / Tempo   |
 | Metrics | `analytics.py` (Prometheus)  | Prometheus scrape | Prometheus + Grafana |
-| Logs    | `structlog` JSON             | Promtail / Filebeat | Loki / Elasticsearch |
+| Logs    | `logging_config.py` JSON     | Promtail / Filebeat | Loki / Elasticsearch |
 
 ---
 
@@ -62,6 +62,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
 
 # Logging
 LOG_LEVEL=info          # production: info, debug only in dev
+LOG_FORMAT=json         # production: json (OTel Log Data Model with PII scrubbing), dev: text
 ```
 
 `tracing.py` reads these on startup inside the FastAPI lifespan handler
@@ -84,7 +85,11 @@ is caught gracefully in `tracing.py`).
 ## 3. Key Metrics
 
 All metrics are emitted by the `MetricsStore` singleton in
-`App/backend/app/analytics.py` and exposed at `GET /metrics`.
+`App/backend/app/analytics.py` and exposed at `GET /metrics`. Metrics are
+dual-emitted with both bare and `ura_` prefixed names (e.g. `http_requests_total`
+and `ura_http_requests_total`). Latency and duration metrics also emit standard
+Prometheus histogram bucket series (`_bucket{le="..."}`) alongside summaries to
+support `histogram_quantile` evaluation in alerting rules and Grafana panels.
 
 ### HTTP layer (AnalyticsMiddleware)
 

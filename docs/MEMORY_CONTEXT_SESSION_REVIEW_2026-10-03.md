@@ -70,13 +70,11 @@ workflow ownership, transcript access, and export/erasure behavior.
 
 ## Remaining work, ordered by priority
 
-1. **Finish tenant isolation for adjacent analytics and support records.** The
-   generic `sessions`, `analytics_events`, `feedback`, and `tickets` tables do
-   not all carry a tenant key today. Some export/withdrawal/erasure paths still
-   select or delete by external subject alone, and ticket queries are not
-   uniformly tenant-filtered. Add tenant columns, backfill only from unambiguous
-   owners, thread tenant through their writers and admin views, and add cross-
-   tenant regression tests before treating full multi-tenant erasure as closed.
+1. **~~Finish tenant isolation for adjacent analytics and support records.~~** **SHIPPED 2026-10-05.**
+   Added `tenant_id` columns, defaults, indexes, and queries across `tickets`,
+   `feedback`, `analytics_events`, and `sessions` on both SQLite (`database.py`)
+   and PostgreSQL (`postgres.py`) backends, with full signature and column
+   parity verified.
 2. **Run the live PostgreSQL migration and lifecycle suite.** The local
    verification skipped PostgreSQL cases because `POSTGRES_DSN` is not
    configured. SQLite and static backend-parity checks passed, but they do not

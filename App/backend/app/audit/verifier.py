@@ -219,6 +219,9 @@ def verify_anchor(anchor: dict[str, Any], tenant_id: str = "default") -> AnchorB
     head_hash = anchor.get("head_hash") or ""
     if head_hash and rows[-1]["row_hash"] != head_hash:
         return _break("head_hash mismatch: the chain was rewritten under the seal")
+    tsa_token = str(anchor.get("tsa_token") or "").strip()
+    if tsa_token and len(tsa_token) < 8:
+        return _break("tsa_token format invalid or truncated")
     return None
 
 

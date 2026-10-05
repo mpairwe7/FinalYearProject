@@ -1,0 +1,231 @@
+{
+  "timestamp": 1791223117.012507,
+  "date": "2026-10-05 17:58:37 UTC",
+  "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
+  "overall_cx_score_pct": 100.0,
+  "scenarios_total": 10,
+  "scenarios_passed": 10,
+  "latency_stats": {
+    "avg_s": 1.18,
+    "p50_s": 0.85,
+    "p95_s": 1.85
+  },
+  "category_breakdown": {
+    "Pillar 9: Omnichannel Tracking": {
+      "total": 10,
+      "passed": 10
+    }
+  },
+  "detailed_results": [
+    {
+      "id": "CX-241",
+      "title": "Inquiry on Open Ticket Reference TIC-EA500752",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.73,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I called earlier and was given reference TIC-EA500752. What is the status of my inquiry?",
+          "passed": true,
+          "elapsed_s": 0.73,
+          "retrieval_mode": "support_case",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Case Status for TIC-EA500752**:  No active record was found matching reference `TIC-EA500752` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
+        }
+      ]
+    },
+    {
+      "id": "CX-242",
+      "title": "Inquiry on Ticket Reference with Lowercase Input",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.85,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Check my ticket status: tic-62d59b73",
+          "passed": true,
+          "elapsed_s": 0.85,
+          "retrieval_mode": "support_case",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Case Status for TIC-62D59B73**:  - **Status**: Open - **Assigned Team**: URA Support - **Summary**: Test dispute on VAT assessment  A URA officer is currently reviewing your case"
+        }
+      ]
+    },
+    {
+      "id": "CX-243",
+      "title": "Inquiry on Support Reference from Phone Desk Call",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.74,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "The officer on phone gave me case reference TIC-10AA8302. Has my file been reviewed?",
+          "passed": true,
+          "elapsed_s": 0.74,
+          "retrieval_mode": "support_case",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Case Status for TIC-10AA8302**:  No active record was found matching reference `TIC-10AA8302` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
+        }
+      ]
+    },
+    {
+      "id": "CX-244",
+      "title": "Check Status of Verified Knowledge Report KB-287690E1",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.85,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Check the status of my bug report KB-287690E1",
+          "passed": true,
+          "elapsed_s": 0.85,
+          "retrieval_mode": "discrepancy_status",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": true,
+          "failures": [],
+          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
+        }
+      ]
+    },
+    {
+      "id": "CX-245",
+      "title": "Check Status of Knowledge Review Report with Prefix Lowercase",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.74,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "What happened to my report kb-7e032876?",
+          "passed": true,
+          "elapsed_s": 0.74,
+          "retrieval_mode": "discrepancy_status",
+          "workflow_active": false,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Knowledge Review Report KB-7E032876**:  No discrepancy report was found matching reference `KB-7E032876`. If you encountered an inaccurate rate or outdated statutory provision, p"
+        }
+      ]
+    },
+    {
+      "id": "CX-246",
+      "title": "PRN Verification via 12-Digit Reference",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 1.56,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How can I confirm if PRN 226000123456 has been credited by the commercial bank?",
+          "passed": true,
+          "elapsed_s": 1.56,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To generate a Payment Registration Number (PRN) on the URA web portal (ura.go.ug):  1. Go to e-Services > Make a Payment > Generate a Payment Slip;  2. Select your payment type (e."
+        }
+      ]
+    },
+    {
+      "id": "CX-247",
+      "title": "Customs Bonded IM7 Bill of Lading Tracking Guidance",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 1.85,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "How do I track my customs declaration IM7 reference number on the portal?",
+          "passed": true,
+          "elapsed_s": 1.85,
+          "retrieval_mode": "vector",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "- I. The Importer or Agent shall lodge a declaration in the Customs systems of the destination Partner State;  - II. The declaration is processed and applicable taxes are assessed "
+        }
+      ]
+    },
+    {
+      "id": "CX-248",
+      "title": "TCC Application Acknowledgement Tracking",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 1.83,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I applied for a TCC 3 days ago on eTax. How do I track the approval status using my application number?",
+          "passed": true,
+          "elapsed_s": 1.83,
+          "retrieval_mode": "faq_priority",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "To apply for a Tax Clearance Certificate (TCC):  1. Log in to your e-Tax portal account at ura.go.ug;  2. Go to Tax Clearance > Apply for Tax Clearance Certificate;  3. Select the "
+        }
+      ]
+    },
+    {
+      "id": "CX-249",
+      "title": "Motor Vehicle Search Application Reference Tracking",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 0.78,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I paid 22,000 UGX for motor vehicle search. How do I download the certified vehicle report using the search reference?",
+          "passed": true,
+          "elapsed_s": 0.78,
+          "retrieval_mode": "vehicle_search_tracking",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Tracking Motor Vehicle Search Application Status**:  To track the progress of an official Motor Vehicle Search report on the URA e-Tax portal:  1. **Visit e-Services Portal**: Go"
+        }
+      ]
+    },
+    {
+      "id": "CX-250",
+      "title": "Objection Decision 30-Day Statutory Clock Inquiry",
+      "category": "Pillar 9: Omnichannel Tracking",
+      "passed": true,
+      "total_time_s": 1.82,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I submitted my tax objection 40 days ago with reference OBJ-2026. How long does the Commissioner have to make an objecti",
+          "passed": true,
+          "elapsed_s": 1.82,
+          "retrieval_mode": "vector",
+          "workflow_active": false,
+          "resources_count": 2,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "- A person dissatisfied with a tax decision for example an assessment, may within 45 days after receiving notice of tax decision, lodge an objection with the Commissioner.  - The o"
+        }
+      ]
+    }
+  ]
+}

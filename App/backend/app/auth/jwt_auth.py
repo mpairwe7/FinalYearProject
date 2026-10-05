@@ -147,16 +147,29 @@ def _fetch_jwks(url: str, timeout_s: float) -> dict[str, Any]:
     if APP_ENV == "production":
         if not url.startswith("https://"):
             raise JWTAuthError("OIDC_JWKS_URL must start with https:// in production")
-    elif not (url.startswith("https://") or url.startswith("http://")):
+    elif not url.startswith(("https://", "http://")):
         raise JWTAuthError("OIDC_JWKS_URL must start with https:// or http://")
 
+    payload = None
     try:
-        opener = urllib.request.build_opener(_JWKSRedirectHandler())
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with opener.open(req, timeout=timeout_s) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception as err:
-        raise JWTAuthError(f"failed to fetch JWKS: {err}") from err
+        import httpx
+
+        with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
+            resp = client.get(url, headers={"Accept": "application/json"})
+            resp.raise_for_status()
+            if APP_ENV == "production" and resp.url.scheme != "https":
+                raise JWTAuthError(f"Insecure redirect to non-https URL in production: {resp.url}")
+            payload = resp.json()
+    except (JWTAuthError, Exception) as err:
+        if isinstance(err, JWTAuthError):
+            raise
+        try:
+            opener = urllib.request.build_opener(_JWKSRedirectHandler())
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with opener.open(req, timeout=timeout_s) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception as inner_err:
+            raise JWTAuthError(f"failed to fetch JWKS: {inner_err}") from inner_err
 
     if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
         raise JWTAuthError("malformed JWKS payload")
