@@ -72,11 +72,22 @@ quality reports and `docs/runbooks/guided-journey-probes.md`.
 
 ## Staff controls and data access
 
-- Staff and administrators use `/admin/connectors` to see local health and
-  enable or disable built-in simulators. The page states that external services
-  are not connected.
+- Staff and administrators use `/admin/connectors` to see local health,
+  trigger live diagnostic pings, register new external connector endpoints via
+  the `+ Add Connector` modal (protected by SSRF validation and RFC 1918 loopback
+  guards), and inspect read-only connector resources.
 - The connector API requires administrator access; changing connector state
   also requires a staff-writer role.
+- Connector credentials and bearer tokens are vaulted using `TokenVault`
+  (AES-256-GCM envelope encryption with HKDF key derivation). Plaintext secrets
+  are never written to disk or logged.
+- Mutating actions across connectors adhere to monetary ceilings (`MAX_TRANSACTION_CEILING_UGX = 50,000,000 UGX`)
+  and distributed Redis velocity limits (10 mutating calls/hr).
+- Multi-step transactional sagas support compensation and rollback via
+  `SystemConnector.compensate()`.
+- Static reference data and documentation from connectors are exposed as read-only
+  MCP resources accessible through `PluginOrchestrator.get_all_resources()` and
+  `read_connector_resource()`.
 - Raw database record inspection is retired. `/v1/connectors/{name}/records`
   returns `410 Gone`; `/v1/connectors` exposes aggregate simulator health.
 - A stamp code missing from the DTS sample fixtures returns `UNKNOWN` with
