@@ -216,6 +216,16 @@ class ToolDeclarationTests(unittest.TestCase):
             with self.subTest(tool=schema.name):
                 self.assertTrue(schema.requires_confirmation)
 
+    def test_every_registered_tool_declares_output_schema(self) -> None:
+        tools = ToolRegistry.all()
+        self.assertTrue(tools)
+        for tool in tools:
+            schema = tool.schema
+            with self.subTest(tool=schema.name):
+                self.assertIsNotNone(schema.output_schema, f"Tool {schema.name} missing output_schema")
+                self.assertEqual(schema.output_schema.get("type"), "object")
+                self.assertIn("ok", schema.output_schema.get("required", []))
+
 
 if __name__ == "__main__":
     unittest.main()

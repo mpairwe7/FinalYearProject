@@ -215,6 +215,26 @@ class PluginOrchestrator:
                 tools.extend(plugin.connector.get_tools())
         return tools
 
+    def get_all_resources(self) -> list[dict[str, Any]]:
+        """Aggregate all read-only MCP resources across active connectors."""
+        resources: list[dict[str, Any]] = []
+        for plugin in self._plugins.values():
+            if plugin.status == PluginStatus.ACTIVE:
+                for r in plugin.connector.get_resources():
+                    resources.append(r.to_mcp_dict())
+        return resources
+
+    def read_connector_resource(self, uri: str) -> dict[str, Any] | None:
+        """Fetch read-only content for a connector resource matching uri."""
+        scheme = uri.split("://")[0].lower() if "://" in uri else ""
+        for plugin in self._plugins.values():
+            if plugin.status == PluginStatus.ACTIVE and plugin.connector.system_name == scheme:
+                try:
+                    return plugin.connector.read_resource(uri)
+                except KeyError:
+                    pass
+        return None
+
     def wire_tools(self, registry: Any = None) -> list[str]:
         """Wire all active connector tools into the agent ToolRegistry."""
         if registry is None:

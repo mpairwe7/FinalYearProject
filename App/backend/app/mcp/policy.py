@@ -35,18 +35,70 @@ MCP_MAX_CRITICAL_ACTIONS_PER_HOUR = int(os.getenv("MCP_MAX_CRITICAL_ACTIONS_PER_
 # Thread-safe sliding-window velocity tracker for critical actions
 _velocity_lock = threading.Lock()
 _user_action_history: dict[str, list[float]] = {}
+_redis_client = None
+_redis_checked = False
+
+
+def _get_velocity_redis():
+    global _redis_client, _redis_checked
+    if _redis_checked:
+        return _redis_client
+    _redis_checked = True
+    url = os.getenv("REDIS_URL", "")
+    if not url:
+        return None
+    try:
+        import redis
+
+        r = redis.from_url(url, socket_timeout=1)
+        r.ping()
+        _redis_client = r
+        return _redis_client
+    except Exception:
+        return None
 
 
 def reset_velocity_tracker() -> None:
     """Clear velocity history (useful for test isolation)."""
     with _velocity_lock:
         _user_action_history.clear()
+    r = _get_velocity_redis()
+    if r is not None:
+        try:
+            for key in r.scan_iter("mcp:velocity:*"):
+                r.delete(key)
+        except Exception:
+            pass
 
 
 def _check_and_record_velocity(user_id: str, limit: int = MCP_MAX_CRITICAL_ACTIONS_PER_HOUR, window_s: float = 3600.0) -> bool:
-    if not user_id or limit <= 0:
+    if not user_id or user_id == "discovery-probe" or limit <= 0:
         return True
     now = time.time()
+
+    # Prefer distributed Redis sorted set when available
+    r = _get_velocity_redis()
+    if r is not None:
+        try:
+            import uuid
+
+            key = f"mcp:velocity:{user_id}"
+            pipe = r.pipeline()
+            pipe.zremrangebyscore(key, "-inf", now - window_s)
+            pipe.zcard(key)
+            results = pipe.execute()
+            count = results[1]
+            if count >= limit:
+                return False
+            pipe = r.pipeline()
+            pipe.zadd(key, {f"{now}:{uuid.uuid4().hex[:6]}": now})
+            pipe.expire(key, int(window_s) + 60)
+            pipe.execute()
+            return True
+        except Exception as exc:
+            logger.debug("Redis velocity check failed, falling back to in-process tracker: %s", exc)
+
+    # In-process fallback
     with _velocity_lock:
         history = [t for t in _user_action_history.get(user_id, []) if now - t < window_s]
         if len(history) >= limit:

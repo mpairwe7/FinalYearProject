@@ -85,6 +85,7 @@ class EscalateToHumanTool(Tool):
                     "message": {"type": "string"},
                     "error": {"type": "string"},
                 },
+                "required": ["ok"],
             },
             risk="medium",
             namespace="core",

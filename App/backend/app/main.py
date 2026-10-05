@@ -570,6 +570,12 @@ async def lifespan(app: FastAPI):
     try:
         app.state.model = ChatModel()
         logger.info("ChatModel ready – %d tags loaded", len(app.state.model._faq_index))
+        if app.state.model and getattr(app.state.model, "_retriever", None):
+            dense = getattr(app.state.model._retriever, "_dense_model", None)
+            if dense is not None:
+                from .mcp.tool_rag import inject_dense_model
+
+                inject_dense_model(dense)
     except Exception:
         logger.exception("ChatModel initialisation failed")
         app.state.model = None

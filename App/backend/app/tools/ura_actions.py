@@ -50,6 +50,7 @@ class UraActionProposalTool(Tool):
                     "message": {"type": "string"},
                     "error": {"type": "string"},
                 },
+                "required": ["ok"],
             },
             risk="critical",
             requires_confirmation=True,

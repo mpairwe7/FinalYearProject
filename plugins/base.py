@@ -40,6 +40,16 @@ class ToolSchema:
     idempotent: bool = True
     open_world: bool = False
 
+    def __post_init__(self) -> None:
+        if self.output_schema and isinstance(self.output_schema, dict):
+            if "properties" in self.output_schema and "ok" in self.output_schema["properties"]:
+                req = list(self.output_schema.get("required", []))
+                if "ok" not in req:
+                    req.append("ok")
+                    schema_copy = dict(self.output_schema)
+                    schema_copy["required"] = req
+                    object.__setattr__(self, "output_schema", schema_copy)
+
     def annotations(self) -> dict[str, Any]:
         """MCP annotations object for this tool."""
         return {

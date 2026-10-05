@@ -3935,6 +3935,12 @@ class ChatModel:
         self._cache = create_cache()
         if self._retriever_ready and self._retriever._dense_model:
             self._cache.set_model(self._retriever._dense_model)
+            try:
+                from .mcp.tool_rag import inject_dense_model
+
+                inject_dense_model(self._retriever._dense_model)
+            except Exception:
+                logger.debug("Tool RAG dense inject skipped", exc_info=True)
 
         self._workflow_count = 0
         if _WORKFLOW_FLOWS_DIR.is_dir():

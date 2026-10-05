@@ -195,6 +195,22 @@ class LookupRateTool(Tool):
             },
             risk="low",
             namespace=RATES_NAMESPACE,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "tax_type": {"type": "string"},
+                    "display_name": {"type": "string"},
+                    "value": {"type": "number"},
+                    "formatted": {"type": "string"},
+                    "fiscal_year": {"type": "string"},
+                    "explanation": {"type": "string"},
+                    "rate_basis": {"type": ["object", "string"]},
+                    "authority": {"type": "object"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(
@@ -277,6 +293,23 @@ class ListAvailableRatesTool(Tool):
             },
             risk="low",
             namespace=RATES_NAMESPACE,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "fiscal_year": {"type": "string"},
+                    "count": {"type": "integer"},
+                    "rates": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                    },
+                    "explanation": {"type": "string"},
+                    "rate_basis": {"type": ["object", "string"]},
+                    "authority": {"type": "object"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(
@@ -356,6 +389,22 @@ class CompareFiscalYearsTool(Tool):
             },
             risk="low",
             namespace=RATES_NAMESPACE,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "from_fiscal_year": {"type": "string"},
+                    "to_fiscal_year": {"type": "string"},
+                    "changed": {"type": "array", "items": {"type": "object"}},
+                    "added": {"type": "array", "items": {"type": "object"}},
+                    "removed": {"type": "array", "items": {"type": "object"}},
+                    "unchanged_count": {"type": "integer"},
+                    "explanation": {"type": "string"},
+                    "authority": {"type": "object"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(self, from_fiscal_year: str, to_fiscal_year: str) -> dict[str, Any]:
