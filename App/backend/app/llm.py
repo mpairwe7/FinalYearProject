@@ -2209,11 +2209,76 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                 "tool_budget": budget.stats(),
             }
 
-        # Dispatch each parsed tool call and feed the results back
+        # Dispatch parsed tool calls (concurrently when multiple calls exist)
         assistant_tool_call_entries: list[dict[str, Any]] = []
         tool_result_messages: list[dict[str, Any]] = []
-        for idx, pc in enumerate(parsed_calls):
+
+        def _execute_single_call(idx: int, pc: dict[str, Any]) -> dict[str, Any]:
             call_id = pc.get("id") or f"call_{iteration}_{idx}"
+            call_t0 = time.perf_counter()
+            decision = budget.admit(pc["name"], pc.get("arguments", {}), iteration=iteration)
+            if not decision.should_dispatch:
+                res = decision.result or {}
+                return {
+                    "idx": idx,
+                    "call_id": call_id,
+                    "pc": pc,
+                    "decision": decision,
+                    "result": res,
+                    "ok": bool(res.get("ok", True)),
+                    "error": None,
+                    "skipped": True,
+                    "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+                }
+            try:
+                result_obj = client.call_tool(
+                    pc["name"],
+                    pc.get("arguments", {}),
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    user_role=user_role,
+                    granted_purposes=granted_purposes or [],
+                    iteration=iteration,
+                )
+                res = result_obj.result
+                ok_val = bool(getattr(result_obj, "ok", True))
+                err_val = None
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("tool dispatch raised for %s", pc.get("name"))
+                res = {"ok": False, "error": str(exc)}
+                ok_val = False
+                err_val = str(exc)
+            return {
+                "idx": idx,
+                "call_id": call_id,
+                "pc": pc,
+                "decision": decision,
+                "result": res,
+                "ok": ok_val,
+                "error": err_val,
+                "skipped": False,
+                "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+            }
+
+        if len(parsed_calls) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=min(len(parsed_calls), 8)) as executor:
+                executed_calls = list(
+                    executor.map(lambda item: _execute_single_call(item[0], item[1]), enumerate(parsed_calls))
+                )
+        else:
+            executed_calls = [_execute_single_call(0, parsed_calls[0])]
+
+        for exec_info in executed_calls:
+            idx = exec_info["idx"]
+            pc = exec_info["pc"]
+            call_id = exec_info["call_id"]
+            result = exec_info["result"]
+            ok = exec_info["ok"]
+            elapsed_ms = exec_info["elapsed_ms"]
+            decision = exec_info["decision"]
+
             _emit(
                 {
                     "type": "tool_call.started",
@@ -2223,15 +2288,8 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "iteration": iteration,
                 }
             )
-            call_t0 = time.perf_counter()
-            decision = budget.admit(
-                pc["name"], pc.get("arguments", {}), iteration=iteration
-            )
-            if not decision.should_dispatch:
-                # Repeat or over-budget: the model gets an answer either
-                # way, so it can move on instead of retrying blindly.
-                result = decision.result or {}
-                ok = bool(result.get("ok", True))
+
+            if exec_info["skipped"]:
                 _emit(
                     {
                         "type": "tool_call.skipped",
@@ -2243,33 +2301,17 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     }
                 )
             else:
-                try:
-                    result_obj = client.call_tool(
-                        pc["name"],
-                        pc.get("arguments", {}),
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        user_role=user_role,
-                        granted_purposes=granted_purposes or [],
-                        iteration=iteration,
-                    )
-                    result = result_obj.result
-                    ok = bool(getattr(result_obj, "ok", True))
-                except Exception as exc:
-                    logger.exception("tool dispatch raised for %s", pc.get("name"))
+                if exec_info["error"]:
                     _emit(
                         {
                             "type": "tool_call.error",
                             "call_id": call_id,
                             "name": pc["name"],
-                            "error": str(exc),
-                            "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+                            "error": exec_info["error"],
+                            "elapsed_ms": elapsed_ms,
                         }
                     )
-                    result = {"ok": False, "error": str(exc)}
-                    ok = False
                 budget.record(pc["name"], pc.get("arguments", {}), result)
-            elapsed_ms = (time.perf_counter() - call_t0) * 1000
             # Phase 4: HITL hook — tools with requires_confirmation=True
             # return ``submitted=False`` plus a ``proposal`` struct on the
             # first invocation.  Surface this so the client can elicit

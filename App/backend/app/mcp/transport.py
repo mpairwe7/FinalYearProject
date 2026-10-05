@@ -198,11 +198,20 @@ class HttpTransport:
     tool list, so any request may land on any replica.
     """
 
-    def __init__(self, namespace: str, base_url: str, token: str = "") -> None:
+    def __init__(
+        self,
+        namespace: str,
+        base_url: str,
+        token: str = "",
+        cert: tuple[str, str] | str | None = None,
+    ) -> None:
         self.name = f"http:{namespace}"
         self.namespace = namespace
         self.base_url = base_url.rstrip("/")
         self._token = token
+        cert_file = os.getenv(f"MCP_CLIENT_CERT_{namespace.upper()}")
+        key_file = os.getenv(f"MCP_CLIENT_KEY_{namespace.upper()}")
+        self._cert = (cert_file, key_file) if cert_file and key_file else (cert or None)
         self._tools: list[dict[str, Any]] | None = None
         self._tools_expires_at: float = 0.0
         self._client: Any = None
@@ -217,7 +226,7 @@ class HttpTransport:
                     self._client.close()
                 except Exception:
                     pass
-            self._client = httpx.Client(timeout=timeout_s)
+            self._client = httpx.Client(timeout=timeout_s, cert=self._cert)
             self._client_timeout_s = timeout_s
         return self._client
 

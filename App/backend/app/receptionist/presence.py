@@ -169,6 +169,17 @@ def get_presence_board() -> dict[str, Any]:
     }
 
 
+def count_active_officers(target_team: str = "") -> int:
+    """Return count of officers currently marked available, on_call, or busy (online)."""
+    officers = list_officers()
+    active = [
+        o for o in officers
+        if o.get("status") in ("available", "on_call", "wrap_up", "busy")
+        and (not target_team or target_team in o.get("teams", []))
+    ]
+    return len(active)
+
+
 def set_on_call(user_id: str, call_id: str, display_name: str = "") -> None:
     """Transition an officer to 'on_call'."""
     existing = get_presence(user_id)

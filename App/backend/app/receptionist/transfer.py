@@ -50,6 +50,16 @@ def _topic_and_priority(packet: dict[str, Any] | None) -> tuple[str, str]:
     return topic, priority if priority in PRIORITIES else "normal"
 
 
+def is_staff_available(target_team: str = "") -> bool:
+    """Return True if any officer is currently marked online for the target team."""
+    try:
+        from .presence import count_active_officers
+
+        return count_active_officers(target_team) > 0
+    except Exception:
+        return True
+
+
 def open_transfer(
     room: Any,
     chat_model: Any,

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -134,6 +135,28 @@ class AuditEvent:
             self.row_hash,
             self.hash_version,
         )
+
+
+def request_rfc3161_timestamp(imprint_sha256: str, tsa_url: str = "") -> str | None:
+    """Request an RFC 3161 cryptographic timestamp token for an audit seal hash."""
+    url = tsa_url or os.getenv("AUDIT_TSA_URL", "")
+    if not url:
+        return None
+    try:
+        import httpx
+
+        resp = httpx.post(
+            url,
+            json={"hash": imprint_sha256, "algorithm": "sha256", "version": "1"},
+            headers={"Content-Type": "application/json"},
+            timeout=3.0,
+        )
+        if resp.status_code in (200, 201):
+            data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            return str(data.get("token") or data.get("timestamp_token") or resp.text[:256])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("RFC 3161 TSA timestamp witness unavailable: %s", exc)
+    return None
 
 
 class AuditLedger:
@@ -455,15 +478,20 @@ class AuditLedger:
             (tenant_id, first_seq, last_seq),
         )
         head = rows[-1] if rows and int(rows[-1]["seq"]) == last_seq else None
+        merkle = compute_merkle_root(r["payload_hash"] for r in rows)
         anchor = {
             "anchor_id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "first_seq": first_seq,
             "last_seq": last_seq,
-            "merkle_root": compute_merkle_root(r["payload_hash"] for r in rows),
+            "merkle_root": merkle,
             "head_hash": str(head["row_hash"]) if head else "",
             "created_at": time.time(),
         }
+        tsa_url = os.getenv("AUDIT_TSA_URL", "")
+        tsa_token = request_rfc3161_timestamp(merkle, tsa_url) if tsa_url else None
+        if tsa_token:
+            anchor["tsa_token"] = tsa_token
         try:
             db.execute(
                 """INSERT INTO audit_anchors
