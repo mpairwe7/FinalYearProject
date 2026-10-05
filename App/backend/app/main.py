@@ -4771,7 +4771,9 @@ def configure_system_connector(
     res = orchestrator.configure_connector(name, clean_payload)
     if not res.get("ok") and "not found" in res.get("error", "").lower():
         raise HTTPException(status_code=404, detail=res["error"])
-    logger.info("Admin %s updated connector %s configuration", ctx.user_id, name)
+    safe_uid = re.sub(r"[^a-zA-Z0-9_-]", "", str(ctx.user_id))[:64]
+    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "", str(name))[:64]
+    logger.info("Admin %s updated connector %s configuration", safe_uid, safe_name)
     return res
 
 

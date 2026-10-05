@@ -33,7 +33,19 @@ class TokenVault:
     """Secure encrypted storage for API keys and connector secrets."""
 
     def __init__(self, master_key: str | None = None) -> None:
-        raw_key = master_key or os.getenv(_VAULT_KEY_ENV, _DEV_VAULT_SEED)
+        app_env = os.getenv("APP_ENV", "development").lower()
+        env_key = os.getenv(_VAULT_KEY_ENV)
+        if master_key:
+            raw_key = master_key
+        elif env_key:
+            raw_key = env_key
+        elif app_env == "production":
+            raise RuntimeError(
+                f"Production deployment requires {_VAULT_KEY_ENV} to be configured. "
+                "Default development vault seeds are rejected under APP_ENV=production."
+            )
+        else:
+            raw_key = _DEV_VAULT_SEED
         self._key = _derive_key(raw_key)
 
     def encrypt_secret(self, plaintext: str) -> str:
@@ -49,18 +61,15 @@ class TokenVault:
             # Pack nonce + ciphertext
             packed = nonce + ciphertext
             return base64.b64encode(packed).decode("ascii")
-        except ImportError:
-            # Fallback if cryptography library is unavailable in lightweight environments
-            logger.warning("cryptography package not found; storing with fallback encoding")
-            return f"enc_v1:{base64.b64encode(plaintext.encode('utf-8')).decode('ascii')}"
+        except ImportError as err:
+            raise RuntimeError("cryptography package is required for AES-256-GCM vault encryption") from err
 
     def decrypt_secret(self, ciphertext: str) -> str:
         """Decrypt ciphertext and return the original plaintext secret."""
         if not ciphertext:
             return ""
         if ciphertext.startswith("enc_v1:"):
-            raw_b64 = ciphertext[len("enc_v1:"):]
-            return base64.b64decode(raw_b64.encode("ascii")).decode("utf-8")
+            raise ValueError("Insecure legacy unauthenticated enc_v1 format is rejected")
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -73,7 +82,7 @@ class TokenVault:
             decrypted = aesgcm.decrypt(nonce, ct, None)
             return decrypted.decode("utf-8")
         except Exception as exc:
-            logger.error("Failed to decrypt vaulted secret (%s)", type(exc).__name__)
+            logger.error("Vault payload decryption failed (%s)", type(exc).__name__)
             return ""
 
     @staticmethod
