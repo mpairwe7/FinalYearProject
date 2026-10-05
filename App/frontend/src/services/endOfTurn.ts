@@ -64,6 +64,29 @@ export function levelDbfs(samples: Float32Array): number {
   return rms > 0 ? Math.max(SILENT_DBFS, 20 * Math.log10(rms)) : SILENT_DBFS;
 }
 
+/**
+ * Acoustic zero-crossing rate calculation.
+ * Voiced human speech formants concentrate zero crossings between 0.01 and 0.38 crossings per sample.
+ */
+export function zeroCrossingRate(samples: Float32Array): number {
+  if (samples.length < 2) return 0;
+  let crossings = 0;
+  for (let i = 1; i < samples.length; i++) {
+    if ((samples[i] >= 0 && samples[i - 1] < 0) || (samples[i] < 0 && samples[i - 1] >= 0)) {
+      crossings++;
+    }
+  }
+  return crossings / samples.length;
+}
+
+/** Check if the acoustic time-domain buffer matches human vocal characteristics rather than ultrasonic hiss */
+export function isVocalAcousticProfile(samples: Float32Array): boolean {
+  if (samples.length < 128) return true;
+  const zcr = zeroCrossingRate(samples);
+  // Suppresses high-frequency digital noise or ultrasonic hiss spikes (>0.45)
+  return zcr <= 0.45;
+}
+
 export class EndOfTurnDetector {
   private readonly silenceMs: number;
   private readonly minSpeechMs: number;
@@ -206,7 +229,10 @@ export function watchEndOfTurn(
   };
   timer = setInterval(() => {
     analyser.getFloatTimeDomainData(samples);
-    const event = detector.push(levelDbfs(samples), performance.now());
+    const db = levelDbfs(samples);
+    // Suppress non-vocal acoustic transients (table thumps, click spikes)
+    const effectiveDb = isVocalAcousticProfile(samples) ? db : Math.min(db, SILENT_DBFS + 20);
+    const event = detector.push(effectiveDb, performance.now());
     if (!event) return;
     if (event !== 'speech') stop();
     onEvent(event);

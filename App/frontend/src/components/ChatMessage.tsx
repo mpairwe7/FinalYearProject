@@ -511,6 +511,8 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
     citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
     prev.userQuery === next.userQuery &&
+    prev.turn.discrepancyReport?.id === next.turn.discrepancyReport?.id &&
+    prev.turn.discrepancyReport?.status === next.turn.discrepancyReport?.status &&
     prev.playingTurnId === next.playingTurnId &&
     prev.ttsLoading === next.ttsLoading &&
     prev.locale === next.locale &&

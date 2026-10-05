@@ -105,6 +105,8 @@
  * ------------------------------------------------------------------------- */
 .chatv2 .message-list {
   padding-top: var(--cv2-top-h);
+  scroll-padding-top: calc(var(--cv2-top-h) + 12px);
+  scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 24px);
   -webkit-mask-image: linear-gradient(
     180deg,
     transparent 0,
