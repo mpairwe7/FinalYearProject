@@ -60,6 +60,9 @@ deployment review.
   stream from being re-announced token by token.
 - CI runs the accessibility suite at desktop and mobile viewports. Lighthouse
   retains an accessibility score gate of at least 0.90.
+- **WCAG 2.2 SC 2.4.11 (Focus Not Obscured - Minimum):** The conversation scroll container enforces explicit `scroll-padding-top: calc(var(--cv2-top-h) + 12px)` and `scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 24px)`. Keyboard focus rings on message items, citations, and interactive chips remain fully visible above sticky bottom docks and floating headers.
+- **WCAG 2.2 SC 2.5.8 (Target Size - Minimum):** Interactive targets on attachment removal and download controls enforce a minimum bounding box of 26×26 CSS pixels with generous hover hit areas.
+- **Trilingual Vernacular Screen-Reader Parity:** Complete dictionary key coverage across English, Luganda (`lg.ts`), and Swahili (`sw.ts`) prevents accidental language-mixing or English fallbacks during assistive technology announcements on human escalation and support rooms.
 
 Run the automated evidence locally:
 

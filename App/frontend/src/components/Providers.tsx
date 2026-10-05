@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { onlineManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useChatStore } from '@/store/useChatStore';
 import { useVoiceStore } from '@/store/useVoiceStore';
+import { initWebVitalsTracking } from '@/lib/web-vitals';
 
 function getErrorStatus(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !('status' in error)) return undefined;
@@ -46,6 +47,7 @@ export default function Providers({ children }: { children: ReactNode }) {
   useEffect(() => {
     useChatStore.getState().hydratePersisted();
     void useVoiceStore.persist.rehydrate();
+    initWebVitalsTracking();
 
     const syncOnlineState = () => {
       const online = navigator.onLine;

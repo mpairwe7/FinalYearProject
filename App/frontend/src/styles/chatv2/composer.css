@@ -267,17 +267,43 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  min-width: 26px;
+  min-height: 26px;
   margin-left: 2px;
   color: var(--cv2-accent);
-  border-radius: 4px;
-  transition: opacity 0.15s ease;
+  border-radius: 6px;
+  transition: opacity 0.15s ease, background 0.15s ease;
 }
-.chatv2 .attachment-report-link:hover {
-  opacity: 0.8;
+.chatv2 .attachment-report-link:hover,
+.chatv2 .attachment-report-link:focus-visible {
+  background: var(--surface-2);
+  opacity: 1;
 }
 .chatv2 .attachment-report-link > svg {
+  width: 14px;
+  height: 14px;
+}
+.chatv2 .attachment-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin-left: 2px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.chatv2 .attachment-remove:hover,
+.chatv2 .attachment-remove:focus-visible {
+  background: var(--surface-2);
+  color: var(--text-0);
+}
+.chatv2 .attachment-remove > svg {
   width: 14px;
   height: 14px;
 }

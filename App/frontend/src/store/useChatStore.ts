@@ -207,7 +207,9 @@ function deriveTitle(turns: ChatTurn[]): string {
   return first.content.slice(0, 60) + (first.content.length > 60 ? '...' : '');
 }
 
-type PersistedChatState = Pick<ChatStore, 'locale' | 'conversations' | 'activeConversationId'>;
+type PersistedChatState = Pick<ChatStore, 'locale' | 'conversations' | 'activeConversationId'> & {
+  draftMessage?: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -257,6 +259,15 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
         return attachment;
       });
     if (attachments.length) turn.attachments = attachments;
+  }
+  if (Array.isArray(value.nextActions)) {
+    turn.nextActions = value.nextActions.filter((a): a is string => typeof a === 'string');
+  }
+  if (isRecord(value.workflow) && typeof value.workflow.id === 'string') {
+    turn.workflow = value.workflow as unknown as WorkflowState;
+  }
+  if (Array.isArray(value.resources)) {
+    turn.resources = value.resources.filter(isRecord) as unknown as ContextResource[];
   }
 
   return turn;
@@ -340,10 +351,13 @@ function readPersistedChatState(): PersistedChatState | null {
       activeConversationId = null;
     }
 
+    const draftMessage = typeof state.draftMessage === 'string' ? state.draftMessage : '';
+
     return {
       locale: normalizeLocale(state.locale),
       conversations,
       activeConversationId,
+      draftMessage,
     };
   } catch {
     return null;
@@ -362,6 +376,7 @@ function writePersistedChatState(state: PersistedChatState): void {
           locale: normalizeLocale(state.locale),
           conversations: state.conversations.slice(0, MAX_SESSIONS),
           activeConversationId: state.activeConversationId,
+          draftMessage: state.draftMessage ?? '',
         },
         version: CHAT_STORAGE_VERSION,
       }),
@@ -491,6 +506,20 @@ export function cleanResponse(text: string): string {
   return normalizeAssistantResponse(cleaned || text.trim());
 }
 
+let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedSaveDraft(state: ChatStore): void {
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    writePersistedChatState({
+      locale: state.locale,
+      conversations: state.conversations,
+      activeConversationId: state.activeConversationId,
+      draftMessage: state.message,
+    });
+  }, 400);
+}
+
 export const useChatStore = create<ChatStore>()((set, get) => ({
   message: '',
   chat: [GREETING],
@@ -501,7 +530,10 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   activeTicketId: null as string | null,
   supportCaseOpen: false,
 
-  setMessage: (value) => set({ message: value }),
+  setMessage: (value) => {
+    set({ message: value });
+    debouncedSaveDraft(get());
+  },
   setSpeechState: (state) => set({ speechState: state }),
   setLocale: (locale) => {
     set({ locale: normalizeLocale(locale) });
@@ -693,7 +725,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       : null;
 
     set({
-      message: '',
+      message: persisted.draftMessage || '',
       chat: activeConversation?.turns.length ? activeConversation.turns : [GREETING],
       speechState: 'idle',
       locale: persisted.locale,

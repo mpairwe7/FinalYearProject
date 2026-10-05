@@ -48,12 +48,32 @@ import {
 import JourneyFunnelTable from "../../components/charts/JourneyFunnelTable";
 import SloGaugeCard from "../../components/charts/SloGaugeCard";
 import { plainSeconds } from "../../components/charts/chartTheme";
-import TopicBarChart from "../../components/charts/TopicBarChart";
-import FeedbackPieChart from "../../components/charts/FeedbackPieChart";
-import RetrievalModeChart from "../../components/charts/RetrievalModeChart";
-import LatencyChart, { routeFromMetricKey } from "../../components/charts/LatencyChart";
-import TicketStatusChart from "../../components/charts/TicketStatusChart";
+import dynamic from "next/dynamic";
+import { routeFromMetricKey } from "../../components/charts/LatencyChart";
 import "./analytics.css";
+
+const ChartSkeleton = () => <Skeleton height={260} />;
+
+const TopicBarChart = dynamic(() => import("../../components/charts/TopicBarChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const FeedbackPieChart = dynamic(() => import("../../components/charts/FeedbackPieChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const RetrievalModeChart = dynamic(() => import("../../components/charts/RetrievalModeChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const LatencyChart = dynamic(() => import("../../components/charts/LatencyChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const TicketStatusChart = dynamic(() => import("../../components/charts/TicketStatusChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
 
 function formatUptime(s: number): string {
   const d = Math.floor(s / 86400);

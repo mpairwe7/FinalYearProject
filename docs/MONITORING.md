@@ -506,6 +506,27 @@ curl -s http://localhost:8000/v1/analytics/dashboard | python -m json.tool
 
 ---
 
+## 11. Real-User Monitoring (RUM) & Core Web Vitals Telemetry
+
+The Next.js taxpayer and staff portal actively tracks client-side performance under real Ugandan mobile network conditions via `App/frontend/src/lib/web-vitals.ts` and `Providers.tsx`.
+
+### Monitored Metrics & Thresholds
+
+| Metric | Full Name | Good | Needs Improvement | Poor |
+| --- | --- | --- | --- | --- |
+| **INP** | Interaction to Next Paint | $\le 200$ ms | $201 - 500$ ms | $> 500$ ms |
+| **LCP** | Largest Contentful Paint | $\le 2500$ ms | $2501 - 4000$ ms | $> 4000$ ms |
+| **CLS** | Cumulative Layout Shift | $\le 0.10$ | $0.11 - 0.25$ | $> 0.25$ |
+| **FCP** | First Contentful Paint | $\le 1800$ ms | $1801 - 3000$ ms | $> 3000$ ms |
+| **TTFB** | Time to First Byte | $\le 600$ ms | $601 - 1800$ ms | $> 1800$ ms |
+
+### Telemetry Pipeline
+1. **Collector (`web-vitals.ts`):** `initWebVitalsTracking()` mounts on root hydration and hooks into `PerformanceObserver` for `largest-contentful-paint`, `event` (INP duration > 100ms), and `layout-shift`.
+2. **Dispatch Mechanism:** Reports are beaconed using non-blocking `navigator.sendBeacon('/api/v1/telemetry/vitals', payload)` to ensure zero main-thread contention.
+3. **Development Observability:** Emits structured debug entries to the browser console (`[Web Vitals] INP: 82ms (good)`).
+
+---
+
 ## Quick Reference: File Locations
 
 | File                                 | Purpose                              |

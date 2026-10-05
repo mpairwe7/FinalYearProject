@@ -176,19 +176,24 @@ interface VitalReport {
   entryType: string;
 }
 
-function reportWebVital(_vital: VitalReport): void {
-  // In production, send to analytics service
-  if (process.env.NODE_ENV === 'production' && typeof navigator !== 'undefined') {
-    // Send to analytics (example, replace with actual endpoint)
-    // const payload = {
-    //   metric: vital.name,
-    //   value: vital.value,
-    //   rating: vital.rating,
-    //   url: window.location.href,
-    //   userAgent: navigator.userAgent,
-    //   timestamp: new Date().toISOString(),
-    // };
-    // fetch('/api/analytics/vitals', { method: 'POST', body: JSON.stringify(payload) });
+function reportWebVital(vital: VitalReport): void {
+  if (typeof window === 'undefined') return;
+  if (process.env.NODE_ENV === 'development') {
+    // Helpful dev feedback for Core Web Vitals
+    console.debug(`[Web Vitals] ${vital.name}: ${Math.round(vital.value)}ms (${vital.rating})`);
+  } else if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    try {
+      const payload = JSON.stringify({
+        metric: vital.name,
+        value: Math.round(vital.value),
+        rating: vital.rating,
+        url: window.location.pathname,
+        timestamp: Date.now(),
+      });
+      navigator.sendBeacon('/api/v1/telemetry/vitals', payload);
+    } catch {
+      // Non-blocking telemetry
+    }
   }
 }
 
