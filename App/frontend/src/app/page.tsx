@@ -513,6 +513,21 @@ export default function Page() {
     };
   }, [hasStartedChat, isLoading, isRecording]);
 
+  // Persist session state and typed drafts immediately when switching apps or tab backgrounding
+  useEffect(() => {
+    const onVisibilityOrPageHide = () => {
+      if (document.visibilityState === 'hidden') {
+        saveCurrentSession();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityOrPageHide);
+    window.addEventListener('pagehide', onVisibilityOrPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityOrPageHide);
+      window.removeEventListener('pagehide', onVisibilityOrPageHide);
+    };
+  }, [saveCurrentSession]);
+
   // Restore the stored collapse preference after mount — see the state comment.
   useEffect(() => {
     try {

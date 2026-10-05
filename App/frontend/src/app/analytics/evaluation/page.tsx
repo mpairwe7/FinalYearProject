@@ -28,17 +28,28 @@
  * there is a live run behind it.
  */
 import React from "react";
+import dynamic from "next/dynamic";
 import { useQuery } from "@tanstack/react-query";
 import StaffGuard from "../../../components/StaffGuard";
 import { OpsPage } from "../../../components/ops/OpsPage";
-import EvalRadarChart from "../../../components/charts/EvalRadarChart";
+import { Skeleton } from "../../../components/ops/States";
 import MetricsTable from "../../../components/charts/MetricsTable";
-import SegmentComparisonChart from "../../../components/charts/SegmentComparisonChart";
 import ConfusionMatrix from "../../../components/charts/ConfusionMatrix";
 import { AlertTriangleIcon } from "../../../components/ops/icons";
 import { authHeaders } from "@/lib/authSession";
 import { queryKeys } from "@/lib/queryKeys";
 import "../analytics.css";
+
+const ChartSkeleton = () => <Skeleton height={280} />;
+
+const EvalRadarChart = dynamic(() => import("../../../components/charts/EvalRadarChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const SegmentComparisonChart = dynamic(() => import("../../../components/charts/SegmentComparisonChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
 
 // Sample eval data — rendered when no live run is available. Never presented
 // as a measurement; see the banner below.

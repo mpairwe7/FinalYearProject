@@ -66,6 +66,11 @@ When completely disconnected, the browser serves `offline.html`, which includes:
 * `calculatePresumptiveTax(turnover)`
 * `formatUgx(amount)`
 
+### 3.4 State Persistence Across Backgrounding & Mobile App Switching
+* **Debounced Form Draft Persistence:** Taxpayer inquiry drafts are debounced (400 ms) and saved to local storage under `ura-chat-store.draftMessage`.
+* **Visibility State Flush (`page.tsx`):** On `visibilitychange` (`hidden`) and `window.pagehide`, in-progress chat sessions and message drafts are immediately committed to persistent storage without awaiting debounce timeouts.
+* **Multi-Step Stepper & Journey Recovery:** `sanitizeTurn()` explicitly retains `workflow` (interactive wizards, current step, option widgets), `nextActions`, and `resources` across sessions and reloads, preventing taxpayer data loss during mobile multitasking.
+
 ---
 
 ## 4. Verification & Testing Commands

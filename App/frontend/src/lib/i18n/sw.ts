@@ -151,6 +151,18 @@ export const sw: Partial<Dictionary> = {
     'Hili halikuweza kufikishwa kwa afisa. Piga simu bila malipo 0800 117 000.',
   'handoff.offline':
     'Inaonekana huna mtandao. Jaribu tena ukiunganishwa, au piga 0800 117 000.',
+  'handoff.open_case': 'Fungua Kesi ya Usaidizi',
+  'handoff.case_room': 'Chumba cha Usaidizi cha Afisa wa URA',
+  'handoff.officer_response': 'Jibu Rasmi kutoka kwa Afisa wa URA',
+  'handoff.awaiting_officer': 'Inasubiri Ukaguzi wa Afisa',
+  'handoff.in_review': 'Afisa Anakagua Sasa',
+  'handoff.reply_placeholder': 'Jibu afisa au toa maelezo zaidi, PRN, au TIN...',
+  'handoff.send_reply': 'Tuma Jibu',
+  'handoff.call_hotline': 'Piga Simu Bila Malipo 0800 117 000',
+  'handoff.copy_ref': 'Nakili Nambari ya Kumbukumbu',
+  'handoff.copied': 'Imenakiliwa!',
+  'menu.theme': 'Mandhari',
+  'menu.language': 'Lugha',
 
   'common.cancel': 'Ghairi',
   'common.delete': 'Futa',
