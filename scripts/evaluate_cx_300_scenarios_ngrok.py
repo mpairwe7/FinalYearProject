@@ -227,7 +227,7 @@ def main() -> int:
 
     # Health check probe
     session = requests.Session()
-    health_url = f"{base_url}/health" if "/api" not in base_url else base_url.replace("/api", "/health")
+    health_url = f"{base_url}/health"
     try:
         hr = session.get(health_url, headers=HEADERS, timeout=15)
         print(f"✓ Health probe: HTTP {hr.status_code} ({hr.text[:50]})\n")
