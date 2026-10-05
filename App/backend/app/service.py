@@ -4813,12 +4813,20 @@ class ChatModel:
             key_t = (title, locale)
             if key_t in cls._RESOURCE_TRANSLATIONS:
                 out["title"] = cls._RESOURCE_TRANSLATIONS[key_t]
+            else:
+                loc_t = localize_reply(title, locale)
+                if loc_t:
+                    out["title"] = loc_t
 
         desc = str(out.get("description") or "").strip()
         if desc:
             key_d = (desc, locale)
             if key_d in cls._RESOURCE_TRANSLATIONS:
                 out["description"] = cls._RESOURCE_TRANSLATIONS[key_d]
+            else:
+                loc_d = localize_reply(desc, locale)
+                if loc_d:
+                    out["description"] = loc_d
         return out
 
     _WORKFLOW_LOCALIZATIONS: dict[str, dict[str, dict[str, Any]]] = {
