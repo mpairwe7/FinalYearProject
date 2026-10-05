@@ -418,6 +418,41 @@ def contains_pii(text: str) -> bool:
     return False
 
 
+class StreamingDLPFilter:
+    """Zero-latency streaming Data Loss Prevention (DLP) filter.
+
+    Buffers a trailing boundary window across chunks so multi-character sensitive
+    tokens (14-char Ugandan NINs, 10-digit TINs, phone numbers, credit card sequences)
+    that split across streaming token chunk boundaries are caught and sanitized
+    without introducing user-perceptible latency.
+    """
+
+    def __init__(self, buffer_size: int = 36) -> None:
+        self._buffer_size = buffer_size
+        self._buffer = ""
+
+    def process_chunk(self, chunk: str) -> str:
+        """Feed a new chunk of streamed text; returns sanitized text ready to yield."""
+        if not chunk:
+            return ""
+        self._buffer += chunk
+        if len(self._buffer) <= self._buffer_size:
+            return ""
+        flushable_len = len(self._buffer) - self._buffer_size
+        sanitized_full = redact_pii_text(self._buffer)
+        emit = sanitized_full[:flushable_len]
+        self._buffer = sanitized_full[flushable_len:]
+        return emit
+
+    def flush(self) -> str:
+        """Flush any remaining buffered text at the end of the stream."""
+        if not self._buffer:
+            return ""
+        remaining = redact_pii_text(self._buffer)
+        self._buffer = ""
+        return remaining
+
+
 _LISTISH_VERB_RE = re.compile(
     r"\b(?:is|are|was|were|must|should|will|shall|means|applies)\b",
     re.IGNORECASE,

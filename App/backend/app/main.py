@@ -1155,7 +1155,10 @@ async def chat_stream(
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
         # summary emitted just before ``grounding``.  Live tool-call frames
         # are exclusive to the WS path.
+        from .guardrails import OutputGuard, StreamingDLPFilter
+
         agent_trace: list[dict[str, Any]] = []
+        dlp_filter = StreamingDLPFilter()
         async for event_type, payload in service_module.run_chat_turn(
             model,
             message=body.message,
@@ -1208,7 +1211,21 @@ async def chat_stream(
                 yield {"event": event_type, "data": json.dumps(payload)}
             elif event_type == "error":
                 yield {"event": "error", "data": payload.get("message", "Internal server error")}
-            else:  # token / revision / done
+            elif event_type == "token":
+                chunk = payload if isinstance(payload, str) else ""
+                sanitized_chunk = dlp_filter.process_chunk(chunk)
+                if sanitized_chunk:
+                    yield {"event": "token", "data": sanitized_chunk}
+            elif event_type == "done":
+                trailing = dlp_filter.flush()
+                if trailing:
+                    yield {"event": "token", "data": trailing}
+                yield {"event": "done", "data": payload if isinstance(payload, str) else ""}
+            elif event_type == "revision":
+                dlp_filter.flush()
+                sanitized_rev = OutputGuard.redact_pii(payload if isinstance(payload, str) else "")
+                yield {"event": "revision", "data": sanitized_rev}
+            else:
                 yield {"event": event_type, "data": payload if isinstance(payload, str) else ""}
 
         # Flush trailing trace (e.g. if grounding was skipped).

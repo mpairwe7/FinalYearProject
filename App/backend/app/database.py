@@ -824,6 +824,17 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_mcp_tasks_status
             ON mcp_tasks(tenant_id, status, created_at);
 
+        CREATE TABLE IF NOT EXISTS agent_checkpoints (
+            thread_id    TEXT NOT NULL,
+            step         INTEGER NOT NULL,
+            node_name    TEXT NOT NULL,
+            state_json   TEXT NOT NULL,
+            created_at   REAL NOT NULL,
+            PRIMARY KEY (thread_id, step)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_thread
+            ON agent_checkpoints(thread_id, created_at DESC);
+
         CREATE TABLE IF NOT EXISTS audit_events (
             event_id     TEXT PRIMARY KEY,
             event_type   TEXT NOT NULL,
@@ -3094,6 +3105,57 @@ def _task_row(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
         out["replayed"] = True
     return out
 
+
+# ---------------------------------------------------------------------------
+# Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
+# ---------------------------------------------------------------------------
+def save_agent_checkpoint(
+    thread_id: str,
+    step: int,
+    node_name: str,
+    state_data: dict[str, Any],
+) -> None:
+    """Save an agent graph execution step snapshot."""
+    if not thread_id:
+        return
+    now = time.time()
+    state_json = json.dumps(state_data, default=str)
+    execute(
+        """INSERT OR REPLACE INTO agent_checkpoints
+           (thread_id, step, node_name, state_json, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (thread_id, step, node_name, state_json, now),
+    )
+
+
+def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
+    """Load the latest checkpoint state for a thread."""
+    if not thread_id:
+        return None
+    row = query_one(
+        """SELECT state_json FROM agent_checkpoints
+           WHERE thread_id = ?
+           ORDER BY step DESC LIMIT 1""",
+        (thread_id,),
+    )
+    if not row or not row.get("state_json"):
+        return None
+    try:
+        return json.loads(row["state_json"])
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:
+    """List execution history checkpoints for a thread."""
+    if not thread_id:
+        return []
+    rows = query_all(
+        """SELECT step, node_name, created_at FROM agent_checkpoints
+           WHERE thread_id = ? ORDER BY step ASC""",
+        (thread_id,),
+    )
+    return rows or []
 
 
 def get_ticket(ticket_id: str) -> dict[str, Any] | None:

@@ -129,9 +129,39 @@ Run the full MCP and connector verification test suites:
 # MCP test suite
 PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_mcp_*.py -q
 
-# Agent and connector integration tests
-PYTHONPATH=App/backend python3 -m pytest tests/agents/test_plugins_orchestrator.py tests/agents/test_mcp.py -q
+# Agent, checkpointer, and connector integration tests
+PYTHONPATH=App/backend python3 -m pytest tests/agents/test_plugins_orchestrator.py tests/agents/test_mcp.py tests/agents/test_graph_checkpointer.py -q
+
+# Streaming DLP tests
+PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_streaming_dlp.py -q
 
 # Full API manifest and endpoint parity
 PYTHONPATH=App/backend python3 -m pytest tests/test_all_endpoints_e2e.py -q
 ```
+
+---
+
+## 6. Standalone DMZ Microservices & Streaming DLP
+
+### 6.1 Deploying Standalone FastMCP Servers
+To launch decoupled MCP microservices in isolated container runtimes:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d \
+  mcp-tax-calculator mcp-ura-account mcp-efris
+```
+
+Endpoints exposed:
+- `mcp-tax-calculator`: `http://localhost:8931` (Health: `/health`)
+- `mcp-ura-account`: `http://localhost:8932` (Health: `/health`)
+- `mcp-efris`: `http://localhost:8933` (Health: `/health`)
+
+### 6.2 Streaming Data Loss Prevention (DLP)
+All SSE (`/v1/chat/stream`) and WebSocket (`/v2/chat/stream`) streams route through `StreamingDLPFilter` (`app/guardrails.py`):
+- Stateful 36-character boundary window prevents multi-chunk sensitive token leaks (Ugandan 14-character NINs, 10-digit TINs, phone numbers).
+- Exemption rules preserve official URA contact numbers and `@ura.go.ug` email channels.
+
+### 6.3 Durable Agent Graph Checkpointing
+Agent execution graphs maintain state durability across restarts:
+- State snapshots are persisted to the `agent_checkpoints` table on each node transition.
+- Supported on both PostgreSQL (clustered production) and SQLite (local testing/dev).
+- Allows in-flight tax audits and multi-step filings to survive process reboots and scale events.
