@@ -167,11 +167,11 @@ on them without understanding our tool names.
 | `core` | `escalate_to_human` | medium | in-process |
 | `tasks` | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres/SQLite-backed |
 | `efris` | `efris_fiscal_invoice`, `efris_taxpayer_status`, `efris_stock_management`, `efris_credit_note` | low–critical | 🟢 standalone server available (`mcp_efris` :8933) / in-process |
-| `digital_tax_stamps`| `dts_verify_stamp`, `dts_order_stamps`, `dts_activate_stamps`, `dts_taxpayer_status` | low–critical | in-process plugin connector (simulated) |
-| `payment_system` | `payment_generate_prn`, `payment_view_status`, `payment_reactivate_prn`, `payment_checkout_settle`, `payment_verify_advance_tax` | low–critical | in-process plugin connector (simulated) |
-| `tin_registration` | `tin_search_verify`, `tin_apply_individual`, `tin_apply_non_individual`, `tin_tax_obligations` | low–critical | in-process plugin connector (simulated) |
-| `ursb` | `ursb_verify_business`, `ursb_register_business`, `ursb_compliance_status` | low–critical | in-process plugin connector (simulated) |
-| `bwims` | `bwims_consignment_status`, `bwims_warehouse_inventory`, `bwims_release_clearance` | low–critical | in-process plugin connector (simulated) |
+| `digital_tax_stamps`| `dts_verify_stamp`, `dts_order_stamps`, `dts_activate_stamps`, `dts_taxpayer_status` | low–critical | 🟢 standalone server available (`mcp_dts` :8934) / in-process |
+| `payment_system` | `payment_generate_prn`, `payment_view_status`, `payment_reactivate_prn`, `payment_checkout_settle`, `payment_verify_advance_tax` | low–critical | 🟢 standalone server available (`mcp_payment` :8935) / in-process |
+| `tin_registration` | `tin_search_verify`, `tin_apply_individual`, `tin_apply_non_individual`, `tin_tax_obligations` | low–critical | 🟢 standalone server available (`mcp_tin` :8936) / in-process |
+| `ursb` | `ursb_verify_business`, `ursb_register_business`, `ursb_compliance_status` | low–critical | 🟢 standalone server available (`mcp_ursb` :8937) / in-process |
+| `bwims` | `bwims_consignment_status`, `bwims_warehouse_inventory`, `bwims_release_clearance` | low–critical | 🟢 standalone server available (`mcp_bwims` :8938) / in-process |
 | `ura_account` | `ura_account_profile` | high | 🟢 standalone server available (`mcp_ura_account` :8932) / DMZ |
 | `ura_actions` | `ura_action_proposal` | critical | DMZ |
 
@@ -181,12 +181,19 @@ The platform includes Docker Compose overlays (`docker-compose.mcp.yml`) to depl
 - **`mcp-tax-calculator`** (`http://localhost:8931`): All statutory tax calculators and document auditing.
 - **`mcp-ura-account`** (`http://localhost:8932`): High-risk read-only account profile and filing inquiry tools.
 - **`mcp-efris`** (`http://localhost:8933`): EFRIS electronic fiscal invoicing, credit note reconciliation, and inventory tracking.
+- **`mcp-dts`** (`http://localhost:8934`): Digital Tax Stamps ordering, verification, and activation.
+- **`mcp-payment`** (`http://localhost:8935`): PRN slip generation, bank settlement, and advance tax verification.
+- **`mcp-tin`** (`http://localhost:8936`): Instant TIN application and registration inquiry.
+- **`mcp-ursb`** (`http://localhost:8937`): URSB business entity verification and registration.
+- **`mcp-bwims`** (`http://localhost:8938`): Customs bonded warehouse inventory and consignment release.
 
-To bind the core API to remote microservices, set:
+To bind the core API to remote microservices with mutual TLS (mTLS):
 ```bash
 MCP_SERVER_URL_TAX_CALCULATOR=http://mcp-tax-calculator:8931/
 MCP_SERVER_URL_URA_ACCOUNT=http://mcp-ura-account:8932/
 MCP_SERVER_URL_EFRIS=http://mcp-efris:8933/
+MCP_CLIENT_CERT_EFRIS=/etc/ssl/certs/mcp-client.crt
+MCP_CLIENT_KEY_EFRIS=/etc/ssl/certs/mcp-client.key
 ```
 
 ## Enterprise Security Controls (2026 Standards)

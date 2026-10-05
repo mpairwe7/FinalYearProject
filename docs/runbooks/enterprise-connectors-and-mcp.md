@@ -147,20 +147,39 @@ PYTHONPATH=App/backend python3 -m pytest tests/test_all_endpoints_e2e.py -q
 To launch decoupled MCP microservices in isolated container runtimes:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d \
-  mcp-tax-calculator mcp-ura-account mcp-efris
+  mcp-tax-calculator mcp-ura-account mcp-efris mcp-dts mcp-payment mcp-tin mcp-ursb mcp-bwims
 ```
 
 Endpoints exposed:
 - `mcp-tax-calculator`: `http://localhost:8931` (Health: `/health`)
 - `mcp-ura-account`: `http://localhost:8932` (Health: `/health`)
 - `mcp-efris`: `http://localhost:8933` (Health: `/health`)
+- `mcp-dts`: `http://localhost:8934` (Health: `/health`)
+- `mcp-payment`: `http://localhost:8935` (Health: `/health`)
+- `mcp-tin`: `http://localhost:8936` (Health: `/health`)
+- `mcp-ursb`: `http://localhost:8937` (Health: `/health`)
+- `mcp-bwims`: `http://localhost:8938` (Health: `/health`)
 
-### 6.2 Streaming Data Loss Prevention (DLP)
+### 6.2 Mutual TLS (mTLS) Transport Security
+Outbound HTTP transports support client-certificate mutual authentication:
+```bash
+MCP_CLIENT_CERT_<NAMESPACE>=/etc/ssl/certs/mcp-client.crt
+MCP_CLIENT_KEY_<NAMESPACE>=/etc/ssl/certs/mcp-client.key
+```
+
+### 6.3 External Cryptographic Audit Timestamping (RFC 3161)
+The audit ledger supports external witness anchoring via RFC 3161 Timestamp Authorities (TSA):
+```bash
+AUDIT_TSA_URL=https://tsa.example.gov.ug/timestamp
+```
+When configured, Merkle roots from periodic seals are automatically submitted to the TSA, recording verifiable external cryptographic timestamp tokens.
+
+### 6.4 Streaming Data Loss Prevention (DLP)
 All SSE (`/v1/chat/stream`) and WebSocket (`/v2/chat/stream`) streams route through `StreamingDLPFilter` (`app/guardrails.py`):
-- Stateful 36-character boundary window prevents multi-chunk sensitive token leaks (Ugandan 14-character NINs, 10-digit TINs, phone numbers).
+- Stateful 24-character word-boundary window prevents multi-chunk sensitive token leaks (Ugandan 14-character NINs, 10-digit TINs, phone numbers).
 - Exemption rules preserve official URA contact numbers and `@ura.go.ug` email channels.
 
-### 6.3 Durable Agent Graph Checkpointing
+### 6.5 Durable Agent Graph Checkpointing
 Agent execution graphs maintain state durability across restarts:
 - State snapshots are persisted to the `agent_checkpoints` table on each node transition.
 - Supported on both PostgreSQL (clustered production) and SQLite (local testing/dev).

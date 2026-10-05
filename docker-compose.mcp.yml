@@ -2,7 +2,7 @@
 # URA Taxpayer Chatbot — Standalone FastMCP Microservices (2026 Standards)
 # ===========================================================================
 # Deploys out-of-process FastMCP server containers for statutory calculators,
-# DMZ URA account integration, and EFRIS fiscal services.
+# DMZ URA account integration, and decoupled system connectors.
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
@@ -66,6 +66,106 @@ services:
       - "8933:8933"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8933/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  mcp-dts:
+    build:
+      context: .
+      dockerfile: App/deploy/Dockerfile
+    container_name: ura-mcp-dts
+    restart: unless-stopped
+    command: python3 -m app.mcp.servers.dts --http --port 8934
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - PYTHONPATH=/app/App/backend:/app
+    ports:
+      - "8934:8934"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8934/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  mcp-payment:
+    build:
+      context: .
+      dockerfile: App/deploy/Dockerfile
+    container_name: ura-mcp-payment
+    restart: unless-stopped
+    command: python3 -m app.mcp.servers.payment --http --port 8935
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - PYTHONPATH=/app/App/backend:/app
+    ports:
+      - "8935:8935"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8935/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  mcp-tin:
+    build:
+      context: .
+      dockerfile: App/deploy/Dockerfile
+    container_name: ura-mcp-tin
+    restart: unless-stopped
+    command: python3 -m app.mcp.servers.tin --http --port 8936
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - PYTHONPATH=/app/App/backend:/app
+    ports:
+      - "8936:8936"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8936/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  mcp-ursb:
+    build:
+      context: .
+      dockerfile: App/deploy/Dockerfile
+    container_name: ura-mcp-ursb
+    restart: unless-stopped
+    command: python3 -m app.mcp.servers.ursb --http --port 8937
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - PYTHONPATH=/app/App/backend:/app
+    ports:
+      - "8937:8937"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8937/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - default
+
+  mcp-bwims:
+    build:
+      context: .
+      dockerfile: App/deploy/Dockerfile
+    container_name: ura-mcp-bwims
+    restart: unless-stopped
+    command: python3 -m app.mcp.servers.bwims --http --port 8938
+    environment:
+      - APP_ENV=${APP_ENV:-production}
+      - PYTHONPATH=/app/App/backend:/app
+    ports:
+      - "8938:8938"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8938/health"]
       interval: 15s
       timeout: 5s
       retries: 3
