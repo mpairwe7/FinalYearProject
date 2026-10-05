@@ -494,6 +494,9 @@ def node_respond(state: AgentGraphState) -> NodeResult:
 # ---------------------------------------------------------------------------
 def build_main_graph(checkpointer: Any = None) -> GraphRuntime:
     """Construct the bounded main agent graph with optional durable checkpointer."""
+    from .runtime import DurableCheckpointStore
+
+    actual_checkpointer = DurableCheckpointStore() if checkpointer is None else checkpointer
     nodes: dict[str, GraphNode] = {
         "route": node_route,
         "tool_rag_select": node_tool_rag_select,
@@ -504,4 +507,4 @@ def build_main_graph(checkpointer: Any = None) -> GraphRuntime:
         "reflect": node_reflect,
         "respond": node_respond,
     }
-    return GraphRuntime(nodes=nodes, entry="route", max_steps=12, checkpointer=checkpointer)
+    return GraphRuntime(nodes=nodes, entry="route", max_steps=12, checkpointer=actual_checkpointer)

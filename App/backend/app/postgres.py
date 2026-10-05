@@ -350,6 +350,17 @@ def init_db() -> None:
         updated_at       DOUBLE PRECISION NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
+        thread_id    TEXT NOT NULL,
+        step         INTEGER NOT NULL,
+        node_name    TEXT NOT NULL,
+        state_json   TEXT NOT NULL,
+        created_at   DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (thread_id, step)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_thread
+        ON agent_checkpoints(thread_id, created_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_feedback_message      ON feedback(message_id);
     CREATE INDEX IF NOT EXISTS idx_feedback_created      ON feedback(created_at);
     CREATE INDEX IF NOT EXISTS idx_events_type           ON analytics_events(event_type);
@@ -2738,3 +2749,74 @@ def complete_workflow_session(
             touched = cur.rowcount > 0
         conn.commit()
     return touched
+
+
+# ---------------------------------------------------------------------------
+# Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
+# ---------------------------------------------------------------------------
+def save_agent_checkpoint(
+    thread_id: str,
+    step: int,
+    node_name: str,
+    state_data: dict[str, Any],
+) -> None:
+    if not thread_id:
+        return
+    now = time.time()
+    state_json = json.dumps(state_data, default=str)
+    pool = _get_pool()
+    if pool is None:
+        return
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO agent_checkpoints
+                   (thread_id, step, node_name, state_json, created_at)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (thread_id, step) DO UPDATE
+                   SET node_name = EXCLUDED.node_name,
+                       state_json = EXCLUDED.state_json,
+                       created_at = EXCLUDED.created_at""",
+                (thread_id, step, node_name, state_json, now),
+            )
+        conn.commit()
+
+
+def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
+    if not thread_id:
+        return None
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT state_json FROM agent_checkpoints
+                   WHERE thread_id = %s
+                   ORDER BY step DESC LIMIT 1""",
+                (thread_id,),
+            )
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return None
+            try:
+                return json.loads(row[0])
+            except (json.JSONDecodeError, TypeError):
+                return None
+
+
+def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:
+    if not thread_id:
+        return []
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT step, node_name, created_at FROM agent_checkpoints
+                   WHERE thread_id = %s ORDER BY step ASC""",
+                (thread_id,),
+            )
+            rows = cur.fetchall()
+            return [{"step": r[0], "node_name": r[1], "created_at": r[2]} for r in rows]

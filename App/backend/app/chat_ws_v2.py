@@ -335,6 +335,9 @@ async def _run_response_create(
 
     final_log: dict[str, Any] | None = None
     full_reply = ""
+    from .guardrails import OutputGuard, StreamingDLPFilter
+
+    dlp_filter = StreamingDLPFilter()
 
     try:
         async for event_type, payload in service_module.run_chat_turn(
@@ -384,10 +387,24 @@ async def _run_response_create(
             }.get(event_type, f"response.{event_type}")
 
             if event_type == "token":
-                await _send_json(websocket, {"type": frame_type, "delta": payload})
+                chunk = payload if isinstance(payload, str) else ""
+                sanitized_chunk = dlp_filter.process_chunk(chunk)
+                if sanitized_chunk:
+                    await _send_json(websocket, {"type": frame_type, "delta": sanitized_chunk})
+            elif event_type == "done":
+                trailing = dlp_filter.flush()
+                if trailing:
+                    await _send_json(websocket, {"type": "response.token", "delta": trailing})
+                await _send_json(websocket, {"type": frame_type})
             elif event_type == "revision":
-                await _send_json(websocket, {"type": frame_type, "text": payload})
+                dlp_filter.flush()
+                sanitized_text = OutputGuard.redact_pii(payload if isinstance(payload, str) else "")
+                await _send_json(websocket, {"type": frame_type, "text": sanitized_text})
             elif event_type in ("metadata", "grounding"):
+                if event_type == "grounding":
+                    trailing = dlp_filter.flush()
+                    if trailing:
+                        await _send_json(websocket, {"type": "response.token", "delta": trailing})
                 meta_payload = dict(payload) if isinstance(payload, dict) else {}
                 if event_type == "metadata" and "response_id" not in meta_payload:
                     meta_payload["response_id"] = response_id

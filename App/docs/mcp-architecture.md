@@ -166,14 +166,28 @@ on them without understanding our tool names.
 | `document_audit` | `audit_tax_document` | low | in-process / standalone |
 | `core` | `escalate_to_human` | medium | in-process |
 | `tasks` | `task_create`, `task_get`, `task_cancel` | medium | in-process, Postgres/SQLite-backed |
-| `efris` | `efris_fiscal_invoice`, `efris_taxpayer_status`, `efris_stock_management`, `efris_credit_note` | low–critical | in-process plugin connector (simulated) |
+| `efris` | `efris_fiscal_invoice`, `efris_taxpayer_status`, `efris_stock_management`, `efris_credit_note` | low–critical | 🟢 standalone server available (`mcp_efris` :8933) / in-process |
 | `digital_tax_stamps`| `dts_verify_stamp`, `dts_order_stamps`, `dts_activate_stamps`, `dts_taxpayer_status` | low–critical | in-process plugin connector (simulated) |
 | `payment_system` | `payment_generate_prn`, `payment_view_status`, `payment_reactivate_prn`, `payment_checkout_settle`, `payment_verify_advance_tax` | low–critical | in-process plugin connector (simulated) |
 | `tin_registration` | `tin_search_verify`, `tin_apply_individual`, `tin_apply_non_individual`, `tin_tax_obligations` | low–critical | in-process plugin connector (simulated) |
 | `ursb` | `ursb_verify_business`, `ursb_register_business`, `ursb_compliance_status` | low–critical | in-process plugin connector (simulated) |
 | `bwims` | `bwims_consignment_status`, `bwims_warehouse_inventory`, `bwims_release_clearance` | low–critical | in-process plugin connector (simulated) |
-| `ura_account` | `ura_account_profile` | high | DMZ |
+| `ura_account` | `ura_account_profile` | high | 🟢 standalone server available (`mcp_ura_account` :8932) / DMZ |
 | `ura_actions` | `ura_action_proposal` | critical | DMZ |
+
+## Standalone FastMCP Microservices (`docker-compose.mcp.yml`)
+
+The platform includes Docker Compose overlays (`docker-compose.mcp.yml`) to deploy independent, zero-trust FastMCP servers:
+- **`mcp-tax-calculator`** (`http://localhost:8931`): All statutory tax calculators and document auditing.
+- **`mcp-ura-account`** (`http://localhost:8932`): High-risk read-only account profile and filing inquiry tools.
+- **`mcp-efris`** (`http://localhost:8933`): EFRIS electronic fiscal invoicing, credit note reconciliation, and inventory tracking.
+
+To bind the core API to remote microservices, set:
+```bash
+MCP_SERVER_URL_TAX_CALCULATOR=http://mcp-tax-calculator:8931/
+MCP_SERVER_URL_URA_ACCOUNT=http://mcp-ura-account:8932/
+MCP_SERVER_URL_EFRIS=http://mcp-efris:8933/
+```
 
 ## Enterprise Security Controls (2026 Standards)
 

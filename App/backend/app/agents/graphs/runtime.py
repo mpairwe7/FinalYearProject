@@ -68,6 +68,27 @@ class InMemoryCheckpointStore(CheckpointStore):
         return entries[-1]["state"] if entries else None
 
 
+class DurableCheckpointStore(CheckpointStore):
+    """Database-backed durable checkpointer for agent graph execution states."""
+
+    def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        try:
+            from ...database import save_agent_checkpoint
+
+            save_agent_checkpoint(thread_id, step, node_name, state_dict)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("DurableCheckpointStore save error: %s", exc)
+
+    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        try:
+            from ...database import get_agent_checkpoint
+
+            return get_agent_checkpoint(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("DurableCheckpointStore load error: %s", exc)
+            return None
+
+
 class GraphRuntime:
     """Dispatch loop for a list of named nodes.
 
