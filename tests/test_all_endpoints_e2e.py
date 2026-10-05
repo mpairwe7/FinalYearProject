@@ -185,6 +185,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/connectors/{name}/toggle"),
     ("GET", "/v1/connectors/{name}/records"),
     ("POST", "/v1/connectors/register"),
+    ("POST", "/v1/connectors/{name}/test"),
+    ("POST", "/v1/connectors/{name}/configure"),
     # --- Receptionist (simulated phone calls) ---
     ("GET", "/v1/admin/calls"),
     ("GET", "/v1/admin/calls/metrics"),
@@ -305,6 +307,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/connectors/{name}/toggle"): "this:test_connectors_endpoints",
     ("GET", "/v1/connectors/{name}/records"): "this:test_connectors_endpoints",
     ("POST", "/v1/connectors/register"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/test"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/configure"): "this:test_connectors_endpoints",
     ("GET", "/v1/admin/calls"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
@@ -454,10 +458,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (106 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (108 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 106, f"expected 106 HTTP endpoints, found {len(http)}"
+    assert len(http) == 108, f"expected 108 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -846,6 +850,17 @@ def test_connectors_endpoints():
     r4 = c.post("/v1/connectors/register", headers=_bearer(STAFF))
     assert r4.status_code == 410
     assert "Dynamic connector registration is disabled" in r4.json()["detail"]
+
+    # Active diagnostic ping and capability test
+    r5 = c.post("/v1/connectors/efris/test", headers=_bearer(STAFF))
+    assert r5.status_code == 200
+    assert r5.json()["ok"] is True
+    assert "latency_ms" in r5.json()
+
+    # Enterprise connector configuration
+    r6 = c.post("/v1/connectors/efris/configure", json={"mode": "simulation"}, headers=_bearer(STAFF))
+    assert r6.status_code == 200
+    assert r6.json()["ok"] is True
 
 
 if __name__ == "__main__":

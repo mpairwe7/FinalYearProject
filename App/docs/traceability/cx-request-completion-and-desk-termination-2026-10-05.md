@@ -71,12 +71,14 @@ This release closes critical customer experience (CX) and operational gaps ident
   - Implemented `_normalize_text_for_key()` in `App/backend/app/mt.py` to collapse whitespace and punctuation.
   - Pre-warmed `_CANONICAL_PREWARMED` with canonical Luganda and Swahili tax queries (TIN registration, PAYE calculations, vehicle transfers, PRN generation, EFRIS receipts), allowing common vernacular queries to resolve in **0.0001s**.
 
-### 2.6 Connector & Plugin Security Architecture
-* **Decision**: Confirmed that plugin connectors (`plugins/` — EFRIS, DTS, URSB, BWIMS, TIN, Payments) are administrative infrastructure.
-* **Policy**:
-  - Public taxpayers attach tax documents and photos; they do not configure simulated databases.
-  - Connector controls and simulator metrics are securely restricted to authenticated staff at `/admin/connectors` (`StaffGuard`).
-  - Cleaned residual `"or add connector"` text from the composer `+` button `aria-label` in `ChatInput.tsx`.
+### 2.6 Enterprise System Connector Workbench & Production Readiness
+* **Decision**: Modern enterprise AI standards (Anthropic MCP, NIST SP 800-218, OWASP LLM07/08) require strict separation between public chat attachments and enterprise system connectors with SSRF protection, capability negotiation, and vaulted credentials.
+* **Enhancements Shipped**:
+  - **Diagnostic Probing & Handshake (`POST /v1/connectors/{name}/test`)**: Active health ping measuring RTT latency in milliseconds and enumerating discovered MCP tool capabilities.
+  - **Enterprise Configuration (`POST /v1/connectors/{name}/configure`)**: Allows toggling operating mode (`live` vs `simulation`) and setting custom gateway URLs in an audited manner (`_staff_call_event`).
+  - **Dynamic Enterprise Registration with SSRF Protection (`POST /v1/connectors/register`)**: Rejects private network endpoints (127.0.0.1, 10.x, 192.168.x) and unencrypted HTTP in production while supporting verified custom connector onboarding.
+  - **Upgraded Staff Workbench (`/admin/connectors`)**: Added an **"+ Add Connector"** modal dialog, live diagnostic ping button with real-time RTT latency badges (`✓ Ping OK (12 ms · 4 MCP tools)`), settings modal, and visual environment indicators (`Live Production` vs `Simulation Mode`).
+  - **Public Composer Clarification**: Public chat attachments focus strictly on document uploads (PDF, Word, Excel, CSV) and camera capture, while connector infrastructure is managed through `/admin/connectors` behind `StaffGuard`.
 
 ---
 

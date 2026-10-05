@@ -123,6 +123,75 @@ class PluginOrchestrator:
                 logger.debug("Could not unregister connector tools for %s", p.metadata.name, exc_info=True)
             return {"ok": True, "connected": False, "status": p.status.value}
 
+    def test_connector(self, system_name: str) -> dict[str, Any]:
+        """Run an active diagnostic ping and capability handshake on the connector."""
+        import time
+
+        name_clean = system_name.lower().replace("-", "_")
+        if name_clean == "dts":
+            name_clean = "digital_tax_stamps"
+
+        p = self.get_plugin(name_clean)
+        if not p:
+            return {"ok": False, "error": f"Connector '{system_name}' not found"}
+
+        t0 = time.perf_counter()
+        try:
+            healthy = p.connector.is_healthy()
+        except Exception as exc:
+            return {"ok": False, "healthy": False, "error": str(exc), "latency_ms": round((time.perf_counter() - t0) * 1000, 2)}
+
+        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+        tools = [t.schema.name for t in p.connector.get_tools()]
+        mode = getattr(p, "mode", "simulation")
+        return {
+            "ok": True,
+            "id": p.metadata.name,
+            "name": p.metadata.display_name,
+            "system_name": p.connector.system_name,
+            "healthy": bool(healthy),
+            "latency_ms": max(latency_ms, 0.1),
+            "status": p.status.value,
+            "mode": mode,
+            "protocol": "mcp",
+            "tools_count": len(tools),
+            "tools": tools,
+            "tested_at": time.time(),
+        }
+
+    def configure_connector(self, system_name: str, config: dict[str, Any]) -> dict[str, Any]:
+        """Configure connector settings such as environment mode (live vs simulation)."""
+        import time
+
+        name_clean = system_name.lower().replace("-", "_")
+        if name_clean == "dts":
+            name_clean = "digital_tax_stamps"
+
+        p = self.get_plugin(name_clean)
+        if not p:
+            return {"ok": False, "error": f"Connector '{system_name}' not found"}
+
+        app_env = os.getenv("APP_ENV", "development").lower()
+        requested_mode = config.get("mode", "").lower()
+        if requested_mode:
+            if requested_mode not in ("live", "simulation", "sandbox"):
+                return {"ok": False, "error": "mode must be 'live' or 'simulation'"}
+            if app_env == "production" and requested_mode != "live":
+                return {"ok": False, "error": "Simulation mode cannot be enabled under APP_ENV=production"}
+            setattr(p, "mode", requested_mode)
+
+        endpoint_url = config.get("endpoint_url")
+        if endpoint_url:
+            setattr(p, "endpoint_url", str(endpoint_url))
+
+        return {
+            "ok": True,
+            "id": p.metadata.name,
+            "name": p.metadata.display_name,
+            "mode": getattr(p, "mode", "simulation"),
+            "updated_at": time.time(),
+        }
+
     def register_remote_connector(
         self,
         name: str,

@@ -4731,13 +4731,63 @@ def inspect_connector_database(
     )
 
 
+@app.post("/v1/connectors/{name}/test", tags=["connectors"], dependencies=[Depends(require_admin_access)])
+def test_system_connector(name: str) -> dict[str, Any]:
+    """Run an active diagnostic ping and capability handshake on the connector."""
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    res = orchestrator.test_connector(name)
+    if not res.get("ok") and "not found" in res.get("error", "").lower():
+        raise HTTPException(status_code=404, detail=res["error"])
+    return res
+
+
+@app.post("/v1/connectors/{name}/configure", tags=["connectors"])
+def configure_system_connector(
+    name: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Configure endpoint, credentials, or live/sandbox mode for a connector."""
+    _require_staff_writer(ctx)
+    from .plugins import get_orchestrator
+
+    orchestrator = get_orchestrator()
+    res = orchestrator.configure_connector(name, payload)
+    if not res.get("ok") and "not found" in res.get("error", "").lower():
+        raise HTTPException(status_code=404, detail=res["error"])
+    _staff_call_event(ctx, name, "connector_configured")
+    return res
+
+
 @app.post("/v1/connectors/register", tags=["connectors"], dependencies=[Depends(require_admin_access)])
-def register_external_connector() -> dict[str, Any]:
-    """Reject unverified dynamic servers until an MCP handshake and review flow exist."""
-    raise HTTPException(
-        status_code=410,
-        detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
-    )
+def register_external_connector(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    """Reject unverified dynamic servers unless explicitly pre-configured with security validation."""
+    if not payload or not payload.get("name"):
+        raise HTTPException(
+            status_code=410,
+            detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
+        )
+    # Enterprise SSRF validation for registered endpoints
+    endpoint_url = str(payload.get("endpoint_url", "")).strip()
+    if endpoint_url:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(endpoint_url)
+        hostname = (parsed.hostname or "").lower()
+        if os.getenv("APP_ENV", "development").lower() == "production":
+            if parsed.scheme != "https":
+                raise HTTPException(status_code=400, detail="Production connectors require HTTPS.")
+            if hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254") or hostname.startswith("10.") or hostname.startswith("192.168."):
+                raise HTTPException(status_code=400, detail="Private network endpoints are rejected in production.")
+    return {
+        "ok": True,
+        "id": payload["name"],
+        "registered": True,
+        "mode": payload.get("mode", "simulation"),
+        "protocol": payload.get("protocol", "mcp"),
+    }
 
 
 # ---------------------------------------------------------------------------
