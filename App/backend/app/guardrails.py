@@ -427,7 +427,7 @@ class StreamingDLPFilter:
     without introducing user-perceptible latency.
     """
 
-    def __init__(self, buffer_size: int = 36) -> None:
+    def __init__(self, buffer_size: int = 24) -> None:
         self._buffer_size = buffer_size
         self._buffer = ""
 
@@ -436,13 +436,20 @@ class StreamingDLPFilter:
         if not chunk:
             return ""
         self._buffer += chunk
-        if len(self._buffer) <= self._buffer_size:
-            return ""
-        flushable_len = len(self._buffer) - self._buffer_size
-        sanitized_full = redact_pii_text(self._buffer)
-        emit = sanitized_full[:flushable_len]
-        self._buffer = sanitized_full[flushable_len:]
-        return emit
+        # If there is whitespace or punctuation boundary, flush safe complete words immediately
+        last_boundary = max(self._buffer.rfind(" "), self._buffer.rfind("\n"), self._buffer.rfind("\t"))
+        if last_boundary != -1:
+            to_sanitize = self._buffer[:last_boundary + 1]
+            sanitized = redact_pii_text(to_sanitize)
+            self._buffer = self._buffer[last_boundary + 1:]
+            return sanitized
+        if len(self._buffer) > self._buffer_size:
+            flushable_len = len(self._buffer) - self._buffer_size
+            sanitized_full = redact_pii_text(self._buffer)
+            emit = sanitized_full[:flushable_len]
+            self._buffer = sanitized_full[flushable_len:]
+            return emit
+        return ""
 
     def flush(self) -> str:
         """Flush any remaining buffered text at the end of the stream."""

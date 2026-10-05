@@ -401,6 +401,10 @@ async def _run_response_create(
                 sanitized_text = OutputGuard.redact_pii(payload if isinstance(payload, str) else "")
                 await _send_json(websocket, {"type": frame_type, "text": sanitized_text})
             elif event_type in ("metadata", "grounding"):
+                if event_type == "grounding":
+                    trailing = dlp_filter.flush()
+                    if trailing:
+                        await _send_json(websocket, {"type": "response.token", "delta": trailing})
                 meta_payload = dict(payload) if isinstance(payload, dict) else {}
                 if event_type == "metadata" and "response_id" not in meta_payload:
                     meta_payload["response_id"] = response_id
