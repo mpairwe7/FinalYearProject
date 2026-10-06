@@ -4349,9 +4349,12 @@ class ChatModel:
         if preferred_locale not in ("lg", "sw"):
             preferred_locale = ""
 
+        # Returned even when there is nothing yet to put in the prompt: every
+        # memory write checks this state, so returning None for a consented
+        # taxpayer with no profile or memory meant memory could never start
+        # (found live, 2026-10-06). A consented turn is therefore never
+        # cache-served, so each one can be remembered.
         prompt_context = "\n".join(lines)
-        if not prompt_context and not prefill_slots and not preferred_locale:
-            return None
 
         return {
             "consent_granted": True,

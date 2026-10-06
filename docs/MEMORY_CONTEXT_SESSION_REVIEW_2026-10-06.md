@@ -126,6 +126,25 @@ not remembered: code-switched Luganda speech recognition is still error-prone,
 and a mishearing must not become a fact about the caller. Working memory's
 "last topic" is the topic the taxpayer named, not the role that answered.
 
+**Found live, fixed in the same phase.** Two defects only the live stack showed:
+
+- *Memory could never start.* `_load_personalization_state` returned nothing
+  for a consented taxpayer with no profile and no memory yet (there was nothing
+  to put in the prompt), and every memory write checks that state — so a new
+  user's turns were never remembered. It now returns the consent state either
+  way; a consented turn is therefore never cache-served, so each can be kept.
+- *Questions were stored as facts.* "Do I need to pay PAYE for my employees?"
+  became "registered for PAYE": the PAYE, WHT and CIT rules fired on any
+  mention. A registration is now recorded only when the taxpayer states it
+  ("I'm registered for…", "we pay / file / deduct…"), never from a clause
+  that asks.
+
+**Verified live (GPU stack, 2026-10-06).** A signed-in, consented taxpayer's
+three streamed turns (Swahili, Swahili, Luganda) produced one episode —
+"Discussed VAT, TIN registration and PAYE.", 3 turns — the retail fact from
+"duka la rejareja", and working memory naming the topic (VAT). Withdrawing
+consent erased all three tiers.
+
 ## Open findings (phases 4–5)
 - **G122 — sessions and channels.** Anonymous history is keyed on the per-tab
   analytics id while the browser keeps 50 conversations with no expiry (server

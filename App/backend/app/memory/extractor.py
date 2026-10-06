@@ -62,6 +62,12 @@ _INDUSTRY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 #: Confidence kept for a fact read from the machine-translated English form.
 TRANSLATED_FORM_FACTOR = 0.95
 
+# "I am registered for X", "we pay / file / deduct X": the taxpayer saying it.
+_CLAIM = (
+    r"(?:\b(?:i\s+am\s+|i'm\s+|we\s+are\s+|we're\s+)?registered\s+for\s+"
+    r"|\b(?:i|we)\s+(?:already\s+)?(?:pay|file|deduct|remit)\s+)"
+)
+
 _REGISTRATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
         re.compile(
@@ -72,10 +78,36 @@ _REGISTRATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
         ),
         "vat",
     ),
-    (re.compile(r"\bpaye\b", re.IGNORECASE), "paye"),
-    (re.compile(r"\bwithholding\s+tax\b|\bwht\b", re.IGNORECASE), "wht"),
-    (re.compile(r"\bcorporation\s+tax\b|\bcit\b", re.IGNORECASE), "cit"),
+    (re.compile(_CLAIM + r"(?:paye\b|pay\s+as\s+you\s+earn\b)", re.IGNORECASE), "paye"),
+    (re.compile(_CLAIM + r"(?:withholding\s+tax\b|wht\b)", re.IGNORECASE), "wht"),
+    (re.compile(_CLAIM + r"(?:corporation\s+tax\b|cit\b)", re.IGNORECASE), "cit"),
 ]
+
+# A clause that asks rather than tells: its first word is a question word (or
+# the Swahili question particle "je"), or it ends in a question mark.
+_INTERROGATIVE = re.compile(
+    r"^(?:do|does|did|am|is|are|can|could|should|must|will|would|how|what|when|where|which|who|why|je)\b",
+    re.IGNORECASE,
+)
+
+
+def _statements(text: str) -> list[str]:
+    """The clauses of *text* that state something rather than ask it.
+
+    A registration is a fact about the taxpayer only when they say it: "Do I
+    need to pay PAYE for my employees?" asks about PAYE, it does not register
+    them for it (stored as a fact, live on 2026-10-06).
+    """
+    out: list[str] = []
+    for sentence in re.findall(r"[^.!?\n]+[.!?]?", text or ""):
+        asked = sentence.rstrip().endswith("?")
+        clauses = [c.strip() for c in re.split(r"[,;:]", sentence) if c.strip()]
+        for index, clause in enumerate(clauses):
+            last = index == len(clauses) - 1
+            if _INTERROGATIVE.match(clause) or (asked and last):
+                continue
+            out.append(clause)
+    return out
 
 class FactExtractor:
     """Rule-based extractor over conversation turns.
@@ -145,8 +177,9 @@ class FactExtractor:
                     )
                 )
 
+        statements = _statements(text)
         for pat, value in _REGISTRATION_PATTERNS:
-            if pat.search(text):
+            if any(pat.search(clause) for clause in statements):
                 out.append(
                     FactCandidate(
                         category="registered_vat" if value == "vat" else "registered_tax",

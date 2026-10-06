@@ -136,6 +136,32 @@ class FactsFromTheEnglishFormTest(unittest.TestCase):
         self.assertEqual([(f.object_value, f.extractor_model) for f in facts], [("sole_trader", "rules-v1+en")])
 
 
+class RegistrationsAreStatedNotAskedTest(unittest.TestCase):
+    """Live 2026-10-06: "Do I need to pay PAYE for my employees?" was stored as
+    "registered for PAYE"."""
+
+    CASES = {
+        "Do I need to pay PAYE for my employees?": set(),
+        "Am I registered for VAT?": set(),
+        "What is corporation tax?": set(),
+        "Je, nimesajiliwa kwa VAT?": set(),
+        "We deduct PAYE for our staff every month.": {("registered_tax", "paye")},
+        "I am registered for VAT, what do I file next?": {("registered_vat", "vat")},
+        "I'm registered for withholding tax": {("registered_tax", "wht")},
+        "Nimesajiliwa kwa VAT.": {("registered_vat", "vat")},
+    }
+
+    def test_only_statements_register(self) -> None:
+        for text, expected in self.CASES.items():
+            with self.subTest(text=text):
+                found = {
+                    (c.category, c.object_value)
+                    for c in FactExtractor().extract([{"role": "user", "content": text}])
+                    if c.category.startswith("registered")
+                }
+                self.assertEqual(found, expected)
+
+
 class FactValidityTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -214,6 +240,36 @@ class PersistTurnTest(unittest.TestCase):
             )
         memsvc.absorb_conversation.assert_not_called()
         memsvc.update_working.assert_not_called()
+
+
+class MemoryStartsForANewConsentedUserTest(unittest.TestCase):
+    """Live 2026-10-06: a consented user with no profile never got a memory write."""
+
+    def test_consent_state_is_returned_with_nothing_to_inject(self) -> None:
+        from app import service
+        from app.memory.service import MemoryReadResult
+
+        db.init_db()
+        model = service.ChatModel()
+        empty = MemoryReadResult(facts=[], episodic=[], working=None, consent_granted=True)
+        with patch.object(service.flags, "is_enabled", side_effect=lambda name, *a, **k: name == "memory_enabled"), \
+             patch.object(MemoryService, "read_all", return_value=empty), \
+             patch.object(service.db, "get_user_profile", return_value=None):
+            state = model._load_personalization_state(f"new-{uuid.uuid4().hex[:8]}")
+        self.assertIsNotNone(state)
+        self.assertTrue(state["consent_granted"])
+        self.assertEqual(state["prompt_context"], "")
+
+    def test_no_consent_still_means_no_state(self) -> None:
+        from app import service
+        from app.memory.service import MemoryReadResult
+
+        db.init_db()
+        model = service.ChatModel()
+        refused = MemoryReadResult(facts=[], episodic=[], working=None, consent_granted=False)
+        with patch.object(service.flags, "is_enabled", side_effect=lambda name, *a, **k: name == "memory_enabled"), \
+             patch.object(MemoryService, "read_all", return_value=refused):
+            self.assertIsNone(model._load_personalization_state("someone"))
 
 
 class StreamedTurnMemoryTest(unittest.TestCase):
