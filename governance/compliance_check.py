@@ -206,13 +206,32 @@ def _verified_by_refs(manifest_path: Path) -> list[tuple[str, str]]:
     return refs
 
 
+def _declared_functions(source: str) -> set[str]:
+    """Names of every function and method declared in *source* (parsed, not grepped).
+
+    A ``def test_x(`` inside a comment or string is not a runnable test.
+    """
+    import ast
+
+    return {
+        node.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+
+
 def _missing_evidence(ref: str) -> str:
     path, _, name = ref.partition("::")
     full = PROJECT_ROOT / path
     if not full.is_file():
         return "file missing"
-    if name and f"def {name}(" not in full.read_text():
-        return "test not found"
+    if name:
+        try:
+            declared = _declared_functions(full.read_text())
+        except SyntaxError:
+            return "file does not parse"
+        if name not in declared:
+            return "test not found"
     return ""
 
 

@@ -257,7 +257,11 @@ eu_ai_act:
         layer of the 2026 Code of Practice). Text replies name their model (ChatResponse.model).
       verified_by:
         - "App/backend/tests/test_observability_endpoints.py::test_marked_wav_keeps_its_audio"
-      gap: "No imperceptible audio watermark (the Code of Practice's second layer). Applies as a benchmark: the deployment is in Uganda."
+      gap: >
+        Non-WAV audio carries no marker: the MP3 from edge-tts (the English fallback after
+        local TTS) and any non-WAV cloud TTS output (Sunbird, Workers AI) leave unmarked.
+        No imperceptible audio watermark (the Code of Practice's second layer). Applies as a
+        benchmark: the deployment is in Uganda.
   human_oversight:
     - requirement: "Human review channel available"
       status: "implemented"

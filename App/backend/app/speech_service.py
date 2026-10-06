@@ -1732,16 +1732,21 @@ class SpeechModel:
         voice: str | None = None,
         language: str = "en",
     ) -> SynthesizeResult:
-        """Synthesize text to WAV bytes marked as AI-generated (``app.ai_disclosure``).
+        """Synthesize speech; WAV output is marked as AI-generated (``app.ai_disclosure``).
 
         Every backend's WAV leaves here with an IPTC ``trainedAlgorithmicMedia``
-        INFO chunk, whichever endpoint returns it.
+        INFO chunk, whichever endpoint returns it. Non-WAV audio — the MP3
+        from edge-tts and some cloud backends — is returned unmarked
+        (``mark_wav`` leaves it untouched); see G109.
         """
         result = self._synthesize_unmarked(text, voice=voice, language=language)
         if result.audio:
             from .ai_disclosure import mark_wav
 
-            result = replace(result, audio=mark_wav(result.audio, generator=result.backend))
+            # A cache hit reports "<backend>+cache"; the generator is the backend
+            # that made the audio, so the same phrase carries the same marker.
+            generator = result.backend.removesuffix("+cache")
+            result = replace(result, audio=mark_wav(result.audio, generator=generator))
         return result
 
     def _synthesize_unmarked(
