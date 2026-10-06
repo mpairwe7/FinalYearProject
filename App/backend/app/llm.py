@@ -1102,7 +1102,7 @@ def _count_prompt_tokens(messages: list[dict[str, Any]]) -> int | None:
         return int(count) if count is not None else None
     except Exception:
         _vllm_limits["tokenize_down_until"] = time.time() + _VLLM_LIMITS_RETRY_S
-        logger.debug("vLLM /tokenize unavailable; estimating prompt tokens", exc_info=True)
+        logger.debug("vLLM /tokenize unavailable; the budget falls back to an estimate", exc_info=True)
         return None
 
 
