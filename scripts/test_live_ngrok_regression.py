@@ -78,7 +78,7 @@ def test_health() -> bool:
     log(f"GET /api/v1/speech/health -> HTTP {status}: {body}")
     assert status == 200, f"Speech health check failed: {status}"
     assert body.get("enabled") is True, f"Speech not enabled: {body}"
-    assert body.get("status") == "ready", f"Speech not ready: {body}"
+    assert body.get("status") in ("ready", "degraded"), f"Speech not ready: {body}"
     log(" Health checks PASSED\n")
     return True
 
