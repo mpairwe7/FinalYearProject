@@ -346,7 +346,7 @@ def send_notification_item(item: dict[str, Any]) -> dict[str, Any]:
     elif ch == "sms":
         res = _send_sms_live(recipient, message)
     elif ch == "webhook":
-        target = str(payload.get("url") or WEBHOOK_NOTIFY_URL)
+        target = str(payload.get("url") or _env("WEBHOOK_NOTIFY_URL"))
         res = _send_webhook_live(target, payload)
     elif ch == "in_app":
         res = _send_in_app_live(user_id, payload)
