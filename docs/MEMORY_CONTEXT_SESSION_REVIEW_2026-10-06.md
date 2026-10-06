@@ -87,6 +87,19 @@ touching the question or the answer-language instruction. The streamed answer �
 the web client's path — had no budget at all; all four vLLM paths now share this
 one.
 
+**Verified live (GPU stack, 2026-10-06).** The turn phase 1 left wrong — decided
+English, answered in Luganda — is answered in English. A six-turn Luganda thread
+completed with every reply in Luganda, and the log shows prompts trimmed to the
+4,096-token window (3,349 and 3,790 prompt tokens). Every Luganda question was
+stored with its English form.
+
+**Known limit.** A reply has a stored English form only when it was translated
+from English. When the model writes Luganda directly — the calculator's
+trilingual lines, or Sunflower answering a Luganda question in Luganda despite
+the instruction — there is no English text to store, and that turn is replayed
+in Luganda. Translating such replies back for history would cost a model call
+per turn; it is left until it shows up as a problem.
+
 ## Open findings (phases 3–5)
 - **G121 — memory lifecycle.** The episode is rewritten by every turn
   (`turn_count` sticks at 2); topic tags match substrings ("private" → VAT,
