@@ -93,6 +93,30 @@ def make_tsa_cert(
     return builder.sign(ca_key, hashes.SHA256())
 
 
+def make_issuer(
+    parent: tuple[rsa.RSAPrivateKey, x509.Certificate],
+    cn: str,
+    *,
+    ca: bool | None = True,
+    path_length: int | None = None,
+) -> tuple[rsa.RSAPrivateKey, x509.Certificate]:
+    """A certificate under *parent*; ``ca=None`` leaves out basicConstraints (an end entity)."""
+    parent_key, parent_cert = parent
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(_name(cn))
+        .issuer_name(parent_cert.subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(NOW - dt.timedelta(days=100))
+        .not_valid_after(NOW + dt.timedelta(days=1000))
+    )
+    if ca is not None:
+        builder = builder.add_extension(x509.BasicConstraints(ca=ca, path_length=path_length), critical=True)
+    return key, builder.sign(parent_key, hashes.SHA256())
+
+
 def _alg(oid: str, null: bool = True) -> bytes:
     return der_seq(der_oid(oid), b"\x05\x00") if null else der_seq(der_oid(oid))
 
@@ -226,6 +250,29 @@ class VerifyTokenTest(unittest.TestCase):
         token = make_token(self.key, cert, self.digest, chain=(inter,))
         self.assertTrue(tsa.verify_token(token, self.digest, anchors=[root[1]]).chain_verified)
 
+    def test_an_end_entity_cannot_act_as_an_intermediate(self) -> None:
+        """A trusted root's ordinary certificate holder must not be able to mint a TSA."""
+        root = make_ca("Root")
+        for ca in (None, False):
+            rogue = make_issuer(root, "Not a CA", ca=ca)
+            cert = make_tsa_cert(rogue, self.key)
+            token = make_token(self.key, cert, self.digest, chain=(rogue[1],))
+            self.assertIn("not a CA", self._rejects(token, anchors=[root[1]]))
+
+    def test_path_length_constraint_is_enforced(self) -> None:
+        root = make_ca("Root")
+        upper = make_issuer(root, "Upper", path_length=0)
+        lower = make_issuer(upper, "Lower")
+        cert = make_tsa_cert(lower, self.key)
+        token = make_token(self.key, cert, self.digest, chain=(lower[1], upper[1]))
+        self.assertIn("path length", self._rejects(token, anchors=[root[1]]))
+
+    def test_malformed_token_is_a_timestamp_error(self) -> None:
+        token = make_token(self.key, self.cert, self.digest)
+        for broken in (der_seq(der_oid(OID_SIGNED_DATA)), token[: len(token) // 2], b"\x30\x00"):
+            with self.assertRaises(TimestampError):
+                tsa.verify_token(broken, self.digest, anchors=[self.ca[1]])
+
     def test_signing_certificate_binding_is_checked(self) -> None:
         token = make_token(self.key, self.cert, self.digest, signing_cert_hash=b"\x00" * 32)
         self.assertIn("signing-certificate", self._rejects(token))
@@ -309,6 +356,53 @@ class SealTimestampTest(unittest.TestCase):
             broken = verify_anchor(forged, tenant)
         self.assertIsNotNone(broken)
         self.assertIn("timestamp token", broken.reason)
+
+    def _sealed(self, token_for=None) -> tuple[dict, str]:
+        from app.audit import get_ledger
+
+        tenant = f"tsa-{uuid.uuid4().hex[:8]}"
+        get_ledger().append("generate", {"n": 1}, tenant_id=tenant)
+        with mock.patch.dict(os.environ, {"AUDIT_TSA_URL": "https://tsa.test/tsr"}), \
+             mock.patch.object(tsa, "request_timestamp", side_effect=token_for or self._token_for), \
+             mock.patch.object(tsa, "load_trust_anchors", return_value=[self.ca[1]]):
+            return get_ledger().seal_pending(tenant), tenant
+
+    def test_an_unanchored_token_breaks_the_seal_when_timestamps_are_on(self) -> None:
+        """Without trust anchors a self-signed "TSA" would pass the signature check."""
+        from app.audit.verifier import verify_anchor
+
+        anchor, tenant = self._sealed()
+        with mock.patch.object(tsa, "load_trust_anchors", return_value=[]):
+            with mock.patch.dict(os.environ, {"AUDIT_TSA_URL": "https://tsa.test/tsr"}):
+                broken = verify_anchor(anchor, tenant)
+            with mock.patch.dict(os.environ, {"AUDIT_TSA_URL": ""}):
+                self.assertIsNone(verify_anchor(anchor, tenant))
+        self.assertIn("trust anchor", broken.reason)
+
+    def test_required_mode_breaks_on_a_missing_or_legacy_token(self) -> None:
+        from app.audit.verifier import verify_anchor
+
+        anchor, tenant = self._sealed()
+        cases = {"blank": "", "legacy": "freeform-value-from-before-rfc3161"}
+        for label, value in cases.items():
+            forged = dict(anchor, tsa_token=value)
+            with mock.patch.dict(os.environ, {"AUDIT_TSA_REQUIRED": ""}):
+                self.assertIsNone(verify_anchor(forged, tenant), label)
+            with mock.patch.dict(os.environ, {"AUDIT_TSA_REQUIRED": "true"}):
+                self.assertIsNotNone(verify_anchor(forged, tenant), label)
+        with mock.patch.dict(os.environ, {"AUDIT_TSA_REQUIRED": "true"}), \
+             mock.patch.object(tsa, "load_trust_anchors", return_value=[self.ca[1]]):
+            self.assertIsNone(verify_anchor(anchor, tenant))
+
+    def test_a_malformed_stored_token_is_a_break_not_a_crash(self) -> None:
+        import base64
+
+        from app.audit.verifier import verify_anchor
+
+        anchor, tenant = self._sealed()
+        garbage = tsa.TOKEN_PREFIX + base64.b64encode(der_seq(der_oid(OID_SIGNED_DATA))).decode("ascii")
+        broken = verify_anchor(dict(anchor, tsa_token=garbage), tenant)
+        self.assertIn("malformed", broken.reason)
 
     def test_unreachable_tsa_still_seals_and_is_counted(self) -> None:
         from app.analytics import metrics

@@ -187,8 +187,13 @@ by every integrity check, it is verified: PKI status, imprint and nonce, the
 CMS signed attributes (content type, message digest), the signature against
 the TSA certificate carried in the token, the signing-certificate binding
 (ESSCertID/v2), the `timeStamping` extended key usage, validity at `genTime`
-and — with `AUDIT_TSA_CA_CERT` — the chain to a configured trust anchor. A
-token that fails any step is a break ("timestamp token does not verify").
+and — with `AUDIT_TSA_CA_CERT` — the chain to a configured trust anchor, in
+which every certificate between the anchor and the TSA must be a CA
+(`basicConstraints`, path length, `keyCertSign`) valid at `genTime`. A
+token that fails any step, or does not parse, is a break ("timestamp token
+does not verify"). A token that verifies but chains to no anchor proves
+nothing — anyone can mint a self-signed "TSA" — so with `AUDIT_TSA_URL` set it
+is a break too ("does not chain to a trust anchor").
 RSA PKCS#1 v1.5 and ECDSA tokens are supported; RSASSA-PSS is reported as
 unsupported rather than accepted.
 
@@ -196,13 +201,18 @@ unsupported rather than accepted.
 | --- | --- |
 | `AUDIT_TSA_URL` | `http://timestamp.digicert.com`, `http://timestamp.sectigo.com`, `https://freetsa.org/tsr` |
 | `AUDIT_TSA_CA_CERT` | A PEM bundle holding the TSA's root (e.g. `/etc/ssl/certs/ca-certificates.crt` for the commercial TSAs above). Production refuses to start with a TSA and no bundle. |
+| `AUDIT_TSA_REQUIRED` | `true` once every seal you keep carries a token: a seal with no token or a pre-RFC 3161 value is then a break. Default off. |
 
 A TSA that cannot be reached does not stop sealing: the seal is written
 without a token, `ura_audit_tsa_failures_total{reason}` counts the miss and
 `AuditTimestampFailing` alerts. Values stored before 2026-10-06 (the earlier
 client posted JSON, which no TSA speaks, and stored whatever came back) are
 not treated as evidence: they are ignored, neither trusted nor reported as
-breaks.
+breaks — the same as a seal with no token. Someone with write access to the
+database could blank the token column just as easily, so turn on
+`AUDIT_TSA_REQUIRED` once the seals made before timestamps were switched on
+have aged out (or been re-witnessed): from then on a missing token is
+evidence of tampering, not a gap.
 
 **Verified live, 2026-10-06:** tokens from DigiCert and Sectigo verified end
 to end, chain included, against the system trust store; a one-byte change to

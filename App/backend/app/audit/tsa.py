@@ -385,12 +385,48 @@ def _check_tsa_certificate(cert: Any, gen_time: dt.datetime) -> None:
         raise TimestampError("TSA certificate was not valid at genTime")
 
 
-def _chain_to_anchor(cert: Any, intermediates: list[Any], anchors: list[Any]) -> None:
+def _issuing_ca_problem(issuer: Any, gen_time: dt.datetime, cas_below: int) -> str:
+    """Why *issuer* may not act as an intermediate CA here, or ``""``.
+
+    A name match and a valid signature are not enough: without these checks
+    the holder of any certificate under a trusted root could mint a "CA" of
+    their own and sign a TSA certificate with it.
+    """
+    from cryptography import x509
+
+    try:
+        constraints = issuer.extensions.get_extension_for_class(x509.BasicConstraints).value
+    except x509.ExtensionNotFound:
+        return "an intermediate certificate is not a CA (no basicConstraints)"
+    if not constraints.ca:
+        return "an intermediate certificate is not a CA"
+    if constraints.path_length is not None and cas_below > constraints.path_length:
+        return "an intermediate CA's path length constraint is exceeded"
+    try:
+        usage = issuer.extensions.get_extension_for_class(x509.KeyUsage).value
+    except x509.ExtensionNotFound:
+        usage = None
+    if usage is not None and not usage.key_cert_sign:
+        return "an intermediate CA is not allowed to sign certificates"
+    if not issuer.not_valid_before_utc <= gen_time <= issuer.not_valid_after_utc:
+        return "an intermediate CA was not valid at genTime"
+    return ""
+
+
+def _chain_to_anchor(cert: Any, intermediates: list[Any], anchors: list[Any], gen_time: dt.datetime) -> None:
+    """Walk issuer links from the TSA certificate up to a configured anchor.
+
+    Anchors are trusted as configured; every certificate between them and
+    the TSA certificate must be a CA entitled to issue at that depth and
+    valid when the token was made.
+    """
     anchor_prints = {anchor.fingerprint(_sha256_hash()) for anchor in anchors}
     current = cert
+    cas_below = 0
     for _ in range(6):
         if current.fingerprint(_sha256_hash()) in anchor_prints:
             return
+        problem = ""
         for issuer in [*anchors, *intermediates]:
             if issuer.subject != current.issuer or issuer is current:
                 continue
@@ -400,10 +436,14 @@ def _chain_to_anchor(cert: Any, intermediates: list[Any], anchors: list[Any]) ->
                 continue
             if issuer.fingerprint(_sha256_hash()) in anchor_prints:
                 return
+            problem = _issuing_ca_problem(issuer, gen_time, cas_below)
+            if problem:
+                continue
             current = issuer
+            cas_below += 1
             break
         else:
-            raise TimestampError("the TSA certificate does not chain to a configured trust anchor")
+            raise TimestampError(problem or "the TSA certificate does not chain to a configured trust anchor")
     raise TimestampError("TSA certificate chain is too long")
 
 
@@ -446,7 +486,21 @@ def load_trust_anchors(path: str | None = None) -> list[Any]:
 
 
 def verify_token(token: bytes, digest: bytes, *, nonce: int | None = None, anchors: list[Any] | None = None) -> TimestampInfo:
-    """Verify a DER ``TimeStampToken`` over SHA-256 *digest*; raise :class:`TimestampError`."""
+    """Verify a DER ``TimeStampToken`` over SHA-256 *digest*; raise :class:`TimestampError`.
+
+    A truncated or malformed token is a :class:`TimestampError` too, never an
+    ``IndexError`` or ``ValueError``: the ledger verifier reports it as a
+    broken seal instead of aborting the whole run.
+    """
+    try:
+        return _verify_token(token, digest, nonce=nonce, anchors=anchors)
+    except TimestampError:
+        raise
+    except (IndexError, KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
+        raise TimestampError(f"malformed timestamp token ({type(exc).__name__})") from exc
+
+
+def _verify_token(token: bytes, digest: bytes, *, nonce: int | None, anchors: list[Any] | None) -> TimestampInfo:
     content_info = parse_single(token).children()
     if decode_oid(content_info[0]) != OID_SIGNED_DATA:
         raise TimestampError("token is not CMS SignedData")
@@ -499,7 +553,7 @@ def verify_token(token: bytes, digest: bytes, *, nonce: int | None = None, ancho
 
     chain_verified = False
     if anchors:
-        _chain_to_anchor(signer_cert, [c for c in certificates if c is not signer_cert], anchors)
+        _chain_to_anchor(signer_cert, [c for c in certificates if c is not signer_cert], anchors, tst["gen_time"])
         chain_verified = True
     return TimestampInfo(
         gen_time=tst["gen_time"],

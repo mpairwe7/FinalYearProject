@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -219,24 +220,47 @@ def verify_anchor(anchor: dict[str, Any], tenant_id: str = "default") -> AnchorB
     head_hash = anchor.get("head_hash") or ""
     if head_hash and rows[-1]["row_hash"] != head_hash:
         return _break("head_hash mismatch: the chain was rewritten under the seal")
-    tsa_token = str(anchor.get("tsa_token") or "").strip()
-    if tsa_token:
-        from .tsa import TimestampError, seal_statement, verify_stored_token
+    problem = _timestamp_problem(anchor, tenant_id, first, last, head_hash)
+    return _break(problem) if problem else None
 
-        statement = seal_statement(
-            tenant_id=tenant_id,
-            first_seq=first,
-            last_seq=last,
-            merkle_root=str(anchor["merkle_root"]),
-            head_hash=head_hash,
-        )
-        try:
-            # None: a value stored before RFC 3161 support, which proves nothing
-            # and is ignored rather than trusted.
-            verify_stored_token(tsa_token, statement)
-        except TimestampError as exc:
-            return _break(f"timestamp token does not verify: {exc}")
-    return None
+
+def _timestamp_required() -> bool:
+    return os.getenv("AUDIT_TSA_REQUIRED", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _timestamp_problem(anchor: dict[str, Any], tenant_id: str, first: int, last: int, head_hash: str) -> str:
+    """Why the seal's timestamp does not hold, or ``""``.
+
+    A token counts only when it verifies *and* chains to a configured trust
+    anchor: anyone can mint a self-signed "TSA" certificate. With timestamps
+    configured (``AUDIT_TSA_URL``) an unanchored token is a break. With
+    ``AUDIT_TSA_REQUIRED`` every seal must carry an anchored RFC 3161 token,
+    so a blanked or pre-RFC 3161 value is a break too; without it those are
+    ignored — neither trusted nor reported — because seals made before
+    timestamps were switched on have none.
+    """
+    from .tsa import TimestampError, seal_statement, verify_stored_token
+
+    required = _timestamp_required()
+    tsa_token = str(anchor.get("tsa_token") or "").strip()
+    if not tsa_token:
+        return "seal carries no timestamp token (AUDIT_TSA_REQUIRED)" if required else ""
+    statement = seal_statement(
+        tenant_id=tenant_id,
+        first_seq=first,
+        last_seq=last,
+        merkle_root=str(anchor["merkle_root"]),
+        head_hash=head_hash,
+    )
+    try:
+        info = verify_stored_token(tsa_token, statement)
+    except TimestampError as exc:
+        return f"timestamp token does not verify: {exc}"
+    if info is None:
+        return "timestamp token predates RFC 3161 support and proves nothing (AUDIT_TSA_REQUIRED)" if required else ""
+    if not info.chain_verified and (required or os.getenv("AUDIT_TSA_URL", "").strip()):
+        return "timestamp token does not chain to a trust anchor (set AUDIT_TSA_CA_CERT)"
+    return ""
 
 
 def verify_ledger(tenant_id: str = "default", *, scope: str = SCOPE_FULL) -> VerificationReport:
