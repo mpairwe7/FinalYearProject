@@ -28,6 +28,9 @@ names here may need to move with them:
 * each tool call is ``execute_tool {gen_ai.tool.name}``;
 * scores (faithfulness, the response judge) are ``gen_ai.evaluation.result``
   events on the span they evaluate;
+* the turn span and every model-call span carry the turn's
+  ``gen_ai.conversation.id``, ``ura.locale`` and ``ura.locale_source``
+  (:func:`turn_attributes_scope`), on the streamed path too;
 * metrics ``gen_ai.client.operation.duration`` (s) and
   ``gen_ai.client.token.usage`` ({token}) are histograms.
 
@@ -70,6 +73,9 @@ _instruments: dict[str, Any] = {}
 # audit row and the turn span want the total.
 _TURN_USAGE: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
     "turn_llm_usage", default=None
+)
+_TURN_ATTRIBUTES: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "turn_span_attributes", default=None
 )
 _usage_lock = threading.Lock()
 
@@ -214,12 +220,44 @@ def trace_rag_pipeline(
                 span.set_attribute("rag.retrieval.num_results", ctx["num_sources"])
             if "locale" in ctx:
                 span.set_attribute("ura.locale", ctx["locale"])
+            _apply_turn_attributes(span)
             usage = _TURN_USAGE.get() or {}
             if usage.get("calls"):
                 span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
                 span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
     finally:
         _TURN_USAGE.set(previous_usage)
+
+
+@contextmanager
+def turn_attributes_scope() -> Generator[dict[str, Any], None, None]:
+    """Collect the attributes every GenAI span of this turn carries (G123).
+
+    The conversation id (``gen_ai.conversation.id``) and the answer language
+    (``ura.locale``, ``ura.locale_source``) are learnt partway through a turn,
+    and its model calls run on other threads. The dict is shared through the
+    copied context, as :func:`turn_usage_scope`'s is, and restored with
+    ``set`` for the same async-generator reason.
+    """
+    attributes: dict[str, Any] = {}
+    previous = _TURN_ATTRIBUTES.get()
+    _TURN_ATTRIBUTES.set(attributes)
+    try:
+        yield attributes
+    finally:
+        _TURN_ATTRIBUTES.set(previous)
+
+
+def set_turn_attribute(key: str, value: Any) -> None:
+    """Record *key* for the current turn's spans; a no-op outside a turn."""
+    attributes = _TURN_ATTRIBUTES.get()
+    if attributes is not None and value not in (None, ""):
+        attributes[key] = value
+
+
+def _apply_turn_attributes(span: Any) -> None:
+    for key, value in (_TURN_ATTRIBUTES.get() or {}).items():
+        span.set_attribute(key, value)
 
 
 @contextmanager
@@ -350,6 +388,7 @@ def llm_call(
         "gen_ai.operation.name": operation,
         "gen_ai.provider.name": provider,
         "gen_ai.request.model": model,
+        **(_TURN_ATTRIBUTES.get() or {}),
     }
     # A stream is consumed token by token, often from other threads, so its
     # span is never made current: attaching it to one context and detaching it
@@ -374,6 +413,8 @@ def llm_call(
     finally:
         duration = time.perf_counter() - started
         error_type = error_type or call.error_type
+        if span is not None:
+            _apply_turn_attributes(span)
         _finish_llm_call(call, operation, model, provider, streaming, duration, started, error_type, span)
         if span_cm is not None:
             span_cm.__exit__(None, None, None)

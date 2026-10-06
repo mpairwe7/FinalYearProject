@@ -534,6 +534,38 @@ def turn_outcome(result: Mapping[str, Any]) -> str:
     return "answered"
 
 
+#: The answer languages and decision sources a label may take (G123); anything
+#: else is folded into "other", so the series stay bounded.
+_DECISION_LOCALES = frozenset({"en", "lg", "sw"})
+
+
+def record_language_decision(result: Mapping[str, Any], *, channel: str) -> None:
+    """Count why this turn was answered in its language (``ura_language_decisions_total``).
+
+    ``source`` is :data:`app.language_state.LocaleSource`: an explicit request,
+    the client's explicit choice, continuity, a switch, detection, the profile
+    or the default. A rising ``switched`` or ``detected`` share in Luganda and
+    Swahili is the first sign the language decision is drifting. A turn
+    without a decision (an early error) is not counted.
+    """
+    from typing import get_args
+
+    from .language_state import LocaleSource
+
+    source = str(result.get("locale_source") or "")
+    if not source:
+        return
+    locale = str(result.get("locale") or "")
+    metrics.inc(
+        "language_decisions_total",
+        labels={
+            "channel": channel,
+            "locale": locale if locale in _DECISION_LOCALES else "other",
+            "source": source if source in get_args(LocaleSource) else "other",
+        },
+    )
+
+
 def record_chat_turn(
     result: Mapping[str, Any],
     *,
@@ -561,6 +593,7 @@ def record_chat_turn(
             metrics.observe("faithfulness_score", float(faith))
         except (TypeError, ValueError):
             pass
+    record_language_decision(result, channel=channel)
     # Counted apart from the outcome label: an abstained or blocked turn can
     # still open a ticket, and that hand-off is an escalation.
     if outcome == "escalated" or (not error and (result.get("escalation_required") or result.get("handoff"))):

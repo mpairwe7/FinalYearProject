@@ -67,19 +67,25 @@ def _with_locale(turn: dict[str, str], source: dict[str, Any]) -> dict[str, str]
 
 
 def english_view(turns: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Turns as the models should read them: in English wherever it was stored.
+    """Turns as the models should read them: in English, with instructions neutralised.
 
     A Luganda or Swahili turn is stored with its English form (G119). The
     generator answers in English, and the rewriter, entity extraction and
     summary match English patterns, so they all read that form; the stored
     ``locale`` is kept for the answer-language decision.
+
+    Every model-facing replay of history comes through here, so this is where
+    an instruction stored in history is neutralised before it reaches a prompt
+    again (G123, :func:`app.guardrails.scan_replayed_text`). Transcripts,
+    exports and the audit trail read the stored turns, not this view.
     """
+    from .guardrails import scan_replayed_text
+
     out: list[dict[str, str]] = []
     for turn in turns:
-        view = {
-            "user_message": turn.get("user_message_en") or turn.get("user_message", ""),
-            "bot_reply": turn.get("bot_reply_en") or turn.get("bot_reply", ""),
-        }
+        user_text, _ = scan_replayed_text(turn.get("user_message_en") or turn.get("user_message", ""))
+        reply_text, _ = scan_replayed_text(turn.get("bot_reply_en") or turn.get("bot_reply", ""))
+        view = {"user_message": user_text, "bot_reply": reply_text}
         if turn.get("locale"):
             view["locale"] = turn["locale"]
         out.append(view)
