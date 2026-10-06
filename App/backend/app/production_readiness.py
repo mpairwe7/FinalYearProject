@@ -119,10 +119,19 @@ def _document_errors() -> list[str]:
 
 def _notify_errors() -> list[str]:
     if _truthy("NOTIFICATION_LIVE") or _truthy("NOTIFY_LIVE"):
-        return [
-            "G14: NOTIFICATION_LIVE must stay false until a real sender is wired "
-            "(SES / Africa's Talking). The mock outbox is not delivery."
-        ]
+        from .notify import configured_providers
+
+        provs = configured_providers()
+        # Verify at least one real external delivery provider (email, sms, webhook) is configured
+        has_configured_provider = any(
+            k != "in_app" and p.get("configured") and p.get("backend") not in ("live_sandbox", "mock")
+            for k, p in provs.items()
+        )
+        if not has_configured_provider and not _truthy("ALLOW_SANDBOX_NOTIFY"):
+            return [
+                "G14: NOTIFICATION_LIVE is enabled but no real delivery provider is configured "
+                "(RESEND_API_KEY, SMTP_HOST, AFRICASTALKING_API_KEY, TWILIO_ACCOUNT_SID, or WEBHOOK_NOTIFY_URL required)."
+            ]
     return []
 
 

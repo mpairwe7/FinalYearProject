@@ -184,3 +184,24 @@ def test_external_processor_requires_transfer_approval(monkeypatch: pytest.Monke
     monkeypatch.setenv("CROSS_BORDER_PROCESSING_APPROVED", "true")
     monkeypatch.setenv("CROSS_BORDER_TRANSFER_ASSESSMENT_ID", "TIA-TEST-001")
     assert gap_gate_errors() == []
+
+
+def test_live_notification_production_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key, value in SECURE.items():
+        monkeypatch.setenv(key, value)
+
+    # When NOTIFICATION_LIVE is on without providers, gate fails
+    monkeypatch.setenv("NOTIFICATION_LIVE", "true")
+    monkeypatch.delenv("RESEND_API_KEY", raising=False)
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.delenv("AFRICASTALKING_API_KEY", raising=False)
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("WEBHOOK_NOTIFY_URL", raising=False)
+    errors = [e for e in gap_gate_errors() if e.startswith("G14:")]
+    assert len(errors) == 1
+    assert "no real delivery provider is configured" in errors[0]
+
+    # When a real provider is configured, gate passes cleanly
+    monkeypatch.setenv("RESEND_API_KEY", "re_live_key_999")  # pragma: allowlist secret
+    errors_with_provider = [e for e in gap_gate_errors() if e.startswith("G14:")]
+    assert errors_with_provider == []

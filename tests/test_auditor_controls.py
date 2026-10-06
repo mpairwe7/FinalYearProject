@@ -307,6 +307,8 @@ _WRITE_BODIES = {
     "/v1/admin/calls/{call_id}/callback-done": {"note": "called back"},
     "/v1/admin/officers/me/presence": {"status": "available"},
     "/v1/admin/tickets/{ticket_id}": {"status": "resolved"},
+    # A valid body, so the request reaches the role check rather than a 422.
+    "/v1/admin/outbox/test": {"channel": "email", "recipient": "qa@example.org", "message": "matrix"},
 }
 _WRITE_PARAMS = {"/v1/admin/flags/{name}": {"enabled": "true"}}
 
@@ -326,7 +328,13 @@ def test_every_admin_write_route_refuses_an_auditor(client, tenant):
     """Enumerates the live routes, so a new staff write that forgets its role check fails here."""
     from fastapi.routing import APIRoute
 
-    ids = {"ticket_id": _ticket(), "call_id": _receptionist_call(tenant), "override_id": "ovr-qa", "name": "hyde"}
+    ids = {
+        "ticket_id": _ticket(),
+        "call_id": _receptionist_call(tenant),
+        "override_id": "ovr-qa",
+        "name": "hyde",
+        "notification_id": "ntf_test123",
+    }
     auditor = _headers("aud-matrix", "ura_auditor", tenant)
     checked, leaks = [], []
     for route in app.routes:
