@@ -596,10 +596,8 @@ async def lifespan(app: FastAPI):
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 
-    # Which build is answering: read by the audit provenance block and
-    # exported as ``ura_build_info`` so a dashboard can line a regression up
-    # with a deploy.
-    os.environ.setdefault("APP_VERSION", app.version)
+    # Which build is answering: exported as ``ura_build_info`` so a dashboard
+    # can line a regression up with a deploy (APP_VERSION is set at import).
     metrics.set_gauge(
         "build_info",
         1,
@@ -609,14 +607,6 @@ async def lifespan(app: FastAPI):
             "environment": os.getenv("APP_ENV", "development"),
         },
     )
-
-    # OpenTelemetry GenAI tracing (opt-in via OTEL_ENABLED=true)
-    try:
-        from .tracing import init_tracing
-
-        init_tracing(app)
-    except Exception:
-        logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 
     # Initialise analytics database. Development can still offer degraded text
     # chat, while production must not run without its persistence controls.
@@ -897,6 +887,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
+
+# OpenTelemetry (opt-in via OTEL_ENABLED=true) is set up here, at import, not
+# in the lifespan: the lifespan is itself the first ASGI call, so Starlette has
+# already built the middleware stack by then and the FastAPI instrumentation
+# would never wrap a request. Each uvicorn worker imports this module, so each
+# gets its own providers. APP_VERSION feeds service.version and the audit rows.
+os.environ.setdefault("APP_VERSION", app.version)
+try:
+    from .tracing import init_tracing
+
+    init_tracing(app)
+except Exception:
+    logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 

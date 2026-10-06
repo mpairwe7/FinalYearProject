@@ -71,6 +71,33 @@ class LlmCallMetricsTest(unittest.TestCase):
         self.assertEqual(_counter(key) - before, 1)
 
 
+class ExecutorContextTest(unittest.TestCase):
+    """Generation runs on a thread pool; its tokens and span must still belong to the turn.
+
+    Found live on the GPU stack: a bare ``executor.submit`` dropped the turn's
+    context, so the audit row recorded the judge's 918 input tokens and missed
+    the 2,644 of the generation itself.
+    """
+
+    def test_generation_on_the_executor_counts_toward_the_turn(self) -> None:
+        import unittest.mock as mock
+
+        from app import service
+
+        def fake_generate(**_kwargs):
+            with tracing.llm_call("chat", "m-exec", "vllm") as call:
+                call.usage(2644, 180)
+            return "generated"
+
+        with mock.patch.object(service.llm_module, "generate", side_effect=fake_generate), \
+             mock.patch.object(service._LLM_CIRCUIT, "allow_request", return_value=True), \
+             tracing.turn_usage_scope() as usage:
+            reply = service._local_llm_then_cloud("q", [], None, "en", allow_cloud_fallback=False)
+        self.assertEqual(reply, "generated")
+        self.assertEqual(usage["input_tokens"], 2644)
+        self.assertEqual(usage["calls"], 1)
+
+
 class SpanTest(unittest.TestCase):
     def setUp(self) -> None:
         self.exporter = InMemorySpanExporter()

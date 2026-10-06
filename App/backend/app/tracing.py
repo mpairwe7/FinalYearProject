@@ -71,6 +71,7 @@ _instruments: dict[str, Any] = {}
 _TURN_USAGE: contextvars.ContextVar[dict[str, int] | None] = contextvars.ContextVar(
     "turn_llm_usage", default=None
 )
+_usage_lock = threading.Lock()
 
 
 def _resource_attributes() -> dict[str, str]:
@@ -408,9 +409,10 @@ def _finish_llm_call(
             )
         usage = _TURN_USAGE.get()
         if usage is not None and call.input_tokens is not None:
-            usage["input_tokens"] += call.input_tokens
-            usage["output_tokens"] += call.output_tokens or 0
-            usage["calls"] += 1
+            with _usage_lock:  # translations of one reply run in parallel threads
+                usage["input_tokens"] += call.input_tokens
+                usage["output_tokens"] += call.output_tokens or 0
+                usage["calls"] += 1
         _record_otel_llm_metrics(call, operation, model, provider, duration, error_type)
         if span is not None:
             if call.input_tokens is not None:

@@ -516,8 +516,10 @@ services:
 
   # Traces from the Collector. In-memory storage: a restart drops them, which
   # suits the demo stack; keep traces you need as evidence in an export.
+  # Pinned to 2.20: 2.21 removed the /api/* query API that Grafana's Jaeger
+  # data source calls (its health check returns 404 against 2.21).
   jaeger:
-    image: jaegertracing/jaeger:2.21.0
+    image: jaegertracing/jaeger:2.20.0
     container_name: ura-jaeger
     profiles: [monitoring]
     ports:

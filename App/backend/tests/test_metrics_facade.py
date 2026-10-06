@@ -1,7 +1,7 @@
 """The Prometheus metrics facade (app.analytics).
 
 Pins the failures the in-process store had (docs/GAPS_AND_AGENTIC_ROADMAP.md
-G99/G104): counters that differed per uvicorn worker, "histogram" buckets that
+G99): counters that differed per uvicorn worker, "histogram" buckets that
 went down when latency got worse, raw URL paths as labels, and duplicate
 bare + ``ura_`` series.
 """

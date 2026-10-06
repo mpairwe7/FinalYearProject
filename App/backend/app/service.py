@@ -1077,7 +1077,10 @@ def _local_llm_then_cloud(
         logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
         return _cloud()
 
+    # copy_context: the pool thread then sees this turn's trace span and its
+    # token-usage tally (tracing.turn_usage_scope); a bare submit loses both.
     future = _LLM_EXECUTOR.submit(
+        contextvars.copy_context().run,
         llm_module.generate,
         query=query,
         passages=passages,
@@ -1302,6 +1305,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         max_iterations = _resolve_tool_max_iterations()
 
     future = _LLM_EXECUTOR.submit(
+        contextvars.copy_context().run,
         llm_module.generate_with_tools,
         query=query,
         passages=passages or None,
@@ -3219,10 +3223,15 @@ def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
     if len(paragraphs) <= 1:
         out = _translate_reply(text, locale)
         return (out, "ok") if out is not None else (None, "mt_failed")
+    # One copied context per task (a context cannot be entered by two threads
+    # at once), taken here so each translation keeps the turn's span and usage.
+    contexts = [contextvars.copy_context() for _ in paragraphs]
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(4, len(paragraphs)), thread_name_prefix="reply-mt"
     ) as pool:
-        results = list(pool.map(lambda item: _translate_reply(item[1], locale), paragraphs))
+        results = list(
+            pool.map(lambda job: job[0].run(_translate_reply, job[1][1], locale), zip(contexts, paragraphs))
+        )
     translated = list(pieces)
     for (index, source), out in zip(paragraphs, results):
         if out is None or not out.strip():

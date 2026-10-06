@@ -5,7 +5,7 @@ Real FastAPI app, real ``ChatModel``, the LLM mocked to a fixed answer. A
 ``generate`` row in the audit ledger — channel named, reply digest equal to
 the text the client received — and both must show up on ``/metrics`` read
 with the Prometheus scrape token. Before this change the streamed turn (the
-web client's default) left no audit row at all (gap G103).
+web client's default) left no audit row at all (gap G104).
 """
 
 from __future__ import annotations
@@ -38,7 +38,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app import database  # noqa: E402
 from app import service as service_module  # noqa: E402
 from app.analytics import metrics  # noqa: E402
-from app.flags import flags  # noqa: E402
 from app.main import app  # noqa: E402
 
 REPLY = "The standard VAT rate in Uganda is 18% [1]."
@@ -80,8 +79,11 @@ def _sha(text: str) -> str:
 
 
 def _audit_rows(conversation_id: str) -> list[dict]:
+    # seq is per tenant, so "the newest rows" is not a global ORDER BY seq;
+    # select this turn's rows by its (unique) conversation id instead.
     rows = database.query_all(
-        "SELECT payload FROM audit_events WHERE event_type = 'generate' ORDER BY seq DESC LIMIT 50"
+        "SELECT payload FROM audit_events WHERE event_type = 'generate' AND payload LIKE ?",
+        (f"%{conversation_id}%",),
     )
     payloads = [json.loads(row["payload"]) for row in rows]
     return [p for p in payloads if p.get("conversation_id") == conversation_id]
@@ -96,10 +98,12 @@ def client():
 
 
 @pytest.fixture()
-def pipeline(client):
+def pipeline(client, monkeypatch):
     model = app.state.model
     model._llm_available = True
-    flags.set("audit_ledger", True)
+    # The env var, not flags.set(): tests/agents/test_integration.py reloads
+    # app.flags, so a set() here would land on a stale singleton.
+    monkeypatch.setenv("FLAG_AUDIT_LEDGER", "true")
     with mock.patch.object(service_module, "_simple_search", return_value=[dict(_FAQ_ROW)]), \
          mock.patch.object(service_module, "needs_clarification", return_value=""), \
          mock.patch.object(service_module, "verify_claims", return_value={"decision": "approve", "score": 1.0}), \
@@ -116,7 +120,6 @@ def pipeline(client):
          mock.patch.object(service_module.llm_module, "generate_stream",
                            side_effect=lambda *a, **k: iter(["The standard VAT rate ", "in Uganda is 18% [1]."])):
         yield model
-    flags.clear("audit_ledger")
 
 
 def test_rest_turn_is_audited_with_the_served_reply(client, pipeline):

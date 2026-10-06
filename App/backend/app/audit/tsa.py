@@ -414,14 +414,35 @@ def _sha256_hash() -> Any:
 
 
 def load_trust_anchors(path: str | None = None) -> list[Any]:
-    """PEM certificates from ``AUDIT_TSA_CA_CERT`` (a bundle file), or ``[]``."""
+    """PEM certificates from ``AUDIT_TSA_CA_CERT`` (a bundle file), or ``[]``.
+
+    Each certificate is loaded on its own, so one malformed entry in a system
+    bundle (some carry a non-positive serial number, which newer
+    ``cryptography`` releases refuse) is skipped instead of failing every
+    verification.
+    """
     target = path if path is not None else os.getenv("AUDIT_TSA_CA_CERT", "")
     if not target:
         return []
+    import warnings
+
     from cryptography import x509
 
     with open(target, "rb") as fh:
-        return list(x509.load_pem_x509_certificates(fh.read()))
+        bundle = fh.read()
+    end_marker = b"-----END CERTIFICATE-----"
+    anchors: list[Any] = []
+    for block in bundle.split(end_marker):
+        start = block.find(b"-----BEGIN CERTIFICATE-----")
+        if start < 0:
+            continue
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                anchors.append(x509.load_pem_x509_certificate(block[start:] + end_marker))
+        except ValueError:
+            logger.debug("Skipping an unparseable certificate in %s", target)
+    return anchors
 
 
 def verify_token(token: bytes, digest: bytes, *, nonce: int | None = None, anchors: list[Any] | None = None) -> TimestampInfo:
