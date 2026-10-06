@@ -154,5 +154,86 @@ class SpanTest(unittest.TestCase):
         self.assertRegex(value, r"^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$")
 
 
+
+class TurnAttributesTest(unittest.TestCase):
+    """G123: every GenAI span of a turn names its conversation and answer language."""
+
+    def setUp(self) -> None:
+        self.exporter = InMemorySpanExporter()
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(self.exporter))
+        self._saved = tracing._tracer
+        tracing._tracer = provider.get_tracer("test")
+
+    def tearDown(self) -> None:
+        tracing._tracer = self._saved
+
+    def _span(self, name: str):
+        return {span.name: span for span in self.exporter.get_finished_spans()}[name]
+
+    def test_the_turn_and_its_model_calls_carry_them(self) -> None:
+        with tracing.turn_attributes_scope(), tracing.trace_rag_pipeline("Ate 150m?", request_id="req-2"):
+            tracing.set_turn_attribute("gen_ai.conversation.id", "conv-123")
+            tracing.set_turn_attribute("ura.locale", "lg")
+            tracing.set_turn_attribute("ura.locale_source", "continuity")
+            with tracing.llm_call("chat", "m", "vllm"):
+                pass
+        for name in ("invoke_agent ura-assistant", "chat m"):
+            attributes = self._span(name).attributes
+            with self.subTest(span=name):
+                self.assertEqual(attributes["gen_ai.conversation.id"], "conv-123")
+                self.assertEqual((attributes["ura.locale"], attributes["ura.locale_source"]), ("lg", "continuity"))
+
+    def test_a_streamed_call_on_another_thread_carries_them(self) -> None:
+        import asyncio
+
+        def stream() -> None:
+            with tracing.llm_call("chat", "m-stream", "vllm", streaming=True):
+                pass
+
+        async def turn() -> None:
+            with tracing.turn_attributes_scope():
+                tracing.set_turn_attribute("gen_ai.conversation.id", "conv-456")
+                await asyncio.to_thread(stream)
+
+        asyncio.run(turn())
+        self.assertEqual(self._span("chat m-stream").attributes["gen_ai.conversation.id"], "conv-456")
+
+    def test_outside_a_turn_nothing_is_added(self) -> None:
+        tracing.set_turn_attribute("gen_ai.conversation.id", "stray")
+        with tracing.llm_call("chat", "m", "vllm"):
+            pass
+        self.assertNotIn("gen_ai.conversation.id", self._span("chat m").attributes)
+
+
+class LanguageDecisionMetricTest(unittest.TestCase):
+    """G123: ura_language_decisions_total, with labels that cannot grow without bound."""
+
+    @staticmethod
+    def _key(locale: str, source: str) -> str:
+        return f'language_decisions_total{{channel="sse",locale="{locale}",source="{source}"}}'
+
+    def test_each_decision_is_counted_once(self) -> None:
+        from app.analytics import record_chat_turn
+
+        before = _counter(self._key("lg", "continuity"))
+        record_chat_turn({"locale": "lg", "locale_source": "continuity"}, elapsed_ms=10.0, channel="sse")
+        self.assertEqual(_counter(self._key("lg", "continuity")), before + 1)
+
+    def test_unknown_values_fold_into_other(self) -> None:
+        from app.analytics import record_language_decision
+
+        before = _counter(self._key("other", "other"))
+        record_language_decision({"locale": "fr", "locale_source": "guessed"}, channel="sse")
+        self.assertEqual(_counter(self._key("other", "other")), before + 1)
+
+    def test_a_turn_without_a_decision_is_not_counted(self) -> None:
+        from app.analytics import record_language_decision
+
+        before = sum(v for k, v in metrics.snapshot()["counters"].items() if k.startswith("language_decisions_total"))
+        record_language_decision({"locale": "en"}, channel="sse")
+        after = sum(v for k, v in metrics.snapshot()["counters"].items() if k.startswith("language_decisions_total"))
+        self.assertEqual(after, before)
+
 if __name__ == "__main__":
     unittest.main()

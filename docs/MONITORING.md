@@ -115,6 +115,7 @@ worker's numbers.
 | `ura_chat_turns_total` | counter | `channel`, `outcome` | One per chat turn on **every** transport. `channel`: `rest`, `sse`, `ws`, `voice`. `outcome`: `answered`, `abstained`, `clarification`, `escalated`, `blocked`, `out_of_scope`, `error` |
 | `ura_chat_response_time_ms` | histogram | `channel`, `mode` | Whole-turn latency; `mode` is the retrieval mode |
 | `ura_retrieval_mode_total` | counter | `mode` | Retrieval mode per turn |
+| `ura_language_decisions_total` | counter | `channel`, `locale`, `source` | Why each turn was answered in its language (G123). `locale`: `en`, `lg`, `sw`, else `other`. `source`: `explicit_request`, `client_explicit`, `continuity`, `switched`, `detected`, `profile`, `default`, else `other`. A growing `switched` or `default` share for Luganda or Swahili is the first sign the decision is drifting |
 | `ura_faithfulness_score` | histogram | — | Grounding score per scored turn |
 | `ura_escalation_required_total` | counter | `channel` | Turns handed to a person |
 | `ura_escalation_requested_total` | counter | `outcome` | Taxpayer-initiated handoffs (`POST /v1/escalate`) |
@@ -215,10 +216,16 @@ are still at **Development** status (moved to
 
 | Span | Name | Key attributes |
 | --- | --- | --- |
-| Turn | `invoke_agent ura-assistant` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.usage.*` (turn total), `rag.stage.*.duration_ms`, events `gen_ai.evaluation.result` |
+| Turn | `invoke_agent ura-assistant` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `gen_ai.conversation.id`, `ura.locale`, `ura.locale_source`, `gen_ai.usage.*` (turn total), `rag.stage.*.duration_ms`, events `gen_ai.evaluation.result` |
 | Pipeline stage | `rag.<stage>` | `rag.<stage>.duration_ms` |
-| Model call | `chat <model>` | `gen_ai.provider.name` (`vllm`, `cloudflare.workers_ai`, `gcp.gemini`), `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`/`output_tokens`, `gen_ai.response.finish_reasons`, `error.type` |
+| Model call | `chat <model>` | `gen_ai.provider.name` (`vllm`, `cloudflare.workers_ai`, `gcp.gemini`), `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`/`output_tokens`, `gen_ai.response.finish_reasons`, `error.type`, and the turn's `gen_ai.conversation.id`, `ura.locale`, `ura.locale_source` |
 | Tool call | `execute_tool <tool>` | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `gen_ai.tool.type` |
+
+Every GenAI span of a turn carries the turn's conversation id and answer
+language (`tracing.turn_attributes_scope`), including a streamed turn's model
+calls on other threads. Search one conversation's traces by
+`gen_ai.conversation.id`; conversation ids are random and carry no personal
+data.
 
 OTel metrics `gen_ai.client.operation.duration` (s) and
 `gen_ai.client.token.usage` ({token}) are histograms, as the conventions

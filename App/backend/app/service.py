@@ -163,8 +163,10 @@ from .topics import classify_topic, resolve_topic, topic_retrieval_query
 from .tracing import (
     record_evaluation,
     record_retrieval_metrics,
+    set_turn_attribute,
     trace_rag_pipeline,
     trace_stage,
+    turn_attributes_scope,
     turn_usage_scope,
     usage_summary,
 )
@@ -1599,7 +1601,7 @@ async def run_chat_turn(
     both streamed paths before.
     """
     failed = False
-    with turn_usage_scope() as usage:
+    with turn_usage_scope() as usage, turn_attributes_scope():
         async for event_type, payload in _run_chat_turn_events(model, **kwargs):
             if event_type == "error":
                 failed = True
@@ -5359,13 +5361,16 @@ class ChatModel:
         personalization: dict[str, Any] | None,
     ) -> LanguageDecision:
         """Both chat paths decide the answer language here, the same way."""
-        return resolve_turn_locale(
+        decision = resolve_turn_locale(
             message,
             requested_locale=requested_locale,
             locale_explicit=locale_explicit,
             history=conversation_history,
             profile_locale=str((personalization or {}).get("preferred_locale") or ""),
         )
+        set_turn_attribute("ura.locale", decision.locale)
+        set_turn_attribute("ura.locale_source", decision.source)
+        return decision
 
     @staticmethod
     def _english_router_form(message: str, rewritten: str, locale: str) -> tuple[str, str]:
@@ -8522,7 +8527,7 @@ class ChatModel:
         _PENDING_TURN_AUDIT.set(None)
         # A call turn stays on local models, whatever this deployment allows
         # chat (G122; see providers.scope).
-        with turn_usage_scope() as usage, local_models_only(channel == "call"):
+        with turn_usage_scope() as usage, turn_attributes_scope(), local_models_only(channel == "call"):
             return self._generate_localized(
                 message=message,
                 conversation_id=conversation_id,
@@ -8658,6 +8663,7 @@ class ChatModel:
         """
         t0 = time.perf_counter()
         thread_id = conversation_id or str(uuid.uuid4())
+        set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
@@ -8903,7 +8909,6 @@ class ChatModel:
                     personalization=personalization,
                 )
                 locale = language.locale
-                trace_ctx["locale_source"] = language.source
                 if turn_out is not None:
                     turn_out["source"] = language.source
                 logger.info("Effective turn locale: %s (%s)", locale, language.source)
@@ -10488,6 +10493,7 @@ class ChatModel:
         DB round trip per turn.
         """
         thread_id = conversation_id or str(uuid.uuid4())
+        set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale

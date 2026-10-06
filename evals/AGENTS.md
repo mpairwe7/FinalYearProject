@@ -12,6 +12,7 @@ Deterministic gates. Do not call a hosted LLM from these jobs.
 | DPO scaffold | `evals/dpo_job.py` | refuses train unless `EVAL_GATE_OK` |
 | Spoken language id | `evals/language_id/` + `scripts/eval_language_id.py` | receptionist Phase 0A — measurement, GPU; see its README |
 | Orpheus Luganda voice | `evals/orpheus_tts/` + `scripts/bench_orpheus_tts.py` | receptionist Phase 0B — latency here, naturalness by listeners |
+| Trilingual multi-turn | `evals/multiturn_trilingual/scenarios.jsonl` | `test_multiturn_trilingual_eval.py` — answer language, English replay, scrubbed history, facts (deterministic); `scripts/eval_multiturn_trilingual.py` measures the GPU stack |
 
 `FLAG_HYDE` / `FLAG_GRAPH_FUSION` stay off until an unseen multi-hop set exists.
 

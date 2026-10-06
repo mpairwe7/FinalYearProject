@@ -321,6 +321,29 @@ class InputGuard:
 # ---------------------------------------------------------------------------
 # Indirect prompt injection defence (LLM01 — retrieved-content vector)
 # ---------------------------------------------------------------------------
+def _neutralise_injection(text: str) -> tuple[str, bool]:
+    """Replace each injection phrase in *text*: ``(scrubbed, found)``.
+
+    A phrase hidden with homoglyphs or zero-width characters is found on the
+    canonical form but cannot be cut out of the original: ``found`` is then
+    True while :func:`_injection_present` still holds for the result.
+    """
+    scrubbed = text
+    found = False
+    canonical = _canonicalize_text(scrubbed)
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(scrubbed) or pattern.search(canonical):
+            scrubbed = pattern.sub("[REDACTED_INSTRUCTION]", scrubbed)
+            canonical = _canonicalize_text(scrubbed)
+            found = True
+    return scrubbed, found
+
+
+def _injection_present(text: str) -> bool:
+    canonical = _canonicalize_text(text)
+    return any(pattern.search(text) or pattern.search(canonical) for pattern in _INJECTION_PATTERNS)
+
+
 def scan_retrieved_text(text: str) -> tuple[str, bool]:
     """Neutralise injection patterns embedded in retrieved passages.
 
@@ -331,17 +354,33 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
 
     Returns (scrubbed_text, was_scrubbed).
     """
-    scrubbed = text
-    was_scrubbed = False
-    canonical = _canonicalize_text(scrubbed)
-    for pattern in _INJECTION_PATTERNS:
-        if pattern.search(scrubbed) or pattern.search(canonical):
-            scrubbed = pattern.sub("[REDACTED_INSTRUCTION]", scrubbed)
-            canonical = _canonicalize_text(scrubbed)
-            was_scrubbed = True
+    scrubbed, was_scrubbed = _neutralise_injection(text)
     if was_scrubbed:
         logger.warning("Indirect injection scrubbed in retrieved passage (%d chars)", len(text))
     return scrubbed, was_scrubbed
+
+
+#: What a replayed turn becomes when its injection cannot be cut out.
+REPLAY_WITHHELD = "[An earlier message was withheld: it contained instructions addressed to the assistant.]"
+
+
+def scan_replayed_text(text: str) -> tuple[str, bool]:
+    """Neutralise injection patterns in a stored turn before it is replayed (G123).
+
+    Conversation history goes back into the next prompts. That includes turns
+    the input guard refused, which are stored for the transcript, and
+    instructions the guard missed. An injection kept in history is OWASP
+    ASI06's memory poisoning: one message steers every later turn. A phrase
+    that can be cut out is redacted as in retrieved passages. A turn whose
+    phrase survives that (hidden with homoglyphs or zero-width characters) is
+    withheld whole. Returns ``(text, was_scrubbed)``.
+    """
+    scrubbed, found = _neutralise_injection(text)
+    if not found:
+        return text, False
+    if _injection_present(scrubbed):
+        return REPLAY_WITHHELD, True
+    return scrubbed, True
 
 
 def is_official_ura_email(email: str) -> bool:
