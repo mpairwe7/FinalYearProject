@@ -85,7 +85,6 @@ class ChatCarryoverTest(unittest.TestCase):
         self.assertIsNotNone(carry)
         self.assertIn("vat", carry.context.lower())
         self.assertNotIn("duka", carry.context)
-        self.assertEqual(carry.locale, "sw")
 
     def test_malformed_ids_are_refused(self) -> None:
         self.assertIsNone(chat_carryover("../conversations", user_id=self.user))

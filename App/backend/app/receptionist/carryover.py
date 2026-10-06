@@ -37,7 +37,6 @@ class ChatCarryover:
     topic_id: str = ""
     topic_label: str = ""
     tax_type: str = ""
-    locale: str = ""
 
 
 def chat_carryover(
@@ -76,14 +75,12 @@ def chat_carryover(
     if topic:
         parts.append(f"Current task: {topic['label']}.")
     context = " ".join(p for p in parts if p).strip()[:MAX_CONTEXT_CHARS]
-    locale = next((str(t.get("locale") or "") for t in reversed(turns) if t.get("locale")), "")
     return ChatCarryover(
         conversation_id=parent,
         context=context,
         topic_id=str((topic or {}).get("topic_id") or ""),
         topic_label=str((topic or {}).get("label") or ""),
         tax_type=str((topic or {}).get("tax_type") or ""),
-        locale=locale,
     )
 
 
