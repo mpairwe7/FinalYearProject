@@ -55,6 +55,9 @@ on:
     # Weekly quantization on Sunday 02:00 UTC (after scheduled retraining)
     - cron: "0 2 * * 0"
 
+permissions:
+  contents: read
+
 concurrency:
   group: quantization-${{ github.ref }}
   cancel-in-progress: true

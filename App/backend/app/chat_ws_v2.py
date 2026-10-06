@@ -831,13 +831,18 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
             },
         )
 
+        safe_sess_id = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
+        safe_user = str(session_user_id or "anon").replace("\r", "\\r").replace("\n", "\\n")
+        safe_tenant = str(session_tenant_id).replace("\r", "\\r").replace("\n", "\\n")
+        safe_conv = str(conversation_id or "-").replace("\r", "\\r").replace("\n", "\\n")
+        safe_prev_resp = str(previous_response_id or "-").replace("\r", "\\r").replace("\n", "\\n")
         logger.info(
             "chat WS session started session=%s user=%s tenant=%s conv=%s prev_resp=%s resumed=%s",
-            session_id,
-            session_user_id or "anon",
-            session_tenant_id,
-            conversation_id or "-",
-            previous_response_id or "-",
+            safe_sess_id,
+            safe_user,
+            safe_tenant,
+            safe_conv,
+            safe_prev_resp,
             session.resumed,
         )
 
@@ -935,7 +940,8 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
                 )
 
     except WebSocketDisconnect:
-        logger.info("chat WS disconnected session=%s", session_id or "?")
+        safe_disc_id = str(session_id or "?").replace("\r", "\\r").replace("\n", "\\n")
+        logger.info("chat WS disconnected session=%s", safe_disc_id)
     except Exception:
         logger.exception("chat WS error")
         try:

@@ -217,9 +217,11 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
             },
         })
 
+        safe_sess_id = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
+        safe_lang = str(language).replace("\r", "\\r").replace("\n", "\\n")
         logger.info(
             "V2 session started (session=%s, lang=%s, sr=%d, vision=%s)",
-            session_id, language, sample_rate, vision_enabled,
+            safe_sess_id, safe_lang, sample_rate, vision_enabled,
         )
 
         # Audit log
@@ -344,7 +346,8 @@ async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
                     )
 
     except WebSocketDisconnect:
-        logger.info("V2 WebSocket disconnected (session=%s)", session.session_id if session else "?")
+        safe_disc_id = str(session.session_id if session else "?").replace("\r", "\\r").replace("\n", "\\n")
+        logger.info("V2 WebSocket disconnected (session=%s)", safe_disc_id)
         if session:
             try:
                 from .voice_consent import log_voice_event

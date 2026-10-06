@@ -64,7 +64,7 @@ _MULTIPLIERS = {
     "bn": 1e9,
     "billion": 1e9,
 }
-_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent)\b", re.IGNORECASE)
+_PERCENT_RE = re.compile(r"\b(\d{1,6}(?:\.\d{1,4})?)\s*(?:%|percent\b)", re.IGNORECASE)
 _YEAR_RE = re.compile(r"^(19|20)\d{2}$")
 
 
@@ -748,7 +748,7 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         assumptions = []
         duty_pcts = [
             float(m.group(1))
-            for m in _PERCENT_RE.finditer(text)
+            for m in _PERCENT_RE.finditer(text[:2000] if text else "")
             if _DUTY_KW_RE.search(text[max(0, m.start() - 32) : m.end() + 16])
         ]
         if duty_pcts:

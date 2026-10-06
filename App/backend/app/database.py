@@ -1114,7 +1114,8 @@ def save_feedback(
         )
         conn.commit()
     except Exception:
-        logger.exception("Failed to save feedback for message_id=%s", message_id)
+        safe_msg_id = str(message_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to save feedback for message_id=%s", safe_msg_id)
         conn.rollback()
         raise
     return {"id": fb_id, "message_id": message_id, "rating": rating, "created_at": now}
@@ -1138,7 +1139,8 @@ def update_feedback_comment(message_id: str, comment: str, user_id: str = "") ->
         conn.commit()
         return cursor.rowcount > 0
     except Exception:
-        logger.exception("Failed to update feedback comment for message_id=%s", message_id)
+        safe_msg_id = str(message_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to update feedback comment for message_id=%s", safe_msg_id)
         conn.rollback()
         return False
 
@@ -1240,7 +1242,8 @@ def track_event(
         )
         conn.commit()
     except Exception:
-        logger.exception("Failed to track event type=%s", event_type)
+        safe_evt = str(event_type).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to track event type=%s", safe_evt)
         conn.rollback()
 
 
@@ -1281,7 +1284,8 @@ def upsert_session(
         )
         conn.commit()
     except Exception:
-        logger.exception("Failed to upsert session id=%s", session_id)
+        safe_sid = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to upsert session id=%s", safe_sid)
         conn.rollback()
 
 
@@ -1903,7 +1907,9 @@ def create_ticket(
             ),
         )
         conn.commit()
-        logger.info("ticket %s created (priority=%s reason_length=%d)", ticket_id, priority, len(reason))
+        safe_tid = str(ticket_id).replace("\r", "\\r").replace("\n", "\\n")
+        safe_prio = str(priority).replace("\r", "\\r").replace("\n", "\\n")
+        logger.info("ticket %s created (priority=%s reason_length=%d)", safe_tid, safe_prio, len(reason))
     except Exception:
         logger.exception("Failed to create ticket")
         conn.rollback()

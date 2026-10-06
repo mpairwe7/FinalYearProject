@@ -7006,7 +7006,8 @@ class ChatModel:
             if not lesson.get("ok"):
                 return None
         except Exception:
-            logger.exception("education tool execution failed for topic %s", topic)
+            safe_topic = str(topic).replace("\r", "\\r").replace("\n", "\\n")
+            logger.exception("education tool execution failed for topic %s", safe_topic)
             return None
 
         if locale not in ("", "en"):
@@ -7685,7 +7686,8 @@ class ChatModel:
                 logger.exception("calculator tool execution failed")
                 return None
             if not result.get("ok"):
-                logger.info("calculator rejected extracted args: %s", result.get("error", ""))
+                safe_err = str(result.get("error", "")).replace("\r", " ").replace("\n", " ")
+                logger.info("calculator rejected extracted args: %s", safe_err)
                 return None
             remember_calculation(
                 thread_id,
@@ -7819,9 +7821,10 @@ class ChatModel:
         except Exception:
             logger.exception("calculator follow-up failed")
             return None
-        if not result.get("ok"):
-            logger.info("calculator follow-up rejected: %s", result.get("error", ""))
-            return None
+            if not result.get("ok"):
+                safe_err = str(result.get("error", "")).replace("\r", " ").replace("\n", " ")
+                logger.info("calculator follow-up rejected: %s", safe_err)
+                return None
         remember_calculation(
             thread_id,
             nxt["tool"],
@@ -8711,7 +8714,8 @@ class ChatModel:
             #     preserving established conversation locale across follow-up turns.
             with trace_stage("lang_detect", timings=timings):
                 locale = self._resolve_conversation_locale(message, requested_locale, conversation_history)
-                logger.info("Effective turn locale: %s", locale)
+                safe_loc = str(locale).replace("\r", "\\r").replace("\n", "\\n")
+                logger.info("Effective turn locale: %s", safe_loc)
 
             # The deterministic routers below — workflows, TIN clarification,
             # calculators, rate tables — match English patterns. Retrieval
@@ -10329,7 +10333,8 @@ class ChatModel:
         # Language detection & multi-turn continuity — auto-detect user's language,
         # preserving established conversation locale across follow-up turns.
         locale = self._resolve_conversation_locale(message, requested_locale, conversation_history)
-        logger.info("Effective turn locale (streaming): %s", locale)
+        safe_loc_stream = str(locale).replace("\r", "\\r").replace("\n", "\\n")
+        logger.info("Effective turn locale (streaming): %s", safe_loc_stream)
 
         personalization = self._load_personalization_state(user_id, tenant_id or "default")
         # Attachment turns and ongoing multi-turn conversations are never cache-served
