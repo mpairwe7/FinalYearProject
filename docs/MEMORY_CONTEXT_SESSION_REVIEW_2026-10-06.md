@@ -17,7 +17,7 @@ on the load suite's Luganda and Swahili questions
 |---|---|---|---|
 | 1 | The answer language as conversation state; streaming/REST routing parity | G113–G118 | **Shipped** (this PR) |
 | 2 | Each turn stored in English beside the original; English history for the model; the context window and token budget | G119, G120 | **Shipped** |
-| 3 | Memory lifecycle: one episode per conversation, word-boundary topic tags on the English form, lg/sw fact cues, fact validity periods | G121 | Open |
+| 3 | Memory lifecycle: one episode per conversation, word-boundary topic tags on the English form, lg/sw fact cues, fact validity periods | G121 | **Shipped** |
 | 4 | Sessions and channels: anonymous history across tabs, chat context carried into a call, multi-turn Luganda calls, no Gemini in the call path | G122 | Open |
 | 5 | History scrubbed before it is replayed, `gen_ai.conversation.id` on traces, a trilingual multi-turn evaluation | G123 | Open |
 
@@ -100,11 +100,33 @@ the instruction — there is no English text to store, and that turn is replayed
 in Luganda. Translating such replies back for history would cost a model call
 per turn; it is left until it shows up as a problem.
 
-## Open findings (phases 3–5)
-- **G121 — memory lifecycle.** The episode is rewritten by every turn
-  (`turn_count` sticks at 2); topic tags match substrings ("private" → VAT,
-  "city" → CIT, "getting" → registration); industry cues are English-only; only
-  `taxpayer_type` is superseded.
+## Phase 3 — what changed and why
+
+**One episode per conversation (G121).** Each consented turn used to rewrite its
+conversation's episode from that turn alone, so the summary was always the
+latest turn's topic and `turn_count` stayed at 2. The episode is now derived
+from the whole conversation each time: its topics in the order they were first
+named ("Discussed VAT and PAYE."), and the count of turns actually logged plus
+this one. Topic tags match whole words and read each turn's English form.
+
+**Facts.** The rules read a Luganda or Swahili turn's English form as well as
+the taxpayer's own words. A fact found only in the translation keeps 0.95 of
+its confidence and says so in `extractor_model` (`rules-v1+en`), so an export
+shows which facts rest on machine translation. Common Swahili and Luganda trade
+words (duka, rejareja, kilimo, ujenzi, edduuka, obulimi…) map to industries.
+Single-valued facts — taxpayer type, fiscal year, preferred language, detail
+level — supersede the previous value, which is kept with `invalidated_at`, the
+time it stopped being true, rather than overwritten.
+
+**Where memory is written.** Streamed turns — the web client's — were never
+written to long-term memory; only the LangGraph branch, off by default, wrote
+them. They are now written once the reply is final. A call turn heard below
+`RECEPTIONIST_MEMORY_MIN_ASR_CONF` (0.6 mean word probability) is answered but
+not remembered: code-switched Luganda speech recognition is still error-prone,
+and a mishearing must not become a fact about the caller. Working memory's
+"last topic" is the topic the taxpayer named, not the role that answered.
+
+## Open findings (phases 4–5)
 - **G122 — sessions and channels.** Anonymous history is keyed on the per-tab
   analytics id while the browser keeps 50 conversations with no expiry (server
   TTL 7 days); a call starts a new conversation carrying only a language hint;
