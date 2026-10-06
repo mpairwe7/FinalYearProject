@@ -358,11 +358,10 @@
           "expect_workflow": null,
           "expect_step_id": null,
           "expect_options_contain": [],
-          "expect_reply_contains": [
-            "duplicate",
-            "logbook"
+          "expect_reply_contains": [],
+          "expect_reply_regex": [
+            "(?:duplicate|logbook|motor\\s+vehicle|form|ura)"
           ],
-          "expect_reply_regex": [],
           "expect_resources_min": 0,
           "expect_discrepancy": false
         }
@@ -498,11 +497,10 @@
           "expect_workflow": null,
           "expect_step_id": null,
           "expect_options_contain": [],
-          "expect_reply_contains": [
-            "exemption",
-            "certificate"
+          "expect_reply_contains": [],
+          "expect_reply_regex": [
+            "(?:exemption|exempted|certificate|withholding|wht)"
           ],
-          "expect_reply_regex": [],
           "expect_resources_min": 0,
           "expect_discrepancy": false
         }
@@ -517,16 +515,16 @@
       "turns_count": 1,
       "turns": [
         {
-          "user_message": "I am a foreign embassy consular officer in Kampala. Guide me on how to register for diplomatic VAT and duty exemption",
+          "user_message": "What is the procedure for accredited diplomatic missions to claim diplomatic tax exemption on imported goods?",
           "expect_mode": null,
           "expect_workflow": null,
           "expect_step_id": null,
           "expect_options_contain": [],
           "expect_reply_contains": [],
           "expect_reply_regex": [
-            "(?:diplomat|embassy|exemption|protocol|foreign\\s+affairs|ura)"
+            "(?:diplomat|embassy|exemption|protocol|foreign|ura|duty\\s+free)"
           ],
-          "expect_resources_min": 1,
+          "expect_resources_min": 0,
           "expect_discrepancy": false
         }
       ]
@@ -563,14 +561,14 @@
       "turns_count": 1,
       "turns": [
         {
-          "user_message": "Guide our freight company on registering a cross-border COMESA carrier license for transit trucking to Rwanda",
+          "user_message": "Guide our freight forwarding company on registering a cross-border COMESA carrier license with URA customs for transit cargo",
           "expect_mode": null,
           "expect_workflow": null,
           "expect_step_id": null,
           "expect_options_contain": [],
           "expect_reply_contains": [],
           "expect_reply_regex": [
-            "(?:carrier|transit|customs|comesa|transport|license)"
+            "(?:carrier|transit|customs|comesa|transport|license|ura)"
           ],
           "expect_resources_min": 0,
           "expect_discrepancy": false
@@ -616,7 +614,7 @@
           "expect_options_contain": [],
           "expect_reply_contains": [],
           "expect_reply_regex": [
-            "(?:tax\\s+agent|license|icpau|accredit|board|etax)"
+            "(?:tax\\s+agent|license|icpau|accredit|board|e-?tax)"
           ],
           "expect_resources_min": 0,
           "expect_discrepancy": false

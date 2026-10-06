@@ -26,9 +26,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write     # Required for PR summary comments
-  security-events: write   # Upload SARIF to GitHub Security tab
-  actions: read            # Required for SARIF upload
 
 concurrency:
   group: trivy-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -102,6 +99,10 @@ jobs:
   filesystem-scan:
     name: "Filesystem: Dependencies & Secrets"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     timeout-minutes: 15
     outputs:
       critical_count: ${{ steps.parse-vulns.outputs.critical }}
@@ -186,6 +187,10 @@ jobs:
   iac-scan:
     name: "IaC: Dockerfile & Compose Misconfigs"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     timeout-minutes: 10
     outputs:
       misconfig_count: ${{ steps.parse-iac.outputs.misconfigs }}
@@ -320,7 +325,10 @@ jobs:
   container-scan-api:
     name: "Container: API Image"
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     needs: image-change-filter
     if: needs.image-change-filter.outputs.api == 'true'
     outputs:
@@ -428,7 +436,10 @@ jobs:
   container-scan-frontend:
     name: "Container: Frontend Image"
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     needs: image-change-filter
     if: needs.image-change-filter.outputs.frontend == 'true'
     outputs:
@@ -527,6 +538,9 @@ jobs:
   pr-comment:
     name: "PR Security Scan Summary"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     needs:
       - filesystem-scan
       - iac-scan

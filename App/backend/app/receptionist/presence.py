@@ -42,7 +42,16 @@ def _effective_status(status: str, last_seen: float, now: float) -> str:
 
 def get_presence(user_id: str) -> dict[str, Any] | None:
     """Return presence record for an officer with computed status."""
-    rows = db.query_all("SELECT * FROM officer_presence WHERE user_id = ?", (user_id,))
+    try:
+        rows = db.query_all("SELECT * FROM officer_presence WHERE user_id = ?", (user_id,))
+    except Exception:
+        try:
+            from .store import init_receptionist_schema
+
+            init_receptionist_schema()
+            rows = db.query_all("SELECT * FROM officer_presence WHERE user_id = ?", (user_id,))
+        except Exception:
+            return None
     if not rows:
         return None
     row = dict(rows[0])
@@ -92,26 +101,35 @@ def upsert_presence(
     lang_json = json.dumps(target_languages)
     teams_json = json.dumps(target_teams)
 
-    if existing is not None:
-        db.execute(
-            """
-            UPDATE officer_presence
-            SET display_name = ?, status = ?, languages_json = ?, teams_json = ?,
-                current_call_id = ?, previous_status = ?, last_seen = ?, updated_at = ?
-            WHERE user_id = ?
-            """,
-            (target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now, user_id),
-        )
-    else:
-        db.execute(
-            """
-            INSERT INTO officer_presence (
-                user_id, display_name, status, languages_json, teams_json,
-                current_call_id, previous_status, last_seen, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now),
-        )
+    def _do_write() -> None:
+        if existing is not None:
+            db.execute(
+                """
+                UPDATE officer_presence
+                SET display_name = ?, status = ?, languages_json = ?, teams_json = ?,
+                    current_call_id = ?, previous_status = ?, last_seen = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now, user_id),
+            )
+        else:
+            db.execute(
+                """
+                INSERT INTO officer_presence (
+                    user_id, display_name, status, languages_json, teams_json,
+                    current_call_id, previous_status, last_seen, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, target_display, target_status, lang_json, teams_json, target_call_id, target_prev_status, now, now),
+            )
+
+    try:
+        _do_write()
+    except Exception:
+        from .store import init_receptionist_schema
+
+        init_receptionist_schema()
+        _do_write()
 
     current_effective = _effective_status(target_status, now, now)
 

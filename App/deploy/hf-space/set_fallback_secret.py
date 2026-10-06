@@ -28,12 +28,15 @@ def main():
     if not hf or not val:
         raise SystemExit("HF_TOKEN or SUNBIRD_FALLBACK_API_TOKEN missing from .env")
     data = json.dumps({"key": "SUNBIRD_FALLBACK_API_TOKEN", "value": val}).encode()
+    url = f"https://huggingface.co/api/spaces/{REPO}/secrets"
+    if not url.startswith("https://"):
+        raise ValueError("Only https URLs allowed")
     req = urllib.request.Request(
-        f"https://huggingface.co/api/spaces/{REPO}/secrets", data=data, method="POST",
+        url, data=data, method="POST",
         headers={"Authorization": f"Bearer {hf}", "Content-Type": "application/json"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=40) as r:
+        with urllib.request.urlopen(req, timeout=40) as r:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             print(f"SUNBIRD_FALLBACK_API_TOKEN set on {REPO}: HTTP {r.status}")
     except urllib.error.HTTPError as e:
         print(f"HTTP {e.code}: {e.read()[:160]}")

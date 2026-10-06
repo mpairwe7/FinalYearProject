@@ -150,7 +150,8 @@ def require_voice_consent(user_id: str, tenant_id: str = "default") -> bool:
 
         return db.has_active_consent(user_id, "voice_recording", tenant_id=tenant_id)
     except Exception:
-        logger.exception("Consent check failed for user=%s", user_id)
+        safe_uid = str(user_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Consent check failed for user=%s", safe_uid)
         return False
 
 
@@ -165,7 +166,8 @@ def grant_voice_consent(
     Returns the consent receipt ID, or None on failure.
     """
     if purpose not in VOICE_CONSENT_PURPOSES:
-        logger.warning("Invalid voice consent purpose: %s", purpose)
+        safe_purp = str(purpose).replace("\r", "\\r").replace("\n", "\\n")
+        logger.warning("Invalid voice consent purpose: %s", safe_purp)
         return None
 
     try:

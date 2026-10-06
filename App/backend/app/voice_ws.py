@@ -215,12 +215,15 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
         )
 
         await _send_json(websocket, {"type": "session_ready", "session_id": session_id})
+        safe_sess_id = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
+        safe_lang = str(language).replace("\r", "\\r").replace("\n", "\\n")
+        safe_vad = str(vad_sensitivity).replace("\r", "\\r").replace("\n", "\\n")
         logger.info(
             "Voice session started (session=%s, lang=%s, sr=%d, vad=%s)",
-            session_id,
-            language,
+            safe_sess_id,
+            safe_lang,
             sample_rate,
-            vad_sensitivity,
+            safe_vad,
         )
 
         # Audit trail — log session start
@@ -335,7 +338,8 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
                     )
 
     except WebSocketDisconnect:
-        logger.info("Voice WebSocket disconnected (session=%s)", session.session_id if session else "?")
+        safe_disc_id = str(session.session_id if session else "?").replace("\r", "\\r").replace("\n", "\\n")
+        logger.info("Voice WebSocket disconnected (session=%s)", safe_disc_id)
         if session:
             try:
                 from .voice_consent import log_voice_event

@@ -19,8 +19,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  security-events: write
 
 concurrency:
   group: frontend-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -184,6 +182,11 @@ jobs:
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      actions: read
     timeout-minutes: 20
     needs: build-frontend
     if: github.event_name != 'pull_request'

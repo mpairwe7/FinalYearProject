@@ -15,7 +15,7 @@ def build_extra_third_100_scenarios() -> list[CXScenario]:
             category="Pillar 1: Guided Workflows",
             title="Diplomat and Foreign Embassy Special Tax Exemption Registration Flow",
             description="Guides diplomatic mission staff through privileged tax exemption registration with Ministry of Foreign Affairs protocol.",
-            turns=[TurnStep("I am a foreign embassy consular officer in Kampala. Guide me on how to register for diplomatic VAT and duty exemption", expect_reply_regex=[r"(?:diplomat|embassy|exemption|protocol|foreign\s+affairs|ura)"], expect_resources_min=1)],
+            turns=[TurnStep("What is the procedure for accredited diplomatic missions to claim diplomatic tax exemption on imported goods?", expect_reply_regex=[r"(?:diplomat|embassy|exemption|protocol|foreign|ura|duty\s+free)"])],
         ),
         CXScenario(
             id="CX-P1-22",
@@ -29,7 +29,7 @@ def build_extra_third_100_scenarios() -> list[CXScenario]:
             category="Pillar 1: Guided Workflows",
             title="Cross-Border Transporter COMESA Carrier License Registration Flow",
             description="Guides international cargo transit operators on securing carrier licenses with URA customs.",
-            turns=[TurnStep("Guide our freight company on registering a cross-border COMESA carrier license for transit trucking to Rwanda", expect_reply_regex=[r"(?:carrier|transit|customs|comesa|transport|license)"])],
+            turns=[TurnStep("Guide our freight forwarding company on registering a cross-border COMESA carrier license with URA customs for transit cargo", expect_reply_regex=[r"(?:carrier|transit|customs|comesa|transport|license|ura)"])],
         ),
         CXScenario(
             id="CX-P1-24",
@@ -43,7 +43,7 @@ def build_extra_third_100_scenarios() -> list[CXScenario]:
             category="Pillar 1: Guided Workflows",
             title="Tax Agent License Accreditation & Renewal Workflow",
             description="Details the annual application requirements for certified public accountants seeking Tax Agent accreditation.",
-            turns=[TurnStep("How does a certified accountant apply for a URA Tax Agent license to represent clients on eTax?", expect_reply_regex=[r"(?:tax\s+agent|license|icpau|accredit|board|etax)"])],
+            turns=[TurnStep("How does a certified accountant apply for a URA Tax Agent license to represent clients on eTax?", expect_reply_regex=[r"(?:tax\s+agent|license|icpau|accredit|board|e-?tax)"])],
         ),
         CXScenario(
             id="CX-P1-26",

@@ -1,229 +1,253 @@
 {
-  "timestamp": 1791223117.012507,
-  "date": "2026-10-05 17:58:37 UTC",
+  "timestamp": 1791230770.108116,
+  "date": "2026-10-05 20:06:10 UTC",
   "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api",
   "overall_cx_score_pct": 100.0,
   "scenarios_total": 10,
   "scenarios_passed": 10,
   "latency_stats": {
-    "avg_s": 1.18,
-    "p50_s": 0.85,
-    "p95_s": 1.85
+    "avg_s": 0.7,
+    "p50_s": 0.59,
+    "p95_s": 1.46
   },
   "category_breakdown": {
-    "Pillar 9: Omnichannel Tracking": {
+    "Pillar 1: Guided Workflows": {
       "total": 10,
       "passed": 10
     }
   },
   "detailed_results": [
     {
-      "id": "CX-241",
-      "title": "Inquiry on Open Ticket Reference TIC-EA500752",
-      "category": "Pillar 9: Omnichannel Tracking",
+      "id": "CX-001",
+      "title": "Individual TIN Registration (Privacy-Preserving Stepper)",
+      "category": "Pillar 1: Guided Workflows",
       "passed": true,
-      "total_time_s": 0.73,
+      "total_time_s": 1.46,
       "turns": [
         {
           "turn": 1,
-          "user_message": "I called earlier and was given reference TIC-EA500752. What is the status of my inquiry?",
+          "user_message": "Help me register for a TIN",
           "passed": true,
-          "elapsed_s": 0.73,
-          "retrieval_mode": "support_case",
-          "workflow_active": false,
+          "elapsed_s": 0.78,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "**Case Status for TIC-EA500752**:  No active record was found matching reference `TIC-EA500752` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
-        }
-      ]
-    },
-    {
-      "id": "CX-242",
-      "title": "Inquiry on Ticket Reference with Lowercase Input",
-      "category": "Pillar 9: Omnichannel Tracking",
-      "passed": true,
-      "total_time_s": 0.85,
-      "turns": [
+          "snippet": "I can guide you through the TIN Registration Guide process step by step.  Which application are you preparing for: an **individual**, a **company**, or an **NGO**? Please do not sh"
+        },
         {
-          "turn": 1,
-          "user_message": "Check my ticket status: tic-62d59b73",
+          "turn": 2,
+          "user_message": "individual",
           "passed": true,
-          "elapsed_s": 0.85,
-          "retrieval_mode": "support_case",
-          "workflow_active": false,
+          "elapsed_s": 0.34,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
           "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "**Case Status for TIC-62D59B73**:  - **Status**: Open - **Assigned Team**: URA Support - **Summary**: Test dispute on VAT assessment  A URA officer is currently reviewing your case"
-        }
-      ]
-    },
-    {
-      "id": "CX-243",
-      "title": "Inquiry on Support Reference from Phone Desk Call",
-      "category": "Pillar 9: Omnichannel Tracking",
-      "passed": true,
-      "total_time_s": 0.74,
-      "turns": [
+          "snippet": "Do you have the original identification or organization registration documents ready to use in the secure URA portal? (yes/no)"
+        },
         {
-          "turn": 1,
-          "user_message": "The officer on phone gave me case reference TIC-10AA8302. Has my file been reviewed?",
+          "turn": 3,
+          "user_message": "yes",
           "passed": true,
-          "elapsed_s": 0.74,
-          "retrieval_mode": "support_case",
-          "workflow_active": false,
-          "resources_count": 0,
+          "elapsed_s": 0.33,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 3,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "**Case Status for TIC-10AA8302**:  No active record was found matching reference `TIC-10AA8302` in the URA ticket queue. Please verify the reference code provided on your SMS, emai"
+          "snippet": "1. This chat has not created or submitted a TIN application. Continue at the official URA portal: https://ura.go.ug 2. eServices 3. TIN Registration. Use the individual route for a"
         }
       ]
     },
     {
-      "id": "CX-244",
-      "title": "Check Status of Verified Knowledge Report KB-287690E1",
-      "category": "Pillar 9: Omnichannel Tracking",
+      "id": "CX-002",
+      "title": "Company Non-Individual TIN Application Guidance",
+      "category": "Pillar 1: Guided Workflows",
       "passed": true,
-      "total_time_s": 0.85,
+      "total_time_s": 0.81,
       "turns": [
         {
           "turn": 1,
-          "user_message": "Check the status of my bug report KB-287690E1",
+          "user_message": "Help me apply for a TIN for my company",
           "passed": true,
-          "elapsed_s": 0.85,
-          "retrieval_mode": "discrepancy_status",
-          "workflow_active": false,
-          "resources_count": 0,
-          "discrepancy_logged": true,
-          "failures": [],
-          "snippet": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Kn"
-        }
-      ]
-    },
-    {
-      "id": "CX-245",
-      "title": "Check Status of Knowledge Review Report with Prefix Lowercase",
-      "category": "Pillar 9: Omnichannel Tracking",
-      "passed": true,
-      "total_time_s": 0.74,
-      "turns": [
-        {
-          "turn": 1,
-          "user_message": "What happened to my report kb-7e032876?",
-          "passed": true,
-          "elapsed_s": 0.74,
-          "retrieval_mode": "discrepancy_status",
-          "workflow_active": false,
-          "resources_count": 0,
-          "discrepancy_logged": false,
-          "failures": [],
-          "snippet": "**Knowledge Review Report KB-7E032876**:  No discrepancy report was found matching reference `KB-7E032876`. If you encountered an inaccurate rate or outdated statutory provision, p"
-        }
-      ]
-    },
-    {
-      "id": "CX-246",
-      "title": "PRN Verification via 12-Digit Reference",
-      "category": "Pillar 9: Omnichannel Tracking",
-      "passed": true,
-      "total_time_s": 1.56,
-      "turns": [
-        {
-          "turn": 1,
-          "user_message": "How can I confirm if PRN 226000123456 has been credited by the commercial bank?",
-          "passed": true,
-          "elapsed_s": 1.56,
+          "elapsed_s": 0.81,
           "retrieval_mode": "faq_priority",
           "workflow_active": false,
-          "resources_count": 1,
+          "resources_count": 3,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "To generate a Payment Registration Number (PRN) on the URA web portal (ura.go.ug):  1. Go to e-Services > Make a Payment > Generate a Payment Slip;  2. Select your payment type (e."
+          "snippet": "To register an **organisation** (company, NGO, partnership) for a TIN:  1. Go to ura.go.ug 2. Choose the standard **Non-Individual TIN registration** option 3. Fill in the organisa"
         }
       ]
     },
     {
-      "id": "CX-247",
-      "title": "Customs Bonded IM7 Bill of Lading Tracking Guidance",
-      "category": "Pillar 9: Omnichannel Tracking",
+      "id": "CX-003",
+      "title": "Tax Clearance Certificate (TCC) Guided Journey",
+      "category": "Pillar 1: Guided Workflows",
       "passed": true,
-      "total_time_s": 1.85,
+      "total_time_s": 0.71,
       "turns": [
         {
           "turn": 1,
-          "user_message": "How do I track my customs declaration IM7 reference number on the portal?",
+          "user_message": "Guide me through getting a tax clearance certificate",
           "passed": true,
-          "elapsed_s": 1.85,
-          "retrieval_mode": "vector",
-          "workflow_active": false,
-          "resources_count": 1,
+          "elapsed_s": 0.71,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "- I. The Importer or Agent shall lodge a declaration in the Customs systems of the destination Partner State;  - II. The declaration is processed and applicable taxes are assessed "
+          "snippet": "I can guide you through the Tax Clearance Certificate process step by step.  Is the certificate for an **individual**, a **company** or a **partnership**?"
         }
       ]
     },
     {
-      "id": "CX-248",
-      "title": "TCC Application Acknowledgement Tracking",
-      "category": "Pillar 9: Omnichannel Tracking",
+      "id": "CX-004",
+      "title": "Payment Registration Number (PRN) Generation Stepper",
+      "category": "Pillar 1: Guided Workflows",
       "passed": true,
-      "total_time_s": 1.83,
+      "total_time_s": 0.59,
       "turns": [
         {
           "turn": 1,
-          "user_message": "I applied for a TCC 3 days ago on eTax. How do I track the approval status using my application number?",
+          "user_message": "Guide me to generate a PRN for payment",
           "passed": true,
-          "elapsed_s": 1.83,
-          "retrieval_mode": "faq_priority",
-          "workflow_active": false,
-          "resources_count": 2,
+          "elapsed_s": 0.59,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "To apply for a Tax Clearance Certificate (TCC):  1. Log in to your e-Tax portal account at ura.go.ug;  2. Go to Tax Clearance > Apply for Tax Clearance Certificate;  3. Select the "
+          "snippet": "I can guide you through the Payment Assistance process step by step.  Which tax type or liability are you paying for?"
         }
       ]
     },
     {
-      "id": "CX-249",
-      "title": "Motor Vehicle Search Application Reference Tracking",
-      "category": "Pillar 9: Omnichannel Tracking",
+      "id": "CX-005",
+      "title": "Motor Vehicle Registration & Ownership Transfer Workflow",
+      "category": "Pillar 1: Guided Workflows",
       "passed": true,
       "total_time_s": 0.78,
       "turns": [
         {
           "turn": 1,
-          "user_message": "I paid 22,000 UGX for motor vehicle search. How do I download the certified vehicle report using the search reference?",
+          "user_message": "Guide me through registering my imported car",
           "passed": true,
           "elapsed_s": 0.78,
-          "retrieval_mode": "vehicle_search_tracking",
-          "workflow_active": false,
-          "resources_count": 3,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "**Tracking Motor Vehicle Search Application Status**:  To track the progress of an official Motor Vehicle Search report on the URA e-Tax portal:  1. **Visit e-Services Portal**: Go"
+          "snippet": "I can guide you through the Motor Vehicle Registration process step by step.  Is this a **first registration** (a vehicle entering Uganda, or never registered here), or an **alread"
         }
       ]
     },
     {
-      "id": "CX-250",
-      "title": "Objection Decision 30-Day Statutory Clock Inquiry",
-      "category": "Pillar 9: Omnichannel Tracking",
+      "id": "CX-006",
+      "title": "VAT Monthly Return Filing Walkthrough",
+      "category": "Pillar 1: Guided Workflows",
       "passed": true,
-      "total_time_s": 1.82,
+      "total_time_s": 0.53,
       "turns": [
         {
           "turn": 1,
-          "user_message": "I submitted my tax objection 40 days ago with reference OBJ-2026. How long does the Commissioner have to make an objecti",
+          "user_message": "Walk me through filing my VAT return",
           "passed": true,
-          "elapsed_s": 1.82,
-          "retrieval_mode": "vector",
-          "workflow_active": false,
-          "resources_count": 2,
+          "elapsed_s": 0.53,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
           "discrepancy_logged": false,
           "failures": [],
-          "snippet": "- A person dissatisfied with a tax decision for example an assessment, may within 45 days after receiving notice of tax decision, lodge an objection with the Commissioner.  - The o"
+          "snippet": "I can guide you through the Return Filing process step by step.  Are you filing as an **individual**, a **company**, or an **NGO**?"
+        }
+      ]
+    },
+    {
+      "id": "CX-007",
+      "title": "Customs Import Entry & IM4 Clearance Workflow",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.52,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me through customs clearance",
+          "passed": true,
+          "elapsed_s": 0.52,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Customs Clearance process step by step.  Is this an **import** or an **export** clearance?"
+        }
+      ]
+    },
+    {
+      "id": "CX-008",
+      "title": "Formal Tax Assessment Objection / Dispute Filing",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.52,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Help me file an objection against an unfair tax assessment",
+          "passed": true,
+          "elapsed_s": 0.52,
+          "retrieval_mode": "workflow",
+          "workflow_active": true,
+          "resources_count": 0,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "I can guide you through the Objection or Dispute process step by step.  What is the assessment, objection, or notice reference number?"
+        }
+      ]
+    },
+    {
+      "id": "CX-009",
+      "title": "Bonded Warehouse (BWIMS) IM7 Cargo Guidance",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "I need guidance on bonded warehouse goods under IM7",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 1,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "**Published on June 21**, 2024 by Sandra Kakooza (https://ura.go.ug/en/bwims/): BWIMS is a digital inventory tracking and management system designed under the Domestic Revenue Mobi"
+        }
+      ]
+    },
+    {
+      "id": "CX-010",
+      "title": "EFRIS Invoice & Compliance Audit Checklist",
+      "category": "Pillar 1: Guided Workflows",
+      "passed": true,
+      "total_time_s": 0.54,
+      "turns": [
+        {
+          "turn": 1,
+          "user_message": "Guide me to check if my invoice complies with EFRIS rules",
+          "passed": true,
+          "elapsed_s": 0.54,
+          "retrieval_mode": "hybrid",
+          "workflow_active": false,
+          "resources_count": 3,
+          "discrepancy_logged": false,
+          "failures": [],
+          "snippet": "Electronic Fiscal Receipting and Invoicing Solution (EFRIS) is URA’s real-time e-receipting/e-invoicing system using EFDs, e-invoicing, or system-to-system links as per the Tax Pro"
         }
       ]
     }
