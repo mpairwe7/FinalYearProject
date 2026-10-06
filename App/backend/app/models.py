@@ -25,6 +25,14 @@ class ChatRequest(BaseModel):
         pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
         description="Optional ISO 639-1/639-3 locale override (e.g. en, lg, sw)",
     )
+    locale_explicit: bool | None = Field(
+        None,
+        description=(
+            "True when the taxpayer chose `locale` themselves; false when it is only "
+            "the client's default or an earlier detection. Omitted: a requested lg/sw "
+            "counts as a choice and en as a default (see app.language_state)."
+        ),
+    )
     attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
         default_factory=list,
         max_length=3,
@@ -75,6 +83,14 @@ class ChatResponse(BaseModel):
     model: str = "Sunbird/Sunflower-14B-FP8"
     conversation_id: str | None = None
     locale: str = Field("en", description="Locale used for this response")
+    locale_source: str = Field(
+        "",
+        description=(
+            "Why the reply is in `locale`: explicit_request | client_explicit | continuity | "
+            "switched | detected | profile | default. Clients keep only the first two as the "
+            "user's own choice."
+        ),
+    )
     escalation_required: bool = Field(False, description="Whether human review is needed")
     escalation_reason: str = Field("", description="Why escalation was triggered")
     agent_role: str = Field(

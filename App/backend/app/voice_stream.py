@@ -406,6 +406,7 @@ class VoiceSession:
                         conversation_id=self.conversation_id,
                         top_k=self.top_k,
                         locale=llm_locale,
+                        locale_explicit=True,
                         user_id=self.user_id or None,
                         tenant_id=self.tenant_id,
                     ),

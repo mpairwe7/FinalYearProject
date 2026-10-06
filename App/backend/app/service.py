@@ -102,7 +102,8 @@ from .calculator_router import (
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
-from .guardrails import STORE_RAW_PROMPTS, InputGuard, OutputGuard, redact_pii_text
+from .guardrails import STORE_RAW_PROMPTS, GuardResult, InputGuard, OutputGuard, redact_pii_text
+from .language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from .memory import get_memory_service
 from .premise_guard import check_false_premise
 from .query import (
@@ -1679,6 +1680,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     conversation_history_override: list[dict[str, str]] | None = None,
     turn_deadline_s: float | None = None,
     attachments: list[Any] | None = None,
+    locale_explicit: bool | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run a single chat turn and stream event tuples to the caller.
 
@@ -1745,6 +1747,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             {"top_k": top_k, "query_preview": message[:200]},
         )
 
+        language_out: dict[str, str] = {}
         result = await asyncio.to_thread(
             model.generate_retrieval_only,
             message=message,
@@ -1759,7 +1762,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             attachments=attachments,
             user_role=user_role,
             granted_purposes=granted_purposes,
+            locale_explicit=locale_explicit,
+            language_out=language_out,
         )
+        if language_out.get("source"):
+            result.setdefault("locale_source", language_out["source"])
 
         # The *effective* locale, not the one the caller passed. Mirrors the
         # same reassignment in ChatModel.generate: generate_retrieval_only runs
@@ -1806,6 +1813,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 "retrieval_mode": result.get("retrieval_mode"),
                 "sources": result.get("sources", []),
                 "locale": locale,
+                "locale_source": result.get("locale_source", ""),
             },
         )
 
@@ -2390,6 +2398,7 @@ def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) ->
         "model": result.get("model"),
         "conversation_id": result.get("conversation_id"),
         "locale": result.get("locale"),
+        "locale_source": result.get("locale_source", ""),
         "agent_role": result.get("agent_role", "rag_answerer"),
         "response_judge": result.get("response_judge"),
         "next_actions": result.get("next_actions", []),
@@ -4254,8 +4263,15 @@ class ChatModel:
         if last_topic:
             lines.append(f"- Last conversation topic: {last_topic}")
 
+        # The taxpayer's saved answer language seeds a conversation whose first
+        # message gives no language of its own ("TIN?"). English is the
+        # profile default, so only a saved Luganda or Swahili counts.
+        preferred_locale = normalize_locale_tag(str(profile.get("primary_language") or ""))
+        if preferred_locale not in ("lg", "sw"):
+            preferred_locale = ""
+
         prompt_context = "\n".join(lines)
-        if not prompt_context and not prefill_slots:
+        if not prompt_context and not prefill_slots and not preferred_locale:
             return None
 
         return {
@@ -4263,7 +4279,23 @@ class ChatModel:
             "profile": profile,
             "prefill_slots": prefill_slots,
             "prompt_context": prompt_context,
+            "preferred_locale": preferred_locale,
         }
+
+    def _guard_both_forms(self, message: str, english_form: str) -> GuardResult:
+        """Input guard on *message* and, when it differs, on its English form.
+
+        The guard's patterns are English. A Luganda or Kiswahili injection
+        reads as harmless words to them, while its translation does not, and
+        multi-turn attacks in low-resource languages get through commercial
+        models' own safety training far more often than English ones.
+        """
+        guard = self._input_guard.check(message)
+        if guard.allowed and english_form and english_form != message:
+            english_guard = self._input_guard.check(english_form)
+            if not english_guard.allowed:
+                return english_guard
+        return guard
 
     def _bind_conversation_topic(
         self,
@@ -5218,37 +5250,57 @@ class ChatModel:
         message: str,
         requested_locale: str,
         conversation_history: list[dict[str, Any]] | None,
+        locale_explicit: bool | None = None,
+        profile_locale: str = "",
     ) -> str:
-        """Resolve the effective locale for a turn, preserving the conversation's language across follow-ups."""
-        from .receptionist.language import detect_explicit_request
-        explicit = detect_explicit_request(message)
-        if explicit in SUPPORTED_LOCALES:
-            return explicit
+        """The answer language for a turn; see :mod:`app.language_state`."""
+        return resolve_turn_locale(
+            message,
+            requested_locale=requested_locale,
+            locale_explicit=locale_explicit,
+            history=conversation_history,
+            profile_locale=profile_locale,
+        ).locale
 
-        # Check established locale from conversation history
-        established_locale: str | None = None
-        if conversation_history:
-            for turn in reversed(conversation_history[-4:]):
-                usr = str(turn.get("user_message") or "").strip()
-                if usr and len(usr) >= 4:
-                    loc = detect_language(usr, default_lang="en")
-                    if loc in ("lg", "sw"):
-                        established_locale = loc
-                if established_locale:
-                    break
+    @staticmethod
+    def _resolve_turn_language(
+        message: str,
+        requested_locale: str,
+        conversation_history: list[dict[str, Any]] | None,
+        *,
+        locale_explicit: bool | None,
+        personalization: dict[str, Any] | None,
+    ) -> LanguageDecision:
+        """Both chat paths decide the answer language here, the same way."""
+        return resolve_turn_locale(
+            message,
+            requested_locale=requested_locale,
+            locale_explicit=locale_explicit,
+            history=conversation_history,
+            profile_locale=str((personalization or {}).get("preferred_locale") or ""),
+        )
 
-        # Honor explicit English as well as Luganda and Swahili overrides.
-        if requested_locale in SUPPORTED_LOCALES:
-            return requested_locale
+    @staticmethod
+    def _english_router_form(message: str, rewritten: str, locale: str) -> tuple[str, str]:
+        """``(router_message, router_rewritten)``: what the English-pattern routers read.
 
-        if established_locale in ("lg", "sw"):
-            return established_locale
-
-        detected = detect_language(message, default_lang="en")
-        if detected in SUPPORTED_LOCALES:
-            return detected
-
-        return requested_locale or "en"
+        The deterministic routers — workflows, TIN clarification, calculators,
+        rate tables, topic tracking, the FAQ authorization gate — match English
+        patterns. Retrieval translates the question inside the retriever, but
+        these run before that, so a Luganda question used to miss every one of
+        them and fall through to an abstention. Both chat paths translate once
+        here and route on the English form; English, and a failed translation,
+        return the message unchanged.
+        """
+        if locale in ("", "en"):
+            return message, rewritten
+        english_form = english_retrieval_query(message, locale)
+        if not english_form or not english_form.strip() or english_form == message:
+            return message, rewritten
+        # MT expands abbreviations the routers key on ("VAT" comes back as
+        # "value-added tax"), so canonicalize before routing.
+        english_form = canonicalize_tax_terms(english_form)
+        return english_form, normalize_query(english_form)
 
     def _finalize_result(self, result: dict[str, Any]) -> dict[str, Any]:
         """Return a shallow copy with a production-safe user-facing reply and localized metadata."""
@@ -8350,6 +8402,7 @@ class ChatModel:
         granted_purposes: list[str] | None = None,
         attachments: list[documents_module.DocumentRecord] | None = None,
         channel: str = "rest",
+        locale_explicit: bool | None = None,
     ) -> dict[str, Any]:
         """Answer *message*, rendered in *locale*.
 
@@ -8361,7 +8414,9 @@ class ChatModel:
         up answering a Luganda question in English.
 
         ``channel`` names the transport for the audit row and metrics
-        (``rest``, ``voice``, ``call``).
+        (``rest``, ``voice``, ``call``). ``locale_explicit`` says whether
+        *locale* is the taxpayer's own choice or only a default; ``None`` keeps
+        the older contract (see :mod:`app.language_state`).
         """
         _PENDING_TURN_AUDIT.set(None)
         with turn_usage_scope() as usage:
@@ -8379,6 +8434,7 @@ class ChatModel:
                 attachments=attachments,
                 channel=channel,
                 usage=usage,
+                locale_explicit=locale_explicit,
             )
 
     def _generate_localized(
@@ -8397,8 +8453,10 @@ class ChatModel:
         attachments: list[documents_module.DocumentRecord] | None,
         channel: str,
         usage: dict[str, int],
+        locale_explicit: bool | None = None,
     ) -> dict[str, Any]:
         """:meth:`generate`'s body: the English answer, localized, then audited."""
+        language_out: dict[str, str] = {}
         result = self._generate_en(
             message=message,
             conversation_id=conversation_id,
@@ -8411,7 +8469,13 @@ class ChatModel:
             user_role=user_role,
             granted_purposes=granted_purposes,
             attachments=attachments,
+            locale_explicit=locale_explicit,
+            language_out=language_out,
         )
+        if isinstance(result, dict) and language_out.get("source"):
+            # Why the reply is in this language: the client keeps a detected
+            # language as a hint and only an explicit one as the user's choice.
+            result.setdefault("locale_source", language_out["source"])
         # The *effective* locale, not the one passed in: a caller that sends no
         # locale gets "en" by default and _generate_en detects the real one
         # (detect_language) partway through, recording it on the result. Keying
@@ -8465,6 +8529,8 @@ class ChatModel:
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
         attachments: list[documents_module.DocumentRecord] | None = None,
+        locale_explicit: bool | None = None,
+        language_out: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails.
 
@@ -8481,10 +8547,11 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
-        requested_locale = locale if locale in SUPPORTED_LOCALES else ""
-        # An explicitly-requested locale outside SUPPORTED_LOCALES is gated
-        # to English here — see query.SUPPORTED_LOCALES for why.
-        locale = gate_locale(locale)
+        # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
+        # outside SUPPORTED_LOCALES is gated to English here — see
+        # query.SUPPORTED_LOCALES for why.
+        requested_locale = normalize_locale_tag(locale)
+        locale = gate_locale(requested_locale or "en")
 
         with trace_rag_pipeline(message, request_id=request_id) as trace_ctx:
             timings = trace_ctx["timings"]
@@ -8710,32 +8777,29 @@ class ChatModel:
                         )
                     )
 
-            # 0c. Language detection & multi-turn continuity — auto-detect user's language,
-            #     preserving established conversation locale across follow-up turns.
+            # 0c. The answer language is conversation state, not a per-message
+            #     guess (app.language_state). The profile's saved language is
+            #     consent-gated personalization, so that loads first.
+            personalization = self._load_personalization_state(user_id, tenant_id or "default")
             with trace_stage("lang_detect", timings=timings):
-                locale = self._resolve_conversation_locale(message, requested_locale, conversation_history)
-                safe_loc = str(locale).replace("\r", "\\r").replace("\n", "\\n")
-                logger.info("Effective turn locale: %s", safe_loc)
+                language = self._resolve_turn_language(
+                    message,
+                    requested_locale,
+                    conversation_history,
+                    locale_explicit=locale_explicit,
+                    personalization=personalization,
+                )
+                locale = language.locale
+                trace_ctx["locale_source"] = language.source
+                if language_out is not None:
+                    language_out["source"] = language.source
+                logger.info("Effective turn locale: %s (%s)", locale, language.source)
 
-            # The deterministic routers below — workflows, TIN clarification,
-            # calculators, rate tables — match English patterns. Retrieval
-            # translates the question inside the retriever, but these run
-            # before that, so a Luganda question used to miss every one of
-            # them and fall through to an abstention: the languages most in
-            # need of a guided path were getting the weakest one. Translate
-            # once here and route on the English form.
+            # Route on the English form (see _english_router_form).
             router_message, router_rewritten = message, rewritten
             if locale not in ("", "en"):
                 with trace_stage("router_translate", timings=timings):
-                    english_form = english_retrieval_query(message, locale)
-                if english_form and english_form.strip() and english_form != message:
-                    # MT expands abbreviations the routers key on ("VAT" comes
-                    # back as "value-added tax"), so canonicalize before routing.
-                    english_form = canonicalize_tax_terms(english_form)
-                    router_message = english_form
-                    router_rewritten = normalize_query(english_form)
-
-            personalization = self._load_personalization_state(user_id, tenant_id or "default")
+                    router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
             # Attachment turns and ongoing multi-turn conversations are never cache-served
             # or cache-stored: context is specific to attachments or prior dialogue turns.
             cache_allowed = personalization is None and not attachments and not conversation_history
@@ -8798,18 +8862,22 @@ class ChatModel:
                 if message_question_span:
                     binding_query = message_question_span
 
+            # The topic catalog is English patterns, so a Luganda or Swahili
+            # turn is classified on its English form (G6 continuity).
             retrieval_query, binding_query, personalization = self._bind_conversation_topic(
                 conversation_id=thread_id,
-                message=message,
+                message=router_message,
                 retrieval_query=retrieval_query,
                 binding_query=binding_query,
                 personalization=personalization,
                 trace_ctx=trace_ctx,
             )
 
-            # 1. Input guardrails FIRST (OWASP LLM01) — check original message
+            # 1. Input guardrails FIRST (OWASP LLM01) — on the original message
+            #    and, for a Luganda or Swahili turn, on its English form too:
+            #    the guard's patterns are English.
             with trace_stage("input_guard", timings=timings):
-                guard = self._input_guard.check(message)
+                guard = self._guard_both_forms(message, router_message)
             if not guard.allowed:
                 blocked = {
                     "reply": guard.reason,
@@ -10275,6 +10343,8 @@ class ChatModel:
         attachments: list[documents_module.DocumentRecord] | None = None,
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
+        locale_explicit: bool | None = None,
+        language_out: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -10290,10 +10360,11 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         agent_role = "rag_answerer"
 
-        requested_locale = locale if locale in SUPPORTED_LOCALES else ""
-        # An explicitly-requested locale outside SUPPORTED_LOCALES is gated
-        # to English here — see query.SUPPORTED_LOCALES for why.
-        locale = gate_locale(locale)
+        # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
+        # outside SUPPORTED_LOCALES is gated to English here — see
+        # query.SUPPORTED_LOCALES for why.
+        requested_locale = normalize_locale_tag(locale)
+        locale = gate_locale(requested_locale or "en")
 
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
@@ -10330,13 +10401,28 @@ class ChatModel:
         else:
             rewritten = normalize_query(message)
 
-        # Language detection & multi-turn continuity — auto-detect user's language,
-        # preserving established conversation locale across follow-up turns.
-        locale = self._resolve_conversation_locale(message, requested_locale, conversation_history)
-        safe_loc_stream = str(locale).replace("\r", "\\r").replace("\n", "\\n")
-        logger.info("Effective turn locale (streaming): %s", safe_loc_stream)
-
+        # The answer language, decided the same way generate() decides it
+        # (app.language_state); the profile's saved language is consented
+        # personalization, so that loads first.
         personalization = self._load_personalization_state(user_id, tenant_id or "default")
+        language = self._resolve_turn_language(
+            message,
+            requested_locale,
+            conversation_history,
+            locale_explicit=locale_explicit,
+            personalization=personalization,
+        )
+        locale = language.locale
+        if language_out is not None:
+            language_out["source"] = language.source
+        logger.info("Effective turn locale (streaming): %s (%s)", locale, language.source)
+
+        # Route on the English form, exactly as generate() does: this path is
+        # what the web and WebSocket clients use, and without it a Luganda or
+        # Kiswahili turn reached the workflow, calculator, topic and FAQ
+        # authorization routers as words none of their patterns can match.
+        router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
+
         # Attachment turns and ongoing multi-turn conversations are never cache-served
         # or cache-stored: context is specific to attachments or prior dialogue turns.
         cache_allowed = personalization is None and not attachments and not conversation_history
@@ -10349,28 +10435,30 @@ class ChatModel:
         # See generate()'s matching comment, including the 2026-09-01
         # measurement showing why this stays gated on distress rather than
         # firing for every situational preamble.
+        # binding_query is the English form for the reason generate() gives:
+        # the FAQ authorization gate scores English FAQ text against it.
         retrieval_query = rewritten
-        binding_query = message
+        binding_query = router_message
         if distress:
             question_span = extract_question_span(rewritten)
             if question_span:
                 retrieval_query = question_span
-            message_question_span = extract_question_span(message)
+            message_question_span = extract_question_span(router_message)
             if message_question_span:
                 binding_query = message_question_span
 
         stream_topic_ctx: dict[str, Any] = {}
         retrieval_query, binding_query, personalization = self._bind_conversation_topic(
             conversation_id=thread_id,
-            message=message,
+            message=router_message,
             retrieval_query=retrieval_query,
             binding_query=binding_query,
             personalization=personalization,
             trace_ctx=stream_topic_ctx,
         )
 
-        # Input guardrails (OWASP LLM01)
-        guard = self._input_guard.check(message)
+        # Input guardrails (OWASP LLM01), on both forms as in generate()
+        guard = self._guard_both_forms(message, router_message)
         if not guard.allowed:
             return {
                 "reply": guard.reason,
@@ -10389,7 +10477,7 @@ class ChatModel:
                 "_history": [],
             }
 
-        if detect_crisis(message) or detect_crisis(rewritten):
+        if detect_crisis(message) or detect_crisis(rewritten) or detect_crisis(router_message):
             return {
                 **self._crisis_support_result(thread_id=thread_id, locale=locale),
                 "_hits": [],
@@ -10397,9 +10485,20 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
+        # Direct transactional PRN generation (parity with generate()).
+        if re.search(r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE):
+            from .calculator_router import extract_amounts
+
+            if extract_amounts(router_message):
+                prn_res = self._maybe_handle_situational_advisory(
+                    message=message, rewritten=rewritten, thread_id=thread_id, locale=locale
+                )
+                if prn_res:
+                    return {**prn_res, "_hits": [], "_history": [], "_short_circuit": True}
+
         workflow_result = self._maybe_handle_workflow(
-            message=message,
-            rewritten=rewritten,
+            message=router_message,
+            rewritten=router_rewritten,
             thread_id=thread_id,
             locale=locale,
             personalization=personalization,
@@ -10419,7 +10518,7 @@ class ChatModel:
             }
 
         repair = self._conversation_repair_result(
-            message=message,
+            message=router_message,
             thread_id=thread_id,
             locale=locale,
             user_id=user_id,
@@ -10431,6 +10530,8 @@ class ChatModel:
 
         # Deterministic tax calculator (parity with generate()) — instant
         # answer or guided elicitation, both as a single bundled payload.
+        # Same order generate() tries: the taxpayer's own words first (their
+        # figures), then the English form the calculator patterns are written in.
         core_msg_s = strip_conversational_prefix(message) or message
         calc_result = self._maybe_handle_fast_paths(
             message=core_msg_s,
@@ -10447,6 +10548,14 @@ class ChatModel:
                 locale=locale,
                 user_id=user_id,
             )
+        if not calc_result and router_message != message:
+            calc_result = self._maybe_handle_fast_paths(
+                message=router_message,
+                rewritten=router_rewritten,
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+            )
         if calc_result:
             if distress and calc_result.get("reply"):
                 calc_result["reply"] = f"{empathy_ack(distress)}\n\n{calc_result['reply']}"
@@ -10456,6 +10565,28 @@ class ChatModel:
                 "_history": conversation_history,
                 "_rewritten": rewritten,
                 "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                "_short_circuit": True,
+            }
+
+        # A human answered (parity with generate()): an officer's reply to an
+        # escalated conversation is delivered before anything the bot says.
+        officer_note = self._deliver_officer_reply(thread_id, locale=locale)
+        if officer_note:
+            return {
+                "reply": officer_note,
+                "sources": [],
+                "citations": [],
+                "faithfulness_score": None,
+                "retrieval_mode": "officer_reply",
+                "model": self.name,
+                "conversation_id": thread_id,
+                "locale": locale,
+                "escalation_required": False,
+                "escalation_reason": "",
+                "agent_role": "human_officer",
+                "next_actions": self._default_next_actions(agent_role="human_officer"),
+                "_hits": [],
+                "_history": [],
                 "_short_circuit": True,
             }
 
@@ -10602,25 +10733,6 @@ class ChatModel:
                     "_history": [],
                 }
 
-        # Multilingual Natural Conversational & Civic Intelligence Fast-Path (streaming)
-        conv_res_s = handle_conversational_turn(message, locale)
-        if conv_res_s is not None:
-            return {
-                "reply": conv_res_s.reply,
-                "sources": [],
-                "citations": [],
-                "faithfulness_score": None,
-                "retrieval_mode": "conversational",
-                "model": self.name,
-                "conversation_id": thread_id,
-                "locale": conv_res_s.locale,
-                "escalation_required": False,
-                "escalation_reason": "",
-                "agent_role": "conversational_agent",
-                "next_actions": conv_res_s.next_actions,
-                "_hits": [],
-                "_history": [],
-            }
             if route_decision.route == AgentRoute.ESCALATE:
                 ticket_id = ""
                 handoff = None

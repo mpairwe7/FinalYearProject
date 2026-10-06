@@ -48,6 +48,14 @@ _TAXPAYER_STATUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+def _with_locale(turn: dict[str, str], source: dict[str, Any]) -> dict[str, str]:
+    """*turn* plus *source*'s stored ``locale``, when it has one."""
+    stored = str(source.get("locale") or "").strip()
+    if stored:
+        turn["locale"] = stored
+    return turn
+
+
 def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """Normalize any history format into standard turn pairs.
 
@@ -55,6 +63,10 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
     - Standard turn dicts: ``{"user_message": "...", "bot_reply": "..."}``
     - Role-based message lists: ``[{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]``
     - Mixed or legacy keys: ``{"query": ..., "reply": ...}`` or ``{"user": ..., "assistant": ...}``
+
+    A turn's stored ``locale`` (the language it was answered in) is kept when
+    present: the answer language of the next turn is continued from it rather
+    than re-detected from text (:mod:`app.language_state`).
     """
     if not history:
         return []
@@ -62,10 +74,13 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
     # Case 1: Already paired turn dicts
     if all(isinstance(h, dict) and ("user_message" in h or "bot_reply" in h) for h in history):
         return [
-            {
-                "user_message": str(h.get("user_message") or "").strip(),
-                "bot_reply": str(h.get("bot_reply") or "").strip(),
-            }
+            _with_locale(
+                {
+                    "user_message": str(h.get("user_message") or "").strip(),
+                    "bot_reply": str(h.get("bot_reply") or "").strip(),
+                },
+                h,
+            )
             for h in history
             if isinstance(h, dict) and (h.get("user_message") or h.get("bot_reply"))
         ]
@@ -85,7 +100,7 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
                 turns.append({"user_message": current_user, "bot_reply": ""})
             current_user = content
         elif role in ("assistant", "system", "bot", "model"):
-            turns.append({"user_message": current_user, "bot_reply": content})
+            turns.append(_with_locale({"user_message": current_user, "bot_reply": content}, item))
             current_user = ""
         elif "user_message" in item or "bot_reply" in item:
             turns.append({

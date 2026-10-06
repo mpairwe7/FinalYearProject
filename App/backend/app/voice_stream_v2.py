@@ -357,6 +357,8 @@ class VoiceSessionV2:
                     conversation_id=self.conversation_id,
                     top_k=self.top_k,
                     locale="en",
+                    # English on purpose: this pipeline translates the reply itself.
+                    locale_explicit=True,
                     user_id=self.user_id or None,
                     tenant_id=self.tenant_id,
                 ),
