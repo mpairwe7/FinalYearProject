@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
 import type { DocumentAnalysisData } from '../lib/attachments';
 
@@ -335,6 +336,19 @@ function sanitizeConversation(value: unknown): Conversation | null {
   return conversation;
 }
 
+/**
+ * The conversations the server still remembers. It deletes a conversation
+ * `CONVERSATION_TTL_DAYS` after its last turn, so an older one reopened here
+ * would continue without its history (G122). A pinned conversation is kept:
+ * the taxpayer chose to keep it. One stored without a time starts its clock now.
+ */
+function withinRetention(conversations: Conversation[], now: number = Date.now()): Conversation[] {
+  const ttl = conversationTtlMs();
+  return conversations
+    .map((conversation) => (conversation.updatedAt > 0 ? conversation : { ...conversation, updatedAt: now }))
+    .filter((conversation) => conversation.pinned || now - conversation.updatedAt < ttl);
+}
+
 function readPersistedChatState(): PersistedChatState | null {
   const storage = getChatStorage();
   if (!storage) return null;
@@ -352,10 +366,11 @@ function readPersistedChatState(): PersistedChatState | null {
     if (!state) return null;
 
     let conversations = Array.isArray(state.conversations)
-      ? state.conversations
-          .map(sanitizeConversation)
-          .filter((conversation): conversation is Conversation => Boolean(conversation))
-          .slice(0, MAX_SESSIONS)
+      ? withinRetention(
+          state.conversations
+            .map(sanitizeConversation)
+            .filter((conversation): conversation is Conversation => Boolean(conversation)),
+        ).slice(0, MAX_SESSIONS)
       : [];
 
     let activeConversationId =
@@ -757,6 +772,9 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
    * separate thing, removed by `DELETE /v1/me` (right to erasure).
    */
   clearAllSessions: () => {
+    // The server's copy of an anonymous history is bound to the chat session:
+    // a new one means it can no longer be resumed from this browser.
+    resetChatSession();
     set({
       conversations: [],
       chat: [GREETING],

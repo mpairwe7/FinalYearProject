@@ -5,7 +5,7 @@ import { formatDocType } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
 import { useTranslation } from '../lib/i18n';
-import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
+import { getChatSessionId } from '../lib/chatSession';
 import { authHeaders } from '../lib/authSession';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
@@ -47,7 +47,7 @@ function ReportDownloadButton({ attachment }: { attachment: ChatAttachment }) {
     setState('busy');
     try {
       const res = await fetch(`/api/v1/documents/${attachment.id}/report`, {
-        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
       });
       if (!res.ok) throw new Error(`report ${res.status}`);
       const blob = await res.blob();
