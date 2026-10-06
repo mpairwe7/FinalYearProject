@@ -49,10 +49,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 FROM python:3.14.7-slim-bookworm AS runtime
 
+# Keep OS packages current with bookworm-security errata (fixes perl-base,
+# libpcre2, openssl/libssl3 CVEs).
+RUN apt-get update && apt-get -y --no-install-recommends upgrade \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # The base image's own packaging tools are never used here (the app runs from
-# /opt/venv) and were its only remaining HIGH findings (wheel 0.45.1, the
-# jaraco.context that setuptools vendors).
-RUN python -m pip uninstall -y setuptools wheel
+# /opt/venv) and contain vendored dependencies (pip vendors msgpack and urllib3;
+# setuptools vendors jaraco.context).
+RUN python -m pip uninstall -y pip setuptools wheel && \
+    rm -rf /usr/local/lib/python3.14/site-packages/*
 
 # Labels for container registry
 LABEL org.opencontainers.image.title="URA Chatbot API" \

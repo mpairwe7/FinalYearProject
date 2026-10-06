@@ -180,7 +180,10 @@ class MemoryService:
         # financial details, or prompt injection and does not belong in
         # long-lived personalization memory.
         new_user_texts = [text for text in (_user_text(t) for t in turns) if text]
-        prior_user_texts = self._stored_user_texts(user_id, conversation_id, tenant_id)
+        stored_turn_count = self._stored_turn_count(user_id, conversation_id, tenant_id)
+        prior_user_texts = self._stored_user_texts(
+            user_id, conversation_id, tenant_id, limit=max(25, stored_turn_count)
+        )
         tags = _ordered_topic_tags(prior_user_texts + new_user_texts)
         if tags:
             summary_text = f"Discussed {_join_labels([_TOPIC_LABELS.get(t, t.replace('_', ' ')) for t in tags[:3]])}."
@@ -197,7 +200,7 @@ class MemoryService:
             topic_tag=tags[0] if tags else "general",
             # Do not persist inferred emotional or hardship labels.
             sentiment="neutral",
-            turn_count=self._stored_turn_count(user_id, conversation_id, tenant_id) + len(new_user_texts),
+            turn_count=stored_turn_count + len(new_user_texts),
         )
         episodic_id = ""
         try:
@@ -213,7 +216,9 @@ class MemoryService:
         }
 
     @staticmethod
-    def _stored_user_texts(user_id: str, conversation_id: str, tenant_id: str) -> list[str]:
+    def _stored_user_texts(
+        user_id: str, conversation_id: str, tenant_id: str, limit: int = 25
+    ) -> list[str]:
         """The conversation's earlier taxpayer turns, in English where stored (G119)."""
         if not conversation_id:
             return []
@@ -222,7 +227,7 @@ class MemoryService:
             from ..context_manager import english_view, normalize_history_turns
 
             turns = db.get_recent_turns(
-                conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id or "default", limit=25
+                conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id or "default", limit=limit
             )
             return [t["user_message"] for t in english_view(normalize_history_turns(turns)) if t.get("user_message")]
         except Exception:

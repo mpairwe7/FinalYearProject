@@ -15,10 +15,12 @@
 
 from __future__ import annotations
 
+import sqlite3
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from app import database as db
 from app.memory.extractor import FactExtractor
 from app.memory.semantic import SemanticMemory, UserFact
@@ -102,6 +104,23 @@ class EpisodePerConversationTest(unittest.TestCase):
         episode = self._episode()
         self.assertEqual(episode["summary"], "Discussed withholding tax and TIN registration.")
         self.assertEqual(episode["turn_count"], 2)
+
+    def test_long_conversation_preserves_first_topic_beyond_25_turns(self) -> None:
+        # First turn establishes VAT topic
+        self._log("What is VAT?", "What is VAT?")
+        # Next 26 turns are general tax queries
+        for i in range(26):
+            self._log(f"Question {i}", f"Question {i}")
+        # Latest turn introduces PAYE
+        self.memory.absorb_conversation(
+            self.user,
+            self.conversation,
+            [{"role": "user", "content": "How do I calculate PAYE?"}],
+        )
+        episode = self._episode()
+        # VAT must still be in the summary because all >25 turns are looked up
+        self.assertIn("VAT", episode["summary"])
+        self.assertEqual(episode["turn_count"], 28)
 
 
 class FactsFromTheEnglishFormTest(unittest.TestCase):
@@ -332,6 +351,27 @@ class CallTurnConfidenceGateTest(unittest.IsolatedAsyncioTestCase):
     async def test_confident_turn_is_remembered(self) -> None:
         await self.brain._generate_and_speak("How do I register for a TIN?", 0.9)
         self.assertIs(self.chat_model.generate.call_args.kwargs["memory_write"], True)
+
+
+class SchemaMigrationErrorHandlingTest(unittest.TestCase):
+    def test_re_raises_non_duplicate_migration_errors(self) -> None:
+        sem = SemanticMemory.__new__(SemanticMemory)
+
+        with patch.object(db, "execute", side_effect=sqlite3.OperationalError("database is locked")), \
+             pytest.raises(sqlite3.OperationalError):
+            sem._init_schema()
+
+    def test_suppresses_duplicate_column_error(self) -> None:
+        sem = SemanticMemory.__new__(SemanticMemory)
+
+        with patch.object(db, "execute_script", return_value=None), \
+             patch.object(db, "execute", side_effect=[
+                 sqlite3.OperationalError("duplicate column name: invalidated_at"),  # ALTER TABLE
+                 None,  # CREATE UNIQUE INDEX
+             ]), \
+             patch.object(db, "query_all", return_value=[]):
+            # Should not raise
+            sem._init_schema()
 
 
 if __name__ == "__main__":

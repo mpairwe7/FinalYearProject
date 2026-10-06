@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
@@ -121,7 +122,15 @@ class SemanticMemory:
         # Databases created before facts kept the time they were invalidated.
         try:
             db.execute("ALTER TABLE user_facts ADD COLUMN invalidated_at DOUBLE PRECISION")
-        except Exception:
+        except Exception as exc:
+            duplicate_column = (
+                (isinstance(exc, sqlite3.OperationalError) and "duplicate column name" in str(exc).lower())
+                or getattr(exc, "sqlstate", None) == "42701"
+                or "already exists" in str(exc).lower()
+                or "duplicate column" in str(exc).lower()
+            )
+            if not duplicate_column:
+                raise
             logger.debug("user_facts.invalidated_at already present")
         # Preserve the most recent duplicate from older per-turn writes, then
         # enforce one active copy of each exact fact across later retries.
