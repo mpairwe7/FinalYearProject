@@ -67,10 +67,11 @@ const TAX_HEADS: readonly { value: string; label: string }[] = [
   { value: "cit", label: "Corporation tax" },
 ];
 
-/** The backend profile stores only these two; the chat locale set is wider. */
+/** The answer languages the backend profile accepts (`UserProfile.primary_language`). */
 const PROFILE_LANGUAGES = [
   { value: "en", label: "English" },
   { value: "lg", label: "Luganda" },
+  { value: "sw", label: "Swahili" },
 ];
 
 /**
@@ -79,9 +80,10 @@ const PROFILE_LANGUAGES = [
  * `service.py::_personalization_block` reads exactly four of these fields into
  * the prompt — display_name, taxpayer_type, detail_level, registered_tax_types
  * — and only when personalization consent is granted (it returns early on
- * `snapshot.consent_granted`). `industry` and `primary_language` are stored and
- * returned in the data export, but nothing reads them into an answer today, so
- * this does not claim they change one.
+ * `snapshot.consent_granted`). `primary_language` answers a new conversation
+ * whose first message gives no language of its own ("TIN?") in Luganda or
+ * Swahili (`app.language_state`). `industry` is stored and returned in the
+ * data export, but nothing reads it into an answer today.
  */
 const DESCRIPTION =
   "Shapes the answers you get — which taxes are mentioned, how technical the " +
@@ -218,15 +220,15 @@ export default function ProfileSection({ status }: { status: string }) {
       </SettingsRow>
 
       <SettingsRow
-        label="Preferred language for records"
-        hint="Stored on your profile; the language answers are written in is under General."
+        label="Preferred language"
+        hint="Used when a new chat starts with a message in no particular language. Answers otherwise follow the language you type, or the one picked under General."
         htmlFor="setv2-profile-lang"
       >
         <SelectControl
           id="setv2-profile-lang"
           value={value.primary_language}
           options={PROFILE_LANGUAGES}
-          onChange={(next) => patch("primary_language", next as "en" | "lg")}
+          onChange={(next) => patch("primary_language", next as "en" | "lg" | "sw")}
         />
       </SettingsRow>
 

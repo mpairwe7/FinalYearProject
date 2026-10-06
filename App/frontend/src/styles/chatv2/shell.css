@@ -204,6 +204,15 @@
   background: var(--surface-2);
   color: var(--text-0);
 }
+/* "auto": the code beside it is the detected language, not a choice. */
+.chatv2 .langsel-auto {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  /* Same colour as the code: a muted tone fails AA contrast at this size. */
+  color: var(--text-1);
+}
 
 /* Sitting next to the 3-dot, the pill needs room on both sides or the globe,
    the code and the dots read as one crowded cluster. The gap on .hdrv2 is 8px

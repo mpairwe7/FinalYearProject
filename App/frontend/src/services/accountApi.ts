@@ -71,7 +71,7 @@ export interface UserProfile {
   taxpayer_type: TaxpayerType;
   industry: string;
   /** The backend profile only stores en/lg; the chat locale set is wider. */
-  primary_language: "en" | "lg";
+  primary_language: "en" | "lg" | "sw";
   detail_level: DetailLevel;
   registered_tax_types: string[];
   fiscal_year: string;

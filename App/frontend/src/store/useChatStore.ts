@@ -155,6 +155,12 @@ interface ChatStore {
   chat: ChatTurn[];
   speechState: SpeechState;
   locale: string;
+  /**
+   * True when the taxpayer picked `locale` themselves. False means auto-detect:
+   * `locale` is then only a hint (the last language the assistant answered in)
+   * and the backend decides from what was typed and the conversation so far.
+   */
+  localeExplicit: boolean;
   // Session management
   conversations: Conversation[];
   activeConversationId: string | null;
@@ -163,7 +169,16 @@ interface ChatStore {
   // Actions
   setMessage: (value: string) => void;
   setSpeechState: (state: SpeechState) => void;
+  /** The taxpayer picked a language. */
   setLocale: (locale: string) => void;
+  /** Go back to auto-detecting the answer language. */
+  setAutoDetectLocale: () => void;
+  /**
+   * Follow the language the backend answered in. Only `explicit_request`
+   * ("answer in Luganda", typed into the chat) becomes the taxpayer's choice;
+   * a detected or continued language stays a hint.
+   */
+  adoptResponseLocale: (locale: string, source?: string) => void;
   setActiveTicketId: (ticketId: string | null) => void;
   setSupportCaseOpen: (open: boolean) => void;
   addTurns: (turns: ChatTurn[]) => void;
@@ -216,6 +231,7 @@ function deriveTitle(turns: ChatTurn[]): string {
 }
 
 type PersistedChatState = Pick<ChatStore, 'locale' | 'conversations' | 'activeConversationId'> & {
+  localeExplicit?: boolean;
   draftMessage?: string;
 };
 
@@ -372,6 +388,8 @@ function readPersistedChatState(): PersistedChatState | null {
 
     return {
       locale: normalizeLocale(state.locale),
+      // Stored before the flag existed: auto-detect, the default.
+      localeExplicit: state.localeExplicit === true,
       conversations,
       activeConversationId,
       draftMessage,
@@ -391,6 +409,7 @@ function writePersistedChatState(state: PersistedChatState): void {
       JSON.stringify({
         state: {
           locale: normalizeLocale(state.locale),
+          localeExplicit: state.localeExplicit === true,
           conversations: state.conversations.slice(0, MAX_SESSIONS),
           activeConversationId: state.activeConversationId,
           draftMessage: state.draftMessage ?? '',
@@ -530,6 +549,7 @@ function debouncedSaveDraft(state: ChatStore): void {
   draftSaveTimer = setTimeout(() => {
     writePersistedChatState({
       locale: state.locale,
+      localeExplicit: state.localeExplicit,
       conversations: state.conversations,
       activeConversationId: state.activeConversationId,
       draftMessage: state.message,
@@ -542,6 +562,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   chat: [GREETING],
   speechState: 'idle' as SpeechState,
   locale: 'en',
+  localeExplicit: false,
   conversations: [] as Conversation[],
   activeConversationId: null as string | null,
   activeTicketId: null as string | null,
@@ -553,7 +574,18 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   },
   setSpeechState: (state) => set({ speechState: state }),
   setLocale: (locale) => {
-    set({ locale: normalizeLocale(locale) });
+    set({ locale: normalizeLocale(locale), localeExplicit: true });
+    writePersistedChatState(get());
+  },
+  setAutoDetectLocale: () => {
+    set({ localeExplicit: false });
+    writePersistedChatState(get());
+  },
+  adoptResponseLocale: (locale, source) => {
+    const next = normalizeLocale(locale);
+    const explicit = source === 'explicit_request' ? true : get().localeExplicit;
+    if (next === get().locale && explicit === get().localeExplicit) return;
+    set({ locale: next, localeExplicit: explicit });
     writePersistedChatState(get());
   },
   setActiveTicketId: (ticketId) => {
@@ -592,6 +624,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       chat: [GREETING],
       speechState: 'idle',
       locale: 'en',
+      localeExplicit: false,
       activeConversationId: null,
       activeTicketId: null,
       supportCaseOpen: false,
@@ -746,6 +779,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       chat: activeConversation?.turns.length ? activeConversation.turns : [GREETING],
       speechState: 'idle',
       locale: persisted.locale,
+      localeExplicit: persisted.localeExplicit === true,
       conversations: persisted.conversations,
       activeConversationId: activeConversation?.id ?? null,
     });
