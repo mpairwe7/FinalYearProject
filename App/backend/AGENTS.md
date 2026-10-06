@@ -21,7 +21,10 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `tools/` | Registered tools (`ToolRegistry`) |
 | `mcp/` | MCP client + tax-calculator server |
 | `guardrails.py` | Input/output OWASP LLM01–09 |
-| `logging_config.py` | Structured JSON logging + OTel trace correlation + PII scrubber |
+| `logging_config.py` | Root JSON logging: request id, trace ids, scrubbed `attributes` and tracebacks |
+| `analytics.py` | The one metrics facade (prometheus_client, all workers); `record_chat_turn` |
+| `tracing.py` | OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage |
+| `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer), RFC 3161 seals (`tsa.py`) |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
 | `flags.py` | Registry + rollout; do not add a flag here only |
 
@@ -44,3 +47,6 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 - Production gap gates: `app/production_readiness.py` (malware isolated parse, https publications, RLS ack, no seed, no live notify). See `docs/PRODUCTION_GATES.md`.
 - Publications ingest hashes `URA_PUBLICATIONS_URL` and enqueues reindex. Never auto-`--recreate`.
 - Flag PATCH persists to `flag_overrides` on **this replica**. Cluster-wide still needs `FLAG_*`.
+- Metrics go through `analytics.metrics` only (never `prometheus_client` directly): label values must be bounded (route templates, enums), and a rule or dashboard panel may only name series the code emits — `tests/test_monitoring_config.py` fails otherwise.
+- A new chat transport calls `record_chat_turn` once per turn and audits through `ChatModel.record_turn_audit` (or goes through `run_chat_turn`, which does both). Audit the text that was served, after localization.
+- A new model client wraps its HTTP call in `tracing.llm_call(...)` and reports the provider's `usage`; never estimate tokens from words.

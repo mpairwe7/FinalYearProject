@@ -1009,13 +1009,16 @@ python scripts/carbon_tracker.py --task training --duration 3600
 ## Monitoring Stack
 
 ```bash
-# Start Prometheus + Grafana + Jaeger
+# Needs METRICS_TOKEN, GRAFANA_PASSWORD and ALERTMANAGER_WEBHOOK_URL in .env
 docker compose --profile monitoring up -d
 
-# Prometheus:  http://localhost:9090
-# Grafana:     http://localhost:3001  (admin / ura2026)
-# Jaeger:      http://localhost:16686
+# Prometheus:    http://127.0.0.1:9090
+# Grafana:       http://127.0.0.1:3001  (admin / $GRAFANA_PASSWORD)
+# Alertmanager:  http://127.0.0.1:9093
+# Jaeger:        http://127.0.0.1:16686
 ```
+
+See [docs/MONITORING.md](MONITORING.md).
 
 ## Next Steps
 

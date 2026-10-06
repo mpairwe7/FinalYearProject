@@ -81,7 +81,7 @@ One `generate` row per answered turn, written once the reply is final — after
 translation, so `reply_sha256` is the digest of the text the taxpayer
 actually received (it used to be taken on the English draft). Before
 2026-10-06 only `/v1/chat` wrote these rows; the streamed answers the web
-client uses by default left no record (gap G103). Payload (`schema: 2`):
+client uses by default left no record (gap G104). Payload (`schema: 2`):
 
 | Field | What it pins |
 | --- | --- |

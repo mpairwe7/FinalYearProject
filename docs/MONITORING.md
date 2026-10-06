@@ -2,7 +2,7 @@
 
 How the URA chatbot is measured, alerted on and traced, and what to do when an
 alert fires. Rewritten 2026-10-06 after an audit found the previous pipeline
-dark end to end (gaps G99–G110 in
+dark end to end (gaps G99–G112 in
 [`GAPS_AND_AGENTIC_ROADMAP.md`](GAPS_AND_AGENTIC_ROADMAP.md)): Prometheus got
 401 from `/metrics`, counters differed per uvicorn worker, alert rules matched
 no series, and nothing routed an alert anywhere.
@@ -293,9 +293,10 @@ Every `ONLINE_EVAL_INTERVAL_SECONDS` (6 h by default) each worker re-scores a
 sample of recent conversations with the evaluation harness
 (`app/evaluation.py`) and publishes `ura_eval_metric` /
 `ura_eval_metric_passed`. `POST /v1/evaluate` (ops key) runs one on demand.
-Offline, CI scores the golden sets (`ml.pipelines.evaluate_rag`); the
-production gate still runs with `--soft-fail` (open: make it fail on
-regression against a committed baseline — G110).
+Offline, CI scores the golden sets (`ml.pipelines.evaluate_rag`) and the
+production gate fails a pull request when any metric drops more than 0.03
+below the committed baseline (`ml/configs/quality_baseline.json`), as well
+as when it misses an absolute threshold.
 
 ## 9. Dashboard
 
@@ -388,6 +389,43 @@ the edge if it continues.
 
 `RedisDown`: rate limits and the response cache fall back to per-worker
 memory (limits are then per worker). `QdrantDown`: see Failed retrievals.
+
+## 11. Live verification (2026-10-06)
+
+Run on the local GPU host against the branch: a separate API container
+(2 uvicorn workers, GPU 3, its own database and Redis DBs) attached to the
+stack's Qdrant and Redis, a throwaway vLLM 0.8.5 serving Sunflower-14B-FP8,
+and this directory's Prometheus, Alertmanager, Collector, Loki and Jaeger
+configs with a webhook catcher. Nothing in the shared stack was restarted.
+
+| Check | Result |
+| --- | --- |
+| Scrape with `METRICS_TOKEN` | `up{job="ura-api"} = 1`; without a credential `/metrics` refuses (503 with no operator key configured) |
+| Two workers, one count | 50 requests → 8 consecutive scrapes all read `50.0` (files `counter_10.db`, `counter_11.db`) |
+| Route labels | 41 requests to a non-route counted under `path="__unmatched__"` |
+| REST + SSE audit | `generate` rows with `channel` `rest` and `sse`, schema 2, provenance block; `verify_ledger` full scope: valid, 2 seals checked |
+| RFC 3161 | Scheduled seals carry DigiCert tokens (~8 KB DER), verified with chain against the system bundle |
+| Model telemetry | `ura_llm_requests_total{status="ok"}`; streamed call reported 983 input / 246 output tokens (`stream_options.include_usage`), time to first token 0.57 s; the SSE audit row carries the same `usage` (`source: provider`) |
+| Traces | `POST /v1/chat/stream` → `invoke_agent ura-assistant` → `rag.*` stages → `chat Sunbird/Sunflower-14B-FP8` with `gen_ai.*` attributes; `gen_ai.evaluation.result` on grounding; `traceresponse` header returned |
+| Logs | JSON on stdout with `request_id`; OTLP → Loki with `event`, `request_id`, `http_route` as structured metadata |
+| Security event | Bad bearer → 401 → `authn_login_fail` record + `ura_security_events_total` |
+| RUM | `POST /v1/telemetry/vitals` (text/plain) → 204; route folded to `/staff/tickets/:id` |
+| Alert delivery | Prometheus → Alertmanager → webhook delivered `QdrantDown`, `RedisDown`, `StorageWorldWritable` with runbook links |
+| Scheduled jobs | Online evaluation published `ura_eval_metric_passed`; retention `status="ok"`; `ura_build_info` exported |
+
+Found by the run and fixed in the same change: tracing was initialised
+inside the lifespan, after Starlette had built the middleware stack, so
+requests had no server span (now initialised at import); generation submitted
+to the LLM thread pool lost the turn's context, so its tokens and span fell
+outside the turn (now submitted with `contextvars.copy_context()`); Jaeger
+2.21 removed the query API Grafana's data source calls (pinned to 2.20).
+
+Found and reported, not changed here: the host's root disk is 99% full, so
+Loki's WAL (90% threshold) refuses writes on this machine and
+`QdrantHostDiskLow` would fire; the first turns after an API restart spend
+30–55 s in hybrid retrieval while models load (visible in the trace as
+`rag.hybrid_search`); the shared stack's vLLM container had been stopped, so
+its API was answering without the local LLM.
 
 ## File locations
 

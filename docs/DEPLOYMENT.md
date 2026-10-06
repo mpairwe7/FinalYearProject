@@ -438,49 +438,46 @@ OTEL_ENABLED=true
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 ```
 
-Traced spans include:
-- `rag.pipeline` (parent) with per-stage children: `embed`, `search`, `rerank`, `generate`, `guardrails`
-- `gen_ai.client.token.usage` counter
-- `gen_ai.retrieval.duration` histogram
+Traced spans (GenAI semantic conventions, Development status — see
+[MONITORING.md §5](MONITORING.md#5-tracing)):
+- `invoke_agent ura-assistant` per turn, with `rag.<stage>` children
+- `chat <model>` per model call (`gen_ai.provider.name`, provider-reported `gen_ai.usage.*`)
+- `execute_tool <tool>` per MCP tool call
+- `gen_ai.client.operation.duration` and `gen_ai.client.token.usage` histograms
 
 ### Prometheus metrics
 
-The `/metrics` endpoint (see `App/backend/app/analytics.py`) exposes Prometheus text format:
+`/metrics` aggregates every uvicorn worker (`App/backend/app/analytics.py`,
+`PROMETHEUS_MULTIPROC_DIR`) and needs a credential: set `METRICS_TOKEN` and
+have Prometheus send it as a bearer token.
 
 ```
-http_requests_total{method="POST",path="/v1/chat",status="200"} 4821
-http_request_duration_ms{quantile="0.95",method="POST",path="/v1/chat"} 1423.12
-chat_requests_total 4821
-chat_response_time_ms{quantile="0.95"} 1423.12
-faithfulness_score{quantile="0.95"} 0.82
-escalation_required_total 37
-feedback_total{rating="up"} 312
-feedback_total{rating="down"} 41
+ura_http_requests_total{method="POST",path="/v1/chat",status="200"} 4821.0
+ura_chat_turns_total{channel="sse",outcome="answered"} 3990.0
+ura_chat_response_time_ms_bucket{channel="sse",le="3000.0",mode="hybrid"} 3712.0
+ura_llm_tokens_total{model="…",operation="chat",provider="vllm",type="input"} 6.1e+06
+ura_feedback_total{rating="up"} 312.0
 ```
-
-Add a Prometheus scrape job:
 
 ```yaml
-# prometheus.yml
+# prometheus.yml (the monitoring profile ships monitoring/prometheus.yml)
 scrape_configs:
-  - job_name: ura-chatbot-api
-    scrape_interval: 15s
+  - job_name: ura-api
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/ura_metrics_token
     static_configs:
       - targets: ["api:8000"]
-    metrics_path: /metrics
 ```
 
-### Grafana dashboard recommendations
+### Dashboards and alerts
 
-| Panel | Query |
-|---|---|
-| Request rate | `rate(http_requests_total[5m])` |
-| p95 latency | `http_request_duration_ms{quantile="0.95"}` |
-| Error rate | `rate(http_errors_total[5m]) / rate(http_requests_total[5m])` |
-| Chat throughput | `rate(chat_requests_total[5m])` |
-| Faithfulness p95 | `faithfulness_score{quantile="0.95"}` |
-| Escalation rate | `rate(escalation_required_total[5m])` |
-| Feedback ratio | `feedback_total{rating="up"} / (feedback_total{rating="up"} + feedback_total{rating="down"})` |
+The monitoring profile provisions the Grafana dashboard
+(`monitoring/grafana/dashboards/ura-chatbot-overview.json`), the SLO
+recording and burn-rate alert rules, and Alertmanager delivering to
+`ALERTMANAGER_WEBHOOK_URL`. See [MONITORING.md](MONITORING.md) for the metric
+catalogue, SLOs and incident playbooks.
 
 ---
 

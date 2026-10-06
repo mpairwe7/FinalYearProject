@@ -488,7 +488,7 @@ what `/analytics` renders under "Taxpayer question".
 How far taxpayers get through each guided journey in the period. Staff only
 (OIDC staff role or the operator key). Built from the stored journey sessions
 and feedback, so it is the same on every replica and survives restarts; the
-`journey_events_total` counter on `/metrics` is per replica and resets.
+`ura_journey_events_total` counter on `/metrics` is per replica and resets on restart.
 
 ```http
 GET /v1/analytics/journeys?days=30
@@ -708,19 +708,63 @@ GET /v1/analytics/dashboard?days=30
 
 ### Prometheus Metrics
 
-Prometheus-compatible metrics endpoint for scraping by monitoring systems.
+Prometheus metrics for every API worker process, aggregated. Requires
+`Authorization: Bearer <METRICS_TOKEN>` (the scrape credential), a staff
+login, or the operator key; otherwise 401/403. Rate-limited to 30/minute.
+Metric catalogue: [MONITORING.md §3](MONITORING.md#3-metrics).
 
 ```http
 GET /metrics
+Authorization: Bearer <METRICS_TOKEN>
 ```
 
 **Response** (`text/plain; version=0.0.4`)
 ```
-# HELP requests_total Total HTTP requests
-# TYPE requests_total counter
-requests_total{method="POST",path="/v1/chat"} 1234
+# HELP ura_http_requests_total URA chatbot metric ura_http_requests_total
+# TYPE ura_http_requests_total counter
+ura_http_requests_total{method="POST",path="/v1/chat",status="200"} 1234.0
+ura_chat_turns_total{channel="sse",outcome="answered"} 980.0
 ...
 ```
+
+---
+
+### Report Web Vitals (real-user monitoring)
+
+Core Web Vitals measured in the browser by the `web-vitals` library. Public
+and anonymous; the web client sends batches only with analytics consent.
+Accepts `application/json` or `text/plain` (what `navigator.sendBeacon`
+sends). Unknown fields are rejected; bodies over 16 KB get 413. 60/minute.
+
+```http
+POST /v1/telemetry/vitals
+Content-Type: application/json
+
+{"metrics": [{"name": "INP", "value": 184, "rating": "good",
+              "route": "/staff/tickets/7d1c0e2a", "navigation_type": "navigate"}]}
+```
+
+`name` is `LCP`, `INP`, `CLS`, `FCP` or `TTFB`; `rating` is `good`,
+`needs-improvement` or `poor`. Ids in `route` are folded to `:id`.
+**Response:** `204 No Content`.
+
+---
+
+### Report a Client Error
+
+An uncaught browser error, unhandled rejection or error-boundary render.
+There is deliberately **no message field** (it could quote user input).
+30/minute.
+
+```http
+POST /v1/telemetry/errors
+Content-Type: application/json
+
+{"kind": "boundary", "name": "TypeError", "digest": "2771883407", "source": "", "route": "/"}
+```
+
+`kind` is `error`, `unhandledrejection`, `boundary` or `global-boundary`.
+**Response:** `204 No Content`.
 
 ---
 
