@@ -968,6 +968,15 @@ def init_db() -> None:
     )
     conn.commit()
     migrate_legacy_conversation_state_keys()
+
+    # Ensure call desk / receptionist tables exist (officer_presence, voice_calls, etc.)
+    try:
+        from .receptionist.store import init_receptionist_schema
+
+        init_receptionist_schema()
+    except Exception:
+        logger.debug("receptionist schema init skipped or deferred", exc_info=True)
+
     logger.info("Analytics database initialised at %s", _DB_PATH)
 
     # Run cleanup on startup
