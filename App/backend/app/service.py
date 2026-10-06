@@ -2074,7 +2074,12 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     except Exception:
                         pass
 
-            threading.Thread(target=_pump_tokens, daemon=True).start()
+            # copy_context for the same reason as the executor submits: the
+            # streamed generation must count toward this turn's usage and sit
+            # under its span; a bare thread starts with an empty context.
+            threading.Thread(
+                target=contextvars.copy_context().run, args=(_pump_tokens,), daemon=True
+            ).start()
 
             saw_streamed_token = False
             pending_stream_chunk = ""

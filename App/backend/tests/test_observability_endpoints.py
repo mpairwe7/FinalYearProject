@@ -149,6 +149,14 @@ class ClientTelemetryTest(unittest.TestCase):
         self.assertEqual(self.client.post("/v1/telemetry/vitals", content=extra).status_code, 422)
         self.assertEqual(self.client.post("/v1/telemetry/vitals", content="x" * 20000).status_code, 413)
 
+    def test_chunked_oversize_is_refused_without_content_length(self) -> None:
+        def chunks():
+            for _ in range(40):
+                yield b"x" * 1024
+
+        resp = self.client.post("/v1/telemetry/errors", content=chunks())
+        self.assertEqual(resp.status_code, 413)
+
     def test_client_error_never_carries_a_message(self) -> None:
         ok = self.client.post(
             "/v1/telemetry/errors",

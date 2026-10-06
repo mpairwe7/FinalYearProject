@@ -37,10 +37,12 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import database  # noqa: E402
 from app import service as service_module  # noqa: E402
+from app import tracing  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 from app.main import app  # noqa: E402
 
 REPLY = "The standard VAT rate in Uganda is 18% [1]."
+STREAM_INPUT_TOKENS = 1531
 METRICS_TOKEN = "integration-scrape-token-0123456789abcdef"  # pragma: allowlist secret
 
 _FAQ_ROW = {
@@ -72,6 +74,21 @@ def _passthrough_guard(model, **kwargs):
         "revised": False,
         "claim_report": {"decision": "approve"},
     }
+
+
+def _streamed_generation(*_args, **_kwargs):
+    # Runs on the token-pump thread; the turn must still see its usage.
+    with tracing.llm_call("chat", "stub-model", "vllm", streaming=True) as call:
+        yield "The standard VAT rate "
+        yield "in Uganda is 18% [1]."
+        call.usage(STREAM_INPUT_TOKENS, 12)
+
+
+def _scrape(client) -> str:
+    with mock.patch.dict(os.environ, {"METRICS_TOKEN": METRICS_TOKEN}):
+        resp = client.get("/metrics", headers={"Authorization": f"Bearer {METRICS_TOKEN}"})
+    assert resp.status_code == 200
+    return resp.text
 
 
 def _sha(text: str) -> str:
@@ -117,8 +134,7 @@ def pipeline(client, monkeypatch):
          mock.patch.object(model._cache, "put"), \
          mock.patch.object(service_module.llm_module, "is_available", return_value=True), \
          mock.patch.object(service_module.llm_module, "generate", return_value=REPLY), \
-         mock.patch.object(service_module.llm_module, "generate_stream",
-                           side_effect=lambda *a, **k: iter(["The standard VAT rate ", "in Uganda is 18% [1]."])):
+         mock.patch.object(service_module.llm_module, "generate_stream", side_effect=_streamed_generation):
         yield model
 
 
@@ -130,6 +146,7 @@ def test_rest_turn_is_audited_with_the_served_reply(client, pipeline):
                                          "conversation_id": conversation_id})
     assert resp.status_code == 200
     assert metrics.snapshot()["counters"].get(key, 0) - before == 1
+    assert 'ura_chat_turns_total{channel="rest",outcome="answered"}' in _scrape(client)
     rows = _audit_rows(conversation_id)
     assert len(rows) == 1, rows
     assert rows[0]["channel"] == "rest"
@@ -145,13 +162,12 @@ def test_streamed_turn_is_audited_and_counted(client, pipeline):
         body = "".join(resp.iter_text())
     tokens = [line[len("data: "):] for line in body.splitlines() if line.startswith("data: ")]
     assert "event: done" in body
+    assert any("18%" in token for token in tokens)
+    assert 'ura_chat_turns_total{channel="sse",outcome="answered"}' in _scrape(client)
     rows = _audit_rows(conversation_id)
     assert len(rows) == 1, f"streamed turn left {len(rows)} audit rows"
     assert rows[0]["channel"] == "sse"
     assert rows[0]["reply_sha256"] != _sha("")
-    assert any("18%" in token for token in tokens)
-
-    with mock.patch.dict(os.environ, {"METRICS_TOKEN": METRICS_TOKEN}):
-        scrape = client.get("/metrics", headers={"Authorization": f"Bearer {METRICS_TOKEN}"})
-    assert scrape.status_code == 200
-    assert 'ura_chat_turns_total{channel="sse",outcome="answered"}' in scrape.text
+    # Generated on the token-pump thread: lost unless the thread copies the context.
+    assert rows[0]["usage"]["input_tokens"] == STREAM_INPUT_TOKENS
+    assert rows[0]["usage"]["source"] == "provider"

@@ -163,6 +163,15 @@ class ChatTurnRecorderTest(unittest.TestCase):
         key = 'chat_turns_total{channel="sse",outcome="error"}'
         self.assertEqual(after.get(key, 0) - before.get(key, 0), 1)
 
+    def test_escalation_is_counted_whatever_the_outcome(self) -> None:
+        """An abstained turn that opens a ticket is an escalation (it was before the facade)."""
+        key = 'escalation_required_total{channel="rest"}'
+        before = analytics.metrics.snapshot()["counters"].get(key, 0)
+        record_chat_turn({"retrieval_mode": "abstained", "escalation_required": True}, elapsed_ms=5, channel="rest")
+        record_chat_turn({"retrieval_mode": "blocked", "handoff": {"ticket_id": "t"}}, elapsed_ms=5, channel="rest")
+        record_chat_turn({"retrieval_mode": "abstained"}, elapsed_ms=5, channel="rest")
+        self.assertEqual(analytics.metrics.snapshot()["counters"].get(key, 0) - before, 2)
+
     def test_record_mapped(self) -> None:
         table = {"_c": ("counter", "mapped_total", None), "_g": ("gauge", "mapped_active", None)}
         record_mapped(table, "_c")

@@ -98,6 +98,16 @@ class ExecutorContextTest(unittest.TestCase):
         self.assertEqual(usage["calls"], 1)
 
 
+class GeminiUsageTest(unittest.TestCase):
+    def test_thinking_tokens_count_as_output(self) -> None:
+        from app.providers.gateway import _gemini_output_tokens
+
+        self.assertEqual(_gemini_output_tokens({"candidatesTokenCount": 120, "thoughtsTokenCount": 900}), 1020)
+        self.assertEqual(_gemini_output_tokens({"candidatesTokenCount": 120}), 120)
+        self.assertEqual(_gemini_output_tokens({"thoughtsTokenCount": 7}), 7)
+        self.assertIsNone(_gemini_output_tokens({"promptTokenCount": 10}))
+
+
 class SpanTest(unittest.TestCase):
     def setUp(self) -> None:
         self.exporter = InMemorySpanExporter()

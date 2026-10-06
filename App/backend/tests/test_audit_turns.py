@@ -76,6 +76,22 @@ class PayloadTest(unittest.TestCase):
         self.assertNotIn("Omusolo", flattened)
         self.assertNotIn("18 percent", flattened)
 
+    def test_tool_calls_are_digested_not_copied(self) -> None:
+        calls = [
+            {"id": "c1", "name": "calculate_paye", "arguments": {"monthly_income": 2_750_000},
+             "result": {"tax": 712_500, "note": "for the income you entered"}, "iteration": 1},
+            "not a dict",
+        ]
+        payload = turns.build_turn_payload(message="m", result={"reply": "r"}, channel="rest", tool_calls=calls)
+        self.assertEqual(len(payload["tool_calls"]), 1)
+        entry = payload["tool_calls"][0]
+        self.assertEqual(set(entry), {"name", "iteration", "arguments_sha256"})
+        self.assertEqual(entry["name"], "calculate_paye")
+        self.assertEqual(entry["arguments_sha256"], _sha(json.dumps({"monthly_income": 2_750_000}, sort_keys=True)))
+        flattened = json.dumps(payload)
+        self.assertNotIn("2750000", flattened)
+        self.assertNotIn("you entered", flattened)
+
     def test_usage_without_provider_counts_is_labelled_estimate(self) -> None:
         payload = turns.build_turn_payload(message="hello", result={"reply": "hi there"}, channel="rest")
         self.assertEqual(payload["usage"]["source"], "estimate")

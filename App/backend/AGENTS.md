@@ -24,7 +24,7 @@ PYTHONPATH=App/backend python3 -m app.seed_prototype   # development only
 | `logging_config.py` | Root JSON logging: request id, trace ids, scrubbed `attributes` and tracebacks |
 | `analytics.py` | The one metrics facade (prometheus_client, all workers); `record_chat_turn` |
 | `tracing.py` | OTel setup; `llm_call`, `trace_tool_call`, GenAI spans and turn token usage |
-| `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer), RFC 3161 seals (`tsa.py`) |
+| `audit/` | Hash-chained ledger, `turns.append_turn` (one row per answer while `audit_ledger` is on; a failed append is counted and logged, never retried), RFC 3161 seals (`tsa.py`) |
 | `mt.py` | Shared translation cache + the figure-fidelity guard |
 | `flags.py` | Registry + rollout; do not add a flag here only |
 

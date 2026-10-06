@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 #: Version of the ``generate`` payload layout. 1 had no channel, provenance
-#: or citation digests; rows keep the layout they were written with.
+#: or citation digests and kept tool calls raw; rows keep the layout they
+#: were written with.
 TURN_PAYLOAD_SCHEMA = 2
 
 _MAX_LISTED = 10
@@ -71,6 +72,10 @@ def provenance() -> dict[str, Any]:
     if cached is not None and now - cached[0] < _PROVENANCE_TTL_S:
         return dict(cached[1])
     with _provenance_lock:
+        # Another thread may have rebuilt it while this one waited for the lock.
+        cached = _provenance_cache
+        if cached is not None and now - cached[0] < _PROVENANCE_TTL_S:
+            return dict(cached[1])
         value = {
             "app_version": os.getenv("APP_VERSION", ""),
             "build_sha": os.getenv("APP_BUILD_SHA", ""),
@@ -79,6 +84,30 @@ def provenance() -> dict[str, Any]:
         }
         _provenance_cache = (now, value)
     return dict(value)
+
+
+def _tool_call_digests(tool_calls: Iterable[Any]) -> list[dict[str, Any]]:
+    """Tool name, iteration and an arguments digest — never raw arguments or results.
+
+    Arguments can carry what the taxpayer typed (an income, a TIN) and results
+    what a connector returned; the ledger keeps neither, only enough to show
+    which tool ran with which inputs.
+    """
+    entries: list[dict[str, Any]] = []
+    for call in list(tool_calls or [])[:_MAX_LISTED]:
+        if not isinstance(call, dict):
+            continue
+        arguments = call.get("arguments")
+        entries.append(
+            {
+                "name": str(call.get("name") or "")[:80],
+                "iteration": int(call.get("iteration") or 0),
+                "arguments_sha256": _sha256(json.dumps(arguments, sort_keys=True, default=str))
+                if arguments
+                else "",
+            }
+        )
+    return entries
 
 
 def _citation_digests(citations: Iterable[Any]) -> list[str]:
@@ -159,7 +188,7 @@ def build_turn_payload(
         "locale": result.get("locale", "en"),
         "conversation_id": result.get("conversation_id") or "",
         "usage": _usage(message, reply, usage),
-        "tool_calls": list(tool_calls or []),
+        "tool_calls": _tool_call_digests(tool_calls),
         "tool_iterations": int(tool_iterations or 0),
         "agent_route": agent_route or "",
         "ticket_id": result.get("ticket_id", ""),

@@ -11,6 +11,7 @@ from functools import lru_cache
 from typing import Any, Final
 
 from .. import database as db
+from ..analytics import record_chat_turn
 from ..flags import flags
 from ..speech_normalization import clean_text_for_speech
 from ..text_signals import detect_crisis
@@ -920,12 +921,14 @@ class UraReceptionistBrain(LLMService):
             result = await asyncio.wait_for(gen_task, timeout=25.0)
         except asyncio.TimeoutError:
             logger.warning("Generation timed out for call %s", self.room.call_id)
+            record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
             if self.room.state.mode == "ai":
                 await self._say_and_record(phrase("timeout_transfer", self.language), kind="answer")
                 await self._transfer("timeout")
             return
         except Exception:
             logger.exception("Generation failed for call %s", self.room.call_id)
+            record_chat_turn({}, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call", error=True)
             if self.room.state.mode == "ai":
                 await self._say_and_record(phrase("error_transfer", self.language), kind="answer")
                 await self._transfer("system_error")
@@ -935,6 +938,9 @@ class UraReceptionistBrain(LLMService):
         if curr_gen_id != self.room.state.generation_id:
             logger.info("Dropping late generation for call %s after barge-in", self.room.call_id)
             return
+        # Once per answered call turn, crisis hand-overs included, in the same
+        # families as every other transport.
+        record_chat_turn(result, elapsed_ms=(time.perf_counter() - t0) * 1000, channel="call")
 
         # The chat's own crisis check caught what the call's did not (a
         # Luganda turn is read for it only once it has been put into English).

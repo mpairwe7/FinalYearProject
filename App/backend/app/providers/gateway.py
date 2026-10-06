@@ -291,6 +291,19 @@ def workers_ai_tts(text: str, model: str = "@cf/myshell-ai/melotts", *, lang: st
 
 # ── Gemini (via the google-ai-studio provider on the Gateway) ────────────────
 
+def _gemini_output_tokens(meta: dict[str, Any]) -> int | None:
+    """Billed output tokens: the visible answer plus a thinking model's reasoning.
+
+    ``candidatesTokenCount`` covers only the answer; Gemini reports reasoning
+    separately as ``thoughtsTokenCount`` and bills it as output. ``None`` when
+    the response reports neither.
+    """
+    parts = [meta.get("candidatesTokenCount"), meta.get("thoughtsTokenCount")]
+    if all(part is None for part in parts):
+        return None
+    return sum(int(part or 0) for part in parts)
+
+
 def gemini_generate(
     prompt: str,
     *,
@@ -350,7 +363,7 @@ def gemini_generate(
             call.fail(type(last).__name__ if last else "unreachable")
         else:
             meta = data.get("usageMetadata") or {}
-            call.usage(meta.get("promptTokenCount"), meta.get("candidatesTokenCount"))
+            call.usage(meta.get("promptTokenCount"), _gemini_output_tokens(meta))
     if data is None:
         # Both routes are unreachable for THIS model. If a lighter model is
         # configured, try it once before giving up: a primary that is

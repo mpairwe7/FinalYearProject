@@ -1019,11 +1019,14 @@ async def security_headers(request: Request, call_next):
     # handled by the OpenTelemetry FastAPI instrumentation when tracing is on.
     request_id_token = REQUEST_ID.set(request_id)
     try:
-        logger.info("request method=%s path=%s", request.method, request.url.path)
         response: Response = await call_next(request)
         traceresponse = current_traceresponse()
+        # The route template, not request.url.path: the decoded path can carry
+        # CR/LF (log injection) and the ids a template folds away.
+        route = route_label(request)
+        logger.info("request method=%s route=%s status=%s", request.method, route, response.status_code)
         # 401 / 403 / 429 become OWASP-vocabulary security events (logged and counted).
-        record_http_security_event(request, response.status_code, route_label(request))
+        record_http_security_event(request, response.status_code, route)
     finally:
         REQUEST_ID.reset(request_id_token)
 
@@ -3021,20 +3024,27 @@ def prometheus_metrics(
 # Real-user monitoring from the web client (app.client_telemetry)
 # ---------------------------------------------------------------------------
 async def _telemetry_body(request: Request) -> bytes:
-    """The raw body, refused early when oversized.
+    """The raw body, refused as soon as it is oversized.
 
     Read raw rather than as a JSON body parameter: ``navigator.sendBeacon``
     with a string posts ``text/plain``, which FastAPI's JSON binding rejects.
+    Read as a stream with a running count: a chunked request carries no
+    ``content-length``, and ``request.body()`` would buffer all of it first.
     """
     from .client_telemetry import MAX_BODY_BYTES
 
+    too_large = HTTPException(status_code=413, detail="telemetry payload too large")
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="telemetry payload too large")
-    body = await request.body()
-    if len(body) > MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="telemetry payload too large")
-    return body
+        raise too_large
+    chunks: list[bytes] = []
+    received = 0
+    async for chunk in request.stream():
+        received += len(chunk)
+        if received > MAX_BODY_BYTES:
+            raise too_large
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 @app.post("/v1/telemetry/vitals", status_code=204, tags=["telemetry"])
@@ -4891,6 +4901,7 @@ async def voice_vision_chat(
             duration_s = tts_result.duration_s
 
     total_latency = time.perf_counter() - t0
+    record_chat_turn(result, elapsed_ms=total_latency * 1000, channel="multimodal")
 
     return VoiceVisionChatResponse(
         transcript=transcript,

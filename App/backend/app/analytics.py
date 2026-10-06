@@ -544,9 +544,10 @@ def record_chat_turn(
     """Record one finished chat turn, whichever transport carried it.
 
     ``channel`` is ``rest`` (``/v1/chat``), ``sse`` (``/v1/chat/stream``),
-    ``ws`` (``/v2/chat/stream``) or ``voice`` (``/v1/voice/chat``). Every
-    path calls this once per turn, so the counters agree with each other and
-    no transport is invisible.
+    ``ws`` (``/v2/chat/stream``), ``voice`` (``/v1/voice/chat``),
+    ``multimodal`` (``/v1/voice/vision/chat``) or ``call`` (the receptionist).
+    Every path calls this once per turn, so the counters agree with each
+    other and no transport is invisible.
     """
     outcome = "error" if error else turn_outcome(result)
     mode = str(result.get("retrieval_mode") or "unknown")
@@ -560,7 +561,9 @@ def record_chat_turn(
             metrics.observe("faithfulness_score", float(faith))
         except (TypeError, ValueError):
             pass
-    if outcome == "escalated":
+    # Counted apart from the outcome label: an abstained or blocked turn can
+    # still open a ticket, and that hand-off is an escalation.
+    if outcome == "escalated" or (not error and (result.get("escalation_required") or result.get("handoff"))):
         metrics.inc("escalation_required_total", labels={"channel": channel})
 
 
