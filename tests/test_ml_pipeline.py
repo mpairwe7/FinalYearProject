@@ -317,6 +317,14 @@ class TestQualityRegressionGate:
         checks = check_regressions({}, {"metrics": {"faithfulness": 0.8}}, 0.03)
         assert checks[0]["passed"] is False and checks[0]["value"] == "missing"
 
+    @pytest.mark.parametrize("baseline", [None, {}, {"metrics": {}}, ["not", "a", "dict"]])
+    def test_an_unusable_baseline_fails_instead_of_skipping(self, baseline):
+        from ml.pipelines.quality_gates import check_regressions
+
+        checks = check_regressions({"faithfulness": {"mean": 0.9}}, baseline, 0.03)
+        assert [c["name"] for c in checks] == ["regression.baseline"]
+        assert checks[0]["passed"] is False
+
     def test_committed_baseline_is_well_formed(self):
         from pathlib import Path
 

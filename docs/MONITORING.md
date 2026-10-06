@@ -79,7 +79,7 @@ readable with `METRICS_TOKEN` by any external Prometheus.
 | `LOG_LEVEL` | `info` | Root and `app.*` level; `httpx`/`httpcore` stay at WARNING. |
 | `ONLINE_EVAL_INTERVAL_SECONDS` | `21600` | Scheduled evaluation of recent conversations; `0` = off. |
 | `ALERTMANAGER_WEBHOOK_URL` | unset | Where every alert is delivered (compose secret). |
-| `AUDIT_TSA_URL`, `AUDIT_TSA_CA_CERT` | unset | RFC 3161 timestamps on audit seals ([runbook](runbooks/audit-trail.md#trusted-timestamps-rfc-3161)). |
+| `AUDIT_TSA_URL`, `AUDIT_TSA_CA_CERT`, `AUDIT_TSA_REQUIRED` | unset | RFC 3161 timestamps on audit seals; `REQUIRED` makes a seal without an anchored token a break ([runbook](runbooks/audit-trail.md#trusted-timestamps-rfc-3161)). |
 
 ## 3. Metrics
 
@@ -222,7 +222,9 @@ are still at **Development** status (moved to
 
 OTel metrics `gen_ai.client.operation.duration` (s) and
 `gen_ai.client.token.usage` ({token}) are histograms, as the conventions
-specify. Prompt and completion text are never recorded.
+specify; they reach Prometheus through the Collector's exporter on `:8889`
+(scrape job `otel-collector-genai`). Prompt and completion text are never
+recorded.
 
 Responses carry `X-Request-ID` and, when a span is active, a W3C
 `traceresponse` header (both exposed to browsers through CORS). The API no

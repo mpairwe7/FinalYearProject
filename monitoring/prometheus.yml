@@ -99,6 +99,12 @@ scrape_configs:
     static_configs:
       - targets: ["otel-collector:8888"]
 
+  # The Collector's Prometheus exporter: the OTLP metrics it receives,
+  # including the gen_ai.client.* histograms (:8888 above is its own health).
+  - job_name: "otel-collector-genai"
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
   - job_name: "alertmanager"
     static_configs:
       - targets: ["alertmanager:9093"]
