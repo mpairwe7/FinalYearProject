@@ -18,7 +18,7 @@ on the load suite's Luganda and Swahili questions
 | 1 | The answer language as conversation state; streaming/REST routing parity | G113–G118 | **Shipped** (this PR) |
 | 2 | Each turn stored in English beside the original; English history for the model; the context window and token budget | G119, G120 | **Shipped** |
 | 3 | Memory lifecycle: one episode per conversation, word-boundary topic tags on the English form, lg/sw fact cues, fact validity periods | G121 | **Shipped** |
-| 4 | Sessions and channels: anonymous history across tabs, chat context carried into a call, multi-turn Luganda calls, no Gemini in the call path | G122 | Open |
+| 4 | Sessions and channels: anonymous history across tabs, chat context carried into a call, multi-turn Luganda calls, no Gemini in the call path | G122 | **Shipped** |
 | 5 | History scrubbed before it is replayed, `gen_ai.conversation.id` on traces, a trilingual multi-turn evaluation | G123 | Open |
 
 ## Phase 1 — what changed and why
@@ -145,12 +145,79 @@ three streamed turns (Swahili, Swahili, Luganda) produced one episode —
 "duka la rejareja", and working memory naming the topic (VAT). Withdrawing
 consent erased all three tiers.
 
-## Open findings (phases 4–5)
-- **G122 — sessions and channels.** Anonymous history is keyed on the per-tab
-  analytics id while the browser keeps 50 conversations with no expiry (server
-  TTL 7 days); a call starts a new conversation carrying only a language hint;
-  the Luganda call path is single-turn and still falls back to Gemini, against
-  the 2026-09-30 local-only rule.
+## Phase 4 — what changed and why
+
+**Anonymous history across tabs (G122).** A signed-out taxpayer's history was
+bound to the analytics session id, which lives in sessionStorage. A new tab, or
+the browser reopened, began a new session. A conversation reopened from the
+sidebar then continued with no server-side history while the page still showed
+it. Every chat-bound request (chat, streaming, voice turns, uploads, report
+downloads, escalation) now sends one browser-wide chat session id
+(`lib/chatSession.ts`). It is kept in localStorage beside the conversations and
+moves forward while it is used. It is replaced after
+`NEXT_PUBLIC_CONVERSATION_TTL_DAYS` (7) without use, when the server has already
+deleted everything bound to it, and whenever the taxpayer clears their chat
+history. Analytics keep their per-tab id. The voice-first page sent the
+conversation id itself as the session, so the id alone unlocked the history; it
+now sends the chat session too.
+
+**The browser keeps conversations no longer than the server.** The browser kept
+50 conversations with no expiry, while the server deletes one 7 days after its
+last turn. A conversation older than that is dropped when the page loads,
+unless the taxpayer pinned it.
+
+**A call carries the chat it came from.** A call started from the chat sends
+the chat's conversation id. If the caller owns that chat (their account, or the
+chat session when signed out), the call starts on the chat's task. It also gets
+a short English account of the chat: the tax topics named, the taxpayer type,
+the figures mentioned, and the current task. It never gets the taxpayer's own
+words. The account is stored on the call (`voice_calls.parent_conversation_id`,
+`chat_context`). The officer's brief reads it as context and never cites it as
+a turn. Before, the call opened with only the chat's language as a hint.
+
+**Luganda calls are multi-turn.** English and Swahili call turns go through the
+chat pipeline, which has the call's history. The Luganda path turned each
+question into an English search query on its own, so "kiki ekyetaagisa?" ("what
+is needed?") was searched with no subject. The query is now made with the call's
+last two exchanges (their English forms) and the chat's account.
+
+**No hosted model on a call.** The receptionist still fell back to Gemini for
+the officer brief, the call summary, the Luganda query and the Luganda answer,
+against the 2026-09-30 local-only rule. These now run on Sunflower only, with
+deterministic fallbacks when vLLM is down, and `RECEPTIONIST_BRIEF_MODEL` is
+gone. A call's English or Swahili turn reaches the chat service, whose own cloud
+fallbacks are switched by environment. Until now only the GPU stack's settings
+kept them off. `providers/scope.py` holds a call turn to local models whatever
+chat allows: no LLM fallback chain, FAQ judge, Gemini, Workers AI or Sunbird
+translation, and no dense-retrieval fallback. The scope travels as a context
+variable. The speech translation pool did not copy the context, so its submit
+now does.
+
+**Verified live (GPU stack, 2026-10-07).**
+
+- *Chat to call:* an anonymous chat turn ("…my turnover is above 150 million
+  shillings. Do I need to register for VAT?") set the chat's task to VAT
+  registration. A real call start on `WS /v1/calls/stream` naming that chat
+  stored this account: "Tax domains discussed: Value Added Tax (VAT). Financial
+  figures mentioned: 150 million. Current task: VAT registration." The account
+  did not contain the taxpayer's words, and the call opened on the
+  VAT-registration task. The same call start with another session's id carried
+  nothing.
+- *Luganda follow-up:* Sunflower on vLLM turned "Kiki ekyetaagisa?" ("what is
+  needed?") into "What is required?" alone, and into "What is required to
+  register for VAT?" with the call so far.
+- *Local-only translation:* a call turn's Swahili translation came from local
+  Sunflower, with every hosted provider replaced by a tripwire.
+- *Two tabs:* the phase-4 frontend build drove the live API in a browser. A
+  question in one tab and a follow-up in a new tab sent the same chat session
+  and conversation, and the server stored both turns under one session.
+
+That follow-up ("What documents do I need for it?") was correctly read as VAT
+registration but answered with customs import documents (commercial invoice,
+bill of lading, packing list). This is an answer-quality defect outside this
+phase, registered as G124.
+
+## Open findings (phase 5)
 - **G123 — safety, traces and evaluation.** Stored history is replayed
   unscrubbed; traces carry no `gen_ai.conversation.id`; no test covers
   multi-turn behaviour in all three languages.

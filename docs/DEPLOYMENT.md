@@ -121,6 +121,9 @@ DENSE_DIM=1024                         # Must match the indexed collection
 
 # --- Frontend ---
 NEXT_PUBLIC_API_URL=https://ura-chatbot.example.com/api
+# Build-time. Days the browser keeps a conversation (and its anonymous chat
+# session) without use; match the backend's CONVERSATION_TTL_DAYS.
+NEXT_PUBLIC_CONVERSATION_TTL_DAYS=7
 FRONTEND_PORT=3000
 
 # --- Observability ---

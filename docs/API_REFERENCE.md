@@ -16,7 +16,13 @@ The API is open for chat and classification endpoints. The indexing endpoint req
 Authorization: Bearer <INDEX_API_KEY>
 ```
 
-Session tracking uses the `X-Session-ID` header (optional, client-provided).
+Session tracking uses the `X-Session-ID` header (optional, client-provided). For a
+signed-out taxpayer it is also what binds a conversation's history, attachments and
+escalation transcript to them: a conversation id alone never unlocks history. The web
+client sends a browser-wide chat session id here (localStorage, replaced after
+`NEXT_PUBLIC_CONVERSATION_TTL_DAYS` without use or when history is cleared), so a
+conversation reopened in a new tab keeps its history. Analytics events keep their own
+per-tab id.
 
 ## Endpoints
 
