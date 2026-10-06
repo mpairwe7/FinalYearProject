@@ -1199,6 +1199,7 @@ def chat(
             topic_tag=topic_tag,
             tenant_id=ctx.tenant_id or "default",
             **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or "en"),
+            **_CM.english_forms(result, served_reply=str(result.get("reply") or "")),
         )
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
@@ -1387,6 +1388,11 @@ def _log_stream_conversation(
             user_id=user_id,
             tenant_id=tenant_id or "default",
             **_experiment_log_fields(user_id, result.get("locale") or body.locale or "en"),
+            **_CM.english_forms(
+                result,
+                served_reply=full_reply,
+                english_reply=str(log_payload.get("english_reply") or ""),
+            ),
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
@@ -2164,6 +2170,7 @@ async def voice_chat(
             response_time_ms=round(total_latency * 1000, 2),
             tenant_id=ctx.tenant_id or "default",
             **_experiment_log_fields(ctx.user_id or "", chat_result.get("locale") or ""),
+            **_CM.english_forms(chat_result, served_reply=reply_text),
         )
     except Exception:
         logger.warning("Voice conversation logging failed", exc_info=True)

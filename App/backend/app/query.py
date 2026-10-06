@@ -1445,6 +1445,16 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
     return None
 
 
+def _reads_as_english(text: str) -> bool:
+    """Three or more words, at least two of them common English, none Luganda or Swahili."""
+    from .receptionist.language import lexical_hits  # imports this module
+
+    if len(re.findall(r"[a-z']+", text.lower())) < 3:
+        return False
+    hits = lexical_hits(text)
+    return hits["en"] >= 2 and hits["lg"] == 0 and hits["sw"] == 0
+
+
 def english_retrieval_query(query: str, locale: str | None) -> str:
     """Query text to search the English corpus with (G18).
 
@@ -1455,6 +1465,12 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     text = (query or "").strip()
     loc = (locale or "en").strip().lower().split("-")[0]
     if not text or loc in ("", "en"):
+        return text
+    if _reads_as_english(text):
+        # A Luganda or Swahili turn whose search text is already English —
+        # the history-aware rewriter, reading English history (G119), often
+        # returns it so. Translating it "from Luganda" costs a model call and
+        # can only make it worse.
         return text
     if loc == "sw":
         from .receptionist.lexicon import normalize_swahili_tax_query

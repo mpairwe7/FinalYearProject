@@ -1723,7 +1723,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     _output_guard = OutputGuard()
     t0 = time.perf_counter()
     full_reply = ""
+    # The answer before translation, logged beside the served reply so later
+    # turns replay English history to the English generator (G119).
+    english_reply = ""
     result: dict[str, Any] = {}
+
+    def _localized(text: str) -> str:
+        nonlocal english_reply
+        english_reply = text
+        return localize_reply(text, locale)
     cancel_event = cancel_event or threading.Event()
     deadline_s = turn_deadline_s if turn_deadline_s is not None else _resolve_turn_deadline()
 
@@ -1767,6 +1775,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         )
         if language_out.get("source"):
             result.setdefault("locale_source", language_out["source"])
+        if language_out.get("english_message"):
+            result.setdefault("_english_message", language_out["english_message"])
 
         # The *effective* locale, not the one the caller passed. Mirrors the
         # same reassignment in ChatModel.generate: generate_retrieval_only runs
@@ -1834,7 +1844,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # localized before it is sent rather than corrected afterwards.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = localize_reply(result.get("reply", ""), locale)
+            full_reply = _localized(result.get("reply", ""))
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -1855,7 +1865,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             yield ("done", "")
             yield (
                 "_log",
-                {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+                {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
             )
             return
 
@@ -1939,9 +1949,16 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # Same localization the token branch does below. The agentic
                 # path had none at all, so enabling `tool_use` silently turned
                 # every non-English conversation back into an English one.
+                # Decided English, but the model wrote Luganda or Swahili: the
+                # prompt carried another language (see _answer_in_english).
+                if locale in ("", "en"):
+                    english_only = await asyncio.to_thread(_answer_in_english, full_reply)
+                    if english_only != full_reply:
+                        full_reply = english_only
+                        yield ("revision", full_reply)
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
-                    localized = localize_reply(full_reply, locale)
+                    localized = _localized(full_reply)
                     yield ("translation.completed", {"locale": locale})
                     if localized != full_reply:
                         full_reply = localized
@@ -1968,6 +1985,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     {
                         "result": result,
                         "full_reply": full_reply,
+                        "english_reply": english_reply,
                         "elapsed_ms": (time.perf_counter() - t0) * 1000,
                     },
                 )
@@ -2017,7 +2035,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             finalize_turn_actions(result, escalated=escalate)
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = localize_reply(abstained_reply, locale)
+            full_reply = _localized(abstained_reply)
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             result["reply"] = full_reply
@@ -2038,7 +2056,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             yield ("done", "")
             yield (
                 "_log",
-                {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+                {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
             )
             return
 
@@ -2157,14 +2175,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # with the English extractive fallback.
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
-                full_reply = localize_reply(full_reply, locale)
+                full_reply = _localized(full_reply)
                 if locale not in ("", "en"):
                     yield ("translation.completed", {"locale": locale})
                 yield ("token", full_reply)
                 yield ("done", "")
                 yield (
                     "_log",
-                    {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+                    {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
                 )
                 return
 
@@ -2201,6 +2219,13 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # text arrives as a revision, which the client already applies for
             # grounded revisions above. Emitted only when translation actually
             # changed something, so an English session sees no extra frame.
+            # Decided English, but the model wrote Luganda or Swahili: the
+            # prompt carried another language (see _answer_in_english).
+            if locale in ("", "en"):
+                english_only = await asyncio.to_thread(_answer_in_english, full_reply)
+                if english_only != full_reply:
+                    full_reply = english_only
+                    yield ("revision", full_reply)
             if locale not in ("", "en"):
                 # Announced, because it is the slow part of a non-English turn
                 # and the reader is looking at a finished English answer while
@@ -2208,7 +2233,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # having answered in the wrong language and then changing its
                 # mind — which is exactly how it was reported.
                 yield ("translation.started", {"locale": locale})
-                localized = localize_reply(full_reply, locale)
+                localized = _localized(full_reply)
                 yield ("translation.completed", {"locale": locale})
                 if localized != full_reply:
                     full_reply = localized
@@ -2265,7 +2290,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # One frame, so localize before sending rather than revising after.
             if locale not in ("", "en"):
                 yield ("translation.started", {"locale": locale})
-            full_reply = localize_reply(full_reply, locale)
+            full_reply = _localized(full_reply)
             if locale not in ("", "en"):
                 yield ("translation.completed", {"locale": locale})
             yield ("token", full_reply)
@@ -2273,7 +2298,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         yield ("done", "")
         yield (
             "_log",
-            {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+            {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
         )
 
     except Exception:
@@ -2282,7 +2307,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         yield ("done", "")
         yield (
             "_log",
-            {"result": result, "full_reply": full_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
+            {"result": result, "full_reply": full_reply, "english_reply": english_reply, "elapsed_ms": (time.perf_counter() - t0) * 1000},
         )
 
 
@@ -3217,6 +3242,38 @@ def _translate_reply(text: str, locale: str) -> str | None:
 
 #: A blank line between paragraphs, kept so the translation keeps the layout.
 _PARAGRAPH_BREAK_RE = re.compile(r"(\n[ \t]*\n+)")
+
+
+def _answer_in_english(reply: str) -> str:
+    """*reply* in English when the turn was decided English but it is not.
+
+    The answer language is decided in code (``app.language_state``); the model
+    is only asked to follow it. When the prompt carried another language — the
+    taxpayer's earlier Luganda turns, before they were replayed in English
+    (G119) — Sunflower followed those instead, live on 2026-10-06. This is the
+    check: a reply with clear Luganda or Swahili evidence is translated back,
+    paragraph by paragraph (Sunflower can stop after the first) and under the
+    same figure and length guards as any reply translation. When that fails the
+    reply is served as it is, and logged.
+    """
+    from .receptionist.language import lexical_hits  # noqa: PLC0415 — imports this module's peers
+
+    hits = lexical_hits(reply or "")
+    source = "lg" if hits["lg"] >= hits["sw"] else "sw"
+    if hits[source] < 3 or hits[source] <= hits["en"]:
+        return reply
+    pieces = _PARAGRAPH_BREAK_RE.split(reply)
+    out = list(pieces)
+    for index, piece in enumerate(pieces):
+        if index % 2 or not piece.strip():
+            continue
+        english = translate_query_for_retrieval(piece, source)
+        if not english or not mt.figures_survived(piece, english) or not mt.length_plausible(piece, english):
+            logger.warning("English-decided reply came back in %s and could not be translated", source)
+            return reply
+        out[index] = english
+    logger.info("English-decided reply came back in %s; served its English translation", source)
+    return "".join(out)
 
 
 def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
@@ -8476,6 +8533,9 @@ class ChatModel:
             # Why the reply is in this language: the client keeps a detected
             # language as a hint and only an explicit one as the user's choice.
             result.setdefault("locale_source", language_out["source"])
+        if isinstance(result, dict) and language_out.get("english_message"):
+            # Stored beside the taxpayer's own words (G119); never sent to them.
+            result.setdefault("_english_message", language_out["english_message"])
         # The *effective* locale, not the one passed in: a caller that sends no
         # locale gets "en" by default and _generate_en detects the real one
         # (detect_language) partway through, recording it on the result. Keying
@@ -8496,11 +8556,18 @@ class ChatModel:
             # voice endpoint keying TTS off the caller's language would read
             # that English with the Luganda or Swahili voice.
             result["reply_locale"] = "en"
+            if effective in ("", "en") and result.get("reply"):
+                # Decided English, but the model may have followed another
+                # language in its prompt (see _answer_in_english).
+                result["reply"] = _answer_in_english(str(result["reply"]))
             if effective not in ("", "en"):
                 english = str(result.get("reply", ""))
                 result["reply"] = self._localize_reply(english, effective)
                 if result["reply"] != english or _is_already_in_locale(english.strip(), effective):
                     result["reply_locale"] = effective
+                if result["reply"] != english:
+                    # The answer before translation, for model-facing history.
+                    result["_english_reply"] = english
                 if "next_actions" in result and isinstance(result["next_actions"], list):
                     result["next_actions"] = self._localize_next_actions(result["next_actions"], effective)
                 if "resources" in result and isinstance(result["resources"], list):
@@ -8800,6 +8867,8 @@ class ChatModel:
             if locale not in ("", "en"):
                 with trace_stage("router_translate", timings=timings):
                     router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
+            if language_out is not None and router_message != message:
+                language_out["english_message"] = router_message
             # Attachment turns and ongoing multi-turn conversations are never cache-served
             # or cache-stored: context is specific to attachments or prior dialogue turns.
             cache_allowed = personalization is None and not attachments and not conversation_history
@@ -10422,6 +10491,8 @@ class ChatModel:
         # Kiswahili turn reached the workflow, calculator, topic and FAQ
         # authorization routers as words none of their patterns can match.
         router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
+        if language_out is not None and router_message != message:
+            language_out["english_message"] = router_message
 
         # Attachment turns and ongoing multi-turn conversations are never cache-served
         # or cache-stored: context is specific to attachments or prior dialogue turns.
@@ -11259,6 +11330,32 @@ class ChatModel:
         if STORE_RAW_PROMPTS:
             return text
         return redact_pii_text(text)
+
+    @classmethod
+    def english_forms(
+        cls,
+        result: dict[str, Any] | None,
+        *,
+        served_reply: str,
+        english_reply: str = "",
+    ) -> dict[str, str]:
+        """``log_conversation`` kwargs for the turn in English (G119).
+
+        A Luganda or Swahili turn carries the question as routed
+        (``_english_message``) and the answer before translation
+        (``_english_reply``, or the streaming core's ``english_reply``). An
+        English turn, or one whose translation failed, has neither: the
+        original is already what the models should read.
+        """
+        result = result or {}
+        user_en = str(result.get("_english_message") or "")
+        reply_en = str(english_reply or result.get("_english_reply") or "")
+        if reply_en.strip() == (served_reply or "").strip():
+            reply_en = ""
+        return {
+            "user_message_en": cls.redact_for_storage(user_en),
+            "bot_reply_en": cls.redact_for_storage(reply_en),
+        }
 
     @staticmethod
     def contexts_json(result: dict[str, Any] | None, limit: int = 8) -> str:

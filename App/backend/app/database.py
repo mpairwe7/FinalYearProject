@@ -954,6 +954,11 @@ def init_db() -> None:
     )
     _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
+    # The turn in English beside what the taxpayer typed and was shown, for a
+    # Luganda or Swahili turn (G119): later turns replay English history to
+    # the English generator. Empty for English turns.
+    _ensure_column(conn, "conversations", "user_message_en", "TEXT DEFAULT ''")
+    _ensure_column(conn, "conversations", "bot_reply_en", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "analytics_events", "user_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "sessions", "user_id", "TEXT DEFAULT ''")
@@ -1364,17 +1369,26 @@ def log_conversation(
     flag_variants: str = "{}",
     locale: str = "",
     tenant_id: str = "default",
+    user_message_en: str = "",
+    bot_reply_en: str = "",
 ) -> str:
     """Log a conversation turn and return the stable thread id.
 
     ``user_id`` is the authenticated OIDC ``sub`` (empty for anonymous turns) —
     it links the turn to the user for /v1/me export + erasure.
+
+    ``user_message_en`` / ``bot_reply_en`` are the turn in English when it was
+    in Luganda or Swahili: the question as routed and the answer before
+    translation. Model-facing history reads them (G119); transcripts, exports
+    and the audit trail keep the original.
     """
     conn = _get_connection()
     from .guardrails import redact_pii_text
 
     user_message = redact_pii_text(user_message)
     bot_reply = redact_pii_text(bot_reply)
+    user_message_en = redact_pii_text(user_message_en or "")
+    bot_reply_en = redact_pii_text(bot_reply_en or "")
     row_id = str(uuid.uuid4())
     thread_id = conversation_id or row_id
     try:
@@ -1382,8 +1396,8 @@ def log_conversation(
             """INSERT INTO conversations
                (id, conversation_id, session_id, tenant_id, user_message, bot_reply, sources,
                 contexts, response_time_ms, confidence, topic_tag, created_at, user_id,
-                flag_variants, locale)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                flag_variants, locale, user_message_en, bot_reply_en)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
@@ -1400,6 +1414,8 @@ def log_conversation(
                 user_id,
                 flag_variants or "{}",
                 locale or "",
+                user_message_en,
+                bot_reply_en,
             ),
         )
         conn.commit()
@@ -1419,26 +1435,28 @@ def get_recent_turns(
 ) -> list[dict[str, str]]:
     """Retrieve the most recent conversation turns for a session (multi-turn memory).
 
-    Returns a list of dicts with ``user_message`` and ``bot_reply`` keys,
-    ordered oldest-first (chronological) for prompt injection.
+    Returns a list of dicts with ``user_message`` and ``bot_reply`` keys, the
+    turn's ``locale`` and, for a Luganda or Swahili turn, its English
+    ``user_message_en`` / ``bot_reply_en``; ordered oldest-first
+    (chronological) for prompt injection.
     """
     tenant_id = tenant_id or "default"
     if user_id and conversation_id:
-        sql = """SELECT user_message, bot_reply, locale FROM conversations
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                  WHERE tenant_id = ? AND conversation_id = ? AND user_id = ?
                  ORDER BY created_at DESC LIMIT ?"""
         args: tuple[Any, ...] = (tenant_id, conversation_id, user_id, limit)
     elif user_id and session_id:
-        sql = """SELECT user_message, bot_reply, locale FROM conversations
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                  WHERE tenant_id = ? AND session_id = ? AND user_id = ?
                  ORDER BY created_at DESC LIMIT ?"""
         args = (tenant_id, session_id, user_id, limit)
     elif not user_id and session_id:
         # Anonymous history is session-bound. A client-supplied conversation id
         # alone is not an authorization credential.
-        sql = """SELECT user_message, bot_reply, locale FROM conversations
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                  WHERE tenant_id = ? AND session_id = ? AND conversation_id = ?
-                 ORDER BY created_at DESC LIMIT ?""" if conversation_id else """SELECT user_message, bot_reply, locale FROM conversations
+                 ORDER BY created_at DESC LIMIT ?""" if conversation_id else """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                  WHERE tenant_id = ? AND session_id = ?
                  ORDER BY created_at DESC LIMIT ?"""
         args = (tenant_id, session_id, conversation_id, limit) if conversation_id else (tenant_id, session_id, limit)
@@ -1453,6 +1471,8 @@ def get_recent_turns(
             "user_message": r["user_message"],
             "bot_reply": r["bot_reply"],
             "locale": r["locale"] if "locale" in r.keys() else "",
+            "user_message_en": r["user_message_en"] or "",
+            "bot_reply_en": r["bot_reply_en"] or "",
         }
         for r in reversed(rows)
     ]
