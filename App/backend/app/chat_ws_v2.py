@@ -198,12 +198,19 @@ class WsChatSession:
     # Phase 5: most recent speculative-prefetch prefix (cosmetic for now).
     last_partial_prefix: str = ""
 
-    def append_turn(self, user_msg: str, assistant_msg: str) -> None:
-        """Append a turn to the in-memory history (FIFO eviction)."""
+    def append_turn(self, user_msg: str, assistant_msg: str, locale: str = "") -> None:
+        """Append a turn to the in-memory history (FIFO eviction).
+
+        *locale* is the language the reply was given in; the next turn's
+        answer language continues from it (``app.language_state``).
+        """
         if user_msg:
             self.history.append({"role": "user", "content": user_msg})
         if assistant_msg:
-            self.history.append({"role": "assistant", "content": assistant_msg})
+            entry = {"role": "assistant", "content": assistant_msg}
+            if locale:
+                entry["locale"] = locale
+            self.history.append(entry)
         # Trim oldest pairs once we exceed the cap.
         if len(self.history) > _HISTORY_CACHE_MAX:
             self.history = self.history[-_HISTORY_CACHE_MAX:]
@@ -255,7 +262,10 @@ class WsChatSession:
             if u:
                 hydrated.append({"role": "user", "content": u})
             if b:
-                hydrated.append({"role": "assistant", "content": b})
+                entry = {"role": "assistant", "content": b}
+                if r.get("locale"):
+                    entry["locale"] = str(r["locale"])
+                hydrated.append(entry)
         self.history = hydrated
         self.last_response_id = previous_response_id
         self.resumed = True
@@ -292,8 +302,12 @@ async def _run_response_create(
     from .query import SUPPORTED_LOCALES
 
     turn_locale = msg.get("locale")
+    turn_explicit = msg.get("locale_explicit")
+    if not isinstance(turn_explicit, bool):
+        turn_explicit = None
     if not isinstance(turn_locale, str) or turn_locale not in SUPPORTED_LOCALES:
         turn_locale = session.locale if session.locale_explicit else ""
+        turn_explicit = True if session.locale_explicit else None
     top_k = int(msg.get("top_k", 4))
     top_k = max(1, min(top_k, 10))
     request_id = msg.get("metadata", {}).get("client_request_id") if isinstance(
@@ -333,6 +347,7 @@ async def _run_response_create(
             sentence_batching=False,  # WS wants low TTFT per-token frames
             channel="ws",
             conversation_history_override=list(session.history) if session.history else None,
+            locale_explicit=turn_explicit,
         ):
             if event_type == "_keepalive":
                 await _send_json(websocket, {"type": "ping"})
@@ -453,7 +468,7 @@ async def _run_response_create(
             if new_conv and not session.conversation_id:
                 session.conversation_id = new_conv
             if full_reply:
-                session.append_turn(user_input, full_reply)
+                session.append_turn(user_input, full_reply, locale=str(result.get("locale") or ""))
                 session.last_response_id = response_id
 
 
@@ -782,10 +797,18 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         from .query import SUPPORTED_LOCALES
 
         requested_locale = config.get("locale")
-        locale_explicit = isinstance(requested_locale, str) and requested_locale in SUPPORTED_LOCALES
-        locale = requested_locale if locale_explicit else "en"
+        supported = isinstance(requested_locale, str) and requested_locale in SUPPORTED_LOCALES
+        locale = requested_locale if supported else "en"
         if len(locale) > 8:
-            locale, locale_explicit = "en", False
+            locale, supported = "en", False
+        # The client says whether the taxpayer picked the language. A client
+        # that does not say keeps the older contract: lg/sw are a choice, en is
+        # only the default (app.language_state).
+        flagged = config.get("locale_explicit")
+        if isinstance(flagged, bool):
+            locale_explicit = supported and flagged
+        else:
+            locale_explicit = supported and locale in ("lg", "sw")
         conversation_id = config.get("conversation_id") or ""
         if not isinstance(conversation_id, str) or len(conversation_id) > 64:
             conversation_id = ""

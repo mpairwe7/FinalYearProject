@@ -755,6 +755,9 @@ class UraReceptionistBrain(LLMService):
             session_id=self.room.call_id,
             top_k=4,
             locale="en",
+            # The English pivot of a Luganda question: answer it in English,
+            # never in the language the call's earlier turns were stored in.
+            locale_explicit=True,
             user_id=self.room.state.user_id,
             tenant_id=self.room.state.tenant_id,
             channel="call",
@@ -900,6 +903,8 @@ class UraReceptionistBrain(LLMService):
                     session_id=self.room.call_id,
                     top_k=4,
                     locale=self.room.state.locale,
+                    # The call's LanguagePolicy decided this language.
+                    locale_explicit=True,
                     user_id=self.room.state.user_id,
                     tenant_id=self.room.state.tenant_id,
                     channel="call",

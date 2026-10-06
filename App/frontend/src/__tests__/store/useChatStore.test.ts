@@ -75,6 +75,52 @@ describe("useChatStore", () => {
     expect(store().locale).toBe("lg");
   });
 
+  /* The answer language: auto-detected until the taxpayer picks one. The
+     backend took the picker's default "en" as a choice and answered Luganda
+     and Swahili in English (PR #529); `locale_explicit` is how it can tell. */
+  it("starts in auto-detect, and a picked language becomes explicit", () => {
+    expect(store().localeExplicit).toBe(false);
+    store().setLocale("sw");
+    expect(store().locale).toBe("sw");
+    expect(store().localeExplicit).toBe(true);
+  });
+
+  it("setAutoDetectLocale returns to auto-detect without changing the hint", () => {
+    store().setLocale("lg");
+    store().setAutoDetectLocale();
+    expect(store().localeExplicit).toBe(false);
+    expect(store().locale).toBe("lg");
+  });
+
+  it("a detected or continued response language stays a hint", () => {
+    store().adoptResponseLocale("lg", "detected");
+    expect(store().locale).toBe("lg");
+    expect(store().localeExplicit).toBe(false);
+    store().adoptResponseLocale("en", "switched");
+    expect(store().locale).toBe("en");
+    expect(store().localeExplicit).toBe(false);
+  });
+
+  it("a language the taxpayer typed a request for becomes their choice", () => {
+    store().adoptResponseLocale("sw", "explicit_request");
+    expect(store().locale).toBe("sw");
+    expect(store().localeExplicit).toBe(true);
+  });
+
+  it("a picked language survives a reload; auto-detect is the default for old state", () => {
+    store().setLocale("lg");
+    useChatStore.setState({ locale: "en", localeExplicit: false });
+    store().hydratePersisted();
+    expect(store().locale).toBe("lg");
+    expect(store().localeExplicit).toBe(true);
+
+    const raw = JSON.parse(localStorage.getItem("ura-chat-store") || "{}");
+    delete raw.state.localeExplicit;
+    localStorage.setItem("ura-chat-store", JSON.stringify(raw));
+    store().hydratePersisted();
+    expect(store().localeExplicit).toBe(false);
+  });
+
   it("setSpeechState transitions correctly", () => {
     expect(store().speechState).toBe("idle");
     store().setSpeechState("listening");
@@ -92,6 +138,7 @@ describe("useChatStore", () => {
     expect(store().message).toBe("");
     expect(store().chat).toHaveLength(1);
     expect(store().locale).toBe("en");
+    expect(store().localeExplicit).toBe(false);
     expect(store().speechState).toBe("idle");
   });
 });

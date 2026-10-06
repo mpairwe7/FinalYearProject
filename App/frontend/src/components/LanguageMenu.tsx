@@ -14,6 +14,11 @@ import { useTranslation } from "../lib/i18n";
  * radiogroup labelled "Language selection" — so existing tests and assistive
  * tech behavior carry over. Selecting a language closes the overlay and
  * returns focus to the trigger.
+ *
+ * With `onAutoDetect`, the first option is "Auto-detect": the answer follows
+ * the language the taxpayer types (backend `app.language_state`), and `locale`
+ * is then only the language the assistant last answered in. Picking a
+ * language makes it the taxpayer's choice until they pick Auto-detect again.
  */
 
 export interface LanguageOption {
@@ -27,12 +32,20 @@ interface LanguageMenuProps {
   locale: string;
   options: readonly LanguageOption[];
   onLocaleChange: (code: string) => void;
+  /** True while the answer language is auto-detected. */
+  autoDetect?: boolean;
+  /** Offer an "Auto-detect" option; called when it is chosen. */
+  onAutoDetect?: () => void;
 }
+
+const AUTO = "auto";
 
 export default function LanguageMenu({
   locale,
-  options,
+  options: languageOptions,
   onLocaleChange,
+  autoDetect = false,
+  onAutoDetect,
 }: LanguageMenuProps) {
   const t = useTranslation();
   const [open, setOpen] = useState(false);
@@ -42,8 +55,16 @@ export default function LanguageMenu({
   const panelRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
-  const current = options.find((o) => o.value === locale) ?? options[0];
-  const activeIdx = Math.max(0, options.findIndex((o) => o.value === locale));
+  const current = languageOptions.find((o) => o.value === locale) ?? languageOptions[0];
+  const auto = Boolean(onAutoDetect) && autoDetect;
+  const options: readonly LanguageOption[] = onAutoDetect
+    ? [
+        { value: AUTO, label: "Auto-detect", native: "Answers follow the language you type" },
+        ...languageOptions,
+      ]
+    : languageOptions;
+  const isChecked = (value: string) => (value === AUTO ? auto : !auto && value === locale);
+  const activeIdx = Math.max(0, options.findIndex((o) => isChecked(o.value)));
   /* Roving tabindex. Derived rather than stored, so a controlled open — which
      never runs openMenu() — still lands on the selected language. */
   const rovingIdx = focusIdx ?? activeIdx;
@@ -61,10 +82,11 @@ export default function LanguageMenu({
 
   const select = useCallback(
     (code: string) => {
-      onLocaleChange(code);
+      if (code === AUTO) onAutoDetect?.();
+      else onLocaleChange(code);
       close();
     },
-    [close, onLocaleChange],
+    [close, onLocaleChange, onAutoDetect],
   );
 
   // Focus the active option on open; lock background scroll; trap Tab.
@@ -138,10 +160,14 @@ export default function LanguageMenu({
         ref={btnRef}
         type="button"
         className="langsel-btn"
-        aria-label={`Response language: ${current.label}`}
+        aria-label={
+          auto
+            ? `Response language: Auto-detect (currently ${current.label})`
+            : `Response language: ${current.label}`
+        }
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Response language"
+        title={auto ? "Response language: auto-detected" : "Response language"}
         onClick={() => (open ? close() : openMenu())}
         onKeyDown={(e) => {
           if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
@@ -152,6 +178,7 @@ export default function LanguageMenu({
       >
         <GlobeIcon />
         <span>{current.value.toUpperCase()}</span>
+        {auto && <span className="langsel-auto">auto</span>}
         <ChevronDownIcon />
       </button>
 
@@ -187,7 +214,7 @@ export default function LanguageMenu({
                   }}
                   type="button"
                   role="radio"
-                  aria-checked={o.value === locale}
+                  aria-checked={isChecked(o.value)}
                   className="lmv2-opt"
                   tabIndex={i === rovingIdx ? 0 : -1}
                   onKeyDown={(e) => onOptionKey(e, i)}
@@ -197,12 +224,14 @@ export default function LanguageMenu({
                     <span className="lmv2-name">{o.label}</span>
                     {o.native && <span className="lmv2-native">{o.native}</span>}
                   </span>
-                  {o.value === locale && <CheckIcon />}
+                  {isChecked(o.value) && <CheckIcon />}
                 </button>
               ))}
             </div>
             <div className="lmv2-foot">
-              Answers and narration follow the selected language.
+              {onAutoDetect
+                ? "Pick a language to always answer in it, or let answers follow the language you type."
+                : "Answers and narration follow the selected language."}
             </div>
           </div>
         </div>

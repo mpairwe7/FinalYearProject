@@ -70,8 +70,8 @@ export interface UserProfile {
   user_id: string;
   taxpayer_type: TaxpayerType;
   industry: string;
-  /** The backend profile only stores en/lg; the chat locale set is wider. */
-  primary_language: "en" | "lg";
+  /** The answer languages the backend profile stores (en/lg/sw). */
+  primary_language: "en" | "lg" | "sw";
   detail_level: DetailLevel;
   registered_tax_types: string[];
   fiscal_year: string;

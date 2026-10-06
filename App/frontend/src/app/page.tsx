@@ -177,8 +177,10 @@ export default function Page() {
   const speechState = useChatStore((s) => s.speechState);
   const setSpeechState = useChatStore((s) => s.setSpeechState);
   const locale = useChatStore((s) => s.locale);
+  const localeExplicit = useChatStore((s) => s.localeExplicit);
   const t = useTranslation();
   const setLocale = useChatStore((s) => s.setLocale);
+  const setAutoDetectLocale = useChatStore((s) => s.setAutoDetectLocale);
   const addTurns = useChatStore((s) => s.addTurns);
   const updateLastTurn = useChatStore((s) => s.updateLastTurn);
   const reset = useChatStore((s) => s.reset);
@@ -1017,6 +1019,9 @@ export default function Page() {
       conversation_id: conversationId,
       top_k: 4,
       locale,
+      // Until the taxpayer picks a language, `locale` is only a hint and the
+      // backend detects the language from what they type.
+      locale_explicit: localeExplicit,
       ...(sentAttachments.length ? { attachment_ids: sentAttachments.map((a) => a.id) } : {}),
     });
     const requestHeaders = authHeaders({
@@ -1046,8 +1051,8 @@ export default function Page() {
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
       if (d.conversation_id) sessionIdRef.current = d.conversation_id;
-      if (d.locale && d.locale !== useChatStore.getState().locale) {
-        useChatStore.getState().setLocale(d.locale);
+      if (d.locale) {
+        useChatStore.getState().adoptResponseLocale(d.locale, d.locale_source);
       }
       const content = cleanResponse(d.reply ?? '');
       const disc = d.discrepancy_report ?? d.discrepancyReport;
@@ -1152,8 +1157,8 @@ export default function Page() {
               if (p && typeof p === 'object' && !Array.isArray(p)) {
                 meta = { ...meta, ...p };
                 if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-                if (p.locale && p.locale !== useChatStore.getState().locale) {
-                  useChatStore.getState().setLocale(p.locale);
+                if (p.locale) {
+                  useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
                 }
                 if (typeof p.reply === 'string' && p.reply.trim()) {
                   reveal.set(cleanResponse(p.reply));
@@ -1196,8 +1201,8 @@ export default function Page() {
               const p = JSON.parse(trimmedData);
               meta = { ...meta, ...p };
               if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-              if (p.locale && p.locale !== useChatStore.getState().locale) {
-                useChatStore.getState().setLocale(p.locale);
+              if (p.locale) {
+                useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
               }
               if (typeof p.reply === 'string' && p.reply.trim()) {
                 reveal.set(cleanResponse(p.reply));
@@ -1388,7 +1393,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, activeConversationId, pendingAttachments, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1884,6 +1889,8 @@ export default function Page() {
         locale={locale}
         localeOptions={LOCALE_OPTIONS}
         onLocaleChange={setLocale}
+        localeAutoDetect={!localeExplicit}
+        onLocaleAutoDetect={setAutoDetectLocale}
         onStartCall={openCall}
       />
 

@@ -215,7 +215,13 @@ class TestMultiTurnLocaleAndAttachedMetadataLocalization(FrameTestCase):
         # 3. Explicit switch to English is honored
         loc3 = ChatModel._resolve_conversation_locale("Speak in English please", "", hist)
         self.assertEqual(loc3, "en")
-        self.assertEqual(ChatModel._resolve_conversation_locale("What about this?", "en", hist), "en")
+        # English the taxpayer picked overrides the thread; the picker's
+        # default "en" (no flag) does not — the web client sends it on every
+        # turn until someone touches the picker.
+        self.assertEqual(
+            ChatModel._resolve_conversation_locale("What about this?", "en", hist, locale_explicit=True), "en"
+        )
+        self.assertEqual(ChatModel._resolve_conversation_locale("What about this?", "en", hist), "lg")
 
         # 4. Swahili thread preserves Swahili on follow-up
         hist_sw = [{
