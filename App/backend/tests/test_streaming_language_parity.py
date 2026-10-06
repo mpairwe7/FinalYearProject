@@ -65,7 +65,7 @@ class LanguageResolutionTest(_Base):
             message=LG_TIN,
             locale="en",
             locale_explicit=False,
-            language_out=language,
+            turn_out=language,
         )
         self.assertEqual(out["locale"], "lg")
         self.assertEqual(language["source"], "detected")
@@ -77,7 +77,7 @@ class LanguageResolutionTest(_Base):
             message=LG_TIN,
             locale="en",
             locale_explicit=True,
-            language_out=language,
+            turn_out=language,
         )
         self.assertEqual(out["locale"], "en")
         self.assertEqual(language["source"], "client_explicit")

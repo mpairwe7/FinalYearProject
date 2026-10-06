@@ -27,6 +27,7 @@ from .config import (
     get_idle_reprompts,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
+    get_memory_min_asr_confidence,
     get_transfer_timeout_s,
 )
 from .hub import hub
@@ -715,7 +716,7 @@ class UraReceptionistBrain(LLMService):
                 continue
         return ""
 
-    async def _generate_luganda_answer(self, question: str) -> dict[str, Any]:
+    async def _generate_luganda_answer(self, question: str, *, memory_write: bool = True) -> dict[str, Any]:
         """Fast cross-lingual RAG bridge: local Sunflower first, Gemini only if it is down.
 
         Replaces the slow 4-hop MT pipeline with direct cross-lingual understanding,
@@ -761,6 +762,7 @@ class UraReceptionistBrain(LLMService):
             user_id=self.room.state.user_id,
             tenant_id=self.room.state.tenant_id,
             channel="call",
+            memory_write=memory_write,
         )
 
         # Read for a crisis only now that it is in English: the call's crisis
@@ -894,9 +896,13 @@ class UraReceptionistBrain(LLMService):
         t0 = time.perf_counter()
         prefilled, self._prefilled = self._prefilled, False
 
+        # A turn heard with low confidence answers the caller but is kept out
+        # of long-term memory (see get_memory_min_asr_confidence).
+        memory_write = mean_word_prob is None or mean_word_prob >= get_memory_min_asr_confidence()
+
         # Start background task for LLM answer
         if self.language == "lg":
-            gen_task = asyncio.create_task(self._generate_luganda_answer(question))
+            gen_task = asyncio.create_task(self._generate_luganda_answer(question, memory_write=memory_write))
         else:
             gen_task = asyncio.create_task(
                 asyncio.to_thread(
@@ -911,6 +917,7 @@ class UraReceptionistBrain(LLMService):
                     user_id=self.room.state.user_id,
                     tenant_id=self.room.state.tenant_id,
                     channel="call",
+                    memory_write=memory_write,
                 )
             )
 

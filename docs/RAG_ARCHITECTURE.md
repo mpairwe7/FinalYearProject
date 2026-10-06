@@ -250,12 +250,37 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
 - Semantic facts, episodic topic labels, and short-term working state are all
   tenant-scoped. Reads and writes require active personalization consent.
 - Exact facts and one episode per conversation are upserted, so retries do not
-  multiply memory rows. Corrections supersede earlier taxpayer-type facts.
-- Episodic storage keeps only a coarse tax-topic label; it does not retain raw
-  inquiry text or inferred distress. `/v1/me/export` includes facts, episodes,
-  and working state; withdrawal and erasure remove all three.
+  multiply memory rows. A new value of a single-valued fact (taxpayer type,
+  fiscal year, preferred language, detail level) supersedes the old one, which is
+  kept with `invalidated_at`, the time it stopped being true (G121).
+- The episode is derived from the whole conversation each time a turn is
+  absorbed: its tax topics in the order first named ("Discussed VAT and PAYE."),
+  the first as `topic_tag`, and an honest `turn_count`. Topic tags match whole
+  words, read from a turn's English form (G119). Episodic storage keeps only
+  these coarse labels; it does not retain raw inquiry text or inferred distress.
+  `/v1/me/export` includes facts, episodes, and working state; withdrawal and
+  erasure remove all three.
+- Facts are read from the taxpayer's own words and from a Luganda or Swahili
+  turn's English form; a fact found only in the English form keeps 0.95 of its
+  confidence and records `extractor_model = rules-v1+en`.
+- Streamed turns (SSE, WebSocket) are written to memory once the reply is final
+  (`_finish_streamed_turn`); before, only the LangGraph branch wrote them. A call
+  turn heard below `RECEPTIONIST_MEMORY_MIN_ASR_CONF` (0.6) is answered but not
+  written: a mishearing must not become a fact about the caller.
 - Working state is stored in the selected shared analytics backend with a
-  30-minute expiry, so a new worker can continue using the same state.
+  30-minute expiry, so a new worker can continue using the same state. Its
+  `last_topic` is the topic the taxpayer named (or the guided journey), not the
+  role that answered.
+
+**Where state lives** (the session / user / app / invocation scopes of Google
+ADK's state model, mapped onto this system):
+
+| Scope | Lifetime | Here |
+|---|---|---|
+| Invocation (`temp:`) | one turn | the English router form, the language decision, `turn_out` |
+| Session (no prefix) | one conversation | `conversations` turns (+ English forms), topic (`conversation_topics`), guided journey (`workflow_sessions`), answer language (the stored turn locale) |
+| User (`user:`) | across conversations, consented | `user_profiles`, `user_facts`, `episodic_summaries`, working state |
+| App (`app:`) | everyone | the corpus, rate tables, flags |
 
 **WebSocket resume** (`chat_ws_v2.py`):
 - Each completed response has a server-minted response ID. Resume requires an

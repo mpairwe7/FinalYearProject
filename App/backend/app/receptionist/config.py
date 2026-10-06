@@ -166,6 +166,14 @@ def get_lid_min_speech_s() -> float:
     return _env_float("RECEPTIONIST_LID_MIN_SPEECH_S", 1.5)
 
 
+def get_memory_min_asr_confidence() -> float:
+    """A call turn heard below this mean word probability is not written to
+    long-term memory: a mishearing must not become a fact about the caller.
+    Code-switched Luganda speech recognition is still error-prone (AfriSwitch,
+    2026), and the memory's rule-based facts would otherwise keep the error."""
+    return _env_float("RECEPTIONIST_MEMORY_MIN_ASR_CONF", 0.6)
+
+
 def get_lid_switch_confidence() -> float:
     """One vote at or above this switches a locked call."""
     return _env_float("RECEPTIONIST_LID_SWITCH_CONFIDENCE", 0.90)
