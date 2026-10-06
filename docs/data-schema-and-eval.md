@@ -11,8 +11,11 @@
   - id (uuid), collection_name, index_version, model_name, dim, metric (cosine), points_count, created_at, status (active/archived).
 - **conversations**: Conversation sessions with end users.
   - id (uuid), conversation_id, session_id, tenant_id, user_id (optional),
-    user_message, bot_reply, locale, created_at. History reads are scoped by
-    tenant + authenticated subject + conversation, or by anonymous session.
+    user_message, bot_reply, locale, user_message_en, bot_reply_en, created_at.
+    History reads are scoped by tenant + authenticated subject + conversation,
+    or by anonymous session. For a Luganda or Swahili turn `user_message_en` /
+    `bot_reply_en` hold the question as routed and the answer before
+    translation; model-facing history reads them (G119).
 - **messages**: Ordered turns within a conversation.
   - id (uuid), conversation_id (fk conversations), role (user/assistant/system), content, tokens, latency_ms, created_at, retrieval_context (json with chunk ids and scores).
 - **eval_runs**: Offline/online evaluation tracking.
@@ -43,7 +46,9 @@ Prototype sample rows live in `Data/eval/prototype_seed.json`. In development th
 - **conversations**: Chat turns (multi-turn history).
   - id (PK), conversation_id, session_id, tenant_id, user_id, user_message,
     bot_reply, sources (JSON), response_time_ms, confidence, topic_tag, locale,
-    created_at.
+    user_message_en, bot_reply_en (English forms of a lg/sw turn; empty for
+    English), created_at. Both are PII-redacted like the originals, exported
+    by `/v1/me/export` and erased with the row.
   - Indexes: tenant_id + conversation_id, session_id, conversation_id,
     created_at. Retention: `CONVERSATION_TTL_DAYS` (default: 7).
 
