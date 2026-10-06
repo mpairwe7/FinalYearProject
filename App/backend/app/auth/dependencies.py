@@ -241,10 +241,12 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
 
                 claims = _hs256_verify(token, verifier.dev_secret)
             except Exception:
-                logger.info("JWT rejected: %s", e)
+                request.state.security_reason = f"invalid token: {e}"[:160]
                 raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
         else:
-            logger.info("JWT rejected: %s", e)
+            # Logged as an authn_login_fail security event by the request
+            # middleware (app.security_events), with this reason attached.
+            request.state.security_reason = f"invalid token: {e}"[:160]
             raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
 
     user = _claims_to_user(claims)

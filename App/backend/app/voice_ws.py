@@ -34,6 +34,7 @@ import uuid
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from . import ws_concurrency
+from .analytics import MetricSpec, record_mapped
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .flags import flags
 from .voice_stream import VADConfig, VoiceSession, VoiceStreamEvent
@@ -42,80 +43,32 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Prometheus metric helpers (lazy import to avoid circular deps)
+# Prometheus metrics (recorded through app.analytics)
 # ---------------------------------------------------------------------------
 
-_metrics_registered = False
+_SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-
-def _ensure_metrics() -> None:
-    """Register voice-specific Prometheus metrics once."""
-    global _metrics_registered
-    if _metrics_registered:
-        return
-    try:
-        from prometheus_client import Counter, Gauge, Histogram
-
-        # These are module-level singletons — safe to create once.
-        globals()["_ws_connections_total"] = Counter(
-            "voice_ws_connections_total",
-            "Total WebSocket voice connections opened",
-        )
-        globals()["_ws_active"] = Gauge(
-            "voice_ws_active_connections",
-            "Currently active WebSocket voice sessions",
-        )
-        globals()["_ws_session_duration"] = Histogram(
-            "voice_ws_session_duration_seconds",
-            "Duration of each WebSocket voice session",
-            buckets=(1, 5, 15, 30, 60, 120, 300, 600),
-        )
-        globals()["_stream_asr_latency"] = Histogram(
-            "voice_stream_asr_latency_seconds",
-            "ASR latency in streaming mode",
-            buckets=(0.1, 0.2, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0, 3.0),
-        )
-        globals()["_stream_tts_first_chunk"] = Histogram(
-            "voice_stream_tts_first_chunk_seconds",
-            "Time-to-first-TTS-audio-byte",
-            buckets=(0.1, 0.2, 0.3, 0.5, 0.8, 1.0, 1.5, 2.0),
-        )
-        globals()["_stream_total_latency"] = Histogram(
-            "voice_stream_total_latency_seconds",
-            "End-to-end turn latency (utterance end -> last TTS byte)",
-            buckets=(0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0, 5.0),
-        )
-        globals()["_barge_in_total"] = Counter(
-            "voice_barge_in_total",
-            "Number of barge-in interruptions",
-        )
-        globals()["_vad_utterances_total"] = Counter(
-            "voice_vad_utterances_total",
-            "Number of utterances detected by VAD",
-        )
-        globals()["_consent_denied_total"] = Counter(
-            "voice_consent_denied_total",
-            "Consent check failures",
-        )
-        _metrics_registered = True
-    except ImportError:
-        _metrics_registered = True  # skip silently if prometheus_client absent
+# Call-site key -> (kind, metric name, buckets); recorded through app.analytics
+# so they reach /metrics with every other worker's samples.
+_METRICS: dict[str, MetricSpec] = {
+    "_ws_connections_total": ("counter", "voice_ws_connections_total", None),
+    "_ws_active": ("gauge", "voice_ws_active_connections", None),
+    "_ws_session_duration": ("histogram", "voice_ws_session_duration_seconds", _SESSION_BUCKETS),
+    "_stream_asr_latency": ("histogram", "voice_stream_asr_latency_seconds", None),
+    "_stream_tts_first_chunk": ("histogram", "voice_stream_tts_first_chunk_seconds", None),
+    "_stream_total_latency": ("histogram", "voice_stream_total_latency_seconds", None),
+    "_barge_in_total": ("counter", "voice_barge_in_total", None),
+    "_vad_utterances_total": ("counter", "voice_vad_utterances_total", None),
+    "_consent_denied_total": ("counter", "voice_consent_denied_total", None),
+}
 
 
 def _inc_metric(name: str, value: float = 1.0) -> None:
-    metric = globals().get(name)
-    if metric is None:
-        return
-    if hasattr(metric, "observe"):
-        metric.observe(value)
-    elif hasattr(metric, "inc"):
-        metric.inc(value)
+    record_mapped(_METRICS, name, value)
 
 
 def _dec_metric(name: str) -> None:
-    metric = globals().get(name)
-    if metric is not None and hasattr(metric, "dec"):
-        metric.dec()
+    record_mapped(_METRICS, name, -1.0)
 
 
 def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[str, str]:
@@ -145,7 +98,6 @@ async def voice_stream_ws(websocket: WebSocket, app: object) -> None:
 
     Called from ``main.py``.  Manages the full session lifecycle.
     """
-    _ensure_metrics()
 
     # ── Feature flag gate ──────────────────────────────────────────
     if not flags.is_enabled("voice_streaming"):

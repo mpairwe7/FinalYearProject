@@ -158,7 +158,14 @@ from .text_signals import (
     tone_hint_for,
 )
 from .topics import classify_topic, resolve_topic, topic_retrieval_query
-from .tracing import record_retrieval_metrics, record_token_usage, trace_rag_pipeline, trace_stage
+from .tracing import (
+    record_evaluation,
+    record_retrieval_metrics,
+    trace_rag_pipeline,
+    trace_stage,
+    turn_usage_scope,
+    usage_summary,
+)
 from .turn_guidance import apply_turn_guidance, finalize_turn_actions, turns_from_history
 from .verified_resources import resources_for_turn
 from .workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
@@ -168,6 +175,13 @@ logger = logging.getLogger(__name__)
 
 _ACTIVE_CONVERSATION_STATE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "active_conversation_state", default=""
+)
+# The audit row for a ``generate`` turn is written by :meth:`ChatModel.generate`
+# after the reply has been localized, so its digest matches the text that was
+# served. ``_generate_en`` has a dozen exits; each one records the trace
+# context it knows here and ``generate`` writes the row once, at the end.
+_PENDING_TURN_AUDIT: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "pending_turn_audit", default=None
 )
 _ACTIVE_TENANT_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
     "active_conversation_tenant", default=""
@@ -1063,7 +1077,10 @@ def _local_llm_then_cloud(
         logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
         return _cloud()
 
+    # copy_context: the pool thread then sees this turn's trace span and its
+    # token-usage tally (tracing.turn_usage_scope); a bare submit loses both.
     future = _LLM_EXECUTOR.submit(
+        contextvars.copy_context().run,
         llm_module.generate,
         query=query,
         passages=passages,
@@ -1288,6 +1305,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         max_iterations = _resolve_tool_max_iterations()
 
     future = _LLM_EXECUTOR.submit(
+        contextvars.copy_context().run,
         llm_module.generate_with_tools,
         query=query,
         passages=passages or None,
@@ -1562,7 +1580,86 @@ def _recent_turns_for_guidance(
         return []
 
 
-async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE generator one-to-one
+async def run_chat_turn(
+    model: Any,
+    *,
+    channel: str = "sse",
+    **kwargs: Any,
+) -> "AsyncIterator[tuple[str, Any]]":
+    """Run one streamed chat turn; see :func:`_run_chat_turn_events` for the events.
+
+    Every streamed turn — SSE (``channel="sse"``) or WebSocket
+    (``channel="ws"``) — is counted and audited here, once, when the core
+    yields its final ``_log`` frame. Doing it in the shared core rather than
+    in each adapter is what keeps a new transport from being invisible to
+    ``/metrics`` and absent from the audit ledger, which is what happened to
+    both streamed paths before.
+    """
+    failed = False
+    with turn_usage_scope() as usage:
+        async for event_type, payload in _run_chat_turn_events(model, **kwargs):
+            if event_type == "error":
+                failed = True
+            elif event_type == "_log" and isinstance(payload, dict):
+                await asyncio.to_thread(
+                    _finish_streamed_turn,
+                    model,
+                    payload,
+                    channel=channel,
+                    failed=failed,
+                    message=str(kwargs.get("message") or ""),
+                    session_id=kwargs.get("session_id"),
+                    user_id=kwargs.get("user_id"),
+                    tenant_id=kwargs.get("tenant_id"),
+                    usage=usage_summary(usage),
+                )
+            yield event_type, payload
+
+
+def _finish_streamed_turn(
+    model: Any,
+    log_payload: dict[str, Any],
+    *,
+    channel: str,
+    failed: bool,
+    message: str,
+    session_id: str | None,
+    user_id: str | None,
+    tenant_id: str | None,
+    usage: dict[str, Any] | None = None,
+) -> None:
+    """Metrics and the audit row for a streamed turn (runs off the event loop)."""
+    from .analytics import record_chat_turn
+
+    result = log_payload.get("result") or {}
+    served = {**result, "reply": str(log_payload.get("full_reply") or "")}
+    try:
+        record_chat_turn(
+            served,
+            elapsed_ms=float(log_payload.get("elapsed_ms") or 0.0),
+            channel=channel,
+            error=failed,
+        )
+    except Exception:
+        logger.debug("Streamed turn metrics failed", exc_info=True)
+    record = getattr(model, "record_turn_audit", None)
+    if failed or not callable(record):
+        return
+    record(
+        message=message,
+        result=served,
+        channel=channel,
+        session_id=session_id,
+        user_id=user_id,
+        tenant_id=tenant_id,
+        tool_calls=list(result.get("tool_calls") or []),
+        tool_iterations=int(result.get("tool_iterations") or 0),
+        agent_route=str(result.get("agent_route") or ""),
+        usage=usage,
+    )
+
+
+async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors SSE generator one-to-one
     model: Any,
     *,
     message: str,
@@ -1977,7 +2074,12 @@ async def run_chat_turn(  # noqa: PLR0912, PLR0915 — long but mirrors SSE gene
                     except Exception:
                         pass
 
-            threading.Thread(target=_pump_tokens, daemon=True).start()
+            # copy_context for the same reason as the executor submits: the
+            # streamed generation must count toward this turn's usage and sit
+            # under its span; a bare thread starts with an empty context.
+            threading.Thread(
+                target=contextvars.copy_context().run, args=(_pump_tokens,), daemon=True
+            ).start()
 
             saw_streamed_token = False
             pending_stream_chunk = ""
@@ -3126,10 +3228,15 @@ def _translate_by_paragraph(text: str, locale: str) -> tuple[str | None, str]:
     if len(paragraphs) <= 1:
         out = _translate_reply(text, locale)
         return (out, "ok") if out is not None else (None, "mt_failed")
+    # One copied context per task (a context cannot be entered by two threads
+    # at once), taken here so each translation keeps the turn's span and usage.
+    contexts = [contextvars.copy_context() for _ in paragraphs]
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(4, len(paragraphs)), thread_name_prefix="reply-mt"
     ) as pool:
-        results = list(pool.map(lambda item: _translate_reply(item[1], locale), paragraphs))
+        results = list(
+            pool.map(lambda job: job[0].run(_translate_reply, job[1][1], locale), zip(contexts, paragraphs))
+        )
     translated = list(pieces)
     for (index, source), out in zip(paragraphs, results):
         if out is None or not out.strip():
@@ -8239,6 +8346,7 @@ class ChatModel:
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
         attachments: list[documents_module.DocumentRecord] | None = None,
+        channel: str = "rest",
     ) -> dict[str, Any]:
         """Answer *message*, rendered in *locale*.
 
@@ -8248,7 +8356,46 @@ class ChatModel:
         deterministic, abstained, escalated, the generated path — and
         translating at each of them is how one of those branches quietly ends
         up answering a Luganda question in English.
+
+        ``channel`` names the transport for the audit row and metrics
+        (``rest``, ``voice``, ``call``).
         """
+        _PENDING_TURN_AUDIT.set(None)
+        with turn_usage_scope() as usage:
+            return self._generate_localized(
+                message=message,
+                conversation_id=conversation_id,
+                top_k=top_k,
+                locale=locale,
+                session_id=session_id,
+                request_id=request_id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                attachments=attachments,
+                channel=channel,
+                usage=usage,
+            )
+
+    def _generate_localized(
+        self,
+        *,
+        message: str,
+        conversation_id: str | None,
+        top_k: int,
+        locale: str,
+        session_id: str | None,
+        request_id: str | None,
+        user_id: str | None,
+        tenant_id: str | None,
+        user_role: str,
+        granted_purposes: list[str] | None,
+        attachments: list[documents_module.DocumentRecord] | None,
+        channel: str,
+        usage: dict[str, int],
+    ) -> dict[str, Any]:
+        """:meth:`generate`'s body: the English answer, localized, then audited."""
         result = self._generate_en(
             message=message,
             conversation_id=conversation_id,
@@ -8293,6 +8440,12 @@ class ChatModel:
                     result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
                 if "workflow" in result and isinstance(result["workflow"], dict):
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
+        pending = _PENDING_TURN_AUDIT.get()
+        _PENDING_TURN_AUDIT.set(None)
+        if pending is not None and isinstance(result, dict):
+            self.record_turn_audit(
+                message=message, result=result, channel=channel, usage=usage_summary(usage), **pending
+            )
         return result
 
     @_scoped_conversation_state
@@ -9702,6 +9855,7 @@ class ChatModel:
                     )
                     reply = grounding.sanitized_text
                     trace_ctx["faithfulness"] = faith
+                    record_evaluation("faithfulness", faith)
                     if reflect_fired:
                         trace_ctx["self_reflected"] = True
 
@@ -9951,16 +10105,8 @@ class ChatModel:
 
             trace_ctx["num_sources"] = len(sources)
             trace_ctx["locale"] = locale
-
-            # Record real token usage (gen_ai.usage.input_tokens /
-            # gen_ai.usage.output_tokens).  Uses the loaded Qwen tokenizer
-            # via llm_module.count_tokens; falls back to word count when
-            # the tokenizer is not available (LLM disabled).
-            input_tokens = llm_module.count_tokens(message)
-            output_tokens = llm_module.count_tokens(reply)
-            trace_ctx["input_tokens"] = input_tokens
-            trace_ctx["output_tokens"] = output_tokens
-            record_token_usage(input_tokens, output_tokens)
+            # Token usage is taken from each model call's own ``usage`` block
+            # (tracing.llm_call) and summed for the turn by turn_usage_scope.
 
         # Extractive answers arrive as bare corpus text; give them the same
         # voice the generated path gets from the system prompt. No-ops when the
@@ -10051,57 +10197,64 @@ class ChatModel:
         session_id: str | None,
         trace_ctx: dict[str, Any] | None = None,
     ) -> None:
-        """Append an immutable audit event for this turn.
+        """Record this exit's trace context for the turn's audit row.
 
-        Called from every return site in :py:meth:`generate` so
+        Called from every return site in :py:meth:`_generate_en` so
         blocked / clarification / escalated / abstained / happy-path
-        outcomes all end up in the ledger.  Payload excludes raw
-        query/reply content (we store SHA-256 hashes) so the
-        audit chain is useful for regulatory replay without becoming
-        a second PII store.  Gated on ``FLAG_AUDIT_LEDGER``.
-
-        Failures are swallowed — a broken audit DB must never
-        block a user response.
+        outcomes all reach the ledger. The row itself is written by
+        :py:meth:`generate` once the reply is localized
+        (:py:meth:`record_turn_audit`), so its reply digest is of the text
+        the taxpayer received.
         """
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
-        if not flags.is_enabled("audit_ledger"):
-            return
-        try:
-            import hashlib as _hashlib
-
-            from .audit import get_ledger
-
-            reply = result.get("reply", "") or ""
-            payload = {
-                "query_sha256": _hashlib.sha256((message or "").encode("utf-8")).hexdigest(),
-                "reply_sha256": _hashlib.sha256(reply.encode("utf-8")).hexdigest(),
-                "retrieval_mode": result.get("retrieval_mode", ""),
-                "num_sources": len(result.get("sources", [])),
-                "num_citations": len(result.get("citations", [])),
-                "faithfulness_score": result.get("faithfulness_score"),
-                "escalation_required": bool(result.get("escalation_required")),
-                "escalation_reason": result.get("escalation_reason", ""),
-                "model": result.get("model", self.name),
-                "locale": result.get("locale", "en"),
-                "conversation_id": result.get("conversation_id") or "",
-                "input_tokens": llm_module.count_tokens(message),
-                "output_tokens": llm_module.count_tokens(reply),
-                "tool_calls": trace_ctx.get("tool_calls", []),
-                "tool_iterations": trace_ctx.get("tool_iterations", 0),
-                "agent_route": trace_ctx.get("agent_route", ""),
-                "ticket_id": result.get("ticket_id", ""),
+        _PENDING_TURN_AUDIT.set(
+            {
+                "session_id": session_id,
+                "user_id": str(trace_ctx.get("user_id") or ""),
+                "tenant_id": str(trace_ctx.get("tenant_id") or "default"),
+                "tool_calls": list(trace_ctx.get("tool_calls") or []),
+                "tool_iterations": int(trace_ctx.get("tool_iterations") or 0),
+                "agent_route": str(trace_ctx.get("agent_route") or ""),
             }
-            audit_tenant_id = str(trace_ctx.get("tenant_id") or "default")[:128]
-            audit_user_id = str(trace_ctx.get("user_id") or session_id or "")[:128]
-            get_ledger().append(
-                event_type="generate",
-                payload=payload,
-                tenant_id=audit_tenant_id,
-                user_id=audit_user_id,
-            )
-        except Exception:
-            logger.debug("audit ledger append failed", exc_info=True)
+        )
+
+    def record_turn_audit(
+        self,
+        *,
+        message: str,
+        result: dict[str, Any],
+        channel: str,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        tool_calls: list[Any] | None = None,
+        tool_iterations: int = 0,
+        agent_route: str = "",
+        usage: dict[str, Any] | None = None,
+    ) -> bool:
+        """Append the ``generate`` audit row for a finished turn (any transport).
+
+        Payload excludes raw query/reply content (SHA-256 digests only) so the
+        audit chain supports regulatory replay without becoming a second PII
+        store. Gated on ``FLAG_AUDIT_LEDGER``; failures are counted and logged
+        but never block the answer (see :mod:`app.audit.turns`).
+        """
+        from .audit.turns import append_turn
+
+        return append_turn(
+            message=message,
+            result=result,
+            channel=channel,
+            session_id=session_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            model_name=self.name,
+            tool_calls=tool_calls or [],
+            tool_iterations=tool_iterations,
+            agent_route=agent_route,
+            usage=usage,
+        )
 
     @_scoped_conversation_state
     def generate_retrieval_only(

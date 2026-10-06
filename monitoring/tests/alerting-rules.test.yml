@@ -1,0 +1,194 @@
+# promtool unit tests for monitoring/{recording,alerting}-rules.yml.
+#   docker run --rm -v "$PWD/monitoring:/m:ro" -w /m --entrypoint promtool \
+#     prom/prometheus:v3.13.4 test rules tests/alerting-rules.test.yml
+# Each case pins a failure the old rules had (see docs/GAPS_AND_AGENTIC_ROADMAP.md G99).
+rule_files:
+  - ../recording-rules.yml
+  - ../alerting-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 5% of requests are 5xx: the fast availability burn fires.
+  - interval: 1m
+    input_series:
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="200"}'
+        values: '0+95x80'
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="500"}'
+        values: '0+5x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UraAvailabilityBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "5xx responses are burning the 99.9% availability budget fast"
+              description: "At this rate the 30-day error budget is gone within days (1h/5m or 6h/30m window pair above threshold)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#high-error-rate"
+
+  # A single 500 among thousands of requests is not an outage. The old rule
+  # divided each error series by its own request series and saw 100%.
+  - interval: 1m
+    input_series:
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="200"}'
+        values: '0+1000x80'
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="500"}'
+        values: '0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UraAvailabilityBudgetBurnFast
+        exp_alerts: []
+
+  # 404s from scanners and 401s from unauthenticated callers are client
+  # errors; they do not spend the availability budget.
+  - interval: 1m
+    input_series:
+      - series: 'ura_http_requests_total{method="GET",path="__unmatched__",status="404"}'
+        values: '0+500x80'
+      - series: 'ura_http_requests_total{method="GET",path="/metrics",status="401"}'
+        values: '0+50x80'
+      - series: 'ura_http_requests_total{method="POST",path="/v1/chat",status="200"}'
+        values: '0+100x80'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: UraAvailabilityBudgetBurnFast
+        exp_alerts: []
+
+  # Half the chat turns take longer than 3 s for 7 hours: the latency budget
+  # burns. The old rule selected path="/v1/chat" on a histogram with no path
+  # label and could never fire.
+  - interval: 1m
+    input_series:
+      - series: 'ura_chat_response_time_ms_bucket{channel="sse",mode="hybrid",le="3000.0"}'
+        values: '0+50x430'
+      - series: 'ura_chat_response_time_ms_bucket{channel="sse",mode="hybrid",le="+Inf"}'
+        values: '0+100x430'
+      - series: 'ura_chat_response_time_ms_count{channel="sse",mode="hybrid"}'
+        values: '0+100x430'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: UraChatLatencyBudgetBurnFast
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+            exp_annotations:
+              summary: "Too many chat turns are slower than 3 s"
+              description: "The share of turns over the NFR-01 3 s objective is burning the 5% latency budget fast."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#slow-responses"
+    promql_expr_test:
+      - expr: ura:chat_turns_slow:ratio_rate1h
+        eval_time: 7h
+        exp_samples:
+          - labels: 'ura:chat_turns_slow:ratio_rate1h'
+            value: 0.5
+
+  # The scrape fails (API down, or the scrape token rejected with 401).
+  - interval: 1m
+    input_series:
+      - series: 'up{job="ura-api",instance="api:8000"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: UraApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: backend
+              job: ura-api
+              instance: "api:8000"
+            exp_annotations:
+              summary: "The API cannot be scraped"
+              description: "Prometheus has not read /metrics for 2 minutes: the API is down, or the scrape token is wrong (401)."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#api-down-or-unscrapeable"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_audit_chain_breaks_total{scope="full"}'
+        values: '0 0 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: AuditChainBreakDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: security
+              scope: full
+            exp_annotations:
+              summary: "The audit trail failed its integrity check"
+              description: "An event or a seal no longer matches its fingerprint. Treat as a security incident: snapshot the database before anything else and do not seal."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/runbooks/audit-trail.md#when-the-check-fails"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_eval_metric_passed{name="faithfulness"}'
+        values: '0x10'
+      - series: 'ura_eval_metric_passed{name="answer_relevancy"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: UraEvalRegression
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: ml
+              name: faithfulness
+            exp_annotations:
+              summary: "Online evaluation below threshold: faithfulness"
+              description: "The scheduled evaluation of recent conversations reported faithfulness under its threshold."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#online-evaluation"
+
+  - interval: 1m
+    input_series:
+      - series: 'ura_security_events_total{event="authn_login_fail"}'
+        values: '0+120x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: AuthenticationFailureSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: security
+            exp_annotations:
+              summary: "Sustained authentication failures (> 1/s)"
+              description: "Possible credential stuffing or an expired IdP signing key. Read the authn_login_fail log events."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#security-events"
+
+  - interval: 5m
+    input_series:
+      - series: 'ura_retention_last_success_timestamp_seconds'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 4h
+        alertname: RetentionJobStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "Retention cleanup has not succeeded for 3 hours"
+              description: "RETENTION_CLEANUP_INTERVAL_SECONDS is 1h by default."
+              runbook_url: "https://github.com/mpairwe7/FinalYearProject/blob/dev/docs/MONITORING.md#retention"
+
+  # Containment: 80 answered, 10 escalated, 10 abstained per minute.
+  - interval: 1m
+    input_series:
+      - series: 'ura_chat_turns_total{channel="sse",outcome="answered"}'
+        values: '0+80x90'
+      - series: 'ura_chat_turns_total{channel="sse",outcome="escalated"}'
+        values: '0+10x90'
+      - series: 'ura_chat_turns_total{channel="ws",outcome="abstained"}'
+        values: '0+10x90'
+    promql_expr_test:
+      - expr: round(ura:chat_turns:containment_ratio_1h * 100)
+        eval_time: 80m
+        exp_samples:
+          - labels: '{}'
+            value: 80
+      - expr: round(ura:chat_turns:escalation_ratio_1h * 100)
+        eval_time: 80m
+        exp_samples:
+          - labels: '{}'
+            value: 10

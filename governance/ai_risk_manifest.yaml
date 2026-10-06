@@ -68,7 +68,14 @@ nist_ai_rmf:
       gap: "Formal fairness report needed for demographic groups"
     - control: "MEASURE 4.1 – Measurement approaches applied regularly"
       status: "implemented"
-      evidence: ".github/workflows/ci-ml-pipeline.yml (CI runs on every push)"
+      evidence: >
+        .github/workflows/ci-ml-pipeline.yml — the production gate is blocking and fails
+        a regression past ml/configs/quality_baseline.json; App/backend/app/main.py runs the
+        online evaluation every ONLINE_EVAL_INTERVAL_SECONDS (ura_eval_metric_passed, alert
+        UraEvalRegression).
+      verified_by:
+        - "tests/test_ml_pipeline.py::test_regression_below_baseline_fails_even_above_the_floor"
+        - "monitoring/tests/alerting-rules.test.yml"
 
   manage:
     - control: "MANAGE 1.1 – Deployment approval with risk review"
@@ -79,10 +86,20 @@ nist_ai_rmf:
       evidence: "App/backend/app/main.py (feedback endpoint), App/backend/app/database.py"
     - control: "MANAGE 3.1 – Incidents logged and responded to"
       status: "implemented"
-      evidence: "App/backend/app/analytics.py (error tracking), App/backend/app/tracing.py"
-    - control: "MANAGE 4.1 – Decommission plan"
+      evidence: >
+        monitoring/alerting-rules.yml routed by monitoring/alertmanager.yml; security events
+        (App/backend/app/security_events.py); incident playbooks in docs/MONITORING.md §10.
+      verified_by:
+        - "App/backend/tests/test_observability_endpoints.py::test_denied_metrics_scrape_is_a_logged_counted_event"
+        - "tests/test_monitoring_config.py::test_alerts_are_routable_and_actionable"
+    - control: "MANAGE 4.1 – Post-deployment monitoring, incident response and decommissioning"
       status: "partial"
-      evidence: "Dockerfile (containerised, can be stopped)"
+      evidence: >
+        SLOs (monitoring/slo/ura-chatbot.openslo.yaml), burn-rate alerts, Grafana dashboard,
+        real-user monitoring (/v1/telemetry/*), docs/MONITORING.md. Containerised, can be stopped.
+      verified_by:
+        - "tests/test_monitoring_config.py::test_slo_objectives_match_the_burn_rate_rules"
+        - "tests/test_observability_integration.py::test_streamed_turn_is_audited_and_counted"
       gap: "Formal decommission runbook"
 
 # =============================================================================
@@ -233,8 +250,18 @@ eu_ai_act:
       status: "implemented"
       evidence: "App/frontend/ (UI branding as AI chatbot)"
     - requirement: "Art. 50(2) — AI-generated content marked"
-      status: "implemented"
-      evidence: "App/backend/app/models.py (model field in ChatResponse)"
+      status: "partial"
+      evidence: >
+        App/backend/app/ai_disclosure.py — every synthesised WAV carries a RIFF INFO chunk
+        with the IPTC digitalSourceType trainedAlgorithmicMedia (machine-readable metadata
+        layer of the 2026 Code of Practice). Text replies name their model (ChatResponse.model).
+      verified_by:
+        - "App/backend/tests/test_observability_endpoints.py::test_marked_wav_keeps_its_audio"
+      gap: >
+        Non-WAV audio carries no marker: the MP3 from edge-tts (the English fallback after
+        local TTS) and any non-WAV cloud TTS output (Sunbird, Workers AI) leave unmarked.
+        No imperceptible audio watermark (the Code of Practice's second layer). Applies as a
+        benchmark: the deployment is in Uganda.
   human_oversight:
     - requirement: "Human review channel available"
       status: "implemented"
@@ -244,9 +271,17 @@ eu_ai_act:
       status: "implemented"
       evidence: "governance/ai_risk_manifest.yaml, governance/compliance_check.py"
   record_keeping:
-    - requirement: "Logging of AI system operation"
+    - requirement: "Logging of AI system operation (Art. 12-style traceability; ISO/IEC 42001 A.6.2.8)"
       status: "implemented"
-      evidence: "App/backend/app/database.py (conversations table), App/backend/app/tracing.py"
+      evidence: >
+        App/backend/app/audit/turns.py — one hash-chained `generate` row per answer on every
+        transport (REST, SSE, WebSocket, voice, calls) with sources, citation digests, build,
+        prompt and corpus provenance; App/backend/app/audit/tsa.py — RFC 3161 timestamps on
+        seals; structured logs with request and trace ids (App/backend/app/logging_config.py).
+      verified_by:
+        - "tests/test_observability_integration.py::test_rest_turn_is_audited_with_the_served_reply"
+        - "tests/test_observability_integration.py::test_streamed_turn_is_audited_and_counted"
+        - "App/backend/tests/test_audit_tsa.py::test_seal_is_timestamped_and_verified"
 
 # =============================================================================
 # DevSecOps Threat Modelling (2026 Industry Standard)

@@ -477,45 +477,41 @@ class TestDatabaseLayer:
 
 
 class TestMetricsStore:
-    """Tests for the in-process metrics store."""
+    """The metrics facade over prometheus_client (App/backend/app/analytics.py)."""
 
     def test_counter_increment(self):
-        """Test counter increments correctly."""
         from App.backend.app.analytics import MetricsStore
 
         store = MetricsStore()
-        store.inc("test_counter")
-        store.inc("test_counter")
+        store.inc("test_counter_total")
+        store.inc("test_counter_total")
 
         snap = store.snapshot()
-        assert snap["counters"]["test_counter"] == 2
+        assert snap["counters"]["test_counter_total"] == 2
 
     def test_histogram_observation(self):
-        """Test histogram records observations."""
+        """count / sum / avg are exact; percentiles come from the buckets."""
         from App.backend.app.analytics import MetricsStore
 
         store = MetricsStore()
         for v in [10.0, 20.0, 30.0, 40.0, 50.0]:
-            store.observe("test_latency", v)
+            store.observe("test_latency_ms", v)
 
-        snap = store.snapshot()
-        hist = snap["histograms"]["test_latency"]
+        hist = store.snapshot()["histograms"]["test_latency_ms"]
         assert hist["count"] == 5
-        assert hist["min"] == 10.0
-        assert hist["max"] == 50.0
         assert hist["avg"] == 30.0
+        assert hist["p50"] <= hist["p95"] <= hist["p99"] <= 50.0
 
-    def test_histogram_bounded_memory(self):
-        """Test histogram uses bounded deque (no memory leak)."""
-        from App.backend.app.analytics import MetricsStore, _MAX_HISTOGRAM_SIZE
+    def test_histogram_counts_every_observation(self):
+        """No sliding window: the 6000th observation is still counted."""
+        from App.backend.app.analytics import MetricsStore
 
         store = MetricsStore()
-        # Insert more than the max size
         for i in range(6000):
-            store.observe("mem_test", float(i))
+            store.observe("mem_test_ms", float(i))
 
         snap = store.snapshot()
-        assert snap["histograms"]["mem_test"]["count"] == _MAX_HISTOGRAM_SIZE
+        assert snap["histograms"]["mem_test_ms"]["count"] == 6000
 
     def test_prometheus_export(self):
         """Test Prometheus text format export."""
@@ -525,32 +521,33 @@ class TestMetricsStore:
         store.inc("http_requests_total", labels={"method": "GET", "path": "/health", "status": "200"})
 
         text = store.to_prometheus()
-        assert "http_requests_total" in text
-        assert "counter" in text
+        assert 'ura_http_requests_total{method="GET",path="/health",status="200"} 1.0' in text
+        assert "# TYPE ura_http_requests_total counter" in text
 
     def test_prometheus_no_duplicate_type_declarations(self):
-        """Test TYPE is declared only once per metric name."""
+        """TYPE is declared once per family, and there is no bare-name twin."""
         from App.backend.app.analytics import MetricsStore
 
         store = MetricsStore()
-        store.inc("req", labels={"method": "GET"})
-        store.inc("req", labels={"method": "POST"})
+        store.inc("req_total", labels={"method": "GET"})
+        store.inc("req_total", labels={"method": "POST"})
 
         text = store.to_prometheus()
-        assert text.count("# TYPE req counter") == 1
+        assert text.count("# TYPE ura_req_total counter") == 1
+        assert "\nreq_total{" not in text
 
     def test_labeled_metrics(self):
         """Test metrics with labels."""
         from App.backend.app.analytics import MetricsStore
 
         store = MetricsStore()
-        store.inc("req", labels={"method": "GET"})
-        store.inc("req", labels={"method": "POST"})
-        store.inc("req", labels={"method": "GET"})
+        store.inc("req_total", labels={"method": "GET"})
+        store.inc("req_total", labels={"method": "POST"})
+        store.inc("req_total", labels={"method": "GET"})
 
         snap = store.snapshot()
-        assert snap["counters"]['req{method="GET"}'] == 2
-        assert snap["counters"]['req{method="POST"}'] == 1
+        assert snap["counters"]['req_total{method="GET"}'] == 2
+        assert snap["counters"]['req_total{method="POST"}'] == 1
 
 
 class TestFeedbackCommentModel:

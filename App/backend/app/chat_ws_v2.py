@@ -42,6 +42,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 from . import confirm_tokens
 from . import database as db
 from . import service as service_module
+from .analytics import MetricSpec, metrics, record_mapped
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .flags import flags
 from .voice_ws_v2 import _send_error, _send_json
@@ -53,48 +54,23 @@ logger = logging.getLogger(__name__)
 # Prometheus metrics
 # ---------------------------------------------------------------------------
 
-_metrics_registered = False
+_SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-
-def _ensure_metrics() -> None:
-    global _metrics_registered
-    if _metrics_registered:
-        return
-    try:
-        from prometheus_client import Counter, Gauge, Histogram
-
-        globals()["_ws_chat_connections_total"] = Counter(
-            "chat_ws_connections_total",
-            "Total chat WebSocket connections accepted",
-        )
-        globals()["_ws_chat_active"] = Gauge(
-            "chat_ws_active_connections",
-            "Currently active chat WebSocket sessions",
-        )
-        globals()["_ws_chat_session_duration"] = Histogram(
-            "chat_ws_session_duration_seconds",
-            "Duration of chat WebSocket sessions",
-            buckets=(1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600),
-        )
-        _metrics_registered = True
-    except ImportError:
-        _metrics_registered = True
+# Call-site key -> (kind, metric name, buckets); recorded through app.analytics.
+_METRICS: dict[str, MetricSpec] = {
+    "_ws_chat_connections_total": ("counter", "chat_ws_connections_total", None),
+    "_ws_chat_active": ("gauge", "chat_ws_active_connections", None),
+    "_ws_chat_session_duration": ("histogram", "chat_ws_session_duration_seconds", _SESSION_BUCKETS),
+    "_ws_chat_partial_received_total": ("counter", "chat_ws_partial_received_total", None),
+}
 
 
 def _metric(name: str, value: float = 1.0) -> None:
-    metric = globals().get(name)
-    if metric is None:
-        return
-    if hasattr(metric, "observe"):
-        metric.observe(value)
-    elif hasattr(metric, "inc"):
-        metric.inc(value)
+    record_mapped(_METRICS, name, value)
 
 
 def _metric_dec(name: str) -> None:
-    metric = globals().get(name)
-    if metric is not None and hasattr(metric, "dec"):
-        metric.dec()
+    record_mapped(_METRICS, name, -1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -355,6 +331,7 @@ async def _run_response_create(
             should_continue=_alive,
             cancel_event=cancel_event,
             sentence_batching=False,  # WS wants low TTFT per-token frames
+            channel="ws",
             conversation_history_override=list(session.history) if session.history else None,
         ):
             if event_type == "_keepalive":
@@ -689,6 +666,7 @@ def _audit_tool_confirm(
             },
         )
     except Exception:
+        metrics.inc("audit_append_failed_total", labels={"event_type": "tool_confirm"})
         logger.warning("audit append for tool_confirm failed", exc_info=True)
 
 
@@ -748,7 +726,6 @@ def _log_ws_turn(
 
 async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
     """V2 WebSocket handler for ``/v2/chat/stream``."""
-    _ensure_metrics()
 
     if not flags.is_enabled("ws_chat"):
         await websocket.close(code=1001, reason="ws_chat flag is disabled")

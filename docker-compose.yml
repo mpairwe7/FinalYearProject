@@ -135,6 +135,11 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SLOWAPI_STORAGE_URI=${SLOWAPI_STORAGE_URI:-redis://redis:6379/1}
       - CACHE_BACKEND=${CACHE_BACKEND:-redis}
+      # Telemetry (docs/MONITORING.md): OTLP goes to the monitoring profile's
+      # Collector when OTEL_ENABLED=true; METRICS_TOKEN comes from .env.
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}
+      - LOG_FORMAT=${LOG_FORMAT:-json}
     env_file:
       - .env
     init: true
@@ -343,12 +348,15 @@ services:
     networks:
       - ura-network
 
-  # ---------------------------------------------------------------------------
-  # Prometheus — metrics scraping (profile: monitoring)
-  # Enable with: docker compose --profile monitoring up
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
+  # Observability stack (profile: monitoring) — docs/MONITORING.md
+  #   docker compose --profile monitoring up -d
+  # Required env: METRICS_TOKEN (>=32 chars; the API and Prometheus share it),
+  # GRAFANA_PASSWORD, ALERTMANAGER_WEBHOOK_URL. UIs bind to 127.0.0.1 only;
+  # reach them through an SSH tunnel or a reverse proxy with auth.
+  # ===========================================================================
   prometheus:
-    image: prom/prometheus:v3.4.0
+    image: prom/prometheus:v3.13.4
     container_name: ura-prometheus
     profiles: [monitoring]
     command:
@@ -356,11 +364,14 @@ services:
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/recording-rules.yml:/etc/prometheus/recording-rules.yml:ro
       - ./monitoring/alerting-rules.yml:/etc/prometheus/alerting-rules.yml:ro
       - prometheus_data:/prometheus
+    secrets:
+      - ura_metrics_token
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
       interval: 15s
@@ -374,10 +385,63 @@ services:
     networks:
       - ura-network
 
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    container_name: ura-alertmanager
+    profiles: [monitoring]
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    secrets:
+      - alertmanager_webhook_url
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - ura-network
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.28.0
+    container_name: ura-blackbox-exporter
+    profiles: [monitoring]
+    command:
+      - "--config.file=/etc/blackbox/blackbox.yml"
+    volumes:
+      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - ura-network
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.93.0
+    container_name: ura-redis-exporter
+    profiles: [monitoring]
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    read_only: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - ura-network
+
   # Host filesystem metrics let the Qdrant volume's capacity be alerted on.
-  # This is intentionally opt-in with the existing monitoring profile.
   node-exporter:
-    image: prom/node-exporter:v1.9.1
+    image: prom/node-exporter:v1.12.1
     container_name: ura-node-exporter
     profiles: [monitoring]
     command:
@@ -394,26 +458,36 @@ services:
     networks:
       - ura-network
 
-  # ---------------------------------------------------------------------------
-  # Grafana — dashboards and alerting (profile: monitoring)
-  # ---------------------------------------------------------------------------
-  grafana:
-    image: grafana/grafana-oss:11.6.0
-    container_name: ura-grafana
+  # GPU metrics for the inference cards (needs nvidia-container-toolkit).
+  dcgm-exporter:
+    image: nvcr.io/nvidia/k8s/dcgm-exporter:4.5.2-4.8.1-ubuntu22.04
+    container_name: ura-dcgm-exporter
+    profiles: [monitoring-gpu]
+    cap_add:
+      - SYS_ADMIN
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    networks:
+      - ura-network
+
+  # The API exports traces, logs and GenAI metrics here over OTLP
+  # (OTEL_ENABLED=true, OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0
+    container_name: ura-otel-collector
     profiles: [monitoring]
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-ura2026}
-      - GF_USERS_ALLOW_SIGN_UP=false
-    ports:
-      - "${GRAFANA_PORT:-3001}:3000"
+    command: ["--config=/etc/otelcol/config.yaml"]
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      prometheus:
-        condition: service_healthy
+      - ./monitoring/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -422,19 +496,61 @@ services:
     networks:
       - ura-network
 
-  # ---------------------------------------------------------------------------
-  # Jaeger — distributed tracing (profile: monitoring)
-  # ---------------------------------------------------------------------------
+  loki:
+    image: grafana/loki:3.7.8
+    container_name: ura-loki
+    profiles: [monitoring]
+    command: ["-config.file=/etc/loki/config.yaml"]
+    volumes:
+      - ./monitoring/loki.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    ports:
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - ura-network
+
+  # Traces from the Collector. In-memory storage: a restart drops them, which
+  # suits the demo stack; keep traces you need as evidence in an export.
+  # Pinned to 2.20: 2.21 removed the /api/* query API that Grafana's Jaeger
+  # data source calls (its health check returns 404 against 2.21).
   jaeger:
-    image: jaegertracing/jaeger:2.6.0
+    image: jaegertracing/jaeger:2.20.0
     container_name: ura-jaeger
     profiles: [monitoring]
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
     ports:
-      - "${JAEGER_UI_PORT:-16686}:16686"     # UI
-      - "${JAEGER_OTLP_PORT:-4317}:4317"     # OTLP gRPC
-      - "${JAEGER_OTLP_HTTP_PORT:-4318}:4318" # OTLP HTTP
+      - "127.0.0.1:${JAEGER_UI_PORT:-16686}:16686"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - ura-network
+
+  grafana:
+    image: grafana/grafana-oss:13.0.2
+    container_name: ura-grafana
+    profiles: [monitoring]
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      # No committed default: set GRAFANA_PASSWORD (e.g. `openssl rand -base64 24`).
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -463,3 +579,14 @@ volumes:
   caddy_config:
   prometheus_data:
   grafana_data:
+  alertmanager_data:
+  loki_data:
+
+# -----------------------------------------------------------------------------
+# Secrets (monitoring profile) — read from the environment, never committed.
+# -----------------------------------------------------------------------------
+secrets:
+  ura_metrics_token:
+    environment: METRICS_TOKEN
+  alertmanager_webhook_url:
+    environment: ALERTMANAGER_WEBHOOK_URL

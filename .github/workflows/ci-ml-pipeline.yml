@@ -618,8 +618,10 @@ jobs:
   # Stage 5d: Production Gates
   # ============================================
   # Runs the combined production quality gate against the RAG evaluation
-  # results. Uses --soft-fail so CI stays green while the gate is scored
-  # on RAG metrics alone; safety/calibration/tokenizer/benchmark/model-card
+  # results. Blocking: every absolute threshold must hold AND no metric may
+  # drop more than 0.03 below ml/configs/quality_baseline.json (the scores
+  # dev last measured). The gate is scored on RAG metrics alone;
+  # safety/calibration/tokenizer/benchmark/model-card
   # inputs are omitted (their producing scripts were training-pipeline
   # tooling, removed with the rest of ml/) — quality_gates.py treats each
   # as optional and skips the corresponding check when absent.
@@ -658,7 +660,8 @@ jobs:
             --family production \
             --config ml/configs/training_config.yaml \
             --rag-eval Results/rag_evaluation_results.json \
-            --soft-fail
+            --baseline ml/configs/quality_baseline.json \
+            --max-regression 0.03
 
       - name: Step summary
         if: always()
@@ -666,7 +669,7 @@ jobs:
           {
             echo "## Production Gates"
             echo ""
-            echo "Quality gates scored against \`Results/rag_evaluation_results.json\`, run with \`--soft-fail\`."
+            echo "Quality gates scored against \`Results/rag_evaluation_results.json\` and the \`ml/configs/quality_baseline.json\` regression baseline (blocking)."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
@@ -817,6 +820,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: |

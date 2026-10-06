@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 
+from ..tracing import llm_call
 from .config import get_cloud_settings
 
 logger = logging.getLogger("ura.providers.gateway")
@@ -208,19 +209,22 @@ def workers_ai_chat(
     temperature: float = 0.2,
 ) -> str:
     """Chat-completion via a Workers AI text model; returns the reply string."""
-    if get_cloud_settings().cf_relay_base_url.strip():
-        from . import relay_client
+    with llm_call("chat", model, "cloudflare.workers_ai") as call:
+        if get_cloud_settings().cf_relay_base_url.strip():
+            from . import relay_client
 
-        return relay_client.relay_workers_ai_chat(
-            messages, model, max_tokens=max_tokens, temperature=temperature
+            return relay_client.relay_workers_ai_chat(
+                messages, model, max_tokens=max_tokens, temperature=temperature
+            )
+        data = _workers_ai_call(
+            model,
+            lambda url, h: _post_json(
+                url, h, {"messages": messages, "max_tokens": max_tokens, "temperature": temperature}
+            ),
         )
-    data = _workers_ai_call(
-        model,
-        lambda url, h: _post_json(
-            url, h, {"messages": messages, "max_tokens": max_tokens, "temperature": temperature}
-        ),
-    )
-    return (data.get("result", {}).get("response") or "").strip()
+        usage = (data.get("result") or {}).get("usage") or {}
+        call.usage(usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        return (data.get("result", {}).get("response") or "").strip()
 
 
 def workers_ai_stt(audio: bytes, model: str = "@cf/openai/whisper") -> dict[str, Any]:
@@ -287,6 +291,19 @@ def workers_ai_tts(text: str, model: str = "@cf/myshell-ai/melotts", *, lang: st
 
 # ── Gemini (via the google-ai-studio provider on the Gateway) ────────────────
 
+def _gemini_output_tokens(meta: dict[str, Any]) -> int | None:
+    """Billed output tokens: the visible answer plus a thinking model's reasoning.
+
+    ``candidatesTokenCount`` covers only the answer; Gemini reports reasoning
+    separately as ``thoughtsTokenCount`` and bills it as output. ``None`` when
+    the response reports neither.
+    """
+    parts = [meta.get("candidatesTokenCount"), meta.get("thoughtsTokenCount")]
+    if all(part is None for part in parts):
+        return None
+    return sum(int(part or 0) for part in parts)
+
+
 def gemini_generate(
     prompt: str,
     *,
@@ -340,6 +357,46 @@ def gemini_generate(
             },
         ),
     ]
+    with llm_call("chat", model, "gcp.gemini") as call:
+        data, last = _gemini_attempt(targets, payload, model)
+        if data is None:
+            call.fail(type(last).__name__ if last else "unreachable")
+        else:
+            meta = data.get("usageMetadata") or {}
+            call.usage(meta.get("promptTokenCount"), _gemini_output_tokens(meta))
+    if data is None:
+        # Both routes are unreachable for THIS model. If a lighter model is
+        # configured, try it once before giving up: a primary that is
+        # overloaded, rate-limited or withdrawn should degrade to a slower
+        # answer rather than to none.
+        if _allow_model_fallback and GEMINI_FALLBACK_MODEL and model != GEMINI_FALLBACK_MODEL:
+            logger.warning(
+                "Gemini %s unreachable; falling back to %s", model, GEMINI_FALLBACK_MODEL
+            )
+            return gemini_generate(
+                prompt,
+                system=system,
+                model=GEMINI_FALLBACK_MODEL,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                locale=locale,
+                _allow_model_fallback=False,
+            )
+        raise last if last else RuntimeError("gemini_generate: no reachable endpoint")
+    cands = data.get("candidates", [])
+    if not cands:
+        raise RuntimeError("gemini_generate: no candidates returned")
+    parts = cands[0].get("content", {}).get("parts", [])
+    text = "".join(p.get("text", "") for p in parts).strip()
+    if not text:
+        raise RuntimeError("gemini_generate: empty text")
+    return text
+
+
+def _gemini_attempt(
+    targets: list[tuple[str, dict[str, str]]], payload: dict[str, Any], model: str
+) -> tuple[dict[str, Any] | None, Exception | None]:
+    """Try each Gemini route in turn; ``(data, None)`` or ``(None, last error)``."""
     data: dict[str, Any] | None = None
     last: Exception | None = None
     for index, (url, headers) in enumerate(targets):
@@ -368,30 +425,4 @@ def gemini_generate(
                 "Gemini %s on %s for model %s",
                 exc.response.status_code, url.split("/")[2], model,
             )
-    if data is None:
-        # Both routes are unreachable for THIS model. If a lighter model is
-        # configured, try it once before giving up: a primary that is
-        # overloaded, rate-limited or withdrawn should degrade to a slower
-        # answer rather than to none.
-        if _allow_model_fallback and GEMINI_FALLBACK_MODEL and model != GEMINI_FALLBACK_MODEL:
-            logger.warning(
-                "Gemini %s unreachable; falling back to %s", model, GEMINI_FALLBACK_MODEL
-            )
-            return gemini_generate(
-                prompt,
-                system=system,
-                model=GEMINI_FALLBACK_MODEL,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                locale=locale,
-                _allow_model_fallback=False,
-            )
-        raise last if last else RuntimeError("gemini_generate: no reachable endpoint")
-    cands = data.get("candidates", [])
-    if not cands:
-        raise RuntimeError("gemini_generate: no candidates returned")
-    parts = cands[0].get("content", {}).get("parts", [])
-    text = "".join(p.get("text", "") for p in parts).strip()
-    if not text:
-        raise RuntimeError("gemini_generate: empty text")
-    return text
+    return data, last

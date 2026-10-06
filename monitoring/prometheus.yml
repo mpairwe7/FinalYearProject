@@ -1,46 +1,114 @@
-# Prometheus configuration — URA Chatbot (2026)
-# Aligned with: MONITORING.md, ISO/IEC 25010:2023 §5 (Reliability), SLOs
+# Prometheus configuration — URA Chatbot
+# Used by the `monitoring` profile in docker-compose.yml. See docs/MONITORING.md.
+#
+# Rules:   monitoring/recording-rules.yml (SLIs) + monitoring/alerting-rules.yml
+# Tests:   promtool test rules monitoring/tests/*.test.yml  (CI: monitoring-config.yml)
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    service: ura-chatbot
 
 rule_files:
+  - "recording-rules.yml"
   - "alerting-rules.yml"
 
+# Firing alerts go to Alertmanager, which routes them to the on-call webhook
+# (monitoring/alertmanager.yml). Without this block Prometheus evaluates rules
+# and tells no one.
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
 scrape_configs:
-  # Backend API metrics
+  # The API. /metrics requires a credential, so the scrape presents the
+  # dedicated read-only METRICS_TOKEN (mounted as a compose secret) — never a
+  # staff login or the break-glass INDEX_API_KEY.
   - job_name: "ura-api"
     metrics_path: "/metrics"
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/ura_metrics_token
     static_configs:
       - targets: ["api:8000"]
         labels:
-          service: "ura-chatbot-api"
-          environment: "production"
+          component: "api"
 
-  # Qdrant vector store
   - job_name: "qdrant"
     metrics_path: "/metrics"
     static_configs:
       - targets: ["qdrant:6333"]
         labels:
-          service: "qdrant"
-          environment: "production"
+          component: "vector-store"
 
-  # The monitoring profile starts node-exporter read-only. This supports disk
-  # headroom alerts for Docker/Qdrant persistent volumes.
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          component: "cache"
+
+  # Host filesystem metrics for the disk-headroom alerts.
   - job_name: "node-exporter"
     static_configs:
       - targets: ["node-exporter:9100"]
-        labels:
-          service: "node-exporter"
-          environment: "production"
 
-  # Redis (requires redis_exporter sidecar — optional)
-  # - job_name: "redis"
-  #   static_configs:
-  #     - targets: ["redis-exporter:9121"]
+  # vLLM serves its own Prometheus metrics (queue depth, time to first token,
+  # KV-cache use). DNS discovery finds the servers only when their profile is
+  # running, so an absent optional server is not reported as down.
+  - job_name: "vllm"
+    dns_sd_configs:
+      - names: ["vllm"]
+        type: A
+        port: 8001
+      - names: ["vllm-quantized"]
+        type: A
+        port: 8002
+    relabel_configs:
+      - source_labels: [__meta_dns_name]
+        target_label: server
 
-  # Prometheus self-monitoring
+  # NVIDIA DCGM exporter (profile `monitoring-gpu`): GPU memory, utilisation,
+  # temperature and XID errors for the inference cards.
+  - job_name: "dcgm"
+    dns_sd_configs:
+      - names: ["dcgm-exporter"]
+        type: A
+        port: 9400
+
+  # Synthetic probes: is the service answering from the outside, independent
+  # of whether the API can still report on itself?
+  - job_name: "blackbox-http"
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://api:8000/health
+          - http://api:8000/ready
+          - http://frontend:3000/
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["otel-collector:8888"]
+
+  # The Collector's Prometheus exporter: the OTLP metrics it receives,
+  # including the gen_ai.client.* histograms (:8888 above is its own health).
+  - job_name: "otel-collector-genai"
+    static_configs:
+      - targets: ["otel-collector:8889"]
+
+  - job_name: "alertmanager"
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]

@@ -85,10 +85,17 @@ cryptography>=47.0.0
 # SSE streaming
 sse-starlette>=3.4.1
 
-# OpenTelemetry GenAI observability (opt-in, aligned with 2025 stable semconv)
-opentelemetry-api>=1.44.0
-opentelemetry-sdk>=1.44.0
-opentelemetry-exporter-otlp-proto-grpc>=1.29.0
+# Prometheus metrics, aggregated across uvicorn workers (app/analytics.py)
+prometheus-client>=0.26.0
+
+# OpenTelemetry (opt-in via OTEL_ENABLED=true). The SDK and the contrib
+# instrumentations release in lockstep (1.45.x <-> 0.66b0); pinning the family
+# together keeps a lone SDK bump from producing an unresolvable install.
+opentelemetry-api>=1.45.0,<1.46
+opentelemetry-sdk>=1.45.0,<1.46
+opentelemetry-exporter-otlp-proto-grpc>=1.45.0,<1.46
+opentelemetry-instrumentation-fastapi==0.66b0
+opentelemetry-instrumentation-httpx==0.66b0
 
 # Cloudflare free-tier + Gemini fallbacks (FLAG_CLOUDFLARE_FALLBACK)
 pydantic-settings>=2.15.0

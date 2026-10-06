@@ -191,4 +191,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 EXPOSE 8000
 
+# Which commit this image was built from: exported as ura_build_info and
+# recorded in every audit row's provenance. Declared last so a new commit does
+# not invalidate any cached layer above.
+ARG GIT_SHA=""
+ENV APP_BUILD_SHA=${GIT_SHA}
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

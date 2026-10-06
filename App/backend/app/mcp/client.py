@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..resilience import CircuitBreaker
+from ..tracing import trace_tool_call
 from .mrtr import parse_input_required, unwrap_request_state
 from .policy import authorize_tool_call
 from .transport import (
@@ -339,8 +340,43 @@ class MCPClient:
 
         Never raises: every failure mode — unknown tool, denied policy,
         invalid arguments, open circuit, transport error — comes back as
-        a result the model can read and react to.
+        a result the model can read and react to. Every call is one
+        ``execute_tool {name}`` span and one ``ura_tool_calls_total`` sample.
         """
+        with trace_tool_call(name) as outcome:
+            result = self._call_tool(
+                name,
+                arguments,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                confirmed=confirmed,
+                idempotency_key=idempotency_key,
+                iteration=iteration,
+                timeout_s=timeout_s,
+                input_responses=input_responses,
+                request_state=request_state,
+            )
+            outcome["ok"] = bool(result.ok)
+            return result
+
+    def _call_tool(  # noqa: PLR0913 - a call's full security context
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        tenant_id: str,
+        user_id: str,
+        user_role: str,
+        granted_purposes: list[str] | None,
+        confirmed: bool,
+        idempotency_key: str,
+        iteration: int,
+        timeout_s: float,
+        input_responses: list[Any] | None,
+        request_state: Any,
+    ) -> MCPCallResult:
         t0 = time.perf_counter()
         call_id = str(uuid.uuid4())
         args = dict(arguments or {})

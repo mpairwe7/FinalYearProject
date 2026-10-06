@@ -26,6 +26,7 @@ import uuid
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from . import ws_concurrency
+from .analytics import MetricSpec, record_mapped
 from .auth.jwt_auth import JWTAuthError, JWTVerifier
 from .flags import flags
 from .voice_stream import VADConfig
@@ -38,74 +39,28 @@ logger = logging.getLogger(__name__)
 # Prometheus metrics (extends V1 metrics)
 # ---------------------------------------------------------------------------
 
-_v2_metrics_registered = False
+_SESSION_BUCKETS = (1, 5, 15, 30, 60, 120, 300, 600, 1800, 3600)
 
-
-def _ensure_v2_metrics() -> None:
-    """Register V2-specific Prometheus metrics once."""
-    global _v2_metrics_registered
-    if _v2_metrics_registered:
-        return
-    try:
-        from prometheus_client import Counter, Gauge, Histogram
-
-        globals()["_v2_connections_total"] = Counter(
-            "voice_v2_connections_total",
-            "Total V2 WebSocket voice connections",
-        )
-        globals()["_v2_active"] = Gauge(
-            "voice_v2_active_connections",
-            "Currently active V2 sessions",
-        )
-        globals()["_v2_session_duration"] = Histogram(
-            "voice_v2_session_duration_seconds",
-            "Duration of V2 sessions",
-            buckets=(1, 5, 15, 30, 60, 120, 300, 600),
-        )
-        globals()["_v2_prefetch_hit"] = Counter(
-            "voice_v2_speculative_prefetch_hits_total",
-            "Speculative prefetch cache hits",
-        )
-        globals()["_v2_prefetch_miss"] = Counter(
-            "voice_v2_speculative_prefetch_misses_total",
-            "Speculative prefetch cache misses",
-        )
-        globals()["_v2_vision_requests"] = Counter(
-            "voice_v2_vision_requests_total",
-            "Vision frames processed",
-        )
-        globals()["_v2_path_routing"] = Counter(
-            "voice_v2_path_routing_total",
-            "Voice path routing decisions",
-            ["path"],
-        )
-        globals()["_v2_tts_first_byte"] = Histogram(
-            "voice_v2_tts_first_byte_seconds",
-            "Time-to-first-TTS-audio-byte (V2 streaming)",
-            buckets=(0.05, 0.1, 0.15, 0.2, 0.3, 0.5, 0.8, 1.0, 1.5),
-        )
-        _v2_metrics_registered = True
-    except ImportError:
-        _v2_metrics_registered = True
+# Call-site key -> (kind, metric name, buckets); recorded through app.analytics.
+_V2_METRICS: dict[str, MetricSpec] = {
+    "_v2_connections_total": ("counter", "voice_v2_connections_total", None),
+    "_v2_active": ("gauge", "voice_v2_active_connections", None),
+    "_v2_session_duration": ("histogram", "voice_v2_session_duration_seconds", _SESSION_BUCKETS),
+    "_v2_prefetch_hit": ("counter", "voice_v2_speculative_prefetch_hits_total", None),
+    "_v2_prefetch_miss": ("counter", "voice_v2_speculative_prefetch_misses_total", None),
+    "_v2_vision_requests": ("counter", "voice_v2_vision_requests_total", None),
+    "_v2_path_routing": ("counter", "voice_v2_path_routing_total", None),
+    "_v2_tts_first_byte": ("histogram", "voice_v2_tts_first_byte_seconds", None),
+}
 
 
 def _v2_metric(name: str, value: float = 1.0, labels: dict | None = None) -> None:
-    """Record a V2 metric (no-op if prometheus_client is absent)."""
-    metric = globals().get(name)
-    if metric is None:
-        return
-    if labels and hasattr(metric, "labels"):
-        metric = metric.labels(**labels)
-    if hasattr(metric, "observe"):
-        metric.observe(value)
-    elif hasattr(metric, "inc"):
-        metric.inc(value)
+    """Record a V2 metric."""
+    record_mapped(_V2_METRICS, name, value, labels)
 
 
 def _v2_dec(name: str) -> None:
-    metric = globals().get(name)
-    if metric is not None and hasattr(metric, "dec"):
-        metric.dec()
+    record_mapped(_V2_METRICS, name, -1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +92,6 @@ def _resolve_ws_auth(websocket: WebSocket, *, required: bool = False) -> tuple[s
 
 async def voice_stream_ws_v2(websocket: WebSocket, app: object) -> None:
     """V2 WebSocket handler for ``/v2/voice/chat/stream``."""
-    _ensure_v2_metrics()
 
     # Feature flag gate: require native_voice
     if not flags.is_enabled("native_voice"):

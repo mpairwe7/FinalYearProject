@@ -24,6 +24,7 @@
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "recharts": "^3.10.1",
+    "web-vitals": "6.2.3",
     "zustand": "5.0.15"
   },
   "devDependencies": {
