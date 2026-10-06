@@ -49,6 +49,7 @@ services:
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true
       - FLAG_HANDOFF_SUMMARIES=true
+      - FLAG_MEMORY_ENABLED=true
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.
