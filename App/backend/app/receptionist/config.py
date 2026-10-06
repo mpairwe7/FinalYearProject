@@ -233,11 +233,6 @@ def get_brief_every_turns() -> int:
     return max(1, _env_int("RECEPTIONIST_BRIEF_EVERY_TURNS", 3))
 
 
-def get_brief_model() -> str:
-    """Gemini model behind the officer's brief when local Sunflower cannot write it."""
-    return os.getenv("RECEPTIONIST_BRIEF_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
-
-
 def get_claim_timeout_s() -> float:
     """How long an officer's claim holds a call before their audio connects."""
     return max(1.0, _env_float("RECEPTIONIST_CLAIM_TIMEOUT_S", 20.0))

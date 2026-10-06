@@ -25,6 +25,7 @@ import httpx
 
 from ..tracing import llm_call
 from .config import get_cloud_settings
+from .scope import cloud_models_allowed
 
 logger = logging.getLogger("ura.providers.gateway")
 
@@ -145,7 +146,12 @@ def cloud_generation_allowed_for(locale: str | None) -> bool:
     instead of the provider — the first version was `gemini_allowed_for`, and
     guarding only the Gemini branch let Luganda fall through to the Cloudflare
     chain underneath it.
+
+    A call turn is never allowed, in any language: the call receptionist runs
+    on local models only (see :mod:`app.providers.scope`).
     """
+    if not cloud_models_allowed():
+        return False
     if not GEMINI_ENGLISH_ONLY:
         return True
     lang = (locale or "en").strip().lower().split("-")[0].split("_")[0]

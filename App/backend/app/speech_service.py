@@ -37,6 +37,7 @@ paths are enabled by default.
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import hashlib
 import logging
 import math
@@ -56,6 +57,7 @@ _PROJECT_ROOT = str(_PROJECT_ROOT_P)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from .providers.scope import cloud_models_allowed
 from .resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -2332,7 +2334,11 @@ class SpeechModel:
                 backend="circuit_open",
                 error="MT circuit open",
             )
-        future = self._executor.submit(self._do_translate, text, source_lang, target_lang)
+        # copy_context: a call turn's local-only scope (providers.scope) must
+        # reach _do_translate, which decides the tiers.
+        future = self._executor.submit(
+            contextvars.copy_context().run, self._do_translate, text, source_lang, target_lang
+        )
         try:
             result = future.result(timeout=SPEECH_DEADLINE_S)
             self._breakers["mt"].record_success()
@@ -2726,6 +2732,10 @@ class SpeechModel:
                 ("gemini_flash", _gemini), ("cf_workers_ai", _cf),
                 ("sunbird_cloud", _sunbird), ("local_mt", _local), ("prompted_qwen3", _prompted),
             ]
+        if not cloud_models_allowed():
+            # A call turn (providers.scope). Removed here, in the caller's
+            # context: _cloud_call's pool does not carry the scope.
+            tiers = [tier for tier in tiers if tier[0] in ("local_mt", "prompted_qwen3")]
 
         prev: str | None = None
         for name, tier in tiers:
@@ -2755,7 +2765,7 @@ class SpeechModel:
         """
         from .flags import flags
 
-        if not flags.is_enabled("cloudflare_fallback"):
+        if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
         if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() != "gemini":
             return ""
@@ -2801,7 +2811,7 @@ class SpeechModel:
         or unavailable so the Sunbird tier still runs."""
         from .flags import flags
 
-        if not flags.is_enabled("cloudflare_fallback"):
+        if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
         if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() not in ("gemini", "workers_ai"):
             return ""

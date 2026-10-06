@@ -1148,7 +1148,11 @@ class HybridRetriever:
         from .providers import breakers, budget, routing
         from .providers import gateway as _gw
         from .providers import vectorize as _vz
+        from .providers.scope import cloud_models_allowed
 
+        if not cloud_models_allowed():
+            # A call turn stays on local models (providers.scope).
+            return []
         if not breakers.VECTORIZE_BREAKER.allow_request():
             logger.warning("Vectorize circuit OPEN — skipping dense fallback")
             return []

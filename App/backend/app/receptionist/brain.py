@@ -18,7 +18,6 @@ from ..text_signals import detect_crisis
 from .clarify import ClarifyGate, ClarifyState
 from .config import (
     KNOWN_LANGUAGES,
-    get_brief_model,
     get_clarify_threshold,
     get_clarify_threshold_for,
     get_default_language,
@@ -144,6 +143,8 @@ QUERY_EXTRACT_SYSTEM = (
     "You convert Luganda taxpayer questions into concise English search queries "
     "for the Uganda Revenue Authority legal knowledge base. "
     "Focus on the core tax type, rates, deadlines, or procedure. "
+    "When the question leans on earlier lines of the call (\"it\", \"that\", \"the same\"), "
+    "make the query say what it refers to. "
     "Output ONLY the English search query and nothing else."
 )
 
@@ -636,6 +637,29 @@ class UraReceptionistBrain(LLMService):
         # 4. Standard Answer Generation
         await self._answer_question(user_text, mean_word_prob=mean_prob)
 
+    def _earlier_in_call(self, exchanges: int = 2) -> str:
+        """The call so far, in English: what the chat carried over and the last exchanges."""
+        lines: list[str] = []
+        if self.room.state.chat_context:
+            lines.append(f"Before the call, in the chat: {self.room.state.chat_context}")
+        try:
+            from ..context_manager import english_view, normalize_history_turns
+
+            turns = db.get_recent_turns(
+                session_id=self.room.call_id,
+                conversation_id=self.room.state.conversation_id,
+                limit=exchanges,
+                user_id=self.room.state.user_id or None,
+                tenant_id=self.room.state.tenant_id or "default",
+            )
+            for turn in english_view(normalize_history_turns(turns)):
+                lines.append(f"Caller: {turn['user_message'][:200]}")
+                if turn.get("bot_reply"):
+                    lines.append(f"Assistant: {turn['bot_reply'][:200]}")
+        except Exception:
+            logger.debug("Earlier call turns unavailable", exc_info=True)
+        return "\n".join(lines)
+
     def _extract_english_tax_query(self, luganda_query: str) -> str:
         """Extract a clean English search query from a Luganda taxpayer question."""
         from .lexicon import normalize_luganda_tax_query, repair_asr_entities
@@ -645,38 +669,30 @@ class UraReceptionistBrain(LLMService):
         repaired = repair_asr_entities(luganda_query)
         normalized = normalize_luganda_tax_query(repaired)
 
-        def _sunflower_query() -> str:
+        # A Luganda follow-up ("kiki ekyetaagisa?" — "what is needed?") means
+        # nothing without the call so far; the chat pipeline that English and
+        # Swahili calls go through has that history, this one-shot extraction
+        # did not (G122).
+        earlier = self._earlier_in_call()
+        prompt = (
+            (f"Earlier in this call (English):\n{earlier}\n\n" if earlier else "")
+            + f"Luganda question: {normalized}\nEnglish search query:"
+        )
+
+        # Local Sunflower only: the call receptionist runs on local models
+        # (decided 2026-09-30); with vLLM down the Luganda words are searched.
+        try:
             from ..llm import _vllm_generate
 
-            prompt = f"Luganda question: {normalized}\nEnglish search query:"
             messages = [
                 {"role": "system", "content": QUERY_EXTRACT_SYSTEM},
                 {"role": "user", "content": prompt},
             ]
-            return _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
-
-        def _gemini_query() -> str:
-            from ..providers.gateway import gemini_generate
-
-            model = get_brief_model()
-            prompt = f"Luganda question: {normalized}\nEnglish search query:"
-            return gemini_generate(
-                prompt,
-                system=QUERY_EXTRACT_SYSTEM,
-                model=model,
-                max_tokens=64,
-                temperature=0.0,
-                locale="en",
-            ).strip().strip('"')
-
-        # Local Sunflower on vLLM first. Gemini is only the outage fallback.
-        for gen in (_sunflower_query, _gemini_query):
-            try:
-                res = gen()
-                if res and len(res) > 2:
-                    return res
-            except Exception:
-                continue
+            res = _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
+            if res and len(res) > 2:
+                return res
+        except Exception:
+            logger.debug("Luganda query extraction failed", exc_info=True)
 
         return normalized or luganda_query
 
@@ -684,36 +700,20 @@ class UraReceptionistBrain(LLMService):
         """Single-pass synthesis from English statutory context directly into Luganda."""
         prompt = LUGANDA_RAG_PROMPT_TEMPLATE.format(passages=context_text, luganda_query=question)
 
-        def _sunflower_synth() -> str:
+        # Local Sunflower only (decided 2026-09-30). With vLLM down the caller
+        # gets the English answer translated, or the transfer phrase.
+        try:
             from ..llm import _vllm_generate
 
             messages = [
                 {"role": "system", "content": LUGANDA_RAG_SYSTEM},
                 {"role": "user", "content": prompt},
             ]
-            return _vllm_generate(messages, max_tokens=256, temperature=0.1).strip()
-
-        def _gemini_synth() -> str:
-            from ..providers.gateway import gemini_generate
-
-            model = get_brief_model()
-            return gemini_generate(
-                prompt,
-                system=LUGANDA_RAG_SYSTEM,
-                model=model,
-                max_tokens=256,
-                temperature=0.1,
-                locale="en",
-            ).strip()
-
-        # Same order as query extraction: the local Sunflower weights, then Gemini.
-        for synth in (_sunflower_synth, _gemini_synth):
-            try:
-                res = synth()
-                if res and len(res) > 3:
-                    return res
-            except Exception:
-                continue
+            res = _vllm_generate(messages, max_tokens=256, temperature=0.1).strip()
+            if res and len(res) > 3:
+                return res
+        except Exception:
+            logger.debug("Luganda answer synthesis failed", exc_info=True)
         return ""
 
     async def _generate_luganda_answer(self, question: str, *, memory_write: bool = True) -> dict[str, Any]:

@@ -24,6 +24,7 @@ from ..ws_concurrency import is_ws_origin_allowed, rekey_slot, release, try_acqu
 from . import brief as call_brief
 from . import desk, livekit, risk
 from .brain import UraReceptionistBrain
+from .carryover import chat_carryover, seed_call_topic
 from .config import (
     get_default_language,
     get_languages,
@@ -237,6 +238,25 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             caller_ws=websocket,
         )
         room.state.preferred_locale = preferred_locale
+        # The chat the caller rang from (G122): its task and a coarse English
+        # account of it travel into the call — for follow-ups and for the
+        # officer's brief — when the caller owns that chat.
+        carry = chat_carryover(
+            str(init_msg.get("parent_conversation_id") or ""),
+            chat_session=str(init_msg.get("chat_session") or ""),
+            user_id=user_id or "",
+            tenant_id=tenant_id or "default",
+        )
+        if carry is not None:
+            room.state.parent_conversation_id = carry.conversation_id
+            room.state.chat_context = carry.context
+            seed_call_topic(
+                carry,
+                conversation_id=room.state.conversation_id,
+                call_id=call_id,
+                user_id=user_id or "",
+                tenant_id=tenant_id or "default",
+            )
         caller_token = ""
         if livekit.enabled():
             room.state.livekit_room = livekit.room_name(call_id)
@@ -256,6 +276,8 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             status="ai",
             started_at=room.state.started_at,
         )
+        if carry is not None:
+            update_call(call_id, parent_conversation_id=carry.conversation_id, chat_context=carry.context)
 
         log_voice_event(user_id=user_id or "", session_id=call_id, event_type="call_started", tenant_id=tenant_id or "default")
         call_brief.start(call_id)

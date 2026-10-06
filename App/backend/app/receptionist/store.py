@@ -38,6 +38,10 @@ _CALL_DESK_COLUMNS: dict[str, str] = {
     "brief_json": "TEXT",
     "brief_updated_at": "DOUBLE PRECISION",
     "risk_json": "TEXT",
+    # The chat the caller rang from, and the coarse English account of it the
+    # call carries (receptionist.carryover, G122).
+    "parent_conversation_id": "TEXT NOT NULL DEFAULT ''",
+    "chat_context": "TEXT NOT NULL DEFAULT ''",
 }
 
 

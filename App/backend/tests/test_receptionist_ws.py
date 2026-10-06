@@ -17,7 +17,7 @@ from app.flags import flags
 from app.main import app
 from app.receptionist.hub import CallEventHub, hub
 from app.receptionist.state import CallRoom, CallState, registry
-from app.receptionist.store import create_call, create_turn, init_receptionist_schema, update_call
+from app.receptionist.store import create_call, create_turn, get_call, init_receptionist_schema, update_call
 from app.voice_consent import init_voice_consent_schema
 
 
@@ -338,8 +338,9 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
         _init_schema()
         cls.client = TestClient(app)
 
-    def _run_call(self, frames: list[str]):
-        """Start a LiveKit call, send *frames*, drop the socket; return what the pipeline saw."""
+    def _run_call(self, frames: list[str], **start: str):
+        """Start a LiveKit call (``call_start`` extended by *start*), send *frames*,
+        drop the socket; return what the pipeline saw."""
         import threading
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, MagicMock
@@ -354,7 +355,7 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
         from app.receptionist import livekit
         from app.receptionist import ws as ws_mod
 
-        seen = SimpleNamespace(frames=[], cancelled=threading.Event(), running=threading.Event())
+        seen = SimpleNamespace(frames=[], cancelled=threading.Event(), running=threading.Event(), call_id="")
 
         class FakeTask:
             stop: asyncio.Event | None = None
@@ -397,8 +398,11 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
             patch.object(ws_mod, "generate_call_summary", new=MagicMock()),
         ):
             with self.client.websocket_connect("/v1/calls/stream") as sock:
-                sock.send_text(json.dumps({"type": "call_start", "locale": "en", "voice_consent_accepted": True}))
+                sock.send_text(
+                    json.dumps({"type": "call_start", "locale": "en", "voice_consent_accepted": True, **start})
+                )
                 ready = sock.receive_json()
+                seen.call_id = ready["call_id"]
                 self.assertEqual(ready["media"]["transport"], "livekit")
                 self.assertTrue(seen.running.wait(5), "the media pipeline never started")
                 for frame in frames:
@@ -419,6 +423,28 @@ class TestLiveKitCallControlLoop(unittest.TestCase):
     def test_a_dropped_control_socket_stops_the_media_pipeline(self):
         seen = self._run_call([])
         self.assertTrue(seen.cancelled.is_set(), "the Pipecat task outlived the call")
+
+    def test_a_call_started_from_the_chat_carries_its_task(self):
+        """G122: the chat's task and a coarse English account travel into the call."""
+        conversation, session = f"conv-{uuid.uuid4().hex[:10]}", f"sess-{uuid.uuid4().hex[:10]}"
+        db.log_conversation(
+            session_id=session, conversation_id=conversation,
+            user_message="How do I register for VAT?", bot_reply="On the URA portal.",
+        )
+        seen = self._run_call([], parent_conversation_id=conversation, chat_session=session)
+        call = get_call(seen.call_id)
+        self.assertEqual(call["parent_conversation_id"], conversation)
+        self.assertIn("vat", call["chat_context"].lower())
+
+    def test_a_chat_the_caller_does_not_hold_carries_nothing(self):
+        conversation = f"conv-{uuid.uuid4().hex[:10]}"
+        db.log_conversation(
+            session_id=f"sess-{uuid.uuid4().hex[:10]}", conversation_id=conversation,
+            user_message="How do I register for VAT?", bot_reply="On the URA portal.",
+        )
+        seen = self._run_call([], parent_conversation_id=conversation, chat_session="someone-elses-session")
+        call = get_call(seen.call_id)
+        self.assertEqual((call["parent_conversation_id"], call["chat_context"]), ("", ""))
 
     def test_a_malformed_control_frame_does_not_end_the_call(self):
         seen = self._run_call(["not json", "[1]", json.dumps({"type": "set_language", "language": "sw"})])
