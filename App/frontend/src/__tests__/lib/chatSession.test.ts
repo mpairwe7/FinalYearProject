@@ -107,6 +107,19 @@ describe('the browser keeps conversations as long as the server does', () => {
     expect(kept.updatedAt).toBeGreaterThan(0);
   });
 
+  it('a tab left open past the retention period drops what the server forgot when switching', () => {
+    const now = Date.now();
+    useChatStore.setState({
+      conversations: [conversation('recent', now - DAY), conversation('expired', now - 8 * DAY)],
+      activeConversationId: null,
+    });
+    useChatStore.getState().switchSession('expired');
+    expect(useChatStore.getState().activeConversationId).toBeNull();
+    expect(useChatStore.getState().conversations.map((c) => c.id)).toEqual(['recent']);
+    useChatStore.getState().switchSession('recent');
+    expect(useChatStore.getState().activeConversationId).toBe('recent');
+  });
+
   it('clearing chat history also starts a new chat session', () => {
     const before = getChatSessionId();
     useChatStore.getState().clearAllSessions();

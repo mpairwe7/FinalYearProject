@@ -711,9 +711,17 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   switchSession: (id) => {
     const { saveCurrentSession } = get();
     saveCurrentSession();
-    const target = get().conversations.find((c) => c.id === id);
-    if (!target) return;
+    // A tab can stay open past the retention period: drop what the server has
+    // already forgotten before reopening anything (G122).
+    const conversations = withinRetention(get().conversations);
+    const target = conversations.find((c) => c.id === id);
+    if (!target) {
+      set({ conversations });
+      writePersistedChatState(get());
+      return;
+    }
     set({
+      conversations,
       chat: target.turns,
       activeConversationId: id,
       message: '',

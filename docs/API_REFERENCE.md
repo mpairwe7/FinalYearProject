@@ -355,7 +355,7 @@ as `/v1/chat`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `conversation_id` | No | Attaches the transcript, and is where the officer's reply is delivered back |
-| `session_id` | No | Analytics session |
+| `session_id` | No | The chat session (`X-Session-ID`) the conversation's history is bound to; the transcript is read with it |
 | `reason` | No | The taxpayer's own words, max 1000 chars. Defaults to a generic request |
 | `locale` | No | Language to acknowledge in; the message is translated on the way out |
 
