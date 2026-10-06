@@ -8,7 +8,6 @@ import { LOCALE_OPTIONS } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import {
   initAnalytics,
-  getAnalyticsSessionId,
   trackChatSent,
   trackChatReceived,
   trackVoiceUsed,
@@ -28,6 +27,7 @@ import {
 } from '../services/voiceService';
 import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
+import { getChatSessionId } from '../lib/chatSession';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
@@ -879,7 +879,7 @@ export default function Page() {
       // No Content-Type header — the browser sets the multipart boundary.
       const res = await fetch(`${API_URL}/v1/documents/analyze`, {
         method: 'POST',
-        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
         body: form,
       });
       if (!res.ok) {
@@ -1026,7 +1026,7 @@ export default function Page() {
     });
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
-      'X-Session-ID': getAnalyticsSessionId(),
+      'X-Session-ID': getChatSessionId(),
       'ngrok-skip-browser-warning': 'true',
     });
 
@@ -1444,7 +1444,7 @@ export default function Page() {
               conversationId,
               ttsEnabled: false,
               voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
-              sessionId: getAnalyticsSessionId(),
+              sessionId: getChatSessionId(),
             });
             if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
@@ -1751,7 +1751,7 @@ export default function Page() {
   const handleDownloadReport = useCallback(async (docId: string, docName: string) => {
     try {
       const res = await fetch(`/api/v1/documents/${docId}/report`, {
-        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
       });
       if (!res.ok) throw new Error(`report ${res.status}`);
       const blob = await res.blob();

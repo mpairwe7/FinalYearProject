@@ -83,6 +83,7 @@ from .conversational import handle_conversational_turn
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
 from .providers.routing import log_tier, select_tier
+from .providers.scope import cloud_models_allowed, local_models_only
 from .cache import create_cache
 from .calculator_router import (
     _CURRENCY,
@@ -878,9 +879,10 @@ def _cloud_llm_ready() -> bool:
     LLM is entirely unavailable (``llm_module.is_available()`` False — e.g. an
     LLM-less deployment profile), not merely failing per-request.  Without
     this, the availability gates skip the generation step and the configured
-    Cloudflare/Gemini tier never gets a chance.
+    Cloudflare/Gemini tier never gets a chance. Never for a call turn
+    (:mod:`app.providers.scope`).
     """
-    if not flags.is_enabled("cloudflare_fallback"):
+    if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
         return False
     backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
     if backend not in ("gemini", "workers_ai"):
@@ -3250,6 +3252,9 @@ def _translate_reply(text: str, locale: str) -> str | None:
         order = (("sunbird", _cloud), ("fast_fallback", _fast_fallback))
     else:
         order = (("local", _local), ("sunbird", _cloud), ("fast_fallback", _fast_fallback))
+    if not cloud_models_allowed():
+        # A call turn: local Sunflower only (providers.scope).
+        order = tuple(step for step in order if step[0] == "local")
 
     for name, fn in order:
         try:
@@ -3770,7 +3775,7 @@ def _judge_rescue(
     on this task: all four scored identically, at 1.5s median / 8.7s max versus
     4.7s / 74.9s for the configured gemini-2.5-flash.
     """
-    if not FAQ_JUDGE_ENABLED or not query.strip():
+    if not FAQ_JUDGE_ENABLED or not query.strip() or not cloud_models_allowed():
         return []
     try:
         from .providers import config as _cfg
@@ -8515,7 +8520,9 @@ class ChatModel:
         transcript).
         """
         _PENDING_TURN_AUDIT.set(None)
-        with turn_usage_scope() as usage:
+        # A call turn stays on local models, whatever this deployment allows
+        # chat (G122; see providers.scope).
+        with turn_usage_scope() as usage, local_models_only(channel == "call"):
             return self._generate_localized(
                 message=message,
                 conversation_id=conversation_id,

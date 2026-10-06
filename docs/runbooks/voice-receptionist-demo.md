@@ -37,7 +37,7 @@ FastAPI (one worker and one replica; process-local call actor)
                               local Orpheus sidecar for the languages in ORPHEUS_TTS_LANGUAGES)
      → LiveKit audio/data output
    Observers: CallMetricsObserver (turn latency, barge-ins)
-   On end: summary.py (always English; local Sunflower first, Gemini only if vLLM is down)
+   On end: summary.py (always English; local Sunflower, or a deterministic summary if vLLM is down)
            + metrics.py → store.py (voice_calls / voice_call_turns)
 ```
 
@@ -90,8 +90,12 @@ Sunflower on vLLM against Qdrant, and the Orpheus voice, all from locally cached
 Hugging Face weights on the GPU stack. `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` adds a
 language sentinel that moves a call between English, Luganda and Swahili on this same
 engine — see **§6 Multilingual calls**. The Gemini Live speech-to-speech engine was
-removed on 2026-09-30; Gemini is now only a text fallback when the local vLLM is down
-(the officer brief, the call summary, the Luganda query bridge).
+removed on 2026-09-30. Since G122 (2026-10) **no hosted model is used anywhere on a
+call**. The officer brief, the call summary, the Luganda query bridge and the Luganda
+answer run on Sunflower only, with deterministic fallbacks when vLLM is down. A call
+turn's English or Swahili answer comes from the chat service, which is held to local
+models for that turn whatever chat is configured to use: no Gemini, Workers AI or
+Sunbird API, and no FAQ judge (`app/providers/scope.py`).
 
 ---
 
@@ -116,7 +120,6 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
 | `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer; `0` turns them off |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
-| `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Fallback model for the officer brief; local Sunflower writes it first for every call |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
@@ -478,9 +481,22 @@ local way: "Vati" and "tiini" are VAT and TIN.
 | Direction | Message | Meaning |
 |---|---|---|
 | client → server | `call_start.preferred_locale` | the chat's language — a hint for staff and metrics only |
+| client → server | `call_start.parent_conversation_id`, `call_start.chat_session` | the chat the call was started from, and (signed out) the chat session that owns it — see *Calls started from the chat* below |
 | server → client | `call_ready.language_detection`, `.languages`, `.language` | show the language chip; the opening language |
 | server → client | `{"type":"language","language":"lg","source":"auto"\|"explicit"\|"override","confidence":0.93}` | the call's language is now … |
 | client → server | `{"type":"set_language","language":"sw"}` | pin the call to a language |
+
+**Calls started from the chat (G122).** A call started from the chat sends the chat's
+conversation id. The server carries that chat's task and a short English account of it
+into the call only when the caller owns the chat: their account when signed in, or the
+browser's chat session when signed out. A conversation id alone carries nothing. The
+account is coarse, never the taxpayer's own words: the tax topics named, the taxpayer
+type, the figures mentioned, and the current task. The call starts on the chat's task,
+so a short follow-up keeps it. The account is stored on the call
+(`voice_calls.parent_conversation_id`, `chat_context`) and given to the officer's brief
+as context, never as a turn. A Luganda question is turned into its English search query
+together with the call's last two exchanges (in English) and that account, so
+"kiki ekyetaagisa?" ("what is needed?") is read as a follow-up.
 
 Staff see a language badge on the queue row and the case header, "Luganda caller" on
 the handoff brief, the switch as a `Language: Luganda (detected, 93%)` note in the

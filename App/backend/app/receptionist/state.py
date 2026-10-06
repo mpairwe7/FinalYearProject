@@ -102,6 +102,9 @@ class CallState:
     language_overrides: int = 0
     lid_latencies_ms: list[float] = field(default_factory=list)
     lid_confidences: list[float] = field(default_factory=list)
+    # The chat the caller rang from and what it carried over (carryover.py).
+    parent_conversation_id: str = ""
+    chat_context: str = ""
 
 
 class CallRoom:

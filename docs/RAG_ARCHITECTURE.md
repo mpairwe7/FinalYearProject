@@ -282,6 +282,12 @@ ADK's state model, mapped onto this system):
 | User (`user:`) | across conversations, consented | `user_profiles`, `user_facts`, `episodic_summaries`, working state |
 | App (`app:`) | everyone | the corpus, rate tables, flags |
 
+A signed-out taxpayer's session is the browser's chat session id (`X-Session-ID`,
+`App/frontend/src/lib/chatSession.ts`). It is browser-wide, not per tab, and lives as
+long as the server keeps the conversations. A call started from the chat opens a new
+session carrying the chat's task and a coarse English account of it, only for the
+chat's owner (`receptionist/carryover.py`).
+
 **WebSocket resume** (`chat_ws_v2.py`):
 - Each completed response has a server-minted response ID. Resume requires an
   unexpired mapping for that exact response, user, tenant, and conversation.

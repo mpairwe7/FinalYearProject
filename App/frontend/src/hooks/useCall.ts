@@ -8,6 +8,8 @@ import {
   useCallStore,
 } from '@/store/useCallStore';
 import { CallSocket } from '@/services/callSocket';
+import { getChatSessionId } from '@/lib/chatSession';
+import { useChatStore } from '@/store/useChatStore';
 import {
   LiveKitCallSession,
   type LiveKitCallCredentials,
@@ -361,11 +363,17 @@ export function useCall() {
       // `locale` stays the chat's language: a single-engine call is held in
       // it. A multilingual call opens in English whatever it says and treats
       // `preferred_locale` as a hint.
+      // The chat this call was started from: the server carries its task into
+      // the call when this browser holds the chat (G122).
+      const parentConversationId = useChatStore.getState().activeConversationId;
       socket.connect({
         locale,
         preferred_locale: locale,
         voice_consent_accepted: true,
         sample_rate: 16000,
+        ...(parentConversationId
+          ? { parent_conversation_id: parentConversationId, chat_session: getChatSessionId() }
+          : {}),
       });
     },
     [cleanupAudio, hangup, store, t],

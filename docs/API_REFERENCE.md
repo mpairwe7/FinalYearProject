@@ -16,7 +16,13 @@ The API is open for chat and classification endpoints. The indexing endpoint req
 Authorization: Bearer <INDEX_API_KEY>
 ```
 
-Session tracking uses the `X-Session-ID` header (optional, client-provided).
+Session tracking uses the `X-Session-ID` header (optional, client-provided). For a
+signed-out taxpayer it is also what binds a conversation's history, attachments and
+escalation transcript to them: a conversation id alone never unlocks history. The web
+client sends a browser-wide chat session id here (localStorage, replaced after
+`NEXT_PUBLIC_CONVERSATION_TTL_DAYS` without use or when history is cleared), so a
+conversation reopened in a new tab keeps its history. Analytics events keep their own
+per-tab id.
 
 ## Endpoints
 
@@ -349,7 +355,7 @@ as `/v1/chat`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `conversation_id` | No | Attaches the transcript, and is where the officer's reply is delivered back |
-| `session_id` | No | Analytics session |
+| `session_id` | No | The chat session (`X-Session-ID`) the conversation's history is bound to; the transcript is read with it |
 | `reason` | No | The taxpayer's own words, max 1000 chars. Defaults to a generic request |
 | `locale` | No | Language to acknowledge in; the message is translated on the way out |
 
