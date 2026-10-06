@@ -375,8 +375,8 @@ export function OutboxBoard() {
               </thead>
               <tbody>
                 {items.map((row: OutboxItem) => {
-                  const recipient = row.payload?.recipient || row.user_id;
-                  const refId = row.provider_msg_id || row.id;
+                  const recipient = String(row.payload?.recipient || row.user_id || "-");
+                  const refId = String(row.provider_msg_id || row.id || "");
                   const isFailed = FAILED.has(row.status.toLowerCase());
                   const isQueued = row.status.toLowerCase() === "queued";
 
