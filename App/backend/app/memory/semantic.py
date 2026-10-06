@@ -7,6 +7,9 @@ Each fact is one (subject, predicate, object) triple with:
 - ``provenance`` — ``conversation_id`` + ``turn_id`` + ``extractor_model``
 - ``extracted_at`` — unix epoch; feeds decay
 - ``superseded_by`` — nullable, set when a newer fact overrides this one
+- ``invalidated_at`` — when it was superseded: the fact is kept, with the
+  time it stopped being true, rather than overwritten (the validity model
+  of temporal agent-memory stores such as Zep/Graphiti)
 
 Retrieval applies consent gating + temporal decay at query time;
 facts below ``decay_floor`` are excluded from results but preserved
@@ -32,6 +35,12 @@ from .decay import compute_decayed_confidence
 logger = logging.getLogger(__name__)
 
 SEMANTIC_TTL_DAYS = int(os.getenv("SEMANTIC_TTL_DAYS", "365"))
+
+#: Categories that hold one value at a time: a new value supersedes the old.
+#: Industries and registrations can be several at once, so they accumulate.
+SINGLE_VALUED_CATEGORIES: frozenset[str] = frozenset(
+    {"taxpayer_type", "fiscal_year", "primary_language", "detail_level"}
+)
 
 
 @dataclass
@@ -96,7 +105,8 @@ class SemanticMemory:
                 conversation_id  TEXT DEFAULT '',
                 turn_id          TEXT DEFAULT '',
                 extractor_model  TEXT DEFAULT '',
-                superseded_by    TEXT
+                superseded_by    TEXT,
+                invalidated_at   DOUBLE PRECISION
             );
             CREATE INDEX IF NOT EXISTS idx_facts_user
                 ON user_facts(user_id);
@@ -108,6 +118,11 @@ class SemanticMemory:
                 ON user_facts(extracted_at);
             """
         )
+        # Databases created before facts kept the time they were invalidated.
+        try:
+            db.execute("ALTER TABLE user_facts ADD COLUMN invalidated_at DOUBLE PRECISION")
+        except Exception:
+            logger.debug("user_facts.invalidated_at already present")
         # Preserve the most recent duplicate from older per-turn writes, then
         # enforce one active copy of each exact fact across later retries.
         rows = db.query_all(
@@ -151,7 +166,8 @@ class SemanticMemory:
                        conversation_id = excluded.conversation_id,
                        turn_id = excluded.turn_id,
                        extractor_model = excluded.extractor_model,
-                       superseded_by = NULL""",
+                       superseded_by = NULL,
+                       invalidated_at = NULL""",
                 tuple(fact.to_row()),
             )
             stored = db.query_one(
@@ -162,14 +178,15 @@ class SemanticMemory:
             )
             if stored:
                 fact.fact_id = str(stored["fact_id"])
-                if fact.category == "taxpayer_type":
+                if fact.category in SINGLE_VALUED_CATEGORIES:
                     db.execute(
-                        """UPDATE user_facts SET superseded_by = ?
+                        """UPDATE user_facts SET superseded_by = ?, invalidated_at = ?
                            WHERE tenant_id = ? AND user_id = ? AND category = ?
                              AND subject = ? AND predicate = ? AND object_value != ?
                              AND superseded_by IS NULL""",
                         (
                             fact.fact_id,
+                            time.time(),
                             fact.tenant_id,
                             fact.user_id,
                             fact.category,
@@ -192,12 +209,12 @@ class SemanticMemory:
 
         try:
             return db.execute(
-                """UPDATE user_facts SET superseded_by = ? WHERE fact_id = ?
+                """UPDATE user_facts SET superseded_by = ?, invalidated_at = ? WHERE fact_id = ?
                    AND EXISTS (SELECT 1 FROM user_facts AS newer
                                WHERE newer.fact_id = ?
                                  AND newer.user_id = user_facts.user_id
                                  AND newer.tenant_id = user_facts.tenant_id)""",
-                (new_fact_id, old_fact_id, new_fact_id),
+                (new_fact_id, time.time(), old_fact_id, new_fact_id),
             ) > 0
         except Exception:
             logger.exception("semantic supersede failed")

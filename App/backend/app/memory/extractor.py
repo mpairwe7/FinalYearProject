@@ -47,15 +47,20 @@ _TAXPAYER_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bpartnership\b", re.IGNORECASE), "partnership"),
 ]
 
+# English cues, read against the English form of a Luganda or Swahili turn too
+# (G119), plus the commonest Swahili and Luganda words for the same trades.
 _INDUSTRY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bretail\b|\bshop\b", re.IGNORECASE), "retail"),
+    (re.compile(r"\bretail\b|\bshop\b|\bduka\b|\brejareja\b|\b(?:e)?dduuka\b", re.IGNORECASE), "retail"),
     (re.compile(r"\bimport(?:s|ing|er)?\b", re.IGNORECASE), "import_export"),
-    (re.compile(r"\bconstruction\b|\bbuilding\b", re.IGNORECASE), "construction"),
-    (re.compile(r"\brestaurant\b|\bhotel\b|\bcatering\b", re.IGNORECASE), "hospitality"),
-    (re.compile(r"\btransport\b|\blogistics\b", re.IGNORECASE), "transport"),
-    (re.compile(r"\bagricultur(?:e|al)\b|\bfarm(?:ing)?\b", re.IGNORECASE), "agriculture"),
+    (re.compile(r"\bconstruction\b|\bbuilding\b|\bujenzi\b", re.IGNORECASE), "construction"),
+    (re.compile(r"\brestaurant\b|\bhotel\b|\bcatering\b|\bhoteli\b|\bmgahawa\b", re.IGNORECASE), "hospitality"),
+    (re.compile(r"\btransport\b|\blogistics\b|\busafirishaji\b", re.IGNORECASE), "transport"),
+    (re.compile(r"\bagricultur(?:e|al)\b|\bfarm(?:ing)?\b|\bkilimo\b|\bobulimi\b", re.IGNORECASE), "agriculture"),
     (re.compile(r"\btech(?:nology)?\b|\bsoftware\b", re.IGNORECASE), "technology"),
 ]
+
+#: Confidence kept for a fact read from the machine-translated English form.
+TRANSLATED_FORM_FACTOR = 0.95
 
 _REGISTRATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (
@@ -82,17 +87,30 @@ class FactExtractor:
     """
 
     def extract(self, turns: list[dict[str, str]]) -> list[FactCandidate]:
+        """Facts from the taxpayer's own words and, for a Luganda or Swahili
+        turn, from its English form (``user_message_en`` / ``content_en``).
+
+        A fact found only in the English form is a little less certain — it
+        rests on a translation — so it keeps ``TRANSLATED_FORM_FACTOR`` of its
+        confidence and its ``rule_id`` ends in ``+en``.
+        """
         candidates: list[FactCandidate] = []
         for i, turn in enumerate(turns):
             if "user_message" in turn:
                 text = str(turn.get("user_message") or "").strip()
+                english = str(turn.get("user_message_en") or "").strip()
             elif turn.get("role") in ("user", "user_message"):
                 text = str(turn.get("content") or turn.get("message") or "").strip()
+                english = str(turn.get("content_en") or "").strip()
             else:
                 continue
-            if not text:
-                continue
-            candidates.extend(self._scan(text, source_turn=i))
+            if text:
+                candidates.extend(self._scan(text, source_turn=i))
+            if english and english != text:
+                for candidate in self._scan(english, source_turn=i):
+                    candidate.confidence = round(candidate.confidence * TRANSLATED_FORM_FACTOR, 4)
+                    candidate.rule_id = f"{candidate.rule_id}+en"
+                    candidates.append(candidate)
         return self._dedupe(candidates)
 
     def _scan(self, text: str, source_turn: int) -> list[FactCandidate]:

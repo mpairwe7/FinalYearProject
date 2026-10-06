@@ -1643,6 +1643,23 @@ def _finish_streamed_turn(
         )
     except Exception:
         logger.debug("Streamed turn metrics failed", exc_info=True)
+    if not failed and result.get("_memory_consent") and not result.get("_memory_absorbed"):
+        # The streamed path never wrote to long-term memory: only its LangGraph
+        # branch (off by default) did, so a consented web user's facts and
+        # episodes were never kept. Written here, once the reply is final.
+        persist = getattr(model, "_persist_personalization_turn", None)
+        if callable(persist):
+            persist(
+                user_id=user_id,
+                tenant_id=tenant_id or "default",
+                conversation_id=str(result.get("conversation_id") or ""),
+                message=message,
+                message_en=str(result.get("_english_message") or ""),
+                reply=served["reply"],
+                agent_role=str(result.get("agent_role") or "rag_answerer"),
+                personalization={"consent_granted": True},
+                workflow=result.get("workflow") if isinstance(result.get("workflow"), dict) else None,
+            )
     record = getattr(model, "record_turn_audit", None)
     if failed or not callable(record):
         return
@@ -1755,7 +1772,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             {"top_k": top_k, "query_preview": message[:200]},
         )
 
-        language_out: dict[str, str] = {}
+        turn_out: dict[str, str] = {}
         result = await asyncio.to_thread(
             model.generate_retrieval_only,
             message=message,
@@ -1771,12 +1788,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             user_role=user_role,
             granted_purposes=granted_purposes,
             locale_explicit=locale_explicit,
-            language_out=language_out,
+            turn_out=turn_out,
         )
-        if language_out.get("source"):
-            result.setdefault("locale_source", language_out["source"])
-        if language_out.get("english_message"):
-            result.setdefault("_english_message", language_out["english_message"])
+        if turn_out.get("source"):
+            result.setdefault("locale_source", turn_out["source"])
+        if turn_out.get("english_message"):
+            result.setdefault("_english_message", turn_out["english_message"])
+        if turn_out.get("memory_consent"):
+            result.setdefault("_memory_consent", True)
 
         # The *effective* locale, not the one the caller passed. Mirrors the
         # same reassignment in ChatModel.generate: generate_retrieval_only runs
@@ -6533,21 +6552,32 @@ class ChatModel:
         agent_role: str,
         personalization: dict[str, Any] | None,
         workflow: dict[str, Any] | None = None,
+        message_en: str = "",
+        allowed: bool = True,
     ) -> None:
-        """Update working memory and absorb the latest consented turn."""
-        if not user_id or not personalization or not personalization.get("consent_granted"):
+        """Update working memory and absorb the latest consented turn.
+
+        ``message_en`` is the turn's English form when it was in Luganda or
+        Swahili: topic tags and fact rules read English (G119). ``allowed`` is
+        False for a turn the system is not sure it heard — a call transcript
+        below the receptionist's ASR confidence floor — so a mishearing is
+        never kept as a fact about the taxpayer.
+        """
+        if not allowed or not user_id or not personalization or not personalization.get("consent_granted"):
             return
         try:
+            from .memory.service import topic_label
+
             memsvc = get_memory_service()
-            memsvc.update_working(
-                user_id,
-                tenant_id=tenant_id or "default",
-                last_topic=workflow.get("name") if workflow else agent_role,
-                last_agent_role=agent_role,
-                last_conversation_id=conversation_id,
-            )
+            working: dict[str, Any] = {"last_agent_role": agent_role, "last_conversation_id": conversation_id}
+            # The topic the taxpayer named, not the role that answered it: the
+            # prompt reads this back as "Last conversation topic".
+            topic = workflow.get("name") if workflow else topic_label(message_en or message)
+            if topic:
+                working["last_topic"] = topic
+            memsvc.update_working(user_id, tenant_id=tenant_id or "default", **working)
             turns = [
-                {"role": "user", "content": message},
+                {"role": "user", "content": message, "content_en": message_en},
                 {"role": "assistant", "content": reply},
             ]
             memsvc.absorb_conversation(
@@ -8463,6 +8493,7 @@ class ChatModel:
         attachments: list[documents_module.DocumentRecord] | None = None,
         channel: str = "rest",
         locale_explicit: bool | None = None,
+        memory_write: bool = True,
     ) -> dict[str, Any]:
         """Answer *message*, rendered in *locale*.
 
@@ -8476,7 +8507,9 @@ class ChatModel:
         ``channel`` names the transport for the audit row and metrics
         (``rest``, ``voice``, ``call``). ``locale_explicit`` says whether
         *locale* is the taxpayer's own choice or only a default; ``None`` keeps
-        the older contract (see :mod:`app.language_state`).
+        the older contract (see :mod:`app.language_state`). ``memory_write``
+        False keeps this turn out of long-term memory (a low-confidence call
+        transcript).
         """
         _PENDING_TURN_AUDIT.set(None)
         with turn_usage_scope() as usage:
@@ -8495,6 +8528,7 @@ class ChatModel:
                 channel=channel,
                 usage=usage,
                 locale_explicit=locale_explicit,
+                memory_write=memory_write,
             )
 
     def _generate_localized(
@@ -8514,9 +8548,10 @@ class ChatModel:
         channel: str,
         usage: dict[str, int],
         locale_explicit: bool | None = None,
+        memory_write: bool = True,
     ) -> dict[str, Any]:
         """:meth:`generate`'s body: the English answer, localized, then audited."""
-        language_out: dict[str, str] = {}
+        turn_out: dict[str, str] = {}
         result = self._generate_en(
             message=message,
             conversation_id=conversation_id,
@@ -8530,15 +8565,16 @@ class ChatModel:
             granted_purposes=granted_purposes,
             attachments=attachments,
             locale_explicit=locale_explicit,
-            language_out=language_out,
+            turn_out=turn_out,
+            memory_write=memory_write,
         )
-        if isinstance(result, dict) and language_out.get("source"):
+        if isinstance(result, dict) and turn_out.get("source"):
             # Why the reply is in this language: the client keeps a detected
             # language as a hint and only an explicit one as the user's choice.
-            result.setdefault("locale_source", language_out["source"])
-        if isinstance(result, dict) and language_out.get("english_message"):
+            result.setdefault("locale_source", turn_out["source"])
+        if isinstance(result, dict) and turn_out.get("english_message"):
             # Stored beside the taxpayer's own words (G119); never sent to them.
-            result.setdefault("_english_message", language_out["english_message"])
+            result.setdefault("_english_message", turn_out["english_message"])
         # The *effective* locale, not the one passed in: a caller that sends no
         # locale gets "en" by default and _generate_en detects the real one
         # (detect_language) partway through, recording it on the result. Keying
@@ -8596,7 +8632,8 @@ class ChatModel:
         granted_purposes: list[str] | None = None,
         attachments: list[documents_module.DocumentRecord] | None = None,
         locale_explicit: bool | None = None,
-        language_out: dict[str, str] | None = None,
+        turn_out: dict[str, str] | None = None,
+        memory_write: bool = True,
     ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails.
 
@@ -8857,8 +8894,8 @@ class ChatModel:
                 )
                 locale = language.locale
                 trace_ctx["locale_source"] = language.source
-                if language_out is not None:
-                    language_out["source"] = language.source
+                if turn_out is not None:
+                    turn_out["source"] = language.source
                 logger.info("Effective turn locale: %s (%s)", locale, language.source)
 
             # Route on the English form (see _english_router_form).
@@ -8866,8 +8903,8 @@ class ChatModel:
             if locale not in ("", "en"):
                 with trace_stage("router_translate", timings=timings):
                     router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
-            if language_out is not None and router_message != message:
-                language_out["english_message"] = router_message
+            if turn_out is not None and router_message != message:
+                turn_out["english_message"] = router_message
             # Attachment turns and ongoing multi-turn conversations are never cache-served
             # or cache-stored: context is specific to attachments or prior dialogue turns.
             cache_allowed = personalization is None and not attachments and not conversation_history
@@ -9494,6 +9531,8 @@ class ChatModel:
                                 reply=graph_reply,
                                 agent_role=role_label,
                                 personalization=personalization,
+                                message_en=router_message if router_message != message else "",
+                                allowed=memory_write,
                             )
                             self._audit_turn(
                                 message=message,
@@ -9722,6 +9761,8 @@ class ChatModel:
                     reply=reply,
                     agent_role=agent_role,
                     personalization=personalization,
+                    message_en=router_message if router_message != message else "",
+                    allowed=memory_write,
                 )
                 self._audit_turn(
                     message=message,
@@ -9761,6 +9802,8 @@ class ChatModel:
                     reply=premise_reply,
                     agent_role="epistemic_guard",
                     personalization=personalization,
+                    message_en=router_message if router_message != message else "",
+                    allowed=memory_write,
                 )
                 self._audit_turn(
                     message=message,
@@ -10322,6 +10365,8 @@ class ChatModel:
             reply=reply,
             agent_role=agent_role,
             personalization=personalization,
+            message_en=router_message if router_message != message else "",
+            allowed=memory_write,
         )
 
         # Phase 21 — audit ledger append (happy path).
@@ -10418,7 +10463,8 @@ class ChatModel:
         user_role: str = "public",
         granted_purposes: list[str] | None = None,
         locale_explicit: bool | None = None,
-        language_out: dict[str, str] | None = None,
+        turn_out: dict[str, str] | None = None,
+        memory_write: bool = True,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -10487,8 +10533,12 @@ class ChatModel:
             personalization=personalization,
         )
         locale = language.locale
-        if language_out is not None:
-            language_out["source"] = language.source
+        if turn_out is not None:
+            turn_out["source"] = language.source
+            if memory_write and personalization and personalization.get("consent_granted"):
+                # The answer is still to be streamed; run_chat_turn writes the
+                # turn to memory once it has been (see _finish_streamed_turn).
+                turn_out["memory_consent"] = "1"
         logger.info("Effective turn locale (streaming): %s (%s)", locale, language.source)
 
         # Route on the English form, exactly as generate() does: this path is
@@ -10496,8 +10546,8 @@ class ChatModel:
         # Kiswahili turn reached the workflow, calculator, topic and FAQ
         # authorization routers as words none of their patterns can match.
         router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
-        if language_out is not None and router_message != message:
-            language_out["english_message"] = router_message
+        if turn_out is not None and router_message != message:
+            turn_out["english_message"] = router_message
 
         # Attachment turns and ongoing multi-turn conversations are never cache-served
         # or cache-stored: context is specific to attachments or prior dialogue turns.
@@ -10957,7 +11007,10 @@ class ChatModel:
                         reply=graph_reply,
                         agent_role=role_label,
                         personalization=personalization,
+                        message_en=router_message if router_message != message else "",
+                        allowed=memory_write,
                     )
+                    graph_result["_memory_absorbed"] = True
                     return graph_result
 
                 logger.warning(

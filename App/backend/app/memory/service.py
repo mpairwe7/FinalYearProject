@@ -22,6 +22,7 @@ Every read is gated on the user's active consent for the
 from __future__ import annotations
 
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass
@@ -150,6 +151,9 @@ class MemoryService:
         for c in candidates:
             if c.confidence < MIN_FACT_CONFIDENCE:
                 continue
+            # Provenance: a fact read only from the machine-translated English
+            # form of a Luganda or Swahili turn says so.
+            model = f"{extractor_model}+en" if c.rule_id.endswith("+en") else extractor_model
             fact = UserFact(
                 fact_id=str(uuid.uuid4()),
                 user_id=user_id,
@@ -162,37 +166,38 @@ class MemoryService:
                 extracted_at=time.time(),
                 conversation_id=conversation_id,
                 turn_id=str(c.source_turn),
-                extractor_model=extractor_model,
+                extractor_model=model,
             )
             try:
                 written_fact_ids.append(self.semantic.write(fact))
             except Exception:
                 logger.exception("semantic write failed")
 
-        # 2. Store only a coarse topic label. Raw user text can contain
-        # identifiers, financial details, or prompt injection and does not
-        # belong in long-lived personalization memory.
-        first_user = next(
-            (
-                msg
-                for t in turns
-                if ("user_message" in t or t.get("role") in ("user", "user_message"))
-                and (msg := str(t.get("user_message") or t.get("content") or "").strip())
-            ),
-            "",
-        )
-        topic_tag = _guess_topic_tag(first_user)
-        summary_text = f"Discussed {topic_tag.replace('_', ' ')}." if first_user else "Conversation topic unavailable."
+        # 2. One episode per conversation, derived from the whole conversation
+        # so far — its stored turns plus these — so every turn writes the same
+        # row with more in it, rather than replacing it with its own topic.
+        # Only coarse topic labels: raw user text can contain identifiers,
+        # financial details, or prompt injection and does not belong in
+        # long-lived personalization memory.
+        new_user_texts = [text for text in (_user_text(t) for t in turns) if text]
+        prior_user_texts = self._stored_user_texts(user_id, conversation_id, tenant_id)
+        tags = _ordered_topic_tags(prior_user_texts + new_user_texts)
+        if tags:
+            summary_text = f"Discussed {_join_labels([_TOPIC_LABELS.get(t, t.replace('_', ' ')) for t in tags[:3]])}."
+        elif new_user_texts or prior_user_texts:
+            summary_text = "Discussed general tax questions."
+        else:
+            summary_text = "Conversation topic unavailable."
         episodic = EpisodicSummary(
             summary_id=str(uuid.uuid4()),
             user_id=user_id,
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             summary=summary_text,
-            topic_tag=topic_tag,
+            topic_tag=tags[0] if tags else "general",
             # Do not persist inferred emotional or hardship labels.
             sentiment="neutral",
-            turn_count=len(turns),
+            turn_count=self._stored_turn_count(user_id, conversation_id, tenant_id) + len(new_user_texts),
         )
         episodic_id = ""
         try:
@@ -206,6 +211,41 @@ class MemoryService:
             "episodic_id": episodic_id,
             "episodic_written": bool(episodic_id),
         }
+
+    @staticmethod
+    def _stored_user_texts(user_id: str, conversation_id: str, tenant_id: str) -> list[str]:
+        """The conversation's earlier taxpayer turns, in English where stored (G119)."""
+        if not conversation_id:
+            return []
+        try:
+            from .. import database as db
+            from ..context_manager import english_view, normalize_history_turns
+
+            turns = db.get_recent_turns(
+                conversation_id=conversation_id, user_id=user_id, tenant_id=tenant_id or "default", limit=25
+            )
+            return [t["user_message"] for t in english_view(normalize_history_turns(turns)) if t.get("user_message")]
+        except Exception:
+            logger.debug("episodic: earlier turns unavailable", exc_info=True)
+            return []
+
+    @staticmethod
+    def _stored_turn_count(user_id: str, conversation_id: str, tenant_id: str) -> int:
+        """Turns already logged for this conversation (the current one is logged after)."""
+        if not conversation_id:
+            return 0
+        try:
+            from .. import database as db
+
+            row = db.query_one(
+                """SELECT COUNT(*) AS n FROM conversations
+                   WHERE tenant_id = ? AND conversation_id = ? AND user_id = ?""",
+                (tenant_id or "default", conversation_id, user_id),
+            )
+            return int((row or {}).get("n") or 0)
+        except Exception:
+            logger.debug("episodic: turn count unavailable", exc_info=True)
+            return 0
 
     # -- Working memory -----------------------------------------------
     def update_working(self, user_id: str, tenant_id: str = "default", **fields: Any) -> None:
@@ -279,32 +319,92 @@ class MemoryService:
 
 
 # ---------------------------------------------------------------------------
-# Topic-tag heuristic (keeps the dependency count low)
+# Topic tags (keeps the dependency count low)
 # ---------------------------------------------------------------------------
-_TOPIC_KEYWORDS = {
-    "vat": ["vat", "value added"],
-    "paye": ["paye", "take-home", "salary tax"],
-    "cit": ["corporation tax", "corporate tax", "cit"],
-    "customs": ["import", "customs", "cif", "tariff", "forodha"],
-    "registration": ["register", "tin", "sign up"],
-    "withholding": ["withholding", "wht", "kodi ya zuio", "zuio"],
-    "capital_gains": ["capital gains", "cgt", "sold"],
-    "rental": ["rental", "landlord", "tenancy", "kodi ya pango"],
-    "stamp": ["stamp duty", "property transfer", "land transfer"],
-    "motor_vehicle": ["motor vehicle", "logbook", "number plate"],
-    "excise": ["excise", "dts", "digital tax stamp"],
-    "efris": ["efris", "fiscal invoice"],
-    "escalation": ["human", "officer", "dispute", "appeal"],
-    "general_tax": ["omusolo", "kodi", "ushuru"],
+# Whole words only. Substring matching tagged "I run a private company" as VAT
+# ("pri-vat-e"), "the city council" as corporation tax and "getting started" as
+# TIN registration. Patterns are English, read against a turn's English form
+# (G119); the Luganda and Swahili words are a fallback for turns stored before
+# English forms were.
+_TOPIC_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("vat", (r"vat", r"value[\s-]added(?:\s+tax)?")),
+    ("paye", (r"paye", r"take[\s-]home(?:\s+pay)?", r"salary\s+tax", r"pay\s+as\s+you\s+earn")),
+    ("cit", (r"corporat(?:e|ion)\s+(?:income\s+)?tax", r"cit")),
+    ("customs", (r"import(?:s|ed|ing|er)?", r"customs", r"cif", r"tariffs?", r"forodha")),
+    ("registration", (r"regist(?:er|ers|ered|ering|ration)", r"tin", r"sign\s+up")),
+    ("withholding", (r"withholding", r"wht", r"kodi\s+ya\s+zuio", r"zuio")),
+    ("capital_gains", (r"capital\s+gains?", r"cgt")),
+    ("rental", (r"rental", r"landlords?", r"tenancy", r"renting\s+out", r"kodi\s+ya\s+pango")),
+    ("stamp", (r"stamp\s+duty", r"property\s+transfer", r"land\s+transfer")),
+    ("motor_vehicle", (r"motor\s+vehicles?", r"logbooks?", r"number\s+plates?")),
+    ("excise", (r"excise", r"dts", r"digital\s+tax\s+stamps?")),
+    ("efris", (r"efris", r"fiscal\s+invoices?")),
+    ("escalation", (r"officer", r"human", r"dispute", r"appeal", r"objection")),
+    ("general_tax", (r"omusolo", r"kodi", r"ushuru")),
+)
+_TOPIC_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
+    (tag, re.compile(r"\b(?:" + "|".join(patterns) + r")\b", re.I)) for tag, patterns in _TOPIC_PATTERNS
+)
+_TOPIC_LABELS: dict[str, str] = {
+    "vat": "VAT",
+    "paye": "PAYE",
+    "cit": "corporation tax",
+    "customs": "customs and imports",
+    "registration": "TIN registration",
+    "withholding": "withholding tax",
+    "capital_gains": "capital gains tax",
+    "rental": "rental income tax",
+    "stamp": "stamp duty",
+    "motor_vehicle": "motor vehicle registration",
+    "excise": "excise duty and digital tax stamps",
+    "efris": "EFRIS",
+    "escalation": "speaking to an officer",
+    "general_tax": "general tax questions",
 }
 
 
+def topic_label(text: str) -> str:
+    """A readable label for the topic *text* names, or "" when it names none."""
+    tag = _guess_topic_tag(text)
+    return "" if tag == "general" else _TOPIC_LABELS.get(tag, tag.replace("_", " "))
+
+
 def _guess_topic_tag(text: str) -> str:
-    t = (text or "").lower()
-    for tag, keywords in _TOPIC_KEYWORDS.items():
-        if any(k in t for k in keywords):
+    """The first topic *text* names, or ``general``."""
+    for tag, pattern in _TOPIC_RES:
+        if pattern.search(text or ""):
             return tag
     return "general"
+
+
+def _ordered_topic_tags(texts: list[str]) -> list[str]:
+    """Specific topics in the order the conversation first named them.
+
+    ``general_tax`` (a bare "omusolo") counts only when nothing more specific
+    was named.
+    """
+    tags: list[str] = []
+    for text in texts:
+        for tag, pattern in _TOPIC_RES:
+            if tag not in tags and pattern.search(text or ""):
+                tags.append(tag)
+    specific = [t for t in tags if t != "general_tax"]
+    return specific or tags
+
+
+def _join_labels(labels: list[str]) -> str:
+    if len(labels) <= 1:
+        return "".join(labels)
+    return f"{', '.join(labels[:-1])} and {labels[-1]}"
+
+
+def _user_text(turn: dict[str, Any]) -> str:
+    """A taxpayer turn's English form when stored, else its own words."""
+    if "user_message" in turn:
+        return str(turn.get("user_message_en") or turn.get("user_message") or "").strip()
+    if turn.get("role") in ("user", "user_message"):
+        return str(turn.get("content_en") or turn.get("content") or turn.get("message") or "").strip()
+    return ""
 
 
 # ---------------------------------------------------------------------------
