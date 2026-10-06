@@ -100,11 +100,9 @@ workflow ownership, transcript access, and export/erasure behavior.
    (`language_state.normalize_locale_tag`: `sw-UG` → `sw`, `lug` → `lg`). See
    the [2026-10-06 follow-up](MEMORY_CONTEXT_SESSION_REVIEW_2026-10-06.md),
    which also found that "an explicit supported locale, including `en`" above
-   switched auto-detection off for the web client (G113). Current primary tags `en`,
-   `lg`, and `sw` are valid BCP 47 language subtags, but regioned/case-varied
-   values such as `sw-UG` are not canonicalized yet. Normalize tags once, retain
-   the selected tag for rendering, and use the supported base language for
-   routing and memory cues.
+   switched auto-detection off for the web client (G113). The base language
+   (`en`, `lg`, `sw`) now drives routing and memory cues; a regioned or
+   case-varied tag such as `sw-UG` or `SW` is reduced to it at the boundary.
 
 ## Verification evidence
 
