@@ -16,7 +16,7 @@ on the load suite's Luganda and Swahili questions
 | Phase | Scope | Gaps | Status |
 |---|---|---|---|
 | 1 | The answer language as conversation state; streaming/REST routing parity | G113–G118 | **Shipped** (this PR) |
-| 2 | Each turn stored in English beside the original; English history for the model; the context window and token budget | G119, G120 | Open |
+| 2 | Each turn stored in English beside the original; English history for the model; the context window and token budget | G119, G120 | **Shipped** |
 | 3 | Memory lifecycle: one episode per conversation, word-boundary topic tags on the English form, lg/sw fact cues, fact validity periods | G121 | Open |
 | 4 | Sessions and channels: anonymous history across tabs, chat context carried into a call, multi-turn Luganda calls, no Gemini in the call path | G122 | Open |
 | 5 | History scrubbed before it is replayed, `gen_ai.conversation.id` on traces, a trilingual multi-turn evaluation | G123 | Open |
@@ -65,17 +65,42 @@ whose first message gives no language of its own ("TIN?").
 the browser sends); frontend `useChatStore`, `LanguageMenu` and `SettingsDialog`
 tests. Live verification on the GPU stack is recorded in the PR.
 
-## Open findings (phases 2–5)
+## Phase 2 — what changed and why
 
-- **G119 — history in the taxpayer's language reaches an English generator.**
-  Turns are stored as the raw message and the translated reply; the last three
-  are replayed into a prompt that asks for English, and the rewriter, entity
-  extraction and summaries work on that text. The English form of each turn
-  exists at runtime but is not stored.
-- **G120 — a context hole and no token budget under vLLM.** Six turns load, the
-  summary starts at turn 7, the prompt uses three. `_count_tokens` returns 0
-  without a local tokenizer, and the fallback assumes 3 characters per token
-  against Sunflower's 4,096-token limit.
+**History in English for the models (G119).** Each Luganda or Swahili turn is
+now stored with its English form beside the original: the question as it was
+routed and the answer before translation (`conversations.user_message_en`,
+`bot_reply_en`), on every transport that logs a turn — REST, SSE, WebSocket,
+voice chat and calls. `context_manager.english_view` hands the generator, the
+rewriter, entity extraction and the rolling summary the English, while
+transcripts, exports and the audit trail keep what the taxpayer typed and saw.
+This keeps the prompt in one language (mixed-language input degrades answers)
+and roughly halves the tokens a Luganda thread spends on history. Search text
+that is already English — what the history-aware rewriter now tends to return —
+is not translated again.
+
+**No hole between the prompt and the summary, and a real budget (G120).** The
+prompt replays the last three turns and the summary now covers every older one.
+`llm._fit_to_context` asks vLLM for its served window and the prompt's exact
+token count, drops the oldest exchanges whole, then shortens passages without
+touching the question or the answer-language instruction. The streamed answer —
+the web client's path — had no budget at all; all four vLLM paths now share this
+one.
+
+**Verified live (GPU stack, 2026-10-06).** The turn phase 1 left wrong — decided
+English, answered in Luganda — is answered in English. A six-turn Luganda thread
+completed with every reply in Luganda, and the log shows prompts trimmed to the
+4,096-token window (3,349 and 3,790 prompt tokens). Every Luganda question was
+stored with its English form.
+
+**Known limit.** A reply has a stored English form only when it was translated
+from English. When the model writes Luganda directly — the calculator's
+trilingual lines, or Sunflower answering a Luganda question in Luganda despite
+the instruction — there is no English text to store, and that turn is replayed
+in Luganda. Translating such replies back for history would cost a model call
+per turn; it is left until it shows up as a problem.
+
+## Open findings (phases 3–5)
 - **G121 — memory lifecycle.** The episode is rewritten by every turn
   (`turn_count` sticks at 2); topic tags match substrings ("private" → VAT,
   "city" → CIT, "getting" → registration); industry cues are English-only; only

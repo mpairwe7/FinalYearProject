@@ -48,12 +48,42 @@ _TAXPAYER_STATUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+#: Earlier turns the LLM prompt replays verbatim (``llm._build_messages``).
+#: Every older turn is in the rolling summary instead, so none falls between
+#: the two (G120: the prompt used the last three while the summary started at
+#: turn seven, and turns four to six reached the model in neither).
+PROMPT_VERBATIM_TURNS = 3
+
+_TURN_EXTRAS = ("locale", "user_message_en", "bot_reply_en")
+
+
 def _with_locale(turn: dict[str, str], source: dict[str, Any]) -> dict[str, str]:
-    """*turn* plus *source*'s stored ``locale``, when it has one."""
-    stored = str(source.get("locale") or "").strip()
-    if stored:
-        turn["locale"] = stored
+    """*turn* plus *source*'s stored ``locale`` and English forms, when present."""
+    for key in _TURN_EXTRAS:
+        stored = str(source.get(key) or "").strip()
+        if stored:
+            turn[key] = stored
     return turn
+
+
+def english_view(turns: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Turns as the models should read them: in English wherever it was stored.
+
+    A Luganda or Swahili turn is stored with its English form (G119). The
+    generator answers in English, and the rewriter, entity extraction and
+    summary match English patterns, so they all read that form; the stored
+    ``locale`` is kept for the answer-language decision.
+    """
+    out: list[dict[str, str]] = []
+    for turn in turns:
+        view = {
+            "user_message": turn.get("user_message_en") or turn.get("user_message", ""),
+            "bot_reply": turn.get("bot_reply_en") or turn.get("bot_reply", ""),
+        }
+        if turn.get("locale"):
+            view["locale"] = turn["locale"]
+        out.append(view)
+    return out
 
 
 def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -98,9 +128,10 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
         if role == "user":
             if current_user:
                 turns.append({"user_message": current_user, "bot_reply": ""})
-            current_user = content
+            current_user = str(item.get("content_en") or "").strip() or content
         elif role in ("assistant", "system", "bot", "model"):
-            turns.append(_with_locale({"user_message": current_user, "bot_reply": content}, item))
+            reply = str(item.get("content_en") or "").strip() or content
+            turns.append(_with_locale({"user_message": current_user, "bot_reply": reply}, item))
             current_user = ""
         elif "user_message" in item or "bot_reply" in item:
             turns.append({
@@ -251,21 +282,24 @@ class RollingContextManager:
         raw_history: list[dict[str, Any]] | None,
         conversation_id: str = "",
     ) -> ConversationContext:
-        """Construct a multi-turn context object with rolling summary and entity slots."""
-        normalized = normalize_history_turns(raw_history)
+        """Construct a multi-turn context object with rolling summary and entity slots.
+
+        Every turn is in its model-facing (English) form, see
+        :func:`english_view`. ``recent_turns`` is the last ``recent_limit``
+        turns, for the rewriter and the language decision; the summary covers
+        every turn the prompt does not replay verbatim
+        (:data:`PROMPT_VERBATIM_TURNS`).
+        """
+        normalized = english_view(normalize_history_turns(raw_history))
         if self.max_total_turns > 0 and len(normalized) > self.max_total_turns:
             normalized = normalized[-self.max_total_turns :]
         total = len(normalized)
 
         entities = extract_conversation_entities(normalized)
 
-        if total <= self.recent_limit:
-            recent = normalized
-            summary = ""
-        else:
-            older_turns = normalized[:-self.recent_limit]
-            recent = normalized[-self.recent_limit:]
-            summary = summarize_older_turns(older_turns)
+        recent = normalized[-self.recent_limit:] if self.recent_limit > 0 else normalized
+        verbatim = max(1, min(PROMPT_VERBATIM_TURNS, self.recent_limit or PROMPT_VERBATIM_TURNS))
+        summary = summarize_older_turns(normalized[:-verbatim]) if total > verbatim else ""
 
         return ConversationContext(
             recent_turns=recent,

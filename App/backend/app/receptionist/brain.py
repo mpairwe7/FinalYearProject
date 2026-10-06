@@ -826,6 +826,9 @@ class UraReceptionistBrain(LLMService):
             "handoff": rag_result.get("handoff"),
             "locale": "lg",
             "english_query": english_query,
+            # The turn in English, for the call's model-facing history (G119).
+            "_english_message": english_query,
+            "_english_reply": english_reply,
         }
 
     async def on_caller_idle(self) -> None:
@@ -963,6 +966,9 @@ class UraReceptionistBrain(LLMService):
 
         # Save Q/A in database conversation history for continuity & tickets
         try:
+            from ..service import ChatModel
+
+            _english_forms = ChatModel.english_forms
             db.log_conversation(
                 session_id=self.room.call_id,
                 conversation_id=self.room.state.conversation_id,
@@ -974,6 +980,7 @@ class UraReceptionistBrain(LLMService):
                 user_id=self.room.state.user_id,
                 locale=self.room.state.locale,
                 tenant_id=self.room.state.tenant_id or "default",
+                **_english_forms(result, served_reply=bot_reply),
             )
         except Exception:
             logger.debug("Failed logging conversation turn to DB", exc_info=True)

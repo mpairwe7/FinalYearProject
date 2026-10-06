@@ -540,10 +540,10 @@ def _build_messages(
 
     # Conversation history (multi-turn, sliding window of normalized recent turns)
     if conversation_history:
-        from .context_manager import normalize_history_turns
+        from .context_manager import PROMPT_VERBATIM_TURNS, english_view, normalize_history_turns
 
-        normalized = normalize_history_turns(conversation_history)
-        for turn in normalized[-3:]:
+        normalized = english_view(normalize_history_turns(conversation_history))
+        for turn in normalized[-PROMPT_VERBATIM_TURNS:]:
             u_msg = turn.get("user_message", "").strip()
             b_msg = turn.get("bot_reply", "").strip()
             if u_msg:
@@ -1025,6 +1025,150 @@ async def _get_vllm_async_client(timeout_s: float = VLLM_HTTP_TIMEOUT) -> Any:
         return _vllm_async_client
 
 
+# ---------------------------------------------------------------------------
+# Prompt budget (G120)
+# ---------------------------------------------------------------------------
+# vLLM rejects a request whose prompt plus ``max_tokens`` exceeds the context it
+# was started with (``--max-model-len``: 4,096 for Sunflower on the GPU stack),
+# and LLM_CONTEXT_WINDOW need not match it. The budget below asks the server for
+# both numbers — the served window (``/v1/models``) and the prompt's exact token
+# count with its chat template (``/tokenize``) — and falls back to a
+# conservative estimate only when the server cannot say.
+
+#: Characters per token when the server cannot count. Luganda takes about twice
+#: English's tokens and Swahili about 1.5x, so the English rule of thumb (3-4)
+#: overran the window on exactly the turns that needed the room.
+_FALLBACK_CHARS_PER_TOKEN = 2.5
+#: Ask again after this long when the server could not answer.
+_VLLM_LIMITS_RETRY_S = 300.0
+_vllm_limits: dict[str, float] = {"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0}
+_vllm_limits_lock = threading.Lock()
+
+
+def _vllm_auth_headers() -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
+        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+    return headers
+
+
+def _vllm_root_url() -> str:
+    """``/tokenize`` is served at the root, beside ``/v1``."""
+    base = VLLM_BASE_URL.rstrip("/")
+    return base[: -len("/v1")] if base.endswith("/v1") else base
+
+
+def _served_context_window() -> int:
+    """The context length the vLLM server was started with, or 0 if unknown."""
+    now = time.time()
+    with _vllm_limits_lock:
+        known = int(_vllm_limits["max_model_len"])
+        if known or now - _vllm_limits["models_checked_at"] < _VLLM_LIMITS_RETRY_S:
+            return known
+        _vllm_limits["models_checked_at"] = now
+    length = 0
+    try:
+        client = _get_vllm_client(5.0)
+        if client is not None:
+            resp = client.get(f"{VLLM_BASE_URL.rstrip('/')}/models", headers=_vllm_auth_headers(), timeout=5.0)
+            resp.raise_for_status()
+            for model in resp.json().get("data", []):
+                if model.get("max_model_len"):
+                    length = int(model["max_model_len"])
+                    break
+    except Exception:
+        logger.debug("vLLM /models unavailable; the prompt budget uses LLM_CONTEXT_WINDOW", exc_info=True)
+    with _vllm_limits_lock:
+        _vllm_limits["max_model_len"] = float(length)
+    return length
+
+
+def _count_prompt_tokens(messages: list[dict[str, Any]]) -> int | None:
+    """The prompt's exact token count from the server, chat template included."""
+    if time.time() < _vllm_limits["tokenize_down_until"]:
+        return None
+    try:
+        client = _get_vllm_client(5.0)
+        if client is None:
+            return None
+        resp = client.post(
+            f"{_vllm_root_url()}/tokenize",
+            json={"model": LLM_MODEL, "messages": messages, "add_generation_prompt": True},
+            headers=_vllm_auth_headers(),
+            timeout=5.0,
+        )
+        resp.raise_for_status()
+        count = resp.json().get("count")
+        return int(count) if count is not None else None
+    except Exception:
+        _vllm_limits["tokenize_down_until"] = time.time() + _VLLM_LIMITS_RETRY_S
+        logger.debug("vLLM /tokenize unavailable; the budget falls back to an estimate", exc_info=True)
+        return None
+
+
+def _estimate_tokens(text: str) -> int:
+    return int(len(text or "") / _FALLBACK_CHARS_PER_TOKEN)
+
+
+def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
+    return sum(_estimate_tokens(str(m.get("content") or "")) + 8 for m in messages)
+
+
+def _shorten_passages(content: str, keep_ratio: float) -> str:
+    """Shorten what comes before the question; never the question or what follows it.
+
+    The final user message is passages, then ``## User question`` and the
+    answer-language instruction. Cutting its end — what the budget used to do —
+    removed exactly the part the model must not lose.
+    """
+    keep_ratio = max(0.0, min(1.0, keep_ratio))
+    marker = content.find("## User question")
+    if marker <= 0:
+        keep = int(len(content) * keep_ratio)
+        return content[len(content) - keep :] if keep else content[-200:]
+    head, tail = content[:marker], content[marker:]
+    keep = int(len(head) * keep_ratio)
+    return f"{head[:keep].rstrip()}\n\n{tail}" if keep else tail
+
+
+def _fit_to_context(messages: list[dict[str, Any]], max_tokens: int, *, extra_tokens: int = 0) -> int:
+    """Trim *messages* in place to the served window; return a safe ``max_tokens``.
+
+    Drops the oldest replayed exchanges first (whole user/assistant pairs), then
+    shortens the passages in the active request, keeping its question and
+    instructions. Nothing at or after the active request (the last user
+    message) is dropped: in a tool loop what follows it is the model's tool
+    calls and their results, which mean nothing without the question.
+    ``extra_tokens`` covers what the messages do not carry, such as tool schemas.
+    """
+    served = _served_context_window()
+    window = min(LLM_CONTEXT_WINDOW, served) if served else LLM_CONTEXT_WINDOW
+    answer = max(64, min(max_tokens, window // 2))
+    budget = max(256, window - answer - 16)
+
+    exact = _count_prompt_tokens(messages)
+    count = (exact if exact is not None else _estimate_prompt_tokens(messages)) + extra_tokens
+    if count > budget:
+        active = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=len(messages) - 1)
+        while count > budget and active > 1:
+            pair = active > 2 and messages[1].get("role") == "user" and messages[2].get("role") == "assistant"
+            drop = 2 if pair else 1
+            removed = messages[1 : 1 + drop]
+            del messages[1 : 1 + drop]
+            active -= drop
+            count -= _estimate_prompt_tokens(removed)
+        if count > budget and messages:
+            request = messages[active]
+            content = str(request.get("content") or "")
+            request_tokens = max(1, _estimate_tokens(content))
+            room = request_tokens - (count - budget)
+            request["content"] = _shorten_passages(content, room / request_tokens)
+        recount = _count_prompt_tokens(messages)
+        count = (recount if recount is not None else _estimate_prompt_tokens(messages)) + extra_tokens
+        logger.info("Prompt trimmed to the %d-token window (%d prompt tokens)", window, count)
+    return max(16, min(max_tokens, window - count - 8))
+
+
 def _vllm_generate(
     messages: list[dict[str, str]],
     *,
@@ -1043,27 +1187,7 @@ def _vllm_generate(
         import json as _json
         import urllib.request
 
-        # Ensure total context length respects model's context window without premature truncation
-        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        while total_chars > max_prompt_chars:
-            if len(messages) > 2:
-                popped = messages.pop(1)
-                total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
-                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
-                total_chars = sum(len(m.get("content", "")) for m in messages)
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
-                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
-                total_chars = sum(len(m.get("content", "")) for m in messages)
-            else:
-                break
-
-        est_prompt_tokens = max(100, total_chars // 3)
-        safe_max_tokens = min(
-            LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
-        )
+        safe_max_tokens = _fit_to_context(messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens)
 
         body_dict = {
             "model": LLM_MODEL,
@@ -1123,25 +1247,9 @@ async def async_vllm_generate(
     try:
         import asyncio
 
-        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
-        total_chars = sum(len(m.get("content", "")) for m in messages)
-        while total_chars > max_prompt_chars:
-            if len(messages) > 2:
-                popped = messages.pop(1)
-                total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
-                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
-                total_chars = sum(len(m.get("content", "")) for m in messages)
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
-                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
-                total_chars = sum(len(m.get("content", "")) for m in messages)
-            else:
-                break
-
-        est_prompt_tokens = max(100, total_chars // 3)
-        safe_max_tokens = min(
-            LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
+        # The budget asks the server for counts; keep that off the event loop.
+        safe_max_tokens = await asyncio.to_thread(
+            _fit_to_context, messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens
         )
 
         body_dict = {
@@ -1201,26 +1309,9 @@ def _vllm_chat_completion(
         import json as _json
         import urllib.request
 
-        tools_chars = len(_json.dumps(tools)) if tools else 0
-        max_prompt_chars = max(12000, (LLM_CONTEXT_WINDOW - LLM_MAX_TOKENS) * 3)
-        total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
-        while total_chars > max_prompt_chars:
-            if len(messages) > 2:
-                popped = messages.pop(1)
-                total_chars -= len(popped.get("content", ""))
-            elif len(messages) > 1 and len(messages[-1].get("content", "")) > max_prompt_chars // 2:
-                messages[-1]["content"] = messages[-1]["content"][: max_prompt_chars // 2]
-                total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
-            elif len(messages) > 0 and len(messages[0].get("content", "")) > max_prompt_chars // 2:
-                messages[0]["content"] = messages[0]["content"][: max_prompt_chars // 2]
-                total_chars = sum(len(m.get("content", "")) for m in messages) + tools_chars
-            else:
-                break
-
-        est_prompt_tokens = max(100, total_chars // 3)
-        safe_max_tokens = min(
-            LLM_MAX_TOKENS if max_tokens is None else max_tokens,
-            max(256, LLM_CONTEXT_WINDOW - est_prompt_tokens),
+        tools_tokens = _estimate_tokens(_json.dumps(tools)) if tools else 0
+        safe_max_tokens = _fit_to_context(
+            messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens, extra_tokens=tools_tokens
         )
 
         payload: dict[str, Any] = {
@@ -1335,6 +1426,8 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
         import json as _json
         import urllib.request
 
+        # The streamed answer had no budget at all: a long thread overran the window.
+        stream_max_tokens = _fit_to_context(messages, LLM_MAX_TOKENS)
         body_dict = {
             "model": LLM_MODEL,
             "messages": messages,
@@ -1342,7 +1435,7 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
             "top_p": 0.95,
             "min_p": LLM_MIN_P,
             "presence_penalty": LLM_PRESENCE_PENALTY,
-            "max_tokens": LLM_MAX_TOKENS,
+            "max_tokens": stream_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -2087,10 +2180,10 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     ]
 
     if conversation_history:
-        from .context_manager import normalize_history_turns
+        from .context_manager import PROMPT_VERBATIM_TURNS, english_view, normalize_history_turns
 
-        normalized = normalize_history_turns(conversation_history)
-        for turn in normalized[-3:]:
+        normalized = english_view(normalize_history_turns(conversation_history))
+        for turn in normalized[-PROMPT_VERBATIM_TURNS:]:
             u_msg = turn.get("user_message", "").strip()
             b_msg = turn.get("bot_reply", "").strip()
             if u_msg:

@@ -198,18 +198,33 @@ class WsChatSession:
     # Phase 5: most recent speculative-prefetch prefix (cosmetic for now).
     last_partial_prefix: str = ""
 
-    def append_turn(self, user_msg: str, assistant_msg: str, locale: str = "") -> None:
+    def append_turn(
+        self,
+        user_msg: str,
+        assistant_msg: str,
+        locale: str = "",
+        *,
+        user_en: str = "",
+        assistant_en: str = "",
+    ) -> None:
         """Append a turn to the in-memory history (FIFO eviction).
 
         *locale* is the language the reply was given in; the next turn's
         answer language continues from it (``app.language_state``).
+        *user_en* / *assistant_en* are the turn in English when it was in
+        Luganda or Swahili: the models read those (G119).
         """
         if user_msg:
-            self.history.append({"role": "user", "content": user_msg})
+            entry: dict[str, str] = {"role": "user", "content": user_msg}
+            if user_en:
+                entry["content_en"] = user_en
+            self.history.append(entry)
         if assistant_msg:
             entry = {"role": "assistant", "content": assistant_msg}
             if locale:
                 entry["locale"] = locale
+            if assistant_en:
+                entry["content_en"] = assistant_en
             self.history.append(entry)
         # Trim oldest pairs once we exceed the cap.
         if len(self.history) > _HISTORY_CACHE_MAX:
@@ -260,11 +275,16 @@ class WsChatSession:
             u = r.get("user_message", "")
             b = r.get("bot_reply", "")
             if u:
-                hydrated.append({"role": "user", "content": u})
+                entry = {"role": "user", "content": u}
+                if r.get("user_message_en"):
+                    entry["content_en"] = str(r["user_message_en"])
+                hydrated.append(entry)
             if b:
                 entry = {"role": "assistant", "content": b}
                 if r.get("locale"):
                     entry["locale"] = str(r["locale"])
+                if r.get("bot_reply_en"):
+                    entry["content_en"] = str(r["bot_reply_en"])
                 hydrated.append(entry)
         self.history = hydrated
         self.last_response_id = previous_response_id
@@ -468,7 +488,18 @@ async def _run_response_create(
             if new_conv and not session.conversation_id:
                 session.conversation_id = new_conv
             if full_reply:
-                session.append_turn(user_input, full_reply, locale=str(result.get("locale") or ""))
+                english = service_module.ChatModel.english_forms(
+                    result,
+                    served_reply=full_reply,
+                    english_reply=str(final_log.get("english_reply") or ""),
+                )
+                session.append_turn(
+                    user_input,
+                    full_reply,
+                    locale=str(result.get("locale") or ""),
+                    user_en=english["user_message_en"],
+                    assistant_en=english["bot_reply_en"],
+                )
                 session.last_response_id = response_id
 
 
@@ -715,6 +746,11 @@ def _log_ws_turn(
             **flags.experiment_log_fields(
                 subject=user_id or None,
                 locale=str(result.get("locale") or ""),
+            ),
+            **_CM.english_forms(
+                result,
+                served_reply=full_reply,
+                english_reply=str(log_payload.get("english_reply") or ""),
             ),
         )
         stored_conversation_id = str(result.get("conversation_id") or conversation_id or "")

@@ -224,6 +224,23 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   the taxpayer picked (`locale_explicit: true`) takes priority; a short follow-up
   stays in the thread's language and a substantive message in another language
   switches it (`app.language_state`).
+- **Model-facing history is English (G119).** A Luganda or Swahili turn is stored
+  with its English form beside the original (`user_message_en`: the question as
+  routed; `bot_reply_en`: the answer before translation). The generator, the
+  rewriter, entity extraction and the rolling summary read the English
+  (`context_manager.english_view`); transcripts, exports and the audit trail keep
+  the original. Luganda costs about twice English's tokens, so this also halves
+  the context a Luganda thread uses.
+- **No turn falls between the prompt and the summary (G120).** The prompt replays
+  the last `PROMPT_VERBATIM_TURNS` (3) turns verbatim; the rolling summary covers
+  every older one. Before, the summary started at turn seven and turns four to
+  six reached the model in neither.
+- **Prompt budget under vLLM (G120).** `llm._fit_to_context` asks the server for
+  its served window (`/v1/models` `max_model_len`, 4,096 for Sunflower) and the
+  prompt's exact token count (`/tokenize`); over budget it drops the oldest
+  replayed exchanges whole, then shortens the passages, never the question or
+  the answer-language instruction. The streamed answer, which had no budget,
+  goes through it too. Without `/tokenize` it estimates 2.5 characters per token.
 - History passed to both query rewriting and LLM generation
 - Topic and guided-workflow rows use an opaque key derived from the tenant,
   authenticated subject or anonymous session, and conversation. Workflow reads,

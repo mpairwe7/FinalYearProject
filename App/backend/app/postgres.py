@@ -419,6 +419,8 @@ def init_db() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_tenant_user ON workflow_sessions(tenant_id, user_id)")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_message_en TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_reply_en TEXT DEFAULT ''")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_conversations_tenant_thread ON conversations(tenant_id, conversation_id)")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
@@ -809,6 +811,8 @@ def log_conversation(
     flag_variants: str = "{}",
     locale: str = "",
     tenant_id: str = "default",
+    user_message_en: str = "",
+    bot_reply_en: str = "",
 ) -> str:
     """Mirrors :func:`database.log_conversation` exactly.
 
@@ -826,6 +830,8 @@ def log_conversation(
 
     user_message = redact_pii_text(user_message)
     bot_reply = redact_pii_text(bot_reply)
+    user_message_en = redact_pii_text(user_message_en or "")
+    bot_reply_en = redact_pii_text(bot_reply_en or "")
     row_id = str(uuid.uuid4())
     thread_id = conversation_id or row_id
     with pool.connection() as conn:
@@ -833,8 +839,8 @@ def log_conversation(
             cur.execute(
                 """INSERT INTO conversations (id, conversation_id, session_id, tenant_id, user_message, bot_reply,
                        sources, contexts, response_time_ms, confidence, topic_tag,
-                       user_id, flag_variants, locale, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       user_id, flag_variants, locale, created_at, user_message_en, bot_reply_en)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     row_id,
                     thread_id,
@@ -851,6 +857,8 @@ def log_conversation(
                     flag_variants or "{}",
                     locale or "",
                     time.time(),
+                    user_message_en,
+                    bot_reply_en,
                 ),
             )
         conn.commit()
@@ -869,23 +877,23 @@ def get_recent_turns(
         return []
     tenant_id = tenant_id or "default"
     if user_id and conversation_id:
-        sql = """SELECT user_message, bot_reply, locale FROM conversations
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                    WHERE tenant_id = %s AND conversation_id = %s AND user_id = %s
                    ORDER BY created_at DESC LIMIT %s"""
         args: tuple[Any, ...] = (tenant_id, conversation_id, user_id, limit)
     elif user_id and session_id:
-        sql = """SELECT user_message, bot_reply, locale FROM conversations
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                    WHERE tenant_id = %s AND session_id = %s AND user_id = %s
                    ORDER BY created_at DESC LIMIT %s"""
         args = (tenant_id, session_id, user_id, limit)
     elif not user_id and session_id:
         if conversation_id:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
+            sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                        WHERE tenant_id = %s AND session_id = %s AND conversation_id = %s
                        ORDER BY created_at DESC LIMIT %s"""
             args = (tenant_id, session_id, conversation_id, limit)
         else:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
+            sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
                        WHERE tenant_id = %s AND session_id = %s
                        ORDER BY created_at DESC LIMIT %s"""
             args = (tenant_id, session_id, limit)
@@ -894,7 +902,16 @@ def get_recent_turns(
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, args)
         rows = cur.fetchall()
-    return [{"user_message": r[0], "bot_reply": r[1], "locale": r[2] or ""} for r in reversed(rows)]
+    return [
+        {
+            "user_message": r[0],
+            "bot_reply": r[1],
+            "locale": r[2] or "",
+            "user_message_en": r[3] or "",
+            "bot_reply_en": r[4] or "",
+        }
+        for r in reversed(rows)
+    ]
 
 
 def get_conversation_context(
