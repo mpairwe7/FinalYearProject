@@ -15,9 +15,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import unittest
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -153,6 +155,7 @@ class FactsFromTheEnglishFormTest(unittest.TestCase):
             )
             facts = memory.semantic.read(user_id=user)
         self.assertEqual([(f.object_value, f.extractor_model) for f in facts], [("sole_trader", "rules-v1+en")])
+        self.assertAlmostEqual(facts[0].confidence, 0.85 * 0.95, places=4)
 
 
 class RegistrationsAreStatedNotAskedTest(unittest.TestCase):
@@ -324,6 +327,59 @@ class StreamedTurnMemoryTest(unittest.TestCase):
             )
             model._persist_personalization_turn.assert_not_called()
 
+    def test_stream_to_finalizer_handoff_persists_consented_turn(self) -> None:
+        """Verify generate_retrieval_only through stream-to-finalizer handoff forwards consent and English translation."""
+        from app import service
+
+        model = MagicMock()
+
+        def _retrieval_only(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            turn_out = kwargs.get("turn_out")
+            if isinstance(turn_out, dict):
+                turn_out["source"] = "auto_detect"
+                turn_out["english_message"] = "What is VAT?"
+                turn_out["memory_consent"] = "1"
+            return {
+                "reply": "VAT ni 18%.",
+                "retrieval_mode": "abstained",
+                "conversation_id": "c-stream-1",
+                "locale": "sw",
+                "sources": [],
+                "citations": [],
+                "_hits": [],
+                "agent_role": "rag_answerer",
+            }
+
+        model.generate_retrieval_only.side_effect = _retrieval_only
+
+        async def _run() -> list[Any]:
+            events = []
+            async for ev in service.run_chat_turn(
+                model,
+                message="VAT kye ki?",
+                conversation_id="c-stream-1",
+                top_k=4,
+                locale="sw",
+                session_id="s-stream-1",
+                request_id="req-1",
+                user_id="u-stream-1",
+                tenant_id="default",
+            ):
+                events.append(ev)
+            return events
+
+        with patch.object(service, "localize_reply", side_effect=lambda text, loc: text):
+            asyncio.run(_run())
+
+        model._persist_personalization_turn.assert_called_once()
+        kwargs = model._persist_personalization_turn.call_args.kwargs
+        self.assertEqual(
+            (kwargs["message"], kwargs["message_en"], kwargs["reply"]),
+            ("VAT kye ki?", "What is VAT?", "VAT ni 18%."),
+        )
+        self.assertEqual(kwargs["user_id"], "u-stream-1")
+        self.assertEqual(kwargs["conversation_id"], "c-stream-1")
+
 
 class CallTurnConfidenceGateTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -351,6 +407,17 @@ class CallTurnConfidenceGateTest(unittest.IsolatedAsyncioTestCase):
     async def test_confident_turn_is_remembered(self) -> None:
         await self.brain._generate_and_speak("How do I register for a TIN?", 0.9)
         self.assertIs(self.chat_model.generate.call_args.kwargs["memory_write"], True)
+
+    async def test_zero_confidence_words_stay_below_memory_gate(self) -> None:
+        """Verify word confidence of 0.0 is preserved and stays below the memory persistence gate."""
+        from app.speech_service import WordConf
+
+        self.brain.room.state.locale = "lg"
+        words = [WordConf(word="ebyamaguzi", prob=0.0)]
+        await self.brain.handle_external_question("ebyamaguzi byange", words=words)
+        self.assertEqual(self.brain.room.state.word_probs[-1], 0.0)
+        self.chat_model.generate.assert_called()
+        self.assertIs(self.chat_model.generate.call_args.kwargs["memory_write"], False)
 
 
 class SchemaMigrationErrorHandlingTest(unittest.TestCase):

@@ -478,7 +478,9 @@ class UraReceptionistBrain(LLMService):
         th = get_clarify_threshold_for(language)
         word_probs: list[float] = []
         for w in words:
-            prob = getattr(w, "prob", None) or (w.get("prob") if isinstance(w, dict) else 1.0)
+            prob = getattr(w, "prob", None)
+            if prob is None:
+                prob = w.get("prob") if isinstance(w, dict) else 1.0
             word_str = getattr(w, "word", None) or (w.get("word") if isinstance(w, dict) else "")
             word_probs.append(prob)
             if prob < th:
