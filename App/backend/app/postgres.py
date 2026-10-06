@@ -270,8 +270,19 @@ def init_db() -> None:
         provider   TEXT NOT NULL DEFAULT 'mock',
         payload    TEXT NOT NULL,
         status     TEXT NOT NULL DEFAULT 'queued',
-        created_at DOUBLE PRECISION NOT NULL
+        created_at DOUBLE PRECISION NOT NULL,
+        sent_at    DOUBLE PRECISION,
+        delivered_at DOUBLE PRECISION,
+        error      TEXT DEFAULT '',
+        provider_msg_id TEXT DEFAULT '',
+        retries    INTEGER DEFAULT 0
     );
+
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS sent_at DOUBLE PRECISION;
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS delivered_at DOUBLE PRECISION;
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS error TEXT DEFAULT '';
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS provider_msg_id TEXT DEFAULT '';
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS answer_overrides (
         id           TEXT PRIMARY KEY,
@@ -1739,6 +1750,9 @@ def enqueue_notification(
     payload: dict[str, Any],
     *,
     provider: str = "mock",
+    status: str = "queued",
+    provider_msg_id: str = "",
+    error: str = "",
 ) -> dict[str, Any]:
     import json as _json
     import uuid as _uuid
@@ -1750,46 +1764,154 @@ def enqueue_notification(
         return {}
     nid = str(_uuid.uuid4())
     now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """INSERT INTO notification_outbox
-               (id, user_id, channel, provider, payload, status, created_at)
-               VALUES (%s, %s, %s, %s, %s, 'queued', %s)""",
-            (nid, uid, ch, provider, _json.dumps(payload or {}), now),
+               (id, user_id, channel, provider, payload, status, created_at, sent_at, delivered_at, error, provider_msg_id, retries)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)""",
+            (nid, uid, ch, provider, _json.dumps(payload or {}), status, now, sent_at, delivered_at, error, provider_msg_id),
         )
         conn.commit()
+    is_live = provider != "mock"
     return {
         "id": nid,
         "user_id": uid,
         "channel": ch,
         "provider": provider,
-        "status": "queued",
-        "live": False,
+        "status": status,
+        "live": is_live,
+        "sent_at": sent_at,
+        "delivered_at": delivered_at,
+        "error": error,
+        "provider_msg_id": provider_msg_id,
+        "retries": 0,
+        "created_at": now,
     }
 
 
-def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+def update_notification_status(
+    nid: str,
+    status: str,
+    *,
+    provider: str = "",
+    provider_msg_id: str = "",
+    error: str = "",
+) -> bool:
+    pool = _get_pool()
+    if pool is None:
+        return False
+    now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """UPDATE notification_outbox
+               SET status = %s,
+                   provider = CASE WHEN %s != '' THEN %s ELSE provider END,
+                   provider_msg_id = CASE WHEN %s != '' THEN %s ELSE provider_msg_id END,
+                   error = %s,
+                   sent_at = COALESCE(sent_at, %s),
+                   delivered_at = COALESCE(delivered_at, %s),
+                   retries = retries + 1
+               WHERE id = %s""",
+            (status, provider, provider, provider_msg_id, provider_msg_id, error, sent_at, delivered_at, nid),
+        )
+        conn.commit()
+    return True
+
+
+def get_notification_by_id(nid: str) -> dict[str, Any] | None:
+    import json as _json
+
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, user_id, channel, provider, payload, status, created_at,
+                      sent_at, delivered_at, error, provider_msg_id, retries
+               FROM notification_outbox WHERE id = %s""",
+            (nid,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    raw = row[4]
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except _json.JSONDecodeError:
+            pass
+    return {
+        "id": row[0],
+        "user_id": row[1],
+        "channel": row[2],
+        "provider": row[3],
+        "payload": raw,
+        "status": row[5],
+        "created_at": row[6],
+        "sent_at": row[7],
+        "delivered_at": row[8],
+        "error": row[9] or "",
+        "provider_msg_id": row[10] or "",
+        "retries": row[11] or 0,
+        "live": row[3] != "mock",
+    }
+
+
+def get_outbox_stats() -> dict[str, int]:
+    pool = _get_pool()
+    if pool is None:
+        return {"queued": 0, "sent": 0, "delivered": 0, "failed": 0, "total": 0}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT status, COUNT(*) as cnt FROM notification_outbox GROUP BY status"""
+        )
+        rows = cur.fetchall()
+    stats = {"queued": 0, "sent": 0, "delivered": 0, "failed": 0, "total": 0}
+    for r in rows:
+        st = str(r[0]).lower()
+        c = int(r[1])
+        stats[st] = c
+        stats["total"] += c
+    return stats
+
+
+def list_notification_outbox(
+    user_id: str = "",
+    limit: int = 50,
+    status: str = "",
+) -> list[dict[str, Any]]:
     import json as _json
 
     pool = _get_pool()
     if pool is None:
         return []
     cap = max(1, min(limit, 200))
+    query = """SELECT id, user_id, channel, provider, payload, status, created_at,
+                      sent_at, delivered_at, error, provider_msg_id, retries
+               FROM notification_outbox"""
+    params: list[Any] = []
+    clauses: list[str] = []
+
+    if user_id:
+        clauses.append("user_id = %s")
+        params.append(user_id)
+    if status:
+        clauses.append("status = %s")
+        params.append(status.lower().strip())
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC LIMIT %s"
+    params.append(cap)
+
     with pool.connection() as conn, conn.cursor() as cur:
-        if user_id:
-            cur.execute(
-                """SELECT id, user_id, channel, provider, payload, status, created_at
-                   FROM notification_outbox WHERE user_id = %s
-                   ORDER BY created_at DESC LIMIT %s""",
-                (user_id, cap),
-            )
-        else:
-            cur.execute(
-                """SELECT id, user_id, channel, provider, payload, status, created_at
-                   FROM notification_outbox ORDER BY created_at DESC LIMIT %s""",
-                (cap,),
-            )
+        cur.execute(query, tuple(params))
         rows = cur.fetchall()
+
     out = []
     for r in rows:
         raw = r[4]
@@ -1807,6 +1929,12 @@ def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[st
                 "payload": raw,
                 "status": r[5],
                 "created_at": r[6],
+                "sent_at": r[7] if len(r) > 7 else None,
+                "delivered_at": r[8] if len(r) > 8 else None,
+                "error": r[9] if len(r) > 9 else "",
+                "provider_msg_id": r[10] if len(r) > 10 else "",
+                "retries": r[11] if len(r) > 11 else 0,
+                "live": r[3] != "mock",
             }
         )
     return out

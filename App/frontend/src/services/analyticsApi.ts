@@ -284,6 +284,35 @@ export interface CorpusTombstone {
   created_by: string;
 }
 
+export interface OutboxItem {
+  id: string;
+  user_id: string;
+  channel: string;
+  provider: string;
+  payload?: Record<string, unknown>;
+  status: string;
+  created_at: number;
+  sent_at?: number | null;
+  delivered_at?: number | null;
+  error?: string;
+  provider_msg_id?: string;
+  retries?: number;
+  live?: boolean;
+}
+
+export interface OutboxResponse {
+  items: OutboxItem[];
+  live: boolean;
+  providers?: Record<string, { configured: boolean; backend?: string; status: string; live?: boolean }>;
+  stats?: {
+    total: number;
+    queued: number;
+    sent: number;
+    delivered: number;
+    failed: number;
+  };
+}
+
 export interface StatutoryPrecedence {
   id: string;
   topic: string;
@@ -532,10 +561,21 @@ export const analyticsApi = {
     }),
   deletePrecedence: (id: string) =>
     fetchJson<{ ok: boolean }>(`/v1/admin/precedences/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  outbox: () =>
-    fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
-      "/v1/admin/outbox",
-    ),
+  outbox: () => fetchJson<OutboxResponse>("/v1/admin/outbox"),
+  dispatchOutbox: () =>
+    fetchJson<{ ok: boolean; processed: number; sent: number; failed: number }>("/v1/admin/outbox/dispatch", {
+      method: "POST",
+    }),
+  retryOutbox: (id: string) =>
+    fetchJson<{ ok: boolean; status: string; provider?: string }>(`/v1/admin/outbox/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    }),
+  testNotification: (payload: { channel: string; recipient: string; message: string; subject?: string }) =>
+    fetchJson<{ ok: boolean; provider: string; status: string; id: string; provider_msg_id?: string }>("/v1/admin/outbox/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   auditEvents: ({ eventType = "", actor = "", since, beforeSeq, limit = 50 }: AuditQuery = {}) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (eventType) params.set("event_type", eventType);

@@ -957,9 +957,16 @@ def init_db() -> None:
     _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "analytics_events", "user_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "sessions", "user_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "notification_outbox", "sent_at", "REAL")
+    _ensure_column(conn, "notification_outbox", "delivered_at", "REAL")
+    _ensure_column(conn, "notification_outbox", "error", "TEXT DEFAULT ''")
+    _ensure_column(conn, "notification_outbox", "provider_msg_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "notification_outbox", "retries", "INTEGER DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON analytics_events(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_outbox_status ON notification_outbox(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_outbox_created ON notification_outbox(created_at)")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -2364,6 +2371,9 @@ def enqueue_notification(
     payload: dict[str, Any],
     *,
     provider: str = "mock",
+    status: str = "queued",
+    provider_msg_id: str = "",
+    error: str = "",
 ) -> dict[str, Any]:
     uid = (user_id or "").strip()
     ch = (channel or "").strip().lower()
@@ -2372,39 +2382,129 @@ def enqueue_notification(
     conn = _get_connection()
     nid = str(uuid.uuid4())
     now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
     body = json.dumps(payload or {}, ensure_ascii=True)
     conn.execute(
         """INSERT INTO notification_outbox
-           (id, user_id, channel, provider, payload, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'queued', ?)""",
-        (nid, uid, ch, provider, body, now),
+           (id, user_id, channel, provider, payload, status, created_at, sent_at, delivered_at, error, provider_msg_id, retries)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (nid, uid, ch, provider, body, status, now, sent_at, delivered_at, error, provider_msg_id, 0),
     )
     conn.commit()
+    is_live = provider != "mock"
     return {
         "id": nid,
         "user_id": uid,
         "channel": ch,
         "provider": provider,
-        "status": "queued",
-        "live": False,
+        "status": status,
+        "live": is_live,
+        "sent_at": sent_at,
+        "delivered_at": delivered_at,
+        "error": error,
+        "provider_msg_id": provider_msg_id,
+        "retries": 0,
+        "created_at": now,
     }
 
 
-def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+def update_notification_status(
+    nid: str,
+    status: str,
+    *,
+    provider: str = "",
+    provider_msg_id: str = "",
+    error: str = "",
+) -> bool:
+    """Update outbox item delivery state, timestamps, and retry counts."""
     conn = _get_connection()
+    now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
+    try:
+        conn.execute(
+            """UPDATE notification_outbox
+               SET status = ?,
+                   provider = CASE WHEN ? != '' THEN ? ELSE provider END,
+                   provider_msg_id = CASE WHEN ? != '' THEN ? ELSE provider_msg_id END,
+                   error = ?,
+                   sent_at = COALESCE(sent_at, ?),
+                   delivered_at = COALESCE(delivered_at, ?),
+                   retries = retries + 1
+               WHERE id = ?""",
+            (status, provider, provider, provider_msg_id, provider_msg_id, error, sent_at, delivered_at, nid),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        safe_nid = str(nid).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to update notification status for id=%s", safe_nid)
+        conn.rollback()
+        return False
+
+
+def get_notification_by_id(nid: str) -> dict[str, Any] | None:
+    """Fetch single notification outbox item by UUID."""
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT id, user_id, channel, provider, payload, status, created_at, sent_at, delivered_at, error, provider_msg_id, retries
+           FROM notification_outbox WHERE id = ?""",
+        (nid,),
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    raw = item.get("payload")
+    if isinstance(raw, str):
+        try:
+            item["payload"] = json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+    return item
+
+
+def get_outbox_stats() -> dict[str, int]:
+    """Retrieve aggregate delivery statistics from the notification outbox."""
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT status, COUNT(*) as cnt FROM notification_outbox GROUP BY status"""
+    ).fetchall()
+    stats = {"queued": 0, "sent": 0, "delivered": 0, "failed": 0, "total": 0}
+    for r in rows:
+        st = str(r["status"]).lower()
+        c = int(r["cnt"])
+        stats[st] = c
+        stats["total"] += c
+    return stats
+
+
+def list_notification_outbox(
+    user_id: str = "",
+    limit: int = 50,
+    status: str = "",
+) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    cap = max(1, min(limit, 200))
+    query = """SELECT id, user_id, channel, provider, payload, status, created_at,
+                      sent_at, delivered_at, error, provider_msg_id, retries
+               FROM notification_outbox"""
+    params: list[Any] = []
+    clauses: list[str] = []
+
     if user_id:
-        rows = conn.execute(
-            """SELECT id, user_id, channel, provider, payload, status, created_at
-               FROM notification_outbox WHERE user_id = ?
-               ORDER BY created_at DESC LIMIT ?""",
-            (user_id, max(1, min(limit, 200))),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT id, user_id, channel, provider, payload, status, created_at
-               FROM notification_outbox ORDER BY created_at DESC LIMIT ?""",
-            (max(1, min(limit, 200)),),
-        ).fetchall()
+        clauses.append("user_id = ?")
+        params.append(user_id)
+    if status:
+        clauses.append("status = ?")
+        params.append(status.lower().strip())
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(cap)
+
+    rows = conn.execute(query, tuple(params)).fetchall()
     out = []
     for row in rows:
         item = dict(row) if isinstance(row, dict) else {
@@ -2415,7 +2515,13 @@ def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[st
             "payload": row[4],
             "status": row[5],
             "created_at": row[6],
+            "sent_at": row[7] if len(row) > 7 else None,
+            "delivered_at": row[8] if len(row) > 8 else None,
+            "error": row[9] if len(row) > 9 else "",
+            "provider_msg_id": row[10] if len(row) > 10 else "",
+            "retries": row[11] if len(row) > 11 else 0,
         }
+        item["live"] = item.get("provider", "") != "mock"
         raw = item.get("payload")
         if isinstance(raw, str):
             try:
@@ -3844,6 +3950,9 @@ if ANALYTICS_BACKEND == "postgres":
         upsert_reminder_inbox = _pg.upsert_reminder_inbox  # type: ignore
         list_reminder_inbox = _pg.list_reminder_inbox  # type: ignore
         enqueue_notification = _pg.enqueue_notification  # type: ignore
+        update_notification_status = _pg.update_notification_status  # type: ignore
+        get_notification_by_id = _pg.get_notification_by_id  # type: ignore
+        get_outbox_stats = _pg.get_outbox_stats  # type: ignore
         list_notification_outbox = _pg.list_notification_outbox  # type: ignore
         get_answer_override = _pg.get_answer_override  # type: ignore
         upsert_answer_override = _pg.upsert_answer_override  # type: ignore

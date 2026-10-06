@@ -142,6 +142,9 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("PATCH", "/v1/admin/precedences/{precedence_id}"),
     ("DELETE", "/v1/admin/precedences/{precedence_id}"),
     ("GET", "/v1/admin/outbox"),
+    ("POST", "/v1/admin/outbox/dispatch"),
+    ("POST", "/v1/admin/outbox/test"),
+    ("POST", "/v1/admin/outbox/{notification_id}/retry"),
     ("GET", "/v1/admin/audit/events"),
     ("GET", "/v1/admin/audit/verify"),
     ("POST", "/v1/admin/audit/seal"),
@@ -294,6 +297,9 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("PATCH", "/v1/admin/precedences/{precedence_id}"): "App.backend.tests.test_discrepancy_and_precedence",
     ("DELETE", "/v1/admin/precedences/{precedence_id}"): "App.backend.tests.test_discrepancy_and_precedence",
     ("GET", "/v1/admin/outbox"): "App.backend.tests.test_remaining_gaps",
+    ("POST", "/v1/admin/outbox/dispatch"): "this:test_outbox_live_endpoints",
+    ("POST", "/v1/admin/outbox/test"): "this:test_outbox_live_endpoints",
+    ("POST", "/v1/admin/outbox/{notification_id}/retry"): "this:test_outbox_live_endpoints",
     ("GET", "/v1/admin/audit/events"): "test_auditor_controls:test_auditor_reads_the_trail_and_filters_it",
     ("GET", "/v1/admin/audit/verify"): "test_auditor_controls:test_verify_detects_a_tampered_row",
     ("POST", "/v1/admin/audit/seal"): "test_auditor_controls:test_sealing_is_for_audit_readers_and_catches_a_rewrite",
@@ -483,7 +489,7 @@ def test_manifest_endpoint_count():
     """Lock the surface size so additions are deliberate (110 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 110, f"expected 110 HTTP endpoints, found {len(http)}"
+    assert len(http) == 113, f"expected 113 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -883,6 +889,51 @@ def test_connectors_endpoints():
     r6 = c.post("/v1/connectors/efris/configure", json={"mode": "simulation"}, headers=_bearer(STAFF))
     assert r6.status_code == 200
     assert r6.json()["ok"] is True
+
+
+def test_outbox_live_endpoints() -> None:
+    c = _client()
+    # Anonymous and non-staff rejected
+    assert c.get("/v1/admin/outbox").status_code in (401, 503)
+    assert c.post("/v1/admin/outbox/dispatch").status_code in (401, 503)
+    assert c.post("/v1/admin/outbox/test", json={"channel": "email", "recipient": "test@ura.go.ug", "message": "hi"}).status_code in (401, 503)
+
+    # Staff can query outbox and inspect live provider statuses
+    res = c.get("/v1/admin/outbox", headers=_bearer(STAFF))
+    assert res.status_code == 200
+    data = res.json()
+    assert "items" in data
+    assert "live" in data
+    assert "providers" in data
+    assert "stats" in data
+
+    # Staff can send a live test notification
+    test_res = c.post(
+        "/v1/admin/outbox/test",
+        json={
+            "channel": "email",
+            "recipient": "taxpayer@ura.go.ug",
+            "message": "Your monthly VAT reminder is ready.",
+            "subject": "VAT Filing Reminder",
+        },
+        headers=_bearer(STAFF),
+    )
+    assert test_res.status_code == 200
+    test_data = test_res.json()
+    assert test_data["ok"] is True
+    assert "id" in test_data
+    nid = test_data["id"]
+
+    # Staff can retry notification
+    retry_res = c.post(f"/v1/admin/outbox/{nid}/retry", headers=_bearer(STAFF))
+    assert retry_res.status_code == 200
+    assert retry_res.json()["ok"] is True
+
+    # Staff can trigger outbox dispatch
+    dispatch_res = c.post("/v1/admin/outbox/dispatch", headers=_bearer(STAFF))
+    assert dispatch_res.status_code == 200
+    assert dispatch_res.json()["ok"] is True
+    assert "processed" in dispatch_res.json()
 
 
 if __name__ == "__main__":

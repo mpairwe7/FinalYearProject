@@ -41,6 +41,8 @@ try:
 except ImportError:  # pragma: no cover – uvicorn always present at runtime
     _HAS_PROXY_MIDDLEWARE = False
 
+from pydantic import BaseModel, Field
+
 from . import database as db
 from . import documents
 from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
@@ -3612,13 +3614,80 @@ def delete_precedence_endpoint(
     return {"ok": True, "id": precedence_id}
 
 
+class TestNotificationRequest(BaseModel):
+    channel: str = Field(..., description="Channel to test: email, sms, or webhook")
+    recipient: str = Field(..., description="Email address, phone number (+256...), or webhook URL")
+    message: str = Field(..., description="Notification message body")
+    subject: str = Field("URA Assistant Notification", description="Notification subject line")
+
+
 @app.get("/v1/admin/outbox", tags=["admin"])
 def list_outbox_endpoint(
+    status: str = Query("", description="Optional status filter: queued, sent, delivered, failed"),
+    limit: int = Query(50, ge=1, le=200),
     _ctx: AuthContext = Depends(require_admin_access),
-    limit: int = 50,
 ) -> dict:
-    """Mock email/SMS queue. provider=mock; nothing is sent."""
-    return {"items": db.list_notification_outbox(limit=limit), "live": False}
+    """Notification outbox with live provider metrics, status counts, and real-time state."""
+    from .notify import is_live, configured_providers
+
+    items = db.list_notification_outbox(limit=limit, status=status)
+    stats = db.get_outbox_stats()
+    return {
+        "items": items,
+        "live": is_live(),
+        "providers": configured_providers(),
+        "stats": stats,
+    }
+
+
+@app.post("/v1/admin/outbox/dispatch", tags=["admin"])
+def dispatch_outbox_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Trigger live drain and delivery of queued notification outbox messages."""
+    _require_staff_writer(ctx)
+    from .notify import drain_outbox
+
+    res = drain_outbox(limit=limit)
+    _audit_staff_action(ctx, "staff.outbox_dispatched", {"processed": res.get("processed", 0), "sent": res.get("sent", 0)})
+    return res
+
+
+@app.post("/v1/admin/outbox/{notification_id}/retry", tags=["admin"])
+def retry_outbox_endpoint(
+    notification_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Retry sending a specific queued or failed outbox notification."""
+    _require_staff_writer(ctx)
+    from .notify import retry_notification
+
+    res = retry_notification(notification_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Retry failed"))
+    _audit_staff_action(ctx, "staff.outbox_retried", {"notification_id": notification_id, "status": res.get("status")})
+    return res
+
+
+@app.post("/v1/admin/outbox/test", tags=["admin"])
+def test_outbox_endpoint(
+    req: TestNotificationRequest,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Send an immediate test notification across a live communication channel."""
+    _require_staff_writer(ctx)
+    from .notify import test_notification
+
+    res = test_notification(
+        channel=req.channel,
+        recipient=req.recipient,
+        message=req.message,
+        subject=req.subject,
+        user_id=ctx.user_id or "staff-test",
+    )
+    _audit_staff_action(ctx, "staff.outbox_test_sent", {"channel": req.channel, "status": res.get("status")})
+    return res
 
 
 @app.get("/v1/admin/audit/events", response_model=AuditEventsResponse, tags=["admin"])

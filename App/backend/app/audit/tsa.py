@@ -372,6 +372,21 @@ def _verify_signature(cert: Any, signature: bytes, data: bytes, hash_name: str, 
         raise TimestampError("the TSA signature does not verify") from exc
 
 
+def _cert_valid_range(cert: Any) -> tuple[dt.datetime, dt.datetime]:
+    """Compatibility helper for cryptography < 42.0.0 and >= 42.0.0."""
+    if hasattr(cert, "not_valid_before_utc"):
+        return cert.not_valid_before_utc, cert.not_valid_after_utc
+    import datetime as _dt
+
+    nvb = cert.not_valid_before
+    nva = cert.not_valid_after
+    if nvb.tzinfo is None:
+        nvb = nvb.replace(tzinfo=_dt.timezone.utc)
+    if nva.tzinfo is None:
+        nva = nva.replace(tzinfo=_dt.timezone.utc)
+    return nvb, nva
+
+
 def _check_tsa_certificate(cert: Any, gen_time: dt.datetime) -> None:
     from cryptography import x509
 
@@ -381,7 +396,8 @@ def _check_tsa_certificate(cert: Any, gen_time: dt.datetime) -> None:
         raise TimestampError("TSA certificate has no extended key usage") from exc
     if x509.ObjectIdentifier(OID_KP_TIME_STAMPING) not in usage:
         raise TimestampError("TSA certificate is not authorised for timeStamping")
-    if not cert.not_valid_before_utc <= gen_time <= cert.not_valid_after_utc:
+    not_before, not_after = _cert_valid_range(cert)
+    if not not_before <= gen_time <= not_after:
         raise TimestampError("TSA certificate was not valid at genTime")
 
 
@@ -408,9 +424,27 @@ def _issuing_ca_problem(issuer: Any, gen_time: dt.datetime, cas_below: int) -> s
         usage = None
     if usage is not None and not usage.key_cert_sign:
         return "an intermediate CA is not allowed to sign certificates"
-    if not issuer.not_valid_before_utc <= gen_time <= issuer.not_valid_after_utc:
+    not_before, not_after = _cert_valid_range(issuer)
+    if not not_before <= gen_time <= not_after:
         return "an intermediate CA was not valid at genTime"
     return ""
+
+
+def _verify_issued_by(cert: Any, issuer: Any) -> None:
+    """Verify that cert was directly signed by issuer (cryptography compatible)."""
+    if hasattr(cert, "verify_directly_issued_by"):
+        cert.verify_directly_issued_by(issuer)
+        return
+    from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
+
+    pub = issuer.public_key()
+    algo = cert.signature_hash_algorithm
+    if isinstance(pub, rsa.RSAPublicKey):
+        pub.verify(cert.signature, cert.tbs_certificate_bytes, padding.PKCS1v15(), algo)
+    elif isinstance(pub, ec.EllipticCurvePublicKey):
+        pub.verify(cert.signature, cert.tbs_certificate_bytes, ec.ECDSA(algo))
+    else:
+        pub.verify(cert.signature, cert.tbs_certificate_bytes)
 
 
 def _chain_to_anchor(cert: Any, intermediates: list[Any], anchors: list[Any], gen_time: dt.datetime) -> None:
@@ -431,7 +465,7 @@ def _chain_to_anchor(cert: Any, intermediates: list[Any], anchors: list[Any], ge
             if issuer.subject != current.issuer or issuer is current:
                 continue
             try:
-                current.verify_directly_issued_by(issuer)
+                _verify_issued_by(current, issuer)
             except Exception:
                 continue
             if issuer.fingerprint(_sha256_hash()) in anchor_prints:
