@@ -135,6 +135,30 @@ class PromptBudgetTest(unittest.TestCase):
         self.assertLessEqual(prompt_tokens + body["max_tokens"], 4096)
 
 
+class ToolLoopBudgetTest(unittest.TestCase):
+    """CodeRabbit on #543: a tool loop must keep its active question."""
+
+    def setUp(self) -> None:
+        llm._vllm_limits.update({"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0})
+
+    def test_the_active_request_and_its_tool_results_survive(self) -> None:
+        msgs = [{"role": "system", "content": "You are the URA assistant."}]
+        for i in range(4):
+            msgs.append({"role": "user", "content": f"old question {i} " + "x" * 900})
+            msgs.append({"role": "assistant", "content": f"old answer {i} " + "y" * 900})
+        msgs.append({"role": "user", "content": "## Retrieved passages\n" + "p" * 3000 + "\n\n## User question\nWhat is VAT?"})
+        msgs.append({"role": "assistant", "content": "", "tool_calls": [{"id": "t1"}]})
+        msgs.append({"role": "tool", "content": "rate: 18%", "tool_call_id": "t1"})
+        fake = _FakeVllm(window=4096)
+        with mock.patch.object(llm, "_get_vllm_client", return_value=fake), \
+             mock.patch.object(llm, "LLM_CONTEXT_WINDOW", 8192):
+            llm._fit_to_context(msgs, 512)
+        roles = [m["role"] for m in msgs]
+        self.assertEqual(roles[-3:], ["user", "assistant", "tool"])
+        self.assertIn("## User question\nWhat is VAT?", msgs[-3]["content"])
+        self.assertNotIn("old question 0", " ".join(m["content"] for m in msgs))
+
+
 class ShortenPassagesTest(unittest.TestCase):
     def test_keeps_everything_from_the_question_on(self) -> None:
         content = "## Retrieved passages\n" + "a" * 1000 + "\n\n## User question\nQ?\n\n## Answer language\nEnglish."

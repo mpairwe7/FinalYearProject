@@ -1135,9 +1135,11 @@ def _fit_to_context(messages: list[dict[str, Any]], max_tokens: int, *, extra_to
     """Trim *messages* in place to the served window; return a safe ``max_tokens``.
 
     Drops the oldest replayed exchanges first (whole user/assistant pairs), then
-    shortens the passages in the final message, keeping its question and
-    instructions. ``extra_tokens`` covers what the messages do not carry, such as
-    tool schemas.
+    shortens the passages in the active request, keeping its question and
+    instructions. Nothing at or after the active request (the last user
+    message) is dropped: in a tool loop what follows it is the model's tool
+    calls and their results, which mean nothing without the question.
+    ``extra_tokens`` covers what the messages do not carry, such as tool schemas.
     """
     served = _served_context_window()
     window = min(LLM_CONTEXT_WINDOW, served) if served else LLM_CONTEXT_WINDOW
@@ -1147,17 +1149,20 @@ def _fit_to_context(messages: list[dict[str, Any]], max_tokens: int, *, extra_to
     exact = _count_prompt_tokens(messages)
     count = (exact if exact is not None else _estimate_prompt_tokens(messages)) + extra_tokens
     if count > budget:
-        while count > budget and len(messages) > 2:
-            pair = len(messages) > 3 and messages[1].get("role") == "user" and messages[2].get("role") == "assistant"
-            removed = messages[1 : 3 if pair else 2]
-            del messages[1 : 3 if pair else 2]
+        active = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=len(messages) - 1)
+        while count > budget and active > 1:
+            pair = active > 2 and messages[1].get("role") == "user" and messages[2].get("role") == "assistant"
+            drop = 2 if pair else 1
+            removed = messages[1 : 1 + drop]
+            del messages[1 : 1 + drop]
+            active -= drop
             count -= _estimate_prompt_tokens(removed)
         if count > budget and messages:
-            last = messages[-1]
-            content = str(last.get("content") or "")
-            last_tokens = max(1, _estimate_tokens(content))
-            room = last_tokens - (count - budget)
-            last["content"] = _shorten_passages(content, room / last_tokens)
+            request = messages[active]
+            content = str(request.get("content") or "")
+            request_tokens = max(1, _estimate_tokens(content))
+            room = request_tokens - (count - budget)
+            request["content"] = _shorten_passages(content, room / request_tokens)
         recount = _count_prompt_tokens(messages)
         count = (recount if recount is not None else _estimate_prompt_tokens(messages)) + extra_tokens
         logger.info("Prompt trimmed to the %d-token window (%d prompt tokens)", window, count)

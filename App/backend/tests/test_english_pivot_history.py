@@ -200,6 +200,27 @@ class EnglishDecidedReplySafetyNetTest(unittest.TestCase):
             self.assertEqual(service._answer_in_english(self.LG_ANSWER), self.LG_ANSWER)
 
 
+class WebSocketResumeRestoresEnglishFormsTest(unittest.TestCase):
+    """CodeRabbit on #543: a resumed session replays the English forms too."""
+
+    def test_try_resume_carries_content_en(self) -> None:
+        from app import chat_ws_v2
+
+        session = chat_ws_v2.WsChatSession(
+            session_id="s", conversation_id="c", user_id="u", tenant_id="default", locale="lg"
+        )
+        rows = [
+            {"user_message": LG_TIN, "bot_reply": LG_REPLY, "locale": "lg", "user_message_en": EN_TIN, "bot_reply_en": EN_REPLY}
+        ]
+        with mock.patch.object(chat_ws_v2.db, "query_one", return_value={"1": 1}), \
+             mock.patch.object(chat_ws_v2.db, "get_recent_turns", return_value=rows):
+            self.assertTrue(session.try_resume("resp_x"))
+        self.assertEqual(
+            normalize_history_turns(session.history),
+            [{"user_message": EN_TIN, "bot_reply": EN_REPLY, "locale": "lg"}],
+        )
+
+
 class PromptReadsEnglishHistoryTest(unittest.TestCase):
     def test_build_messages_replays_the_english_form(self) -> None:
         from app import llm

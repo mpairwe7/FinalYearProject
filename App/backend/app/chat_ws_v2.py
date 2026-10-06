@@ -275,11 +275,16 @@ class WsChatSession:
             u = r.get("user_message", "")
             b = r.get("bot_reply", "")
             if u:
-                hydrated.append({"role": "user", "content": u})
+                entry = {"role": "user", "content": u}
+                if r.get("user_message_en"):
+                    entry["content_en"] = str(r["user_message_en"])
+                hydrated.append(entry)
             if b:
                 entry = {"role": "assistant", "content": b}
                 if r.get("locale"):
                     entry["locale"] = str(r["locale"])
+                if r.get("bot_reply_en"):
+                    entry["content_en"] = str(r["bot_reply_en"])
                 hydrated.append(entry)
         self.history = hydrated
         self.last_response_id = previous_response_id

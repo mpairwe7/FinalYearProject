@@ -1923,6 +1923,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 yield event
 
             if full_reply:
+                # Decided English, but the model wrote Luganda or Swahili: put
+                # it in English first, so the guards verify the reply that is
+                # served (see _answer_in_english).
+                if locale in ("", "en"):
+                    english_only = await asyncio.to_thread(_answer_in_english, full_reply)
+                    if english_only != full_reply:
+                        full_reply = english_only
+                        yield ("revision", full_reply)
                 # P0-3: run the SAME post-generation guard pipeline the
                 # token-streaming branch uses (judge + claim verification +
                 # grounded revision + escalation/handoff/ticket), not just a
@@ -1949,13 +1957,6 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # Same localization the token branch does below. The agentic
                 # path had none at all, so enabling `tool_use` silently turned
                 # every non-English conversation back into an English one.
-                # Decided English, but the model wrote Luganda or Swahili: the
-                # prompt carried another language (see _answer_in_english).
-                if locale in ("", "en"):
-                    english_only = await asyncio.to_thread(_answer_in_english, full_reply)
-                    if english_only != full_reply:
-                        full_reply = english_only
-                        yield ("revision", full_reply)
                 if locale not in ("", "en"):
                     yield ("translation.started", {"locale": locale})
                     localized = _localized(full_reply)
@@ -2188,6 +2189,15 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
             full_reply = _output_guard.redact_pii(full_reply)
 
+            # Decided English, but the model wrote Luganda or Swahili: put it
+            # in English first, so the guards verify the reply that is served
+            # (see _answer_in_english).
+            if locale in ("", "en"):
+                english_only = await asyncio.to_thread(_answer_in_english, full_reply)
+                if english_only != full_reply:
+                    full_reply = english_only
+                    yield ("revision", full_reply)
+
             guard = _apply_output_guards(
                 model,
                 message=message,
@@ -2219,13 +2229,6 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # text arrives as a revision, which the client already applies for
             # grounded revisions above. Emitted only when translation actually
             # changed something, so an English session sees no extra frame.
-            # Decided English, but the model wrote Luganda or Swahili: the
-            # prompt carried another language (see _answer_in_english).
-            if locale in ("", "en"):
-                english_only = await asyncio.to_thread(_answer_in_english, full_reply)
-                if english_only != full_reply:
-                    full_reply = english_only
-                    yield ("revision", full_reply)
             if locale not in ("", "en"):
                 # Announced, because it is the slow part of a non-English turn
                 # and the reader is looking at a finished English answer while
@@ -8556,10 +8559,6 @@ class ChatModel:
             # voice endpoint keying TTS off the caller's language would read
             # that English with the Luganda or Swahili voice.
             result["reply_locale"] = "en"
-            if effective in ("", "en") and result.get("reply"):
-                # Decided English, but the model may have followed another
-                # language in its prompt (see _answer_in_english).
-                result["reply"] = _answer_in_english(str(result["reply"]))
             if effective not in ("", "en"):
                 english = str(result.get("reply", ""))
                 result["reply"] = self._localize_reply(english, effective)
@@ -9937,6 +9936,12 @@ class ChatModel:
                 reply = NO_HITS_REPLY
                 if distress:
                     reply = f"{empathy_ack(distress)}\n\n{reply}"
+
+            # Decided English, but the model wrote Luganda or Swahili: put it in
+            # English before the guards and grounding checks read it
+            # (see _answer_in_english).
+            if locale in ("", "en") and reply:
+                reply = _answer_in_english(reply)
 
             # 6. Output guardrails (OWASP LLM02 + LLM05 + LLM07)
             with trace_stage("output_guard", timings=timings):
