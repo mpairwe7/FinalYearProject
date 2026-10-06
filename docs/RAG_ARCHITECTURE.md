@@ -29,8 +29,11 @@ User Query
   │     ├── extract_retrieval_preferences() — soft tax-type / current-FY boost
   │     └── decompose_query() — multi-intent split  [FLAG_QUERY_DECOMPOSITION]
   │
-  ├─► Stage 0c: Language Detection (query.py)
-  │     └── Auto-detect locale (en, lg, sw, nyn, ach) via regex + word patterns
+  ├─► Stage 0c: Answer language (language_state.py) — conversation state
+  │     ├── typed request > picked language (locale_explicit) > stored thread
+  │     │   language until a clear switch > detection > profile > English
+  │     └── English router form (_english_router_form): workflows, calculator,
+  │         topic, FAQ authorization gate and input guard read the English
   │
   ├─► Stage 1: Input Guardrails (guardrails.py → InputGuard)
   │     ├── Length check (MAX_INPUT_LENGTH=2000)
@@ -182,11 +185,19 @@ User Query
 
 **Locale in the streaming path.** `run_chat_turn` reassigns its `locale` from
 the retrieval result immediately after `generate_retrieval_only` returns, not
-from the caller's parameter. Detection runs *inside* that call, so a taxpayer
-who simply types Luganda arrives with `locale="en"` and the resolved value is
-only on the result. Keying off the parameter is what made the streaming path —
-the one the web and WebSocket clients actually use — answer non-English
-questions in English while `ChatModel.generate()` handled them correctly.
+from the caller's parameter. The decision is made *inside* that call
+(`app.language_state`, the same as `ChatModel.generate()`), so a taxpayer who
+simply types Luganda arrives with `locale="en"` and the resolved value is only
+on the result, with its `locale_source`. Keying off the parameter is what made
+the streaming path — the one the web and WebSocket clients actually use — answer
+non-English questions in English while `ChatModel.generate()` handled them
+correctly.
+
+**One routing contract for both paths.** `generate_retrieval_only` builds the
+same English router form as `generate()` and uses it for the FAQ authorization
+gate, guided workflows, the calculator, PRN generation, topic tracking and the
+input guard, and delivers an officer's reply before the bot answers (G114). The
+supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
 
 **Security in streaming path:**
 - Each token is XSS-sanitized via `OutputGuard.sanitize()`
@@ -207,8 +218,12 @@ questions in English while `ChatModel.generate()` handled them correctly.
 - Authenticated reads require tenant, subject, and conversation identity. Anonymous
   reads require the server-issued session identity; a bare conversation ID is not
   sufficient.
-- The stored locale is returned with each turn so language continuity is based on
-  taxpayer turns. An explicit supported request, including English, takes priority.
+- The stored locale (the language each turn was answered in) is returned with each
+  turn and kept by `normalize_history_turns`, so language continuity reads it rather
+  than re-detecting old text. A typed request ("answer in English") or a language
+  the taxpayer picked (`locale_explicit: true`) takes priority; a short follow-up
+  stays in the thread's language and a substantive message in another language
+  switches it (`app.language_state`).
 - History passed to both query rewriting and LLM generation
 - Topic and guided-workflow rows use an opaque key derived from the tenant,
   authenticated subject or anonymous session, and conversation. Workflow reads,

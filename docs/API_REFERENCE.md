@@ -127,7 +127,8 @@ POST /v1/chat
   "message": "What is the VAT rate in Uganda?",
   "conversation_id": "conv_123",
   "top_k": 4,
-  "locale": "en"
+  "locale": "en",
+  "locale_explicit": false
 }
 ```
 
@@ -136,7 +137,15 @@ POST /v1/chat
 | `message` | string | Yes | User's question (max 2000 chars) |
 | `conversation_id` | string | No | For conversation continuity |
 | `top_k` | integer | No | Number of passages to retrieve (1–10, default 4) |
-| `locale` | string | No | ISO 639-1 locale, e.g. `en`, `lg-UG` (default `en`) |
+| `locale` | string | No | ISO 639-1/639-3 or BCP 47 tag, e.g. `en`, `lg`, `sw-UG` (the region is dropped) |
+| `locale_explicit` | boolean | No | `true` when the taxpayer picked `locale`; `false` when it is only the client's default or an earlier detection. Omitted: a requested `lg`/`sw` counts as a choice and `en` as a default |
+
+**Which language the reply is in** (`app/language_state.py`), highest first:
+a request typed into the message ("answer in Luganda"); a language the
+taxpayer picked (`locale_explicit: true`); the language the conversation was
+last answered in, until a substantive message clearly switches; detection of
+this message; the profile's saved language for an ambiguous first message
+("TIN?", personalization consent only); English.
 
 **Response**
 ```json
@@ -157,6 +166,7 @@ POST /v1/chat
   "model": "ura-qwen2.5-3b-instruct",
   "conversation_id": "conv_123",
   "locale": "en",
+  "locale_source": "detected",
   "escalation_required": false,
   "escalation_reason": ""
 }
@@ -170,6 +180,7 @@ POST /v1/chat
 | `faithfulness_score` | float\|null | 0–1 grounding score (null if blocked/abstained) |
 | `retrieval_mode` | string | `hybrid`, `keyword`, `blocked`, or `abstained` |
 | `locale` | string | Locale used for response |
+| `locale_source` | string | Why: `explicit_request`, `client_explicit`, `continuity`, `switched`, `detected`, `profile` or `default`. A client should keep only the first two as the taxpayer's choice and treat the rest as a hint |
 | `escalation_required` | boolean | Whether human review is recommended |
 | `escalation_reason` | string | Reason(s) for escalation (e.g. `low_faithfulness=0.12; no_retrieval_results`) |
 
@@ -229,9 +240,11 @@ generated in English and translated on the way out (see
 which a complete English answer is already on screen — without a phase frame
 that reads as the assistant having answered in the wrong language.
 
-The locale those phases carry is the **effective** one. A caller that sends no
-`locale` gets `en`, and the server detects the real language from the message;
-`retrieval.completed` reports what it resolved.
+The locale those phases carry is the **effective** one, decided as described
+under `POST /v1/chat`: a caller that sends no locale, or `en` without
+`locale_explicit: true`, gets the language detected from the message or
+continued from the conversation. `retrieval.completed` and `metadata` report it
+with its `locale_source`.
 
 **cURL Example**
 ```bash
@@ -1586,7 +1599,7 @@ PUT /v1/me/profile
 |-------|------|----------|-------------|
 | `taxpayer_type` | string | No | `individual`, `business`, `ngo` |
 | `industry` | string | No | Industry sector |
-| `primary_language` | string | No | ISO 639-1 locale |
+| `primary_language` | string | No | `en`, `lg` or `sw`. With personalization consent, a saved `lg`/`sw` answers a new conversation whose first message gives no language of its own |
 | `detail_level` | string | No | `brief`, `standard`, `detailed` |
 
 **Response**: Updated profile object.

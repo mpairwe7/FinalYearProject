@@ -30,7 +30,10 @@ The implementation now:
   and conversation. Anonymous clients do not receive cross-connection resume.
 - Carries the stored locale into context and lets an explicit supported locale,
   including `en`, override automatic continuity. Inferred locale follows the
-  taxpayer's prior turns rather than assistant output.
+  taxpayer's prior turns rather than assistant output. *(Superseded 2026-10-06:
+  the web client sends `en` by default, so a bare `en` is now a hint unless the
+  client sets `locale_explicit`, and continuity reads the stored locale, which
+  `normalize_history_turns` had been dropping — G113/G116.)*
 
 ### Phase 2 — memory lifecycle and privacy
 
@@ -93,7 +96,11 @@ workflow ownership, transcript access, and export/erasure behavior.
    lacks a durable checkpoint/replay contract for an in-flight workflow. Add
    checkpoint versioning, resumable execution, and idempotency keys around
    external side effects before promising crash-safe agent continuation.
-6. **Normalize locale tags at the API boundary.** Current primary tags `en`,
+6. **~~Normalize locale tags at the API boundary.~~** **SHIPPED 2026-10-06**
+   (`language_state.normalize_locale_tag`: `sw-UG` → `sw`, `lug` → `lg`). See
+   the [2026-10-06 follow-up](MEMORY_CONTEXT_SESSION_REVIEW_2026-10-06.md),
+   which also found that "an explicit supported locale, including `en`" above
+   switched auto-detection off for the web client (G113). Current primary tags `en`,
    `lg`, and `sw` are valid BCP 47 language subtags, but regioned/case-varied
    values such as `sw-UG` are not canonicalized yet. Normalize tags once, retain
    the selected tag for rendering, and use the supported base language for
