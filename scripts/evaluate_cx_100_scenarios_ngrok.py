@@ -1013,16 +1013,16 @@ def run_scenario(client: requests.Session, base_url: str, scenario: CXScenario) 
         step_headers["X-Session-ID"] = sess_id
 
         resp = None
-        for attempt in range(5):
+        for attempt in range(3):
             t0 = time.perf_counter()
             try:
-                resp = client.post(chat_url, headers=step_headers, json=payload, timeout=60)
+                resp = client.post(chat_url, headers=step_headers, json=payload, timeout=25)
                 elapsed_s = time.perf_counter() - t0
                 total_time_s += elapsed_s
                 break
             except Exception as exc:
-                if attempt < 4:
-                    time.sleep(1.0 * (attempt + 1))
+                if attempt < 2:
+                    time.sleep(0.5 * (attempt + 1))
                     continue
                 results.append({
                     "turn": step_num,

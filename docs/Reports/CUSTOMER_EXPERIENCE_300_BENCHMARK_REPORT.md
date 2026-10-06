@@ -1,9 +1,9 @@
 # URA Assistant — 300-Test Customer Experience & Request Completion Benchmark Report
 
-> **Date:** 2026-10-05 17:58:37 UTC  
+> **Date:** 2026-10-05 20:06:10 UTC  
 > **Target Endpoint:** `https://struttingly-nongeological-briella.ngrok-free.dev/api`  
 > **Overall Request Completion Score:** **100.0%** (10/10 passed)  
-> **Latency:** P50: 0.85s | P95: 1.85s | Avg: 1.18s  
+> **Latency:** P50: 0.59s | P95: 1.46s | Avg: 0.7s  
 
 ---
 
@@ -15,7 +15,7 @@ This evaluation moves beyond static FAQ matching to evaluate whether the URA con
 
 | Pillar | Scenarios | Passed | Completion Rate | Status |
 |---|---|---|---|---|
-| Pillar 9: Omnichannel Tracking | 10 | 10 | 100.0% | 🟢 |
+| Pillar 1: Guided Workflows | 10 | 10 | 100.0% | 🟢 |
 
 ---
 

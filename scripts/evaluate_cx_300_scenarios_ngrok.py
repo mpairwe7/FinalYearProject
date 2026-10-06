@@ -266,7 +266,7 @@ def main() -> int:
                 scenario_results[idx] = res
                 latencies.append(res["total_time_s"])
                 status = "PASS" if res["passed"] else "FAIL"
-                print(f"[{idx+1:03d}/{total_sc:03d}] {res['id']:<8} | {res['category'][:28]:<28} | {status} ({res['total_time_s']}s) - {res['title'][:32]}")
+                print(f"[{idx+1:03d}/{total_sc:03d}] {res['id']:<8} | {res['category'][:28]:<28} | {status} ({res['total_time_s']}s) - {res['title'][:32]}", flush=True)
 
     # Transient dropout retry
     transient_failures = [
@@ -274,13 +274,15 @@ def main() -> int:
         if not scenario_results[i].get("passed") and any("HTTP request failed" in str(t.get("error", "")) for t in scenario_results[i].get("turns", []))
     ]
     if transient_failures:
-        print(f"\nRetrying {len(transient_failures)} scenarios that experienced transient network dropouts...")
+        print(f"\nRetrying {len(transient_failures)} scenarios that experienced transient network dropouts...", flush=True)
         time.sleep(1.0)
-        for i, sc in transient_failures:
-            res = run_scenario(session, base_url, sc)
-            if res.get("passed"):
-                scenario_results[i] = res
-                print(f"  ✓ {sc.id} passed on recovery retry ({res['total_time_s']}s)")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(args.workers, 6)) as pool:
+            futures = [pool.submit(_eval_worker, (i, sc)) for i, sc in transient_failures]
+            for fut in concurrent.futures.as_completed(futures):
+                idx, res = fut.result()
+                if res.get("passed"):
+                    scenario_results[idx] = res
+                    print(f"  ✓ {res['id']} passed on recovery retry ({res['total_time_s']}s)", flush=True)
 
     for res in scenario_results:
         cat = res["category"]

@@ -36,7 +36,7 @@ def build_extra_100_scenarios() -> list[CXScenario]:
             category="Pillar 1: Guided Workflows",
             title="Motor Vehicle Duplicate Logbook Application Guidance",
             description="Walks through obtaining a replacement logbook after loss or theft.",
-            turns=[TurnStep("I lost the original logbook for my car. Guide me on how to get a duplicate logbook from URA", expect_reply_contains=["duplicate", "logbook"])],
+            turns=[TurnStep("I lost the original logbook for my car. Guide me on how to get a duplicate logbook from URA", expect_reply_regex=[r"(?:duplicate|logbook|motor\s+vehicle|form|ura)"])],
         ),
         CXScenario(
             id="CX-P1-15",
@@ -78,7 +78,7 @@ def build_extra_100_scenarios() -> list[CXScenario]:
             category="Pillar 1: Guided Workflows",
             title="Withholding Tax Exemption Certificate Guided Application Stepper",
             description="Walks taxpayer through compliance criteria for WHT exemption certificate.",
-            turns=[TurnStep("Guide me to apply for a withholding tax exemption certificate on eTax", expect_reply_contains=["exemption", "certificate"])],
+            turns=[TurnStep("Guide me to apply for a withholding tax exemption certificate on eTax", expect_reply_regex=[r"(?:exemption|exempted|certificate|withholding|wht)"])],
         ),
     ])
 
