@@ -101,7 +101,9 @@ describe("client error reporting", () => {
     window.dispatchEvent(new ErrorEvent("error", { error: new RangeError("r"), filename: "https://x/app.js?v=1", lineno: 3, colno: 9 }));
     expect(beacon).toHaveBeenCalledTimes(1);
     uninstall();
-    window.dispatchEvent(new ErrorEvent("error", { error: new SyntaxError("s") }));
+    // No `error` object: with no listener left, Vitest rethrows an ErrorEvent
+    // that carries one as an uncaught exception and fails the run.
+    window.dispatchEvent(new ErrorEvent("error", { message: "s", filename: "https://x/other.js", lineno: 1, colno: 1 }));
     expect(beacon).toHaveBeenCalledTimes(1);
   });
 });
