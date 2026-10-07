@@ -1768,6 +1768,9 @@ answers on it, and download a branded PDF analysis report. Documents are
 held in ephemeral container storage shared across the app's worker
 processes (TTL ~2 h, dies with the container) and are bound to the
 uploading `X-Session-ID`; they are never written to the analytics DB.
+The composer suggests a general image question only when at least one image
+is accepted within the remaining attachment and file-size limits; rejected
+images do not leave a question in the draft without an attachment.
 
 ---
 
@@ -1782,7 +1785,10 @@ XLSX/XLSM, CSV, TXT, and images (PNG/JPEG/WebP/BMP/TIFF, OCR best-effort).
 Max 10 MB. Extracts text and tables, classifies the document against the
 URA taxonomy (receipt, tin_card, assessment, customs_declaration,
 filing_form, invoice, statutory_act, portal_screenshot, generic), and pulls TINs, UGX amounts, dates, and
-reference numbers. For portal screenshots, returns interactive diagnostic troubleshooting steps, UI click hotspots, and portal links.
+reference numbers. For portal screenshots, returns diagnostic guidance with
+suggested resolution steps, detected screen areas, and portal links. The UI
+presents screen areas as text and includes a reminder to verify the portal
+address and important tax actions.
 
 **Response** `200`
 ```json

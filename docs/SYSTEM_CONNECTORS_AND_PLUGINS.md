@@ -72,15 +72,21 @@ quality reports and `docs/runbooks/guided-journey-probes.md`.
 
 ## Staff controls and data access
 
-- Staff and administrators use `/admin/connectors` to see local health,
-  trigger live diagnostic pings, register new external connector endpoints via
-  the `+ Add Connector` modal (protected by SSRF validation and RFC 1918 loopback
-  guards), and inspect read-only connector resources.
+- Staff and administrators use `/admin/connectors` to review local health,
+  run local connector health checks, view deployment notes, and inspect
+  read-only connector resources. **Add connector** opens the deployment setup
+  guidance; it does not register a server or accept endpoint credentials.
+- `POST /v1/connectors/register` always returns `410 Gone`. New connectors
+  require a reviewed server implementation and deployment configuration. See
+  `docs/runbooks/enterprise-connectors-and-mcp.md` for the operational path.
+- `POST /v1/connectors/{name}/configure` also returns `410 Gone`; endpoint,
+  credential, and mode changes are not accepted at runtime.
 - The connector API requires administrator access; changing connector state
   also requires a staff-writer role.
-- Connector credentials and bearer tokens are vaulted using `TokenVault`
-  (AES-256-GCM envelope encryption with HKDF key derivation). Plaintext secrets
-  are never written to disk or logged.
+- The staff console and runtime connector APIs do not accept endpoint URLs or
+  credentials. Remote MCP bearer tokens are supplied through deployment-managed
+  `MCP_SERVER_TOKEN_<NAMESPACE>` settings and the platform secret store; never
+  put them in the browser or repository.
 - Mutating actions across connectors adhere to monetary ceilings (`MAX_TRANSACTION_CEILING_UGX = 50,000,000 UGX`)
   and distributed Redis velocity limits (10 mutating calls/hr).
 - Multi-step transactional sagas support compensation and rollback via

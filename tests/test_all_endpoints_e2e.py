@@ -885,10 +885,10 @@ def test_connectors_endpoints():
     assert r5.json()["ok"] is True
     assert "latency_ms" in r5.json()
 
-    # Enterprise connector configuration
+    # Runtime configuration is disabled; endpoint and credentials are deployment-only.
     r6 = c.post("/v1/connectors/efris/configure", json={"mode": "simulation"}, headers=_bearer(STAFF))
-    assert r6.status_code == 200
-    assert r6.json()["ok"] is True
+    assert r6.status_code == 410
+    assert "Runtime connector configuration is disabled" in r6.json()["detail"]
 
 
 def test_outbox_live_endpoints() -> None:

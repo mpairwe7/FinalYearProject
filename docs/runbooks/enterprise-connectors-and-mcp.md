@@ -28,10 +28,10 @@ The system manages 28 registered tools across core tax calculators, statutory ra
 
 The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI RMF**:
 
-### 2.1 Envelope Encryption for Credentials (`TokenVault`)
-- Connector secrets, bearer tokens, and partner API credentials are encrypted at rest using **AES-256-GCM envelope encryption** with HKDF key derivation.
-- Key material is sourced from `VAULT_MASTER_KEY` (or derived from `JWT_SECRET`).
-- Plaintext secrets are never logged, echoed in transcripts, or included in client payloads.
+### 2.1 Deployment-Managed Credentials
+- Remote MCP bearer tokens are injected as `MCP_SERVER_TOKEN_<NAMESPACE>` from the deployment secret store and sent by the transport in the `Authorization` header.
+- The staff console and runtime connector APIs do not accept or persist endpoint credentials. Keep secret values in the platform secret manager; never put them in browser forms, source control, or chat transcripts.
+- Restrict access to deployment secrets and rotate credentials through the owning platform's secret-management workflow.
 
 ### 2.2 Monetary Transaction Ceilings
 - Any tool execution carrying financial value (PRN payments, invoice adjustments, clearance duties) is evaluated against `MAX_TRANSACTION_CEILING_UGX` (default: **UGX 50,000,000**).
@@ -48,8 +48,9 @@ The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI R
 - When invoked by the model, the system emits an actionable confirmation proposal. Execution is blocked until the taxpayer or staff member explicitly approves the action with an idempotency key.
 
 ### 2.5 Server-Side Request Forgery (SSRF) Protection
-- Adding external connectors via the `/admin/connectors` workbench executes strict IP resolution filtering.
-- Connections targeting RFC 1918 private subnets, loopback addresses (`127.0.0.1`), metadata endpoints (`169.254.169.254`), or unresolvable domains are rejected immediately.
+- Dynamic endpoint registration and runtime connector configuration are disabled. `POST /v1/connectors/register` and `POST /v1/connectors/{name}/configure` return `410 Gone`; they do not validate or activate submitted endpoint or credential data.
+- Remote MCP endpoints are supplied through reviewed deployment configuration. Before rollout, review DNS resolution, HTTPS/TLS identity, redirects, and network egress rules so the configured server cannot reach loopback, private, or cloud metadata services.
+- The `/admin/connectors` screen only reports and checks configured connectors. Its health checks are not a substitute for the endpoint and network review.
 
 ### 2.6 Distributed Saga Compensation
 - Multi-action business sequences support atomic rollbacks via `SystemConnector.compensate()`.
@@ -61,18 +62,36 @@ The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI R
 
 ### 3.1 Inspecting Connector Health
 1. Navigate to `/admin/connectors` in the staff console.
-2. The dashboard displays real-time connectivity status, latency metrics, and error rates.
-3. To trigger an active probe, select **Ping** next to any connector.
+2. The dashboard identifies each built-in connector as a local simulation and shows local health and registered tool counts.
+3. Select **Test connection** to run the local connector health check and view its latency and tool count. This does not confirm an external service connection.
 
-### 3.2 Adding a New System Connector
-1. Open the `/admin/connectors` dashboard as a user with `ura_admin` and staff-writer privileges.
-2. Click **+ Add Connector**.
-3. Complete the form:
-   - **Connector ID**: Unique identifier (e.g., `customs_asycuda`).
-   - **Display Name**: Human-readable name.
-   - **Endpoint URL**: Must be a valid public HTTPS endpoint (SSRF-checked).
-   - **API Token**: Optional bearer token (automatically vaulted via AES-256-GCM).
-4. Save and trigger a live test ping.
+### 3.2 Deploying a New System Connector
+1. Open `/admin/connectors` and use **Add connector** to review the setup path. This dialog is guidance only; it does not submit or store connector data.
+2. Implement the connector server and register its namespace, tools, permissions, and protocol through the reviewed code change.
+3. Configure the remote endpoint with `MCP_SERVER_URL_<NAMESPACE>` and store any credential in the deployment secret store. Never submit bearer tokens or private keys through the browser.
+4. Review DNS/IP resolution, HTTPS/TLS identity, redirects, and outbound network access before deployment.
+5. Deploy the reviewed change and refresh `/admin/connectors`. **Test connection** checks local simulator health only; it does not probe the remote MCP server.
+6. From the deployed API runtime, confirm the resolved namespace binds to the approved remote transport and send an MCP ping. The configured bearer token is sent by the transport in the authorization header and must never be printed:
+
+   ```bash
+   PYTHONPATH=App/backend python3 - <<'PY'
+   from app.mcp import get_client
+
+   namespace = "tax_calculator"
+   client = get_client()
+   binding = client.health()["namespaces"].get(namespace, {})
+   expected_transport = f"http:{namespace}"
+   if binding.get("transport") != expected_transport:
+       raise SystemExit(f"{namespace} is not bound to its approved remote transport")
+   if not client.ping(namespace):
+       raise SystemExit(f"MCP ping failed for {namespace}")
+   print({"namespace": namespace, "transport": expected_transport, "reachable": True})
+   PY
+   ```
+
+   Compare the namespace's endpoint with the approved deployment configuration. For a server that requires bearer authentication, a successful ping confirms the configured credential was accepted. Never print or paste the credential. Enable supported actions only after the remote binding and authentication checks pass.
+
+The browser registration and configuration APIs fail closed with `410 Gone` for authorized requests that reach the handlers. A successful response must never be interpreted as a connector registration or configuration change.
 
 ### 3.3 Binding a Remote MCP Server
 To offload an in-process namespace (such as `tax_calculator`) to an out-of-process DMZ server:

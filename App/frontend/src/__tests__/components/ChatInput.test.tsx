@@ -110,10 +110,10 @@ describe("ChatInput attachments", () => {
 
   it("renders the attach button only when onAttachFiles is provided", () => {
     const { unmount } = render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
-    expect(screen.getByLabelText(/Attach a document/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Attach a file, screenshot, or photo/)).toBeInTheDocument();
     unmount();
     render(<ChatInput {...defaults} />);
-    expect(screen.queryByLabelText(/Attach a document/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Attach a file, screenshot, or photo/)).not.toBeInTheDocument();
   });
 
   it("offers document and photo attachments with the privacy reminder", async () => {
@@ -123,10 +123,46 @@ describe("ChatInput attachments", () => {
 
     await userEvent.click(addBtn);
 
-    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+    expect(screen.getByText("Upload a file or screenshot")).toBeInTheDocument();
     expect(screen.getByText("Take a photo")).toBeInTheDocument();
-    expect(screen.getByText(/Never share passwords or one-time codes/)).toBeInTheDocument();
+    expect(screen.getByText(/Files upload for analysis\. Hide passwords, one-time codes/)).toBeInTheDocument();
     expect(screen.queryByText("Add connector")).not.toBeInTheDocument();
+  });
+
+  it("adds the image prompt only when the attachment handler accepts an image", async () => {
+    const image = new File(["pixels"], "portal.png", { type: "image/png" });
+    const onAttachFiles = vi.fn(() => [image]);
+    const onMessageChange = vi.fn();
+    const { container } = render(
+      <ChatInput {...defaults} onAttachFiles={onAttachFiles} onMessageChange={onMessageChange} />,
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][multiple]');
+    expect(input).not.toBeNull();
+
+    await userEvent.upload(input!, image);
+
+    expect(onAttachFiles).toHaveBeenCalledOnce();
+    expect(onMessageChange).toHaveBeenCalledWith(
+      "Please review this image and help me understand what to do next.",
+    );
+  });
+
+  it("does not add an image prompt when the attachment handler rejects the image", async () => {
+    const image = new File(["pixels"], "portal.png", { type: "image/png" });
+    const onMessageChange = vi.fn();
+    const { container } = render(
+      <ChatInput
+        {...defaults}
+        onAttachFiles={vi.fn(() => [])}
+        onMessageChange={onMessageChange}
+      />,
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][multiple]');
+    expect(input).not.toBeNull();
+
+    await userEvent.upload(input!, image);
+
+    expect(onMessageChange).not.toHaveBeenCalled();
   });
 
   it("does not render any composer-connector-bar keeping prompt area clean", () => {

@@ -80,6 +80,8 @@ This release closes critical customer experience (CX) and operational gaps ident
   - **Upgraded Staff Workbench (`/admin/connectors`)**: Added an **"+ Add Connector"** modal dialog, live diagnostic ping button with real-time RTT latency badges (`✓ Ping OK (12 ms · 4 MCP tools)`), settings modal, and visual environment indicators (`Live Production` vs `Simulation Mode`).
   - **Public Composer Clarification**: Public chat attachments focus strictly on document uploads (PDF, Word, Excel, CSV) and camera capture, while connector infrastructure is managed through `/admin/connectors` behind `StaffGuard`.
 
+**Current behavior (2026-10-07):** The earlier workbench description above is superseded by the screenshot and connector-flow review. Built-in connector rows are explicitly labeled local simulations, **Test connection** checks local health, and the Add/Details dialogs provide deployment guidance. `POST /v1/connectors/register` and `POST /v1/connectors/{name}/configure` now fail closed with `410 Gone`; new server endpoints and credentials are supplied through reviewed deployment configuration. The screenshot flow now carries backend screenshot guidance into chat, uses a general image prompt for image attachments, and labels interpretation as potentially incomplete. See `docs/runbooks/enterprise-connectors-and-mcp.md` for the current connector procedure.
+
 ### 2.7 October 2026 Standards Hardening: Blast Radius, Vaulting, and Saga Compensation
 * **OWASP LLM06 Excessive Agency Mitigation (`App/backend/app/mcp/policy.py`)**:
   - Enforced monetary transaction ceilings (`MAX_TRANSACTION_CEILING_UGX` default 50M UGX), requiring supervisor/admin sign-off for proposals exceeding threshold.
