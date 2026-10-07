@@ -59,6 +59,10 @@ pnpm install
 pnpm dev
 ```
 
+The committed lockfile includes `pnpm` security overrides for vulnerable
+transitive dependencies. When changing these floors, update the lockfile with
+`pnpm install --lockfile-only` in the same change.
+
 Open [http://localhost:3000](http://localhost:3000) to view the blog.
 
 ## Theme System
