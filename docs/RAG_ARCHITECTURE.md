@@ -88,6 +88,10 @@ User Query
   │     ├── Agentic path: generate_with_tools() [FLAG_TOOL_USE]
   │     │   ├── Bounded tool-calling loop (max 3 iterations)
   │     │   └── Tools: calculators, rates, calendar, KB search, escalation
+  │     ├── Explicitly selected remote MCP connectors [FLAG_ENTERPRISE_CONNECTORS]
+  │     │   ├── Deployment-bound namespaces only; role and consent checked at dispatch
+  │     │   ├── Explicit read-only declarations required; local companion tools are read-only too
+  │     │   └── External tool output is screened as untrusted before the next agent turn
   │     └── vLLM path: OpenAI-compatible HTTP dispatch [LLM_BACKEND=vllm]
   │
   ├─► Stage 6: Output Guardrails (guardrails.py → OutputGuard)
@@ -811,7 +815,7 @@ Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17
 
 All settings are configurable via environment variables. See [API Reference → Environment Variables](API_REFERENCE.md#environment-variables) for the complete list, or [PROJECT_SETUP.md](PROJECT_SETUP.md#5-environment-configuration) for a quick-start `.env` template.
 
-- `FLAG_ENTERPRISE_CONNECTORS` (default `false`): Reserved for reviewed enterprise integrations. It cannot enable local simulator fixtures in production; production remains fail-closed until a live connector implementation is reviewed and deployed.
+- `FLAG_ENTERPRISE_CONNECTORS` (default `false`): Allows explicitly selected, deployment-bound remote MCP connectors to expose eligible read-only operations in taxpayer chat after review. It never enables local simulator fixtures; production still requires a reviewed live service and its authorization controls.
 
 These built-ins remain local simulators even when enabled; their status is not
 evidence of a live URA, NIRA, URSB, bank, or payment connection. Connector

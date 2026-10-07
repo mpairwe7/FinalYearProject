@@ -28,6 +28,7 @@ import {
 import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
+import type { ChatConnector } from '../lib/connectors';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
@@ -323,6 +324,11 @@ export default function Page() {
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [chatConnectors, setChatConnectors] = useState<ChatConnector[]>([]);
+  const [connectorsEnabled, setConnectorsEnabled] = useState(false);
+  const [connectorsLoading, setConnectorsLoading] = useState(false);
+  const [connectorsError, setConnectorsError] = useState(false);
+  const [selectedConnectorNamespaces, setSelectedConnectorNamespaces] = useState<string[]>([]);
   const [inspectingDoc, setInspectingDoc] = useState<{
     id: string;
     name: string;
@@ -957,6 +963,49 @@ export default function Page() {
 
   // ---- Text chat (SSE) ----
 
+  const loadChatConnectors = useCallback(async () => {
+    setConnectorsLoading(true);
+    setConnectorsError(false);
+    try {
+      const response = await fetch(`${API_URL}/v1/connectors?view=chat`, {
+        method: 'GET',
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error('Connector catalog unavailable');
+      const payload = await response.json();
+      const available = Array.isArray(payload?.connectors)
+        ? payload.connectors.filter((connector: Partial<ChatConnector>): connector is ChatConnector =>
+            typeof connector.namespace === 'string' &&
+            typeof connector.label === 'string' &&
+            typeof connector.description === 'string' &&
+            typeof connector.operation_count === 'number' &&
+            connector.read_only === true,
+          )
+        : [];
+      setChatConnectors(available);
+      setConnectorsEnabled(payload?.enabled === true);
+      setSelectedConnectorNamespaces((current) =>
+        current.filter((namespace) => available.some((connector) => connector.namespace === namespace)),
+      );
+    } catch {
+      setConnectorsError(true);
+      setChatConnectors([]);
+      setConnectorsEnabled(false);
+      setSelectedConnectorNamespaces([]);
+    } finally {
+      setConnectorsLoading(false);
+    }
+  }, []);
+
+  const toggleChatConnector = useCallback((namespace: string) => {
+    setSelectedConnectorNamespaces((current) => {
+      if (current.includes(namespace)) return current.filter((item) => item !== namespace);
+      if (current.length >= 8) return current;
+      return [...current, namespace];
+    });
+  }, []);
+
   const sendMessage = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? message).trim();
     if (!text || isLoading) return;
@@ -1026,6 +1075,9 @@ export default function Page() {
       // backend detects the language from what they type.
       locale_explicit: localeExplicit,
       ...(sentAttachments.length ? { attachment_ids: sentAttachments.map((a) => a.id) } : {}),
+      ...(selectedConnectorNamespaces.length
+        ? { connector_namespaces: selectedConnectorNamespaces }
+        : {}),
     });
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
@@ -1396,7 +1448,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1791,6 +1843,13 @@ export default function Page() {
       window.setTimeout(() => scrollToBottom('smooth'), 80);
     },
     attachments: pendingAttachments,
+    chatConnectors,
+    connectorsEnabled,
+    connectorsLoading,
+    connectorsError,
+    selectedConnectorNamespaces,
+    onOpenConnectors: loadChatConnectors,
+    onToggleConnector: toggleChatConnector,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
     onInspectAttachment: (att: PendingAttachment) =>
@@ -1847,8 +1906,16 @@ export default function Page() {
           conversations={conversations}
           activeConversationId={activeConversationId}
           onClose={() => setSidebarOpen(false)}
-          onNewConversation={() => { createNewSession(); setSidebarOpen(false); }}
-          onSelectConversation={(id) => { switchSession(id); setSidebarOpen(false); }}
+          onNewConversation={() => {
+            setSelectedConnectorNamespaces([]);
+            createNewSession();
+            setSidebarOpen(false);
+          }}
+          onSelectConversation={(id) => {
+            setSelectedConnectorNamespaces([]);
+            switchSession(id);
+            setSidebarOpen(false);
+          }}
           onDeleteConversation={requestDeleteConversation}
           onRenameConversation={renameSession}
           onPinConversation={togglePinSession}
@@ -2044,6 +2111,7 @@ export default function Page() {
         conversations={conversations}
         onClose={() => setSearchOpen(false)}
         onSelect={(id) => {
+          setSelectedConnectorNamespaces([]);
           switchSession(id);
           setSidebarOpen(false);
         }}

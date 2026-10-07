@@ -1286,6 +1286,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     event_callback: Callable[[dict[str, Any]], None] | None = None,
     agent_role: str = "",
     context_summary: str = "",
+    connector_namespaces: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1327,6 +1328,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         event_callback=event_callback,
         agent_role=agent_role,
         context_summary=context_summary,
+        connector_namespaces=connector_namespaces or [],
     )
     try:
         result = future.result(timeout=deadline_s)
@@ -1702,6 +1704,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
     turn_deadline_s: float | None = None,
     attachments: list[Any] | None = None,
     locale_explicit: bool | None = None,
+    connector_namespaces: list[str] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run a single chat turn and stream event tuples to the caller.
 
@@ -1792,6 +1795,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             user_role=user_role,
             granted_purposes=granted_purposes,
             locale_explicit=locale_explicit,
+            connector_namespaces=connector_namespaces,
             turn_out=turn_out,
         )
         if turn_out.get("source"):
@@ -1914,7 +1918,14 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         force_tool_whitelist = result.get("_force_tool_whitelist")
         agent_role = str(result.get("agent_role") or "rag_answerer")
         use_agentic = (
-            (force_agentic or flags.is_enabled("tool_use"))
+            (
+                force_agentic
+                or flags.is_enabled("tool_use")
+                or (
+                    bool(connector_namespaces)
+                    and flags.is_enabled("enterprise_connectors")
+                )
+            )
             and llm_module.is_available()
             and not result.get("_suppress_agentic")
         )
@@ -1936,6 +1947,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 context_summary=context_summary,
                 tool_names=force_tool_whitelist,
                 agent_role=agent_role,
+                connector_namespaces=connector_namespaces,
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -2354,6 +2366,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     context_summary: str = "",
     tool_names: list[str] | None = None,
     agent_role: str = "",
+    connector_namespaces: list[str] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -2399,6 +2412,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             event_callback=_emit,
             agent_role=agent_role,
             context_summary=context_summary,
+            connector_namespaces=connector_namespaces,
         )
 
 
@@ -8508,6 +8522,7 @@ class ChatModel:
         channel: str = "rest",
         locale_explicit: bool | None = None,
         memory_write: bool = True,
+        connector_namespaces: list[str] | None = None,
     ) -> dict[str, Any]:
         """Answer *message*, rendered in *locale*.
 
@@ -8545,6 +8560,7 @@ class ChatModel:
                 usage=usage,
                 locale_explicit=locale_explicit,
                 memory_write=memory_write,
+                connector_namespaces=connector_namespaces,
             )
 
     def _generate_localized(
@@ -8565,6 +8581,7 @@ class ChatModel:
         usage: dict[str, int],
         locale_explicit: bool | None = None,
         memory_write: bool = True,
+        connector_namespaces: list[str] | None = None,
     ) -> dict[str, Any]:
         """:meth:`generate`'s body: the English answer, localized, then audited."""
         turn_out: dict[str, str] = {}
@@ -8583,6 +8600,7 @@ class ChatModel:
             locale_explicit=locale_explicit,
             turn_out=turn_out,
             memory_write=memory_write,
+            connector_namespaces=connector_namespaces,
         )
         if isinstance(result, dict) and turn_out.get("source"):
             # Why the reply is in this language: the client keeps a detected
@@ -8650,6 +8668,7 @@ class ChatModel:
         locale_explicit: bool | None = None,
         turn_out: dict[str, str] | None = None,
         memory_write: bool = True,
+        connector_namespaces: list[str] | None = None,
     ) -> dict[str, Any]:
         """Return a grounded, cited answer via hybrid retrieval + guardrails.
 
@@ -8923,7 +8942,12 @@ class ChatModel:
                 turn_out["english_message"] = router_message
             # Attachment turns and ongoing multi-turn conversations are never cache-served
             # or cache-stored: context is specific to attachments or prior dialogue turns.
-            cache_allowed = personalization is None and not attachments and not conversation_history
+            cache_allowed = (
+                personalization is None
+                and not attachments
+                and not conversation_history
+                and not connector_namespaces
+            )
 
             # Emotional-intelligence signal for this turn: adapts the LLM
             # opening line (tone_hint) and prefixes deterministic replies
@@ -9037,7 +9061,11 @@ class ChatModel:
                     if prn_res:
                         return _with_discrepancy(prn_res)
 
-            if flags.is_enabled("workflows") and not discrepancy_payload:
+            if (
+                flags.is_enabled("workflows")
+                and not discrepancy_payload
+                and not connector_namespaces
+            ):
                 with trace_stage("workflow_router", timings=timings):
                     workflow_result = self._maybe_handle_workflow(
                         message=router_message,
@@ -9348,7 +9376,7 @@ class ChatModel:
                         trace_ctx=trace_ctx,
                     )
                     return greeted
-                if route_decision.route == AgentRoute.CLARIFY:
+                if route_decision.route == AgentRoute.CLARIFY and not connector_namespaces:
                     clarified = {
                         "reply": route_decision.clarification_question
                         or CLARIFICATION_PROMPT,
@@ -9815,7 +9843,12 @@ class ChatModel:
 
             # 4. Optional agentic tool-calling path (P0: decoupled from hits and evaluated before abstention)
             use_agentic = (
-                force_agentic or flags.is_enabled("tool_use")
+                force_agentic
+                or flags.is_enabled("tool_use")
+                or (
+                    bool(connector_namespaces)
+                    and flags.is_enabled("enterprise_connectors")
+                )
             ) and self._llm_available and not suppress_agentic_fallback
 
             agentic_used_tools = False
@@ -9838,6 +9871,7 @@ class ChatModel:
                         granted_purposes=granted_purposes or [],
                         agent_role=agent_role,
                         context_summary=context_summary,
+                        connector_namespaces=connector_namespaces,
                     )
                 agentic_reply = agentic.get("text", "")
                 if agentic.get("tool_calls"):
@@ -10465,6 +10499,7 @@ class ChatModel:
         locale_explicit: bool | None = None,
         turn_out: dict[str, str] | None = None,
         memory_write: bool = True,
+        connector_namespaces: list[str] | None = None,
     ) -> dict[str, Any]:
         """Run retrieval + guardrails but skip LLM generation (for SSE streaming).
 
@@ -10552,7 +10587,12 @@ class ChatModel:
 
         # Attachment turns and ongoing multi-turn conversations are never cache-served
         # or cache-stored: context is specific to attachments or prior dialogue turns.
-        cache_allowed = personalization is None and not attachments and not conversation_history
+        cache_allowed = (
+            personalization is None
+            and not attachments
+            and not conversation_history
+            and not connector_namespaces
+        )
 
         # Emotional-intelligence signal (parity with generate()): tone hint
         # for the LLM stream, empathy prefix for deterministic short-circuits.
@@ -10623,14 +10663,16 @@ class ChatModel:
                 if prn_res:
                     return {**prn_res, "_hits": [], "_history": [], "_short_circuit": True}
 
-        workflow_result = self._maybe_handle_workflow(
-            message=router_message,
-            rewritten=router_rewritten,
-            thread_id=thread_id,
-            locale=locale,
-            personalization=personalization,
-            user_id=user_id,
-        )
+        workflow_result = None
+        if not connector_namespaces:
+            workflow_result = self._maybe_handle_workflow(
+                message=router_message,
+                rewritten=router_rewritten,
+                thread_id=thread_id,
+                locale=locale,
+                personalization=personalization,
+                user_id=user_id,
+            )
         if workflow_result:
             if distress and workflow_result.get("reply"):
                 workflow_result["reply"] = (
@@ -10838,7 +10880,7 @@ class ChatModel:
                 has_conversation_history=bool(conversation_history),
                 locale=locale,
             )
-            if route_decision.route == AgentRoute.CLARIFY:
+            if route_decision.route == AgentRoute.CLARIFY and not connector_namespaces:
                 return {
                     "reply": route_decision.clarification_question
                     or CLARIFICATION_PROMPT,

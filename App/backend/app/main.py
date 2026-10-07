@@ -1136,6 +1136,29 @@ def index_freshness() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Chat endpoint (with conversation logging)
 # ---------------------------------------------------------------------------
+def _validate_chat_connector_selection(body: ChatRequest, ctx: AuthContext) -> None:
+    """Fail closed when a request selects an unconfigured or unauthorized service."""
+    if not body.connector_namespaces:
+        return
+    from .flags import flags
+
+    if not flags.is_enabled("enterprise_connectors"):
+        raise HTTPException(status_code=409, detail="Chat connectors are not enabled.")
+    from .mcp import get_client
+    from .mcp.chat_connectors import validate_chat_connector_selection
+
+    if not validate_chat_connector_selection(
+        get_client(),
+        body.connector_namespaces,
+        user_role=ctx.role,
+        granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="One or more selected services are unavailable for this account.",
+        )
+
+
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 @limiter.limit(_RATE_LIMIT)
 def chat(
@@ -1144,6 +1167,7 @@ def chat(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> ChatResponse:
+    _validate_chat_connector_selection(body, ctx)
     session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     t0 = time.perf_counter()
@@ -1164,6 +1188,7 @@ def chat(
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
         attachments=attachments or None,
+        connector_namespaces=body.connector_namespaces,
         channel="rest",
     )
 
@@ -1243,6 +1268,8 @@ async def chat_stream(
     """
     from . import service as service_module
 
+    _validate_chat_connector_selection(body, ctx)
+
     session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     attachments = documents.resolve_attachments(
@@ -1272,8 +1299,9 @@ async def chat_stream(
             should_continue=lambda: _sse_not_disconnected(request),
             sentence_batching=True,  # SSE keeps historical behaviour
             user_role=getattr(ctx, "role", "public"),
-            granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+            granted_purposes=ctx.user.granted_purposes if ctx.user else [],
             attachments=attachments or None,
+            connector_namespaces=body.connector_namespaces,
         ):
             if event_type == "_keepalive":
                 yield {
@@ -1307,7 +1335,27 @@ async def chat_stream(
                     yield {"event": "phase", "data": event_type}
                 # Buffer for the agent_trace summary; do not forward live.
                 event_dict = payload if isinstance(payload, dict) else {"value": payload}
-                agent_trace.append({"type": event_type, **{k: v for k, v in event_dict.items() if k != "type"}})
+                safe_trace_fields = {
+                    "name",
+                    "call_id",
+                    "iteration",
+                    "iterations",
+                    "truncated",
+                    "tool_call_count",
+                    "admission",
+                    "ok",
+                    "elapsed_ms",
+                }
+                agent_trace.append(
+                    {
+                        "type": event_type,
+                        **{
+                            key: value
+                            for key, value in event_dict.items()
+                            if key in safe_trace_fields
+                        },
+                    }
+                )
                 continue
             if event_type == "grounding" and agent_trace:
                 yield {"event": "agent_trace", "data": json.dumps(agent_trace)}

@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/St
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
 import { ModalDialog } from "../../../components/ModalDialog";
 import { authHeaders } from "../../../lib/authSession";
+import type { ChatConnector } from "../../../lib/connectors";
 import "../admin.css";
 
 interface ConnectorRow {
@@ -29,10 +30,36 @@ interface ConnectorList {
   connectors: ConnectorRow[];
 }
 
+interface ChatConnectorCatalog {
+  ok: true;
+  enabled: boolean;
+  connectors: ChatConnector[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isChatConnector(value: unknown): value is ChatConnector {
+  return (
+    isRecord(value) &&
+    typeof value.namespace === "string" &&
+    /^[a-z0-9_]{1,64}$/.test(value.namespace) &&
+    typeof value.label === "string" &&
+    typeof value.description === "string" &&
+    Number.isInteger(value.operation_count) &&
+    Number(value.operation_count) >= 0 &&
+    value.read_only === true
+  );
+}
+
 export function ConnectorBoard() {
   const [data, setData] = useState<ConnectorList | null>(null);
+  const [chatCatalog, setChatCatalog] = useState<ChatConnectorCatalog | null>(null);
   const [loading, setLoading] = useState(true);
+  const [chatCatalogLoading, setChatCatalogLoading] = useState(true);
   const [error, setError] = useState("");
+  const [chatCatalogError, setChatCatalogError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [testingId, setTestingId] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; latency_ms: number; message?: string }>>({});
@@ -45,9 +72,43 @@ export function ConnectorBoard() {
   // Read-only deployment notes for a built-in simulator.
   const [configuringConnector, setConfiguringConnector] = useState<ConnectorRow | null>(null);
 
+  const refreshChatCatalog = useCallback(async () => {
+    setChatCatalogLoading(true);
+    setChatCatalogError("");
+    try {
+      const response = await fetch("/api/v1/connectors?view=chat", {
+        headers: authHeaders({ Accept: "application/json" }),
+        cache: "no-store",
+      });
+      const body: unknown = await response.json();
+      if (
+        !response.ok ||
+        !isRecord(body) ||
+        body.ok !== true ||
+        typeof body.enabled !== "boolean" ||
+        !Array.isArray(body.connectors)
+      ) {
+        throw new Error("Reviewed chat integrations are unavailable.");
+      }
+      setChatCatalog({
+        ok: true,
+        enabled: body.enabled,
+        connectors: body.connectors.filter(isChatConnector),
+      });
+    } catch (cause) {
+      setChatCatalog(null);
+      setChatCatalogError(
+        cause instanceof Error ? cause.message : "Reviewed chat integrations are unavailable.",
+      );
+    } finally {
+      setChatCatalogLoading(false);
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError("");
+    void refreshChatCatalog();
     try {
       const response = await fetch("/api/v1/connectors", {
         headers: authHeaders({ Accept: "application/json" }),
@@ -61,7 +122,7 @@ export function ConnectorBoard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshChatCatalog]);
 
   useEffect(() => {
     void refresh();
@@ -134,7 +195,7 @@ export function ConnectorBoard() {
     <OpsPage
       eyebrow="Configure"
       title="System connectors"
-      description="Review local connector health. New integrations go through a security review and deployment configuration."
+      description="Review local simulator health and deployment-reviewed services available for taxpayer chat."
       width="read"
       actions={
         <div className="flex items-center gap-2">
@@ -234,6 +295,66 @@ export function ConnectorBoard() {
             })}
           </ul>
         ) : null}
+      </OpsPanel>
+
+      <OpsPanel
+        id="chat-integrations"
+        title="Taxpayer-chat integrations"
+        flush
+        bare
+        end={(
+          <button
+            className="ops-btn is-ghost is-sm"
+            type="button"
+            onClick={() => void refreshChatCatalog()}
+            disabled={chatCatalogLoading}
+          >
+            {chatCatalogLoading ? "Refreshing…" : "Refresh integrations"}
+          </button>
+        )}
+      >
+        <p className="ops-panel-note">
+          These are deployment-managed remote services, shown separately from local simulations.
+          Availability reflects your current role and consent scopes; it does not confirm live service health.
+        </p>
+        <div aria-busy={chatCatalogLoading}>
+          {chatCatalogLoading && !chatCatalog ? <SkeletonRows rows={1} height={72} /> : null}
+          {chatCatalogError ? (
+            <ErrorState body={chatCatalogError} onRetry={() => void refreshChatCatalog()} />
+          ) : null}
+          {!chatCatalogLoading && !chatCatalogError && chatCatalog && !chatCatalog.enabled ? (
+            <EmptyState
+              title="Chat integrations are disabled"
+              body="Enable the reviewed connector feature in deployment settings before services can be offered in taxpayer chat."
+            />
+          ) : null}
+          {!chatCatalogLoading && !chatCatalogError && chatCatalog?.enabled && chatCatalog.connectors.length === 0 ? (
+            <EmptyState
+              title="No chat services are available to this account"
+              body="No configured remote service currently advertises an approved read-only operation for your role and consent scopes."
+            />
+          ) : null}
+          {chatCatalog?.enabled && chatCatalog.connectors.length > 0 ? (
+            <ul className="ops-queue" aria-label="Reviewed taxpayer-chat integrations">
+              {chatCatalog.connectors.map((connector) => (
+                <li className="ops-queue-row" key={connector.namespace}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <strong>{connector.label}</strong>
+                      <span className="ops-chip is-good">Available for chat</span>
+                      <span className="ops-chip">Read-only</span>
+                    </div>
+                    {connector.description ? <p>{connector.description}</p> : null}
+                    <p className="ops-stat-hint">
+                      {connector.operation_count} approved operation{connector.operation_count === 1 ? "" : "s"}
+                      {" · "}{connector.namespace}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
       </OpsPanel>
 
       {/* Add Connector setup guidance: runtime registration is disabled. */}

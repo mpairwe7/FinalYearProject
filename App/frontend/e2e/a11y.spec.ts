@@ -287,6 +287,55 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
 });
 
 test.describe("keyboard and focus regression checks", () => {
+  test("connector picker supports keyboard selection, restores focus, and passes WCAG 2.2 AA", async ({ page }) => {
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+    await page.route(
+      (url) => url.pathname === "/api/v1/connectors" && url.searchParams.get("view") === "chat",
+      (route) => route.fulfill({
+        json: {
+          ok: true,
+          enabled: true,
+          connectors: [
+            {
+              namespace: "efris",
+              label: "EFRIS",
+              description: "Review approved EFRIS taxpayer information.",
+              operation_count: 1,
+              read_only: true,
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/");
+
+    const trigger = page.getByTestId("composer-add-btn");
+    await trigger.click();
+    await expect(page.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "URA services" });
+    await expect(dialog).toBeVisible();
+    await expectNoSeriousOrCritical(page, "connector picker");
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    const connectorOption = dialog.getByRole("button", { name: /EFRIS/ });
+    await connectorOption.click();
+    await expect(connectorOption).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Remove EFRIS from this chat" })).toBeVisible();
+    await page.keyboard.press("Escape");
+  });
+
   test("header menu follows the menu-button keyboard pattern and restores focus", async ({ page }) => {
     await seedConsent(page);
     await clearChatStore(page);

@@ -13,6 +13,7 @@ import {
   DownloadIcon,
   EyeIcon,
   CameraIcon,
+  PlugIcon,
   PlusIcon,
 } from './Icons';
 import {
@@ -22,6 +23,7 @@ import {
   formatDocType,
   formatFileSize,
 } from '../lib/attachments';
+import type { ChatConnector } from '../lib/connectors';
 
 interface ChatInputProps {
   message: string;
@@ -63,6 +65,13 @@ interface ChatInputProps {
   audioLevels?: number[];
   /** Voice mode sends the turn by itself when the speaker pauses (Settings → Voice). */
   autoSend?: boolean;
+  chatConnectors?: ChatConnector[];
+  connectorsEnabled?: boolean;
+  connectorsLoading?: boolean;
+  connectorsError?: boolean;
+  selectedConnectorNamespaces?: string[];
+  onOpenConnectors?: () => void;
+  onToggleConnector?: (namespace: string) => void;
 }
 
 /** Inline waveform — 5 bars responsive to live microphone levels when available */
@@ -114,10 +123,18 @@ function ChatInputInner({
   onStop,
   audioLevels,
   autoSend = false,
+  chatConnectors = [],
+  connectorsEnabled = false,
+  connectorsLoading = false,
+  connectorsError = false,
+  selectedConnectorNamespaces = [],
+  onOpenConnectors,
+  onToggleConnector,
 }: ChatInputProps) {
   const t = useTranslation();
   const [isDragging, setIsDragging] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [showConnectorsDialog, setShowConnectorsDialog] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
@@ -125,6 +142,10 @@ function ChatInputInner({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
+  const attachmentLimitReached = (attachments?.length ?? 0) >= MAX_ATTACHMENTS;
+  const selectedConnectors = chatConnectors.filter((connector) =>
+    selectedConnectorNamespaces.includes(connector.namespace),
+  );
 
   const handleAttachFiles = useCallback((files: FileList) => {
     if (!onAttachFiles || files.length === 0) return;
@@ -167,6 +188,35 @@ function ChatInputInner({
   const addBtnRef = useRef<HTMLButtonElement>(null);
   const addMenuPanelRef = useRef<HTMLDivElement>(null);
   const addMenuOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const connectorsDialogRef = useRef<HTMLDialogElement>(null);
+
+  // Native modal dialogs provide browser-managed focus containment, Escape
+  // handling, and focus restoration. Keep an open-attribute fallback for
+  // environments without showModal(), such as lightweight DOM test runners.
+  useEffect(() => {
+    const dialog = connectorsDialogRef.current;
+    if (!dialog) return;
+
+    if (showConnectorsDialog) {
+      if (!dialog.open) {
+        if (typeof dialog.showModal === 'function') dialog.showModal();
+        else dialog.setAttribute('open', '');
+      }
+    } else if (dialog.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
+  }, [showConnectorsDialog]);
+
+  const closeConnectorsDialog = () => {
+    const dialog = connectorsDialogRef.current;
+    if (dialog?.open) {
+      if (typeof dialog.close === 'function') dialog.close();
+      else dialog.removeAttribute('open');
+    }
+    setShowConnectorsDialog(false);
+    window.requestAnimationFrame(() => addBtnRef.current?.focus());
+  };
 
   const closeAddMenu = useCallback(() => {
     setAddMenuFocusIdx(null);
@@ -183,7 +233,13 @@ function ChatInputInner({
     }
   };
 
-  const addMenuRovingIdx = addMenuFocusIdx ?? 0;
+  const addMenuOptionIndices = [0, 1, 2].filter(
+    (idx) => !attachmentLimitReached || idx === 2,
+  );
+  const addMenuRovingIdx =
+    addMenuFocusIdx !== null && addMenuOptionIndices.includes(addMenuFocusIdx)
+      ? addMenuFocusIdx
+      : addMenuOptionIndices[0];
 
   // Focus active option on open; lock body scroll; trap Tab and Escape
   useEffect(() => {
@@ -221,24 +277,25 @@ function ChatInputInner({
   }, [showAttachMenu, closeAddMenu, addMenuRovingIdx]);
 
   const onAddMenuOptionKey = (e: React.KeyboardEvent, idx: number) => {
-    const totalOptions = 2;
-    const move = (next: number) => {
-      const clamped = (next + totalOptions) % totalOptions;
-      setAddMenuFocusIdx(clamped);
-      addMenuOptionRefs.current[clamped]?.focus();
+    const move = (position: number) => {
+      const clampedPosition = (position + addMenuOptionIndices.length) % addMenuOptionIndices.length;
+      const nextIdx = addMenuOptionIndices[clampedPosition];
+      setAddMenuFocusIdx(nextIdx);
+      addMenuOptionRefs.current[nextIdx]?.focus();
     };
+    const position = addMenuOptionIndices.indexOf(idx);
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
       e.preventDefault();
-      move(idx + 1);
+      move(position + 1);
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
       e.preventDefault();
-      move(idx - 1);
+      move(position - 1);
     } else if (e.key === 'Home') {
       e.preventDefault();
       move(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      move(totalOptions - 1);
+      move(addMenuOptionIndices.length - 1);
     }
   };
   // Drives the morph in the primary slot: nothing typed yet -> offer voice
@@ -433,6 +490,26 @@ function ChatInputInner({
           </>
         )}
 
+        {selectedConnectors.length > 0 && (
+          <div className="composer-connectors" role="group" aria-label={t('composer.selectedConnectors')}>
+            {selectedConnectors.map((connector) => (
+              <span key={connector.namespace} className="composer-connector-chip">
+                <PlugIcon />
+                <span>{connector.label}</span>
+                <button
+                  type="button"
+                  className="composer-connector-remove"
+                  onClick={() => onToggleConnector?.(connector.namespace)}
+                  aria-label={t('composer.removeConnector', { name: connector.label })}
+                  disabled={isLoading}
+                >
+                  <CloseIcon />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={inputRef}
           className="input"
@@ -494,7 +571,7 @@ function ChatInputInner({
                       : 'text-neutral-400 hover:text-white hover:bg-neutral-800/80'
                   }`}
                   onClick={() => setShowAttachMenu((prev) => !prev)}
-                  disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
+                  disabled={isLoading}
                   aria-label={t('composer.addToConversation')}
                   aria-haspopup="dialog"
                   aria-expanded={showAttachMenu}
@@ -552,6 +629,7 @@ function ChatInputInner({
                               role="menuitem"
                               tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
                               className="addmenu-opt group"
+                              disabled={attachmentLimitReached}
                               onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
                               onClick={() => {
                                 closeAddMenu();
@@ -581,6 +659,7 @@ function ChatInputInner({
                               role="menuitem"
                               tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
                               className="addmenu-opt group"
+                              disabled={attachmentLimitReached}
                               onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
                               onClick={handleTakePhotoClick}
                             >
@@ -598,9 +677,42 @@ function ChatInputInner({
                               </span>
                             </button>
 
+                            {/* URA services are discoverable here, but only
+                                reviewed taxpayer integrations may be offered. */}
+                            <button
+                              ref={(el) => {
+                                addMenuOptionRefs.current[2] = el;
+                              }}
+                              type="button"
+                              role="menuitem"
+                              tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
+                              className="addmenu-opt group"
+                              onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
+                              onClick={() => {
+                                closeAddMenu();
+                                setShowConnectorsDialog(true);
+                                onOpenConnectors?.();
+                              }}
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
+                                  <PlugIcon />
+                                </div>
+                                <div className="min-w-0 text-left">
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">{t('composer.addConnector')}</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">{t('composer.connectorDescription')}</div>
+                                </div>
+                              </div>
+                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
+                                {t('composer.uraManagedTag')}
+                              </span>
+                            </button>
+
                           </div>
                           <div className="lmv2-foot addmenu-foot">
-                            {t('composer.attachPrivacyNotice')}
+                            {attachmentLimitReached
+                              ? t('composer.attachLimitReached')
+                              : t('composer.attachPrivacyNotice')}
                           </div>
                       </>
                     </div>
@@ -712,6 +824,108 @@ function ChatInputInner({
             ? t('composer.voiceHint')
             : t('composer.disclaimer')}
       </p>
+
+      <dialog
+        ref={connectorsDialogRef}
+        className="connectors-dialog"
+        aria-labelledby="composer-connectors-title"
+        aria-describedby="composer-connectors-description"
+        onClose={() => {
+          setShowConnectorsDialog(false);
+          window.requestAnimationFrame(() => addBtnRef.current?.focus());
+        }}
+      >
+        <div className="connectors-dialog-content">
+          <header className="lmv2-head addmenu-head">
+            <div className="flex items-center gap-2">
+              <div className="connectors-heading-icon" aria-hidden="true">
+                <PlugIcon />
+              </div>
+              <h2 id="composer-connectors-title">{t('composer.connectorsTitle')}</h2>
+            </div>
+            <button
+              type="button"
+              className="dlgv2-x lmv2-x"
+              onClick={closeConnectorsDialog}
+              aria-label={t('common.close')}
+            >
+              <CloseIcon />
+            </button>
+          </header>
+
+          <div className="connectors-dialog-body">
+            <div className="connectors-status-card" role={connectorsError ? 'alert' : 'status'}>
+              <span className="connectors-status-dot" aria-hidden="true" />
+              <span id="composer-connectors-description">
+                {connectorsLoading
+                  ? t('composer.connectorsLoading')
+                  : connectorsError
+                    ? t('composer.connectorsLoadFailed')
+                    : !connectorsEnabled
+                      ? t('composer.connectorsDisabled')
+                      : chatConnectors.length
+                        ? t('composer.connectorsAvailable', { count: chatConnectors.length })
+                        : t('composer.connectorUnavailable')}
+              </span>
+            </div>
+
+            {chatConnectors.length > 0 && (
+              <div className="connectors-options" role="group" aria-label={t('composer.connectorsTitle')}>
+                {chatConnectors.map((connector) => {
+                  const selected = selectedConnectorNamespaces.includes(connector.namespace);
+                  return (
+                    <button
+                      key={connector.namespace}
+                      type="button"
+                      className={`connectors-option${selected ? ' is-selected' : ''}`}
+                      aria-pressed={selected}
+                      onClick={() => onToggleConnector?.(connector.namespace)}
+                    >
+                      <span className="connectors-option-icon" aria-hidden="true"><PlugIcon /></span>
+                      <span className="connectors-option-copy">
+                        <span className="connectors-option-name">{connector.label}</span>
+                        {connector.description && (
+                          <span className="connectors-option-description">{connector.description}</span>
+                        )}
+                        <span className="connectors-option-meta">
+                          {t('composer.connectorReadOnly')} · {t('composer.connectorOperationCount', { count: connector.operation_count })}
+                        </span>
+                      </span>
+                      <span className="connectors-option-action">
+                        {selected ? t('composer.connectorSelected') : t('composer.connectorAdd')}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <section className="connectors-detail-card" aria-labelledby="composer-connector-use-title">
+              <div className="connectors-detail-heading">
+                <PlugIcon size={16} />
+                <h3 id="composer-connector-use-title">{t('composer.connectorUseTitle')}</h3>
+              </div>
+              <p>{t('composer.connectorUseDescription')}</p>
+            </section>
+
+            <aside className="connectors-safety-note" role="note">
+              <h3>{t('composer.connectorSafetyTitle')}</h3>
+              <p>{t('composer.connectorSafetyDescription')}</p>
+            </aside>
+          </div>
+
+          <footer className="connectors-dialog-footer">
+            <p>{t('composer.connectorManagedDescription')}</p>
+            <button
+              type="button"
+              className="connectors-close-button"
+              onClick={closeConnectorsDialog}
+            >
+              {t('common.close')}
+            </button>
+          </footer>
+        </div>
+      </dialog>
 
       {isCameraActive && (
         <CameraCapture

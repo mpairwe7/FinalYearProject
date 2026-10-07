@@ -62,15 +62,16 @@ The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI R
 
 ### 3.1 Inspecting Connector Health
 1. Navigate to `/admin/connectors` in the staff console.
-2. The dashboard identifies each built-in connector as a local simulation and shows local health and registered tool counts.
-3. Select **Test connection** to run the local connector health check and view its latency and tool count. This does not confirm an external service connection.
+2. In **Built-in connector status**, the dashboard identifies each fixture-backed plugin as a local simulation and shows local health and registered tool counts.
+3. In **Taxpayer-chat integrations**, review the remote MCP services and read-only operations available under your current role and consent scopes. The catalog is policy-filtered and does not expose endpoint URLs, credentials, or tool schemas.
+4. A service appearing in the chat catalog does not prove that its endpoint is reachable. Select **Test connection** only to run the local simulator health check and view its latency and tool count.
 
 ### 3.2 Deploying a New System Connector
 1. Open `/admin/connectors` and use **Add connector** to review the setup path. This dialog is guidance only; it does not submit or store connector data.
 2. Implement the connector server and register its namespace, tools, permissions, and protocol through the reviewed code change.
 3. Configure the remote endpoint with `MCP_SERVER_URL_<NAMESPACE>` and store any credential in the deployment secret store. Never submit bearer tokens or private keys through the browser.
 4. Review DNS/IP resolution, HTTPS/TLS identity, redirects, and outbound network access before deployment.
-5. Deploy the reviewed change and refresh `/admin/connectors`. **Test connection** checks local simulator health only; it does not probe the remote MCP server.
+5. Deploy the reviewed change and refresh `/admin/connectors`. The chat integration list reflects the current deployment and caller policy. **Test connection** checks local simulator health only; it does not probe the remote MCP server.
 6. From the deployed API runtime, confirm the resolved namespace binds to the approved remote transport and send an MCP ping. The configured bearer token is sent by the transport in the authorization header and must never be printed:
 
    ```bash

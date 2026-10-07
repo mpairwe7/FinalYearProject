@@ -140,7 +140,9 @@ class MCPCallResult:
 
 def _meta_of(descriptor: dict[str, Any], key: str, default: Any) -> Any:
     """Read one of our ``_meta`` fields off an MCP tool descriptor."""
-    meta = descriptor.get("_meta") or {}
+    meta = descriptor.get("_meta")
+    if not isinstance(meta, dict):
+        return default
     return meta.get(f"ug.go.ura.chatbot/{key}", default)
 
 
@@ -189,14 +191,24 @@ class MCPClient:
         bound to a remote server — the remote wins.
         """
         for transport in self._unique_transports():
-            descriptor = transport.describe(name)
-            if descriptor is None:
+            raw_descriptor = transport.describe(name)
+            if raw_descriptor is None:
                 continue
+            descriptor = self._with_transport_namespace(
+                raw_descriptor,
+                str(getattr(transport, "namespace", "")),
+            )
             bound = self._transports.get(str(_meta_of(descriptor, "namespace", "core")))
             if bound is not None and bound is not transport:
                 remote_descriptor = bound.describe(name)
                 if remote_descriptor is not None:
-                    return remote_descriptor, bound
+                    return (
+                        self._with_transport_namespace(
+                            remote_descriptor,
+                            str(getattr(bound, "namespace", "")),
+                        ),
+                        bound,
+                    )
             return descriptor, transport
         return None, None
 
@@ -211,7 +223,18 @@ class MCPClient:
         """Return MCP ``Tool`` descriptors across every bound transport."""
         seen: dict[str, dict[str, Any]] = {}
         for transport in self._unique_transports():
-            for descriptor in transport.list_tools():
+            namespace = str(getattr(transport, "namespace", ""))
+            try:
+                descriptors = transport.list_tools()
+            except Exception as exc:  # noqa: BLE001 — one connector must not hide the others
+                logger.warning(
+                    "MCP tool discovery failed namespace=%s (%s)",
+                    namespace or "local",
+                    type(exc).__name__,
+                )
+                continue
+            for raw_descriptor in descriptors:
+                descriptor = self._with_transport_namespace(raw_descriptor, namespace)
                 name = str(descriptor.get("name", ""))
                 if not name:
                     continue
@@ -219,6 +242,51 @@ class MCPClient:
                 if name not in seen or owner is transport:
                     seen[name] = descriptor
         return [seen[name] for name in sorted(seen)]
+
+    @staticmethod
+    def _with_transport_namespace(
+        descriptor: dict[str, Any], namespace: str,
+    ) -> dict[str, Any]:
+        """Bind a remote descriptor to the namespace configured by URA.
+
+        The deployment binding is authoritative. This also lets ordinary MCP
+        servers omit URA's private ``_meta`` namespace field while preserving
+        the standard tool descriptor sent to the model.
+        """
+        normalized = dict(descriptor)
+        if namespace:
+            raw_meta = normalized.get("_meta")
+            meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+            meta["ug.go.ura.chatbot/namespace"] = namespace
+            normalized["_meta"] = meta
+        return normalized
+
+    def remote_tool_descriptors(self) -> list[tuple[str, dict[str, Any]]]:
+        """List tools from deployment-bound remote MCP servers only.
+
+        A failed server is omitted from discovery without preventing other
+        configured connectors from appearing.
+        """
+        remote: list[tuple[str, dict[str, Any]]] = []
+        for namespace, transport in sorted(self._transports.items()):
+            if isinstance(transport, InProcessTransport):
+                continue
+            try:
+                descriptors = transport.list_tools()
+            except Exception as exc:  # noqa: BLE001 — fail closed per server
+                logger.warning(
+                    "MCP tool discovery failed namespace=%s (%s)",
+                    namespace,
+                    type(exc).__name__,
+                )
+                continue
+            for raw_descriptor in descriptors:
+                if not isinstance(raw_descriptor, dict) or not raw_descriptor.get("name"):
+                    continue
+                remote.append(
+                    (namespace, self._with_transport_namespace(raw_descriptor, namespace))
+                )
+        return remote
 
     def describe_tool(self, name: str) -> dict[str, Any] | None:
         from ..tools import ToolRegistry

@@ -318,6 +318,16 @@
   outline: none;
 }
 
+.chatv2 .addmenu-opt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chatv2 .addmenu-opt:disabled:hover {
+  background: var(--surface-1);
+  border-color: transparent;
+}
+
 .chatv2 .addmenu-foot {
   padding: 10px 18px;
   border-top: 1px solid var(--border-0);
@@ -326,6 +336,288 @@
   color: var(--text-2);
   line-height: 1.4;
   flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+ * URA connector availability and safety details. This uses the native dialog
+ * element so the browser contains focus, handles Escape, and restores focus.
+ * ------------------------------------------------------------------------- */
+.chatv2 .connectors-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(88dvh, 720px);
+  padding: 0;
+  border: 1px solid var(--border-0);
+  border-radius: 18px;
+  overflow: auto;
+  color: var(--text-0);
+  background: var(--bg-0);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+}
+
+.chatv2 .connectors-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.chatv2 .connectors-dialog-content {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.chatv2 .connectors-heading-icon {
+  display: flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 8px;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.chatv2 .connectors-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+}
+
+.chatv2 .connectors-options {
+  display: grid;
+  gap: 8px;
+}
+
+.chatv2 .connectors-option {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  min-height: 64px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  color: var(--text-0);
+  background: var(--bg-1);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-option:hover,
+.chatv2 .connectors-option:focus-visible {
+  border-color: var(--ura-gold);
+  background: var(--surface-1);
+  outline: none;
+}
+
+.chatv2 .connectors-option.is-selected {
+  border-color: rgba(52, 211, 153, 0.6);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.chatv2 .connectors-option-icon {
+  display: flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 10px;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.chatv2 .connectors-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.chatv2 .connectors-option-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chatv2 .connectors-option-description,
+.chatv2 .connectors-option-meta {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+}
+
+.chatv2 .connectors-option-action {
+  min-width: 78px;
+  color: var(--text-1);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+}
+
+.chatv2 .composer-connectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px 12px 0;
+}
+
+.chatv2 .composer-connector-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 3px 4px 3px 9px;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+  border-radius: 999px;
+  color: var(--text-1);
+  background: rgba(16, 185, 129, 0.08);
+  font-size: 12px;
+}
+
+.chatv2 .composer-connector-chip > svg {
+  width: 14px;
+  height: 14px;
+  color: #34d399;
+}
+
+.chatv2 .composer-connector-remove {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+}
+
+.chatv2 .composer-connector-remove:hover,
+.chatv2 .composer-connector-remove:focus-visible {
+  color: var(--text-0);
+  background: var(--surface-2);
+  outline: 2px solid var(--ura-gold);
+  outline-offset: 1px;
+}
+
+.chatv2 .connectors-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  color: var(--text-1);
+  background: var(--surface-1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chatv2 .connectors-status-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+
+.chatv2 .connectors-detail-card,
+.chatv2 .connectors-safety-note {
+  padding: 14px;
+  border: 1px solid var(--border-1);
+  border-radius: 12px;
+  background: var(--bg-1);
+}
+
+.chatv2 .connectors-detail-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ura-gold);
+}
+
+.chatv2 .connectors-detail-heading h3,
+.chatv2 .connectors-safety-note h3 {
+  margin: 0;
+  color: var(--text-0);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.chatv2 .connectors-detail-card p,
+.chatv2 .connectors-safety-note p,
+.chatv2 .connectors-dialog-footer p {
+  margin: 7px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chatv2 .connectors-safety-note {
+  border-color: rgba(249, 199, 79, 0.22);
+  background: rgba(249, 199, 79, 0.045);
+}
+
+.chatv2 .connectors-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-1);
+}
+
+.chatv2 .connectors-dialog-footer p {
+  margin: 0;
+  max-width: 290px;
+  font-size: 11px;
+}
+
+.chatv2 .connectors-close-button {
+  min-width: 88px;
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  color: var(--text-0);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-close-button:hover {
+  background: var(--surface-3);
+}
+
+.chatv2 .connectors-dialog :focus-visible {
+  outline: 2px solid var(--ura-gold);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .chatv2 .connectors-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .chatv2 .connectors-dialog-footer p {
+    max-width: none;
+  }
+
+  .chatv2 .connectors-close-button {
+    width: 100%;
+  }
 }
 
 /* ---------------------------------------------------------------------------

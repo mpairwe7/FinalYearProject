@@ -7,7 +7,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 
 if TYPE_CHECKING:
     from ..auth import AuthContext
@@ -28,9 +28,24 @@ def _require_staff_writer(ctx: AuthContext) -> None:
         raise HTTPException(status_code=403, detail="read-only role")
 
 
-@router.get("/v1/connectors", dependencies=[Depends(get_admin_access)])
-def list_system_connectors() -> dict[str, Any]:
-    """List staff-only connector health and simulator metrics."""
+@router.get("/v1/connectors")
+def list_system_connectors(request: Request, response: Response) -> dict[str, Any]:
+    """List the taxpayer-safe chat catalog or staff-only connector health."""
+    response.headers["Cache-Control"] = "private, no-store"
+    if request.query_params.get("view") == "chat":
+        response.headers["Vary"] = "Authorization"
+        from ..auth.dependencies import optional_user
+        from ..mcp import get_client
+        from ..mcp.chat_connectors import chat_connector_catalog
+
+        ctx = optional_user(request, request.headers.get("Authorization"))
+        return chat_connector_catalog(
+            get_client(),
+            user_role=ctx.role,
+            granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+        )
+
+    get_admin_access(request)
     try:
         from ..plugins import get_orchestrator
 

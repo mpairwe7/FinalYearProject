@@ -110,10 +110,10 @@ describe("ChatInput attachments", () => {
 
   it("renders the attach button only when onAttachFiles is provided", () => {
     const { unmount } = render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
-    expect(screen.getByLabelText(/Attach a file, screenshot, or photo/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Add a file, photo, or connector/)).toBeInTheDocument();
     unmount();
     render(<ChatInput {...defaults} />);
-    expect(screen.queryByLabelText(/Attach a file, screenshot, or photo/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Add a file, photo, or connector/)).not.toBeInTheDocument();
   });
 
   it("offers document and photo attachments with the privacy reminder", async () => {
@@ -126,7 +126,56 @@ describe("ChatInput attachments", () => {
     expect(screen.getByText("Upload a file or screenshot")).toBeInTheDocument();
     expect(screen.getByText("Take a photo")).toBeInTheDocument();
     expect(screen.getByText(/Files upload for analysis\. Hide passwords, one-time codes/)).toBeInTheDocument();
-    expect(screen.queryByText("Add connector")).not.toBeInTheDocument();
+    expect(screen.getByText("Add a connector")).toBeInTheDocument();
+  });
+
+  it("opens the connector picker, exposes safe service state, and adds a removable chip", async () => {
+    const connector = {
+      namespace: "efris",
+      label: "EFRIS",
+      description: "Check invoice status.",
+      operation_count: 1,
+      read_only: true as const,
+    };
+    const onToggleConnector = vi.fn();
+    const props = {
+      ...defaults,
+      onAttachFiles: vi.fn(),
+      chatConnectors: [connector],
+      connectorsEnabled: true,
+      onToggleConnector,
+    };
+    const { rerender } = render(<ChatInput {...props} />);
+
+    await userEvent.click(screen.getByTestId("composer-add-btn"));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Add a connector/ }));
+
+    const dialog = screen.getByRole("dialog", { name: "URA services" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText("1 approved service(s) are available. Choose which to use in this chat.")).toBeInTheDocument();
+    const option = screen.getByRole("button", { name: /EFRIS/ });
+    expect(option).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(option);
+    expect(onToggleConnector).toHaveBeenCalledWith("efris");
+
+    rerender(<ChatInput {...props} selectedConnectorNamespaces={["efris"]} />);
+    expect(dialog.querySelector(".connectors-option")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Remove EFRIS from this chat")).toBeInTheDocument();
+  });
+
+  it("keeps connector access available after the attachment limit is reached", async () => {
+    render(
+      <ChatInput
+        {...defaults}
+        onAttachFiles={vi.fn()}
+        attachments={[readyAttachment, { ...readyAttachment, clientId: "c2" }, { ...readyAttachment, clientId: "c3" }]}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId("composer-add-btn"));
+    expect(screen.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Take a photo/ })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Add a connector/ })).toBeEnabled();
   });
 
   it("adds the image prompt only when the attachment handler accepts an image", async () => {

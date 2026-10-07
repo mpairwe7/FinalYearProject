@@ -38,6 +38,11 @@ class ChatRequest(BaseModel):
         max_length=3,
         description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
     )
+    connector_namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9_]{1,64}$")]] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Deployment-configured chat connectors selected for this turn",
+    )
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 

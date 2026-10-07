@@ -362,6 +362,23 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
     return scrubbed, was_scrubbed
 
 
+def scan_external_tool_text(text: str) -> tuple[str, bool]:
+    """Neutralize instruction-like text returned by an external tool.
+
+    Remote tools can return attacker-controlled content. Apply the same
+    injection patterns used for retrieved passages, and withhold text when
+    normalization reveals an instruction that cannot be removed safely.
+    """
+    scrubbed, found = _neutralise_injection(text)
+    if not found:
+        return text, False
+    if _injection_present(scrubbed):
+        logger.warning("Instruction-like text in external tool output withheld (%d chars)", len(text))
+        return "[External tool output withheld because it contained unsafe instructions.]", True
+    logger.warning("Instruction-like text in external tool output scrubbed (%d chars)", len(text))
+    return scrubbed, True
+
+
 #: What a replayed turn becomes when its injection cannot be cut out.
 REPLAY_WITHHELD = "[An earlier message was withheld: it contained instructions addressed to the assistant.]"
 

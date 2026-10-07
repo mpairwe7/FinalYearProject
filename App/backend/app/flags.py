@@ -336,8 +336,8 @@ _REGISTRY: dict[str, Flag] = {
         Flag(
             "enterprise_connectors",
             False,
-            "Gate reviewed enterprise connector integrations (EFRIS, DTS, URSB, BWIMS, TIN, Payments). "
-            "This flag cannot enable local simulator fixtures in production; a live implementation must be reviewed first.",
+            "Expose explicitly selected, deployment-bound remote MCP connectors in taxpayer chat. "
+            "Only reviewed read-only operations are eligible; this flag never enables local simulator fixtures.",
         ),
         # Phase 30 (2026) — next-generation architecture increments.
         # All default off and all subject-addressable, so each lands on a
