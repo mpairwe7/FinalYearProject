@@ -62,7 +62,8 @@ docker run --gpus device=$GPU --ipc=host -p 18011:8000 \
 PYTHONPATH=App/backend LLM_BACKEND=vllm LLM_MODEL=Sunbird/Sunflower-14B-FP8 \
   VLLM_BASE_URL=http://127.0.0.1:18011/v1 QDRANT_ENABLED=true \
   QDRANT_URL=http://127.0.0.1:6333 QDRANT_COLLECTION=ura_knowledge_base \
-  RERANK_ENABLED=false RATE_LIMIT=10000/minute SPEECH_ENABLED=false \
+  RERANK_ENABLED=true RETRIEVER_DENSE_DEVICE=cuda:0 HYBRID_FUSION=dbsf \
+  RATE_LIMIT=10000/minute SPEECH_ENABLED=false \
   python -m uvicorn app.main:app --host 127.0.0.1 --port 18080 --workers 1
 ```
 

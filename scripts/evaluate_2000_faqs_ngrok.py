@@ -673,13 +673,13 @@ class URAEvaluationEngine2000:
 | Metric | Target SLA | Benchmark Result | Status |
 |---|:---:|:---:|:---:|
 | **Total Evaluated FAQs** | 2,000 queries | **{m['total_faqs']} queries** | **COMPLETE** ✅ |
-| **Overall Grounded Accuracy** | ≥ 95.0% | **{a['overall_accuracy_pct']}%** ({a['accurate_count']}/{a['total_count']}) | **MET** ✅ |
-| **HTTP Availability (200 OK)** | 100.0% | **{res['http_availability_pct']}%** (0 server drops) | **MET** ✅ |
-| **Median Response Time (p50)** | < 800 ms | **{p['p50_ms']} ms** | **MET** ✅ |
-| **95th Percentile Latency (p95)**| < 3,000 ms | **{p['p95_ms']} ms** | **MET** ✅ |
-| **System Throughput (QPS)** | > 5.0 req/s | **{m['throughput_qps']} req/s** (Completed in {m['duration_seconds']}s) | **MET** ✅ |
-| **Figure Fidelity in Vernacular**| ≥ 98.0% | **{l.get('lg', {}).get('figure_fidelity_pct', 100)}% (LG) / {l.get('sw', {}).get('figure_fidelity_pct', 100)}% (SW)** | **MET** ✅ |
-| **Structured Step Formatting**| ≥ 90.0% | **{res['structured_formatting_pct']}%** | **MET** ✅ |
+| **Overall Grounded Accuracy** | ≥ 95.0% | **{a['overall_accuracy_pct']}%** ({a['accurate_count']}/{a['total_count']}) | **{'MET ✅' if a['overall_accuracy_pct'] >= 95.0 else 'NOT MET ❌'}** |
+| **HTTP Availability (200 OK)** | 100.0% | **{res['http_availability_pct']}%** (0 server drops) | **{'MET ✅' if res['http_availability_pct'] >= 100.0 else 'NOT MET ❌'}** |
+| **Median Response Time (p50)** | < 800 ms | **{p['p50_ms']} ms** | **{'MET ✅' if p['p50_ms'] < 800 else 'NOT MET ❌'}** |
+| **95th Percentile Latency (p95)**| < 3,000 ms | **{p['p95_ms']} ms** | **{'MET ✅' if p['p95_ms'] < 3000 else 'NOT MET ❌'}** |
+| **System Throughput (QPS)** | > 5.0 req/s | **{m['throughput_qps']} req/s** (Completed in {m['duration_seconds']}s) | **{'MET ✅' if m['throughput_qps'] > 5.0 else 'NOT MET ❌'}** |
+| **Figure Fidelity in Vernacular**| ≥ 98.0% | **{l.get('lg', {}).get('figure_fidelity_pct', 100)}% (LG) / {l.get('sw', {}).get('figure_fidelity_pct', 100)}% (SW)** | **{'MET ✅' if min(l.get('lg', {}).get('figure_fidelity_pct', 100), l.get('sw', {}).get('figure_fidelity_pct', 100)) >= 98.0 else 'NOT MET ❌'}** |
+| **Structured Step Formatting**| ≥ 90.0% | **{res['structured_formatting_pct']}%** | **{'MET ✅' if res['structured_formatting_pct'] >= 90.0 else 'NOT MET ❌'}** |
 | **Official Contact Integrity** | 0 False Redactions | **100.0%** (0 `[REDACTED_EMAIL]` tags) | **MET** ✅ |
 
 ---

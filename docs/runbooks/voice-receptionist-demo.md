@@ -32,7 +32,9 @@ FastAPI (one worker and one replica; process-local call actor)
                               is quiet, 2 transcribed words barge in while it talks; the turn closes
                               RECEPTIONIST_TURN_TIMEOUT_S after VAD's 0.5 s stop — Smart Turn v3
                               covers neither Luganda nor Swahili)
-     → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer)
+     → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer;
+                              integrates GPU dense BGE-M3 + DBSF fusion + GPU mxbai-rerank with clean
+                              single-sigmoid probabilities, G126–G132)
      → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k; streams from the
                               local Orpheus sidecar for the languages in ORPHEUS_TTS_LANGUAGES)
      → LiveKit audio/data output

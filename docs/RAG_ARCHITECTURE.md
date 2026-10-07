@@ -123,8 +123,8 @@ User Query
 |-----------|---------|
 | Dense model | `BAAI/bge-m3` (1024-dim, multilingual, MTEB 63.0). Set via `DENSE_MODEL` + `DENSE_DIM` env vars. |
 | Sparse | BM25, encoded asymmetrically: documents carry term saturation, queries carry IDF, and their Qdrant dot product is the BM25 score. `bm25_state.json` stamps `encoding_version`; a state from an older index is queried its own way so an un-rebuilt collection keeps its ranking. |
-| Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API. `FusionQuery(fusion=RRF)` passes no `k`, so Qdrant's default **k=2** applies, not `RRF_K` (60), which only `rrf_fuse_ranked_lists` (the graph leg) reads. Measured against k=60 and DBSF in `docs/Reports/MULTILINGUAL_RETRIEVAL_EVALUATION_2026-10-07.md` (G127). |
-| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Loaded only when `RERANK_ENABLED=true` (env, default true); the `reranker` flag in the registry is not read by any code. The base `App/docker-compose.yml` sets `RERANK_ENABLED=false` (since #541), and no GPU overlay turns it back on (G126). |
+| Fusion | Distribution-Based Score Fusion (DBSF) via Qdrant query API by default (`HYBRID_FUSION=dbsf`, G127), outperforming RRF k=2 by +6 pts Luganda and +4 pts Swahili; falls back to RRF if configured. Graph leg continues to fuse via `rrf_fuse_ranked_lists` with `RRF_K=60`. |
+| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Governed by `RERANK_ENABLED=true` and dynamically by `flags.is_enabled("reranker")`. GPU compose overlays (`docker-compose.local-sunflower.yml`, `docker-compose.local-qwen.yml`) restore dense embeddings and reranking on GPU (`cuda:0`, G126). Outputs clean single-sigmoid probabilities (G129). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 

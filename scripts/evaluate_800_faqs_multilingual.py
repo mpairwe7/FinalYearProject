@@ -475,13 +475,13 @@ class Benchmark800Runner:
 | Metric | Target SLA | Benchmark Result | Status |
 |---|:---:|:---:|:---:|
 | **Total Evaluated FAQs** | 800 queries | **{m['total_faqs']} queries** | **COMPLETE** ✅ |
-| **Overall Grounded Accuracy** | ≥ 95.0% | **{a['overall_accuracy_pct']}%** | **MET** ✅ |
-| **HTTP Service Availability** | 100.0% | **{res['http_availability_pct']}%** (0 drops) | **MET** ✅ |
-| **Median Response Time (p50)** | < 800 ms | **{p['p50_ms']} ms** | **MET** ✅ |
-| **95th Percentile Latency (p95)**| < 2,500 ms | **{p['p95_ms']} ms** | **MET** ✅ |
-| **System Throughput** | > 3.0 req/s | **{m['throughput_qps']} req/s** | **MET** ✅ |
-| **Figure Fidelity in Vernacular**| ≥ 98.0% | **{l['lg']['figure_fidelity_pct']}% (LG) / {l['sw']['figure_fidelity_pct']}% (SW)** | **MET** ✅ |
-| **Structured Step Formatting**| ≥ 90.0% | **{res['structured_formatting_pct']}%** | **MET** ✅ |
+| **Overall Grounded Accuracy** | ≥ 95.0% | **{a['overall_accuracy_pct']}%** | **{'MET ✅' if a['overall_accuracy_pct'] >= 95.0 else 'NOT MET ❌'}** |
+| **HTTP Service Availability** | 100.0% | **{res['http_availability_pct']}%** (0 drops) | **{'MET ✅' if res['http_availability_pct'] >= 100.0 else 'NOT MET ❌'}** |
+| **Median Response Time (p50)** | < 800 ms | **{p['p50_ms']} ms** | **{'MET ✅' if p['p50_ms'] < 800 else 'NOT MET ❌'}** |
+| **95th Percentile Latency (p95)**| < 2,500 ms | **{p['p95_ms']} ms** | **{'MET ✅' if p['p95_ms'] < 2500 else 'NOT MET ❌'}** |
+| **System Throughput** | > 3.0 req/s | **{m['throughput_qps']} req/s** | **{'MET ✅' if m['throughput_qps'] > 3.0 else 'NOT MET ❌'}** |
+| **Figure Fidelity in Vernacular**| ≥ 98.0% | **{l['lg']['figure_fidelity_pct']}% (LG) / {l['sw']['figure_fidelity_pct']}% (SW)** | **{'MET ✅' if min(l['lg']['figure_fidelity_pct'], l['sw']['figure_fidelity_pct']) >= 98.0 else 'NOT MET ❌'}** |
+| **Structured Step Formatting**| ≥ 90.0% | **{res['structured_formatting_pct']}%** | **{'MET ✅' if res['structured_formatting_pct'] >= 90.0 else 'NOT MET ❌'}** |
 
 ---
 

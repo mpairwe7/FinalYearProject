@@ -49,6 +49,10 @@ services:
       - VLLM_HTTP_TIMEOUT=120
       - LLM_MAX_TOKENS=512
       - ANALYTICS_DB_DIR=/tmp/ura-analytics
+      # G126: Restore dense model on GPU and cross-encoder reranker on GPU overlay
+      - RETRIEVER_DENSE_DEVICE=${RETRIEVER_DENSE_DEVICE:-cuda:0}
+      - RERANK_ENABLED=${RERANK_ENABLED:-true}
+      - RERANKER_DEVICE=${RERANKER_DEVICE:-cuda:0}
     depends_on:
       vllm:
         condition: service_healthy

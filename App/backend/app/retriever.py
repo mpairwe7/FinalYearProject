@@ -139,6 +139,8 @@ _RERANK_CHARS = int(os.getenv("RETRIEVER_RERANK_CHARS", "1200"))
 _DEDUPE_THRESHOLD = float(os.getenv("RETRIEVER_DEDUPE_THRESHOLD", "0.9"))
 #: RRF constant shared by Qdrant, the Vectorize client, and the graph leg.
 RRF_K = int(os.getenv("RRF_K", "60"))
+#: Hybrid fusion strategy for prefetch legs: "dbsf" (Distribution-Based Score Fusion, G127) or "rrf".
+HYBRID_FUSION = os.getenv("HYBRID_FUSION", "dbsf").lower()
 
 
 def _shingles(text: str) -> frozenset[str]:
@@ -1413,6 +1415,11 @@ class HybridRetriever:
         passage anyway. When an English translation is supplied, dual-scores
         and preserves the higher relevance across both representations.
         """
+        from .flags import flags
+
+        if not flags.is_enabled("reranker"):
+            return
+
         pairs = [
             (query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
             for c in candidates
@@ -1428,7 +1435,9 @@ class HybridRetriever:
 
         for i, s in enumerate(scores):
             candidates[i]["score_rerank"] = float(s)
-            candidates[i]["score_norm"] = normalize_rerank_score(float(s))
+            # CrossEncoder (mxbai-rerank-base-v2) output is already sigmoid-activated
+            # into [0, 1]. Do not apply a second logistic squash (G129).
+            candidates[i]["score_norm"] = float(max(0.0, min(1.0, s)))
 
         # Stale-year penalty for rate/duty tables: if a chunk explicitly cites superseded
         # years (e.g. 2020, 2021, 2022) and the query is not asking for that historical year,
@@ -1566,10 +1575,15 @@ class HybridRetriever:
                 )
 
             query_started = time.perf_counter()
+            fusion_mode = (
+                models.Fusion.DBSF
+                if HYBRID_FUSION == "dbsf" and hasattr(models.Fusion, "DBSF")
+                else models.Fusion.RRF
+            )
             results = self._client.query_points(
                 collection_name=QDRANT_COLLECTION,
                 prefetch=prefetch,
-                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                query=models.FusionQuery(fusion=fusion_mode),
                 query_filter=query_filter,
                 limit=prefetch_limit,
             )
@@ -1752,7 +1766,14 @@ class HybridRetriever:
                 locale, (query or "")[:60], english[:60], len(hits),
             )
             return hits
-        merged = merge_retrieval_hits([hits, en_hits], top_k=top_k)
+        # G128: When reranker is disabled or ties, en_hits (translated leg) must
+        # rank ahead of hits (untranslated pass). In Luganda especially, bge-m3 cross-lingual
+        # dense + BM25 against English text yields 0% relevant top hits; using en_hits directly
+        # prevents context contamination. For Swahili and other languages, merge both legs.
+        if loc == "lg" and en_hits:
+            merged = en_hits[:top_k]
+        else:
+            merged = merge_retrieval_hits([en_hits, hits], top_k=top_k)
         merged = apply_preference_boost(merged, prefer)
 
         def _best(rows: list[dict[str, Any]]) -> float:

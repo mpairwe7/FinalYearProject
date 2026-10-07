@@ -536,6 +536,17 @@ _LUGANDA_WORDS: frozenset[str] = frozenset({
     "emmotoka", "pikipiki", "eppikipiki", "obwannannyini", "okukyusa", "obutonde",
     "ekibonerezo", "ebibonerezo", "okwemulugunya", "ebyamaguzi", "ebisale",
     "ebiwandiiko", "lole", "tulakita", "obupangisa", "mayumba", "nnyumba", "kyuma", "ekyuma",
+    # Function and question words for code-switched queries (G132)
+    "nga", "ku", "mu", "oba", "naye", "ne", "kiki", "ki", "nze", "gwe", "ffe",
+    "yange", "wange", "lyange", "kyange", "gwange", "yaffe", "kwe", "nnyinza",
+    "njagala", "mbuuza", "okumanya", "ssebo", "nnyabo", "ndowooza", "ntegeeza",
+    "nnyonnyola", "okusasula", "nsasula", "ngisasula", "okugisasula", "ddi",
+    "wano", "olwaleero", "jjuuzi", "tuyinza", "okwogera", "twogere",
+    "tewali", "sirina", "nina", "bwentyo", "ekyo", "kino", "kati",
+    "oli", "otya", "gyebale", "ko", "bulungi", "nnyo",
+    "mmeka", "bimeka", "meka", "etya", "zitya", "gitya", "atya", "lwaki",
+    "eri", "kiri", "ziri", "ngiwaayo", "ngifuna", "amateeka", "kkomo",
+    "buvunaanyizibwa", "bizinensi", "zaayo", "ekwatagana", "ebalirira", "okusasulwa",
 })
 
 _SWAHILI_WORDS: frozenset[str] = frozenset({
@@ -547,6 +558,12 @@ _SWAHILI_WORDS: frozenset[str] = frozenset({
     "risiti", "forodha", "mizigo", "mzigo", "msamaha", "kuagiza", "kusafirisha",
     "mfumo", "hifadhi", "pingamizi", "adhabu", "je", "malori", "yamesamehewa",
     "kusamehewa", "tozo", "kifaa", "inalipwaje",
+    # Function and question words for code-switched queries (G132)
+    "ni", "ya", "za", "la", "cha", "vya", "kwamba", "lakini", "sana",
+    "mimi", "wewe", "yangu", "wangu", "yako", "nataka", "naomba", "tafadhali",
+    "ninahitaji", "nini", "gani", "lini", "vipi", "wapi", "ngapi",
+    "tuongee", "kiswahili", "hii", "hiyo", "kuna", "sijui", "sawa",
+    "yapi", "hawa", "kuhusu", "kisheria", "majukumu", "inahusiana",
 })
 
 _LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS
@@ -1018,27 +1035,39 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     if not text or len(text.strip()) < 4:
         return default_lang
 
-    # Understand syntax and typos before checking language
-    corrected = correct_spelling(normalize(text))
-    cleaned = corrected.strip().lower()
-    words = set(re.findall(r"[a-z']+", cleaned))
-    if not words:
+    # 1. Inspect raw tokens before any English spellcheck.
+    # Running English spellcheck on Swahili/Luganda corrupts words like 'nini' -> 'nin' (G132).
+    normalized = normalize(text)
+    cleaned = normalized.strip().lower()
+    raw_words = set(re.findall(r"[a-z']+", cleaned))
+    if not raw_words:
         return default_lang
+
+    lg_hits = len(raw_words & _LUGANDA_WORDS)
+    sw_hits = len(raw_words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
+    en_common = len(raw_words & _COMMON_ENGLISH_WORDS)
+
+    # 2. Check for noisy or misspelled English ONLY when vernacular markers are absent.
+    if lg_hits == 0 and sw_hits == 0:
+        corrected = correct_spelling(normalized)
+        corr_cleaned = corrected.strip().lower()
+        corr_words = set(re.findall(r"[a-z']+", corr_cleaned))
+        en_hits = len(corr_words & _COMMON_ENGLISH_WORDS) + len(corr_words & _TAX_DOMAIN_VOCAB)
+        if en_hits > 0:
+            return default_lang
+        detector_text = corrected
+        words = corr_words
+        cleaned = corr_cleaned
+    else:
+        # Code-switched query: tax terms (VAT, TIN, EFRIS, PAYE, withholding) are loanwords
+        # common in Ugandan vernacular and must not count as English evidence (G132).
+        detector_text = normalized
+        words = raw_words
+        en_hits = en_common
 
     n_words = max(len(words), 1)
 
-    # 1. Lexical markers for English, Luganda, and Swahili
-    en_hits = len(words & _COMMON_ENGLISH_WORDS) + len(words & _TAX_DOMAIN_VOCAB)
-    lg_hits = len(words & _LUGANDA_WORDS)
-    sw_hits = len(words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
-
-    # A misspelled or noisy English query (e.g. "wat is the vat rat?",
-    # "How do I pay assessmnt witholding tax?") resolves to English tokens and
-    # must NEVER be hijacked to Luganda or Swahili.
-    if en_hits > 0 and lg_hits == 0 and sw_hits == 0:
-        return default_lang
-
-    # 2. Strong lexical signals for supported Ugandan / East African locales
+    # 3. Strong lexical signals for supported Ugandan / East African locales
     if sw_hits > lg_hits and (sw_hits >= 2 or (sw_hits >= 1 and en_hits == 0)):
         return "sw"
     if lg_hits > sw_hits and (lg_hits >= 2 or (lg_hits >= 1 and en_hits == 0)):
@@ -1048,11 +1077,11 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     if lg_hits >= 2 and sw_hits == 0:
         return "lg"
 
-    # Consult statistical detector (lingua) on the corrected text
+    # Consult statistical detector (lingua)
     det = _get_language_detector()
     if det is not None:
         try:
-            result = det.detect(corrected)
+            result = det.detect(detector_text)
             if result.lang in SUPPORTED_LOCALES and result.is_confident(0.75):
                 # Extra guard: lingua must not override to lg/sw if English words dominate
                 if result.lang in ("lg", "sw") and en_hits > 0 and lg_hits == 0 and sw_hits == 0:

@@ -754,18 +754,8 @@ _LOCALE_BOOST_TERMS = {
 
 
 def service_language_boost(hits: list[dict[str, Any]], locale: str) -> tuple[list[dict[str, Any]], int]:
-    boost_terms = _LOCALE_BOOST_TERMS.get(locale, set())
-    boosted = 0
-    hits = [dict(h) for h in hits]
-    if locale != "en" and hits and boost_terms:
-        for h in hits:
-            source = (h.get("source") or "").lower()
-            text_preview = (h.get("text") or "")[:200].lower()
-            if any(t in source or t in text_preview for t in boost_terms):
-                h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
-                boosted += 1
-        hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
-    return hits, boosted
+    # G131: Removed buggy substring boost from service.py; reranker order is preserved.
+    return [dict(h) for h in hits], 0
 
 
 def cmd_mechanisms(args: argparse.Namespace) -> int:

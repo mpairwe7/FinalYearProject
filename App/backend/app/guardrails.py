@@ -26,6 +26,8 @@ STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
 # P1-5: abstention threshold on the normalized [0,1] reranker scale.
 ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
+ABSTENTION_THRESHOLD_NORM_LG = float(os.getenv("ABSTENTION_THRESHOLD_NORM_LG", "0.20"))
+ABSTENTION_THRESHOLD_NORM_SW = float(os.getenv("ABSTENTION_THRESHOLD_NORM_SW", "0.20"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
 # ---------------------------------------------------------------------------
@@ -957,7 +959,13 @@ class OutputGuard:
             return True
         from .retriever import LEXICAL_RELEVANCE_FLOOR, hit_relevance
 
-        eff_threshold = threshold if locale in ("", "en") else min(threshold, 0.02)
+        loc = (locale or "en").strip().lower().split("-")[0]
+        if loc == "lg":
+            eff_threshold = ABSTENTION_THRESHOLD_NORM_LG
+        elif loc == "sw":
+            eff_threshold = ABSTENTION_THRESHOLD_NORM_SW
+        else:
+            eff_threshold = threshold
 
         scores = [r for h in hits if (r := hit_relevance(h)) is not None]
         if scores:

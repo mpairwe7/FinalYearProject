@@ -3670,6 +3670,17 @@ def _simple_search(
                         scored.append((float(overlap), entry_copy, match))
         return _retain_faq_candidates(bind_text, scored, top_k)
 
+    # Check for direct native matches against versioned multilingual FAQ translations (G134)
+    # first when the query is in a supported local language.
+    if locale and locale != "en":
+        vernacular_hits = _vernacular_pass(query, match_query, locale)
+        if vernacular_hits:
+            logger.info(
+                "Direct native FAQ hit (%s): %r, %d hit(s)",
+                locale, query[:60], len(vernacular_hits),
+            )
+            return vernacular_hits
+
     hits = _one_pass(query, match_query)
     if not hits:
         expanded_query = _expand_faq_synonyms(query)
@@ -3677,16 +3688,6 @@ def _simple_search(
             hits = _one_pass(expanded_query, expanded_query)
     if hits or not locale or locale == "en":
         return hits
-
-    # Check for direct native matches against versioned multilingual FAQ translations
-    # before incurring machine translation round-trip latency.
-    vernacular_hits = _vernacular_pass(query, match_query, locale)
-    if vernacular_hits:
-        logger.info(
-            "Direct native FAQ hit (%s): %r, %d hit(s)",
-            locale, query[:60], len(vernacular_hits),
-        )
-        return vernacular_hits
 
     # Nothing matched and the question was not asked in English. The corpus is
     # English, so a Luganda or Runyankole question shares no terms with it:
@@ -9619,25 +9620,9 @@ class ChatModel:
                             f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
                         )
 
-            # 3b2. Language-aware retrieval boosting — when the detected
-            #      locale is non-English, boost hits whose metadata
-            #      matches the detected language (e.g. Luganda FAQ sources).
-            if locale != "en" and hits:
-                locale_keywords = {
-                    "lg": {"luganda", "oluganda", "lg"},
-                    "sw": {"swahili", "kiswahili", "sw"},
-                    "nyn": {"runyankole", "nkore", "nyn"},
-                    "ach": {"acholi", "ach"},
-                }
-                boost_terms = locale_keywords.get(locale, set())
-                if boost_terms:
-                    for h in hits:
-                        source = (h.get("source") or "").lower()
-                        text_preview = (h.get("text") or "")[:200].lower()
-                        if any(t in source or t in text_preview for t in boost_terms):
-                            h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
-                    # Re-sort by boosted score
-                    hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
+            # 3b2. G131 fix: removed buggy substring-matching language boost that
+            #      matched 'sw' inside 'Answer' and corrupted reranker ordering with
+            #      score_rrf re-sorting. Clean reranker ranking is preserved.
 
             # 3c. Always blend top FAQ keyword hits AFTER corrective RAG
             #     so precise CSV FAQ steps are never filtered out by reranking.
@@ -11097,22 +11082,9 @@ class ChatModel:
                     f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
                 )
 
-        # Language-aware retrieval boosting (streaming path)
-        if locale != "en" and hits:
-            locale_keywords = {
-                "lg": {"luganda", "oluganda", "lg"},
-                "sw": {"swahili", "kiswahili", "sw"},
-                "nyn": {"runyankole", "nkore", "nyn"},
-                "ach": {"acholi", "ach"},
-            }
-            boost_terms = locale_keywords.get(locale, set())
-            if boost_terms:
-                for h in hits:
-                    source = (h.get("source") or "").lower()
-                    text_preview = (h.get("text") or "")[:200].lower()
-                    if any(t in source or t in text_preview for t in boost_terms):
-                        h["score_rrf"] = h.get("score_rrf", 0.5) + 0.3
-                hits.sort(key=lambda x: x.get("score_rrf", 0), reverse=True)
+        # G131 fix: removed buggy substring-matching language boost that
+        # matched 'sw' inside 'Answer' and corrupted reranker ordering with
+        # score_rrf re-sorting. Clean reranker ranking is preserved.
 
         # Blend top FAQ keyword hits after corrective RAG (parity with the
         # REST path, including the priority FAQ hits the deterministic
