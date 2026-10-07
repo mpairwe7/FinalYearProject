@@ -56,10 +56,11 @@ import json
 import re
 import sys
 import time
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 # The repo root too: detect_language imports ml.scripts.lang_id, and without it
@@ -156,9 +157,11 @@ OOD_EN: list[tuple[str, str]] = [
 ]
 
 def _post(url: str, body: dict[str, Any], timeout: float = 120.0) -> dict[str, Any]:
-    req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.load(resp)
+    if not url.startswith(("http://", "https://")):
+        raise ValueError(f"not an HTTP URL: {url!r}")
+    resp = httpx.post(url, json=body, timeout=timeout)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def norm_question(text: str) -> str:

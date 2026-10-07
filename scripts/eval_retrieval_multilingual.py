@@ -300,8 +300,8 @@ def passage_key(hit: dict[str, Any]) -> str:
     if pid:
         return pid
     basis = f"{hit.get('source', '')}|{norm_question(hit.get('question', ''))}|{(hit.get('text') or '')[:200]}"
-    # An identity for passages without a Qdrant id, not a security boundary.
-    return "nid:" + hashlib.sha1(basis.encode(), usedforsecurity=False).hexdigest()[:16]
+    # An identity for passages without a Qdrant id; only compared within one run.
+    return "nid:" + hashlib.sha256(basis.encode()).hexdigest()[:16]
 
 
 def rank_metrics(labels: list[int], k: int = 10) -> dict[str, float]:
@@ -577,8 +577,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 def env_summary(h: Harness) -> dict[str, Any]:
     from app.flags import flags
     from app.guardrails import ABSTENTION_THRESHOLD_NORM
-    from app.retriever import (DENSE_MODEL_NAME, LEXICAL_RELEVANCE_FLOOR, RERANK_ENABLED, RERANKER_MODEL_NAME,
-                               RETRIEVER_DENSE_DEVICE, RRF_K)
+    from app.retriever import (
+        DENSE_MODEL_NAME,
+        LEXICAL_RELEVANCE_FLOOR,
+        RERANK_ENABLED,
+        RERANKER_MODEL_NAME,
+        RETRIEVER_DENSE_DEVICE,
+        RRF_K,
+    )
 
     return {
         "dense_model": DENSE_MODEL_NAME if h.has_dense else None,
@@ -667,9 +673,13 @@ def precision_check(h: Harness, rows: list[dict[str, Any]]) -> dict[str, Any]:
     float16 twin on the same device and scores identical inputs.
     """
     import torch
+    from app.retriever import (
+        DENSE_MODEL_NAME,
+        RERANKER_DEVICE,
+        RERANKER_MODEL_NAME,
+        RETRIEVER_DENSE_DEVICE,
+    )
     from sentence_transformers import CrossEncoder, SentenceTransformer
-
-    from app.retriever import DENSE_MODEL_NAME, RERANKER_DEVICE, RERANKER_MODEL_NAME, RETRIEVER_DENSE_DEVICE
 
     out: dict[str, Any] = {}
     texts = [h.pivot(r["query"], r["lang"]) if r["lang"] != "en" else r["query"] for r in rows]
@@ -924,9 +934,8 @@ def cmd_judge(args: argparse.Namespace) -> int:
             for sysrec in rec["systems"].values():
                 for hit in sysrec["hits"][: args.depth]:
                     pool[rec["parent"]].add(hit["key"])
-    from qdrant_client import QdrantClient
-
     from app.retriever import QDRANT_COLLECTION, QDRANT_URL
+    from qdrant_client import QdrantClient
 
     client = QdrantClient(url=QDRANT_URL)
     ids = sorted({k for keys in pool.values() for k in keys if not k.startswith("nid:")})
