@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import StaffGuard from "../../../components/StaffGuard";
 import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/States";
 import { OpsPage, OpsPanel } from "../../../components/ops/OpsPage";
+import { ModalDialog } from "../../../components/ModalDialog";
 import { authHeaders } from "../../../lib/authSession";
 import "../admin.css";
 
@@ -37,24 +38,12 @@ export function ConnectorBoard() {
   const [testResults, setTestResults] = useState<Record<string, { ok: boolean; latency_ms: number; message?: string }>>({});
   const [notice, setNotice] = useState("");
 
-  // Add Connector Modal State
+  // Dynamic registration is intentionally disabled; this opens the reviewed
+  // deployment setup guide instead of collecting endpoint or credential data.
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newConnName, setNewConnName] = useState("");
-  const [newConnDisplayName, setNewConnDisplayName] = useState("");
-  const [newConnUrl, setNewConnUrl] = useState("");
-  const [newConnProtocol, setNewConnProtocol] = useState<"mcp" | "rest">("mcp");
-  const [newConnMode, setNewConnMode] = useState<"simulation" | "live">("simulation");
-  const [newConnKey, setNewConnKey] = useState("");
-  const [addBusy, setAddBusy] = useState(false);
-  const [addError, setAddError] = useState("");
-  const [addTestSuccess, setAddTestSuccess] = useState<string | null>(null);
 
-  // Configure Connector Modal State
+  // Read-only deployment notes for a built-in simulator.
   const [configuringConnector, setConfiguringConnector] = useState<ConnectorRow | null>(null);
-  const [configMode, setConfigMode] = useState<"simulation" | "live">("simulation");
-  const [configUrl, setConfigUrl] = useState("");
-  const [configBusy, setConfigBusy] = useState(false);
-  const [configError, setConfigError] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -121,7 +110,7 @@ export function ConnectorBoard() {
           [connector.id]: {
             ok: true,
             latency_ms: body.latency_ms || 1.2,
-            message: `Ping OK (${body.latency_ms || 1.2} ms · ${body.tools_count || connector.tools.length} MCP tools)`,
+            message: `Local health check passed (${body.latency_ms || 1.2} ms · ${body.tools_count || connector.tools.length} MCP tools)`,
           },
         }));
       }
@@ -137,72 +126,6 @@ export function ConnectorBoard() {
 
   const handleOpenConfigure = (conn: ConnectorRow) => {
     setConfiguringConnector(conn);
-    setConfigMode((conn.mode as "simulation" | "live") || "simulation");
-    setConfigUrl("");
-    setConfigError("");
-  };
-
-  const handleSaveConfigure = async () => {
-    if (!configuringConnector) return;
-    setConfigBusy(true);
-    setConfigError("");
-    try {
-      const res = await fetch(`/api/v1/connectors/${encodeURIComponent(configuringConnector.id)}/configure`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ mode: configMode, endpoint_url: configUrl || undefined }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body.ok) {
-        throw new Error(body.detail || body.error || "Configuration update failed");
-      }
-      setNotice(`Updated ${configuringConnector.name} settings.`);
-      setConfiguringConnector(null);
-      await refresh();
-    } catch (err) {
-      setConfigError((err as Error).message);
-    } finally {
-      setConfigBusy(false);
-    }
-  };
-
-  const handleAddConnectorSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newConnName.trim() || !newConnDisplayName.trim()) {
-      setAddError("Identifier and Display Name are required.");
-      return;
-    }
-    setAddBusy(true);
-    setAddError("");
-    try {
-      const res = await fetch("/api/v1/connectors/register", {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          name: newConnName.trim().toLowerCase().replace(/\s+/g, "_"),
-          display_name: newConnDisplayName.trim(),
-          endpoint_url: newConnUrl.trim(),
-          protocol: newConnProtocol,
-          mode: newConnMode,
-          api_key: newConnKey.trim() || undefined,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok || !body.ok) {
-        throw new Error(body.detail || body.error || "Registration failed");
-      }
-      setNotice(`Registered connector ${newConnDisplayName}.`);
-      setShowAddModal(false);
-      setNewConnName("");
-      setNewConnDisplayName("");
-      setNewConnUrl("");
-      setNewConnKey("");
-      await refresh();
-    } catch (err) {
-      setAddError((err as Error).message);
-    } finally {
-      setAddBusy(false);
-    }
   };
 
   const connectors = data?.connectors ?? [];
@@ -211,20 +134,16 @@ export function ConnectorBoard() {
     <OpsPage
       eyebrow="Configure"
       title="System connectors"
-      description="Check and enable the connector simulators used by guided agent flows."
+      description="Review local connector health. New integrations go through a security review and deployment configuration."
       width="read"
       actions={
         <div className="flex items-center gap-2">
           <button
             className="ops-btn is-primary is-sm"
             type="button"
-            onClick={() => {
-              setShowAddModal(true);
-              setAddError("");
-              setAddTestSuccess(null);
-            }}
+            onClick={() => setShowAddModal(true)}
           >
-            + Add Connector
+            Add connector
           </button>
           <button className="ops-btn is-ghost is-sm" type="button" onClick={() => void refresh()} disabled={loading}>
             Refresh status
@@ -264,19 +183,13 @@ export function ConnectorBoard() {
                       <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
                         {connector.protocol || "MCP"}
                       </span>
-                      <span
-                        className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                          connector.mode === "live"
-                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                            : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                        }`}
-                      >
-                        {connector.mode === "live" ? "Live Production" : "Simulation Mode"}
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                        Local simulation
                       </span>
                     </div>
                     <p>{connector.description}</p>
                     <p className="ops-stat-hint">
-                      {connector.mode || "simulation"} · {connector.tools.length} guided tools ·{" "}
+                      {connector.tools.length} guided tools ·{" "}
                       {connector.healthy ? "healthy locally" : "local health check failed"}
                       {testResult && (
                         <span className={`ml-2 font-mono font-medium ${testResult.ok ? "text-emerald-400" : "text-rose-400"}`}>
@@ -291,17 +204,17 @@ export function ConnectorBoard() {
                       type="button"
                       onClick={() => void testConnection(connector)}
                       disabled={testingId === connector.id}
-                      title="Run live diagnostic ping and MCP tool handshake"
+                      title="Check local connector health and registered tools"
                     >
-                      {testingId === connector.id ? "Pinging…" : "Test Ping"}
+                      {testingId === connector.id ? "Checking…" : "Test connection"}
                     </button>
                     <button
                       className="ops-btn is-ghost is-sm"
                       type="button"
                       onClick={() => handleOpenConfigure(connector)}
-                      title="Configure endpoint and live/sandbox mode"
+                      title={`View deployment notes for ${connector.name}`}
                     >
-                      Settings
+                      Details
                     </button>
                     <span className={`ops-chip ${connector.connected ? "is-good" : ""}`}>
                       {connector.connected ? "Enabled" : "Disabled"}
@@ -323,210 +236,109 @@ export function ConnectorBoard() {
         ) : null}
       </OpsPanel>
 
-      {/* Add Connector Modal Dialog */}
+      {/* Add Connector setup guidance: runtime registration is disabled. */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div
-            className="w-full max-w-lg rounded-2xl bg-neutral-900 border border-neutral-700 shadow-2xl p-6 text-neutral-200 animate-fade-in"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="add-connector-title"
-          >
-            <div className="flex items-center justify-between pb-4 border-b border-neutral-800">
-              <h3 id="add-connector-title" className="text-base font-semibold text-white">
-                Register Enterprise Connector
-              </h3>
-              <button
-                type="button"
-                className="text-neutral-400 hover:text-white text-lg leading-none"
-                onClick={() => setShowAddModal(false)}
-                aria-label="Close modal"
-              >
-                ×
-              </button>
+        <ModalDialog
+          labelledBy="add-connector-title"
+          className="connector-dialog"
+          onClose={() => setShowAddModal(false)}
+        >
+          <header className="connector-dialog-header">
+            <div>
+              <span className="ops-eyebrow">Security-reviewed setup</span>
+              <h2 id="add-connector-title">Add a connector</h2>
+            </div>
+            <button
+              type="button"
+              className="connector-dialog-close"
+              onClick={() => setShowAddModal(false)}
+              aria-label="Close connector setup"
+            >
+              ×
+            </button>
+          </header>
+
+          <div className="connector-dialog-body">
+            <div className="connector-setup-note" role="note">
+              <strong>Registration from this screen is disabled.</strong>
+              <p>
+                New connector servers must be reviewed and supplied through deployment configuration before they can appear here.
+              </p>
             </div>
 
-            <form onSubmit={handleAddConnectorSubmit} className="space-y-4 pt-4 text-xs">
-              {addError && (
-                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">
-                  {addError}
-                </div>
-              )}
-              {addTestSuccess && (
-                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs">
-                  {addTestSuccess}
-                </div>
-              )}
+            <h3>Setup steps</h3>
+            <ol className="connector-setup-steps">
+              <li>Implement and review the connector server, protocol, permissions, and network access.</li>
+              <li>Configure its endpoint and credentials in the deployment secret store. Do not paste secrets into this console.</li>
+              <li>Deploy the reviewed change, then verify it with the connector health checks.</li>
+            </ol>
 
-              <div>
-                <label className="block text-neutral-300 font-medium mb-1">Connector Identifier (Unique)</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. nira_national_id_gateway"
-                  value={newConnName}
-                  onChange={(e) => setNewConnName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="block text-neutral-300 font-medium mb-1">Display Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. NIRA National ID Verification API"
-                  value={newConnDisplayName}
-                  onChange={(e) => setNewConnDisplayName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-neutral-300 font-medium mb-1">Protocol Standard</label>
-                  <select
-                    value={newConnProtocol}
-                    onChange={(e) => setNewConnProtocol(e.target.value as "mcp" | "rest")}
-                    className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="mcp">MCP (Model Context Protocol)</option>
-                    <option value="rest">REST API (OAuth 2.0 / Token)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-neutral-300 font-medium mb-1">Environment Mode</label>
-                  <select
-                    value={newConnMode}
-                    onChange={(e) => setNewConnMode(e.target.value as "simulation" | "live")}
-                    className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="simulation">Simulation (Sandbox Test)</option>
-                    <option value="live">Live Production (HTTPS)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-neutral-300 font-medium mb-1">Endpoint Gateway URL</label>
-                <input
-                  type="url"
-                  placeholder="https://api.ura.go.ug/v1/gateway or http://localhost:8000"
-                  value={newConnUrl}
-                  onChange={(e) => setNewConnUrl(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 font-mono"
-                />
-                <p className="text-[11px] text-neutral-500 mt-1">
-                  Production requires HTTPS. Private IP addresses (127.0.0.1, 10.x, 192.168.x) are blocked in production.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-neutral-300 font-medium mb-1">API Key / Bearer Secret (Optional)</label>
-                <input
-                  type="password"
-                  placeholder="••••••••••••••••"
-                  value={newConnKey}
-                  onChange={(e) => setNewConnKey(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 font-mono"
-                />
-                <p className="text-[11px] text-neutral-500 mt-1">Vaulted securely. Never logged or exposed in API transcripts.</p>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-4 border-t border-neutral-800">
-                <button
-                  type="button"
-                  className="ops-btn is-ghost is-sm"
-                  onClick={() => setShowAddModal(false)}
-                  disabled={addBusy}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="ops-btn is-primary is-sm" disabled={addBusy}>
-                  {addBusy ? "Registering…" : "Register Connector"}
-                </button>
-              </div>
-            </form>
+            <p className="connector-runbook-reference">
+              Operational guide: <code>docs/runbooks/enterprise-connectors-and-mcp.md</code>
+            </p>
           </div>
-        </div>
+
+          <footer className="connector-dialog-footer">
+            <button
+              type="button"
+              className="ops-btn is-primary"
+              onClick={() => setShowAddModal(false)}
+            >
+              Close
+            </button>
+          </footer>
+        </ModalDialog>
       )}
 
-      {/* Configure Connector Settings Modal */}
+      {/* Read-only deployment notes for the selected local simulator. */}
       {configuringConnector && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div
-            className="w-full max-w-md rounded-2xl bg-neutral-900 border border-neutral-700 shadow-2xl p-6 text-neutral-200 animate-fade-in"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="config-connector-title"
-          >
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
-              <h3 id="config-connector-title" className="text-sm font-semibold text-white">
-                Configure {configuringConnector.name}
-              </h3>
-              <button
-                type="button"
-                className="text-neutral-400 hover:text-white text-base leading-none"
-                onClick={() => setConfiguringConnector(null)}
-              >
-                ×
-              </button>
+        <ModalDialog
+          labelledBy="config-connector-title"
+          className="connector-dialog"
+          onClose={() => setConfiguringConnector(null)}
+        >
+          <header className="connector-dialog-header">
+            <div>
+              <span className="ops-eyebrow">Deployment notes</span>
+              <h2 id="config-connector-title">{configuringConnector.name}</h2>
+            </div>
+            <button
+              type="button"
+              className="connector-dialog-close"
+              onClick={() => setConfiguringConnector(null)}
+              aria-label="Close deployment notes"
+            >
+              ×
+            </button>
+          </header>
+
+          <div className="connector-dialog-body">
+            <div className="connector-setup-note" role="note">
+              <strong>This connector is a local simulator.</strong>
+              <p>
+                Its health check reports the local service and registered tools. It does not confirm a live URA, NIRA, bank, or payment connection.
+              </p>
             </div>
 
-            <div className="space-y-4 pt-4 text-xs">
-              {configError && (
-                <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">
-                  {configError}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-neutral-300 font-medium mb-1">Operating Mode</label>
-                <select
-                  value={configMode}
-                  onChange={(e) => setConfigMode(e.target.value as "simulation" | "live")}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="simulation">Simulation (Sandbox / Staging)</option>
-                  <option value="live">Live Production (Authenticated API)</option>
-                </select>
-                <p className="text-[11px] text-neutral-500 mt-1">
-                  Simulation mode uses local SQLite fixture datastores. Live mode connects to official gateways.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-neutral-300 font-medium mb-1">Custom Gateway URL (Optional)</label>
-                <input
-                  type="url"
-                  placeholder="Leave empty to use default deployment routing"
-                  value={configUrl}
-                  onChange={(e) => setConfigUrl(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-neutral-800 border border-neutral-700 text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-800">
-                <button
-                  type="button"
-                  className="ops-btn is-ghost is-sm"
-                  onClick={() => setConfiguringConnector(null)}
-                  disabled={configBusy}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="ops-btn is-primary is-sm"
-                  onClick={handleSaveConfigure}
-                  disabled={configBusy}
-                >
-                  {configBusy ? "Saving…" : "Save Settings"}
-                </button>
-              </div>
-            </div>
+            <h3>Changing the deployment</h3>
+            <p className="connector-deployment-copy">
+              Endpoint routing and credentials are managed through a reviewed server configuration. Changes in this console cannot switch this simulator to a live government service.
+            </p>
+            <p className="connector-runbook-reference">
+              Operational guide: <code>docs/runbooks/enterprise-connectors-and-mcp.md</code>
+            </p>
           </div>
-        </div>
+
+          <footer className="connector-dialog-footer">
+            <button
+              type="button"
+              className="ops-btn is-primary"
+              onClick={() => setConfiguringConnector(null)}
+            >
+              Close
+            </button>
+          </footer>
+        </ModalDialog>
       )}
     </OpsPage>
   );

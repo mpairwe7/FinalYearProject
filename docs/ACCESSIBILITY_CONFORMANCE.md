@@ -3,6 +3,7 @@
 **Service:** URA Tax Assistant (taxpayer chat and staff operations workbench)
 **Conformance target:** [WCAG 2.2 Level AA](https://www.w3.org/TR/WCAG22/)
 **Published:** 2026-08-19
+**Updated:** 2026-10-07
 **Owner:** URA Tax Assistant engineering team
 
 ## Current status
@@ -48,6 +49,11 @@ permission prompt for microphone/camera access, or third-party links. Those
 are outside this application's control and must be assessed separately in a
 deployment review.
 
+The screenshot upload and inspection journey and the `/admin/connectors`
+setup/deployment-notes dialogs are not in the current automated route list. They stay
+in the independent manual audit scope until the release gate explicitly covers
+them.
+
 ## Evidence and release controls
 
 - `App/frontend/e2e/a11y.spec.ts` scans every scoped surface with axe-core's
@@ -80,8 +86,8 @@ blocks the claim.
 
 | Check | Minimum evidence |
 | --- | --- |
-| Keyboard | Tab / Shift+Tab order, Enter/Space activation, Escape dismissal, arrow-key menus, tabs, filters, composer, file attachment, dictation and staff reply flows. Focus is never hidden, trapped, or left on `body`. |
-| Screen reader | NVDA + Firefox and VoiceOver + Safari (or equivalent supported combinations). Verify headings, landmarks, names, state changes, error messages, staff queue selection, and one start/one completion announcement for a streamed answer. |
+| Keyboard | Tab / Shift+Tab order, Enter/Space activation, Escape dismissal, arrow-key menus, tabs, filters, composer, screenshot paste/drop/file selection/camera, screenshot inspection, connector setup/deployment-notes dialogs, dictation and staff reply flows. Focus is never hidden, trapped, or left on `body`. |
+| Screen reader | NVDA + Firefox and VoiceOver + Safari (or equivalent supported combinations). Verify headings, landmarks, names, screenshot guidance and uncertainty note, state changes, error messages, connector setup explanation, staff queue selection, and one start/one completion announcement for a streamed answer. |
 | Visual | Light and dark contrast, focus indicator visibility, 200% zoom/reflow, text spacing, and the warning/accent states in the operations dashboard. |
 | Touch/mobile | 320 CSS px and a current Android/iOS browser. Check target size, zoom, portrait/landscape reflow, and microphone/camera fallback messages. |
 | Authentication | Keyboard-only OIDC entry and the configured identity-provider flow, including any MFA or passkey screen owned by the provider. |

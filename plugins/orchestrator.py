@@ -159,45 +159,6 @@ class PluginOrchestrator:
             "tested_at": time.time(),
         }
 
-    def configure_connector(self, system_name: str, config: dict[str, Any]) -> dict[str, Any]:
-        """Configure connector settings such as environment mode (live vs simulation)."""
-        import time
-
-        name_clean = system_name.lower().replace("-", "_")
-        if name_clean == "dts":
-            name_clean = "digital_tax_stamps"
-
-        p = self.get_plugin(name_clean)
-        if not p:
-            return {"ok": False, "error": f"Connector '{system_name}' not found"}
-
-        app_env = os.getenv("APP_ENV", "development").lower()
-        requested_mode = config.get("mode", "").lower()
-        if requested_mode:
-            if requested_mode not in ("live", "simulation", "sandbox"):
-                return {"ok": False, "error": "mode must be 'live' or 'simulation'"}
-            if app_env == "production" and requested_mode != "live":
-                return {"ok": False, "error": "Simulation mode cannot be enabled under APP_ENV=production"}
-            setattr(p, "mode", requested_mode)
-
-        endpoint_url = config.get("endpoint_url")
-        if endpoint_url:
-            setattr(p, "endpoint_url", str(endpoint_url))
-
-        encrypted_key = config.get("encrypted_key")
-        if encrypted_key:
-            setattr(p, "encrypted_key", str(encrypted_key))
-            if hasattr(p.connector, "set_credentials"):
-                p.connector.set_credentials(str(encrypted_key))
-
-        return {
-            "ok": True,
-            "id": p.metadata.name,
-            "name": p.metadata.display_name,
-            "mode": getattr(p, "mode", "simulation"),
-            "updated_at": time.time(),
-        }
-
     def register_remote_connector(
         self,
         name: str,

@@ -6,7 +6,6 @@ import logging
 import os
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
@@ -105,62 +104,21 @@ def test_system_connector(name: str) -> dict[str, Any]:
 @router.post("/v1/connectors/{name}/configure")
 def configure_system_connector(
     name: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
     ctx: AuthContext = Depends(get_admin_access),
-) -> dict[str, Any]:
-    """Configure endpoint, credentials, or live/sandbox mode for a connector."""
+) -> None:
+    """Reject runtime connector changes; reviewed configuration is deployment-only."""
     _require_staff_writer(ctx)
-    from ..auth.vault import get_token_vault
-    from ..plugins import get_orchestrator
-
-    vault = get_token_vault()
-    clean_payload = dict(payload)
-    if "api_key" in clean_payload and clean_payload["api_key"]:
-        raw_key = str(clean_payload["api_key"])
-        clean_payload["encrypted_key"] = vault.encrypt_secret(raw_key)
-        clean_payload["api_key"] = vault.mask_secret(raw_key)
-
-    orchestrator = get_orchestrator()
-    res = orchestrator.configure_connector(name, clean_payload)
-    if not res.get("ok") and "not found" in res.get("error", "").lower():
-        raise HTTPException(status_code=404, detail=res["error"])
-    safe_uid = re.sub(r"[^a-zA-Z0-9_-]", "", str(ctx.user_id))[:64]
-    safe_name = re.sub(r"[^a-zA-Z0-9_-]", "", str(name))[:64]
-    logger.info("Admin %s updated connector %s configuration", safe_uid, safe_name)
-    return res
+    del name
+    raise HTTPException(
+        status_code=410,
+        detail="Runtime connector configuration is disabled. Configure reviewed servers through deployment settings.",
+    )
 
 
 @router.post("/v1/connectors/register", dependencies=[Depends(get_admin_access)])
-def register_external_connector(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-    """Reject unverified dynamic servers unless explicitly pre-configured with security validation."""
-    if not payload or not payload.get("name"):
-        raise HTTPException(
-            status_code=410,
-            detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
-        )
-    endpoint_url = str(payload.get("endpoint_url", "")).strip()
-    if endpoint_url:
-        parsed = urlparse(endpoint_url)
-        hostname = (parsed.hostname or "").lower()
-        if os.getenv("APP_ENV", "development").lower() == "production":
-            if parsed.scheme != "https":
-                raise HTTPException(status_code=400, detail="Production connectors require HTTPS.")
-            if (
-                hostname in ("localhost", "127.0.0.1", "0.0.0.0", "169.254.169.254")  # noqa: S104
-                or hostname.startswith(("10.", "192.168."))
-            ):
-                raise HTTPException(status_code=400, detail="Private network endpoints are rejected in production.")
-
-    from ..auth.vault import get_token_vault
-
-    vault = get_token_vault()
-    masked_key = vault.mask_secret(str(payload.get("api_key", ""))) if payload.get("api_key") else ""
-
-    return {
-        "ok": True,
-        "id": payload["name"],
-        "registered": True,
-        "mode": payload.get("mode", "simulation"),
-        "protocol": payload.get("protocol", "mcp"),
-        "masked_key": masked_key,
-    }
+def register_external_connector() -> None:
+    """Fail closed: reviewed connector servers are provisioned at deployment time."""
+    raise HTTPException(
+        status_code=410,
+        detail="Dynamic connector registration is disabled. Configure a reviewed server through deployment settings.",
+    )

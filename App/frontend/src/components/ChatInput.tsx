@@ -125,6 +125,15 @@ function ChatInputInner({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
 
+  const handleAttachFiles = useCallback((files: FileList) => {
+    if (!onAttachFiles || files.length === 0) return;
+    onAttachFiles(files);
+    const includesImage = Array.from(files).some((file) => file.type.startsWith('image/'));
+    if (includesImage && !message.trim()) {
+      onMessageChange(t('composer.imagePrompt'));
+    }
+  }, [message, onAttachFiles, onMessageChange, t]);
+
   const handleCameraCapture = (imageBase64: string) => {
     setIsCameraActive(false);
     if (!onAttachFiles) return;
@@ -146,10 +155,10 @@ function ChatInputInner({
       if (typeof DataTransfer !== 'undefined') {
         const dt = new DataTransfer();
         dt.items.add(file);
-        onAttachFiles(dt.files);
+        handleAttachFiles(dt.files);
       }
-    } catch (err) {
-      console.error('Failed to process camera capture', err);
+    } catch {
+      console.error('Failed to process camera capture');
     }
   };
 
@@ -267,7 +276,7 @@ function ChatInputInner({
     setIsDragging(false);
     dragCounterRef.current = 0;
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onAttachFiles?.(e.dataTransfer.files);
+      handleAttachFiles(e.dataTransfer.files);
     }
   };
 
@@ -291,10 +300,7 @@ function ChatInputInner({
         e.preventDefault();
         const dt = new DataTransfer();
         fileList.forEach((f) => dt.items.add(f));
-        onAttachFiles?.(dt.files);
-        if (!message.trim()) {
-          onMessageChange('Please inspect this URA portal screenshot and guide me on how to resolve the issue.');
-        }
+        handleAttachFiles(dt.files);
       }
     }
   };
@@ -368,57 +374,62 @@ function ChatInputInner({
       >
         {isDragging && (
           <div className="composer-drop-overlay" aria-hidden="true">
-            <span>Drop documents here to analyze and attach (PDF, Word, Excel, CSV, or Image)</span>
+            <span>{t('composer.dropFiles')}</span>
           </div>
         )}
         {showAttachments && attachments && attachments.length > 0 && (
-          <div className="composer-attachments" aria-label="Attached documents">
-            {attachments.map((a) => (
-              <div
-                key={a.clientId}
-                className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
-              >
-                <FileIcon />
-                <span className="attachment-name" title={a.name}>{a.name}</span>
-                <span className="attachment-meta">
-                  {a.status === 'uploading' && <LoadingDots />}
-                  {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
-                  {a.status === 'error' && (a.error || 'Failed')}
-                </span>
-                {a.status === 'ready' && (
+          <>
+            <div className="composer-attachments" aria-label={t('composer.attachmentsLabel')}>
+              {attachments.map((a) => (
+                <div
+                  key={a.clientId}
+                  className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
+                >
+                  <FileIcon />
+                  <span className="attachment-name" title={a.name}>{a.name}</span>
+                  <span className="attachment-meta">
+                    {a.status === 'uploading' && <LoadingDots />}
+                    {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
+                    {a.status === 'error' && (a.error || 'Failed')}
+                  </span>
+                  {a.status === 'ready' && (
+                    <button
+                      type="button"
+                      className="attachment-report-link"
+                      onClick={() => onInspectAttachment?.(a)}
+                      title={t('documents.inspect')}
+                      aria-label={t('composer.inspectAttachment', { name: a.name })}
+                    >
+                      <EyeIcon />
+                    </button>
+                  )}
+                  {a.status === 'ready' && a.documentId && (
+                    <a
+                      href={`/api/v1/documents/${a.documentId}/report`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="attachment-report-link"
+                      title={t('documents.downloadReport')}
+                      aria-label={t('composer.downloadAttachmentReport', { name: a.name })}
+                    >
+                      <DownloadIcon />
+                    </a>
+                  )}
                   <button
                     type="button"
-                    className="attachment-report-link"
-                    onClick={() => onInspectAttachment?.(a)}
-                    title="Inspect extracted fields & tax audit"
-                    aria-label={`Inspect ${a.name}`}
+                    className="attachment-remove"
+                    onClick={() => onRemoveAttachment?.(a.clientId)}
+                    aria-label={t('composer.removeAttachmentNamed', { name: a.name })}
                   >
-                    <EyeIcon />
+                    <CloseIcon />
                   </button>
-                )}
-                {a.status === 'ready' && a.documentId && (
-                  <a
-                    href={`/api/v1/documents/${a.documentId}/report`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="attachment-report-link"
-                    title="Download analysis report"
-                    aria-label={`Download analysis report for ${a.name}`}
-                  >
-                    <DownloadIcon />
-                  </a>
-                )}
-                <button
-                  type="button"
-                  className="attachment-remove"
-                  onClick={() => onRemoveAttachment?.(a.clientId)}
-                  aria-label={`Remove ${a.name}`}
-                >
-                  <CloseIcon />
-                </button>
-              </div>
-            ))}
-          </div>
+                </div>
+              ))}
+            </div>
+            <p className="composer-attachment-privacy" role="note">
+              {t('composer.attachPrivacyNotice')}
+            </p>
+          </>
         )}
 
         <textarea
@@ -455,7 +466,7 @@ function ChatInputInner({
                 aria-hidden="true"
                 tabIndex={-1}
                 onChange={(e) => {
-                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  if (e.target.files?.length) handleAttachFiles(e.target.files);
                   e.target.value = '';
                 }}
               />
@@ -468,7 +479,7 @@ function ChatInputInner({
                 aria-hidden="true"
                 tabIndex={-1}
                 onChange={(e) => {
-                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  if (e.target.files?.length) handleAttachFiles(e.target.files);
                   e.target.value = '';
                 }}
               />
@@ -483,11 +494,11 @@ function ChatInputInner({
                   }`}
                   onClick={() => setShowAttachMenu((prev) => !prev)}
                   disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
-                  aria-label="Attach a document (PDF, Word, Excel, CSV, or image) or take a photo"
+                  aria-label={t('composer.addToConversation')}
                   aria-haspopup="dialog"
                   aria-expanded={showAttachMenu}
-                  title="Add to conversation"
-                  data-tip="Add to conversation"
+                  title={t('composer.addTitle')}
+                  data-tip={t('composer.addTitle')}
                   data-testid="composer-add-btn"
                 >
                   <PlusIcon
@@ -510,7 +521,7 @@ function ChatInputInner({
                       className="lmv2 addmenu-dialog"
                       role="dialog"
                       aria-modal="true"
-                      aria-label="Add to conversation"
+                      aria-labelledby="composer-attach-title"
                     >
                       <>
                           <div className="lmv2-head addmenu-head">
@@ -518,19 +529,19 @@ function ChatInputInner({
                               <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
                                 <PlusIcon size={14} />
                               </div>
-                              <h2>Add to conversation</h2>
+                              <h2 id="composer-attach-title">{t('composer.addTitle')}</h2>
                             </div>
                             <button
                               type="button"
                               className="dlgv2-x lmv2-x"
                               onClick={closeAddMenu}
-                              aria-label="Close add menu"
+                              aria-label={t('common.close')}
                             >
                               <CloseIcon />
                             </button>
                           </div>
 
-                          <div className="lmv2-list addmenu-list" role="menu" aria-label="Attachment and tool options">
+                          <div className="lmv2-list addmenu-list" role="menu" aria-label={t('composer.attachmentOptions')}>
                             {/* Option 1: Upload a file */}
                             <button
                               ref={(el) => {
@@ -551,12 +562,12 @@ function ChatInputInner({
                                   <FileIcon size={18} />
                                 </div>
                                 <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">Upload a file</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">PDF, Word, Excel, CSV, or high-res image</div>
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">{t('composer.uploadFile')}</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">{t('composer.uploadFileDescription')}</div>
                                 </div>
                               </div>
                               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                File
+                                {t('composer.fileTag')}
                               </span>
                             </button>
 
@@ -577,12 +588,12 @@ function ChatInputInner({
                                   <CameraIcon />
                                 </div>
                                 <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">Take a photo</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">Snap National ID, receipt, or physical doc</div>
+                                  <div className="font-semibold text-sm text-[var(--text-0)]">{t('composer.takePhoto')}</div>
+                                  <div className="text-xs text-[var(--text-2)] truncate">{t('composer.takePhotoDescription')}</div>
                                 </div>
                               </div>
                               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                Camera
+                                {t('composer.cameraTag')}
                               </span>
                             </button>
 

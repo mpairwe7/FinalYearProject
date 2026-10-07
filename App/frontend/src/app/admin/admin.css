@@ -370,3 +370,171 @@
   align-items: center;
   gap: 8px 12px;
 }
+/* Connector dialogs ------------------------------------------------------- */
+
+.connector-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(90dvh, 780px);
+  margin: auto;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  color: var(--text-0);
+  box-shadow: var(--ops-elev-3);
+}
+
+.connector-dialog:not([open]) {
+  display: none;
+}
+
+.connector-dialog::backdrop {
+  background: rgba(8, 14, 27, 0.64);
+  backdrop-filter: blur(3px);
+}
+
+.connector-dialog-header,
+.connector-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-5) var(--ops-space-6);
+}
+
+.connector-dialog-header {
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.connector-dialog-header h2 {
+  margin: var(--ops-space-1) 0 0;
+  font-size: var(--ops-text-lg);
+  line-height: var(--ops-lh-tight);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.connector-dialog-close {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
+  color: var(--text-1);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.connector-dialog-close:hover {
+  background: var(--ops-row-hover);
+  color: var(--text-0);
+}
+
+.connector-dialog-body {
+  display: grid;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-5) var(--ops-space-6);
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+}
+
+.connector-dialog-body h3 {
+  margin: 0;
+  color: var(--text-0);
+  font-size: var(--ops-text-base);
+  font-weight: var(--ops-weight-semi);
+}
+
+.connector-setup-note,
+.connector-config-error {
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-info-line);
+  border-inline-start: 3px solid var(--ops-info-ink);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-info-fill);
+  color: var(--text-1);
+}
+
+.connector-setup-note strong {
+  color: var(--text-0);
+}
+
+.connector-setup-note p {
+  margin: var(--ops-space-1) 0 0;
+}
+
+.connector-setup-steps {
+  display: grid;
+  gap: var(--ops-space-3);
+  margin: 0;
+  padding-inline-start: 22px;
+  color: var(--text-1);
+}
+
+.connector-setup-steps li {
+  padding-inline-start: var(--ops-space-1);
+}
+
+.connector-setup-steps li::marker {
+  color: var(--ops-info-ink);
+  font-weight: var(--ops-weight-bold);
+}
+
+.connector-deployment-copy {
+  margin: calc(-1 * var(--ops-space-3)) 0 0;
+  color: var(--text-1);
+}
+
+.connector-runbook-reference {
+  margin: 0;
+  padding-top: var(--ops-space-3);
+  border-top: 1px solid var(--ops-hairline);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.connector-runbook-reference code {
+  color: var(--text-0);
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-xs);
+}
+
+.connector-dialog-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--ops-hairline);
+}
+
+.connector-dialog :focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
+}
+
+@media (max-width: 520px) {
+  .connector-dialog {
+    width: calc(100vw - 24px);
+    max-height: min(92dvh, 780px);
+  }
+
+  .connector-dialog-header,
+  .connector-dialog-footer {
+    padding: var(--ops-space-4);
+  }
+
+  .connector-dialog-body {
+    padding: var(--ops-space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connector-dialog {
+    animation: none;
+    scroll-behavior: auto;
+  }
+}

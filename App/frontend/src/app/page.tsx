@@ -905,6 +905,7 @@ export default function Page() {
         truncated: analysis.truncated,
         summary: analysis.summary,
         taxReconciliation: analysis.tax_reconciliation,
+        screenshot_guidance: analysis.screenshot_guidance,
         warnings: analysis.warnings,
         expiresInSeconds: analysis.expires_in_seconds,
       };

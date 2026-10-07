@@ -204,25 +204,34 @@ function ChatMessageInner({
             ))}
             {turn.attachments.map((a) =>
               a.analysis?.screenshot_guidance?.is_screenshot ? (
-                <div className="portal-guidance-card" key={`guidance-${a.id}`} role="region" aria-label="URA Portal Guidance">
+                <section
+                  className="portal-guidance-card"
+                  key={`guidance-${a.id}`}
+                  aria-labelledby={`portal-guidance-title-${a.id}`}
+                >
                   <div className="portal-guidance-badge-row">
-                    <span className="portal-guidance-badge">
-                      🌐 {a.analysis.screenshot_guidance.detected_portal}
-                    </span>
+                    <div className="portal-guidance-heading">
+                      <span className="portal-guidance-eyebrow">{t('documents.portalGuidance')}</span>
+                      <h3 id={`portal-guidance-title-${a.id}`}>
+                        {a.analysis.screenshot_guidance.detected_portal || t('documents.unknownPortal')}
+                      </h3>
+                    </div>
                     {a.analysis.screenshot_guidance.detected_state ? (
-                      <span className="portal-guidance-state">
-                        {a.analysis.screenshot_guidance.detected_state}
-                      </span>
+                      <div className="portal-guidance-state">
+                        <span>{t('documents.screenState')}</span>
+                        <strong>{a.analysis.screenshot_guidance.detected_state}</strong>
+                      </div>
                     ) : null}
                   </div>
                   {a.analysis.screenshot_guidance.issues_detected && a.analysis.screenshot_guidance.issues_detected.length > 0 ? (
-                    <p className="portal-guidance-issue">
-                      ⚠️ <strong>Identified:</strong> {a.analysis.screenshot_guidance.issues_detected.join(' ')}
-                    </p>
+                    <div className="portal-guidance-issue">
+                      <strong>{t('documents.possibleIssue')}</strong>
+                      <p>{a.analysis.screenshot_guidance.issues_detected.join(' ')}</p>
+                    </div>
                   ) : null}
                   {a.analysis.screenshot_guidance.steps && a.analysis.screenshot_guidance.steps.length > 0 ? (
                     <div className="portal-guidance-steps-wrap">
-                      <span className="portal-guidance-steps-title">Recommended Resolution Steps:</span>
+                      <h4 className="portal-guidance-steps-title">{t('documents.recommendedSteps')}</h4>
                       <ol className="portal-guidance-steps-list">
                         {a.analysis.screenshot_guidance.steps.map((step, idx) => (
                           <li key={idx}>{step}</li>
@@ -230,6 +239,7 @@ function ChatMessageInner({
                       </ol>
                     </div>
                   ) : null}
+                  <p className="portal-guidance-caution">{t('documents.screenshotCaution')}</p>
                   <div className="portal-guidance-actions">
                     {a.analysis.screenshot_guidance.portal_url ? (
                       <a
@@ -238,7 +248,7 @@ function ChatMessageInner({
                         rel="noopener noreferrer"
                         className="portal-action-btn is-primary"
                       >
-                        {a.analysis.screenshot_guidance.direct_action?.label || 'Open URA Portal ↗'}
+                        {a.analysis.screenshot_guidance.direct_action?.label || t('documents.openOfficialPortal')}
                       </a>
                     ) : null}
                     {onInspectAttachment ? (
@@ -247,11 +257,11 @@ function ChatMessageInner({
                         className="portal-action-btn is-ghost"
                         onClick={() => onInspectAttachment(a)}
                       >
-                        <EyeIcon /> Inspect Click Guidance
+                        <EyeIcon /> {t('documents.inspectScreenAreas')}
                       </button>
                     ) : null}
                   </div>
-                </div>
+                </section>
               ) : null,
             )}
           </div>
