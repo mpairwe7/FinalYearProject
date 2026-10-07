@@ -55,9 +55,10 @@ User Query
   │     ├── Dense: BAAI/bge-m3 (1024-dim multilingual) → Qdrant ANN search
   │     │     └── Optional HyDE document as the *dense* query only  [FLAG_HYDE]
   │     ├── Sparse: BM25 on the taxpayer's original words (never HyDE)
-  │     ├── Fusion: Reciprocal Rank Fusion (RRF, k=RRF_K default 60)
+  │     ├── Fusion: Qdrant server-side RRF at Qdrant's default k=2 (RRF_K=60 applies only to the graph leg)
   │     ├── Graph leg: statutory rate claims fused by rank, not prepended  [FLAG_GRAPH_FUSION + FLAG_TAX_GRAPH]
   │     ├── Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6) — scores the raw query
+  │     │     (and, for lg/sw, its English form; keeps the higher). On only when RERANK_ENABLED=true
   │     └── Circuit breaker: thread-safe, exponential backoff (10s→300s)
   │
   ├─► Stage 3: Keyword Fallback
@@ -122,8 +123,8 @@ User Query
 |-----------|---------|
 | Dense model | `BAAI/bge-m3` (1024-dim, multilingual, MTEB 63.0). Set via `DENSE_MODEL` + `DENSE_DIM` env vars. |
 | Sparse | BM25, encoded asymmetrically: documents carry term saturation, queries carry IDF, and their Qdrant dot product is the BM25 score. `bm25_state.json` stamps `encoding_version`; a state from an older index is queried its own way so an un-rebuilt collection keeps its ranking. |
-| Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API |
-| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0) |
+| Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API. `FusionQuery(fusion=RRF)` passes no `k`, so Qdrant's default **k=2** applies, not `RRF_K` (60), which only `rrf_fuse_ranked_lists` (the graph leg) reads. Measured against k=60 and DBSF in `docs/Reports/MULTILINGUAL_RETRIEVAL_EVALUATION_2026-10-07.md` (G127). |
+| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Loaded only when `RERANK_ENABLED=true` (env, default true); the `reranker` flag in the registry is not read by any code. The base `App/docker-compose.yml` sets `RERANK_ENABLED=false` (since #541), and no GPU overlay turns it back on (G126). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 
@@ -590,7 +591,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `corrective_rag` | on | Re-retrieval on low quality |
 | `semantic_cache` | on | Cache similar queries |
 | `query_rewrite` | on | Spell/abbreviation/coreference |
-| `reranker` | on | Cross-encoder reranking |
+| `reranker` | on | Nothing: no code reads it. Reranking follows the `RERANK_ENABLED` env var (G126) |
 | `workflows` | on | Guided multi-step workflows |
 | `handoff_summaries` | on | Human triage packets |
 | `ticket_queue` | on | Persist escalations for the staff workbench |
