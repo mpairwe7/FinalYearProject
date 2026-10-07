@@ -37,7 +37,8 @@ interface ChatInputProps {
   onCancelRecording?: () => void;
   onFocus?: () => void;
   attachments?: PendingAttachment[];
-  onAttachFiles?: (files: FileList) => void;
+  /** Attach files and return the subset accepted for upload. */
+  onAttachFiles?: (files: FileList) => File[];
   onRemoveAttachment?: (clientId: string) => void;
   onInspectAttachment?: (attachment: PendingAttachment) => void;
   /* Voice mode is the composer's only conversation-level control. It renders
@@ -127,9 +128,9 @@ function ChatInputInner({
 
   const handleAttachFiles = useCallback((files: FileList) => {
     if (!onAttachFiles || files.length === 0) return;
-    onAttachFiles(files);
-    const includesImage = Array.from(files).some((file) => file.type.startsWith('image/'));
-    if (includesImage && !message.trim()) {
+    const acceptedFiles = onAttachFiles(files);
+    const includesAcceptedImage = acceptedFiles.some((file) => file.type.startsWith('image/'));
+    if (includesAcceptedImage && !message.trim()) {
       onMessageChange(t('composer.imagePrompt'));
     }
   }, [message, onAttachFiles, onMessageChange, t]);

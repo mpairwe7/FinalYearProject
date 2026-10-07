@@ -70,7 +70,26 @@ The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI R
 2. Implement the connector server and register its namespace, tools, permissions, and protocol through the reviewed code change.
 3. Configure the remote endpoint with `MCP_SERVER_URL_<NAMESPACE>` and store any credential in the deployment secret store. Never submit bearer tokens or private keys through the browser.
 4. Review DNS/IP resolution, HTTPS/TLS identity, redirects, and outbound network access before deployment.
-5. Deploy the reviewed change, refresh `/admin/connectors`, and run **Test connection** on the configured connector. Confirm the mode and health before enabling any supported action.
+5. Deploy the reviewed change and refresh `/admin/connectors`. **Test connection** checks local simulator health only; it does not probe the remote MCP server.
+6. From the deployed API runtime, confirm the resolved namespace binds to the approved remote transport and send an MCP ping. The configured bearer token is sent by the transport in the authorization header and must never be printed:
+
+   ```bash
+   PYTHONPATH=App/backend python3 - <<'PY'
+   from app.mcp import get_client
+
+   namespace = "tax_calculator"
+   client = get_client()
+   binding = client.health()["namespaces"].get(namespace, {})
+   expected_transport = f"http:{namespace}"
+   if binding.get("transport") != expected_transport:
+       raise SystemExit(f"{namespace} is not bound to its approved remote transport")
+   if not client.ping(namespace):
+       raise SystemExit(f"MCP ping failed for {namespace}")
+   print({"namespace": namespace, "transport": expected_transport, "reachable": True})
+   PY
+   ```
+
+   Compare the namespace's endpoint with the approved deployment configuration. For a server that requires bearer authentication, a successful ping confirms the configured credential was accepted. Never print or paste the credential. Enable supported actions only after the remote binding and authentication checks pass.
 
 The browser registration and configuration APIs fail closed with `410 Gone` for authorized requests that reach the handlers. A successful response must never be interpreted as a connector registration or configuration change.
 

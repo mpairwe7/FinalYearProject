@@ -930,11 +930,12 @@ export default function Page() {
     }
   }, []);
 
-  const attachFiles = useCallback((files: FileList) => {
+  const attachFiles = useCallback((files: FileList): File[] => {
     const room = MAX_ATTACHMENTS - pendingAttachments.length;
-    if (room <= 0) return;
+    if (room <= 0) return [];
+    const acceptedFiles = Array.from(files).slice(0, room);
     const chips: PendingAttachment[] = [];
-    for (const file of Array.from(files).slice(0, room)) {
+    for (const file of acceptedFiles) {
       const clientId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const oversize = file.size > MAX_ATTACHMENT_BYTES;
       chips.push({
@@ -947,6 +948,7 @@ export default function Page() {
       if (!oversize) void uploadAttachment(file, clientId);
     }
     if (chips.length) setPendingAttachments((prev) => [...prev, ...chips]);
+    return acceptedFiles.filter((file) => file.size <= MAX_ATTACHMENT_BYTES);
   }, [pendingAttachments.length, uploadAttachment]);
 
   const removeAttachment = useCallback((clientId: string) => {

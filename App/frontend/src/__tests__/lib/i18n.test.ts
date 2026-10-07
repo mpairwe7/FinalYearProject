@@ -26,9 +26,9 @@ describe('i18n', () => {
   });
 
   it('shows the attachment privacy reminder in all supported taxpayer languages', () => {
-    expect(translate('en', 'composer.attachPrivacyNotice')).toContain('Never share passwords');
-    expect(translate('lg', 'composer.attachPrivacyNotice')).toContain('Togabana');
-    expect(translate('sw', 'composer.attachPrivacyNotice')).toContain('Usishiriki');
+    expect(translate('en', 'composer.attachPrivacyNotice')).toContain('Hide passwords');
+    expect(translate('lg', 'composer.attachPrivacyNotice')).toContain('Kweka ebisumuluzo');
+    expect(translate('sw', 'composer.attachPrivacyNotice')).toContain('Ficha nywila');
   });
 
   it('falls back to English rather than rendering a key or a blank', () => {

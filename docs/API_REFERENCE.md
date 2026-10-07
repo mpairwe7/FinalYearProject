@@ -1768,6 +1768,9 @@ answers on it, and download a branded PDF analysis report. Documents are
 held in ephemeral container storage shared across the app's worker
 processes (TTL ~2 h, dies with the container) and are bound to the
 uploading `X-Session-ID`; they are never written to the analytics DB.
+The composer suggests a general image question only when at least one image
+is accepted within the remaining attachment and file-size limits; rejected
+images do not leave a question in the draft without an attachment.
 
 ---
 
