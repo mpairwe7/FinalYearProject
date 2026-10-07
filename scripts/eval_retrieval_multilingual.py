@@ -36,6 +36,7 @@ override a variable with ``docker exec -e`` to measure another:
     docker exec ura-app-api mkdir -p /home/appuser/rm_eval
     docker cp scripts/eval_retrieval_multilingual.py ura-app-api:/home/appuser/rm_eval/
     docker cp evals/retrieval_multilingual/queries.jsonl ura-app-api:/home/appuser/rm_eval/
+    docker cp evals/retrieval_multilingual/gold.jsonl ura-app-api:/home/appuser/rm_eval/
     docker exec -w /app ura-app-api python /home/appuser/rm_eval/eval_retrieval_multilingual.py \\
         run --config as_deployed
     docker exec -w /app -e RERANK_ENABLED=true -e RETRIEVER_DENSE_DEVICE=cuda:0 ura-app-api \\
@@ -227,10 +228,13 @@ def load_queries(path: Path, sets: set[str] | None, limit: int) -> list[dict[str
     """The query set, with ``gold.jsonl`` joined on ``parent`` and the typo/ASR copies derived."""
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     gold_path = path.with_name("gold.jsonl")
-    if gold_path.exists():
-        lines = [line for line in gold_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        gold = {g["parent"]: g for g in map(json.loads, lines)}
-        rows = [{**gold.get(r["parent"], {}), **r} for r in rows]
+    # Every row names a parent whose answer lives only in gold.jsonl; without
+    # it the run "succeeds" with empty accuracy tables.
+    if not gold_path.exists():
+        raise SystemExit(f"{gold_path} is missing; copy it next to {path.name}")
+    lines = [line for line in gold_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    gold = {g["parent"]: g for g in map(json.loads, lines)}
+    rows = [{**gold.get(r["parent"], {}), **r} for r in rows]
     if not any("+" in r["variant"] for r in rows):
         rows = [out for r in rows for out in (r, *perturbed_copies(r))]
     if sets:
@@ -259,6 +263,13 @@ def english_source(rows: list[dict[str, Any]]) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- relevance
+#: UMBRELA grades read as relevant on the judged coverage pool. Sunflower is a
+#: lenient judge (it grades 23% of unrelated passages 2 or more), so only its top
+#: grade counts as strict relevance.
+COVERAGE_STRICT_GRADE = 3
+COVERAGE_LENIENT_GRADE = 2
+
+
 class Judge:
     """Strict / lenient relevance of a passage to a row with gold points."""
 
@@ -275,7 +286,7 @@ class Judge:
 
     def strict(self, hit: dict[str, Any]) -> int:
         if self.graded is not None:
-            return int(self.graded.get(passage_key(hit), 0) >= 2)
+            return int(self.graded.get(passage_key(hit), 0) >= COVERAGE_STRICT_GRADE)
         if str(hit.get("id", "")) in self.gold:
             return 1
         q = norm_question(hit.get("question", ""))
@@ -988,7 +999,7 @@ def cmd_judge(args: argparse.Namespace) -> int:
     neg = [g for (_, _, kind, _), g in zip(checks, validation, strict=True) if kind == "neg"]
     summary = {
         "judged": len(tasks), "questions": len(qrels),
-        "answerable": sum(1 for g in qrels.values() if max(g.values(), default=0) >= 2),
+        "answerable": sum(1 for g in qrels.values() if max(g.values(), default=0) >= COVERAGE_STRICT_GRADE),
         "validation": {"gold_ge2": round(sum(g >= 2 for g in pos) / max(1, len(pos)), 3),
                        "unrelated_le1": round(sum(0 <= g <= 1 for g in neg) / max(1, len(neg)), 3),
                        "n": len(pos)},
@@ -1090,16 +1101,17 @@ def summarise(recs: list[dict[str, Any]], rows: dict[str, dict[str, Any]],
                 if not judge.has_gold:
                     continue
                 if row["set"] == "coverage":
-                    labels = [int((judge.graded or {}).get(h["key"], 0) >= 2) for h in hits]
+                    labels = [int((judge.graded or {}).get(h["key"], 0) >= COVERAGE_STRICT_GRADE) for h in hits]
                     if kind == "lenient":
-                        labels = [int((judge.graded or {}).get(h["key"], 0) >= 1) for h in hits]
+                        labels = [int((judge.graded or {}).get(h["key"], 0) >= COVERAGE_LENIENT_GRADE) for h in hits]
                 else:
                     labels = [int(h[kind] or 0) for h in hits]
                 metrics = rank_metrics(labels)
                 if row["set"] == "coverage" and kind == "strict":
                     ideal = list((judge.graded or {}).values())
                     metrics["ndcg10_graded"] = graded_ndcg([(judge.graded or {}).get(h["key"], 0) for h in hits], ideal)
-                if row["set"] == "coverage" and not any(v >= 2 for v in (judge.graded or {}).values()):
+                if row["set"] == "coverage" and not any(
+                        v >= COVERAGE_STRICT_GRADE for v in (judge.graded or {}).values()):
                     continue
                 for group in groups:
                     key = (row["set"], rec["lang"], group, name, kind)
@@ -1117,7 +1129,7 @@ def summarise(recs: list[dict[str, Any]], rows: dict[str, dict[str, Any]],
                 if row["set"] == "ood" or top is None:
                     answerable = False
                 elif row["set"] == "coverage":
-                    answerable = (judge.graded or {}).get(top["key"], 0) >= 2
+                    answerable = (judge.graded or {}).get(top["key"], 0) >= COVERAGE_STRICT_GRADE
                 else:
                     answerable = bool(top["strict"])
                 abst[(name, rec["lang"], family)].append(
