@@ -1,0 +1,53 @@
+{
+  "summary": {
+    "total_queries": 100,
+    "correct_classifications": 100,
+    "overall_accuracy_pct": 100.0,
+    "total_duration_s": 47.99,
+    "throughput_qps": 2.08,
+    "http_success_rate_pct": 100.0
+  },
+  "performance_percentiles_ms": {
+    "p50": 625.8,
+    "p90": 2133.3,
+    "p95": 6614.2,
+    "p99": 33813.8,
+    "mean": 1620.9
+  },
+  "language_breakdown": {
+    "en": {
+      "count": 36,
+      "correct": 36,
+      "accuracy_pct": 100.0,
+      "avg_lat_ms": 1663.9
+    },
+    "lg": {
+      "count": 32,
+      "correct": 32,
+      "accuracy_pct": 100.0,
+      "avg_lat_ms": 1755.5
+    },
+    "sw": {
+      "count": 32,
+      "correct": 32,
+      "accuracy_pct": 100.0,
+      "avg_lat_ms": 1438.1
+    }
+  },
+  "code_switching_accuracy_pct": 100.0,
+  "length_breakdown": {
+    "short (<5 words)": {
+      "count": 14,
+      "accuracy_pct": 100.0
+    },
+    "medium (5-12 words)": {
+      "count": 50,
+      "accuracy_pct": 100.0
+    },
+    "long (>12 words)": {
+      "count": 36,
+      "accuracy_pct": 100.0
+    }
+  },
+  "mismatches": []
+}

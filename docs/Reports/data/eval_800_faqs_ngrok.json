@@ -1,89 +1,97 @@
 {
   "meta": {
     "total_faqs": 800,
-    "duration_seconds": 557.32,
-    "throughput_qps": 1.44,
+    "duration_seconds": 200.6,
+    "throughput_qps": 3.99,
     "target_endpoint": "https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat",
     "concurrency": 8,
-    "timestamp": "2026-09-18 22:38:48 UTC"
+    "timestamp": "2026-10-07 16:24:00 UTC"
   },
   "performance": {
-    "min_ms": 316.6,
-    "p50_ms": 8202.4,
-    "p90_ms": 23761.7,
-    "p95_ms": 30566.0,
-    "p99_ms": 44300.9,
-    "max_ms": 87058.1,
-    "mean_ms": 10558.8
+    "min_ms": 324.0,
+    "p50_ms": 14246.4,
+    "p90_ms": 35099.5,
+    "p95_ms": 46570.2,
+    "p99_ms": 81774.9,
+    "max_ms": 137173.6,
+    "mean_ms": 17103.0
   },
   "accuracy": {
-    "overall_accuracy_pct": 97.83,
-    "scorable_queries": 799,
-    "non_answers_count": 7
+    "overall_accuracy_pct": 95.19,
+    "scorable_queries": 796,
+    "non_answers_count": 8
   },
   "languages": {
     "en": {
       "count": 300,
-      "accuracy_pct": 98.56,
-      "avg_latency_ms": 4874.8,
+      "accuracy_pct": 98.47,
+      "avg_latency_ms": 11730.6,
       "figure_fidelity_pct": 100.0,
       "http_success_pct": 100.0
     },
     "lg": {
       "count": 250,
-      "accuracy_pct": 97.6,
-      "avg_latency_ms": 14834.1,
+      "accuracy_pct": 91.8,
+      "avg_latency_ms": 20886.5,
       "figure_fidelity_pct": 98.8,
-      "http_success_pct": 100.0
+      "http_success_pct": 99.6
     },
     "sw": {
       "count": 250,
-      "accuracy_pct": 97.19,
-      "avg_latency_ms": 13104.2,
-      "figure_fidelity_pct": 97.6,
+      "accuracy_pct": 94.62,
+      "avg_latency_ms": 19766.3,
+      "figure_fidelity_pct": 97.2,
       "http_success_pct": 100.0
     }
   },
   "domains": {
     "domestic": {
       "count": 300,
-      "accuracy_pct": 97.67,
-      "avg_latency_ms": 8934.4
+      "accuracy_pct": 95.69,
+      "avg_latency_ms": 15388.9
     },
     "customs": {
       "count": 240,
-      "accuracy_pct": 97.78,
-      "avg_latency_ms": 10817.6
+      "accuracy_pct": 95.8,
+      "avg_latency_ms": 16922.5
     },
     "tax_education": {
       "count": 260,
-      "accuracy_pct": 98.07,
-      "avg_latency_ms": 12194.1
+      "accuracy_pct": 94.06,
+      "avg_latency_ms": 19247.3
     }
   },
   "retrieval_modes": {
-    "hybrid": 540,
-    "education": 143,
-    "calculator": 52,
-    "faq_priority": 31,
+    "hybrid": 597,
+    "faq_priority": 65,
+    "calculator": 76,
+    "education": 26,
     "out_of_jurisdiction": 1,
-    "false_premise_rejected": 20,
-    "workflow": 7,
-    "contact_channels": 6
+    "false_premise_rejected": 10,
+    "mining_taxation": 5,
+    "vehicle_search_tracking": 1,
+    "error": 1,
+    "contact_channels": 5,
+    "workflow": 1,
+    "conversational": 2,
+    "transit_emergency": 1,
+    "installment_agreement": 1,
+    "escalated": 1,
+    "abstained": 7
   },
   "resilience": {
-    "http_availability_pct": 100.0,
-    "structured_formatting_pct": 42.38,
-    "support_channels_integrity_pct": 99.62
+    "http_availability_pct": 99.88,
+    "structured_formatting_pct": 49.38,
+    "support_channels_integrity_pct": 99.88
   },
   "gpu_telemetry": {
     "gpu_index": 2,
     "name": "NVIDIA RTX A6000",
     "memory_total_mb": 49140.0,
-    "memory_used_mb": 47226.0,
-    "memory_free_mb": 1449.0,
+    "memory_used_mb": 39699.0,
+    "memory_free_mb": 8977.0,
     "utilization_pct": 0.0,
-    "temperature_c": 81.0,
-    "power_draw_w": 191.23
+    "temperature_c": 82.0,
+    "power_draw_w": 236.95
   }
 }

@@ -244,7 +244,11 @@ class Benchmark800Runner:
                     resp = await client.post(
                         self.chat_url,
                         json=payload,
-                        headers={"Content-Type": "application/json", "User-Agent": "URA-800-Benchmark/1.0"},
+                        headers={
+                            "Content-Type": "application/json",
+                            "User-Agent": "URA-800-Benchmark/1.0",
+                            "ngrok-skip-browser-warning": "1",
+                        },
                         timeout=45.0,
                     )
                     latency_ms = (time.perf_counter() - t0) * 1000
