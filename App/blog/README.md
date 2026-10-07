@@ -63,6 +63,11 @@ The committed lockfile includes `pnpm` security overrides for vulnerable
 transitive dependencies. When changing these floors, update the lockfile with
 `pnpm install --lockfile-only` in the same change.
 
+UI components are maintained in this repository. The `shadcn` generator
+package is intentionally excluded from the app dependency graph because its
+transitive `braces` dependency has no upstream security fix yet
+([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)).
+
 Open [http://localhost:3000](http://localhost:3000) to view the blog.
 
 ## Theme System
