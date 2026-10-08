@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
 import { CameraCapture } from './CameraCapture';
+import { ModalDialog } from './ModalDialog';
 import {
   MicIcon,
   SendIcon,
@@ -188,32 +189,8 @@ function ChatInputInner({
   const addBtnRef = useRef<HTMLButtonElement>(null);
   const addMenuPanelRef = useRef<HTMLDivElement>(null);
   const addMenuOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const connectorsDialogRef = useRef<HTMLDialogElement>(null);
-
-  // Native modal dialogs provide browser-managed focus containment, Escape
-  // handling, and focus restoration. Keep an open-attribute fallback for
-  // environments without showModal(), such as lightweight DOM test runners.
-  useEffect(() => {
-    const dialog = connectorsDialogRef.current;
-    if (!dialog) return;
-
-    if (showConnectorsDialog) {
-      if (!dialog.open) {
-        if (typeof dialog.showModal === 'function') dialog.showModal();
-        else dialog.setAttribute('open', '');
-      }
-    } else if (dialog.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
-    }
-  }, [showConnectorsDialog]);
 
   const closeConnectorsDialog = () => {
-    const dialog = connectorsDialogRef.current;
-    if (dialog?.open) {
-      if (typeof dialog.close === 'function') dialog.close();
-      else dialog.removeAttribute('open');
-    }
     setShowConnectorsDialog(false);
     window.requestAnimationFrame(() => addBtnRef.current?.focus());
   };
@@ -828,16 +805,12 @@ function ChatInputInner({
             : t('composer.disclaimer')}
       </p>
 
-      <dialog
-        ref={connectorsDialogRef}
-        className="connectors-dialog"
-        aria-labelledby="composer-connectors-title"
-        aria-describedby="composer-connectors-description"
-        onClose={() => {
-          setShowConnectorsDialog(false);
-          window.requestAnimationFrame(() => addBtnRef.current?.focus());
-        }}
-      >
+      {showConnectorsDialog && (
+        <ModalDialog
+          labelledBy="composer-connectors-title"
+          className="connectors-dialog"
+          onClose={closeConnectorsDialog}
+        >
         <div className="connectors-dialog-content">
           <header className="lmv2-head addmenu-head">
             <div className="flex items-center gap-2">
@@ -928,7 +901,8 @@ function ChatInputInner({
             </button>
           </footer>
         </div>
-      </dialog>
+      </ModalDialog>
+      )}
 
       {isCameraActive && (
         <CameraCapture
