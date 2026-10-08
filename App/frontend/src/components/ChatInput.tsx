@@ -200,7 +200,7 @@ function ChatInputInner({
     setShowAttachMenu(false);
     setAddMenuView('main');
     addBtnRef.current?.focus();
-  }, []);
+  }, [setAddMenuFocusIdx, setShowAttachMenu]);
 
   const handleTakePhotoClick = () => {
     closeAddMenu();
