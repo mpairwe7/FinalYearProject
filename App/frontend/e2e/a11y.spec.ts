@@ -326,9 +326,11 @@ test.describe("keyboard and focus regression checks", () => {
     await expect(trigger).toBeFocused();
 
     await trigger.click();
+    await expect(page.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeFocused();
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
     const connectorOption = dialog.getByRole("button", { name: /EFRIS/ });
     await connectorOption.click({ force: true });
     await expect(connectorOption).toHaveAttribute("aria-pressed", "true");

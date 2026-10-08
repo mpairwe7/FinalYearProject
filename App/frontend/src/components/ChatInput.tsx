@@ -570,7 +570,10 @@ function ChatInputInner({
                       ? 'is-active bg-neutral-800 text-white border border-neutral-700 shadow-sm'
                       : 'text-neutral-400 hover:text-white hover:bg-neutral-800/80'
                   }`}
-                  onClick={() => setShowAttachMenu((prev) => !prev)}
+                  onClick={() => {
+                    setAddMenuFocusIdx(0);
+                    setShowAttachMenu((prev) => !prev);
+                  }}
                   disabled={isLoading}
                   aria-label={t('composer.addToConversation')}
                   aria-haspopup="dialog"
