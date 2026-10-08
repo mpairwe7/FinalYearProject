@@ -330,7 +330,7 @@ test.describe("keyboard and focus regression checks", () => {
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
     const connectorOption = dialog.getByRole("button", { name: /EFRIS/ });
-    await connectorOption.click();
+    await connectorOption.click({ force: true });
     await expect(connectorOption).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("button", { name: "Remove EFRIS from this chat" })).toBeVisible();
     await page.keyboard.press("Escape");

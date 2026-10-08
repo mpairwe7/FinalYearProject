@@ -61,7 +61,7 @@ describe("connector admin board", () => {
     render(<ConnectorBoard />);
 
     const section = await screen.findByRole("region", { name: "Taxpayer-chat integrations" });
-    expect(within(section).getByText("Available for chat")).toBeInTheDocument();
+    expect(await within(section).findByText("Available for chat")).toBeInTheDocument();
     expect(within(section).getByText("Read-only")).toBeInTheDocument();
     expect(within(section).getByText("2 approved operations · efris")).toBeInTheDocument();
     expect(within(section).getByText("Review approved taxpayer information.")).toBeInTheDocument();

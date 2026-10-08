@@ -84,11 +84,6 @@ _TEMPORAL = (
 # adjacency — no ``.*`` — because these run against the *whole* query
 # rather than the truncated probe, and a request for a human has to be
 # found however far into a long message it appears.
-LG_HOW_TO_QUESTION_RE = re.compile(
-    r"\b(nnyinza\s+ntya|nkola\s+ntya|mitendera|emitendera|ngeriki|ngeri\s+ki|kiki\s+ekyetaagisa)\b",
-    re.IGNORECASE,
-)
-
 _ESCALATE = (
     (
         re.compile(
@@ -107,11 +102,7 @@ _ESCALATE = (
     (
         # okuwakanya = to contest/object; okujulira = to appeal;
         # omusango = a legal case. All three are dispute territory.
-        re.compile(
-            r"^(?!.*" + LG_HOW_TO_QUESTION_RE.pattern + r")"
-            r".*\b(okuwakanya|kuwakanya|nwakanya|okujulira|omusango|loya)\b",
-            re.IGNORECASE | re.DOTALL,
-        ),
+        re.compile(r"\b(okuwakanya|kuwakanya|nwakanya|okujulira|omusango|loya)\b", re.IGNORECASE),
         "Legal / dispute context needs human handling (lg)",
     ),
 )

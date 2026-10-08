@@ -342,6 +342,7 @@
  * URA connector availability and safety details. This uses the native dialog
  * element so the browser contains focus, handles Escape, and restores focus.
  * ------------------------------------------------------------------------- */
+dialog.connectors-dialog,
 .chatv2 .connectors-dialog {
   position: fixed;
   inset: 0;
@@ -355,8 +356,10 @@
   color: var(--text-0);
   background: var(--bg-0);
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  z-index: 500;
 }
 
+dialog.connectors-dialog::backdrop,
 .chatv2 .connectors-dialog::backdrop {
   background: rgba(0, 0, 0, 0.58);
   backdrop-filter: blur(4px);
