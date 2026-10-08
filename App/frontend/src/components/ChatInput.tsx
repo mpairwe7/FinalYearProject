@@ -199,7 +199,7 @@ function ChatInputInner({
     setAddMenuFocusIdx(null);
     setShowAttachMenu(false);
     addBtnRef.current?.focus();
-  }, []);
+  }, [setAddMenuFocusIdx, setShowAttachMenu]);
 
   const handleTakePhotoClick = () => {
     closeAddMenu();
