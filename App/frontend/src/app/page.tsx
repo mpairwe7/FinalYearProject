@@ -986,7 +986,7 @@ export default function Page() {
       setChatConnectors(available);
       setConnectorsEnabled(payload?.enabled === true);
       setSelectedConnectorNamespaces((current) =>
-        current.filter((namespace) => available.some((connector) => connector.namespace === namespace)),
+        current.filter((namespace) => available.some((connector: ChatConnector) => connector.namespace === namespace)),
       );
     } catch {
       setConnectorsError(true);

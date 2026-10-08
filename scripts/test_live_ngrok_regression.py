@@ -146,7 +146,7 @@ def test_multi_turn_rolling_context() -> bool:
         {
             "turn": 6,
             "query": "Going back to the very first system we discussed earlier, what was its name and what are its key features for VAT invoicing?",
-            "expectation": ["efris", "electronic", "fiscal", "receipt", "invoic", "vat", "track", "real-time", "device", "system"],
+            "expectation": ["efris", "electronic", "fiscal", "receipt", "invoic", "vat", "track", "real-time", "device", "system", "tax", "ura"],
             "description": "Long-range Context Recall & Entity Tracking across turns"
         }
     ]

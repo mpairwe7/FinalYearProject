@@ -467,7 +467,11 @@ def out_of_jurisdiction_reply(country: str) -> str:
 
 
 _LOCAL_GOVERNMENT_TAX_RE = re.compile(
-    r"\b(local\s+service\s+tax|lst\b|local\s+hotel\s+tax|municipal\s+(?:tax|taxes|levy|levies|authorit\w+|policy)|city\s+council\s+(?:tax|taxes|dues|rates)|local\s+government\s+(?:tax|taxes|rates))\b",
+    r"\b(local\s+service\s+tax|lst\b|local\s+hotel\s+tax"
+    r"|property\s+(?:tax|taxes|rates?)\s*(?:in\s+kampala|kcca|local\s+government)?"
+    r"|omusolo\s+gw['’]?\s*amayumba\s*(?:mu\s+kampala|kcca)?"
+    r"|kodi\s+ya\s+majengo\s*(?:kampala)?"
+    r"|municipal\s+(?:tax|taxes|levy|levies|authorit\w+|policy)|city\s+council\s+(?:tax|taxes|dues|rates)|local\s+government\s+(?:tax|taxes|rates))\b",
     re.IGNORECASE,
 )
 
@@ -478,8 +482,21 @@ def detect_local_government_tax(message: str) -> bool:
     return bool(_LOCAL_GOVERNMENT_TAX_RE.search(text))
 
 
-def local_government_tax_reply() -> str:
-    """Authoritative answer for Local Service Tax and municipal levies not administered by URA."""
+def local_government_tax_reply(query: str = "") -> str:
+    """Authoritative answer for Local Service Tax, Property Rates, and municipal levies not administered by URA."""
+    q_lower = (query or "").lower()
+    if re.search(r"\b(property\s+(?:tax|rates?)|amayumba|majengo)\b", q_lower):
+        return (
+            "**Property Rates (Property Tax)** on physical buildings are assessed and collected directly "
+            "by local government municipal authorities — specifically **Kampala Capital City Authority (KCCA)** in Kampala — "
+            "under the *Local Governments (Rating) Act, 2005*, rather than the Uganda Revenue Authority (URA).\n\n"
+            "• **URA's Mandate (Rental Income Tax)**: If your property is rented out to tenants and earns rental income, "
+            "that income is subject to **Rental Income Tax** administered by URA under the *Income Tax Act* (12% of gross rental income "
+            "above the annual threshold of UGX 2,820,000 for individuals; 30% on chargeable rental income for companies).\n\n"
+            "• **Expense Deductibility**: Ground rent and municipal property rates paid to KCCA are allowable deductible expenses when calculating "
+            "corporate rental income tax with URA.\n\n"
+            "For property valuations, rating registers, and property tax payments in Kampala, please consult KCCA City Hall or visit https://kcca.go.ug."
+        )
     return (
         "**Local Service Tax (LST)** is a local government tax administered and collected "
         "directly by local government authorities (such as City Councils including KCCA, "

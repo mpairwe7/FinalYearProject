@@ -6998,7 +6998,7 @@ class ChatModel:
         if not (detect_local_government_tax(message) or detect_local_government_tax(rewritten)):
             return None
         return {
-            "reply": self._finalize_reply(local_government_tax_reply()),
+            "reply": self._finalize_reply(local_government_tax_reply(message)),
             "sources": [],
             "citations": [],
             "faithfulness_score": 1.0,

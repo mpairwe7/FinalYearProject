@@ -525,7 +525,7 @@ _COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
     "much", "many", "more", "most", "some", "any", "no", "not", "all", "both", "half", "each", "every", "other", "another",
     "want", "need", "like", "know", "tell", "give", "take", "make", "get", "find", "check", "help",
     "pay", "paid", "paying", "rate", "rates", "year", "years", "month", "months", "day", "days", "date", "dates", "time", "times",
-    "good", "well", "great", "please", "thanks", "thank", "bye", "goodbye",
+    "good", "well", "great", "please", "thanks", "thank", "goodbye",
 })
 
 _LUGANDA_WORDS: frozenset[str] = frozenset({
@@ -536,6 +536,8 @@ _LUGANDA_WORDS: frozenset[str] = frozenset({
     "emmotoka", "pikipiki", "eppikipiki", "obwannannyini", "okukyusa", "obutonde",
     "ekibonerezo", "ebibonerezo", "okwemulugunya", "ebyamaguzi", "ebisale",
     "ebiwandiiko", "lole", "tulakita", "obupangisa", "mayumba", "nnyumba", "kyuma", "ekyuma",
+    "musolo", "banja", "ebisanyizo", "satifikeeti", "biruwa", "kiruwa", "obutalina", "talina", "lya", "bye",
+    "weeraba", "tunaalabagana", "edda", "bambi", "ŋŋamba", "ngamba", "nkulamusizza", "owange", "mwattu", "mubalire", "nnyamba",
     # Function and question words for code-switched queries (G132)
     "nga", "ku", "mu", "oba", "naye", "ne", "kiki", "ki", "nze", "gwe", "ffe",
     "yange", "wange", "lyange", "kyange", "gwange", "yaffe", "kwe", "nnyinza",
@@ -558,6 +560,8 @@ _SWAHILI_WORDS: frozenset[str] = frozenset({
     "risiti", "forodha", "mizigo", "mzigo", "msamaha", "kuagiza", "kusafirisha",
     "mfumo", "hifadhi", "pingamizi", "adhabu", "je", "malori", "yamesamehewa",
     "kusamehewa", "tozo", "kifaa", "inalipwaje",
+    "shikamoo", "afisa", "hujambo", "sijambo", "bwana", "kwaheri", "tutaonana", "baadaye",
+    "ningependa", "kujua", "samahani", "nijuze", "heshima", "kutoka", "mpakani", "mno", "eleza",
     # Function and question words for code-switched queries (G132)
     "ni", "ya", "za", "la", "cha", "vya", "kwamba", "lakini", "sana",
     "mimi", "wewe", "yangu", "wangu", "yako", "nataka", "naomba", "tafadhali",
@@ -1039,7 +1043,7 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     # Running English spellcheck on Swahili/Luganda corrupts words like 'nini' -> 'nin' (G132).
     normalized = normalize(text)
     cleaned = normalized.strip().lower()
-    raw_words = set(re.findall(r"[a-z']+", cleaned))
+    raw_words = set(re.findall(r"[a-z'’ŋ]+", cleaned))
     if not raw_words:
         return default_lang
 
@@ -1051,7 +1055,7 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     if lg_hits == 0 and sw_hits == 0:
         corrected = correct_spelling(normalized)
         corr_cleaned = corrected.strip().lower()
-        corr_words = set(re.findall(r"[a-z']+", corr_cleaned))
+        corr_words = set(re.findall(r"[a-z'’ŋ]+", corr_cleaned))
         en_hits = len(corr_words & _COMMON_ENGLISH_WORDS) + len(corr_words & _TAX_DOMAIN_VOCAB)
         if en_hits > 0:
             return default_lang

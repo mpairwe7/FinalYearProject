@@ -1,0 +1,116 @@
+{
+  "meta": {
+    "timestamp": "2026-10-08T20:32:20Z",
+    "total_scenarios": 50000,
+    "total_duration_seconds": 335.76,
+    "throughput_scenarios_per_sec": 148.9,
+    "target_gateway": "https://struttingly-nongeological-briella.ngrok-free.dev"
+  },
+  "accuracy": {
+    "overall_accuracy_pct": 100.0,
+    "correct_count": 50000,
+    "error_count": 0
+  },
+  "algorithm_latency_microseconds": {
+    "p50_us": 24.0,
+    "p90_us": 917.1,
+    "p95_us": 942.4,
+    "p99_us": 1000.8,
+    "mean_us": 366.7
+  },
+  "live_gateway_probes": {
+    "probes_evaluated": 28,
+    "probes_passed": 28,
+    "gateway_accuracy_pct": 100.0,
+    "gateway_p50_latency_ms": 1275.1,
+    "gateway_p95_latency_ms": 32783.0
+  },
+  "language_breakdown": {
+    "en": {
+      "volume": 20000,
+      "correct": 20000,
+      "accuracy_pct": 100.0,
+      "mean_latency_us": 885.4
+    },
+    "lg": {
+      "volume": 15000,
+      "correct": 15000,
+      "accuracy_pct": 100.0,
+      "mean_latency_us": 20.1
+    },
+    "sw": {
+      "volume": 15000,
+      "correct": 15000,
+      "accuracy_pct": 100.0,
+      "mean_latency_us": 21.5
+    }
+  },
+  "confusion_matrix": {
+    "en": {
+      "en": 20000,
+      "lg": 0,
+      "sw": 0
+    },
+    "lg": {
+      "en": 0,
+      "lg": 15000,
+      "sw": 0
+    },
+    "sw": {
+      "en": 0,
+      "lg": 0,
+      "sw": 15000
+    }
+  },
+  "domain_breakdown": {
+    "Customs & EAC Common External Tariff": {
+      "volume": 6550,
+      "correct": 6550,
+      "accuracy_pct": 100.0
+    },
+    "Domestic Taxes (PAYE & PWD)": {
+      "volume": 11850,
+      "correct": 11850,
+      "accuracy_pct": 100.0
+    },
+    "Excise Duty & Specific Rates": {
+      "volume": 4275,
+      "correct": 4275,
+      "accuracy_pct": 100.0
+    },
+    "International Taxation & Corporate": {
+      "volume": 2775,
+      "correct": 2775,
+      "accuracy_pct": 100.0
+    },
+    "Natural Conversational & Civic Intelligence": {
+      "volume": 11000,
+      "correct": 11000,
+      "accuracy_pct": 100.0
+    },
+    "Tax Procedures & Disputes (TPCA)": {
+      "volume": 5825,
+      "correct": 5825,
+      "accuracy_pct": 100.0
+    },
+    "Value Added Tax (VAT & Thresholds)": {
+      "volume": 7725,
+      "correct": 7725,
+      "accuracy_pct": 100.0
+    }
+  },
+  "length_breakdown": {
+    "short (<8 words)": {
+      "volume": 5110,
+      "accuracy_pct": 100.0
+    },
+    "medium (8-18 words)": {
+      "volume": 44186,
+      "accuracy_pct": 100.0
+    },
+    "long (>18 words)": {
+      "volume": 704,
+      "accuracy_pct": 100.0
+    }
+  }
+}

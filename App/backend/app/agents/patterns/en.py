@@ -199,25 +199,36 @@ _CUSTOMS = (
 #: ones — "Please help me, my account is locked" must still reach a person.
 #: "how to" is, because "How to file my return" is the same question as "How
 #: do I file my return?" (both found in code review, 2026-09-29).
+CONTACT_PERSON_QUERY_RE = re.compile(
+    r"\b(?:who\s+(?:is|are)|what\s+(?:is|are)|which|list|provide|find|name|authorized|designated|official|liaison|primary)\b.*\bcontact\s+persons?\b",
+    re.IGNORECASE,
+)
+
 HOW_TO_QUESTION_RE = re.compile(
-    r"\b(?:how\s+(?:do|does|can|should|would)\s+(?:i|we|one)|how\s+to|what\s+are\s+the\s+steps"
+    r"\b(?:how\s+(?:do|does|can|should|would|will)\s+(?:i|we|one)|how\s+to|what\s+are\s+the\s+steps"
+    r"|what\s+(?:is|are)\s+the\s+(?:process|procedure|steps|rules)"
     r"|where\s+(?:do|can)\s+i|guide\s+me|walk\s+me\s+through|steps\s+to"
-    r"|procedure|process\s+(?:to|for|of))\b",
+    r"|procedure|process\s+(?:to|for|of)"
+    r"|can\s+(?:i|we|one)\s+(?:check|verify|track|find|know|get)"
+    r"|can\s+(?:my|a)\s+tin\s+be\s+(?:deactivated|cancelled|reactivated|suspended))\b",
     re.IGNORECASE,
 )
 
 _ESCALATE = (
     (
         re.compile(
-            r"\b(speak\s+to|talk\s+to|contact|call)\s+(?:a|an|the)?\s*(?:human|person|officer|agent|someone)\b",
-            re.IGNORECASE,
+            r"^(?!.*" + CONTACT_PERSON_QUERY_RE.pattern + r")"
+            r".*\b(?:(?:speak\s+to|talk\s+to|call)\s+(?:a|an|the)?\s*(?:human|person|officer|agent|someone)"
+            r"|contact\s+(?:a|an|the)\s+(?:human|person|officer|agent|someone)|contact\s+someone)\b",
+            re.IGNORECASE | re.DOTALL,
         ),
         "User explicitly asked for a human",
     ),
     (
         re.compile(
-            r"\b(?:(?:want|like|need)\s+to\s+(?:dispute|appeal)|can\s+i\s+appeal|customs\s+dispute|dispute\s+my|appeal\s+my|assessment\s+is\s+wrong|lawyer\s+i\s+can\s+speak\s+to|speak\s+to\s+(?:a\s+)?lawyer|court\s+action|report\s+fraud)\b",
-            re.IGNORECASE,
+            r"^(?!.*(?:" + HOW_TO_QUESTION_RE.pattern + r"|" + CONTACT_PERSON_QUERY_RE.pattern + r"))"
+            r".*\b(?:(?:want|like|need)\s+to\s+(?:dispute|appeal)|can\s+i\s+appeal|customs\s+dispute|dispute\s+my|appeal\s+my|assessment\s+is\s+wrong|lawyer\s+i\s+can\s+speak\s+to|speak\s+to\s+(?:a\s+)?lawyer|court\s+action|report\s+fraud)\b",
+            re.IGNORECASE | re.DOTALL,
         ),
         "Legal / dispute context needs human handling",
     ),
