@@ -233,7 +233,7 @@ class ServerAuth:
                 jwks_url=self.jwks_url,
             ).verify(token)
         except JWTAuthError as exc:
-            logger.info("MCP bearer token rejected namespace=%s (%s)", self.namespace or "-", exc)
+            logger.info("MCP caller rejected namespace=%s (%s)", self.namespace or "-", exc)
             return rejected("The access token is not valid.")
 
         if not claims.get("exp"):
@@ -244,7 +244,7 @@ class ServerAuth:
         if not isinstance(audiences, list) or self.resource not in {
             str(audience).rstrip("/") for audience in audiences
         }:
-            logger.info("MCP bearer token rejected namespace=%s (audience)", self.namespace or "-")
+            logger.info("MCP caller rejected namespace=%s (audience)", self.namespace or "-")
             return rejected("The access token was not issued for this server.")
 
         granted = claims.get("scope", claims.get("scp", ""))

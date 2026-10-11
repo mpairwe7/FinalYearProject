@@ -40,7 +40,8 @@ services:
     # The image's ENTRYPOINT starts the chat API and ignores `command`.
     entrypoint: ["python", "-m", "app.mcp.servers.gateway", "--port", "8930"]
     environment:
-      - APP_ENV=development
+      # From the chain: a production chain makes the servers refuse simulators too.
+      - APP_ENV=${APP_ENV:-development}
       - PROJECT_ROOT=/app
       - LOG_LEVEL=info
       - MCP_SERVER_TOKEN_EFRIS=${MCP_LINK_TOKEN:-}

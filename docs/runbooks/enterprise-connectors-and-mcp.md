@@ -302,7 +302,7 @@ Two environment knobs matter:
 - `CONNECTOR_TURN_LOCAL_TOOLS` (default `3`) — how many *local* tools are offered beside the selected service's. The full local registry is ~7,100 tokens of schema against a 4,096-token window; the server answered HTTP 400 and the turn silently fell back to retrieval, as if no service had been chosen. Tool schemas are now fitted to the window **every round** against the real prompt (`tool_budget.fit_tool_specs`), counted as the chat template renders them (spaced JSON — the compact form under-counted four tools by 50 tokens, which is a refused request).
 - `SUNFLOWER_MAX_MODEL_LEN` — **recommended `8192`** for a stack that serves connectors. `4096` works because of the fitting above, but leaves one service and one result per turn.
 
-Reading a live turn: `agent_trace` events carry `connector` and `connector_mode`; the API log line `tool schemas fitted to the N-token window: …` says when tools were slimmed or dropped.
+Reading a live turn: `agent_trace` events carry `connector` and `connector_mode`; the API log line `tool schemas fitted to a context window of N: …` says when tools were slimmed or dropped.
 
 ### 7.4 What it does not do
 - It does not contact URA, NIRA, URSB, a bank or a payment network, and a record it returns is not a URA record.

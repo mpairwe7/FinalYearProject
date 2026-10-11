@@ -230,6 +230,10 @@ class MCPClient:
                         ),
                         bound,
                     )
+                # The server answered and does not serve this tool (a release
+                # that left it out, or a header annotation that made it
+                # invalid). It is not ours to run here either.
+                return None, None
             return descriptor, transport
         return None, None
 

@@ -2447,7 +2447,7 @@ def _fit_tools_to_window(
     if len(fitted) != len(tool_specs) or fitted != tool_specs:
         dropped = [n for n in tool_names(tool_specs) if n not in tool_names(fitted)]
         logger.info(
-            "tool schemas fitted to the %d-token window: %d offered, %d dropped%s",
+            "tool schemas fitted to a context window of %d: %d offered, %d dropped%s",
             window,
             len(fitted),
             len(dropped),

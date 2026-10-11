@@ -9837,7 +9837,11 @@ class ChatModel:
             # 3c. Clarification check — ask for more details if query is ambiguous
             #     (skipped for attachment turns: "what is this?" is answerable
             #     from the attached document, not ambiguous)
-            clarification = None if attachments else needs_clarification(message, hits)
+            # A lookup in a chosen service asks for what it lacks itself
+            # (connector_intent.missing_arguments); passages cannot judge it.
+            clarification = (
+                None if (attachments or connector_intent is not None) else needs_clarification(message, hits)
+            )
             if clarification:
                 clarify_result = {
                     "reply": clarification,
@@ -9916,7 +9920,11 @@ class ChatModel:
 
             # 3e. Epistemic false-premise guard (G43) — reject non-existent statutory instruments
             # Skipped when attachments are present: questions then ask about terms in the attached document
-            premise_res = check_false_premise(rewritten, hits) if not attachments else None
+            premise_res = (
+                check_false_premise(rewritten, hits)
+                if not (attachments or connector_intent is not None)
+                else None
+            )
             if premise_res and premise_res.is_false_premise:
                 premise_reply = self._finalize_reply(premise_res.reply)
                 premise_result = {
@@ -10321,7 +10329,9 @@ class ChatModel:
                         }
 
             # 8. Escalation check
-            if agentic_used_tools and (not hits or connector_intent is not None):
+            if connector_intent is not None or (agentic_used_tools and not hits):
+                # A service that could not be asked is not a reason to open a
+                # ticket either; the streaming path says the same.
                 escalate, esc_reason = False, ""
             else:
                 escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
@@ -10354,13 +10364,17 @@ class ChatModel:
                         "unsupported_count": len(claim_report.get("unsupported_claims") or []),
                         "uncited_count": len(claim_report.get("uncited_claims") or []),
                     }
-            if agentic_used_tools:
+            if agentic_used_tools or connector_intent is not None:
                 response_judge = {
                     "decision": "approve",
                     "final_decision": "approve",
                     "applied_revision": False,
-                    "reasons": ["tool-executed agentic answer"],
-                    "confidence_band": "high",
+                    "reasons": (
+                        ["tool-executed agentic answer"]
+                        if agentic_used_tools
+                        else ["chosen service could not be asked; reported as such"]
+                    ),
+                    "confidence_band": "high" if agentic_used_tools else "medium",
                 }
             else:
                 response_judge = self._evaluate_response_judge(
@@ -11336,7 +11350,9 @@ class ChatModel:
             hits = documents_module.attachment_passages(attachments) + hits
 
         # Clarification check (Phase 6) — skipped for attachment turns
-        clarification = None if attachments else needs_clarification(message, hits)
+        # A lookup in a chosen service asks for what it lacks itself
+        # (connector_intent.missing_arguments); passages cannot judge it.
+        clarification = None if (attachments or connector_intent is not None) else needs_clarification(message, hits)
         if clarification:
             return {
                 "reply": clarification,
@@ -11393,7 +11409,9 @@ class ChatModel:
                 }
 
         # Epistemic false-premise guard (G43) — skipped when attachments are present
-        premise_res = check_false_premise(rewritten, hits) if not attachments else None
+        premise_res = (
+            check_false_premise(rewritten, hits) if not (attachments or connector_intent is not None) else None
+        )
         if premise_res and premise_res.is_false_premise:
             reply = self._finalize_reply(premise_res.reply)
             return {
@@ -11418,7 +11436,14 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
-        if not attachments and not (force_agentic or flags.is_enabled("tool_use")) and self._output_guard.should_abstain(hits, locale=locale):
+        if (
+            not attachments
+            # The service is asked, not the passages: the stream below says so
+            # itself when it cannot be reached.
+            and connector_intent is None
+            and not (force_agentic or flags.is_enabled("tool_use"))
+            and self._output_guard.should_abstain(hits, locale=locale)
+        ):
             reply = ABSTENTION_REPLY
             if distress:
                 reply = f"{empathy_ack(distress)}\n\n{reply}"

@@ -96,15 +96,9 @@ def _operation_title(descriptor: dict[str, Any], namespace: str = "") -> str:
     shown = _display_text(title, 80)
     if shown:
         return shown
-    name = str(descriptor.get("name", ""))
-    words = [word for word in name.split("_") if word]
-    prefixes = {word for word in namespace.split("_") if word}
-    if namespace:
-        prefixes.add(namespace)
-        prefixes.add("".join(word[0] for word in namespace.split("_") if word))
-    if len(words) > 1 and words[0] in prefixes:
-        words = words[1:]
-    return " ".join(words).capitalize()
+    from ..tools import readable_title  # noqa: PLC0415 - tools imports this package
+
+    return readable_title(str(descriptor.get("name", "")), namespace)
 
 
 def is_taxpayer_read_tool(descriptor: dict[str, Any]) -> bool:

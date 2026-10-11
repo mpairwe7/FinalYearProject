@@ -322,8 +322,9 @@ def ungrounded_arguments(
     A model made to call a function must put *something* in every required
     field. If the taxpayer gave no TIN, it will supply one. A free-text
     argument is therefore accepted only if it appears in what they wrote
-    (ignoring case, spaces and punctuation: ``1000 000 001`` is
-    ``1000000001``). Values the schema constrains to an ``enum``, and values
+    (ignoring case, spaces and punctuation: a number typed in groups of
+    digits is the same number run together). Values the schema constrains to
+    an ``enum``, and values
     that are not strings, are the model's choice and are not checked.
     """
     haystack = _squash(taxpayer_text)

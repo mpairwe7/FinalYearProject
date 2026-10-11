@@ -344,6 +344,40 @@ def test_the_systems_send_titles_without_their_own_prefix():
     }
 
 
+def test_a_tool_the_bound_server_does_not_list_is_not_run_from_the_copy_in_this_process():
+    from app.tools import Tool, ToolRegistry, ToolSchema
+
+    ran: list[str] = []
+
+    class LocalOnly(Tool):
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="efris_local_only_probe",
+                description="Exists in this process only.",
+                namespace="efris",
+                risk="low",
+            )
+
+        def execute(self, **_: Any) -> dict[str, Any]:
+            ran.append("local")
+            return {"ok": True, "ran": "locally"}
+
+    ToolRegistry.register(LocalOnly())
+    try:
+        # EFRIS is bound to a server that answers and does not list the tool.
+        remote = StaticTransport("efris", [descriptor("efris_taxpayer_status")])
+        client = make_client(remote)
+
+        result = client.call_tool("efris_local_only_probe", {})
+
+        assert result.ok is False
+        assert ran == [], "the deployment moved EFRIS off this process; its copy must not run"
+        assert remote.calls == []
+    finally:
+        ToolRegistry._tools.pop("efris_local_only_probe", None)
+
+
 def test_the_two_title_rules_agree():
     from app.tools import readable_title as registry_title
     from plugins.base import readable_title as plugin_title  # noqa: I001 - plugins is a sibling package

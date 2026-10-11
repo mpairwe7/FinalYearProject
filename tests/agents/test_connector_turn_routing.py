@@ -130,6 +130,45 @@ class TestSyncPath:
         assert resources_for_turn(LOOKUP, {"connector_lookup": True}) == []
         assert resources_for_turn(LOOKUP, {}) != []
 
+    def test_nothing_about_the_passages_can_pre_empt_the_lookup(self, model, monkeypatch):
+        # Found in review: the clarification, false-premise and abstention gates
+        # sat in front of the service, so a vague-looking or poorly-matched
+        # lookup never reached it (and could open a ticket). None of them may
+        # answer a turn the taxpayer sent to a chosen service.
+        agent = _agent_answering("The sample EFRIS record lists this taxpayer as registered (demo data).")
+        monkeypatch.setattr(service_module, "_call_llm_agentic", agent)
+        monkeypatch.setattr(service_module, "needs_clarification", lambda *_a, **_k: "Which tax do you mean?")
+        monkeypatch.setattr(
+            service_module,
+            "check_false_premise",
+            lambda *_a, **_k: mock.Mock(is_false_premise=True, reply="That tax does not exist."),
+        )
+        monkeypatch.setattr(model._output_guard, "should_abstain", lambda *_a, **_k: True)
+
+        result = model.generate(LOOKUP, connector_namespaces=["efris"], locale="en")  # nosemgrep: ura-llm01-raw-user-input-to-llm -- ChatModel.generate applies InputGuard before inference.
+
+        assert result["retrieval_mode"] == "agentic"
+        assert "demo data" in result["reply"]
+        assert agent.calls
+
+    def test_the_streaming_prelude_does_not_abstain_or_ask_back_before_the_service_is_called(
+        self, model, monkeypatch
+    ):
+        monkeypatch.setattr(service_module, "needs_clarification", lambda *_a, **_k: "Which tax do you mean?")
+        monkeypatch.setattr(
+            service_module,
+            "check_false_premise",
+            lambda *_a, **_k: mock.Mock(is_false_premise=True, reply="That tax does not exist."),
+        )
+        monkeypatch.setattr(model._output_guard, "should_abstain", lambda *_a, **_k: True)
+
+        result = model.generate_retrieval_only(
+            message=LOOKUP, connector_namespaces=["efris"], locale="en", top_k=4
+        )
+
+        assert result["retrieval_mode"] not in ("abstained", "clarification", "false_premise_rejected")
+        assert result["_connector_forced"] == ["efris_taxpayer_status"]
+
     def test_a_connector_answer_is_not_escalated_for_missing_passages(self, model, monkeypatch):
         monkeypatch.setattr(service_module, "_call_llm_agentic", _agent_answering("Registered (sample data)."))
 
@@ -159,6 +198,11 @@ class TestSyncPath:
         assert "couldn't reach the service you selected" in result["reply"]
         assert "won't guess" in result["reply"]
         assert result["retrieval_mode"] != "hybrid"
+        # An unreachable service is not a reason to open a ticket for a person
+        # (the streaming path already said so; the synchronous one escalated
+        # whenever the weak passages or an "account query" phrase said to).
+        assert result["escalation_required"] is False
+        assert result["response_judge"]["decision"] == "approve"
 
     def test_nothing_changes_without_a_selected_connector(self, model, monkeypatch):
         agent = _agent_answering("unused", used_tool=False)
