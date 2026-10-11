@@ -815,7 +815,7 @@ Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17
 
 All settings are configurable via environment variables. See [API Reference → Environment Variables](API_REFERENCE.md#environment-variables) for the complete list, or [PROJECT_SETUP.md](PROJECT_SETUP.md#5-environment-configuration) for a quick-start `.env` template.
 
-- `FLAG_ENTERPRISE_CONNECTORS` (default `false`): Allows explicitly selected, deployment-bound remote MCP connectors to expose eligible read-only operations in taxpayer chat after review. It never enables local simulator fixtures; production still requires a reviewed live service and its authorization controls.
+- `FLAG_ENTERPRISE_CONNECTORS` (default `false`): Allows explicitly selected, deployment-bound remote MCP connectors to expose eligible read-only operations in taxpayer chat after review. It never lists a tool that exists only inside the API process. A simulator bound as a remote MCP server (`App/docker-compose.connectors.yml`) is listed as demo data (`mode: simulation`) outside production and is refused in production, which still requires a connector an operator declared `MCP_SERVER_MODE_<NAMESPACE>=live` and its authorization controls.
 
 These built-ins remain local simulators even when enabled; their status is not
 evidence of a live URA, NIRA, URSB, bank, or payment connection. Connector
@@ -854,3 +854,12 @@ cryptography>=44.0.0
 # Observability (opt-in)
 opentelemetry-api, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-grpc
 ```
+
+## Turns answered by a chosen service
+
+A turn that selected a connector and asked it for a record does not use retrieval as its
+answer. The passages are not given to the agent (`passages=[]`), the reply has no
+`sources` / `citations` / portal-form `resources`, and the abstention and escalation
+paths do not apply to it (an unreachable service says so; it does not fall back to
+passages, which is how a consignment status was once invented). See
+`docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.

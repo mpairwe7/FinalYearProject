@@ -138,6 +138,18 @@ class MCPCallResult:
         }
 
 
+@dataclass(frozen=True)
+class RemoteNamespace:
+    """What discovery learned about one deployment-bound remote server."""
+
+    namespace: str
+    reachable: bool
+    tools: tuple[dict[str, Any], ...] = ()
+    #: Self-reported by the server (name, version, instructions).  For
+    #: display and logs only — never an input to an authorization decision.
+    server: dict[str, Any] = field(default_factory=dict)
+
+
 def _meta_of(descriptor: dict[str, Any], key: str, default: Any) -> Any:
     """Read one of our ``_meta`` fields off an MCP tool descriptor."""
     meta = descriptor.get("_meta")
@@ -191,7 +203,12 @@ class MCPClient:
         bound to a remote server — the remote wins.
         """
         for transport in self._unique_transports():
-            raw_descriptor = transport.describe(name)
+            try:
+                raw_descriptor = transport.describe(name)
+            except TransportError:
+                # A server that is down does not own this lookup; the tool
+                # may belong to another transport.
+                continue
             if raw_descriptor is None:
                 continue
             descriptor = self._with_transport_namespace(
@@ -200,6 +217,10 @@ class MCPClient:
             )
             bound = self._transports.get(str(_meta_of(descriptor, "namespace", "core")))
             if bound is not None and bound is not transport:
+                # Not caught: if the server this namespace is bound to
+                # cannot be asked, the call fails.  Falling back to the
+                # copy still registered in this process would run the
+                # tool somewhere the deployment said it must not run.
                 remote_descriptor = bound.describe(name)
                 if remote_descriptor is not None:
                     return (
@@ -261,32 +282,65 @@ class MCPClient:
             normalized["_meta"] = meta
         return normalized
 
+    def _probe_remote(self, namespace: str, transport: ToolTransport) -> RemoteNamespace:
+        try:
+            descriptors = transport.list_tools()
+        except Exception as exc:  # noqa: BLE001 — fail closed per server
+            logger.warning(
+                "MCP tool discovery failed namespace=%s (%s)",
+                namespace,
+                type(exc).__name__,
+            )
+            return RemoteNamespace(namespace, reachable=False)
+        tools = tuple(
+            self._with_transport_namespace(descriptor, namespace)
+            for descriptor in descriptors
+            if isinstance(descriptor, dict) and descriptor.get("name")
+        )
+        server: dict[str, Any] = {}
+        discover = getattr(transport, "discover", None)
+        if callable(discover):
+            try:
+                discovered = discover()
+            except Exception:  # noqa: BLE001 — identity is optional; the tools are not
+                discovered = {}
+            info = (discovered.get("_meta") or {}).get("io.modelcontextprotocol/serverInfo")
+            if isinstance(info, dict):
+                server = {"name": str(info.get("name", "")), "version": str(info.get("version", ""))}
+            if isinstance(discovered.get("instructions"), str):
+                server["instructions"] = discovered["instructions"]
+        return RemoteNamespace(namespace, reachable=True, tools=tools, server=server)
+
+    def remote_namespaces(self) -> list[RemoteNamespace]:
+        """Every deployment-bound remote server, reachable or not.
+
+        Servers are asked side by side: with several connectors bound, a
+        catalog request must cost one slow server's deadline, not the
+        sum of all of them.
+        """
+        remotes = [
+            (namespace, transport)
+            for namespace, transport in sorted(self._transports.items())
+            if not isinstance(transport, InProcessTransport)
+        ]
+        if len(remotes) <= 1:
+            return [self._probe_remote(namespace, transport) for namespace, transport in remotes]
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(len(remotes), 8), thread_name_prefix="mcp-discovery") as pool:
+            return list(pool.map(lambda remote: self._probe_remote(*remote), remotes))
+
     def remote_tool_descriptors(self) -> list[tuple[str, dict[str, Any]]]:
         """List tools from deployment-bound remote MCP servers only.
 
         A failed server is omitted from discovery without preventing other
         configured connectors from appearing.
         """
-        remote: list[tuple[str, dict[str, Any]]] = []
-        for namespace, transport in sorted(self._transports.items()):
-            if isinstance(transport, InProcessTransport):
-                continue
-            try:
-                descriptors = transport.list_tools()
-            except Exception as exc:  # noqa: BLE001 — fail closed per server
-                logger.warning(
-                    "MCP tool discovery failed namespace=%s (%s)",
-                    namespace,
-                    type(exc).__name__,
-                )
-                continue
-            for raw_descriptor in descriptors:
-                if not isinstance(raw_descriptor, dict) or not raw_descriptor.get("name"):
-                    continue
-                remote.append(
-                    (namespace, self._with_transport_namespace(raw_descriptor, namespace))
-                )
-        return remote
+        return [
+            (remote.namespace, descriptor)
+            for remote in self.remote_namespaces()
+            for descriptor in remote.tools
+        ]
 
     def describe_tool(self, name: str) -> dict[str, Any] | None:
         from ..tools import ToolRegistry
@@ -448,7 +502,7 @@ class MCPClient:
         t0 = time.perf_counter()
         call_id = str(uuid.uuid4())
         args = dict(arguments or {})
-        descriptor, transport = self._descriptor(name)
+        transport: ToolTransport | None = None
 
         def finish(
             result: dict[str, Any],
@@ -477,6 +531,17 @@ class MCPClient:
                 deadline_exceeded=elapsed_ms > timeout_s * 1000,
             )
 
+        try:
+            descriptor, transport = self._descriptor(name)
+        except TransportError:
+            return finish(
+                {
+                    "ok": False,
+                    "error": f"The service that provides '{name}' is temporarily unavailable.",
+                    "retryable": True,
+                },
+                ok=False,
+            )
         if descriptor is None or transport is None:
             return finish(
                 {"ok": False, "error": f"Unknown tool: {name}"},
@@ -726,15 +791,19 @@ class MCPClient:
         }
 
     def ping(self, namespace: str = "tax_calculator", timeout_s: float = 5.0) -> bool:
-        """Diagnostic reachability probe for an MCP namespace."""
+        """Diagnostic reachability probe for an MCP namespace.
+
+        A remote server is probed with ``server/discover``; the protocol's
+        own ``ping`` was removed in 2026-07-28.
+        """
         transport = self._transport_for(namespace)
         if isinstance(transport, InProcessTransport):
             return True
-        if hasattr(transport, "ping"):
-            return transport.ping(timeout_s=timeout_s)
+        probe = getattr(transport, "ping", None)
+        if not callable(probe):
+            return False
         try:
-            res = transport._request("ping", {}, timeout_s=timeout_s)
-            return isinstance(res, dict)
+            return bool(probe(timeout_s=timeout_s))
         except Exception:
             return False
 

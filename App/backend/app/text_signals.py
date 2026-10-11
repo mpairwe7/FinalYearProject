@@ -905,6 +905,13 @@ ABSTENTION_REPLY = (
     "Contact Centre on 0800 117 000 / 0800 217 000."
 )
 
+CONNECTOR_UNAVAILABLE_REPLY = (
+    "I couldn't reach the service you selected just now, so I haven't looked "
+    "that up and I won't guess at the result. Please try again in a moment, or "
+    "contact URA at https://ura.go.ug or on the toll-free Contact Centre "
+    "0800 117 000 / 0800 217 000."
+)
+
 NO_HITS_REPLY = (
     "I'm sorry — I couldn't find a specific answer in the URA knowledge "
     "base. Try rephrasing your question, or contact URA directly at "

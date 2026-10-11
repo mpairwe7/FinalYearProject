@@ -123,6 +123,10 @@ LLM_SERIALIZE_LOCAL_GENERATION = os.getenv(
 # Agentic loop ceilings.  ``max_iterations`` bounds generation rounds;
 # these bound what one round may spend — see app/agents/loop_control.py.
 TOOL_RAG_TOP_K = int(os.getenv("TOOL_RAG_TOP_K", "5"))
+#: Local (non-connector) tools offered alongside the connectors a taxpayer
+#: selected. Their schemas cost ~300 tokens each; the whole registry costs
+#: ~7,100 against a 4,096-token window.
+CONNECTOR_TURN_LOCAL_TOOLS = int(os.getenv("CONNECTOR_TURN_LOCAL_TOOLS", "3"))
 TOOL_MAX_CALLS_PER_TURN = int(os.getenv("TOOL_MAX_CALLS_PER_TURN", "8"))
 TOOL_MAX_CALLS_PER_ITERATION = int(os.getenv("TOOL_MAX_CALLS_PER_ITERATION", "4"))
 TOOL_MAX_CALLS_PER_TOOL = int(os.getenv("TOOL_MAX_CALLS_PER_TOOL", "3"))
@@ -1114,6 +1118,36 @@ def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
     return sum(_estimate_tokens(str(m.get("content") or "")) + 8 for m in messages)
 
 
+def _count_text_tokens(text: str) -> int:
+    """Tokens in *text* as the server counts them; an estimate when it cannot say.
+
+    Counted as one user message, so it includes the few tokens of chat-template
+    framing: a deliberate over-count, never an under-count.
+    """
+    if not text:
+        return 0
+    exact = _count_prompt_tokens([{"role": "user", "content": text}])
+    return exact if exact is not None else _estimate_tokens(text)
+
+
+def _tool_schema_tokens(tools: list[dict[str, Any]] | None) -> int:
+    """What *tools* cost in the prompt.
+
+    ``/tokenize`` does not see tools, so the count is of the schema JSON the
+    chat template renders (spaced separators, as ``tojson`` writes it; the
+    compact form under-counted four tools by 50 tokens, which is a request
+    the server refuses). The previous flat 2.5 characters per token
+    overstated it by half (schemas are about 4), which made the budget cut
+    passages that would have fit.
+    """
+    if not tools:
+        return 0
+    from .tool_budget import TOOLS_BLOCK_OVERHEAD_TOKENS  # noqa: PLC0415
+
+    blob = "\n".join(_json.dumps(tool, ensure_ascii=False) for tool in tools)
+    return _count_text_tokens(blob) + TOOLS_BLOCK_OVERHEAD_TOKENS
+
+
 def _shorten_passages(content: str, keep_ratio: float) -> str:
     """Shorten what comes before the question; never the question or what follows it.
 
@@ -1309,7 +1343,7 @@ def _vllm_chat_completion(
         import json as _json
         import urllib.request
 
-        tools_tokens = _estimate_tokens(_json.dumps(tools)) if tools else 0
+        tools_tokens = _tool_schema_tokens(tools)
         safe_max_tokens = _fit_to_context(
             messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens, extra_tokens=tools_tokens
         )
@@ -2133,6 +2167,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     tone_hint: str = "",
     agent_role: str = "",
     context_summary: str = "",
+    connector_note: str = "",
 ) -> list[dict[str, str]]:
     """Build the initial message list for a tool-calling request.
 
@@ -2149,6 +2184,8 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     specialist = specialist_prompt(agent_role)
     if specialist:
         system_content += f"\n\n{specialist}"
+    if connector_note:
+        system_content += f"\n\n{connector_note}"
 
     calc_ground_truth = ""
     other_personalization = ""
@@ -2239,8 +2276,14 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     return messages
 
 
-def _select_tools_for_query(query: str, eligible_names: list[str]) -> list[str]:
-    """Narrow the exposed tool set for *query* when Tool RAG is enabled.
+def _select_tools_for_query(
+    query: str,
+    eligible_names: list[str],
+    *,
+    k: int | None = None,
+    force: bool = False,
+) -> list[str]:
+    """Narrow the exposed tool set for *query*.
 
     Pasting every registered schema costs ~4.5k tokens of every agentic
     prompt and dilutes selection accuracy.  ``FLAG_TOOL_RAG`` swaps that
@@ -2248,28 +2291,39 @@ def _select_tools_for_query(query: str, eligible_names: list[str]) -> list[str]:
     off — the default — the full eligible set is exposed unchanged, and a
     selector failure falls back the same way: an agent with too many
     tools still works, one with none does not.
+
+    ``force`` is for a caller that cannot afford the full set whatever the
+    flag says (a turn that selected connectors).  It narrows to at most
+    ``k`` tools, and when it cannot score any it returns *none*: for that
+    caller the full set is the one outcome that does not work.
     """
     from .flags import flags  # noqa: PLC0415
 
-    if not flags.is_enabled("tool_rag") or not eligible_names:
+    if not eligible_names:
+        return eligible_names
+    if not force and not flags.is_enabled("tool_rag"):
         return eligible_names
 
     from .mcp.tool_rag import ToolRAGSelector  # noqa: PLC0415
 
+    limit = k if k is not None else TOOL_RAG_TOP_K
     try:
-        selection = ToolRAGSelector().select(query, eligible_names, k=TOOL_RAG_TOP_K)
+        selection = ToolRAGSelector().select(query, eligible_names, k=limit)
     except Exception:
-        logger.warning("Tool RAG selection failed; exposing all eligible tools", exc_info=True)
-        return eligible_names
+        logger.warning("Tool RAG selection failed", exc_info=True)
+        return [] if force else eligible_names
     if not selection.tool_names:
-        return eligible_names
+        return [] if force else eligible_names
+    chosen = list(selection.tool_names)
+    if force:
+        chosen = chosen[:limit]
     logger.info(
         "Tool RAG: %d/%d tools exposed (%s)",
-        len(selection.tool_names),
+        len(chosen),
         len(eligible_names),
         selection.fallback_reason or "scored",
     )
-    return list(selection.tool_names)
+    return chosen
 
 
 def _connector_chat_local_tool_names(candidate_names: list[str]) -> list[str]:
@@ -2317,6 +2371,91 @@ def _sanitize_connector_tool_result(result: Any) -> tuple[Any, bool]:
         }, True
 
 
+def _connector_turn_note(connector_tools: list[tuple[str, dict[str, Any]]]) -> str:
+    """The instruction that turns a chosen service into something the model uses.
+
+    Without it the model sees the service's functions beside a prompt that
+    says "answer factual questions only from the passages", and — live, on
+    Sunflower under ``tool_choice=auto`` — writes "I would typically use
+    efris_taxpayer_status, but I can't check" instead of calling it. The
+    taxpayer chose the service; a question about what it looks up is a
+    request to look it up.
+    """
+    if not connector_tools:
+        return ""
+    by_namespace: dict[str, list[str]] = {}
+    for namespace, descriptor in connector_tools:
+        by_namespace.setdefault(namespace, []).append(str(descriptor.get("name", "")))
+    listing = "\n".join(f"- {namespace}: {', '.join(names)}" for namespace, names in by_namespace.items())
+    return (
+        "## Services the taxpayer chose for this chat\n"
+        "They asked to use these services, so when a question is about something one of them looks up, "
+        "call the matching function. Do not answer it from the passages, and do not say you cannot check. "
+        "Use only values the taxpayer wrote in this conversation as arguments; if one the function needs "
+        "is missing, ask for it rather than guessing. Report only what the function returned, in one or "
+        "two short sentences of plain words, and nothing about what it might mean beyond that. Do not write "
+        "out the identifiers the taxpayer gave (TIN, reference numbers); say \"this taxpayer\" or \"that "
+        "reference\". Whether the data comes from a practice system is added for you.\n"
+        f"{listing}"
+    )
+
+
+#: Prompt tokens kept free for the passages and the answer's grounding once
+#: the tools have been fitted; ``_fit_to_context`` shortens passages to
+#: whatever is left, so this is a floor, not a target.
+_PASSAGE_RESERVE_TOKENS = 300
+
+
+def _fit_tools_to_window(
+    messages: list[dict[str, Any]],
+    tool_specs: list[dict[str, Any]],
+    *,
+    whole_prompt: bool = False,
+) -> list[dict[str, Any]]:
+    """Keep *tool_specs* inside the served window beside *messages*.
+
+    What cannot shrink is the system prompt and the question; passages can
+    (``_fit_to_context`` shortens them), and are given a small reserve. The
+    tools get the rest, slimmed before any is dropped, in the order given.
+
+    ``whole_prompt`` is for a round after tool results are in the prompt:
+    nothing in *messages* can shrink then, and fitting against only the
+    system prompt and the question is what let a second lookup overflow the
+    window (3,717 prompt tokens + 512 for the answer in a 4,096 window).
+    """
+    if not tool_specs or LLM_BACKEND != "vllm":
+        return tool_specs
+    from .tool_budget import fit_tool_specs, tool_names  # noqa: PLC0415
+
+    served = _served_context_window()
+    window = min(LLM_CONTEXT_WINDOW, served) if served else LLM_CONTEXT_WINDOW
+    answer = max(64, min(LLM_MAX_TOKENS, window // 2))
+    question = str(messages[-1].get("content") or "") if messages else ""
+    marker = question.find("## User question")
+    if whole_prompt:
+        floor_messages = messages
+        reserve = 0
+    else:
+        floor_messages = [messages[0], {"role": "user", "content": question[marker:] if marker > 0 else question}]
+        reserve = _PASSAGE_RESERVE_TOKENS
+    floor = _count_prompt_tokens(floor_messages)
+    if floor is None:
+        floor = _estimate_prompt_tokens(floor_messages)
+    budget = window - answer - 16 - floor - reserve
+
+    fitted = fit_tool_specs(tool_specs, budget, _count_text_tokens)
+    if len(fitted) != len(tool_specs) or fitted != tool_specs:
+        dropped = [n for n in tool_names(tool_specs) if n not in tool_names(fitted)]
+        logger.info(
+            "tool schemas fitted to the %d-token window: %d offered, %d dropped%s",
+            window,
+            len(fitted),
+            len(dropped),
+            f" ({', '.join(dropped[:6])})" if dropped else " (slimmed)",
+        )
+    return fitted
+
+
 def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     query: str,
     passages: list[dict[str, Any]] | None = None,
@@ -2334,6 +2473,8 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     agent_role: str = "",
     context_summary: str = "",
     connector_namespaces: list[str] | None = None,
+    forced_operations: list[str] | None = None,
+    summarise_records: bool = True,
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -2356,6 +2497,20 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         User's locale ("en", "lg").
     max_iterations:
         Hard cap on tool-call rounds — protects against runaway loops.
+    forced_operations:
+        Connector operations the first rounds must call, one per round, each
+        as a *named* function call (guided decoding, so the call is
+        well-formed). For a taxpayer who chose a service and asked it for a
+        record: left to ``tool_choice=auto`` this model answers "I would use
+        <function>" and does not. Arguments are still the model's, and are
+        checked against what the taxpayer wrote before anything is sent.
+    summarise_records:
+        When False, a turn whose calls were all connector calls ends once
+        they are answered and returns no text: the caller words the records
+        itself (``connector_outcome.compose``). For replies that are then
+        translated. A model asked a Luganda question writes Luganda, and in
+        testing added a claim the record did not make and citation debris
+        (``[[4]``) to it.
 
     Returns
     -------
@@ -2378,8 +2533,20 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
 
 
     # Import here to avoid a circular import (tools -> retriever -> ...)
+    from .connector_intent import missing_arguments  # noqa: PLC0415
+    from .connector_outcome import (  # noqa: PLC0415
+        FOUND,
+        REPORTED_SEPARATELY,
+        argument_label,
+        classify_all,
+        deterministic,
+    )
     from .mcp import get_client  # noqa: PLC0415
-    from .mcp.chat_connectors import selected_chat_connector_tools  # noqa: PLC0415
+    from .mcp.chat_connectors import (  # noqa: PLC0415
+        connector_label,
+        connector_mode,
+        selected_chat_connector_tools,
+    )
     from .tools import ToolRegistry  # noqa: PLC0415
 
     client = get_client()
@@ -2401,15 +2568,35 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         str(descriptor.get("name", "")): descriptor
         for _, descriptor in connector_tools
     }
+    connector_by_tool = {
+        str(descriptor.get("name", "")): namespace for namespace, descriptor in connector_tools
+    }
+
+    def _connector_fields(tool_name: str) -> dict[str, str]:
+        """Which connector a call went to, so the client can say so beside the answer."""
+        namespace = connector_by_tool.get(tool_name)
+        if namespace is None:
+            return {}
+        return {"connector": namespace, "connector_mode": connector_mode(namespace)}
     local_eligible = eligible_names - remote_names
     if connector_namespaces:
         local_eligible = set(_connector_chat_local_tool_names(sorted(local_eligible)))
-    selected_local_names = (
-        [name for name in tool_names if name in local_eligible]
-        if tool_names
-        else _select_tools_for_query(query, sorted(local_eligible))
-    )
-    scoped_names = list(dict.fromkeys(selected_local_names + list(connector_descriptors)))
+    if tool_names:
+        selected_local_names = [name for name in tool_names if name in local_eligible]
+    elif connector_namespaces:
+        # A turn that selected connectors is there to use them. Offering the
+        # whole local registry beside them put ~7,100 tokens of schemas in
+        # front of a 4,096-token window: the server refused the request, the
+        # loop read that as "no tool call", and the turn was answered by
+        # plain retrieval as if the connector had never been chosen.
+        selected_local_names = _select_tools_for_query(
+            query, sorted(local_eligible), k=CONNECTOR_TURN_LOCAL_TOOLS, force=True
+        )
+    else:
+        selected_local_names = _select_tools_for_query(query, sorted(local_eligible))
+    # The selected connectors' tools come first: they are what this turn is
+    # for, and what the budget below keeps longest.
+    scoped_names = list(dict.fromkeys(list(connector_descriptors) + selected_local_names))
     tool_specs: list[dict[str, Any]] = []
     for name in scoped_names:
         descriptor = connector_descriptors.get(name)
@@ -2431,7 +2618,30 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         local_tool = ToolRegistry.get(name)
         if local_tool is not None:
             tool_specs.append(local_tool.to_openai_spec())
-    allowed_tool_names = set(scoped_names)
+    messages = _build_tool_messages(
+        query,
+        passages,
+        conversation_history,
+        locale,
+        personalization_context=personalization_context,
+        tone_hint=tone_hint,
+        agent_role=agent_role,
+        context_summary=context_summary,
+        connector_note=_connector_turn_note(connector_tools),
+    )
+    tool_specs = _fit_tools_to_window(messages, tool_specs)
+    allowed_tool_names = {str(spec["function"]["name"]) for spec in tool_specs}
+    forced_queue = [
+        name for name in (forced_operations or []) if name in allowed_tool_names and name in connector_descriptors
+    ]
+    if forced_queue:
+        # One round per forced call, and one left to write the answer.
+        max_iterations = max(max_iterations, len(forced_queue) + 1)
+    # What the taxpayer actually wrote: the only source an identifier may come from.
+    taxpayer_text = "\n".join(
+        [query]
+        + [str(turn.get("user_message", "")) for turn in (conversation_history or []) if isinstance(turn, dict)]
+    )
 
     if not tool_specs:
         logger.warning("generate_with_tools: no tools available, falling back to generate()")
@@ -2446,16 +2656,6 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
 
-    messages = _build_tool_messages(
-        query,
-        passages,
-        conversation_history,
-        locale,
-        personalization_context=personalization_context,
-        tone_hint=tone_hint,
-        agent_role=agent_role,
-        context_summary=context_summary,
-    )
     tool_calls_made: list[dict[str, Any]] = []
     last_response = ""
     truncated = False
@@ -2475,10 +2675,44 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
 
     for iteration in range(max_iterations):
         _emit({"type": "iteration.started", "iteration": iteration})
+        forced_name = forced_queue[0] if forced_queue else ""
         if LLM_BACKEND == "vllm":
-            turn_res = _vllm_chat_completion(messages, tools=tool_specs)
+            if forced_name:
+                forced_spec = next(spec for spec in tool_specs if spec["function"]["name"] == forced_name)
+                # With two services in one message the model reached for the
+                # first identifier it saw (EFRIS's TIN as URSB's search text).
+                # The hint rides on the question's own message: a message after
+                # it would become the "active request" and the question itself
+                # could be trimmed as history in a tight window.
+                scope = (
+                    f"Call {forced_name} now, for the part of the request that is about "
+                    f"{connector_label(connector_by_tool.get(forced_name, ''))}. Use only a name or number "
+                    "that belongs to that part; do not reuse one given for another service."
+                )
+                scoped_messages = [dict(message) for message in messages]
+                for message in reversed(scoped_messages):
+                    if message.get("role") == "user":
+                        message["content"] = f"{message.get('content') or ''}\n\n{scope}"
+                        break
+                turn_res = _vllm_chat_completion(
+                    scoped_messages,
+                    tools=[forced_spec],
+                    tool_choice={"type": "function", "function": {"name": forced_name}},
+                )
+            else:
+                round_specs = tool_specs
+                if tool_calls_made:
+                    # Results are in the prompt now. Offer only the tools that
+                    # still fit beside them; none is a valid answer — the model
+                    # then writes the reply from what it was given.
+                    round_specs = _fit_tools_to_window(messages, tool_specs, whole_prompt=True)
+                turn_res = _vllm_chat_completion(messages, tools=round_specs or None)
             response = turn_res.get("content", "")
             parsed_calls = turn_res.get("tool_calls", [])
+            if forced_name:
+                # A round is spent whether or not the server honoured the choice;
+                # never loop on a backend that ignores it.
+                forced_queue.pop(0)
         else:
             try:
                 import torch
@@ -2600,6 +2834,36 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "skipped": False,
                     "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
                 }
+            if pc["name"] in connector_descriptors:
+                input_schema = connector_descriptors[pc["name"]].get("inputSchema")
+                missing = missing_arguments(pc.get("arguments", {}), input_schema, taxpayer_text)
+                if missing:
+                    # A forced call must fill every required field. When the
+                    # taxpayer did not give one, the model invents it — or
+                    # leaves it out — and the service would then answer about a
+                    # record nobody named, or the client would refuse the call
+                    # in its own words.
+                    return {
+                        "idx": idx,
+                        "call_id": call_id,
+                        "pc": pc,
+                        "decision": decision,
+                        "result": {
+                            "ok": False,
+                            "error": "argument_not_provided",
+                            "arguments": missing,
+                            "argument_labels": [argument_label(input_schema, name) for name in missing],
+                            "message": (
+                                "The taxpayer has not given: "
+                                + ", ".join(missing)
+                                + ". Nothing was looked up. Ask them for it; do not guess."
+                            ),
+                        },
+                        "ok": False,
+                        "error": None,
+                        "skipped": False,
+                        "elapsed_ms": (time.perf_counter() - call_t0) * 1000,
+                    }
             try:
                 result_obj = client.call_tool(
                     pc["name"],
@@ -2662,6 +2926,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "name": pc["name"],
                     "arguments": pc.get("arguments", {}),
                     "iteration": iteration,
+                    **_connector_fields(pc["name"]),
                 }
             )
 
@@ -2728,6 +2993,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "result_summary": _summarise_tool_result(result),
                     "elapsed_ms": round(elapsed_ms, 2),
                     "iteration": iteration,
+                    **_connector_fields(pc["name"]),
                 }
             )
             tool_calls_made.append(
@@ -2737,6 +3003,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "arguments": pc.get("arguments", {}),
                     "result": result,
                     "iteration": iteration,
+                    **_connector_fields(pc["name"]),
                 }
             )
             assistant_tool_call_entries.append(
@@ -2749,14 +3016,23 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     },
                 }
             )
+            # Structural compaction — a byte-sliced payload is
+            # invalid JSON and drops by position, not salience.
+            observation = budget.compact(result)
+            if pc["name"] in connector_descriptors:
+                lookup = classify_all(tool_calls_made[-1:], label_for=connector_label)
+                if lookup and lookup[0].kind != FOUND:
+                    # "No record", "give me the TIN" and "could not be asked"
+                    # are reported in the service's words by the caller
+                    # (connector_outcome.compose). Showing them to the model is
+                    # how a missing stamp became "likely counterfeit".
+                    observation = REPORTED_SEPARATELY
             tool_result_messages.append(
                 {
                     "role": "tool",
                     "name": pc["name"],
                     "tool_call_id": call_id,
-                    # Structural compaction — a byte-sliced payload is
-                    # invalid JSON and drops by position, not salience.
-                    "content": budget.compact(result),
+                    "content": observation,
                 }
             )
 
@@ -2769,6 +3045,35 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             }
         )
         messages.extend(tool_result_messages)
+
+        # A lookup that returned no record is worded from the service's own
+        # message by the caller (connector_outcome.compose), and so is every
+        # other lookup in that turn: the round a model would spend
+        # paraphrasing them is how "no registered entity" became "registered".
+        if (
+            not forced_queue
+            and all(call.get("connector") for call in tool_calls_made)
+            and (
+                not summarise_records
+                or deterministic(classify_all(tool_calls_made, label_for=connector_label))
+            )
+        ):
+            _emit(
+                {
+                    "type": "iteration.final",
+                    "iterations": iteration + 1,
+                    "truncated": False,
+                    "tool_call_count": len(tool_calls_made),
+                    "tool_budget": budget.stats(),
+                }
+            )
+            return {
+                "text": "",
+                "tool_calls": tool_calls_made,
+                "iterations": iteration + 1,
+                "truncated": False,
+                "tool_budget": budget.stats(),
+            }
 
     # Max iterations exhausted — return whatever the last generation produced
     truncated = True

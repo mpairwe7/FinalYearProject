@@ -44,8 +44,12 @@ to be registered locally, so cutting a namespace over is one env var:
 
 ```bash
 MCP_SERVER_URL_TAX_CALCULATOR=https://mcp-tax.internal/rpc
-MCP_SERVER_TOKEN_TAX_CALCULATOR=…        # optional bearer
+MCP_SERVER_TOKEN_TAX_CALCULATOR=…        # shared token; the server reads the same variable
 ```
+
+A URL that is not `http(s)`, carries credentials, or is plain `http` in
+production is logged and ignored: the namespace stays in-process rather
+than sending a bearer token somewhere TLS cannot vouch for.
 
 `MCPClient.health()` shows what a running process actually resolved.
 
@@ -175,26 +179,48 @@ on them without understanding our tool names.
 | `ura_account` | `ura_account_profile` | high | 🟢 standalone server available (`mcp_ura_account` :8932) / DMZ |
 | `ura_actions` | `ura_action_proposal` | critical | DMZ |
 
-## Standalone FastMCP Microservices (`docker-compose.mcp.yml`)
+## Standalone MCP servers
 
-The platform includes Docker Compose overlays (`docker-compose.mcp.yml`) to deploy independent, zero-trust FastMCP servers:
-- **`mcp-tax-calculator`** (`http://localhost:8931`): All statutory tax calculators and document auditing.
-- **`mcp-ura-account`** (`http://localhost:8932`): High-risk read-only account profile and filing inquiry tools.
-- **`mcp-efris`** (`http://localhost:8933`): EFRIS electronic fiscal invoicing, credit note reconciliation, and inventory tracking.
-- **`mcp-dts`** (`http://localhost:8934`): Digital Tax Stamps ordering, verification, and activation.
-- **`mcp-payment`** (`http://localhost:8935`): PRN slip generation, bank settlement, and advance tax verification.
-- **`mcp-tin`** (`http://localhost:8936`): Instant TIN application and registration inquiry.
-- **`mcp-ursb`** (`http://localhost:8937`): URSB business entity verification and registration.
-- **`mcp-bwims`** (`http://localhost:8938`): Customs bonded warehouse inventory and consignment release.
+Every server is one `StatelessMCPServer` (`app/mcp/servers/wire.py`), so the
+wire rules and the authentication of the caller are the same everywhere.
+`docker-compose.mcp.yml` runs one container per server:
+- **`mcp-tax-calculator`** (`:8931`): All statutory tax calculators and document auditing.
+- **`mcp-ura-account`** (`:8932`): High-risk read-only account profile and filing inquiry tools.
+- **`mcp-efris`** (`:8933`): EFRIS simulator — fiscal invoices, credit notes, stock.
+- **`mcp-dts`** (`:8934`): Digital Tax Stamps simulator — verification, orders, activation.
+- **`mcp-payment`** (`:8935`): Payment simulator — PRN references, status, advance tax.
+- **`mcp-tin`** (`:8936`): TIN registration simulator.
+- **`mcp-ursb`** (`:8937`): URSB business-registry simulator.
+- **`mcp-bwims`** (`:8938`): Bonded-warehouse simulator.
 
-To bind the core API to remote microservices with mutual TLS (mTLS):
+`App/docker-compose.connectors.yml` serves the six system connectors from a
+single `connectors` container instead (`python -m app.mcp.servers.gateway`,
+one endpoint per system on `:8930`).
+
+Both overlays bind the API and give both ends of every link the same
+generated secret:
+
 ```bash
-MCP_SERVER_URL_TAX_CALCULATOR=http://mcp-tax-calculator:8931/
-MCP_SERVER_URL_URA_ACCOUNT=http://mcp-ura-account:8932/
-MCP_SERVER_URL_EFRIS=http://mcp-efris:8933/
-MCP_CLIENT_CERT_EFRIS=/etc/ssl/certs/mcp-client.crt
+export MCP_LINK_TOKEN=$(openssl rand -hex 32)
+MCP_SERVER_URL_EFRIS=http://mcp-efris:8933          # or http://connectors:8930/efris
+MCP_SERVER_TOKEN_EFRIS=$MCP_LINK_TOKEN              # the same variable on the server
+MCP_CLIENT_CERT_EFRIS=/etc/ssl/certs/mcp-client.crt  # optional mTLS
 MCP_CLIENT_KEY_EFRIS=/etc/ssl/certs/mcp-client.key
 ```
+
+A server with no credential configured is locked, not open. For production
+the link uses OAuth 2.1: the server validates an audience-bound RS256 token
+and the API obtains one with the client-credentials grant
+(`docs/runbooks/enterprise-connectors-and-mcp.md` §2.1).
+
+### Connectors in taxpayer chat
+
+`GET /v1/connectors?view=chat` lists each bound server's eligible read-only
+operations with its `mode` (`simulation` unless the deployment sets
+`MCP_SERVER_MODE_<NAMESPACE>=live`) and `status` (`available` /
+`unavailable`). The six system connectors are simulators: they are shown as
+demo data and are not offered in production. See
+`docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.
 
 ## Enterprise Security Controls (2026 Standards)
 
@@ -234,18 +260,22 @@ address.
   on every request, so any request can land on any replica. The server
   rejects `initialize` with a message saying so rather than a bare
   "method not found".
-- **Header routing.** `Mcp-Method` / `Mcp-Name` duplicate method and
-  tool name into headers. A header that disagrees with the body is
-  rejected — otherwise a gateway could authorize one method while the
-  server runs another. `mcp_tax_calculator` checks both headers.
-- **Required `_meta`.** Every `tools/list`, `tools/call`, `resources/*`,
-  `prompts/*`, and `server/info` request must carry
+- **Header routing.** `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name`
+  are required on every POST. A missing header, or one that disagrees
+  with the body, is `400` with `HeaderMismatch` (`-32020`) — otherwise a
+  gateway could authorize one method while the server runs another.
+  Tool parameters annotated `x-mcp-header` are mirrored into
+  `Mcp-Param-*` headers by the client.
+- **Required `_meta`.** Every request must carry
   `io.modelcontextprotocol/protocolVersion` and
   `io.modelcontextprotocol/clientCapabilities`. Missing fields are
-  JSON-RPC `-32602`. Vendor identity stays under `ug.go.ura.chatbot/`.
-- **Diagnostic Ping & Batching.** Standard `ping` returns `{}` without
-  session state; JSON-RPC 2.0 batch requests (`[...]`) are executed
-  atomically and returned in order.
+  JSON-RPC `-32602`; an unsupported version is `-32022` with the
+  supported list. Vendor identity stays under `ug.go.ura.chatbot/`, and a
+  server believes it only from an authenticated caller.
+- **Discovery, not ping.** Every server implements `server/discover`;
+  `MCPClient.ping()` probes with it because `ping` left the protocol in
+  this revision. One JSON-RPC request per POST: batches are refused over
+  HTTP (the stdio loop still accepts them).
 - **MCP Resources & Prompts.** Serves statutory URA tax rate cards and
   deadlines as standard resources (`ura://rates/current`,
   `ura://calendar/deadlines`) and standard calculation prompt templates
@@ -259,8 +289,9 @@ address.
   exposing automated financial arithmetic reconciliation and statutory tax rate
   auditing to MCP clients.
 - **Cacheable lists.** `tools/list` returns `ttlMs` (1h) and
-  `cacheScope: "server"`. `HttpTransport` honours `ttlMs` instead of
-  caching for process life.
+  `cacheScope: "public"`; every result carries `resultType`.
+  `HttpTransport` honours `ttlMs` instead of caching for process life,
+  and does not retry a server for 15 seconds after a failed discovery.
 - **Full JSON Schema 2020-12** on input and output, and
   `structuredContent` on results alongside a human-readable `content`
   text block. Every registered tool sets `additionalProperties: false`.

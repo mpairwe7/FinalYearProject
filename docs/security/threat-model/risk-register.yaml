@@ -363,7 +363,7 @@ risks:
     threat: Server-Side Request Forgery (SSRF) via remote MCP connector registration
     severity: High
     cvss: "8.6"
-    existing_controls: Strict URL validation blocking cloud metadata (169.254.169.254), private/loopback/multicast IP resolution checks in production, required_scopes RBAC
+    existing_controls: Runtime registration and configuration are disabled (410 Gone); remote MCP endpoints come only from deployment configuration, must be http(s) without embedded credentials and https in production, and redirects are never followed
     status: Mitigated
     mitigation_target: Shipped
     owner: backend-team
@@ -413,3 +413,18 @@ risks:
     owner: backend-team
     cwe: "CWE-840"
     owasp_llm: "LLM06"
+
+  - id: T-CON-05
+    element: Connector MCP Servers
+    framework: STRIDE
+    stride_category: S
+    threat: Unauthenticated access to a connector MCP server, or role escalation by asserting a caller identity in the request body or replaying a token issued for another server
+    severity: High
+    cvss: "8.1"
+    existing_controls: Every HTTP request authenticated (audience-bound OAuth 2.1 RS256 token, or a deployment-managed shared token of at least 32 characters compared in constant time); a server with no credential is locked; body identity honoured only when authenticated; per-system credentials; Origin allow-list; header and body must agree
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-306"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0052"

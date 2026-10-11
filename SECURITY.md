@@ -72,7 +72,7 @@ Automated threat modelling runs in CI via `.github/workflows/devsecops-sast-dast
 | Component | Tool | Purpose |
 |-----------|------|---------|
 | **Architecture model** | [pytm](https://github.com/OWASP/pytm) | DFD generation, STRIDE per-element threat analysis |
-| **Threat registry** | `threat-model/validate_threats.py` | 28 threats with evidence-based mitigation validation (27 mitigated, T21 accepted) |
+| **Threat registry** | `threat-model/validate_threats.py` | 34 threats with evidence-based mitigation validation (33 mitigated, T21 accepted) |
 | **STRIDE coverage** | Automated | 6/6 categories (Spoofing, Tampering, Repudiation, Info Disclosure, DoS, Elevation) |
 | **OWASP LLM mapping** | Registry | 10/10 LLM Top 10 vulnerabilities mapped to mitigations |
 | **MITRE ATLAS** | Registry | 19 mappings / 10 unique AML.T* techniques |

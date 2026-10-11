@@ -101,6 +101,8 @@
   - *Mitigation*: Legacy dashboards carry a persistent simulation notice, expose `X-Connector-Mode: simulation`, retire legacy `/mcp/*` routes with `410`, and return `503` for non-health routes in production. Their login screens are demonstrations, not production authentication.
 - **T-CON-04 (Tampering / Business Logic)**: An agent creates a misleading or duplicate simulated transaction.
   - *Mitigation*: Mutating agent tools require dispatch-time authorization, confirmation, and idempotency. Simulator output is marked `mode=simulation`; no live filing, registration, customs release, or payment is made.
+- **T-CON-05 (Spoofing / Elevation of Privilege)**: A caller that can reach a connector MCP server uses it without being the chat backend, claims a staff role in the request body, or replays a token issued for another server.
+  - *Mitigation*: Every HTTP request is authenticated — an audience-bound OAuth 2.1 access token, or a deployment-managed shared token — and a server with no credential is locked. Identity carried in the body is honoured only on an authenticated request. Credentials are per system, `Origin` is allow-listed, and a request whose routing headers disagree with its body is refused.
 
 ---
 

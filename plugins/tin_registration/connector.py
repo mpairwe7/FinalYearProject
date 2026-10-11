@@ -42,7 +42,7 @@ class TinSearchVerifyTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "found": {"type": "boolean"},
-                    "taxpayer": {"type": "object"},
+                    "taxpayer": {"type": ["object", "null"]},
                     "message": {"type": "string"},
                     "error": {"type": ["string", "null"]},
                 },

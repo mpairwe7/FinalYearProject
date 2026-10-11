@@ -18,9 +18,10 @@ META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
 META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo"
 META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
 
+#: Roots is not declared: 2026-07-28 deprecates it, and this client never
+#: answered a roots request, so advertising it promised something untrue.
 DEFAULT_CLIENT_CAPABILITIES: dict[str, Any] = {
     "elicitation": {},
-    "roots": {"listChanged": False},
 }
 
 

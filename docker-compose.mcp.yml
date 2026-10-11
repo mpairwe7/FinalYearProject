@@ -1,173 +1,182 @@
 # ===========================================================================
-# URA Taxpayer Chatbot — Standalone FastMCP Microservices (2026 Standards)
+# URA Taxpayer Chatbot — standalone MCP servers (MCP 2026-07-28)
 # ===========================================================================
-# Deploys out-of-process FastMCP server containers for statutory calculators,
-# DMZ URA account integration, and decoupled system connectors.
+# One container per server: the statutory calculators, the URA account
+# server, and the six system connectors. This is the shape for a deployment
+# that puts each system behind its own network policy. For a single-host
+# stack, App/docker-compose.connectors.yml serves the six connectors from one
+# process instead.
 #
 # Usage:
+#   export MCP_LINK_TOKEN=$(openssl rand -hex 32)
 #   docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d
+#
+# MCP_LINK_TOKEN is the shared secret both ends of every link are given
+# below. It is never written to a file by this stack; keep it in the shell
+# or the platform's secret store. Without it the servers start LOCKED — they
+# answer /health and refuse everything else — and the API lists the
+# connectors as unavailable.
+#
+# The six connectors are SIMULATORS over fixture data. They are labelled as
+# demo data in chat, and under APP_ENV=production they serve no tools and
+# the API does not offer them.
 # ===========================================================================
 
-version: "3.8"
+x-mcp-server: &mcp-server
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: runtime
+  image: ${DOCKER_IMAGE:-landwind/ura-chatbot-api}:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  read_only: true
+  tmpfs:
+    - /tmp
+    # The simulators keep their fixture databases here and seed them on first
+    # use. In memory on purpose: nothing a simulator holds is a URA record,
+    # and a restart returning it to the fixtures is the right behaviour.
+    - /app/data_store
+  networks:
+    - ura-network
+
+# The image's ENTRYPOINT starts the chat API and ignores `command`, so each
+# server replaces the entrypoint. The image has no curl; the health check is
+# the same Python one-liner the API uses.
+x-mcp-healthcheck: &mcp-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 3
+  start_period: 20s
 
 services:
-  mcp-tax-calculator:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
-    container_name: ura-mcp-tax-calculator
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.tax_calculator --http --port 8931
+  api:
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      # Opens the taxpayer-chat connector surface. With no server bound it
+      # lists nothing, and it never lists a simulator in production.
+      - FLAG_ENTERPRISE_CONNECTORS=${FLAG_ENTERPRISE_CONNECTORS:-true}
+      - MCP_SERVER_URL_EFRIS=http://mcp-efris:8933
+      - MCP_SERVER_TOKEN_EFRIS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_DIGITAL_TAX_STAMPS=http://mcp-dts:8934
+      - MCP_SERVER_TOKEN_DIGITAL_TAX_STAMPS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_PAYMENT_SYSTEM=http://mcp-payment:8935
+      - MCP_SERVER_TOKEN_PAYMENT_SYSTEM=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_TIN_REGISTRATION=http://mcp-tin:8936
+      - MCP_SERVER_TOKEN_TIN_REGISTRATION=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_URSB=http://mcp-ursb:8937
+      - MCP_SERVER_TOKEN_URSB=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_BWIMS=http://mcp-bwims:8938
+      - MCP_SERVER_TOKEN_BWIMS=${MCP_LINK_TOKEN:-}
+      # The calculators and the account server are NOT bound here: binding
+      # them moves tools the chat already serves in-process. To move one, add
+      #   MCP_SERVER_URL_TAX_CALCULATOR=http://mcp-tax-calculator:8931
+      #   MCP_SERVER_TOKEN_TAX_CALCULATOR=${MCP_LINK_TOKEN}
+
+  mcp-tax-calculator:
+    <<: *mcp-server
+    container_name: ura-mcp-tax-calculator
+    entrypoint: ["python", "-m", "app.mcp.servers.tax_calculator", "--http", "--port", "8931"]
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_TAX_CALCULATOR=${MCP_LINK_TOKEN:-}
     ports:
-      - "8931:8931"
+      - "127.0.0.1:8931:8931"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8931/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8931/health', timeout=4).status == 200 else 1)"]
 
   mcp-ura-account:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-ura-account
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.ura_account --http --port 8932
+    entrypoint: ["python", "-m", "app.mcp.servers.ura_account", "--http", "--port", "8932"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
       - URA_ACCOUNT_API_MODE=${URA_ACCOUNT_API_MODE:-mock}
+      - MCP_SERVER_TOKEN_URA_ACCOUNT=${MCP_LINK_TOKEN:-}
     ports:
-      - "8932:8932"
+      - "127.0.0.1:8932:8932"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8932/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8932/health', timeout=4).status == 200 else 1)"]
 
   mcp-efris:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-efris
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.efris --http --port 8933
+    entrypoint: ["python", "-m", "app.mcp.servers.efris", "--http", "--port", "8933"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_EFRIS=${MCP_LINK_TOKEN:-}
     ports:
-      - "8933:8933"
+      - "127.0.0.1:8933:8933"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8933/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8933/health', timeout=4).status == 200 else 1)"]
 
   mcp-dts:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-dts
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.dts --http --port 8934
+    entrypoint: ["python", "-m", "app.mcp.servers.dts", "--http", "--port", "8934"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_DIGITAL_TAX_STAMPS=${MCP_LINK_TOKEN:-}
     ports:
-      - "8934:8934"
+      - "127.0.0.1:8934:8934"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8934/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8934/health', timeout=4).status == 200 else 1)"]
 
   mcp-payment:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-payment
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.payment --http --port 8935
+    entrypoint: ["python", "-m", "app.mcp.servers.payment", "--http", "--port", "8935"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_PAYMENT_SYSTEM=${MCP_LINK_TOKEN:-}
     ports:
-      - "8935:8935"
+      - "127.0.0.1:8935:8935"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8935/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8935/health', timeout=4).status == 200 else 1)"]
 
   mcp-tin:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-tin
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.tin --http --port 8936
+    entrypoint: ["python", "-m", "app.mcp.servers.tin", "--http", "--port", "8936"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_TIN_REGISTRATION=${MCP_LINK_TOKEN:-}
     ports:
-      - "8936:8936"
+      - "127.0.0.1:8936:8936"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8936/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8936/health', timeout=4).status == 200 else 1)"]
 
   mcp-ursb:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-ursb
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.ursb --http --port 8937
+    entrypoint: ["python", "-m", "app.mcp.servers.ursb", "--http", "--port", "8937"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_URSB=${MCP_LINK_TOKEN:-}
     ports:
-      - "8937:8937"
+      - "127.0.0.1:8937:8937"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8937/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8937/health', timeout=4).status == 200 else 1)"]
 
   mcp-bwims:
-    build:
-      context: .
-      dockerfile: App/deploy/Dockerfile
+    <<: *mcp-server
     container_name: ura-mcp-bwims
-    restart: unless-stopped
-    command: python3 -m app.mcp.servers.bwims --http --port 8938
+    entrypoint: ["python", "-m", "app.mcp.servers.bwims", "--http", "--port", "8938"]
     environment:
-      - APP_ENV=${APP_ENV:-production}
-      - PYTHONPATH=/app/App/backend:/app
+      - APP_ENV=${APP_ENV:-development}
+      - MCP_SERVER_TOKEN_BWIMS=${MCP_LINK_TOKEN:-}
     ports:
-      - "8938:8938"
+      - "127.0.0.1:8938:8938"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8938/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-    networks:
-      - default
+      <<: *mcp-healthcheck
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8938/health', timeout=4).status == 200 else 1)"]

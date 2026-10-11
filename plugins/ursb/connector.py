@@ -43,7 +43,7 @@ class UrsbVerifyBusinessTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "found": {"type": "boolean"},
-                    "entity": {"type": "object"},
+                    "entity": {"type": ["object", "null"]},
                     "message": {"type": "string"},
                     "error": {"type": ["string", "null"]},
                 },

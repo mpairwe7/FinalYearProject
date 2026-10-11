@@ -58,9 +58,12 @@ class ResourcesTests(unittest.TestCase):
         deadlines = _rpc("resources/read", {"uri": "ura://calendar/deadlines"})["result"]
         self.assertEqual(deadlines["contents"][0]["uri"], "ura://calendar/deadlines")
 
-    def test_unknown_resource_raises_not_found(self) -> None:
+    def test_unknown_resource_is_invalid_params(self) -> None:
+        # 2026-07-28 moved "resource not found" to -32602. Reporting it as an
+        # unknown *method* is a 404 over HTTP, which tells a conforming
+        # client this server does not implement resources/read at all.
         err = _rpc("resources/read", {"uri": "ura://secret/keys"})["error"]
-        self.assertEqual(err["code"], server.METHOD_NOT_FOUND)
+        self.assertEqual(err["code"], server.INVALID_PARAMS)
 
 
 class PromptsTests(unittest.TestCase):
@@ -98,7 +101,9 @@ class ToolsListTests(unittest.TestCase):
     def test_list_is_cacheable(self) -> None:
         result = _rpc("tools/list")["result"]
         self.assertEqual(result["ttlMs"], server.LIST_TTL_MS)
-        self.assertEqual(result["cacheScope"], "server")
+        # The specification defines exactly two scopes, "public" and "private".
+        self.assertEqual(result["cacheScope"], "public")
+        self.assertEqual(result["resultType"], "complete")
 
     def test_descriptors_carry_schemas_and_annotations(self) -> None:
         tool = next(
@@ -134,8 +139,11 @@ class ToolsCallTests(unittest.TestCase):
         self.assertIn("non-negative", response["result"]["structuredContent"]["error"])
 
     def test_a_tool_from_another_namespace_is_not_served(self) -> None:
+        # An unknown tool is -32602, as the specification's own example shows;
+        # -32601 is reserved for a method the server does not have.
         error = _rpc("tools/call", {"name": "ura_account_profile", "arguments": {}})["error"]
-        self.assertEqual(error["code"], server.METHOD_NOT_FOUND)
+        self.assertEqual(error["code"], server.INVALID_PARAMS)
+        self.assertIn("Unknown tool", error["message"])
 
     def test_non_object_arguments_are_invalid_params(self) -> None:
         error = _rpc("tools/call", {"name": "calculate_vat", "arguments": [1, 2]})["error"]
@@ -162,7 +170,7 @@ class EnvelopeTests(unittest.TestCase):
             {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
             {"Mcp-Method": "tools/call"},
         )["error"]
-        self.assertEqual(error["code"], server.INVALID_REQUEST)
+        self.assertEqual(error["code"], server.HEADER_MISMATCH)
 
     def test_header_name_must_match_the_body_tool(self) -> None:
         error = server.handle_request(
@@ -178,7 +186,7 @@ class EnvelopeTests(unittest.TestCase):
             },
             {"Mcp-Method": "tools/call", "Mcp-Name": "ura_action_proposal"},
         )["error"]
-        self.assertEqual(error["code"], server.INVALID_REQUEST)
+        self.assertEqual(error["code"], server.HEADER_MISMATCH)
         self.assertIn("Mcp-Name", error["message"])
 
     def test_missing_required_meta_is_invalid_params(self) -> None:
