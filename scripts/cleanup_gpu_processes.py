@@ -12,7 +12,8 @@ Guarantees:
         GPU processes show a container-side cwd such as ``/app``, so a path
         match on the PID alone never finds them.
   - Re-queries nvidia-smi afterwards and exits non-zero if anything of this
-    project is still on a GPU.
+    project is still on a GPU, if a container would not stop, or if either
+    nvidia-smi or Docker could not be queried (never a silent "clean").
   - Leaves other users' and other projects' processes and containers untouched.
 """
 
@@ -28,10 +29,16 @@ from pathlib import Path
 from typing import Any
 
 TARGET_PREFIX = "/home/developer/Mpairwe7"
-# Agent scratchpad worktrees live outside TARGET_PREFIX but encode it in the name.
-SCRATCHPAD_MARKER = "Mpairwe7-FinalYearProject"
 COMPOSE_WORKDIR_LABEL = "com.docker.compose.project.working_dir"
 
+# Boundary-anchored: /home/developer/Mpairwe7-other or /srv/home/developer/Mpairwe7
+# are not this project, and this utility kills what it matches.
+_PROJECT_PATH = re.compile(r"(?<![\w.\-])" + re.escape(TARGET_PREFIX) + r"(?![\w.\-])")
+# Agent scratchpad worktrees live outside TARGET_PREFIX; the directory name is the
+# project path with "/" flattened to "-", e.g. /-home-developer-Mpairwe7-FinalYearProject-App/.
+_SCRATCHPAD_PATH = re.compile(r"/-home-developer-Mpairwe7-FinalYearProject(?:-[^/\s]*)?(?:/|$)")
+
+QUERY_TIMEOUT_S = 30
 TERM_GRACE_S = 10.0
 RELEASE_WAIT_S = 15.0
 CONTAINER_STOP_TIMEOUT_S = 30
@@ -39,8 +46,20 @@ CONTAINER_STOP_TIMEOUT_S = 30
 _CONTAINER_ID = re.compile(r"[0-9a-f]{64}")
 
 
-class ContainerLookupError(RuntimeError):
+class VerificationError(RuntimeError):
+    """Something needed to attribute or verify GPU memory could not be queried."""
+
+
+class ContainerLookupError(VerificationError):
     """Docker could not be queried, so container GPU processes cannot be attributed."""
+
+
+class GpuQueryError(VerificationError):
+    """nvidia-smi could not be queried; ``missing`` means the binary is absent (no NVIDIA GPU)."""
+
+    def __init__(self, message: str, missing: bool = False) -> None:
+        super().__init__(message)
+        self.missing = missing
 
 
 def _protected_pids() -> set[int]:
@@ -63,7 +82,7 @@ def _protected_pids() -> set[int]:
 
 
 def _owned_by_project(text: str) -> bool:
-    return text.startswith(TARGET_PREFIX) or SCRATCHPAD_MARKER in text
+    return bool(_PROJECT_PATH.search(text) or _SCRATCHPAD_PATH.search(text))
 
 
 def is_process_in_target_dir(pid: int) -> tuple[bool, str]:
@@ -83,7 +102,7 @@ def is_process_in_target_dir(pid: int) -> tuple[bool, str]:
         cmdline_file = Path(f"/proc/{pid}/cmdline")
         if cmdline_file.exists():
             cmdline = cmdline_file.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
-            if TARGET_PREFIX in cmdline or SCRATCHPAD_MARKER in cmdline:
+            if _owned_by_project(cmdline):
                 return True, f"cmdline: {cmdline[:80]}..."
     except Exception:
         pass
@@ -93,14 +112,22 @@ def is_process_in_target_dir(pid: int) -> tuple[bool, str]:
 
 def _compute_apps() -> list[dict[str, Any]]:
     """Every process nvidia-smi reports on any GPU: pid, gpu name, VRAM MiB."""
-    out = subprocess.check_output(
-        [
-            "nvidia-smi",
-            "--query-compute-apps=pid,gpu_name,used_memory",
-            "--format=csv,noheader,nounits",
-        ],
-        text=True,
-    ).strip().splitlines()
+    try:
+        out = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-compute-apps=pid,gpu_name,used_memory",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True, text=True, check=True, timeout=QUERY_TIMEOUT_S,
+        ).stdout.strip().splitlines()
+    except FileNotFoundError as ex:
+        raise GpuQueryError(f"nvidia-smi not found: {ex}", missing=True) from ex
+    except (OSError, subprocess.TimeoutExpired) as ex:
+        raise GpuQueryError(str(ex)) from ex
+    except subprocess.CalledProcessError as ex:
+        detail = (ex.stderr or "").strip().splitlines()[:1]
+        raise GpuQueryError(detail[0] if detail else f"nvidia-smi exited {ex.returncode}") from ex
     apps: list[dict[str, Any]] = []
     for line in out:
         parts = [p.strip() for p in line.split(",")]
@@ -131,7 +158,8 @@ def _project_containers() -> dict[str, dict[str, Any]]:
     """
     try:
         ids = subprocess.run(
-            ["docker", "ps", "-aq", "--no-trunc"], capture_output=True, text=True, check=True
+            ["docker", "ps", "-aq", "--no-trunc"],
+            capture_output=True, text=True, check=True, timeout=QUERY_TIMEOUT_S,
         ).stdout.split()
         if not ids:
             return {}
@@ -141,9 +169,10 @@ def _project_containers() -> dict[str, dict[str, Any]]:
             "{{if .HostConfig.DeviceRequests}}1{{else}}0{{end}}\t{{.State.Running}}"
         )
         out = subprocess.run(
-            ["docker", "inspect", "--format", fmt, *ids], capture_output=True, text=True, check=True
+            ["docker", "inspect", "--format", fmt, *ids],
+            capture_output=True, text=True, check=True, timeout=QUERY_TIMEOUT_S,
         ).stdout
-    except OSError as ex:
+    except (OSError, subprocess.TimeoutExpired) as ex:
         raise ContainerLookupError(str(ex)) from ex
     except subprocess.CalledProcessError as ex:
         detail = (ex.stderr or "").strip().splitlines()[:1]
@@ -161,11 +190,33 @@ def _project_containers() -> dict[str, dict[str, Any]]:
     return found
 
 
-def _stop_containers(containers: dict[str, dict[str, Any]]) -> None:
-    """Stop then remove, so a restart policy cannot bring the VRAM back."""
-    ids = list(containers)
-    subprocess.run(["docker", "stop", "-t", str(CONTAINER_STOP_TIMEOUT_S), *ids], check=False)
-    subprocess.run(["docker", "rm", "-f", *ids], check=False)
+def _stop_containers(containers: dict[str, dict[str, Any]]) -> dict[str, str]:
+    """Stop then remove each container, so a restart policy cannot bring the VRAM back.
+
+    Returns {container id: reason} for every container that could not be removed.
+    """
+    failed: dict[str, str] = {}
+    for cid, meta in containers.items():
+        name = meta["name"]
+        try:
+            steps = (
+                ("stop", subprocess.run(
+                    ["docker", "stop", "-t", str(CONTAINER_STOP_TIMEOUT_S), cid],
+                    capture_output=True, text=True, timeout=CONTAINER_STOP_TIMEOUT_S + QUERY_TIMEOUT_S,
+                )),
+                ("rm", subprocess.run(
+                    ["docker", "rm", "-f", cid],
+                    capture_output=True, text=True, timeout=QUERY_TIMEOUT_S,
+                )),
+            )
+        except (OSError, subprocess.TimeoutExpired) as ex:
+            failed[cid] = f"{name}: {ex}"
+            continue
+        for step, result in steps:
+            if result.returncode != 0 and "No such container" not in result.stderr:
+                failed[cid] = f"{name}: docker {step} failed: {result.stderr.strip()[:200]}"
+                break
+    return failed
 
 
 def _pid_alive(pid: int) -> bool:
@@ -232,9 +283,13 @@ def _project_holders(
 
 
 def project_vram_remaining() -> list[dict[str, Any]]:
-    """GPU apps that still belong to this project (empty means fully clean)."""
+    """GPU apps that still belong to this project (empty means fully clean).
+
+    Raises VerificationError when nvidia-smi or Docker cannot be queried, so a
+    failed check is never mistaken for a clean one.
+    """
     apps = _compute_apps()
-    containers = _project_containers()  # raises ContainerLookupError; never reports a false "clean"
+    containers = _project_containers()
     protected = _protected_pids()
     host, boxed = [], []
     for app in apps:
@@ -250,16 +305,27 @@ def project_vram_remaining() -> list[dict[str, Any]]:
     return host + boxed
 
 
+def _entry(app: dict[str, Any] | None, reason: str, status: str) -> dict[str, Any]:
+    app = app or {}
+    return {"pid": app.get("pid", 0), "gpu": app.get("gpu", ""), "vram_mb": app.get("vram_mb", ""),
+            "reason": reason, "status": status}
+
+
 def cleanup_mpairwe7_gpu_processes(dry_run: bool = False) -> list[dict[str, Any]]:
     """Free all VRAM held by this project and verify it; returns one entry per holder.
 
-    Any entry whose status is ``STILL_ON_GPU`` means the cleanup was incomplete.
+    Any entry whose status is ``STILL_ON_GPU`` means the cleanup was incomplete or
+    could not be verified.
     """
     cleaned: list[dict[str, Any]] = []
     try:
         apps = _compute_apps()
-    except Exception as ex:
-        print(f"Error checking GPU compute applications: {ex}")
+    except GpuQueryError as ex:
+        if ex.missing:
+            print(f"No NVIDIA GPU to clean: {ex}")
+            return cleaned
+        print(f"[ERROR] Could not enumerate GPU processes: {ex}")
+        cleaned.append(_entry(None, f"GPU enumeration failed ({ex})", "STILL_ON_GPU"))
         return cleaned
 
     lookup_error: ContainerLookupError | None = None
@@ -272,9 +338,7 @@ def cleanup_mpairwe7_gpu_processes(dry_run: bool = False) -> list[dict[str, Any]
     if lookup_error is not None:
         for app in apps:
             if _container_id_for_pid(app["pid"]) is not None:
-                cleaned.append({"pid": app["pid"], "gpu": app["gpu"], "vram_mb": app["vram_mb"],
-                                "reason": f"container ownership unknown ({lookup_error})",
-                                "status": "STILL_ON_GPU"})
+                cleaned.append(_entry(app, f"container ownership unknown ({lookup_error})", "STILL_ON_GPU"))
 
     # Running GPU-requesting containers may not hold VRAM yet (still loading
     # weights) but will the moment they finish, so they go too.
@@ -295,15 +359,18 @@ def cleanup_mpairwe7_gpu_processes(dry_run: bool = False) -> list[dict[str, Any]
     if dry_run:
         return cleaned
 
-    if doomed:
-        _stop_containers(doomed)
+    stop_failed = _stop_containers(doomed) if doomed else {}
     for app in boxed:
-        cleaned.append({"pid": app["pid"], "gpu": app["gpu"], "vram_mb": app["vram_mb"],
-                        "reason": f"container: {app['container']}", "status": "CONTAINER_REMOVED"})
+        why = stop_failed.get(app["container_id"])
+        cleaned.append(_entry(app, why or f"container: {app['container']}",
+                              "STILL_ON_GPU" if why else "CONTAINER_REMOVED"))
+    for cid, why in stop_failed.items():
+        print(f"[ERROR] {why}")
+        if not any(b["container_id"] == cid for b in boxed):
+            cleaned.append(_entry(None, why, "STILL_ON_GPU"))
     statuses = _terminate([a["pid"] for a in host])
     for app in host:
-        cleaned.append({"pid": app["pid"], "gpu": app["gpu"], "vram_mb": app["vram_mb"],
-                        "reason": app["reason"], "status": statuses[app["pid"]]})
+        cleaned.append(_entry(app, app["reason"], statuses[app["pid"]]))
 
     if lookup_error is not None:
         return cleaned  # container holders already flagged above; nothing can be verified
@@ -315,15 +382,16 @@ def cleanup_mpairwe7_gpu_processes(dry_run: bool = False) -> list[dict[str, Any]
         while leftover and time.monotonic() < deadline:
             time.sleep(1.0)
             leftover = project_vram_remaining()
-    except ContainerLookupError as ex:
+    except VerificationError as ex:
         print(f"[ERROR] Could not verify that VRAM was released: {ex}")
-        cleaned.append({"pid": 0, "gpu": "", "vram_mb": "", "reason": f"verification failed ({ex})",
-                        "status": "STILL_ON_GPU"})
+        cleaned.append(_entry(None, f"verification failed ({ex})", "STILL_ON_GPU"))
         return cleaned
+    flagged = {r["pid"] for r in cleaned if r["status"] == "STILL_ON_GPU"}
     for app in leftover:
+        if app["pid"] in flagged:
+            continue
         print(f"[LEFTOVER] PID {app['pid']} ({app['gpu']}, {app['vram_mb']} MiB) still on a GPU")
-        cleaned.append({"pid": app["pid"], "gpu": app["gpu"], "vram_mb": app["vram_mb"],
-                        "reason": "still reported by nvidia-smi", "status": "STILL_ON_GPU"})
+        cleaned.append(_entry(app, "still reported by nvidia-smi", "STILL_ON_GPU"))
     return cleaned
 
 

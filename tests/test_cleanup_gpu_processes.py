@@ -28,12 +28,15 @@ def world(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         "host_owned": {},  # pid -> bool (is_process_in_target_dir)
         "stopped": [],
         "terminated": [],
+        "stop_fail": {},   # container id -> reason the fake docker refuses to stop it
     }
 
-    def stop(containers: dict[str, dict[str, Any]]) -> None:
+    def stop(containers: dict[str, dict[str, Any]]) -> dict[str, str]:
         state["stopped"].extend(containers)
-        gone = {pid for pid, cid in state["cgroup"].items() if cid in containers}
+        failed = {c: r for c, r in state["stop_fail"].items() if c in containers}
+        gone = {pid for pid, cid in state["cgroup"].items() if cid in containers and cid not in failed}
         state["apps"] = [a for a in state["apps"] if a["pid"] not in gone]
+        return failed
 
     def terminate(pids: list[int]) -> dict[int, str]:
         state["terminated"].extend(pids)
@@ -164,6 +167,114 @@ def test_docker_lookup_failure_with_no_container_holders_still_cleans_host(world
     result = cg.cleanup_mpairwe7_gpu_processes()
 
     assert [r["status"] for r in result] == ["TERMINATED"]
+
+
+def test_container_that_will_not_stop_is_reported(world: dict[str, Any]) -> None:
+    world["apps"] = [_app(100, "25000")]
+    world["cgroup"] = {100: PROJECT_CID}
+    world["containers"] = {PROJECT_CID: {"name": "ura-app-vllm-sunflower", "wants_gpu": True, "running": True}}
+    world["stop_fail"] = {PROJECT_CID: "ura-app-vllm-sunflower: docker stop failed: permission denied"}
+
+    result = cg.cleanup_mpairwe7_gpu_processes()
+
+    assert [r["status"] for r in result] == ["STILL_ON_GPU"]
+    assert "permission denied" in result[0]["reason"]
+
+
+def test_gpu_container_that_will_not_stop_is_reported_even_without_vram(world: dict[str, Any]) -> None:
+    """Orpheus mid-load has no PID to leave behind, so only the stop result can show it."""
+    world["containers"] = {ORPHEUS_CID: {"name": "ura-app-orpheus-tts", "wants_gpu": True, "running": True}}
+    world["stop_fail"] = {ORPHEUS_CID: "ura-app-orpheus-tts: docker rm failed"}
+
+    result = cg.cleanup_mpairwe7_gpu_processes()
+
+    assert [r["status"] for r in result] == ["STILL_ON_GPU"]
+
+
+@pytest.mark.parametrize(
+    "text, owned",
+    [
+        ("/home/developer/Mpairwe7", True),
+        ("/home/developer/Mpairwe7/FinalYearProject/App", True),
+        ("python /home/developer/Mpairwe7/FinalYearProject/scripts/x.py --flag", True),
+        ("--cwd=/home/developer/Mpairwe7/FinalYearProject", True),
+        ("/home/developer/claude-tmp/claude-1001/-home-developer-Mpairwe7-FinalYearProject/s/scratchpad/wt", True),
+        ("/home/developer/claude-tmp/claude-1001/-home-developer-Mpairwe7-FinalYearProject-App/s", True),
+        ("/home/developer/Mpairwe7-other/app", False),
+        ("/home/developer/Mpairwe7foo", False),
+        ("/home/developer/Mpairwe7.bak/app", False),
+        ("/srv/home/developer/Mpairwe7/app", False),
+        ("/home/developer/kazuki_sato/paddle_ocr_server", False),
+        ("/home/developer/other-Mpairwe7-FinalYearProject-notes.txt", False),
+    ],
+)
+def test_ownership_is_path_boundary_anchored(text: str, owned: bool) -> None:
+    assert cg._owned_by_project(text) is owned
+
+
+def test_nvidia_smi_failure_is_never_reported_as_clean(world: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    def broken() -> list[dict[str, Any]]:
+        raise cg.GpuQueryError("Failed to initialize NVML")
+
+    monkeypatch.setattr(cg, "_compute_apps", broken)
+
+    result = cg.cleanup_mpairwe7_gpu_processes()
+
+    assert [r["status"] for r in result] == ["STILL_ON_GPU"]
+    assert "enumeration failed" in result[0]["reason"]
+
+
+def test_missing_nvidia_smi_means_no_gpu_and_is_clean(world: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    def absent() -> list[dict[str, Any]]:
+        raise cg.GpuQueryError("nvidia-smi not found", missing=True)
+
+    monkeypatch.setattr(cg, "_compute_apps", absent)
+
+    assert cg.cleanup_mpairwe7_gpu_processes() == []
+
+
+def test_hung_docker_daemon_raises_lookup_error_instead_of_blocking(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def hang(cmd: list[str], **kw: Any) -> Any:
+        seen["timeout"] = kw.get("timeout")
+        raise cg.subprocess.TimeoutExpired(cmd, kw.get("timeout") or 0)
+
+    monkeypatch.setattr(cg.subprocess, "run", hang)
+
+    with pytest.raises(cg.ContainerLookupError):
+        cg._project_containers()
+    assert seen["timeout"] == cg.QUERY_TIMEOUT_S
+
+
+def test_stop_containers_reports_nonzero_exit_and_ignores_already_gone(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Result:
+        def __init__(self, code: int, err: str = "") -> None:
+            self.returncode, self.stderr = code, err
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kw: Any) -> Result:
+        calls.append(cmd)
+        assert kw.get("timeout"), "every docker call must be bounded"
+        cid = cmd[-1]
+        if cid == PROJECT_CID and cmd[1] == "stop":
+            return Result(1, "Error response from daemon: cannot stop container")
+        if cid == OTHER_CID and cmd[1] == "rm":
+            return Result(1, "Error: No such container: " + cid)
+        return Result(0)
+
+    monkeypatch.setattr(cg.subprocess, "run", fake_run)
+    containers = {
+        PROJECT_CID: {"name": "ura-app-api"},
+        OTHER_CID: {"name": "ura-app-gone"},
+        ORPHEUS_CID: {"name": "ura-app-orpheus-tts"},
+    }
+
+    failed = cg._stop_containers(containers)
+
+    assert list(failed) == [PROJECT_CID]
+    assert "cannot stop container" in failed[PROJECT_CID]
 
 
 def test_clean_box_reports_nothing_remaining(world: dict[str, Any]) -> None:
