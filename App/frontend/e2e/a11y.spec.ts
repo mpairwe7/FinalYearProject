@@ -9,7 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-import { clearChatStore, mockBackend, openSettings, seedConsent } from "./helpers";
+import { clearChatStore, mockBackend, openSettings, seedConsent, sendMessage } from "./helpers";
 
 const WCAG_22_AA_TAGS = [
   "wcag2a",
@@ -301,8 +301,26 @@ test.describe("keyboard and focus regression checks", () => {
             {
               namespace: "efris",
               label: "EFRIS",
-              description: "Review approved EFRIS taxpayer information.",
+              description: "Demo data only — not connected to live URA systems. Reads a sample taxpayer profile.",
+              summary: "Reads a sample taxpayer profile.",
+              mode: "simulation",
+              status: "available",
+              operation_count: 2,
+              operations: [
+                { name: "efris_taxpayer_status", title: "Taxpayer status", description: "Reads a profile." },
+                { name: "efris_invoice_status", title: "Invoice status", description: "Reads an invoice." },
+              ],
+              read_only: true,
+            },
+            {
+              namespace: "ursb",
+              label: "URSB",
+              description: "Demo data only — not connected to live URA systems. Searches sample businesses.",
+              summary: "Searches sample businesses.",
+              mode: "simulation",
+              status: "unavailable",
               operation_count: 1,
+              operations: [{ name: "ursb_verify_business", title: "Verify a business", description: "" }],
               read_only: true,
             },
           ],
@@ -314,12 +332,16 @@ test.describe("keyboard and focus regression checks", () => {
     const trigger = page.getByTestId("composer-add-btn");
     await trigger.click();
     await expect(page.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeFocused();
+    await expectNoSeriousOrCritical(page, "add menu");
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
 
     const dialog = page.getByRole("dialog", { name: "URA services" });
     await expect(dialog).toBeVisible();
+    // What a person needs before choosing: demo or live, answering or not.
+    await expect(dialog.getByText("Demo data").first()).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /URSB/ })).toBeDisabled();
     await expectNoSeriousOrCritical(page, "connector picker");
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
@@ -336,6 +358,38 @@ test.describe("keyboard and focus regression checks", () => {
     await expect(connectorOption).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("button", { name: "Remove EFRIS from this chat" })).toBeVisible();
     await page.keyboard.press("Escape");
+  });
+
+  test("the add menu stays above an existing conversation", async ({ page }) => {
+    // Found in the live UI: the menu used to be an overlay inside the composer,
+    // and once the transcript had messages their text and buttons painted
+    // over it. It is a native <dialog> in the browser's top layer now.
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", { timeout: 15_000 });
+
+    await page.getByTestId("composer-add-btn").click();
+    const menu = page.locator("dialog.addmenu-dialog");
+    await expect(menu).toBeVisible();
+
+    const box = await menu.boundingBox();
+    expect(box).not.toBeNull();
+    // Every row's centre is hit-tested to the menu itself, not to the transcript.
+    for (const row of await menu.getByRole("menuitem").all()) {
+      const rowBox = await row.boundingBox();
+      expect(rowBox).not.toBeNull();
+      const owner = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.closest("dialog.addmenu-dialog") !== null,
+        { x: rowBox!.x + rowBox!.width / 2, y: rowBox!.y + rowBox!.height / 2 },
+      );
+      expect(owner).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(menu).not.toBeVisible();
+    await expect(page.getByTestId("composer-add-btn")).toBeFocused();
   });
 
   test("header menu follows the menu-button keyboard pattern and restores focus", async ({ page }) => {

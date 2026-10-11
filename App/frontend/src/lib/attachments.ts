@@ -98,6 +98,51 @@ export interface PendingAttachment {
   docType?: string;
   error?: string;
   analysis?: DocumentAnalysisData;
+  /**
+   * A small `data:` image of an attached picture, for its chip. Not a `blob:`
+   * URL: the page's CSP allows `img-src 'self' data:`, and a blob URL rendered
+   * as a broken image.
+   */
+  previewUrl?: string;
+}
+
+/**
+ * Guidance steps arrive as "Step 1: Click …". The list that renders them is
+ * numbered, so the prefix printed the number twice ("1. Step 1: Click …").
+ */
+export function stripStepPrefix(step: string): string {
+  return step.replace(/^\s*step\s*\d+\s*[:.)\-–]\s*/i, '');
+}
+
+/** The edge, in CSS pixels, of the square a picture is cropped to for its chip. */
+export const THUMBNAIL_EDGE = 56;
+
+/**
+ * A small cover-cropped JPEG `data:` URL of an image file, or `undefined` when
+ * the browser cannot make one (no canvas, an undecodable file). Never throws:
+ * a chip without a picture is the fallback, and the upload goes on regardless.
+ */
+export async function makeThumbnail(file: File, edge: number = THUMBNAIL_EDGE): Promise<string | undefined> {
+  if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return undefined;
+  try {
+    const bitmap = await createImageBitmap(file);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = edge;
+      canvas.height = edge;
+      const context = canvas.getContext('2d');
+      if (!context) return undefined;
+      const scale = Math.max(edge / bitmap.width, edge / bitmap.height);
+      const width = bitmap.width * scale;
+      const height = bitmap.height * scale;
+      context.drawImage(bitmap, (edge - width) / 2, (edge - height) / 2, width, height);
+      return canvas.toDataURL('image/jpeg', 0.7);
+    } finally {
+      bitmap.close?.();
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 /** Mirrors backend `documents.MAX_ATTACHMENTS_PER_TURN`. */

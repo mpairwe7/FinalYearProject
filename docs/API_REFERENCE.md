@@ -1786,9 +1786,12 @@ Max 10 MB. Extracts text and tables, classifies the document against the
 URA taxonomy (receipt, tin_card, assessment, customs_declaration,
 filing_form, invoice, statutory_act, portal_screenshot, generic), and pulls TINs, UGX amounts, dates, and
 reference numbers. For portal screenshots, returns diagnostic guidance with
-suggested resolution steps, detected screen areas, and portal links. The UI
-presents screen areas as text and includes a reminder to verify the portal
-address and important tax actions.
+suggested resolution steps, the areas of the screen it usually concerns, and
+portal links. The areas are the *typical layout* of the identified screen
+(`bbox_basis: "typical_layout"`), not regions located in the image, and the UI
+says so beside them. Steps may arrive as "Step 1: …"; the UI renders them in a
+numbered list and drops that prefix. The UI also includes a reminder to verify
+the portal address and important tax actions.
 
 **Response** `200`
 ```json
