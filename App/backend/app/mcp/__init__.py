@@ -15,8 +15,10 @@ Key abstractions:
 - :mod:`.transport` — ``InProcessTransport`` (the default) and
   ``HttpTransport`` for a namespace bound to a deployed MCP server via
   ``MCP_SERVER_URL_<NAMESPACE>``.
-- :mod:`.servers` — the out-of-process servers themselves.
-  ``tax_calculator`` is live; see its README.
+- :mod:`.servers` — the out-of-process servers themselves, all built on
+  one implementation of the wire rules (``servers/wire.py``).
+- :mod:`.auth` — how a server authenticates its callers, and how this
+  client obtains a token for a server.
 - :class:`ToolRAGSelector` — retrieves the top-k relevant tools per
   query from an index over tool descriptions, replacing the "paste every
   tool schema into every prompt" anti-pattern.
@@ -37,7 +39,7 @@ Feature flag: ``FLAG_TOOL_RAG`` default false.
 
 from __future__ import annotations
 
-from .client import MCPCallResult, MCPClient, get_client, reset_client
+from .client import MCPCallResult, MCPClient, RemoteNamespace, get_client, reset_client
 from .policy import authorize_tool_call
 from .tool_rag import ToolRAGSelector, ToolSelection
 from .protocol import MCP_PROTOCOL_VERSION, request_meta
@@ -54,6 +56,7 @@ __all__ = [
     "InProcessTransport",
     "MCPCallResult",
     "MCPClient",
+    "RemoteNamespace",
     "ToolRAGSelector",
     "ToolSelection",
     "ToolTransport",

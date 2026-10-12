@@ -1345,6 +1345,10 @@ async def chat_stream(
                     "admission",
                     "ok",
                     "elapsed_ms",
+                    # Which connector a tool call went to and whether it
+                    # is a simulator: a namespace and an enum, no payload.
+                    "connector",
+                    "connector_mode",
                 }
                 agent_trace.append(
                     {

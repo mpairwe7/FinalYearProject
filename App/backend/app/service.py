@@ -49,6 +49,9 @@ from . import mt
 from .agents import AgentRoute, supervisor
 from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
+from .connector_intent import ConnectorIntent, detect_connector_intent
+from .connector_outcome import classify_all as classify_connector_outcomes
+from .connector_outcome import compose as compose_connector_reply
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.en import (
     HOW_TO_QUESTION_RE,
@@ -123,6 +126,7 @@ from .resilience import CircuitBreaker
 from .retriever import HybridRetriever, active_retrieval_mode
 from .text_signals import (
     ABSTENTION_REPLY,
+    CONNECTOR_UNAVAILABLE_REPLY,
     CLARIFICATION_PROMPT,
     CONTACT_FOOTER,
     CONTRADICTED_CLAIM_REPLY,
@@ -1268,6 +1272,27 @@ def _stream_local_then_cloud(
         return
 
 
+def _with_connector_outcomes(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Word a turn's connector lookups from what the services answered.
+
+    A record is summarised by the model; "no record", "I need the TIN" and
+    "the service could not be asked" are the services' own words, and the
+    practice-data notice is attached here rather than hoped for
+    (:mod:`app.connector_outcome`). A turn that made no connector call is
+    returned untouched.
+    """
+    if not result or not result.get("tool_calls"):
+        return result
+    from .mcp.chat_connectors import connector_label  # noqa: PLC0415
+
+    outcomes = classify_connector_outcomes(result["tool_calls"], label_for=connector_label)
+    if not outcomes:
+        return result
+    other_tools = any(not call.get("connector") for call in result["tool_calls"])
+    text = compose_connector_reply(outcomes, str(result.get("text") or ""), other_tools=other_tools)
+    return {**result, "text": text}
+
+
 def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     query: str,
     passages: list[dict[str, Any]],
@@ -1287,6 +1312,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     agent_role: str = "",
     context_summary: str = "",
     connector_namespaces: list[str] | None = None,
+    forced_operations: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1329,9 +1355,14 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
         agent_role=agent_role,
         context_summary=context_summary,
         connector_namespaces=connector_namespaces or [],
+        forced_operations=forced_operations or [],
+        # A record is worded by connector_outcome and then translated, rather
+        # than summarised by a model that, asked in Luganda or Swahili, writes
+        # claims the record does not make.
+        summarise_records=not (connector_namespaces and locale not in ("", "en")),
     )
     try:
-        result = future.result(timeout=deadline_s)
+        result = _with_connector_outcomes(future.result(timeout=deadline_s))
         if result and result.get("text"):
             _LLM_CIRCUIT.record_success()
             return result
@@ -1413,6 +1444,7 @@ def _apply_output_guards(
     user_id: str = "",
     tenant_id: str = "default",
     locale: str = "en",
+    tool_grounded: bool = False,
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1426,7 +1458,15 @@ def _apply_output_guards(
     ``reply`` is assumed already PII-redacted + sanitized by the caller.  The
     returned ``reply`` may differ (a grounded revision was substituted); when
     ``revised`` is True the caller should emit a ``("revision", reply)`` event.
+
+    ``tool_grounded`` marks an answer drawn from a service the taxpayer
+    selected. Its facts come from that service's result, so comparing it with
+    the retrieved passages (faithfulness, claim verification, the judge's
+    citation rules) would measure it against evidence it was never built on —
+    and escalate a correct answer. The sync path makes the same exception.
     """
+    if tool_grounded:
+        hits, citations = [], []
     contexts = [h.get("text") or h.get("answer", "") for h in hits]
     faith = HybridRetriever.compute_faithfulness(reply, contexts) if contexts else None
     escalate, esc_reason = output_guard.should_escalate(faith, hits) if hits else (False, "")
@@ -1449,17 +1489,26 @@ def _apply_output_guards(
             logger.debug("claim verification failed", exc_info=True)
             claim_report = None
 
-    response_judge = model._evaluate_response_judge(
-        message=message,
-        reply=reply,
-        hits=hits,
-        citations=citations,
-        faithfulness_score=faith,
-        escalation_required=escalate,
-        escalation_reason=esc_reason,
-        claim_report=claim_report,
-        locale=locale,
-    )
+    if tool_grounded:
+        response_judge = {
+            "decision": "approve",
+            "final_decision": "approve",
+            "applied_revision": False,
+            "reasons": ["answer drawn from the service the taxpayer selected"],
+            "confidence_band": "high",
+        }
+    else:
+        response_judge = model._evaluate_response_judge(
+            message=message,
+            reply=reply,
+            hits=hits,
+            citations=citations,
+            faithfulness_score=faith,
+            escalation_required=escalate,
+            escalation_reason=esc_reason,
+            claim_report=claim_report,
+            locale=locale,
+        )
 
     revised = False
     # The report that DROVE the decision is the draft's. Re-verification below
@@ -1896,6 +1945,11 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             )
             return
 
+        if result.get("_connector_forced"):
+            # The answer will come from the chosen service, not from these
+            # passages: the frame sent now must not offer them as its sources.
+            result["sources"] = []
+            result["citations"] = []
         yield ("metadata", _metadata_payload(result, include_short_circuit=False))
 
         hits = result.get("_hits", [])
@@ -1916,6 +1970,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         # frame because the agentic path produces a complete reply.
         force_agentic = bool(result.get("_force_agentic"))
         force_tool_whitelist = result.get("_force_tool_whitelist")
+        connector_forced = list(result.get("_connector_forced") or [])
         agent_role = str(result.get("agent_role") or "rag_answerer")
         use_agentic = (
             (
@@ -1933,7 +1988,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         if use_agentic:
             async for event in _stream_agentic_turn(
                 rewritten_query=rewritten_query,
-                hits=hits,
+                # A lookup is answered from the service, not from passages.
+                hits=[] if connector_forced else hits,
                 conversation_history=conversation_history,
                 locale=locale,
                 personalization_context=str(personalization_context or ""),
@@ -1948,6 +2004,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 tool_names=force_tool_whitelist,
                 agent_role=agent_role,
                 connector_namespaces=connector_namespaces,
+                forced_operations=connector_forced or None,
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -1985,6 +2042,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     user_id=user_id or "",
                     tenant_id=tenant_id or "default",
                     locale=locale,
+                    tool_grounded=bool(connector_forced and agentic_used_tools),
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -2029,11 +2087,21 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
         # Calibrated abstention: if agentic tools were not used to produce a reply,
         # and passages fail the confidence threshold, abstain (parity with REST path).
-        if not attachments and not (agentic_used_tools and full_reply) and _output_guard.should_abstain(hits, locale=locale):
-            abstained_reply = ABSTENTION_REPLY
+        # A lookup in a chosen service that produced nothing is *not* a case for
+        # the passages: answering from them is how a consignment status got invented.
+        service_unreachable = bool(connector_forced) and not full_reply
+        if service_unreachable or (
+            not attachments
+            and not (agentic_used_tools and full_reply)
+            and _output_guard.should_abstain(hits, locale=locale)
+        ):
+            abstained_reply = CONNECTOR_UNAVAILABLE_REPLY if service_unreachable else ABSTENTION_REPLY
             if turn_ack:
                 abstained_reply = f"{turn_ack}\n\n{abstained_reply}"
-            escalate, esc_reason = _output_guard.should_escalate(None, hits)
+            if service_unreachable:
+                escalate, esc_reason = False, ""
+            else:
+                escalate, esc_reason = _output_guard.should_escalate(None, hits)
             handoff = None
             response_judge = {
                 "decision": "escalate" if escalate else "approve",
@@ -2367,6 +2435,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     tool_names: list[str] | None = None,
     agent_role: str = "",
     connector_namespaces: list[str] | None = None,
+    forced_operations: list[str] | None = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -2413,6 +2482,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             agent_role=agent_role,
             context_summary=context_summary,
             connector_namespaces=connector_namespaces,
+            forced_operations=forced_operations,
         )
 
 
@@ -6855,6 +6925,38 @@ class ChatModel:
             event = "step_entered"
         self._record_journey(session.workflow_id, event, step)
 
+    def _connector_intent(
+        self,
+        *,
+        text: str,
+        connector_namespaces: list[str] | None,
+        user_role: str,
+        granted_purposes: list[str] | None,
+    ) -> ConnectorIntent | None:
+        """Is this turn a request to look something up in a service the taxpayer chose?
+
+        Decided before any deterministic answer is tried, because those match on
+        keywords ("TIN", "EFRIS", "PRN") and answer first. A turn that is a lookup
+        in a chosen service must reach that service; a procedural question about
+        the same words must not be taken from the templates that answer it well.
+        """
+        if not connector_namespaces or not flags.is_enabled("enterprise_connectors"):
+            return None
+        try:
+            from .mcp import get_client
+            from .mcp.chat_connectors import selected_chat_connector_tools
+
+            tools = selected_chat_connector_tools(
+                get_client(),
+                connector_namespaces,
+                user_role=user_role,
+                granted_purposes=granted_purposes or [],
+            )
+            return detect_connector_intent(text, tools)
+        except Exception:  # noqa: BLE001 - detection is an optimisation of routing, never a failure
+            logger.warning("connector intent detection failed", exc_info=True)
+            return None
+
     def _maybe_handle_fast_paths(
         self,
         *,
@@ -8948,6 +9050,16 @@ class ChatModel:
                 and not conversation_history
                 and not connector_namespaces
             )
+            # A taxpayer who chose a service and asked it for a record is not
+            # asking for a template. The keyword answers below cannot read that
+            # service, and one of them answered "check EFRIS" with an invented
+            # invoice audit.
+            connector_intent = self._connector_intent(
+                text=f"{router_message} {router_rewritten}",
+                connector_namespaces=connector_namespaces,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+            )
 
             # Emotional-intelligence signal for this turn: adapts the LLM
             # opening line (tone_hint) and prefixes deterministic replies
@@ -9051,7 +9163,9 @@ class ChatModel:
                 return crisis
 
             # Direct transactional PRN generation when payment amount is explicitly provided
-            if re.search(r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE):
+            if connector_intent is None and re.search(
+                r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE
+            ):
                 from .calculator_router import extract_amounts
 
                 if extract_amounts(router_message):
@@ -9106,7 +9220,7 @@ class ChatModel:
             with trace_stage("calculator_router", timings=timings):
                 core_msg = strip_conversational_prefix(message) or message
                 calc_result = None
-                if core_msg != router_message:
+                if connector_intent is None and core_msg != router_message:
                     calc_result = self._maybe_handle_fast_paths(
                         message=core_msg,
                         rewritten=rewritten,
@@ -9114,7 +9228,7 @@ class ChatModel:
                         locale=locale,
                         user_id=user_id,
                     )
-                if not calc_result and message != router_message:
+                if connector_intent is None and not calc_result and message != router_message:
                     calc_result = self._maybe_handle_fast_paths(
                         message=message,
                         rewritten=rewritten,
@@ -9122,7 +9236,7 @@ class ChatModel:
                         locale=locale,
                         user_id=user_id,
                     )
-                if not calc_result:
+                if connector_intent is None and not calc_result:
                     calc_result = self._maybe_handle_fast_paths(
                         message=router_message,
                         rewritten=router_rewritten,
@@ -9723,7 +9837,11 @@ class ChatModel:
             # 3c. Clarification check — ask for more details if query is ambiguous
             #     (skipped for attachment turns: "what is this?" is answerable
             #     from the attached document, not ambiguous)
-            clarification = None if attachments else needs_clarification(message, hits)
+            # A lookup in a chosen service asks for what it lacks itself
+            # (connector_intent.missing_arguments); passages cannot judge it.
+            clarification = (
+                None if (attachments or connector_intent is not None) else needs_clarification(message, hits)
+            )
             if clarification:
                 clarify_result = {
                     "reply": clarification,
@@ -9755,7 +9873,7 @@ class ChatModel:
             deterministic_citations: list[dict[str, Any]] = []
             # Attachment turns always go to the LLM — a canned procedure
             # template cannot read the attached document.
-            if hits and not attachments:
+            if hits and not attachments and connector_intent is None:
                 deterministic_sources = ordered_sources(hits)
                 deterministic_citations = HybridRetriever.build_citations(hits)
                 deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -9802,7 +9920,11 @@ class ChatModel:
 
             # 3e. Epistemic false-premise guard (G43) — reject non-existent statutory instruments
             # Skipped when attachments are present: questions then ask about terms in the attached document
-            premise_res = check_false_premise(rewritten, hits) if not attachments else None
+            premise_res = (
+                check_false_premise(rewritten, hits)
+                if not (attachments or connector_intent is not None)
+                else None
+            )
             if premise_res and premise_res.is_false_premise:
                 premise_reply = self._finalize_reply(premise_res.reply)
                 premise_result = {
@@ -9857,7 +9979,9 @@ class ChatModel:
                 with trace_stage("llm_agentic", timings=timings):
                     agentic = _call_llm_agentic(
                         query=rewritten,
-                        passages=hits,
+                        # A lookup is answered from the service, not from
+                        # passages: they only spend the context window.
+                        passages=[] if connector_intent is not None else hits,
                         conversation_history=conversation_history or None,
                         locale=locale,
                         tool_names=force_tool_whitelist,
@@ -9872,6 +9996,9 @@ class ChatModel:
                         agent_role=agent_role,
                         context_summary=context_summary,
                         connector_namespaces=connector_namespaces,
+                        forced_operations=(
+                            list(connector_intent.operations) if connector_intent is not None else None
+                        ),
                     )
                 agentic_reply = agentic.get("text", "")
                 if agentic.get("tool_calls"):
@@ -9887,6 +10014,10 @@ class ChatModel:
                 # Attached documents and successful agentic tool executions are usable grounding — never abstain.
                 should_abstain = (
                     not attachments
+                    # A lookup in a chosen service is not judged by how well
+                    # passages match: if the service could not be asked it says
+                    # so below, rather than "not found in the knowledge base".
+                    and connector_intent is None
                     and not (agentic_used_tools and agentic_reply)
                     and self._output_guard.should_abstain(hits, locale=locale)
                 )
@@ -9950,12 +10081,22 @@ class ChatModel:
 
             # 5. Build response with citations
             extractive_fallback = False
-            sources = ordered_sources(hits) if hits else []
-            citations = HybridRetriever.build_citations(hits) if hits else []
-            contexts = [h.get("text") or h.get("answer", "") for h in hits] if hits else []
+            # A lookup in a chosen service is not sourced from the passages that
+            # happened to match the question — whether the service answered or
+            # could not be asked: the agent was given none (passages=[]).
+            cited_hits = [] if connector_intent is not None else hits
+            sources = ordered_sources(cited_hits) if cited_hits else []
+            citations = HybridRetriever.build_citations(cited_hits) if cited_hits else []
+            contexts = [h.get("text") or h.get("answer", "") for h in cited_hits] if cited_hits else []
 
             if agentic_reply:
                 reply = agentic_reply
+            elif connector_intent is not None:
+                # The taxpayer asked a chosen service for a record and it could
+                # not be asked. Say so — answering from passages is how "the
+                # consignment was received at Mombasa on 18 November" got invented.
+                reply = CONNECTOR_UNAVAILABLE_REPLY
+                extractive_fallback = True
             elif hits:
                 # Phase 2: LLM synthesis from top-k passages (true RAG).
                 # The cloud fallback alone is enough to keep generation on
@@ -10188,7 +10329,9 @@ class ChatModel:
                         }
 
             # 8. Escalation check
-            if agentic_used_tools and not hits:
+            if connector_intent is not None or (agentic_used_tools and not hits):
+                # A service that could not be asked is not a reason to open a
+                # ticket either; the streaming path says the same.
                 escalate, esc_reason = False, ""
             else:
                 escalate, esc_reason = self._output_guard.should_escalate(faithfulness_score, hits)
@@ -10221,13 +10364,17 @@ class ChatModel:
                         "unsupported_count": len(claim_report.get("unsupported_claims") or []),
                         "uncited_count": len(claim_report.get("uncited_claims") or []),
                     }
-            if agentic_used_tools:
+            if agentic_used_tools or connector_intent is not None:
                 response_judge = {
                     "decision": "approve",
                     "final_decision": "approve",
                     "applied_revision": False,
-                    "reasons": ["tool-executed agentic answer"],
-                    "confidence_band": "high",
+                    "reasons": (
+                        ["tool-executed agentic answer"]
+                        if agentic_used_tools
+                        else ["chosen service could not be asked; reported as such"]
+                    ),
+                    "confidence_band": "high" if agentic_used_tools else "medium",
                 }
             else:
                 response_judge = self._evaluate_response_judge(
@@ -10372,6 +10519,9 @@ class ChatModel:
             ),
             "ticket_id": ticket_id,
         }
+        if connector_intent is not None:
+            # Read by resources_for_turn: no form links under a service's record.
+            result["connector_lookup"] = True
         result = self._finalize_result(result)
         reply = result["reply"]
 
@@ -10593,6 +10743,14 @@ class ChatModel:
             and not conversation_history
             and not connector_namespaces
         )
+        # See generate(): a lookup in a service the taxpayer chose is not a
+        # question for the keyword templates below.
+        connector_intent = self._connector_intent(
+            text=f"{router_message} {router_rewritten}",
+            connector_namespaces=connector_namespaces,
+            user_role=user_role,
+            granted_purposes=granted_purposes,
+        )
 
         # Emotional-intelligence signal (parity with generate()): tone hint
         # for the LLM stream, empathy prefix for deterministic short-circuits.
@@ -10653,7 +10811,9 @@ class ChatModel:
             }
 
         # Direct transactional PRN generation (parity with generate()).
-        if re.search(r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE):
+        if connector_intent is None and re.search(
+            r"\b(?:generate|create|issue)\b.*\bprn\b", router_message, re.IGNORECASE
+        ):
             from .calculator_router import extract_amounts
 
             if extract_amounts(router_message):
@@ -10702,14 +10862,18 @@ class ChatModel:
         # Same order generate() tries: the taxpayer's own words first (their
         # figures), then the English form the calculator patterns are written in.
         core_msg_s = strip_conversational_prefix(message) or message
-        calc_result = self._maybe_handle_fast_paths(
-            message=core_msg_s,
-            rewritten=rewritten,
-            thread_id=thread_id,
-            locale=locale,
-            user_id=user_id,
+        calc_result = (
+            None
+            if connector_intent is not None
+            else self._maybe_handle_fast_paths(
+                message=core_msg_s,
+                rewritten=rewritten,
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+            )
         )
-        if not calc_result and core_msg_s != message:
+        if connector_intent is None and not calc_result and core_msg_s != message:
             calc_result = self._maybe_handle_fast_paths(
                 message=message,
                 rewritten=rewritten,
@@ -10717,7 +10881,7 @@ class ChatModel:
                 locale=locale,
                 user_id=user_id,
             )
-        if not calc_result and router_message != message:
+        if connector_intent is None and not calc_result and router_message != message:
             calc_result = self._maybe_handle_fast_paths(
                 message=router_message,
                 rewritten=router_rewritten,
@@ -11186,7 +11350,9 @@ class ChatModel:
             hits = documents_module.attachment_passages(attachments) + hits
 
         # Clarification check (Phase 6) — skipped for attachment turns
-        clarification = None if attachments else needs_clarification(message, hits)
+        # A lookup in a chosen service asks for what it lacks itself
+        # (connector_intent.missing_arguments); passages cannot judge it.
+        clarification = None if (attachments or connector_intent is not None) else needs_clarification(message, hits)
         if clarification:
             return {
                 "reply": clarification,
@@ -11210,8 +11376,9 @@ class ChatModel:
         # Deterministic procedural fast path — parity with the REST path so
         # curated KB answers stream with their real (high) faithfulness
         # instead of being re-synthesised and re-scored via the LLM.
-        # Attachment turns always go to the LLM (templates can't read docs).
-        if hits and not attachments:
+        # Attachment turns always go to the LLM (templates can't read docs), and
+        # so does a lookup in a chosen service (nor can a template read that).
+        if hits and not attachments and connector_intent is None:
             deterministic_sources = ordered_sources(hits)
             deterministic_citations = HybridRetriever.build_citations(hits)
             deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
@@ -11242,7 +11409,9 @@ class ChatModel:
                 }
 
         # Epistemic false-premise guard (G43) — skipped when attachments are present
-        premise_res = check_false_premise(rewritten, hits) if not attachments else None
+        premise_res = (
+            check_false_premise(rewritten, hits) if not (attachments or connector_intent is not None) else None
+        )
         if premise_res and premise_res.is_false_premise:
             reply = self._finalize_reply(premise_res.reply)
             return {
@@ -11267,7 +11436,14 @@ class ChatModel:
                 "_short_circuit": True,
             }
 
-        if not attachments and not (force_agentic or flags.is_enabled("tool_use")) and self._output_guard.should_abstain(hits, locale=locale):
+        if (
+            not attachments
+            # The service is asked, not the passages: the stream below says so
+            # itself when it cannot be reached.
+            and connector_intent is None
+            and not (force_agentic or flags.is_enabled("tool_use"))
+            and self._output_guard.should_abstain(hits, locale=locale)
+        ):
             reply = ABSTENTION_REPLY
             if distress:
                 reply = f"{empathy_ack(distress)}\n\n{reply}"
@@ -11409,6 +11585,9 @@ class ChatModel:
             "_force_agentic": force_agentic,
             "_force_tool_whitelist": force_tool_whitelist,
             "_suppress_agentic": suppress_agentic_fallback,
+            "_connector_forced": (
+                list(connector_intent.operations) if connector_intent is not None else []
+            ),
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
         }
 

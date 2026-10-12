@@ -264,6 +264,28 @@ Expose using ngrok:
 # https://struttingly-nongeological-briella.ngrok-free.dev
 ```
 
+### Tearing the stack down — leave no VRAM behind
+
+```bash
+python3 scripts/cleanup_gpu_processes.py --dry-run   # list what would be released
+python3 scripts/cleanup_gpu_processes.py             # release it, then verify
+```
+
+The script frees everything this project holds on the GPUs and then re-queries
+`nvidia-smi`; it exits non-zero (`STILL_ON_GPU`) if anything of this project is
+still resident, and also when Docker cannot be queried, so a failed lookup is
+never reported as clean. It covers what a plain `docker compose down` misses:
+
+- profile-gated services (`orpheus-tts` needs `--profile multilingual`);
+- orphan containers from other compose chains (`ura-app-connectors`, the dev2 stack);
+- host processes started from agent scratchpad worktrees.
+
+Containers are matched by their compose working-dir label (`~/Mpairwe7`), not by
+the process's path: a container process reports a container-side cwd such as
+`/app`, which a path match would skip as external. Other projects' containers and
+processes on the shared box are never touched. Stopping the stack ends the ngrok
+upstream (`502`) until it is brought up again.
+
 ---
 
 ## 5. End-to-End Demo Script

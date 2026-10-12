@@ -52,7 +52,7 @@ class UrsbService:
                 ok=True,
                 found=False,
                 entity=None,
-                message=f"No registered entity found matching query '{request.query}'. Business may be informal or unverified.",
+                message=f"No registered entity found matching query '{request.query}'.",
             )
 
         return BusinessSearchResponse(

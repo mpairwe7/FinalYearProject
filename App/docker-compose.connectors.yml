@@ -1,0 +1,99 @@
+# ===========================================================================
+# System connectors for the local stack — chat ↔ EFRIS, payments, stamps,
+# URSB, BWIMS and TIN services over MCP 2026-07-28.
+# ===========================================================================
+# Adds ONE container, `connectors`, that serves the six system connectors
+# side by side (one MCP endpoint each: /efris, /payment_system, …), and binds
+# the API to them. Append it to whichever overlay chain the stack runs:
+#
+#   export MCP_LINK_TOKEN=$(openssl rand -hex 32)
+#   docker compose -f docker-compose.yml \
+#     -f docker-compose.local-retrieval.yml -f docker-compose.local-sunflower.yml \
+#     -f docker-compose.gpu-salt.yml -f docker-compose.connectors.yml up -d
+#
+# What this is: the connectors are SIMULATORS over the fixture databases in
+# ../data_store. The picker labels them "Demo data", every result says so,
+# and only their read-only operations are offered in chat. Nothing here
+# contacts URA, NIRA, URSB, a bank or a payment network.
+#
+# MCP_LINK_TOKEN is the shared secret for the link, given to both ends below.
+# It is not stored by this stack. Unset, `connectors` starts LOCKED (answers
+# /health, refuses everything else) and the picker shows the services as
+# unavailable — so `docker compose down` and friends still work without it.
+#
+# The six-container form of this, one server per system, is
+# ../docker-compose.mcp.yml. See docs/runbooks/enterprise-connectors-and-mcp.md.
+# ===========================================================================
+
+services:
+  connectors:
+    # The API's CPU runtime image: the connector servers need the backend
+    # package and nothing on a GPU. Same Dockerfile, target and tag as the
+    # base chain's `api`, so it is the image that chain already built; only a
+    # GPU-only host builds it here, once.
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: runtime
+    image: ${DOCKER_IMAGE_API:-app-api}:latest
+    container_name: ura-app-connectors
+    # The image's ENTRYPOINT starts the chat API and ignores `command`.
+    entrypoint: ["python", "-m", "app.mcp.servers.gateway", "--port", "8930"]
+    environment:
+      # From the chain: a production chain makes the servers refuse simulators too.
+      - APP_ENV=${APP_ENV:-development}
+      - PROJECT_ROOT=/app
+      - LOG_LEVEL=info
+      - MCP_SERVER_TOKEN_EFRIS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_TOKEN_PAYMENT_SYSTEM=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_TOKEN_DIGITAL_TAX_STAMPS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_TOKEN_URSB=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_TOKEN_BWIMS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_TOKEN_TIN_REGISTRATION=${MCP_LINK_TOKEN:-}
+    ports:
+      # Loopback only, for `curl localhost:8930/health`. The API reaches it
+      # over the compose network by name.
+      - "127.0.0.1:${CONNECTORS_PORT:-8930}:8930"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      # The same code and fixture databases the API mounts, so the two cannot
+      # run different versions of the wire rules or see different fixtures.
+      - ./backend/app:/app/app:ro
+      - ../plugins:/app/plugins:ro
+      - ../data_store:/app/data_store
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8930/health', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  api:
+    environment:
+      # Opens the taxpayer-chat connector surface. It lists only servers
+      # bound below, and never a simulator in production.
+      - FLAG_ENTERPRISE_CONNECTORS=true
+      - MCP_SERVER_URL_EFRIS=http://connectors:8930/efris
+      - MCP_SERVER_TOKEN_EFRIS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_PAYMENT_SYSTEM=http://connectors:8930/payment_system
+      - MCP_SERVER_TOKEN_PAYMENT_SYSTEM=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_DIGITAL_TAX_STAMPS=http://connectors:8930/digital_tax_stamps
+      - MCP_SERVER_TOKEN_DIGITAL_TAX_STAMPS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_URSB=http://connectors:8930/ursb
+      - MCP_SERVER_TOKEN_URSB=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_BWIMS=http://connectors:8930/bwims
+      - MCP_SERVER_TOKEN_BWIMS=${MCP_LINK_TOKEN:-}
+      - MCP_SERVER_URL_TIN_REGISTRATION=http://connectors:8930/tin_registration
+      - MCP_SERVER_TOKEN_TIN_REGISTRATION=${MCP_LINK_TOKEN:-}
+      # No depends_on: a connector being down must never keep the chat from
+      # starting. The client reports it as unavailable and carries on.

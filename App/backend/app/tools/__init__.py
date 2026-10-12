@@ -42,6 +42,25 @@ _SIMULATION_NOTICE = (
 # ---------------------------------------------------------------------------
 # Tool schema
 # ---------------------------------------------------------------------------
+def readable_title(name: str, namespace: str = "") -> str:
+    """A function name as a person reads it, without its service's prefix.
+
+    ``bwims_consignment_status`` in the ``bwims`` namespace is "Consignment
+    status": the connector picker shows it under the service's own name, and
+    "Bwims consignment status" read as a typo. A name that is nothing but the
+    prefix is kept whole. ``plugins.base.readable_title`` is the same rule for
+    the plugin package's own schema type (a test keeps them in step).
+    """
+    words = [word for word in name.split("_") if word]
+    prefixes = {word for word in namespace.split("_") if word}
+    if namespace:
+        prefixes.add(namespace)
+        prefixes.add("".join(word[0] for word in namespace.split("_") if word))
+    if len(words) > 1 and words[0] in prefixes:
+        words = words[1:]
+    return " ".join(words).capitalize()
+
+
 @dataclass(frozen=True)
 class ToolSchema:
     """Structural description of a tool, exported to the LLM and to MCP.
@@ -115,7 +134,7 @@ class ToolSchema:
     def annotations(self) -> dict[str, Any]:
         """MCP ``annotations`` object for this tool."""
         return {
-            "title": self.title or self.name.replace("_", " ").capitalize(),
+            "title": self.title or readable_title(self.name, self.namespace),
             "readOnlyHint": self.read_only,
             "destructiveHint": self.destructive,
             "idempotentHint": self.idempotent,
