@@ -9,12 +9,15 @@ tool/resource integrations.
 ## 1. Architectural Baseline
 
 ### 1.1 Protocol Baseline
-The platform implements the **MCP `2026-07-28` specification**:
-- **Stateless JSON-RPC 2.0**: No session state headers (`Mcp-Session-Id`) or stateful `initialize`/`initialized` handshakes.
-- **Request Metadata (`_meta`)**: Every request carries `io.modelcontextprotocol/protocolVersion` (`2026-07-28`), client capabilities, and URA vendor context (`ug.go.ura.chatbot/{tenantId,userId,userRole,callId}`).
-- **Header-Body Integrity**: Outbound and inbound requests validate `Mcp-Method` and `Mcp-Name` against the JSON-RPC payload to prevent gateway smuggling.
-- **Transport Routing**: By default, namespaces execute via `InProcessTransport`. Setting `MCP_SERVER_URL_<NAMESPACE>` binds the namespace to a remote `HttpTransport` with persistent connection pooling and W3C `traceparent` propagation.
-- **Mutual TLS (mTLS) & DMZ Isolation**: Remote HTTP transports support mTLS client certificate authentication configured via `MCP_CLIENT_CERT_PATH`, `MCP_CLIENT_KEY_PATH`, and `MCP_CA_CERT_PATH`. System connectors (`dts`, `payment`, `tin`, `ursb`, `bwims`, `efris`) deployable as standalone FastMCP services via `docker-compose.mcp.yml`.
+The platform implements the **MCP `2026-07-28` specification**. One implementation of the server-side rules (`App/backend/app/mcp/servers/wire.py`) backs every server, and one client transport (`App/backend/app/mcp/transport.py`) speaks to them:
+- **Stateless JSON-RPC 2.0**: No session state headers (`Mcp-Session-Id`) or stateful `initialize`/`initialized` handshakes. An `initialize` is refused with a message naming the supported versions.
+- **Request Metadata (`_meta`)**: Every request carries `io.modelcontextprotocol/protocolVersion` (`2026-07-28`), client capabilities, and URA vendor context (`ug.go.ura.chatbot/{tenantId,userId,userRole,callId}`). The vendor context is a statement by the chat backend about the taxpayer it is acting for: a server honours it only on an authenticated request (§2.1).
+- **Discovery**: Every server implements `server/discover` (supported versions, capabilities, identity). It is also the reachability probe — the protocol's own `ping` was removed in this revision; servers still answer it for a caller one release behind.
+- **Results**: Every result carries `resultType`; cacheable ones carry `ttlMs` and a `cacheScope` of `public` or `private`.
+- **Header-Body Integrity**: `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` are required on every POST. A missing or disagreeing header is `400` with `HeaderMismatch` (`-32020`), which prevents a gateway authorizing one operation while the server runs another.
+- **Error mapping**: unsupported protocol version → `400` / `-32022` with the supported list; unknown method → `404` / `-32601`; unknown tool, resource or prompt → `-32602`.
+- **Transport Routing**: By default, namespaces execute via `InProcessTransport`. Setting `MCP_SERVER_URL_<NAMESPACE>` binds the namespace to a remote `HttpTransport` with a persistent connection pool and W3C `traceparent` propagation. The URL must be `http(s)`, carry no credentials, and be `https` in production; an unusable URL is logged and the namespace stays in-process.
+- **Mutual TLS (mTLS) & DMZ Isolation**: Remote HTTP transports support mTLS client certificates configured per namespace via `MCP_CLIENT_CERT_<NAMESPACE>` and `MCP_CLIENT_KEY_<NAMESPACE>`. System connectors (`dts`, `payment`, `tin`, `ursb`, `bwims`, `efris`) deploy as standalone services via `docker-compose.mcp.yml`, or together from one process via `App/docker-compose.connectors.yml`.
 
 ### 1.2 Registered Namespaces & Tools
 The system manages 28 registered tools across core tax calculators, statutory rate lookups, knowledge search, tasks, and system connectors:
@@ -28,9 +31,19 @@ The system manages 28 registered tools across core tax calculators, statutory ra
 
 The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI RMF**:
 
-### 2.1 Deployment-Managed Credentials
-- Remote MCP bearer tokens are injected as `MCP_SERVER_TOKEN_<NAMESPACE>` from the deployment secret store and sent by the transport in the `Authorization` header.
-- The staff console and runtime connector APIs do not accept or persist endpoint credentials. Keep secret values in the platform secret manager; never put them in browser forms, source control, or chat transcripts.
+### 2.1 Authenticating the link
+Every HTTP request to a connector server must present a bearer credential. With nothing configured a server is **locked** — it answers `/health` and refuses everything else with `401`.
+
+| Mode | Server reads | API (client) reads | Use |
+| --- | --- | --- | --- |
+| Shared token | `MCP_SERVER_TOKEN_<NAMESPACE>` | `MCP_SERVER_TOKEN_<NAMESPACE>` (the same name) | Prototype, internal link |
+| OAuth 2.1 | `MCP_SERVER_OAUTH_ISSUER`, `MCP_SERVER_OAUTH_JWKS_URL`, `MCP_SERVER_RESOURCE`, optional `MCP_SERVER_OAUTH_SCOPES`, `MCP_SERVER_OAUTH_AUTHORIZATION_SERVERS` | `MCP_OAUTH_TOKEN_URL_<NAMESPACE>`, `MCP_OAUTH_CLIENT_ID_<NAMESPACE>`, `MCP_OAUTH_CLIENT_SECRET_<NAMESPACE>`, optional `MCP_OAUTH_SCOPE_<NAMESPACE>` | Production |
+| Anonymous | `MCP_SERVER_ALLOW_ANONYMOUS=true` | — | Local development only; refused in production; every caller is `public` |
+
+- A shared token shorter than 32 characters is treated as absent. Generate one with `openssl rand -hex 32`.
+- Under OAuth the server validates an RS256 token's signature, issuer, expiry and **audience** (`MCP_SERVER_RESOURCE`): a token minted for another service — this API's own user tokens included — is refused. It serves RFC 9728 metadata at `/.well-known/oauth-protected-resource[/<path>]` and answers a missing or bad token with `WWW-Authenticate: Bearer resource_metadata="…"`. Server settings may be suffixed `_<NAMESPACE>` so several servers in one process can differ.
+- The API obtains OAuth tokens with the client-credentials grant, sends the RFC 8707 `resource` parameter so each token is bound to one server, caches a token until shortly before it expires, and asks once for a fresh one if the server answers `401`. The token endpoint is configured, never discovered from a server response.
+- The staff console and runtime connector APIs do not accept or persist endpoint credentials. Keep secret values in the platform secret manager; never put them in browser forms, source control, or chat transcripts. Tokens are sent in the `Authorization` header only — never in a URL — and redirects are not followed.
 - Restrict access to deployment secrets and rotate credentials through the owning platform's secret-management workflow.
 
 ### 2.2 Monetary Transaction Ceilings
@@ -64,15 +77,16 @@ The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI R
 1. Navigate to `/admin/connectors` in the staff console.
 2. In **Built-in connector status**, the dashboard identifies each fixture-backed plugin as a local simulation and shows local health and registered tool counts.
 3. In **Taxpayer-chat integrations**, review the remote MCP services and read-only operations available under your current role and consent scopes. The catalog is policy-filtered and does not expose endpoint URLs, credentials, or tool schemas.
-4. A service appearing in the chat catalog does not prove that its endpoint is reachable. Select **Test connection** only to run the local simulator health check and view its latency and tool count.
+4. Each chat integration shows a `status`: `available` means the server answered tool discovery just now (cached for the lifetime the server allows); `unavailable` means it is bound but did not answer, and it cannot be selected. **Test connection** still checks the local simulator only, and reports its latency and tool count.
 
 ### 3.2 Deploying a New System Connector
 1. Open `/admin/connectors` and use **Add connector** to review the setup path. This dialog is guidance only; it does not submit or store connector data.
 2. Implement the connector server and register its namespace, tools, permissions, and protocol through the reviewed code change.
 3. Configure the remote endpoint with `MCP_SERVER_URL_<NAMESPACE>` and store any credential in the deployment secret store. Never submit bearer tokens or private keys through the browser.
 4. Review DNS/IP resolution, HTTPS/TLS identity, redirects, and outbound network access before deployment.
-5. Deploy the reviewed change and refresh `/admin/connectors`. The chat integration list reflects the current deployment and caller policy. **Test connection** checks local simulator health only; it does not probe the remote MCP server.
-6. From the deployed API runtime, confirm the resolved namespace binds to the approved remote transport and send an MCP ping. The configured bearer token is sent by the transport in the authorization header and must never be printed:
+5. Deploy the reviewed change and refresh `/admin/connectors`. The chat integration list reflects the current deployment and caller policy, including whether each bound server is answering. **Test connection** checks local simulator health only.
+6. Declare what is behind the server: `MCP_SERVER_MODE_<NAMESPACE>=live` only for a reviewed live integration. Unset means `simulation`, which is shown as demo data and is never offered in production.
+7. From the deployed API runtime, confirm the namespace binds to the approved remote transport and that the server answers `server/discover`. The configured credential is sent by the transport in the authorization header and must never be printed:
 
    ```bash
    PYTHONPATH=App/backend python3 - <<'PY'
@@ -85,12 +99,12 @@ The integration complies with **OWASP LLM06 (Excessive Agency)** and **NIST AI R
    if binding.get("transport") != expected_transport:
        raise SystemExit(f"{namespace} is not bound to its approved remote transport")
    if not client.ping(namespace):
-       raise SystemExit(f"MCP ping failed for {namespace}")
+       raise SystemExit(f"{namespace} did not answer server/discover")
    print({"namespace": namespace, "transport": expected_transport, "reachable": True})
    PY
    ```
 
-   Compare the namespace's endpoint with the approved deployment configuration. For a server that requires bearer authentication, a successful ping confirms the configured credential was accepted. Never print or paste the credential. Enable supported actions only after the remote binding and authentication checks pass.
+   Compare the namespace's endpoint with the approved deployment configuration. `client.ping()` sends `server/discover` with the configured credential, so success also confirms the credential was accepted. Never print or paste the credential. Enable supported actions only after the remote binding and authentication checks pass.
 
 The browser registration and configuration APIs fail closed with `410 Gone` for authorized requests that reach the handlers. A successful response must never be interpreted as a connector registration or configuration change.
 
@@ -99,7 +113,7 @@ To offload an in-process namespace (such as `tax_calculator`) to an out-of-proce
 ```bash
 # Set in environment or deployment manifest
 MCP_SERVER_URL_TAX_CALCULATOR=https://mcp-tax.dmz.ura.go.ug/rpc
-MCP_SERVER_TOKEN_TAX_CALCULATOR=vaulted-bearer-token
+MCP_SERVER_TOKEN_TAX_CALCULATOR=<from the secret store; the server holds the same value>
 
 # Restart backend service
 systemctl restart ura-chatbot-api
@@ -135,7 +149,27 @@ print(client.health())
     redis-cli DEL "mcp:velocity:<user_id>"
     ```
 
-### 4.3 Output Schema Validation Warning
+### 4.3 A Connector Shows as Unavailable
+- **Symptom**: the picker or `/admin/connectors` lists a service with `status: unavailable`; the API log has `MCP tool discovery failed namespace=<ns>`.
+- **Causes, in the order to check them**:
+  1. The server is locked. `curl -s localhost:8930/health` (gateway) shows `"auth": "locked"` for the system, and its log says why — no credential, a token under 32 characters, or incomplete OAuth settings. Most often `MCP_LINK_TOKEN` was not exported when the stack was brought up.
+  2. The two ends hold different credentials. The API log names it: `was refused: the server did not accept this client's credentials (HTTP 401)`.
+  3. The server is down or unreachable from the API container.
+  4. A protocol mismatch: `the server does not speak MCP 2026-07-28 (it supports […])`.
+- **Behaviour while it lasts**: the API does not retry that server for 15 seconds after a failed discovery, so a connector that is down costs one short deadline, not one per request. Other connectors are unaffected. A tool bound to an unavailable server is **not** run from the copy registered in the API process.
+- **Resolution**: fix the cause and wait out the 15-second window, or restart the API to clear it immediately.
+
+### 4.4 A Call Is Refused with `HeaderMismatch` (`-32020`)
+- **Cause**: an intermediary rewrote or stripped `MCP-Protocol-Version`, `Mcp-Method` or `Mcp-Name`, or a non-conforming client omitted them.
+- **Resolution**: make the proxy pass those headers through unchanged. The server will not act on a request whose headers and body disagree.
+
+### 4.5a "I couldn't get an answer from … just now" / a record that is not found reads as an error
+Two different things show as one symptom.
+
+- **The service answered "no record".** Its message is shown as it is, with the demo notice. This is correct. If it *reads* as a failure, look at what the service returned (`docker exec … python -` with `MCPClient.call_tool`), not at the model.
+- **The service's result was discarded.** `MCP result for <tool> does not match its outputSchema` in the API log: a not-found record is `null` and its `outputSchema` said `object`. The client treats that as a malformed answer and the taxpayer gets "could not be asked". The fix is the schema (`"type": ["object", "null"]`), as done for URSB, BWIMS and the TIN search.
+
+### 4.5 Output Schema Validation Warning
 - **Symptom**: Log message `MCP result for <tool> does not match its outputSchema`.
 - **Cause**: The server returned fields that violate the declared JSON schema.
 - **Impact**: Non-blocking (result is still passed to the LLM), but signals schema drift.
@@ -147,8 +181,11 @@ print(client.health())
 
 Run the full MCP and connector verification test suites:
 ```bash
-# MCP test suite
+# MCP test suite (wire conformance, authentication, client transport included)
 PYTHONPATH=App/backend python3 -m pytest App/backend/tests/test_mcp_*.py -q
+
+# The chat ↔ connector link end to end: real client, real gateway app, real token
+PYTHONPATH=App/backend python3 -m pytest tests/agents/test_connector_link_integration.py tests/agents/test_chat_connectors.py -q
 
 # Agent, checkpointer, and connector integration tests
 PYTHONPATH=App/backend python3 -m pytest tests/agents/test_plugins_orchestrator.py tests/agents/test_mcp.py tests/agents/test_graph_checkpointer.py -q
@@ -167,19 +204,22 @@ PYTHONPATH=App/backend python3 -m pytest tests/test_all_endpoints_e2e.py -q
 ### 6.1 Deploying Standalone FastMCP Servers
 To launch decoupled MCP microservices in isolated container runtimes:
 ```bash
+export MCP_LINK_TOKEN=$(openssl rand -hex 32)   # the shared secret for every link; not stored by the stack
 docker compose -f docker-compose.yml -f docker-compose.mcp.yml up -d \
   mcp-tax-calculator mcp-ura-account mcp-efris mcp-dts mcp-payment mcp-tin mcp-ursb mcp-bwims
 ```
 
-Endpoints exposed:
-- `mcp-tax-calculator`: `http://localhost:8931` (Health: `/health`)
-- `mcp-ura-account`: `http://localhost:8932` (Health: `/health`)
-- `mcp-efris`: `http://localhost:8933` (Health: `/health`)
-- `mcp-dts`: `http://localhost:8934` (Health: `/health`)
-- `mcp-payment`: `http://localhost:8935` (Health: `/health`)
-- `mcp-tin`: `http://localhost:8936` (Health: `/health`)
-- `mcp-ursb`: `http://localhost:8937` (Health: `/health`)
-- `mcp-bwims`: `http://localhost:8938` (Health: `/health`)
+Each container replaces the image's entrypoint with `python -m app.mcp.servers.<name> --http` (the image's own entrypoint starts the chat API and ignores `command`), runs read-only with all capabilities dropped, and keeps its simulator fixtures in memory. Ports are published on loopback only; the API reaches the servers over the compose network. The overlay also binds the API to the six system connectors and sets `FLAG_ENTERPRISE_CONNECTORS=true`.
+
+Health endpoints (unauthenticated, report the server's `auth` mode):
+- `mcp-tax-calculator`: `http://localhost:8931/health`
+- `mcp-ura-account`: `http://localhost:8932/health`
+- `mcp-efris`: `http://localhost:8933/health`
+- `mcp-dts`: `http://localhost:8934/health`
+- `mcp-payment`: `http://localhost:8935/health`
+- `mcp-tin`: `http://localhost:8936/health`
+- `mcp-ursb`: `http://localhost:8937/health`
+- `mcp-bwims`: `http://localhost:8938/health`
 
 ### 6.2 Mutual TLS (mTLS) Transport Security
 Outbound HTTP transports support client-certificate mutual authentication:
@@ -205,3 +245,66 @@ Agent execution graphs maintain state durability across restarts:
 - State snapshots are persisted to the `agent_checkpoints` table on each node transition.
 - Supported on both PostgreSQL (clustered production) and SQLite (local testing/dev).
 - Allows in-flight tax audits and multi-step filings to survive process reboots and scale events.
+
+---
+
+## 7. Connecting Taxpayer Chat to the Plugin Systems (local stack)
+
+The single-host form: one `connectors` container serves the six system connectors, each at its own MCP endpoint, and the API is bound to them. The systems are **simulators over the fixture databases in `data_store/`**; the picker labels them "Demo data" and only their read operations are offered.
+
+### 7.1 Bring-up
+Append the overlay to whichever chain the stack runs (see `docs/runbooks/salt-speech-backends.md` for the GPU chain):
+```bash
+cd App
+export MCP_LINK_TOKEN=$(openssl rand -hex 32)
+docker compose -f docker-compose.yml \
+  -f docker-compose.local-retrieval.yml -f docker-compose.local-sunflower.yml \
+  -f docker-compose.gpu-salt.yml -f docker-compose.connectors.yml up -d
+```
+`MCP_LINK_TOKEN` is given to both ends by the overlay and is not written anywhere. Keep it exported for later `up` commands in the same chain: recreating either service without it leaves the link locked (§4.3). `down`, `ps` and `logs` work without it.
+
+Tool calling needs a model that can call tools. The local Sunflower vLLM is started with `--enable-auto-tool-choice --tool-call-parser hermes` for this; with `LLM_ENABLED=false` or a backend other than `vllm`/`local` the connectors are listed but an answer cannot draw on them.
+
+### 7.2 Verify
+```bash
+# 1. Six systems, each authenticating with the shared token
+curl -s localhost:8930/health
+#    {"ok": true, "name": "mcp_connectors", "servers": {"efris": {"tools": 4, "auth": "token"}, …}}
+
+# 2. The link refuses a caller without the credential
+curl -s -o /dev/null -w "%{http_code}\n" -X POST localhost:8930/efris \
+  -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'   # 401
+
+# 3. The catalog the picker reads: six connectors, mode "simulation", status "available"
+curl -s 'localhost:8083/v1/connectors?view=chat'
+
+# 4. A turn that draws on a connector
+curl -s localhost:8083/v1/chat -H 'Content-Type: application/json' \
+  -d '{"message":"What does EFRIS hold for 1000000001?","connector_namespaces":["efris"]}'
+```
+In the stream (`POST /v1/chat/stream`) the `agent_trace` event carries `{"type":"tool_call.completed","name":"efris_taxpayer_status","connector":"efris","connector_mode":"simulation","ok":true,…}`.
+
+### 7.3 What happens to a chat turn that has a service selected
+
+A selected service is a statement of intent, and the turn is routed on it. Nothing is left to the model's willingness to call a tool: live, on Sunflower-14B under `tool_choice=auto`, it answered "I would use `efris_taxpayer_status`" and did not, and the keyword templates answered first with an invented "EFRIS Invoice Audit".
+
+| Step | Module | What it does |
+|---|---|---|
+| 1. Is it a lookup? | `connector_intent.detect_connector_intent` | Deterministic and conservative. The message must **name the service** (or, if none is named, carry a code and use the one word that points at it) and ask for a record, not a procedure. "How do I register for a TIN?" stays a how-to even with EFRIS selected; "How do I check PRN 2200…?" is both and is looked up. An operation whose **required inputs are not in the message** is not chosen: a company *name* goes to `ursb_verify_business`, not to `ursb_compliance_status`, which needs a registration number. |
+| 2. Keep the templates out of the way | `service._maybe_handle_fast_paths` gating | A detected lookup skips the deterministic procedure/advisory replies and the passages (`passages=[]`). The reply carries no `sources`, `citations` or portal-form `resources`: they would read as where the record came from. |
+| 3. Force the call | `llm.generate_with_tools(forced_operations=…)` | The first round is a **named** function call (guided decoding, so it is well formed). `tool_choice="required"` was measured and is worse: it invents arguments. |
+| 4. Check the arguments | `connector_intent.missing_arguments` | A value must be one the taxpayer wrote (this turn or earlier), be the right *kind* (a 10-digit TIN is not a 12-digit PRN that is also in the conversation) and be present. Otherwise nothing is sent and the taxpayer is asked for it. |
+| 5. Word the outcome | `connector_outcome.compose` | Each call is classified `found` / `no_record` / `needs_input` / `unavailable` and everything that is not a record is worded from **the service's own message**, never a model paraphrase. A practice-system notice is attached by code. Any turn with a non-record outcome is worded entirely from the services' answers (a model asked to summarise a mix wrote "the business is registered" beside "no registered entity"). |
+| 6. Translate | `service._call_llm_agentic(summarise_records=…)` | For Luganda and Swahili the model does not write the record up (it writes claims the record does not make, and citation debris); the fields are rendered and passed through the normal translation step. |
+
+Two environment knobs matter:
+
+- `CONNECTOR_TURN_LOCAL_TOOLS` (default `3`) — how many *local* tools are offered beside the selected service's. The full local registry is ~7,100 tokens of schema against a 4,096-token window; the server answered HTTP 400 and the turn silently fell back to retrieval, as if no service had been chosen. Tool schemas are now fitted to the window **every round** against the real prompt (`tool_budget.fit_tool_specs`), counted as the chat template renders them (spaced JSON — the compact form under-counted four tools by 50 tokens, which is a refused request).
+- `SUNFLOWER_MAX_MODEL_LEN` — **recommended `8192`** for a stack that serves connectors. `4096` works because of the fitting above, but leaves one service and one result per turn.
+
+Reading a live turn: `agent_trace` events carry `connector` and `connector_mode`; the API log line `tool schemas fitted to a context window of N: …` says when tools were slimmed or dropped.
+
+### 7.4 What it does not do
+- It does not contact URA, NIRA, URSB, a bank or a payment network, and a record it returns is not a URA record.
+- It does not write: issuing, paying, ordering, registering and releasing are not offered through chat.
+- It is not offered under `APP_ENV=production`. Declaring a connector `live` (`MCP_SERVER_MODE_<NAMESPACE>=live`) is a statement that a reviewed live integration is behind that URL — do not set it for a simulator.

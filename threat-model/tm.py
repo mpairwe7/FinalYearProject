@@ -419,8 +419,8 @@ tm.assumptions = [
     "PDF JavaScript, Launch, embedded files, and encryption are rejected before extract/OCR",
     "GitHub Actions runners are ephemeral and GitHub-hosted (not self-hosted)",
     "Rate limiting is enforced at the FastAPI application layer (slowapi)",
-    "Enterprise connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments) run on isolated SQLite datastores and are gated behind FLAG_ENTERPRISE_CONNECTORS in production",
-    "Remote MCP connector registrations validate endpoint URLs against SSRF and prohibit access to private IPs and cloud metadata",
+    "Enterprise connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments) are simulators on isolated SQLite datastores; they are offered in chat only when bound as remote MCP servers with FLAG_ENTERPRISE_CONNECTORS on, labelled as demo data, and never in production",
+    "Remote MCP endpoints are deployment-configured, never registered at runtime; the link is authenticated (audience-bound OAuth 2.1 token or a shared token) and uses https in production",
 ]
 
 # =============================================================================

@@ -63,7 +63,7 @@ class TinRegistrationService:
                 ok=True,
                 found=False,
                 taxpayer=None,
-                message=f"No active taxpayer found matching '{request.query}'. Please verify your credentials or apply for a TIN.",
+                message=f"No active taxpayer found matching '{request.query}'.",
             )
 
         return TinSearchResponse(

@@ -337,7 +337,8 @@ _REGISTRY: dict[str, Flag] = {
             "enterprise_connectors",
             False,
             "Expose explicitly selected, deployment-bound remote MCP connectors in taxpayer chat. "
-            "Only reviewed read-only operations are eligible; this flag never enables local simulator fixtures.",
+            "Only reviewed read-only operations are eligible. In-process simulator tools are never "
+            "listed; a simulator bound as a remote server is labelled as demo data and is refused in production.",
         ),
         # Phase 30 (2026) — next-generation architecture increments.
         # All default off and all subject-addressable, so each lands on a

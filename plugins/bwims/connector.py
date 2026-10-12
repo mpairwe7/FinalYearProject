@@ -43,7 +43,7 @@ class BwimsConsignmentStatusTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "found": {"type": "boolean"},
-                    "consignment": {"type": "object"},
+                    "consignment": {"type": ["object", "null"]},
                     "days_in_storage": {"type": "integer"},
                     "is_overstayed": {"type": "boolean"},
                     "message": {"type": "string"},

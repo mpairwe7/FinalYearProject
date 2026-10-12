@@ -58,7 +58,14 @@ def unwrap_request_state(wrapped: Any) -> dict[str, Any] | None:
 
 
 def parse_input_required(result: dict[str, Any]) -> dict[str, Any] | None:
-    """Normalize an InputRequiredResult. Accepts the legacy ``elicitations`` key."""
+    """Normalize an InputRequiredResult. Accepts the legacy ``elicitations`` key.
+
+    The specification carries ``inputRequests`` as a map from a
+    server-chosen key to the request, and the retry answers under the
+    same keys.  The map is passed through as it arrived: flattening it
+    would throw away the keys the answers have to be filed under.  A
+    list — what pre-release servers sent — is passed through too.
+    """
     requests = result.get("inputRequests")
     if requests is None:
         requests = result.get("elicitations")
@@ -67,6 +74,6 @@ def parse_input_required(result: dict[str, Any]) -> dict[str, Any] | None:
     return {
         "ok": False,
         "input_required": True,
-        "inputRequests": list(requests or []),
+        "inputRequests": requests if isinstance(requests, dict) else list(requests or []),
         "requestState": result.get("requestState"),
     }

@@ -14,6 +14,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Tool schema and base conforming to URA agent framework & MCP
 # ---------------------------------------------------------------------------
+def readable_title(name: str, namespace: str = "") -> str:
+    """A function name as a person reads it, without its service's prefix.
+
+    ``bwims_consignment_status`` in the ``bwims`` namespace is "Consignment
+    status": the picker shows it under the service's own name, and
+    "Bwims consignment status" read as a typo. A name that is nothing but the
+    prefix is kept whole.
+    """
+    words = [word for word in name.split("_") if word]
+    prefixes = {word for word in namespace.split("_") if word}
+    if namespace:
+        prefixes.add(namespace)
+        prefixes.add("".join(word[0] for word in namespace.split("_") if word))
+    if len(words) > 1 and words[0] in prefixes:
+        words = words[1:]
+    return " ".join(words).capitalize()
+
+
 @dataclass(frozen=True)
 class ToolSchema:
     """Structural description of a tool, exported to the LLM and to MCP."""
@@ -53,7 +71,7 @@ class ToolSchema:
     def annotations(self) -> dict[str, Any]:
         """MCP annotations object for this tool."""
         return {
-            "title": self.title or self.name.replace("_", " ").capitalize(),
+            "title": self.title or readable_title(self.name, self.namespace),
             "readOnlyHint": self.read_only,
             "destructiveHint": self.destructive,
             "idempotentHint": self.idempotent,
