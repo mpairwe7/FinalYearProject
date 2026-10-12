@@ -198,7 +198,7 @@ export function ConnectorBoard() {
       description="Review local simulator health and deployment-reviewed services available for taxpayer chat."
       width="read"
       actions={
-        <div className="flex items-center gap-2">
+        <div className="ops-row-inline">
           <button
             className="ops-btn is-primary is-sm"
             type="button"
@@ -238,28 +238,24 @@ export function ConnectorBoard() {
               const testResult = testResults[connector.id];
               return (
                 <li className="ops-queue-row" key={connector.id}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                  <div>
+                    <div className="ops-row-inline">
                       <strong>{connector.name}</strong>
-                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
-                        {connector.protocol || "MCP"}
-                      </span>
-                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                        Local simulation
-                      </span>
+                      <span className="ops-chip">{connector.protocol || "MCP"}</span>
+                      <span className="ops-chip is-warn">Local simulation</span>
                     </div>
                     <p>{connector.description}</p>
                     <p className="ops-stat-hint">
                       {connector.tools.length} guided tools ·{" "}
                       {connector.healthy ? "healthy locally" : "local health check failed"}
-                      {testResult && (
-                        <span className={`ml-2 font-mono font-medium ${testResult.ok ? "text-emerald-400" : "text-rose-400"}`}>
-                          · {testResult.message}
-                        </span>
-                      )}
                     </p>
+                    {testResult ? (
+                      <p className={`ops-chip ${testResult.ok ? "is-good" : "is-danger"}`} role="status">
+                        {testResult.message}
+                      </p>
+                    ) : null}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="ops-row-inline">
                     <button
                       className="ops-btn is-ghost is-sm"
                       type="button"
@@ -315,7 +311,9 @@ export function ConnectorBoard() {
       >
         <p className="ops-panel-note">
           These are deployment-managed remote services, shown separately from local simulations.
-          Availability reflects your current role and consent scopes; it does not confirm live service health.
+          A service is listed when it advertises an approved read-only operation for your role and
+          consent scopes. &ldquo;Not responding&rdquo; means it did not answer discovery just now;
+          &ldquo;Demo data&rdquo; means it is a practice system, not a live URA record.
         </p>
         <div aria-busy={chatCatalogLoading}>
           {chatCatalogLoading && !chatCatalog ? <SkeletonRows rows={1} height={72} /> : null}
@@ -336,22 +334,43 @@ export function ConnectorBoard() {
           ) : null}
           {chatCatalog?.enabled && chatCatalog.connectors.length > 0 ? (
             <ul className="ops-queue" aria-label="Reviewed taxpayer-chat integrations">
-              {chatCatalog.connectors.map((connector) => (
-                <li className="ops-queue-row" key={connector.namespace}>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <strong>{connector.label}</strong>
-                      <span className="ops-chip is-good">Available for chat</span>
-                      <span className="ops-chip">Read-only</span>
+              {chatCatalog.connectors.map((connector) => {
+                const answering = connector.status !== "unavailable";
+                const operations = connector.operations ?? [];
+                return (
+                  <li className="ops-queue-row" key={connector.namespace}>
+                    <div>
+                      <div className="ops-row-inline">
+                        <strong>{connector.label}</strong>
+                        <span className={`ops-chip ${answering ? "is-good" : "is-danger"}`}>
+                          {answering ? "Available for chat" : "Not responding"}
+                        </span>
+                        {connector.mode ? (
+                          <span className={`ops-chip ${connector.mode === "live" ? "is-info" : "is-warn"}`}>
+                            {connector.mode === "live" ? "Live" : "Demo data"}
+                          </span>
+                        ) : null}
+                        <span className="ops-chip">Read-only</span>
+                      </div>
+                      {connector.summary || connector.description ? (
+                        <p>{connector.summary || connector.description}</p>
+                      ) : null}
+                      <p className="ops-stat-hint">
+                        {connector.operation_count} approved operation{connector.operation_count === 1 ? "" : "s"}
+                        {" · "}{connector.namespace}
+                        {connector.server?.name
+                          ? ` · ${connector.server.name}${connector.server.version ? ` ${connector.server.version}` : ""}`
+                          : ""}
+                      </p>
+                      {operations.length > 0 ? (
+                        <p className="ops-stat-hint">
+                          {operations.map((operation) => operation.title).join(" · ")}
+                        </p>
+                      ) : null}
                     </div>
-                    {connector.description ? <p>{connector.description}</p> : null}
-                    <p className="ops-stat-hint">
-                      {connector.operation_count} approved operation{connector.operation_count === 1 ? "" : "s"}
-                      {" · "}{connector.namespace}
-                    </p>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           ) : null}
         </div>

@@ -34,6 +34,7 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
+  makeThumbnail,
   PendingAttachment,
   type DocumentAnalysisData,
 } from '../lib/attachments';
@@ -951,7 +952,19 @@ export default function Page() {
         status: oversize ? 'error' : 'uploading',
         error: oversize ? 'Over the 40 MB limit' : undefined,
       });
-      if (!oversize) void uploadAttachment(file, clientId);
+      if (!oversize) {
+        void uploadAttachment(file, clientId);
+        // A screenshot or photo shows as itself on its chip, so a person can
+        // tell which of several images is which. Arrives when it is drawn.
+        if (file.type.startsWith('image/')) {
+          void makeThumbnail(file).then((previewUrl) => {
+            if (!previewUrl) return;
+            setPendingAttachments((prev) => prev.map((a) => (
+              a.clientId === clientId ? { ...a, previewUrl } : a
+            )));
+          });
+        }
+      }
     }
     if (chips.length) setPendingAttachments((prev) => [...prev, ...chips]);
     return acceptedFiles.filter((file) => file.size <= MAX_ATTACHMENT_BYTES);

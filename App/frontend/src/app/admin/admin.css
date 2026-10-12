@@ -511,6 +511,53 @@
   border-top: 1px solid var(--ops-hairline);
 }
 
+/* Rows of the connectors board. Nothing defined these two classes, so the list
+   rendered with browser bullets and a 40px indent and each row's chips and
+   buttons ran together. */
+.ops-queue {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-queue-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-3) var(--ops-space-2);
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.ops-queue-row:last-child {
+  border-bottom: 0;
+}
+
+.ops-queue-row > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ops-queue-row p {
+  margin: var(--ops-space-1) 0 0;
+  color: var(--text-1);
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+}
+
+.ops-queue-row p.ops-stat-hint {
+  color: var(--text-2);
+  font-size: var(--ops-text-xs);
+}
+
+@media (max-width: 720px) {
+  .ops-queue-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .connector-dialog :focus-visible {
   outline: var(--ops-focus-ring) solid var(--ops-focus);
   outline-offset: var(--ops-focus-gap);

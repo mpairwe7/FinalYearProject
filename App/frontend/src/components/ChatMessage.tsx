@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
-import { formatDocType } from '../lib/attachments';
+import { formatDocType, stripStepPrefix } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
 import { useTranslation } from '../lib/i18n';
@@ -234,7 +234,7 @@ function ChatMessageInner({
                       <h4 className="portal-guidance-steps-title">{t('documents.recommendedSteps')}</h4>
                       <ol className="portal-guidance-steps-list">
                         {a.analysis.screenshot_guidance.steps.map((step, idx) => (
-                          <li key={idx}>{step}</li>
+                          <li key={idx}>{stripStepPrefix(step)}</li>
                         ))}
                       </ol>
                     </div>

@@ -24,7 +24,7 @@ import {
   formatDocType,
   formatFileSize,
 } from '../lib/attachments';
-import type { ChatConnector } from '../lib/connectors';
+import { connectorMonogram, type ChatConnector } from '../lib/connectors';
 
 interface ChatInputProps {
   message: string;
@@ -218,40 +218,13 @@ function ChatInputInner({
       ? addMenuFocusIdx
       : addMenuOptionIndices[0];
 
-  // Focus active option on open; lock body scroll; trap Tab and Escape
+  // The menu is a native modal <dialog> (ModalDialog), which owns Escape, the
+  // Tab trap, inertness behind it and returning focus. What it cannot know is
+  // which row is the roving one, so that row is focused as the menu opens.
   useEffect(() => {
     if (!showAttachMenu) return;
     addMenuOptionRefs.current[addMenuRovingIdx]?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeAddMenu();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      const focusables = addMenuPanelRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled])'
-      );
-      if (!focusables || focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [showAttachMenu, closeAddMenu, addMenuRovingIdx]);
+  }, [showAttachMenu, addMenuRovingIdx]);
 
   const onAddMenuOptionKey = (e: React.KeyboardEvent, idx: number) => {
     const move = (position: number) => {
@@ -420,7 +393,12 @@ function ChatInputInner({
                   key={a.clientId}
                   className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
                 >
-                  <FileIcon />
+                  {a.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- a local blob: preview, not a remote asset
+                    <img className="attachment-thumb" src={a.previewUrl} alt="" />
+                  ) : (
+                    <FileIcon />
+                  )}
                   <span className="attachment-name" title={a.name}>{a.name}</span>
                   <span className="attachment-meta">
                     {a.status === 'uploading' && <LoadingDots />}
@@ -473,6 +451,11 @@ function ChatInputInner({
               <span key={connector.namespace} className="composer-connector-chip">
                 <PlugIcon />
                 <span>{connector.label}</span>
+                {connector.mode === 'simulation' && (
+                  <span className="composer-connector-demo" title={t('composer.connectorDemo')}>
+                    {t('composer.connectorDemoShort')}
+                  </span>
+                )}
                 <button
                   type="button"
                   className="composer-connector-remove"
@@ -538,15 +521,11 @@ function ChatInputInner({
                   e.target.value = '';
                 }}
               />
-              <div className="relative" ref={attachMenuRef}>
+              <div className="addmenu-anchor" ref={attachMenuRef}>
                 <button
                   ref={addBtnRef}
                   type="button"
-                  className={`composer-circle-btn add-circle-btn transition-all duration-200 ${
-                    showAttachMenu
-                      ? 'is-active bg-neutral-800 text-white border border-neutral-700 shadow-sm'
-                      : 'text-neutral-400 hover:text-white hover:bg-neutral-800/80'
-                  }`}
+                  className={`composer-circle-btn add-circle-btn${showAttachMenu ? ' is-active' : ''}`}
                   onClick={() => {
                     setAddMenuFocusIdx(0);
                     setShowAttachMenu((prev) => !prev);
@@ -559,144 +538,125 @@ function ChatInputInner({
                   data-tip={t('composer.addTitle')}
                   data-testid="composer-add-btn"
                 >
-                  <PlusIcon
-                    size={18}
-                    className={`transition-transform duration-200 ease-out ${
-                      showAttachMenu ? 'rotate-45 text-white' : ''
-                    }`}
-                  />
+                  <PlusIcon size={18} />
                 </button>
 
                 {showAttachMenu && (
-                  <div
-                    className="lmv2-overlay addmenu-overlay"
-                    onMouseDown={(e) => {
-                      if (e.target === e.currentTarget) closeAddMenu();
-                    }}
+                  // A native modal <dialog>, in the browser's top layer. The
+                  // earlier overlay lived inside the composer's stacking
+                  // context, and once a conversation had messages their text
+                  // and buttons painted over the panel.
+                  <ModalDialog
+                    labelledBy="composer-attach-title"
+                    className="addmenu-dialog"
+                    onClose={closeAddMenu}
                   >
-                    <div
-                      ref={addMenuPanelRef}
-                      className="lmv2 addmenu-dialog"
-                      role="dialog"
-                      aria-modal="true"
-                      aria-labelledby="composer-attach-title"
-                    >
-                      <>
-                          <div className="lmv2-head addmenu-head">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
-                                <PlusIcon size={14} />
-                              </div>
-                              <h2 id="composer-attach-title">{t('composer.addTitle')}</h2>
-                            </div>
-                            <button
-                              type="button"
-                              className="dlgv2-x lmv2-x"
-                              onClick={closeAddMenu}
-                              aria-label={t('common.close')}
-                            >
-                              <CloseIcon />
-                            </button>
-                          </div>
+                    <div ref={addMenuPanelRef} className="addmenu-panel">
+                      <div className="lmv2-head addmenu-head">
+                        <div className="addmenu-head-title">
+                          <span className="addmenu-head-icon" aria-hidden="true">
+                            <PlusIcon size={14} />
+                          </span>
+                          <h2 id="composer-attach-title">{t('composer.addTitle')}</h2>
+                        </div>
+                        <button
+                          type="button"
+                          className="dlgv2-x lmv2-x"
+                          onClick={closeAddMenu}
+                          aria-label={t('common.close')}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
 
-                          <div className="lmv2-list addmenu-list" role="menu" aria-label={t('composer.attachmentOptions')}>
-                            {/* Option 1: Upload a file */}
-                            <button
-                              ref={(el) => {
-                                addMenuOptionRefs.current[0] = el;
-                              }}
-                              type="button"
-                              role="menuitem"
-                              tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
-                              className="addmenu-opt group"
-                              disabled={attachmentLimitReached}
-                              onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
-                              onClick={() => {
-                                closeAddMenu();
-                                fileInputRef.current?.click();
-                              }}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition">
-                                  <FileIcon size={18} />
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">{t('composer.uploadFile')}</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">{t('composer.uploadFileDescription')}</div>
-                                </div>
-                              </div>
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                {t('composer.fileTag')}
-                              </span>
-                            </button>
+                      <div className="lmv2-list addmenu-list" role="menu" aria-label={t('composer.attachmentOptions')}>
+                        {/* Upload a file or screenshot */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[0] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
+                          className="addmenu-opt"
+                          disabled={attachmentLimitReached}
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
+                          onClick={() => {
+                            closeAddMenu();
+                            fileInputRef.current?.click();
+                          }}
+                        >
+                          <span className="addmenu-opt-icon is-file" aria-hidden="true">
+                            <FileIcon size={18} />
+                          </span>
+                          <span className="addmenu-opt-copy">
+                            <span className="addmenu-opt-title">{t('composer.uploadFile')}</span>
+                            <span className="addmenu-opt-desc">{t('composer.uploadFileDescription')}</span>
+                          </span>
+                          <span className="addmenu-opt-tag">{t('composer.fileTag')}</span>
+                        </button>
 
-                            {/* Option 2: Take a photo */}
-                            <button
-                              ref={(el) => {
-                                addMenuOptionRefs.current[1] = el;
-                              }}
-                              type="button"
-                              role="menuitem"
-                              tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
-                              className="addmenu-opt group"
-                              disabled={attachmentLimitReached}
-                              onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
-                              onClick={handleTakePhotoClick}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20 transition">
-                                  <CameraIcon />
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">{t('composer.takePhoto')}</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">{t('composer.takePhotoDescription')}</div>
-                                </div>
-                              </div>
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                {t('composer.cameraTag')}
-                              </span>
-                            </button>
+                        {/* Take a photo */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[1] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
+                          className="addmenu-opt"
+                          disabled={attachmentLimitReached}
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
+                          onClick={handleTakePhotoClick}
+                        >
+                          <span className="addmenu-opt-icon is-camera" aria-hidden="true">
+                            <CameraIcon />
+                          </span>
+                          <span className="addmenu-opt-copy">
+                            <span className="addmenu-opt-title">{t('composer.takePhoto')}</span>
+                            <span className="addmenu-opt-desc">{t('composer.takePhotoDescription')}</span>
+                          </span>
+                          <span className="addmenu-opt-tag">{t('composer.cameraTag')}</span>
+                        </button>
 
-                            {/* URA services are discoverable here, but only
-                                reviewed taxpayer integrations may be offered. */}
-                            <button
-                              ref={(el) => {
-                                addMenuOptionRefs.current[2] = el;
-                              }}
-                              type="button"
-                              role="menuitem"
-                              tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
-                              className="addmenu-opt group"
-                              onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
-                              onClick={() => {
-                                closeAddMenu();
-                                setShowConnectorsDialog(true);
-                                onOpenConnectors?.();
-                              }}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
-                                  <PlugIcon />
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">{t('composer.addConnector')}</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">{t('composer.connectorDescription')}</div>
-                                </div>
-                              </div>
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                {t('composer.uraManagedTag')}
-                              </span>
-                            </button>
-
-                          </div>
-                          <div className="lmv2-foot addmenu-foot">
-                            {attachmentLimitReached
-                              ? t('composer.attachLimitReached')
-                              : t('composer.attachPrivacyNotice')}
-                          </div>
-                      </>
+                        {/* URA services are discoverable here, but only
+                            reviewed taxpayer integrations may be offered. */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[2] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
+                          className="addmenu-opt"
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
+                          onClick={() => {
+                            closeAddMenu();
+                            setShowConnectorsDialog(true);
+                            onOpenConnectors?.();
+                          }}
+                        >
+                          <span className="addmenu-opt-icon is-service" aria-hidden="true">
+                            <PlugIcon />
+                          </span>
+                          <span className="addmenu-opt-copy">
+                            <span className="addmenu-opt-title">{t('composer.addConnector')}</span>
+                            <span className="addmenu-opt-desc">{t('composer.connectorDescription')}</span>
+                          </span>
+                          <span className="addmenu-opt-tag">
+                            {selectedConnectors.length > 0
+                              ? t('composer.connectorsSelectedCount', { count: selectedConnectors.length })
+                              : t('composer.uraManagedTag')}
+                          </span>
+                        </button>
+                      </div>
+                      <div className="lmv2-foot addmenu-foot">
+                        {attachmentLimitReached
+                          ? t('composer.attachLimitReached')
+                          : t('composer.attachPrivacyNotice')}
+                      </div>
                     </div>
-                  </div>
+                  </ModalDialog>
                 )}
               </div>
             </>
@@ -811,97 +771,159 @@ function ChatInputInner({
           className="connectors-dialog"
           onClose={closeConnectorsDialog}
         >
-        <div className="connectors-dialog-content">
-          <header className="lmv2-head addmenu-head">
-            <div className="flex items-center gap-2">
-              <div className="connectors-heading-icon" aria-hidden="true">
-                <PlugIcon />
+          <div className="connectors-dialog-content">
+            <header className="lmv2-head addmenu-head connectors-head">
+              <div className="addmenu-head-title">
+                <span className="connectors-heading-icon" aria-hidden="true">
+                  <PlugIcon />
+                </span>
+                <h2 id="composer-connectors-title">{t('composer.connectorsTitle')}</h2>
+                {selectedConnectors.length > 0 && (
+                  <span className="connectors-count" aria-live="polite">
+                    {t('composer.connectorsSelectedCount', { count: selectedConnectors.length })}
+                  </span>
+                )}
               </div>
-              <h2 id="composer-connectors-title">{t('composer.connectorsTitle')}</h2>
-            </div>
-            <button
-              type="button"
-              className="dlgv2-x lmv2-x"
-              onClick={closeConnectorsDialog}
-              aria-label={t('common.close')}
-            >
-              <CloseIcon />
-            </button>
-          </header>
+              <button
+                type="button"
+                className="dlgv2-x lmv2-x"
+                onClick={closeConnectorsDialog}
+                aria-label={t('common.close')}
+              >
+                <CloseIcon />
+              </button>
+            </header>
 
-          <div className="connectors-dialog-body">
-            <div className="connectors-status-card" role={connectorsError ? 'alert' : 'status'}>
-              <span className="connectors-status-dot" aria-hidden="true" />
-              <span id="composer-connectors-description">
-                {connectorsLoading
-                  ? t('composer.connectorsLoading')
-                  : connectorsError
-                    ? t('composer.connectorsLoadFailed')
-                    : !connectorsEnabled
-                      ? t('composer.connectorsDisabled')
-                      : chatConnectors.length
-                        ? t('composer.connectorsAvailable', { count: chatConnectors.length })
-                        : t('composer.connectorUnavailable')}
-              </span>
-            </div>
+            <div className="connectors-dialog-body">
+              <p className="connectors-intro">{t('composer.connectorsIntro')}</p>
 
-            {chatConnectors.length > 0 && (
-              <div className="connectors-options" role="group" aria-label={t('composer.connectorsTitle')}>
-                {chatConnectors.map((connector) => {
-                  const selected = selectedConnectorNamespaces.includes(connector.namespace);
-                  return (
-                    <button
-                      key={connector.namespace}
-                      type="button"
-                      className={`connectors-option${selected ? ' is-selected' : ''}`}
-                      aria-pressed={selected}
-                      onClick={() => onToggleConnector?.(connector.namespace)}
-                    >
-                      <span className="connectors-option-icon" aria-hidden="true"><PlugIcon /></span>
-                      <span className="connectors-option-copy">
-                        <span className="connectors-option-name">{connector.label}</span>
-                        {connector.description && (
-                          <span className="connectors-option-description">{connector.description}</span>
-                        )}
-                        <span className="connectors-option-meta">
-                          {t('composer.connectorReadOnly')} · {t('composer.connectorOperationCount', { count: connector.operation_count })}
+              <div
+                className="connectors-status-card"
+                data-state={
+                  connectorsLoading
+                    ? 'loading'
+                    : connectorsError
+                      ? 'error'
+                      : !connectorsEnabled || chatConnectors.length === 0
+                        ? 'empty'
+                        : 'ready'
+                }
+                role={connectorsError ? 'alert' : 'status'}
+              >
+                <span className="connectors-status-dot" aria-hidden="true" />
+                <span id="composer-connectors-description">
+                  {connectorsLoading
+                    ? t('composer.connectorsLoading')
+                    : connectorsError
+                      ? t('composer.connectorsLoadFailed')
+                      : !connectorsEnabled
+                        ? t('composer.connectorsDisabled')
+                        : chatConnectors.length
+                          ? t('composer.connectorsAvailable', { count: chatConnectors.length })
+                          : t('composer.connectorUnavailable')}
+                </span>
+                {connectorsError && onOpenConnectors && (
+                  <button
+                    type="button"
+                    className="connectors-retry"
+                    onClick={() => onOpenConnectors()}
+                    disabled={connectorsLoading}
+                  >
+                    {t('composer.connectorsRetry')}
+                  </button>
+                )}
+              </div>
+
+              {chatConnectors.length > 0 && (
+                <div className="connectors-options" role="group" aria-label={t('composer.connectorsTitle')}>
+                  {chatConnectors.map((connector) => {
+                    const selected = selectedConnectorNamespaces.includes(connector.namespace);
+                    const unavailable = connector.status === 'unavailable';
+                    const operations = connector.operations ?? [];
+                    const shown = operations.slice(0, 3).map((operation) => operation.title);
+                    const more = operations.length - shown.length;
+                    const summary = connector.summary || connector.description;
+                    return (
+                      <button
+                        key={connector.namespace}
+                        type="button"
+                        className={`connectors-option${selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}
+                        aria-pressed={selected}
+                        disabled={unavailable && !selected}
+                        onClick={() => onToggleConnector?.(connector.namespace)}
+                      >
+                        <span className="connectors-option-icon" aria-hidden="true">
+                          {connectorMonogram(connector.label)}
                         </span>
-                      </span>
-                      <span className="connectors-option-action">
-                        {selected ? t('composer.connectorSelected') : t('composer.connectorAdd')}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+                        <span className="connectors-option-copy">
+                          <span className="connectors-option-top">
+                            <span className="connectors-option-name">{connector.label}</span>
+                            {connector.mode === 'simulation' && (
+                              <span className="connectors-badge is-demo">{t('composer.connectorDemo')}</span>
+                            )}
+                            {connector.mode === 'live' && (
+                              <span className="connectors-badge is-live">{t('composer.connectorLive')}</span>
+                            )}
+                            {unavailable && (
+                              <span className="connectors-badge is-down">{t('composer.connectorUnavailableTag')}</span>
+                            )}
+                          </span>
+                          {summary && <span className="connectors-option-description">{summary}</span>}
+                          {shown.length > 0 ? (
+                            <span className="connectors-option-meta">
+                              {t('composer.connectorOperations')}: {shown.join(' · ')}
+                              {more > 0 ? ` · ${t('composer.connectorsMore', { count: more })}` : ''}
+                            </span>
+                          ) : (
+                            <span className="connectors-option-meta">
+                              {t('composer.connectorReadOnly')} ·{' '}
+                              {t('composer.connectorOperationCount', { count: connector.operation_count })}
+                            </span>
+                          )}
+                          {unavailable && (
+                            <span className="connectors-option-meta is-warn">
+                              {t('composer.connectorUnavailableHint')}
+                            </span>
+                          )}
+                        </span>
+                        <span className="connectors-option-action">
+                          {selected ? <CheckIcon /> : <PlusIcon size={14} />}
+                          <span>{selected ? t('composer.connectorSelected') : t('composer.connectorAdd')}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
-            <section className="connectors-detail-card" aria-labelledby="composer-connector-use-title">
-              <div className="connectors-detail-heading">
-                <PlugIcon size={16} />
-                <h3 id="composer-connector-use-title">{t('composer.connectorUseTitle')}</h3>
-              </div>
-              <p>{t('composer.connectorUseDescription')}</p>
-            </section>
+              <details className="connectors-details">
+                <summary>{t('composer.connectorsDetails')}</summary>
+                <p>{t('composer.connectorUseDescription')}</p>
+                <p>
+                  <strong>{t('composer.connectorSafetyTitle')}.</strong> {t('composer.connectorSafetyDescription')}
+                </p>
+              </details>
+            </div>
 
-            <aside className="connectors-safety-note" role="note">
-              <h3>{t('composer.connectorSafetyTitle')}</h3>
-              <p>{t('composer.connectorSafetyDescription')}</p>
-            </aside>
+            <footer className="connectors-dialog-footer">
+              <p>{t('composer.connectorManagedDescription')}</p>
+              <div className="connectors-footer-actions">
+                {selectedConnectors.length > 0 && (
+                  <button
+                    type="button"
+                    className="connectors-clear"
+                    onClick={() => selectedConnectors.forEach((c) => onToggleConnector?.(c.namespace))}
+                  >
+                    {t('composer.connectorsClear')}
+                  </button>
+                )}
+                <button type="button" className="connectors-close-button" onClick={closeConnectorsDialog}>
+                  {t('composer.connectorsDone')}
+                </button>
+              </div>
+            </footer>
           </div>
-
-          <footer className="connectors-dialog-footer">
-            <p>{t('composer.connectorManagedDescription')}</p>
-            <button
-              type="button"
-              className="connectors-close-button"
-              onClick={closeConnectorsDialog}
-            >
-              {t('common.close')}
-            </button>
-          </footer>
-        </div>
-      </ModalDialog>
+        </ModalDialog>
       )}
 
       {isCameraActive && (

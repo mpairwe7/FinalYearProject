@@ -59,6 +59,17 @@ registration, customs release, or payment.
 
 ## Customer journeys
 
+**The "+" menu and the service picker.** Both are native modal `<dialog>`s, so
+nothing in the page — including an existing conversation — can paint over them,
+and the browser contains focus and restores it on close. On a phone they are
+bottom sheets. The picker says, for each service, whether it is **Demo data** or
+**Live**, whether it is answering (an unavailable service is shown and cannot be
+chosen), and what it can look up; the header counts what is selected and
+*Remove all* / *Done* sit in the footer. A chosen demo service carries a "Demo"
+tag on its chip, and a reply that came from one says so in its own text. An
+attached image shows as a small picture on its chip (a canvas-drawn `data:` URL:
+the CSP allows `img-src 'self' data:` and not `blob:`).
+
 The main chat composer offers **Add a connector** beside file and photo
 attachments. It loads a browser-safe catalog from `GET /v1/connectors?view=chat`
 and lets the taxpayer select approved services for the current conversation.

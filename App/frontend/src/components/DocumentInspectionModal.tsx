@@ -2,7 +2,7 @@
 
 import React, { useCallback } from 'react';
 import type { DocumentAnalysisData } from '../lib/attachments';
-import { formatDocType, formatFileSize } from '../lib/attachments';
+import { formatDocType, formatFileSize, stripStepPrefix } from '../lib/attachments';
 import { useTranslation } from '../lib/i18n';
 import { useChatStore } from '../store/useChatStore';
 import { ModalDialog } from './ModalDialog';
@@ -161,6 +161,7 @@ export function DocumentInspectionModal({
               {sg.hotspots && sg.hotspots.length > 0 && (
                 <div className="doc-modal-hotspots-panel">
                   <h4 className="doc-modal-sub-title">{t('documents.detectedScreenAreas')}</h4>
+                  <p className="doc-modal-hotspots-note">{t('documents.typicalAreasNote')}</p>
                   <ul className="doc-modal-hotspots-list">
                     {sg.hotspots.map((spot) => (
                       <li key={spot.id} className={`doc-modal-hotspot-item is-${spot.type}`}>
@@ -178,11 +179,11 @@ export function DocumentInspectionModal({
                   <ol className="doc-modal-steps-list">
                     {sg.steps.map((step, idx) => (
                       <li key={idx} className="doc-modal-step-item">
-                        <span>{step}</span>
+                        <span>{stripStepPrefix(step)}</span>
                         <button
                           type="button"
                           className="doc-modal-step-copy"
-                          onClick={() => copyToClipboard(step)}
+                          onClick={() => copyToClipboard(stripStepPrefix(step))}
                           aria-label={t('documents.copyInstruction', { number: idx + 1 })}
                           title={t('message.copy')}
                         >

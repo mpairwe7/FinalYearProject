@@ -242,31 +242,54 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Add Menu Dialog (matching LanguageMenu design system)
+ * Add menu — what a person can put into this conversation.
+ *
+ * A centred panel on wide screens (the overlay pattern of the language picker
+ * above) and a bottom sheet on a phone, where a centred card is out of thumb
+ * reach. Rows are 60px tall: well over the 44px touch target. Colour comes
+ * from tokens only, so both themes keep their contrast (text-2 on surface-1
+ * is 4.7:1 light, 5.8:1 dark).
  * ------------------------------------------------------------------------- */
-.chatv2 .addmenu-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 350;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  animation: dlgv2-fade 140ms ease;
+.chatv2 .addmenu-anchor {
+  position: relative;
+  display: inline-flex;
 }
 
+/* A native <dialog> (see ModalDialog): it sits in the browser's top layer, so
+   nothing in the page — a message bubble, a toolbar — can paint over it. */
+dialog.addmenu-dialog,
 .chatv2 .addmenu-dialog {
-  display: flex;
-  flex-direction: column;
-  width: min(390px, 100%);
-  background: var(--bg-0);
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(86dvh, 640px);
+  padding: 0;
   border: 1px solid var(--border-0);
   border-radius: 18px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  color: var(--text-0);
+  background: var(--bg-0);
+  box-shadow: var(--shadow-lg);
+  z-index: 500;
   animation: dlgv2-pop 140ms ease;
+}
+
+dialog.addmenu-dialog:not([open]),
+.chatv2 .addmenu-dialog:not([open]) {
+  display: none;
+}
+
+dialog.addmenu-dialog::backdrop,
+.chatv2 .addmenu-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.chatv2 .addmenu-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: min(86dvh, 640px);
 }
 
 .chatv2 .addmenu-head {
@@ -274,9 +297,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 15px 14px 12px 18px;
+  padding: 14px 10px 12px 18px;
   border-bottom: 1px solid var(--border-0);
   flex-shrink: 0;
+}
+
+.chatv2 .addmenu-head-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .chatv2 .addmenu-head h2 {
@@ -286,46 +316,126 @@
   color: var(--text-0);
 }
 
+.chatv2 .addmenu-head-icon,
+.chatv2 .connectors-heading-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+}
+
+/* The shared close button is absolutely placed for the small confirm dialog;
+   in these headers it is simply the last item of the row. */
+.chatv2 .addmenu-head .dlgv2-x {
+  position: static;
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
 .chatv2 .addmenu-list {
   padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .chatv2 .addmenu-opt {
-  display: flex;
-  width: 100%;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-height: 60px;
   padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 14px;
   background: var(--surface-1);
-  cursor: pointer;
   color: var(--text-0);
-  font-family: inherit;
-  text-align: left;
-  transition: all 0.15s ease;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.chatv2 .addmenu-opt:hover,
-.chatv2 .addmenu-opt:focus-visible {
+.chatv2 .addmenu-opt:hover {
   background: var(--surface-2);
-  border-color: var(--border-0);
-  outline: none;
+  border-color: var(--border-1);
+}
+
+.chatv2 .addmenu-opt:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
 }
 
 .chatv2 .addmenu-opt:disabled {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 .chatv2 .addmenu-opt:disabled:hover {
   background: var(--surface-1);
-  border-color: transparent;
+  border-color: var(--border-0);
+}
+
+.chatv2 .addmenu-opt-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+
+.chatv2 .addmenu-opt-icon.is-file {
+  color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+}
+
+.chatv2 .addmenu-opt-icon.is-camera {
+  color: var(--warning);
+  background: var(--cv2-warning-soft);
+}
+
+.chatv2 .addmenu-opt-icon.is-service {
+  color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .addmenu-opt-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chatv2 .addmenu-opt-title {
+  color: var(--text-0);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.chatv2 .addmenu-opt-desc {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chatv2 .addmenu-opt-tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--text-1);
+  background: var(--surface-3);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .chatv2 .addmenu-foot {
@@ -339,23 +449,23 @@
 }
 
 /* ---------------------------------------------------------------------------
- * URA connector availability and safety details. This uses the native dialog
- * element so the browser contains focus, handles Escape, and restores focus.
+ * Connector picker. A native <dialog>, so the browser contains focus, handles
+ * Escape and restores focus. Header and footer stay put; the list scrolls.
  * ------------------------------------------------------------------------- */
 dialog.connectors-dialog,
 .chatv2 .connectors-dialog {
   position: fixed;
   inset: 0;
   margin: auto;
-  width: min(460px, calc(100vw - 32px));
+  width: min(480px, calc(100vw - 32px));
   max-height: min(88dvh, 720px);
   padding: 0;
   border: 1px solid var(--border-0);
   border-radius: 18px;
-  overflow: auto;
+  overflow: hidden;
   color: var(--text-0);
   background: var(--bg-0);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-lg);
   z-index: 500;
   pointer-events: auto;
 }
@@ -373,27 +483,102 @@ dialog.connectors-dialog::backdrop,
 
 .chatv2 .connectors-dialog-content {
   display: flex;
-  min-height: 100%;
   flex-direction: column;
+  max-height: min(88dvh, 720px);
 }
 
-.chatv2 .connectors-heading-icon {
-  display: flex;
-  width: 26px;
-  height: 26px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  border-radius: 8px;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.1);
+.chatv2 .connectors-head .connectors-heading-icon {
+  color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .connectors-count {
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: var(--success);
+  background: var(--cv2-success-soft);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .chatv2 .connectors-dialog-body {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 14px;
-  padding: 18px;
+  min-height: 0;
+  padding: 16px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chatv2 .connectors-intro {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chatv2 .connectors-status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 12px;
+  color: var(--text-1);
+  background: var(--surface-1);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.chatv2 .connectors-status-card[data-state="error"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--cv2-danger-soft);
+}
+
+.chatv2 .connectors-status-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+
+.chatv2 .connectors-status-card[data-state="ready"] .connectors-status-dot {
+  background: var(--success);
+}
+
+.chatv2 .connectors-status-card[data-state="error"] .connectors-status-dot {
+  background: var(--danger);
+}
+
+.chatv2 .connectors-status-card[data-state="loading"] .connectors-status-dot {
+  background: var(--warning);
+}
+
+.chatv2 .connectors-status-card > span:not(.connectors-status-dot) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chatv2 .connectors-retry {
+  flex: none;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  color: var(--text-0);
+  background: var(--bg-0);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-retry:hover:not(:disabled) {
+  background: var(--surface-2);
 }
 
 .chatv2 .connectors-options {
@@ -403,42 +588,54 @@ dialog.connectors-dialog::backdrop,
 
 .chatv2 .connectors-option {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 11px;
-  min-height: 64px;
-  padding: 11px 12px;
-  border: 1px solid var(--border-1);
-  border-radius: 12px;
+  gap: 12px;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 14px;
   color: var(--text-0);
-  background: var(--bg-1);
+  background: var(--surface-1);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.chatv2 .connectors-option:hover,
+.chatv2 .connectors-option:hover:not(:disabled) {
+  border-color: var(--border-2);
+  background: var(--surface-2);
+}
+
 .chatv2 .connectors-option:focus-visible {
-  border-color: var(--ura-gold);
-  background: var(--surface-1);
-  outline: none;
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
 }
 
 .chatv2 .connectors-option.is-selected {
-  border-color: rgba(52, 211, 153, 0.6);
-  background: rgba(16, 185, 129, 0.08);
+  border-color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .connectors-option.is-unavailable {
+  border-style: dashed;
+  cursor: not-allowed;
 }
 
 .chatv2 .connectors-option-icon {
-  display: flex;
-  width: 34px;
-  height: 34px;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(16, 185, 129, 0.2);
-  border-radius: 10px;
-  color: #34d399;
-  background: rgba(16, 185, 129, 0.1);
+  border-radius: 12px;
+  color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .chatv2 .connectors-option-copy {
@@ -447,28 +644,193 @@ dialog.connectors-dialog::backdrop,
   gap: 3px;
 }
 
-.chatv2 .connectors-option-name {
-  font-size: 13px;
-  font-weight: 700;
+.chatv2 .connectors-option-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
 }
 
-.chatv2 .connectors-option-description,
+.chatv2 .connectors-option-name {
+  color: var(--text-0);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.chatv2 .connectors-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.chatv2 .connectors-badge.is-demo {
+  color: var(--warning);
+  background: var(--cv2-warning-soft);
+}
+
+.chatv2 .connectors-badge.is-live {
+  color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .connectors-badge.is-down {
+  color: var(--danger);
+  background: var(--cv2-danger-soft);
+}
+
+.chatv2 .connectors-option-description {
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .chatv2 .connectors-option-meta {
-  overflow: hidden;
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 11.5px;
   line-height: 1.4;
-  text-overflow: ellipsis;
+}
+
+.chatv2 .connectors-option-meta.is-warn {
+  color: var(--danger);
+}
+
+/* text-2 on the hover/selected backgrounds measured 4.47:1 — under 4.5. */
+.chatv2 .connectors-option:hover:not(:disabled) .connectors-option-meta,
+.chatv2 .connectors-option.is-selected .connectors-option-meta,
+.chatv2 .addmenu-opt:hover:not(:disabled) .addmenu-opt-desc {
+  color: var(--text-1);
+}
+
+.chatv2 .connectors-option:hover:not(:disabled) .connectors-option-meta.is-warn,
+.chatv2 .connectors-option.is-selected .connectors-option-meta.is-warn {
+  color: var(--danger);
 }
 
 .chatv2 .connectors-option-action {
-  min-width: 78px;
-  color: var(--text-1);
-  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  color: var(--text-0);
+  background: var(--bg-0);
+  font-size: 12px;
   font-weight: 650;
-  text-align: right;
+  white-space: nowrap;
 }
 
+.chatv2 .connectors-option.is-selected .connectors-option-action {
+  border-color: var(--success);
+  color: var(--success);
+  background: var(--bg-0);
+}
+
+.chatv2 .connectors-option:disabled .connectors-option-action {
+  color: var(--text-2);
+  background: transparent;
+}
+
+.chatv2 .connectors-details {
+  padding: 0 2px;
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+
+.chatv2 .connectors-details > summary {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  color: var(--text-1);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-details > summary:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.chatv2 .connectors-details p {
+  margin: 4px 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chatv2 .connectors-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+
+.chatv2 .connectors-dialog-footer p {
+  margin: 0;
+  max-width: 250px;
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.chatv2 .connectors-footer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatv2 .connectors-close-button,
+.chatv2 .connectors-clear {
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-close-button {
+  min-width: 88px;
+  border: 1px solid var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  background: var(--cv2-accent);
+}
+
+.chatv2 .connectors-close-button:hover {
+  background: var(--cv2-accent-hover);
+  border-color: var(--cv2-accent-hover);
+}
+
+.chatv2 .connectors-clear {
+  border: 1px solid var(--border-1);
+  color: var(--text-1);
+  background: transparent;
+}
+
+.chatv2 .connectors-clear:hover {
+  background: var(--surface-2);
+}
+
+.chatv2 .connectors-dialog :focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+/* The chips above the composer. */
 .chatv2 .composer-connectors {
   display: flex;
   flex-wrap: wrap;
@@ -480,25 +842,35 @@ dialog.connectors-dialog::backdrop,
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 32px;
-  padding: 3px 4px 3px 9px;
-  border: 1px solid rgba(52, 211, 153, 0.3);
+  min-height: 34px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
   border-radius: 999px;
   color: var(--text-1);
-  background: rgba(16, 185, 129, 0.08);
+  background: var(--cv2-success-soft);
   font-size: 12px;
 }
 
 .chatv2 .composer-connector-chip > svg {
   width: 14px;
   height: 14px;
-  color: #34d399;
+  color: var(--success);
+}
+
+.chatv2 .composer-connector-demo {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--warning);
+  background: var(--cv2-warning-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
 }
 
 .chatv2 .composer-connector-remove {
   display: inline-flex;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -512,109 +884,76 @@ dialog.connectors-dialog::backdrop,
 .chatv2 .composer-connector-remove:focus-visible {
   color: var(--text-0);
   background: var(--surface-2);
-  outline: 2px solid var(--ura-gold);
+  outline: 2px solid var(--cv2-focus);
   outline-offset: 1px;
 }
 
-.chatv2 .connectors-status-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-1);
-  border-radius: 12px;
-  color: var(--text-1);
-  background: var(--surface-1);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.chatv2 .connectors-status-dot {
-  flex: 0 0 8px;
-  width: 8px;
-  height: 8px;
-  margin-top: 5px;
-  border-radius: 50%;
-  background: var(--text-2);
-}
-
-.chatv2 .connectors-detail-card,
-.chatv2 .connectors-safety-note {
-  padding: 14px;
-  border: 1px solid var(--border-1);
-  border-radius: 12px;
-  background: var(--bg-1);
-}
-
-.chatv2 .connectors-detail-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ura-gold);
-}
-
-.chatv2 .connectors-detail-heading h3,
-.chatv2 .connectors-safety-note h3 {
-  margin: 0;
-  color: var(--text-0);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.chatv2 .connectors-detail-card p,
-.chatv2 .connectors-safety-note p,
-.chatv2 .connectors-dialog-footer p {
-  margin: 7px 0 0;
-  color: var(--text-2);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.chatv2 .connectors-safety-note {
-  border-color: rgba(249, 199, 79, 0.22);
-  background: rgba(249, 199, 79, 0.045);
-}
-
-.chatv2 .connectors-dialog-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 12px 18px 16px;
-  border-top: 1px solid var(--border-0);
-  background: var(--bg-1);
-}
-
-.chatv2 .connectors-dialog-footer p {
-  margin: 0;
-  max-width: 290px;
-  font-size: 11px;
-}
-
-.chatv2 .connectors-close-button {
-  min-width: 88px;
-  min-height: 44px;
-  padding: 8px 14px;
-  border: 1px solid var(--border-1);
-  border-radius: 10px;
-  color: var(--text-0);
+/* A screenshot or photo shows as itself on its chip. */
+.chatv2 .attachment-thumb {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+  object-fit: cover;
   background: var(--surface-2);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.chatv2 .connectors-close-button:hover {
-  background: var(--surface-3);
+/* Phones: both panels become bottom sheets, in reach of a thumb. */
+@keyframes addmenu-sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
 }
 
-.chatv2 .connectors-dialog :focus-visible {
-  outline: 2px solid var(--ura-gold);
-  outline-offset: 2px;
-}
+@media (max-width: 640px) {
+  dialog.addmenu-dialog,
+  .chatv2 .addmenu-dialog {
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 88dvh;
+    margin: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    animation: addmenu-sheet-up 180ms ease;
+  }
 
-@media (max-width: 480px) {
+  .chatv2 .addmenu-panel {
+    max-height: calc(88dvh - env(safe-area-inset-bottom, 0px));
+  }
+
+  dialog.connectors-dialog,
+  .chatv2 .connectors-dialog {
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    margin: 0;
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    animation: addmenu-sheet-up 180ms ease;
+  }
+
+  .chatv2 .connectors-dialog-content {
+    max-height: 92dvh;
+  }
+
+  .chatv2 .connectors-option {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .chatv2 .connectors-option-action {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .chatv2 .connectors-dialog-footer {
     align-items: stretch;
     flex-direction: column;
@@ -624,8 +963,17 @@ dialog.connectors-dialog::backdrop,
     max-width: none;
   }
 
-  .chatv2 .connectors-close-button {
-    width: 100%;
+  .chatv2 .connectors-footer-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.addmenu-dialog,
+  .chatv2 .addmenu-dialog,
+  dialog.connectors-dialog,
+  .chatv2 .connectors-dialog {
+    animation: none;
   }
 }
 
@@ -712,8 +1060,8 @@ dialog.connectors-dialog::backdrop,
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(26, 58, 107, 0.1);
-  color: #1a3a6b;
+  background: var(--cv2-accent-soft);
+  color: var(--cv2-accent);
 }
 
 .doc-modal-meta-badge {
@@ -1166,15 +1514,22 @@ dialog.connectors-dialog::backdrop,
   font-family: inherit;
 }
 
-.portal-action-btn.is-primary {
+/* Text colour is the accent's own contrast colour: white on the dark
+   theme's light-grey accent was invisible. The `.chatv2 a` selectors keep the
+   global link colours (teal on hover, visited purple) off a button. */
+.portal-action-btn.is-primary,
+.chatv2 a.portal-action-btn.is-primary,
+.chatv2 a.portal-action-btn.is-primary:visited {
   background: var(--cv2-accent);
-  color: #ffffff;
+  color: var(--cv2-accent-contrast);
   border: 1px solid var(--cv2-accent);
 }
 
-.portal-action-btn.is-primary:hover {
+.portal-action-btn.is-primary:hover,
+.chatv2 a.portal-action-btn.is-primary:hover {
   background: var(--cv2-accent-hover);
   border-color: var(--cv2-accent-hover);
+  color: var(--cv2-accent-contrast);
 }
 
 .portal-action-btn.is-ghost {
@@ -1276,6 +1631,13 @@ dialog.connectors-dialog::backdrop,
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-1, #333);
+}
+
+.doc-modal-hotspots-note {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .doc-modal-hotspots-list {
