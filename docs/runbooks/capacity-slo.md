@@ -57,7 +57,9 @@ docker run --gpus device=$GPU --ipc=host -p 18011:8000 \
   -v $PWD/App/Model/Sunflower-14B-FP8:/model:ro \
   vllm/vllm-openai:v0.8.5 \
   --model /model --served-model-name Sunbird/Sunflower-14B-FP8 \
-  --port 8000 --max-model-len 4096 --gpu-memory-utilization 0.70 --max-num-seqs 64
+  --port 8000 --max-model-len 131072 --gpu-memory-utilization 0.85 --max-num-seqs 64 \
+  --enable-prefix-caching --enable-chunked-prefill \
+  --hf-overrides '{"rope_scaling": {"factor": 4.0, "original_max_position_embeddings": 32768, "rope_type": "yarn", "type": "yarn"}, "max_position_embeddings": 131072}'
 
 PYTHONPATH=App/backend LLM_BACKEND=vllm LLM_MODEL=Sunbird/Sunflower-14B-FP8 \
   VLLM_BASE_URL=http://127.0.0.1:18011/v1 QDRANT_ENABLED=true \
