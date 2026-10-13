@@ -421,6 +421,140 @@
   color: var(--text-3);
 }
 
+/* The live chat with the taxpayer ------------------------------------------ */
+
+.st-chat {
+  display: grid;
+  gap: var(--ops-space-2);
+}
+
+.st-chat-thread {
+  margin: 0;
+  padding: var(--ops-space-2);
+  list-style: none;
+  display: grid;
+  gap: var(--ops-space-2);
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
+}
+
+/* The taxpayer on the leading side, the officer on the trailing side, as a
+   chat reads; the label above each message names the speaker either way. */
+.st-chat-msg {
+  max-width: min(85%, 560px);
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-hairline);
+  background: var(--ops-panel);
+}
+
+.st-chat-msg.is-officer {
+  justify-self: end;
+  background: var(--ops-info-fill);
+  border-color: var(--ops-info-line);
+}
+
+.st-chat-msg p {
+  margin: 0;
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.st-chat-localized {
+  margin-top: var(--ops-space-2) !important;
+  color: var(--text-2) !important;
+}
+
+.st-chat-end {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  font-size: var(--ops-text-xs);
+  color: var(--text-2);
+}
+
+.st-chat-end::before,
+.st-chat-end::after {
+  content: "";
+  flex: 1 1 16px;
+  height: 1px;
+  background: var(--ops-hairline);
+}
+
+.st-chat-rating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ops-space-2);
+  margin: 0;
+  padding: var(--ops-space-2) var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-hairline);
+  font-size: var(--ops-text-sm);
+  color: var(--text-1);
+}
+
+.st-chat-rating.is-low {
+  background: var(--ops-warn-fill);
+  border-color: var(--ops-warn-line);
+}
+
+.st-chat-rating-face {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.st-chat-rating-comment {
+  flex-basis: 100%;
+  color: var(--text-2);
+}
+
+.st-end-chat {
+  display: grid;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-3);
+  border-radius: var(--ops-radius-sm);
+  border: 1px solid var(--ops-warn-line);
+  background: var(--ops-warn-fill);
+}
+
+.st-end-chat-lead {
+  margin: 0;
+  font-size: var(--ops-text-sm);
+  color: var(--text-1);
+}
+
+.st-end-chat-outcome {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ops-space-4);
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: var(--ops-text-sm);
+  color: var(--text-1);
+}
+
+.st-end-chat-outcome legend {
+  padding: 0;
+  margin-bottom: var(--ops-space-1);
+  font-size: var(--ops-text-xs);
+  color: var(--text-2);
+}
+
+.st-end-chat-outcome label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-1);
+  min-height: 32px;
+}
+
 /* Composer ----------------------------------------------------------------- */
 
 .st-composer {

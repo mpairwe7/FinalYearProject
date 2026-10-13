@@ -51,6 +51,10 @@ export const queryKeys = {
     aiChat: (days: number, pattern: string, topic: string, locale: string, withComment: boolean, limit: number) =>
       ['quality', 'aiChat', { days, pattern, topic, locale, withComment, limit }] as const,
     aiChatTimeline: (conversationId: string) => ['quality', 'aiChatTimeline', conversationId] as const,
+    ratings: (source: string, days: number, score: number | null, officer: string, status: string, limit: number) =>
+      ['quality', 'ratings', { source, days, score, officer, status, limit }] as const,
+    /** A case opened from the audit (read once: each read is recorded). */
+    ticket: (id: string) => ['quality', 'ticket', id] as const,
   },
   speech: {
     all: () => ['speech'] as const,

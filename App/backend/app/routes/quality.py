@@ -1,8 +1,8 @@
 """Service-quality audit routes for administrators and auditors (``/v1/admin/quality/*``).
 
 Read-only views over what taxpayers said about the service: the AI's chat
-answers today (``quality_audit``), and officer chats and calls as those
-ratings land (docs/plans/admin-service-quality-audit-plan.md). Officers do not
+answers (``quality_audit``) and the satisfaction ratings of officer chats and
+calls (``service_ratings``; docs/plans/admin-service-quality-audit-plan.md). Officers do not
 read these: auditing the service is not the job of the people giving it.
 
 Every route here is a staff read of taxpayer text (already redacted when it
@@ -45,10 +45,14 @@ def quality_summary(request: Request, days: int = _DAYS) -> dict[str, Any]:
     """Headline figures for the audit overview: one block per stream audited so far."""
     from .. import quality_audit
 
+    from .. import service_ratings
+
     ctx = _audit_reader(request)
+    tenant = _tenant_scope(ctx)
     return {
         "period_days": days,
-        "ai_chat": quality_audit.ai_chat_summary(days, tenant_id=_tenant_scope(ctx)),
+        "ai_chat": quality_audit.ai_chat_summary(days, tenant_id=tenant),
+        "officer_chat": service_ratings.headline("chat_officer_csat", days, tenant_id=tenant),
     }
 
 
@@ -98,3 +102,38 @@ def quality_ai_chat_timeline(
         raise HTTPException(status_code=404, detail="conversation not found")
     _audit_staff_action(ctx, "staff.conversation_viewed", {"conversation_id": conversation_id})
     return timeline
+
+
+#: The rating streams ``/ratings`` reads (``service_ratings.SOURCES``).
+_SOURCE_PATTERN = r"^(chat_officer_csat|call_officer_csat|call_ai_review_end|call_ai_review_transfer)$"
+
+
+@router.get("/v1/admin/quality/ratings")
+def quality_ratings(
+    request: Request,
+    source: str = Query("chat_officer_csat", pattern=_SOURCE_PATTERN),
+    days: int = _DAYS,
+    score: int | None = Query(None, ge=1, le=5),
+    officer: str = Query("", max_length=128),
+    status: str = Query("", pattern=r"^(|answered|skipped|no_answer)$"),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10_000),
+) -> dict[str, Any]:
+    """Satisfaction ratings of one stream: figures, per officer, per week, and the ratings, lowest first.
+
+    The list never names the taxpayer; each rating names the ticket or call it
+    rates, which the drill-down opens through its own audited read.
+    """
+    from .. import service_ratings
+
+    ctx = _audit_reader(request)
+    return service_ratings.audit(
+        source,
+        days,
+        tenant_id=_tenant_scope(ctx),
+        score=score,
+        officer_id=officer,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )

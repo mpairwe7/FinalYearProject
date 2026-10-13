@@ -106,6 +106,7 @@ All metrics are emitted by the `MetricsStore` singleton in
 | `escalation_required_total`  | counter   | --           | Escalation flagged in middleware         |
 | `escalation_requested_total` | counter   | `outcome`    | **Taxpayer-initiated** handoff (`POST /v1/escalate`): `created`, `reused`, `queue_disabled`, `failed` |
 | `feedback_total`             | counter   | `rating`     | User feedback (`up` / `down`)           |
+| `service_rating_total`       | counter   | `source`, `sentiment` | Satisfaction ratings of officer service (`source`: `chat_officer_csat`; `sentiment`: `positive`, `neutral`, `negative`, `skipped`) |
 | `classification_errors_total`| counter   | --           | Classifier failures during chat         |
 
 ### Answer-integrity counters

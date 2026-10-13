@@ -9,7 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-import { clearChatStore, mockBackend, openSettings, seedConsent } from "./helpers";
+import { clearChatStore, mockBackend, openSettings, seedConsent, sendMessage } from "./helpers";
 
 const WCAG_22_AA_TAGS = [
   "wcag2a",
@@ -31,8 +31,12 @@ function violationSummary(violations: Awaited<ReturnType<AxeBuilder["analyze"]>>
     .join("\n");
 }
 
-async function expectNoSeriousOrCritical(page: Page, surface: string) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA_TAGS).analyze();
+async function expectNoSeriousOrCritical(page: Page, surface: string, include: string[] = []) {
+  let builder = new AxeBuilder({
+    page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"],
+  }).withTags(WCAG_22_AA_TAGS);
+  for (const selector of include) builder = builder.include(selector);
+  const results = await builder.analyze();
   const violations = results.violations.filter(
     (violation) => violation.impact === "critical" || violation.impact === "serious",
   );
@@ -97,12 +101,47 @@ function qualityFixture() {
   return { summary, page, timeline };
 }
 
+/** Officer-chat ratings, as GET /v1/admin/quality/ratings returns them: one low, one high. */
+function ratingsFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const rating = (id: string, score: number, officer: [string, string], extra: Record<string, unknown> = {}) => ({
+    id, source: "chat_officer_csat", channel: "chat", subject: "officer", status: "answered", score,
+    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "", ticket_id: `tkt-${id}`,
+    call_id: "", conversation_id: `conv-${id}`, officer_id: officer[0], officer_name: officer[1], team: "domestic_taxes",
+    topic: "vat", locale: "en", created_at: now - 900, answered_at: now - 600, ...extra,
+  });
+  return {
+    source: "chat_officer_csat",
+    period_days: 30,
+    truncated: false,
+    summary: {
+      asked: 3, answered: 2, skipped: 1, no_answer: 0, pending: 0, response_rate: 66.7, average: 3.5, csat_pct: 50, low: 1,
+      distribution: { "1": 0, "2": 1, "3": 0, "4": 0, "5": 1 },
+      sentiment: { positive: 1, neutral: 0, negative: 1, unclear: 0 },
+      by_officer: [
+        { officer_id: "u-okello", officer_name: "Officer Okello", handled: 2, rated: 1, average: 2, csat_pct: 0, low: 1 },
+        { officer_id: "u-nakato", officer_name: "Officer Nakato", handled: 1, rated: 1, average: 5, csat_pct: 100, low: 0 },
+      ],
+      by_week: [],
+    },
+    previous: { asked: 2, average: 4, csat_pct: 50 },
+    total: 2,
+    limit: 25,
+    offset: 0,
+    ratings: [
+      rating("low", 2, ["u-okello", "Officer Okello"], { comment: "Took too long to answer." }),
+      rating("high", 5, ["u-nakato", "Officer Nakato"]),
+    ],
+  };
+}
+
 async function stubQualityAudit(page: Page) {
   const q = qualityFixture();
   await page.route("**/api/v1/admin/quality/ai-chat/*", (route) => route.fulfill({ json: q.timeline }));
   await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
     route.fulfill({ json: { summary: q.summary, page: q.page } }),
   );
+  await page.route("**/api/v1/admin/quality/ratings?**", (route) => route.fulfill({ json: ratingsFixture() }));
 }
 
 /**
@@ -329,6 +368,7 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
       ura_admin: [
         ["/admin", "Operations overview"],
         ["/admin/quality", "Service quality audit"],
+        ["/admin/quality?tab=officer-chat", "Service quality audit"],
         ["/admin/flags", "Feature flags"],
         ["/admin/overrides", "Answer overrides"],
         ["/admin/outbox", "Notification outbox"],
@@ -352,6 +392,48 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
         }
       }
     }
+  });
+});
+
+test.describe("live chat with an officer", () => {
+  test("the officer's messages, the notices and the rating dialog pass WCAG 2.2 AA, and the faces are keyboard-operable", async ({ page }) => {
+    const ticket = "abc12345-6789-4def-8123-456789abcdef";
+    let phase: "officer" | "ended" = "officer";
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page, { escalate: true, reply: "This requires human review." });
+    await page.route("**/api/v1/escalate", (route) =>
+      route.fulfill({ json: { ok: true, ticket_id: ticket, status: "open", message: "A URA officer has been asked to look at this." } }),
+    );
+    await page.route(`**/api/v1/escalate/${ticket}/messages**`, (route) =>
+      route.fulfill({
+        json: {
+          ticket_id: ticket,
+          chat_state: phase,
+          officer_name: "Officer Nakato",
+          messages: [{ seq: 1, sender: "officer", text: "Which period?", officer_name: "Officer Nakato", created_at: Date.now() / 1000 }],
+          last_seq: 1,
+          csat: { requested: phase === "ended", submitted: false },
+        },
+      }),
+    );
+    await page.route(`**/api/v1/escalate/${ticket}/csat`, (route) => route.fulfill({ json: { ok: true, status: "answered" } }));
+    await page.goto("/");
+    await sendMessage(page, "I was assessed VAT twice");
+    await page.getByTestId("handoff-request").click();
+    await expect(page.locator(".message-row-officer")).toBeVisible({ timeout: 15_000 });
+    // Scoped to what the live chat adds: the officer's message, the notice and
+    // the banner. The rest of the chat page has its own route audit.
+    await expectNoSeriousOrCritical(page, "chat with an officer", [".message-row-officer", ".chat-notice", ".chat-case-banner"]);
+
+    phase = "ended";
+    const dialog = page.getByRole("dialog", { name: "How was your chat with Officer Nakato?" });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    // Focus starts on the scale; the arrows choose without a pointer.
+    await expect(dialog.getByRole("radio", { name: "3 of 5, Neutral" })).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog.getByRole("radio", { name: "4 of 5, Satisfied" })).toBeChecked();
+    await expectNoSeriousOrCritical(page, "officer chat rating dialog", [".service-rating-dialog"]);
   });
 });
 

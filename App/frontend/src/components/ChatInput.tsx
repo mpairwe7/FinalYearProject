@@ -70,6 +70,8 @@ interface ChatInputProps {
   audioLevels?: number[];
   /** Voice mode sends the turn by itself when the speaker pauses (Settings → Voice). */
   autoSend?: boolean;
+  /** Overrides the default placeholder (a live chat with an officer: "Message the officer…"). */
+  placeholder?: string;
 }
 
 /** Inline waveform — 5 bars responsive to live microphone levels when available */
@@ -140,6 +142,7 @@ function ChatInputInner({
   onStop,
   audioLevels,
   autoSend = false,
+  placeholder,
 }: ChatInputProps) {
   const t = useTranslation();
   const {
@@ -465,7 +468,7 @@ function ChatInputInner({
           id="composer-input"
           aria-label={t('composer.label')}
           aria-multiline="true"
-          placeholder={voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder')}
+          placeholder={placeholder ?? (voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder'))}
           value={message}
           rows={1}
           enterKeyHint="send"

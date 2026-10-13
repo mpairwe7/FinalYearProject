@@ -709,10 +709,39 @@ def init_db() -> None:
         ("default", "URA Default Tenant", time.time()),
     )
     conn.commit()
+    init_module_schemas()
     logger.info("Analytics database initialised at %s", _DB_PATH)
 
     # Run cleanup on startup
     cleanup_expired_data()
+
+
+def init_module_schemas() -> None:
+    """Tables owned by their own modules (officer chat threads, service ratings).
+
+    Portable DDL through :func:`execute_script`, so both backends call this
+    from their ``init_db``.
+    """
+    try:
+        from . import officer_chat, service_ratings
+
+        officer_chat.init_schema()
+        service_ratings.init_schema()
+    except Exception:
+        logger.exception("officer chat / service rating schema init failed")
+
+
+def module_retention(now: float | None = None) -> dict[str, int]:
+    """Retention for module-owned tables, after the ticket purge has run."""
+    deleted: dict[str, int] = {}
+    try:
+        from . import officer_chat, service_ratings
+
+        deleted["ticket_messages"] = officer_chat.purge_orphans()
+        deleted["service_ratings"] = service_ratings.purge_expired(_FEEDBACK_TTL_DAYS, now=now)
+    except Exception:
+        logger.exception("TTL cleanup failed for officer chat threads / service ratings")
+    return deleted
 
 
 # ---------------------------------------------------------------------------
@@ -809,6 +838,7 @@ def cleanup_expired_data() -> dict[str, int]:
     except Exception:
         conn.rollback()
 
+    deleted.update(module_retention(now))
     return deleted
 
 
@@ -2965,6 +2995,20 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
             f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608 — identifiers are fixed; values are bound parameters
             workflow_params,
         )
+    # The officer chats on the subject's tickets, and the ratings of their cases.
+    ticket_messages: list[dict[str, Any]] = []
+    service_ratings_rows: list[dict[str, Any]] = []
+    if external_id:
+        try:
+            from . import officer_chat, service_ratings
+
+            # By the subject's id, not the ``tickets`` above: those are read
+            # only while the subject still has logged conversations.
+            ticket_ids = [str(r["id"]) for r in query_all("SELECT id FROM tickets WHERE user_id = ?", (external_id,))]
+            ticket_messages = officer_chat.export_for_tickets(ticket_ids)
+            service_ratings_rows = service_ratings.export_for_user(external_id)
+        except Exception:
+            logger.exception("export_user_data: officer chat / service ratings")
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
@@ -2975,6 +3019,8 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         "sessions": sessions,
         "feedback": feedback,
         "workflow_sessions": workflow_sessions,
+        "ticket_messages": ticket_messages,
+        "service_ratings": service_ratings_rows,
         "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
@@ -3008,6 +3054,15 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
         # Delete by user_id AND by conversation_id: the first reaches
         # tickets whose conversation has already been purged, the second
         # reaches tickets raised before user_id was stamped on the row.
+        try:
+            from . import officer_chat, service_ratings
+
+            ticket_ids = [r["id"] for r in query_all("SELECT id FROM tickets WHERE user_id = ?", (external_id,))]
+            counts["ticket_messages"] = officer_chat.delete_for_tickets(ticket_ids)
+            counts["service_ratings"] = service_ratings.delete_for_user(external_id)
+        except Exception:
+            logger.exception("delete_user_cascade: officer chat threads / service ratings")
+            counts["ticket_messages"] = -1
         try:
             deleted = execute("DELETE FROM tickets WHERE user_id = ?", (external_id,))
             if conv_ids:

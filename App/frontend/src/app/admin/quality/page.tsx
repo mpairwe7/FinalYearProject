@@ -7,12 +7,16 @@
  * it; administrators no longer handle taxpayers live (docs/plans/
  * admin-service-quality-audit-plan.md), so this page is where their work is.
  *
- * This first section audits the AI's chat answers from the taxpayers' 👍/👎.
- * A rating names the answer it rates, so the page can read each conversation's
- * ratings in order: the shape "✓ ✓ ✕" is a conversation that went wrong at its
- * third answer, after two good ones, and the timeline opens at that answer.
+ * Two tabs so far, one per stream audited:
  *
- * Reads only. `?conversation=` makes an opened conversation a link.
+ * - **AI answers · chat** — the taxpayers' 👍/👎. A rating names the answer it
+ *   rates, so the page reads each conversation's ratings in order: the shape
+ *   "✓ ✓ ✕" is a conversation that went wrong at its third answer, after two
+ *   good ones, and the timeline opens at that answer.
+ * - **Officer chats** — the 5-level rating a taxpayer gives when an officer
+ *   ends a live chat, per officer, with the chat itself one click away.
+ *
+ * Reads only. `?tab=`, `?conversation=` and `?ticket=` make a view a link.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
@@ -26,6 +30,7 @@ import { patternLabel, retrievalModeLabel } from "../../../components/charts/cha
 import { PATTERN_ORDER, PatternBreakdown } from "../../../components/quality/PatternBreakdown";
 import { RatingStrip } from "../../../components/quality/RatingStrip";
 import { ConversationTimeline } from "../../../components/quality/ConversationTimeline";
+import { RatingsPanel } from "../../../components/quality/RatingsPanel";
 import { useAiChatAudit } from "../../../hooks/useQualityAudit";
 import { useSkeletonVisible } from "../../../hooks/useLoadingPhase";
 import { callLanguageName } from "../../../lib/callLanguage";
@@ -40,6 +45,34 @@ const PositionChart = dynamic(() => import("../../../components/quality/Position
 });
 
 const PAGE = 25;
+
+const TABS = [
+  { id: "ai-chat", label: "AI answers · chat", heading: "AI answers in chat" },
+  { id: "officer-chat", label: "Officer chats", heading: "Officer chats" },
+] as const;
+type QualityTab = (typeof TABS)[number]["id"];
+/** The URL parameter each tab owns, cleared when another tab is chosen. */
+const TAB_PARAM: Record<QualityTab, string> = { "ai-chat": "conversation", "officer-chat": "ticket" };
+
+function readTab(): QualityTab {
+  if (typeof window === "undefined") return "ai-chat";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return TABS.some((t) => t.id === tab) ? (tab as QualityTab) : "ai-chat";
+}
+
+function writeTab(tab: QualityTab): void {
+  if (typeof window === "undefined") return;
+  const params = new URLSearchParams(window.location.search);
+  if (tab === "ai-chat") params.delete("tab");
+  else params.set("tab", tab);
+  for (const other of TABS) if (other.id !== tab) params.delete(TAB_PARAM[other.id]);
+  const qs = params.toString();
+  try {
+    window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  } catch {
+    /* jsdom without a writable Location */
+  }
+}
 
 function readConversation(): string | null {
   if (typeof window === "undefined") return null;
@@ -313,17 +346,55 @@ export function AiChatAudit({ days, onUpdated }: { days: number; onUpdated?: (at
   );
 }
 
+function QualityTabs({ tab, onChange }: { tab: QualityTab; onChange: (tab: QualityTab) => void }) {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+    const jump = event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
+    if (!step && jump == null) return;
+    event.preventDefault();
+    const next = jump ?? (index + step + TABS.length) % TABS.length;
+    onChange(TABS[next].id);
+    document.getElementById(`qa-tab-${TABS[next].id}`)?.focus();
+  };
+  return (
+    <div className="qa-tabs" role="tablist" aria-label="What to audit">
+      {TABS.map((t, index) => (
+        <button
+          key={t.id}
+          id={`qa-tab-${t.id}`}
+          type="button"
+          role="tab"
+          aria-selected={tab === t.id}
+          aria-controls={`qa-panel-${t.id}`}
+          tabIndex={tab === t.id ? 0 : -1}
+          className={`qa-tab${tab === t.id ? " is-active" : ""}`}
+          onClick={() => onChange(t.id)}
+          onKeyDown={(event) => onKeyDown(event, index)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function QualityAudit() {
   const [days, setDays] = useState(30);
   const [updatedAt, setUpdatedAt] = useState(0);
+  const [tab, setTab] = useState<QualityTab>(() => readTab());
   const queryClient = useQueryClient();
   const fetching = useIsFetching({ queryKey: queryKeys.quality.all() }) > 0;
+  const chooseTab = useCallback((next: QualityTab) => {
+    writeTab(next);
+    setTab(next);
+  }, []);
+  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   return (
     <OpsPage
       eyebrow="Audit"
       title="Service quality audit"
-      description={`What taxpayers said about the answers they got in the last ${days} days. Read-only: it shows where the service went wrong so it can be put right.`}
+      description={`What taxpayers said about the service they got in the last ${days} days — the assistant's answers and the officers' chats. Read-only: it shows where the service went wrong so it can be put right.`}
       actions={
         <>
           <Freshness
@@ -335,8 +406,15 @@ function QualityAudit() {
         </>
       }
     >
-      <h2 className="qa-section-title">AI answers in chat</h2>
-      <AiChatAudit days={days} onUpdated={setUpdatedAt} />
+      <QualityTabs tab={tab} onChange={chooseTab} />
+      <div id={`qa-panel-${tab}`} role="tabpanel" aria-labelledby={`qa-tab-${tab}`} className="qa-tabpanel">
+        <h2 className="qa-section-title">{current.heading}</h2>
+        {tab === "officer-chat" ? (
+          <RatingsPanel source="chat_officer_csat" days={days} onUpdated={setUpdatedAt} />
+        ) : (
+          <AiChatAudit days={days} onUpdated={setUpdatedAt} />
+        )}
+      </div>
     </OpsPage>
   );
 }

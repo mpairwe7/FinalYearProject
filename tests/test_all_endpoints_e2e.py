@@ -89,6 +89,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/escalate"),
     ("GET", "/v1/escalate/{ticket_id}"),
     ("POST", "/v1/escalate/{ticket_id}/reply"),
+    ("GET", "/v1/escalate/{ticket_id}/messages"),
+    ("POST", "/v1/escalate/{ticket_id}/csat"),
     # --- Classification + knowledge (public) ---
     ("POST", "/classify"),
     ("POST", "/classify/batch"),
@@ -121,6 +123,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/tickets/{ticket_id}"),
     ("PATCH", "/v1/admin/tickets/{ticket_id}"),
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"),
+    ("POST", "/v1/admin/tickets/{ticket_id}/end-chat"),
     ("GET", "/v1/admin/flags"),
     ("PATCH", "/v1/admin/flags/{name}"),
     ("DELETE", "/v1/admin/flags/{name}"),
@@ -138,6 +141,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/quality/summary"),
     ("GET", "/v1/admin/quality/ai-chat"),
     ("GET", "/v1/admin/quality/ai-chat/{conversation_id}"),
+    ("GET", "/v1/admin/quality/ratings"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -215,7 +219,9 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/chat"): "this:test_chat_happy_path + test_api_endpoints.ChatEndpoints",
     ("POST", "/v1/escalate"): "this:test_answer_integrity_integration + App/backend/tests/test_taxpayer_escalation.py",
     ("GET", "/v1/escalate/{ticket_id}"): "App/backend/tests/test_taxpayer_escalation.py",
-    ("POST", "/v1/escalate/{ticket_id}/reply"): "App/backend/tests/test_taxpayer_escalation.py",
+    ("POST", "/v1/escalate/{ticket_id}/reply"): "App/backend/tests/test_taxpayer_escalation.py + App/backend/tests/test_officer_chat.py",
+    ("GET", "/v1/escalate/{ticket_id}/messages"): "App/backend/tests/test_officer_chat.py:TaxpayerThreadTests",
+    ("POST", "/v1/escalate/{ticket_id}/csat"): "App/backend/tests/test_officer_chat.py:ChatRatingTests",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/classify/batch"): "test_api_endpoints.ClassificationKnowledge",
@@ -244,6 +250,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status",
     ("PATCH", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status + test_patch_ticket_noop_400",
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"): "test_api_endpoints.AdminEndpoints.test_presence_heartbeats_the_viewer",
+    ("POST", "/v1/admin/tickets/{ticket_id}/end-chat"): "App/backend/tests/test_officer_chat.py:EndChatTests",
     ("GET", "/v1/admin/flags"): "test_api_endpoints.AdminEndpoints.test_flags_list_includes_protection",
     ("PATCH", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_admin_can_set_an_ephemeral_flag",
     ("DELETE", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_clearing_an_override_restores_the_default",
@@ -280,6 +287,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/quality/summary"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
     ("GET", "/v1/admin/quality/ai-chat"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
     ("GET", "/v1/admin/quality/ai-chat/{conversation_id}"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
+    ("GET", "/v1/admin/quality/ratings"): "App/backend/tests/test_service_ratings.py:RatingsRouteTests",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("PUT", "/v1/me/profile"): "test_me_endpoints",
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -461,10 +469,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (100 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (104 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 100, f"expected 100 HTTP endpoints, found {len(http)}"
+    assert len(http) == 104, f"expected 104 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

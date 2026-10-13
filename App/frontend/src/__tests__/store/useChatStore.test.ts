@@ -75,6 +75,33 @@ describe("useChatStore", () => {
     expect(store().locale).toBe("lg");
   });
 
+  it("a reload mid-case resumes the case, its live chat and the answer ids it rated", () => {
+    store().ensureActiveConversationId();
+    store().addTurns([
+      createTurn("user", "Why was I assessed twice?"),
+      createTurn("assistant", "Let me check.", { serverTurnId: "turn-1" }),
+      { ...createTurn("assistant", "Officer Nakato has joined."), notice: "officer_joined", officerName: "Officer Nakato" },
+    ]);
+    store().setActiveTicketId("ticket-1");
+    store().setOfficerChat({ ticketId: "ticket-1", lastSeq: 4, state: "officer", officerName: "Officer Nakato" });
+    useChatStore.setState({ activeTicketId: null, officerChat: null, chat: [] });
+
+    store().hydratePersisted();
+    expect(store().activeTicketId).toBe("ticket-1");
+    expect(store().officerChat).toEqual({ ticketId: "ticket-1", lastSeq: 4, state: "officer", officerName: "Officer Nakato" });
+    expect(store().chat.find((t) => t.content === "Let me check.")?.serverTurnId).toBe("turn-1");
+    expect(store().chat.find((t) => t.notice)).toMatchObject({ notice: "officer_joined", officerName: "Officer Nakato" });
+  });
+
+  it("a new conversation starts with no case and no live chat", () => {
+    store().ensureActiveConversationId();
+    store().addTurns([createTurn("user", "Hello")]);
+    store().setActiveTicketId("ticket-2");
+    store().setOfficerChat({ ticketId: "ticket-2", lastSeq: 1, state: "waiting" });
+    store().createNewSession();
+    expect(store().activeTicketId).toBeNull();
+    expect(store().officerChat).toBeNull();
+  });
   it("setSpeechState transitions correctly", () => {
     expect(store().speechState).toBe("idle");
     store().setSpeechState("listening");

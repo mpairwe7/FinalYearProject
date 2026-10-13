@@ -1,7 +1,12 @@
 "use client";
 
 /**
- * Reply pair + claim/resolve actions.
+ * Reply pair + claim/resolve actions, and ending a live chat.
+ *
+ * On a text case the reply is a message in a live chat. Ending the chat —
+ * "End chat", "Send & end chat", or resolving/closing from the status control,
+ * which the server treats the same — tells the taxpayer, asks them to rate the
+ * chat and hands them back to the assistant, so it asks for a confirmation.
  *
  * `officer_reply` and `staff_note` stay separate all the way to the
  * submit call: one reaches the taxpayer and one does not. The parent
@@ -12,6 +17,7 @@ import React, { useState } from "react";
 import type { TicketDetail } from "../../services/analyticsApi";
 import type { TicketPatch } from "../../services/analyticsApi";
 import { analyticsApi } from "../../services/analyticsApi";
+import { useEndChat } from "../../hooks/useAnalyticsDashboard";
 import { TICKET_MACROS } from "../../lib/ticketMacros";
 import {
   officerHandle,
@@ -53,6 +59,11 @@ export function TicketComposer({
     (viewer) => viewer.toLowerCase() !== handle.toLowerCase(),
   );
   const isVernacular = Boolean(ticket.locale && ticket.locale !== "en");
+  const endChat = useEndChat();
+  const [confirmEnd, setConfirmEnd] = useState(false);
+  const [outcome, setOutcome] = useState<"resolved" | "wontfix">("resolved");
+  const isChat = ticket.modality !== "voice";
+  const chatLive = isChat && ticket.chat?.state !== "ended" && ticket.status !== "resolved" && ticket.status !== "wontfix";
 
   const generatePreview = async () => {
     if (!reply.trim() || !isVernacular) return;
@@ -96,6 +107,28 @@ export function TicketComposer({
     setPreviewText("");
     setShowPreview(false);
     setFiguresSurvived(null);
+  };
+
+  const confirmEndChat = () => {
+    endChat.mutate(
+      {
+        id: ticket.id,
+        body: {
+          outcome,
+          closing_message: reply.trim() || undefined,
+          closing_message_localized: reply.trim() && previewText.trim() ? previewText.trim() : undefined,
+        },
+      },
+      {
+        onSuccess: () => {
+          setConfirmEnd(false);
+          setReply("");
+          setPreviewText("");
+          setShowPreview(false);
+          setFiguresSurvived(null);
+        },
+      },
+    );
   };
 
   return (
@@ -254,8 +287,20 @@ export function TicketComposer({
           disabled={pending || locked || (!reply.trim() && !note.trim())}
           onClick={() => sendReply(true)}
         >
-          Send and resolve
+          {chatLive ? "Send & end chat" : "Send and resolve"}
         </button>
+        {chatLive ? (
+          <button
+            type="button"
+            className="ops-btn"
+            disabled={pending || locked || endChat.isPending}
+            aria-expanded={confirmEnd}
+            aria-controls={`st-end-chat-${ticket.id}`}
+            onClick={() => setConfirmEnd((open) => !open)}
+          >
+            End chat
+          </button>
+        ) : null}
         <button
           type="button"
           className="ops-btn"
@@ -294,6 +339,52 @@ export function TicketComposer({
         ) : null}
       </div>
 
+      {confirmEnd && chatLive ? (
+        <div className="st-end-chat" id={`st-end-chat-${ticket.id}`} role="group" aria-label="End the chat">
+          <p className="st-end-chat-lead">
+            End this chat? The taxpayer is told it has ended, asked to rate it, and handed back to the
+            assistant.
+            {reply.trim() ? " Your reply above is sent as the closing message." : " Write a closing message above if you want to say goodbye."}
+          </p>
+          <fieldset className="st-end-chat-outcome">
+            <legend>How did it end?</legend>
+            <label>
+              <input
+                type="radio"
+                name={`st-outcome-${ticket.id}`}
+                value="resolved"
+                checked={outcome === "resolved"}
+                onChange={() => setOutcome("resolved")}
+              />
+              Resolved
+            </label>
+            <label>
+              <input
+                type="radio"
+                name={`st-outcome-${ticket.id}`}
+                value="wontfix"
+                checked={outcome === "wontfix"}
+                onChange={() => setOutcome("wontfix")}
+              />
+              Closed without resolution
+            </label>
+          </fieldset>
+          <div className="st-actions">
+            <button type="button" className="ops-btn is-primary" disabled={endChat.isPending} onClick={confirmEndChat}>
+              {endChat.isPending ? "Ending…" : "End chat"}
+            </button>
+            <button type="button" className="ops-btn" onClick={() => setConfirmEnd(false)} disabled={endChat.isPending}>
+              Keep chatting
+            </button>
+            {endChat.isError ? (
+              <span className="st-save-err" role="alert">
+                Could not end the chat — try again.
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {ticket.officer_reply ? (
         <div className="st-sent-block">
           <p className="st-sent">
@@ -310,7 +401,10 @@ export function TicketComposer({
       {ticket.staff_note ? <p className="st-note">{ticket.staff_note}</p> : null}
 
       <div className="st-status">
-        <span className="st-field-label">Status</span>
+        <span className="st-field-label">
+          Status
+          {chatLive ? <em>Resolving or closing a live chat ends it for the taxpayer.</em> : null}
+        </span>
         <div className="ops-segmented st-stepper" role="group" aria-label="Ticket status">
           {STATUSES.map((status) => (
             <button

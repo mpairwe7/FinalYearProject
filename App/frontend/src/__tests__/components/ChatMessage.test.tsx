@@ -180,6 +180,13 @@ describe("ChatMessage", () => {
     expect(screen.queryByRole("button", { name: "Helpful response" })).not.toBeInTheDocument();
   });
 
+  it("says an officer's message is from the officer, by name, not from the assistant", () => {
+    renderMsg({ ...assistantTurn, id: "o2", retrievalMode: "officer_reply", officerName: "Officer Nakato", content: "Which period?" });
+    expect(screen.getByText("URA officer · Officer Nakato")).toBeInTheDocument();
+    expect(screen.getByText("Officer Nakato replied")).toHaveClass("sr-only");
+    expect(screen.queryByText("Assistant replied")).not.toBeInTheDocument();
+  });
+
   it("shows Listen button for assistant messages", () => {
     renderMsg(assistantTurn);
     expect(screen.getByLabelText(/Listen in English/)).toBeInTheDocument();

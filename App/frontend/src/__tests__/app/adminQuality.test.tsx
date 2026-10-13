@@ -13,11 +13,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import QualityAuditPage from "../../app/admin/quality/page";
 import { positionReading } from "../../components/quality/PositionChart";
 import { ratingStripLabel } from "../../components/quality/RatingStrip";
+import { distributionReading } from "../../components/quality/SatisfactionDistribution";
 import {
   analyticsApi,
   type AiChatPage,
   type AiChatSummary,
   type AiChatTimeline,
+  type RatingsAudit,
+  type TicketDetail,
 } from "../../services/analyticsApi";
 
 vi.mock("../../components/StaffGuard", () => ({
@@ -98,6 +101,73 @@ const TIMELINE: AiChatTimeline = {
   ],
 };
 
+const RATINGS: RatingsAudit = {
+  source: "chat_officer_csat",
+  period_days: 30,
+  truncated: false,
+  summary: {
+    asked: 6,
+    answered: 4,
+    skipped: 1,
+    no_answer: 0,
+    pending: 1,
+    response_rate: 66.7,
+    average: 3.25,
+    csat_pct: 50,
+    low: 1,
+    distribution: { "1": 0, "2": 1, "3": 1, "4": 1, "5": 1 },
+    sentiment: { positive: 2, neutral: 1, negative: 1, unclear: 0 },
+    by_officer: [
+      { officer_id: "off-b", officer_name: "Officer Okello", handled: 3, rated: 2, average: 2.5, csat_pct: 0, low: 1 },
+      { officer_id: "off-a", officer_name: "Officer Nakato", handled: 3, rated: 2, average: 4.5, csat_pct: 100, low: 0 },
+    ],
+    by_week: [],
+  },
+  previous: { asked: 4, average: 4, csat_pct: 75 },
+  total: 2,
+  limit: 25,
+  offset: 0,
+  ratings: [
+    {
+      id: "r-low", source: "chat_officer_csat", channel: "chat", subject: "officer", status: "answered", score: 2,
+      sentiment: "negative", comment: "Took too long to answer.", ticket_id: "abc12345-0000", call_id: "",
+      conversation_id: "conv-x", officer_id: "off-b", officer_name: "Officer Okello", team: "domestic_taxes",
+      topic: "vat", locale: "en", created_at: NOW - 600, answered_at: NOW - 500,
+    },
+    {
+      id: "r-high", source: "chat_officer_csat", channel: "chat", subject: "officer", status: "answered", score: 5,
+      sentiment: "positive", comment: "", ticket_id: "def67890-0000", call_id: "", conversation_id: "conv-y",
+      officer_id: "off-a", officer_name: "Officer Nakato", team: "customs", topic: "", locale: "lg",
+      created_at: NOW - 400, answered_at: NOW - 300,
+    },
+  ],
+};
+
+const CASE: TicketDetail = {
+  id: "abc12345-0000",
+  status: "resolved",
+  priority: "normal",
+  reason: "VAT assessed twice",
+  team: "domestic_taxes",
+  created_at: NOW - 3600,
+  locale: "en",
+  modality: "text",
+  transcript: [],
+  messages: [
+    { seq: 1, sender: "officer", text: "Which period?", officer_name: "Officer Okello", created_at: NOW - 900 },
+    { seq: 2, sender: "taxpayer", text: "March 2026.", created_at: NOW - 800 },
+    { seq: 3, sender: "system", text: "chat_ended", created_at: NOW - 700 },
+  ],
+  chat: {
+    state: "ended",
+    officer_name: "Officer Okello",
+    ended_at: NOW - 700,
+    ended_by_name: "Officer Okello",
+    outcome: "resolved",
+    rating: { status: "answered", score: 2, comment: "Took too long to answer." },
+  },
+} as unknown as TicketDetail;
+
 function renderPage() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchInterval: false } } });
   return render(
@@ -173,6 +243,72 @@ describe("Service quality audit", () => {
   });
 });
 
+describe("Officer chats tab", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/quality?tab=officer-chat");
+    vi.spyOn(analyticsApi, "qualityAiChat").mockResolvedValue({ summary: SUMMARY, page: PAGE });
+    vi.spyOn(analyticsApi, "qualityRatings").mockResolvedValue(RATINGS);
+    vi.spyOn(analyticsApi, "ticket").mockResolvedValue(CASE);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("opens on the tab the link names, as a real tab", async () => {
+    renderPage();
+    const tab = screen.getByRole("tab", { name: "Officer chats" });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", tab.id);
+    fireEvent.keyDown(tab, { key: "ArrowLeft" });
+    expect(screen.getByRole("tab", { name: "AI answers · chat" })).toHaveAttribute("aria-selected", "true");
+    expect(window.location.search).not.toContain("tab=");
+  });
+
+  it("leads with the average, the satisfied share, the response rate and the low ratings", async () => {
+    renderPage();
+    const stats = await screen.findByLabelText("Officer chat satisfaction summary");
+    await waitFor(() => expect(within(stats).getByText("Average satisfaction")).toBeInTheDocument());
+    expect(stats.textContent).toContain("3.25/5");
+    expect(stats.textContent).toMatch(/down 0.75 from 4 in the period before/);
+    expect(stats.textContent).toContain("4 of 6 asked · 1 skipped · 1 not answered yet");
+    expect(stats.textContent).toContain("Low ratings (1 or 2)");
+  });
+
+  it("shows each level with its face and words, and the officers lowest first", async () => {
+    renderPage();
+    const levels = await screen.findByRole("list", { name: "How satisfied taxpayers were with their chat" });
+    expect(within(levels).getByText(/Very satisfied/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "By officer" })).toBeInTheDocument();
+    const names = screen.getAllByRole("button", { name: /^Officer (Okello|Nakato)$/ }).map((b) => b.textContent);
+    expect(names).toEqual(["Officer Okello", "Officer Nakato"]);
+  });
+
+  it("filters the ratings by officer and by level through the API", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Officer Okello" }));
+    await waitFor(() =>
+      expect(analyticsApi.qualityRatings).toHaveBeenLastCalledWith(expect.objectContaining({ officer: "off-b" })),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "2 of 5, Dissatisfied" }));
+    await waitFor(() =>
+      expect(analyticsApi.qualityRatings).toHaveBeenLastCalledWith(expect.objectContaining({ score: 2, officer: "off-b" })),
+    );
+  });
+
+  it("opens a rated chat read-only, with how it ended and how it was rated", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /2\/5 · Dissatisfied/ }));
+    const chat = await screen.findByRole("article", { name: "Officer chat" });
+    await waitFor(() => expect(within(chat).getByText("March 2026.")).toBeInTheDocument());
+    expect(within(chat).getByText(/Chat ended by Officer Okello · resolved/)).toBeInTheDocument();
+    expect(within(chat).getByText(/Taxpayer rated the chat 2\/5 · Dissatisfied/)).toBeInTheDocument();
+    expect(within(chat).queryByRole("textbox")).toBeNull();
+    expect(window.location.search).toContain("ticket=abc12345-0000");
+    expect(analyticsApi.ticket).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("audit readings", () => {
   it("compares first answers with follow-ups in words", () => {
     expect(positionReading(SUMMARY.by_position)).toMatch(
@@ -182,6 +318,11 @@ describe("audit readings", () => {
 
   it("says when there are no follow-ups to compare", () => {
     expect(positionReading([{ position: "1", rated: 3, helpful: 2, helpful_pct: 66.7 }])).toMatch(/Not enough follow-up/);
+  });
+
+  it("reads the satisfaction levels out in words", () => {
+    expect(distributionReading(RATINGS.summary)).toBe("2 of 4 rated were satisfied or very satisfied; 1 (25%) were dissatisfied — enough to read each one.");
+    expect(distributionReading({ ...RATINGS.summary, distribution: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 } })).toMatch(/Nothing has been rated/);
   });
 
   it("reads a rating strip out in order", () => {
