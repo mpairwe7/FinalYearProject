@@ -64,7 +64,7 @@ class DeskTestCase(unittest.IsolatedAsyncioTestCase):
 
 
 class ClaimRouteRoleTests(unittest.TestCase):
-    """The route decides who is a supervisor: the role on the token, nothing the client sends."""
+    """The role on the token decides who works calls: officers only, never an administrator."""
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -74,16 +74,19 @@ class ClaimRouteRoleTests(unittest.TestCase):
         init_receptionist_schema()
         cls.client = TestClient(app)
 
-    def test_only_an_admin_may_step_into_a_call_the_ai_is_handling(self):
+    def test_officers_take_calls_and_administrators_do_not(self):
         call_id = f"call_role_{uuid.uuid4().hex[:8]}"
         create_call(call_id, conversation_id=f"conv_{call_id}")
         claim = AsyncMock(return_value={"claimed": True})
         with patch.object(desk, "claim", claim):
-            for role, supervisor in (("ura_staff", False), ("ura_admin", True)):
-                token = make_dev_token(f"{role}_claim", role=role)
-                r = self.client.post(f"/v1/admin/calls/{call_id}/claim", headers={"Authorization": f"Bearer {token}"})
-                self.assertEqual(r.status_code, 200, r.text)
-                self.assertIs(claim.call_args.kwargs["is_supervisor"], supervisor)
+            officer = make_dev_token("officer_claim", role="ura_staff")
+            r = self.client.post(f"/v1/admin/calls/{call_id}/claim", headers={"Authorization": f"Bearer {officer}"})
+            self.assertEqual(r.status_code, 200, r.text)
+            claim.reset_mock()
+            admin = make_dev_token("admin_claim", role="ura_admin")
+            r = self.client.post(f"/v1/admin/calls/{call_id}/claim", headers={"Authorization": f"Bearer {admin}"})
+            self.assertEqual(r.status_code, 403, r.text)
+            claim.assert_not_awaited()
 
 
 class ClaimTests(DeskTestCase):
@@ -123,8 +126,8 @@ class ClaimTests(DeskTestCase):
         await desk.release(self.call_id, "okello")
         self.assertEqual(self.lobby_events("call.unclaimed"), [{"call_id": self.call_id, "reason": "released"}])
 
-    async def test_an_officer_cannot_take_a_call_the_ai_is_handling(self):
-        """Officers take the calls the AI hands over; stepping in is a supervisor's call."""
+    async def test_nobody_takes_a_call_the_ai_is_handling(self):
+        """Officers take the calls the AI hands over; nobody steps into one it is still handling."""
         self.room.state.mode = "ai"
         with patch.object(flags, "is_enabled", side_effect=queue_on), self.assertRaises(desk.DeskError) as err:
             await desk.claim(self.call_id, "okello")
@@ -132,24 +135,6 @@ class ClaimTests(DeskTestCase):
         self.assertEqual(self.room.state.mode, "ai")
         self.assertEqual(self.lobby_events("call.transfer_requested"), [])
         self.assertEqual(get_call(self.call_id)["claimed_by"] or "", "")
-
-    async def test_taking_over_from_the_ai_goes_through_the_queue_and_back(self):
-        self.room.state.mode = "ai"
-        with patch.object(flags, "is_enabled", side_effect=queue_on):
-            await desk.claim(self.call_id, "okello", is_supervisor=True)
-        self.assertEqual((self.room.state.mode, self.room.state.transfer_reason), ("transferring", "officer_takeover"))
-        self.assertEqual(len(self.lobby_events("call.transfer_requested")), 1)
-        await desk.release(self.call_id, "okello")
-        self.assertEqual(self.room.state.mode, "ai")  # the caller never asked for a person
-        self.assertEqual(get_call(self.call_id)["status"], "ai")
-        self.assertEqual(self.caller.types()[-1], "ai")
-
-    async def test_no_take_over_without_the_ticket_queue(self):
-        self.room.state.mode = "ai"
-        with patch.object(flags, "is_enabled", return_value=False), self.assertRaises(desk.DeskError) as err:
-            await desk.claim(self.call_id, "okello", is_supervisor=True)
-        self.assertEqual(err.exception.status, 409)
-        self.assertEqual(self.room.state.mode, "ai")
 
     async def test_a_call_with_an_officer_cannot_be_claimed(self):
         self.room.state.mode = "bridged"
@@ -199,6 +184,38 @@ class JoinAndEndTests(DeskTestCase):
         self.assertEqual(err.exception.status, 403)
         with self.assertRaises(desk.DeskError):
             await desk.release(self.call_id, "okello")  # on the call: end it, don't release it
+
+    async def test_an_officer_terminates_a_waiting_call_nobody_has_claimed(self):
+        result = await desk.end(self.call_id, "okello", speech_model=None)
+        self.assertTrue(result["ended"])
+        self.assertEqual(self.room.state.mode, "ended")
+        self.assertEqual(self.caller.types()[-1], "ended")
+        self.assertEqual(get_call(self.call_id)["end_reason"], "officer_terminated_waiting")
+
+    async def test_a_waiting_call_another_officer_claimed_is_not_terminated(self):
+        await desk.claim(self.call_id, "okello", officer_name="Officer Okello")
+        with self.assertRaises(desk.DeskError) as err:
+            await desk.end(self.call_id, "nakato", speech_model=None)
+        self.assertEqual((err.exception.status, err.exception.extra["officer_name"]), (403, "Officer Okello"))
+        self.assertEqual(self.room.state.mode, "transferring")
+
+    async def test_a_call_the_ai_is_handling_is_not_ended_from_the_desk(self):
+        self.room.state.mode = "ai"
+        with self.assertRaises(desk.DeskError) as err:
+            await desk.end(self.call_id, "okello", speech_model=None)
+        self.assertEqual(err.exception.status, 409)
+        self.assertEqual(self.room.state.mode, "ai")
+
+    async def test_a_stale_row_is_cleared_but_an_ended_call_keeps_its_reason(self):
+        stale = f"call_stale_{uuid.uuid4().hex[:8]}"
+        create_call(stale, conversation_id=f"conv_{stale}", status="transferring")  # no room: server restarted
+        result = await desk.end(stale, "okello", speech_model=None)
+        self.assertTrue(result["stale"])
+        self.assertEqual(get_call(stale)["end_reason"], "officer_terminated_stale")
+        with self.assertRaises(desk.DeskError) as err:
+            await desk.end(stale, "nakato", speech_model=None)
+        self.assertEqual(err.exception.status, 404)
+        self.assertEqual(get_call(stale)["end_reason"], "officer_terminated_stale")
 
     async def test_the_joining_line_is_played_as_pcm(self):
         speech = MagicMock()
@@ -357,7 +374,7 @@ class ClaimRouteTests(unittest.TestCase):
         return make_dev_token(user, role=role)
 
     def post(self, action: str, user: str, role: str = "ura_staff"):
-        return self.client.post(f"/v1/admin/calls/{self.call_id}/{action}",
+        return self.client.post(f"/v1/admin/calls/{self.call_id}/{action}", json={},
                                 headers={"Authorization": f"Bearer {self.token(user, role)}"})
 
     def test_first_claim_wins_and_the_second_learns_who(self):
@@ -373,12 +390,19 @@ class ClaimRouteTests(unittest.TestCase):
         for action in ("claim", "release", "end"):
             self.assertEqual(self.post(action, "watcher", role="ura_auditor").status_code, 403)
 
-    def test_ending_a_call_nobody_joined_is_refused(self):
-        self.assertEqual(self.post("end", "okello").status_code, 409)
+    def test_administrators_work_no_calls(self):
+        """Administrators audit the service; taking, holding and ending calls is an officer's work."""
+        for action in ("claim", "release", "end", "hold", "transfer", "wrapup", "callback-done"):
+            res = self.post(action, "boss", role="ura_admin")
+            self.assertEqual(res.status_code, 403, action)
+        self.assertEqual(self.room.state.mode, "transferring")
+        presence = self.client.put("/v1/admin/officers/me/presence", json={"status": "available"},
+                                   headers={"Authorization": f"Bearer {self.token('boss', 'ura_admin')}"})
+        self.assertEqual(presence.status_code, 403)
 
-    def test_admin_can_terminate_waiting_call(self):
-        res = self.post("end", "boss", role="ura_admin")
-        self.assertEqual(res.status_code, 200)
+    def test_an_officer_can_terminate_a_waiting_call(self):
+        res = self.post("end", "okello")
+        self.assertEqual(res.status_code, 200, res.text)
         self.assertTrue(res.json().get("ended"))
 
     def test_the_console_hides_calls_on_a_deployment_without_them(self):

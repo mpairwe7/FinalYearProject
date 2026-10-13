@@ -1,6 +1,9 @@
 /**
  * Staff operations UI on Chromium — /signin, /admin, /agent.
  *
+ * Roles: officers (`ura_staff`) work the queue on /agent, /admin/tickets and
+ * /calls; administrators audit from /admin and are refused the live pages.
+ *
  * These pages were built and verified in Firefox (the only engine that paints in
  * the dev sandbox), so this spec exists to confirm the layout in Blink. It
  * asserts computed styles and geometry rather than comparing screenshots,
@@ -105,6 +108,20 @@ async function signedInAs(page: Page, role: string) {
       },
     }),
   );
+  await page.route("**/api/v1/admin/officers/presence", (route) => {
+    const now = Math.floor(Date.now() / 1000);
+    return route.fulfill({
+      json: {
+        teams: ["general", "domestic_taxes"],
+        officers: [
+          { user_id: "u-nakato", display_name: "Officer Nakato", status: "on_call", languages: ["en", "lg"],
+            teams: ["domestic_taxes"], current_call_id: "call_abc123", last_seen: now - 30, updated_at: now - 30 },
+          { user_id: "u-okello", display_name: "Officer Okello", status: "available", languages: ["en"],
+            teams: ["general"], current_call_id: "", last_seen: now - 60, updated_at: now - 60 },
+        ],
+      },
+    });
+  });
   // Generic detail route first — see the note above.
   await page.route("**/api/v1/admin/tickets/*", (route) =>
     route.fulfill({ json: ticket() }),
@@ -217,6 +234,25 @@ test.describe("Staff UI on Chromium", () => {
       await page.goto("/agent");
       await expect(page.getByRole("heading", { name: "My queue" })).toBeVisible();
     });
+
+    test("ura_admin audits from the overview and is refused every live page", async ({ page }) => {
+      // Officers handle taxpayers live; an administrator has no queue, no case
+      // and no call desk — not hidden behind a menu, refused by the page.
+      await signedInAs(page, "ura_admin");
+      await page.goto("/agent");
+      await expect(page.getByText(/limited to ura_staff\./)).toBeVisible();
+      for (const path of ["/admin/tickets", "/calls"]) {
+        await page.goto(path);
+        await expect(page.getByText(/limited to ura_staff, ura_auditor/)).toBeVisible();
+      }
+
+      await page.goto("/admin");
+      const nav = page.locator("nav.staff-rail");
+      await expect(nav.getByRole("link", { name: "Overview" })).toBeAttached();
+      for (const name of ["My queue", "All tickets", "Calls"]) {
+        await expect(nav.getByRole("link", { name })).toHaveCount(0);
+      }
+    });
   });
 
   test.describe("shared nav", () => {
@@ -318,14 +354,16 @@ test.describe("Staff UI on Chromium", () => {
       expect(backgrounds.size).toBe(1);
     });
 
-    test("queue is ordered urgent-first with real waits", async ({ page }) => {
-      const rows = page.locator(".ov-queue li");
-      await expect(rows).toHaveCount(3);
-      await expect(rows.nth(0).locator(".ov-pri")).toHaveText("urgent");
-      await expect(rows.nth(2).locator(".ov-pri")).toHaveText("low");
-      await expect(page.locator(".ov-queue-panel .ops-chip.is-danger")).toContainText("1 urgent");
-      // 5h of waiting, formatted by waitingFor().
-      await expect(rows.nth(0).locator(".ov-q-wait")).toContainText("5h");
+    test("lists the officers on duty, available first, with nothing to take", async ({ page }) => {
+      const roster = page.locator(".ov-duty-panel table");
+      const rows = roster.locator("tbody tr");
+      await expect(rows).toHaveCount(2);
+      await expect(rows.nth(0)).toContainText("Officer Okello");
+      await expect(rows.nth(0)).toContainText("Available");
+      await expect(rows.nth(1)).toContainText("On a call");
+      // The officer's call is theirs: the board names none and offers no action.
+      await expect(page.locator(".ov-duty-panel")).not.toContainText("call_abc");
+      await expect(page.locator(".ov-duty-panel").getByRole("button")).toHaveCount(0);
     });
 
     test("answer-authority panel reports the manifest state", async ({ page }) => {
@@ -338,13 +376,12 @@ test.describe("Staff UI on Chromium", () => {
       await expect(kv.nth(3)).toHaveText("2 checked");
     });
 
-    test("live tiles link to the population they count", async ({ page }) => {
-      // Awaiting-first-response and past-SLA count open AND in-progress cases,
-      // so a link filtered to open lands on fewer rows than the tile promised.
-      for (const label of ["Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
+    test("service-level tiles are figures, not links into the officers' queue", async ({ page }) => {
+      for (const label of ["Open escalations", "Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
         const tile = page.locator(".ops-stat", { hasText: label });
-        await expect(tile).toHaveAttribute("href", "/admin/tickets?status=any");
+        await expect(tile).not.toHaveAttribute("href", /.*/);
       }
+      await expect(page.locator('main a[href^="/admin/tickets"], main a[href^="/agent"], main a[href^="/calls"]')).toHaveCount(0);
     });
 
     test("two-column at desktop, single column below 900px", async ({ page }) => {
@@ -375,7 +412,7 @@ test.describe("Staff UI on Chromium", () => {
 
   test.describe("/agent queue", () => {
     test.beforeEach(async ({ page }) => {
-      await signedInAs(page, "ura_admin");
+      await signedInAs(page, "ura_staff");
       await page.goto("/agent");
       await expect(page.getByRole("heading", { name: "My queue" })).toBeVisible();
     });
@@ -475,32 +512,30 @@ test.describe("Staff UI on Chromium", () => {
    * per-page checks above covered that route, so nothing caught it.
    */
   test.describe("layout at every width", () => {
-    const ROUTES = [
-      "/admin",
-      "/agent",
-      "/admin/tickets",
-      "/admin/flags",
-      "/admin/overrides",
-      "/admin/outbox",
-      "/analytics",
-      "/analytics/evaluation",
-    ];
+    // Each route under the role that opens it: administrators the audit and
+    // configuration pages, officers the queue.
+    const ROUTES: Record<string, string[]> = {
+      ura_admin: ["/admin", "/admin/flags", "/admin/overrides", "/admin/outbox", "/analytics", "/analytics/evaluation"],
+      ura_staff: ["/agent", "/admin/tickets"],
+    };
 
-    test("no console route scrolls the page sideways", async ({ page }) => {
-      test.slow();
-      await signedInAs(page, "ura_admin");
-      for (const width of [1440, 1024, 900, 720, 560, 412, 360]) {
-        await page.setViewportSize({ width, height: 900 });
-        for (const route of ROUTES) {
-          await page.goto(route);
-          await expect(page.locator("nav.staff-rail")).toBeVisible();
-          const overflow = await page.evaluate(
-            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          );
-          expect(overflow, `${route} overflows at ${width}px`).toBeLessThanOrEqual(1);
+    for (const [role, routes] of Object.entries(ROUTES)) {
+      test(`no ${role} console route scrolls the page sideways`, async ({ page }) => {
+        test.slow();
+        await signedInAs(page, role);
+        for (const width of [1440, 1024, 900, 720, 560, 412, 360]) {
+          await page.setViewportSize({ width, height: 900 });
+          for (const route of routes) {
+            await page.goto(route);
+            await expect(page.locator("nav.staff-rail")).toBeVisible();
+            const overflow = await page.evaluate(
+              () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            );
+            expect(overflow, `${route} overflows at ${width}px`).toBeLessThanOrEqual(1);
+          }
         }
-      }
-    });
+      });
+    }
   });
 
   test.describe("/signin", () => {

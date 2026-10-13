@@ -1,11 +1,14 @@
 /**
- * Operations overview — the three counts that used to be wrong.
+ * Operations overview — the administrator's read-only board.
  *
- * Each case here pins one wire between a rendered figure and the payload it
- * claims to come from. All three shipped green because nothing rendered the
+ * Each count case pins one wire between a rendered figure and the payload it
+ * claims to come from. They shipped green once because nothing rendered the
  * component against the shape the API actually returns: two read fields the
  * backend has never emitted, and one counted an array the page had truncated
  * for a different purpose.
+ *
+ * The rest pin the role split: an administrator audits the service officers
+ * give, so nothing on this page links into the live queue or takes a case.
  */
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -14,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import AdminOverviewPage from "../../app/admin/page";
 import { analyticsApi, type TicketQueueItem } from "../../services/analyticsApi";
+import { callsApi } from "../../services/callsApi";
 
 /** What GET /v1/authority/status actually returns. No `sources` key. */
 const AUTHORITY_FRESH = {
@@ -125,6 +129,24 @@ describe("Operations overview", () => {
       offset: 0,
       tickets: PAGE_OF_TWENTY,
     });
+    const now = Date.now() / 1000;
+    vi.spyOn(callsApi, "getPresence").mockResolvedValue({
+      teams: ["general", "domestic_taxes"],
+      officers: [
+        {
+          user_id: "u-nakato", display_name: "Officer Nakato", status: "on_call", languages: ["en", "lg"],
+          teams: ["domestic_taxes"], current_call_id: "call_abc123", last_seen: now - 30, updated_at: now - 30,
+        },
+        {
+          user_id: "u-okello", display_name: "Officer Okello", status: "available", languages: ["en"],
+          teams: ["general"], current_call_id: "", last_seen: now - 60, updated_at: now - 60,
+        },
+        {
+          user_id: "u-auma", display_name: "Officer Auma", status: "offline", languages: ["sw"],
+          teams: [], current_call_id: "", last_seen: now - 7200, updated_at: now - 7200,
+        },
+      ],
+    });
   });
 
   afterEach(() => {
@@ -152,21 +174,32 @@ describe("Operations overview", () => {
     expect(within(card).queryByText("20")).toBeNull();
   });
 
-  it("sends the live tiles to a view that holds the cases they count", async () => {
+  it("shows the service levels as figures, not as links into the officers' queue", async () => {
     renderOverview();
-    for (const label of ["Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
-      // These count open AND in-progress; ?status=open showed fewer rows than
-      // the number that sent the reader there.
-      expect(await statCard(label)).toHaveAttribute("href", "/admin/tickets?status=any");
+    for (const label of ["Open escalations", "Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
+      expect(await statCard(label)).not.toHaveAttribute("href");
     }
+    // Nothing on the board opens the queue, a case or a call.
+    const links = screen.queryAllByRole("link").map((a) => a.getAttribute("href") ?? "");
+    expect(links.filter((href) => /^\/(agent|admin\/tickets|calls)/.test(href))).toEqual([]);
+    expect(screen.queryByText("Waiting longest")).toBeNull();
+    expect(screen.queryByText(/Open the full queue/)).toBeNull();
   });
 
-  it("does not name the loaded page size as the size of the queue", async () => {
+  it("lists the officers on duty, available first and read-only", async () => {
     renderOverview();
-    await statCard("Unassigned");
-    // Was `All ${allOpen.length} open` — "All 20 open" on a queue of 2,567.
-    expect(screen.queryByText("All 20 open")).toBeNull();
-    expect(screen.getByText("All open")).toBeInTheDocument();
+    const roster = await screen.findByRole("table");
+    const rows = within(roster).getAllByRole("row").slice(1);
+    expect(rows.map((r) => within(r).getAllByRole("cell")[0].textContent)).toEqual([
+      "Officer Okello",
+      "Officer Nakato",
+      "Officer Auma",
+    ]);
+    expect(within(rows[1]).getByText("On a call")).toBeInTheDocument();
+    // An officer's current call is theirs: the board names no call to open.
+    expect(screen.queryByText(/call_abc/)).toBeNull();
+    expect(within(roster).queryAllByRole("button")).toEqual([]);
+    expect(screen.getByText(/available ·/).textContent).toMatch(/1 available · 1 on a call · 2 online of 3/);
   });
 
   it("reads the source count the authority endpoint actually emits", async () => {

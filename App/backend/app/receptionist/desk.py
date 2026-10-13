@@ -10,9 +10,11 @@ audio socket. Rules they share:
 * **A claim is a promise to connect.** It lapses after
   ``RECEPTIONIST_CLAIM_TIMEOUT_S`` unless the officer's audio joins, and the
   call goes back to waiting (``call.unclaimed``).
-* **Taking over from the AI goes through the queue.** Claiming a call the AI
-  is still handling opens a transfer like the AI's own, so the ticket,
-  ``ticket_queue`` and the lobby see it the same way.
+* **Officers take the calls the AI hands over.** A call the AI is still
+  handling is not claimed; nobody steps into it.
+* **Only officers act on calls** (``ura_staff``, enforced by the routes).
+  Nobody acts on a call another officer holds: administrators audit the
+  service and have no override here.
 * The caller hears who joined (``officer_joining``) and a closing line
   (``officer_closing``), in the call's current language.
 
@@ -27,7 +29,6 @@ import logging
 import time
 from typing import Any
 
-from ..flags import flags
 from . import livekit, presence
 from .config import get_claim_timeout_s, get_officer_reconnect_grace_s
 from .hub import hub
@@ -48,13 +49,15 @@ from .store import (
 from .store import (
     mark_callback_done as store_callback_done,
 )
-from .transfer import open_transfer
 from .tts import synthesize_pcm16
 
 logger = logging.getLogger(__name__)
 
 #: 0.5 s of 16 kHz PCM16 per binary message to the caller's player.
 _PCM_CHUNK = 16000
+
+#: ``voice_calls.status`` values of a call that has not ended.
+_LIVE_STATUSES = ("ai", "transferring", "bridged")
 
 
 class DeskError(Exception):
@@ -97,19 +100,11 @@ def _live_room(call_id: str) -> CallRoom:
 # ---------------------------------------------------------------------------
 
 
-async def claim(
-    call_id: str,
-    officer_id: str,
-    chat_model: Any = None,
-    officer_name: str = "",
-    *,
-    is_supervisor: bool = False,
-) -> dict[str, Any]:
+async def claim(call_id: str, officer_id: str, officer_name: str = "") -> dict[str, Any]:
     """Take a call the AI handed over for *officer_id*.
 
-    Officers get the calls the AI escalates. Stepping into a call the AI is
-    still handling is a supervisor's call to make (*is_supervisor*), as barge-in
-    is on any contact-centre floor; it goes through the queue like a transfer.
+    Officers get the calls the AI escalates; a call the AI is still handling
+    is refused, because the caller has not asked for a person.
     """
     room = _live_room(call_id)
     timeout = get_claim_timeout_s()
@@ -120,12 +115,8 @@ async def claim(
             holder = room.state.officer_id or room.state.claimed_by or ""
             raise DeskError(409, "An officer already has this call", claimed_by=holder,
                             officer_name=_holder_name(room, holder))
-        if mode == "ai" and not is_supervisor:
-            raise DeskError(
-                403, "The AI is handling this call: officers take the calls it hands over, a supervisor can step in"
-            )
-        if mode == "ai" and not flags.is_enabled("ticket_queue"):
-            raise DeskError(409, "The officer queue is off")
+        if mode == "ai":
+            raise DeskError(403, "The AI is handling this call: officers take the calls it hands over")
         now = time.time()
         if not claim_call(call_id, officer_id, now, now - timeout):
             holder = str((get_call(call_id) or {}).get("claimed_by") or "")
@@ -134,17 +125,12 @@ async def claim(
         room.state.claimed_by = officer_id
         room.state.claimed_name = name
         room.state.claimed_at = now
-        if mode == "ai":
-            # Taking over: the AI never asked for an officer, so queue the call
-            # the way it would have — ticket, row, lobby — before joining.
-            _, status_event = open_transfer(room, chat_model, "officer_takeover")
-            await _send_to_caller(room, status_event)
         _restart_claim_timer(room, officer_id, timeout)
     hub.publish_lobby("call.claimed", {"call_id": call_id, "officer_id": officer_id, "officer_name": name})
     return {"claimed": True, "call_id": call_id, "officer_name": name, "claim_expires_at": now + timeout}
 
 
-async def release(call_id: str, officer_id: str, *, is_admin: bool = False) -> dict[str, Any]:
+async def release(call_id: str, officer_id: str) -> dict[str, Any]:
     """Give a claimed call back before joining it (the officer changed their mind)."""
     room = _live_room(call_id)
     async with room.desk_lock:
@@ -152,7 +138,7 @@ async def release(call_id: str, officer_id: str, *, is_admin: bool = False) -> d
             raise DeskError(409, "You are on this call — end it instead")
         if not room.state.claimed_by:
             raise DeskError(409, "Nobody has claimed this call")
-        if room.state.claimed_by != officer_id and not is_admin:
+        if room.state.claimed_by != officer_id:
             raise DeskError(403, "Another officer has claimed this call")
         await _release_locked(room, "released")
     return {"released": True, "call_id": call_id}
@@ -182,19 +168,12 @@ async def _expire_claim(room: CallRoom, officer_id: str, timeout: float) -> None
 
 
 async def _release_locked(room: CallRoom, reason: str) -> None:
-    """Drop the claim (call under desk_lock). A take-over goes back to the AI, anything else to waiting."""
+    """Drop the claim (call under desk_lock): the call goes back to waiting."""
     release_claim(room.call_id)
     room.state.claimed_by = ""
     room.state.claimed_name = ""
     room.state.claimed_at = None
     _cancel_claim_timer(room)
-    if room.state.transfer_reason == "officer_takeover" and room.state.mode == "transferring":
-        # The caller never asked for a person; the AI carries on.
-        room.state.mode = "ai"
-        update_call(room.call_id, status="ai")
-        status_event = {"type": "status", "status": "ai"}
-        await _send_to_caller(room, status_event)
-        hub.publish_call(room.call_id, "status", status_event)
     hub.publish_lobby("call.unclaimed", {"call_id": room.call_id, "reason": reason})
 
 
@@ -256,28 +235,38 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
     return name
 
 
-async def end(call_id: str, officer_id: str, speech_model: Any, *, is_admin: bool = False) -> dict[str, Any]:
+async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any]:
     """The officer ends the call: a closing line, then the caller's screen hangs up.
 
-    If the call is in waiting/transferring status (or stale/disconnected), an admin
-    or the assigned officer can terminate the call immediately.
+    Two clean-up cases end a call no officer is on, at once and without a
+    closing line:
+
+    * **stale** — the row still says live but no call room exists on this
+      server (it restarted mid-call), so no caller is on the line;
+    * **waiting** — the caller is in the queue and no *other* officer has
+      claimed it (``officer_terminated_waiting``). A call the AI is still
+      handling is not ended from the desk.
     """
     try:
         room = _live_room(call_id)
     except DeskError as exc:
-        if exc.status == 404:
-            if not is_admin:
-                raise
-            now = time.time()
-            update_call(call_id, status="ended", end_reason="officer_terminated_stale", ended_at=now)
-            hub.publish_lobby("call.ended", {"call_id": call_id, "reason": "officer_terminated_stale"})
-            return {"ended": True, "call_id": call_id, "stale": True}
-        raise
+        row = get_call(call_id) or {}
+        if exc.status != 404 or registry.get(call_id) is not None or row.get("status") not in _LIVE_STATUSES:
+            # An ended call keeps the reason it ended with.
+            raise
+        now = time.time()
+        update_call(call_id, status="ended", end_reason="officer_terminated_stale", ended_at=now)
+        hub.publish_lobby("call.ended", {"call_id": call_id, "reason": "officer_terminated_stale"})
+        return {"ended": True, "call_id": call_id, "stale": True}
 
     if room.state.mode != "bridged":
-        if not is_admin and (not room.state.officer_id or room.state.officer_id != officer_id):
+        if room.state.mode != "transferring":
             raise DeskError(409, "No officer is on this call")
-        # Allow ending/terminating a call that is waiting for an officer, transferring or idle
+        holder = room.state.claimed_by or room.state.reconnecting_officer or ""
+        if holder and holder != officer_id:
+            raise DeskError(403, "Another officer has claimed this call", claimed_by=holder,
+                            officer_name=_holder_name(room, holder))
+        # Waiting for an officer, and nobody else has it: terminate it.
         now = time.time()
         room.state.mode = "ended"
         if room.state.officer_id:
@@ -288,7 +277,7 @@ async def end(call_id: str, officer_id: str, speech_model: Any, *, is_admin: boo
         asyncio.create_task(_save_draft_wrapup(call_id))
         return {"ended": True, "call_id": call_id}
 
-    if room.state.officer_id != officer_id and not is_admin:
+    if room.state.officer_id != officer_id:
         raise DeskError(403, "Another officer is on this call")
     presence.set_wrap_up(officer_id, call_id=call_id)
     duration = await say_to_caller(room, phrase("officer_closing", room.state.locale), speech_model)
@@ -299,13 +288,13 @@ async def end(call_id: str, officer_id: str, speech_model: Any, *, is_admin: boo
     return {"ended": True, "call_id": call_id}
 
 
-async def hold(call_id: str, officer_id: str, on: bool, *, is_admin: bool = False) -> dict[str, Any]:
+async def hold(call_id: str, officer_id: str, on: bool) -> dict[str, Any]:
     """Put an active call on hold or resume it."""
     room = _live_room(call_id)
     async with room.desk_lock:
         if room.state.mode != "bridged" and not (not on and getattr(room.state, "on_hold", False)):
             raise DeskError(409, "Call is not currently bridged with an officer")
-        if room.state.officer_id != officer_id and not is_admin:
+        if room.state.officer_id != officer_id:
             raise DeskError(403, "Another officer is on this call")
         now = time.time()
         if on:
@@ -346,15 +335,13 @@ async def transfer(
     team: str = "",
     target_officer_id: str = "",
     note: str = "",
-    *,
-    is_admin: bool = False,
 ) -> dict[str, Any]:
     """Transfer the call to another team or available officer."""
     room = _live_room(call_id)
     async with room.desk_lock:
         if room.state.mode != "bridged":
             raise DeskError(409, "Call is not currently bridged with an officer")
-        if room.state.officer_id != officer_id and not is_admin:
+        if room.state.officer_id != officer_id:
             raise DeskError(403, "Another officer is on this call")
         now = time.time()
         previous_identity = room.state.livekit_officer_identity
@@ -450,8 +437,6 @@ async def wrapup(
     ticket_action: str | None = None,
     rating: int | None = None,
     rating_note: str | None = None,
-    *,
-    is_admin: bool = False,
 ) -> dict[str, Any]:
     """Save call outcome and wrap-up notes, apply ticket action, restore presence."""
     call = get_call(call_id)
@@ -514,7 +499,7 @@ async def wrapup(
     return {"wrapped_up": True, "call_id": call_id, "outcome": outcome}
 
 
-async def callback_done(call_id: str, officer_id: str, note: str = "", *, is_admin: bool = False) -> dict[str, Any]:
+async def callback_done(call_id: str, officer_id: str, note: str = "") -> dict[str, Any]:
     """Mark an open callback as completed by an officer."""
     call = get_call(call_id)
     if not call:

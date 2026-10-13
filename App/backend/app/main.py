@@ -2450,6 +2450,19 @@ def _require_staff_writer(ctx: AuthContext) -> None:
         raise HTTPException(status_code=403, detail="read-only role")
 
 
+def _require_live_officer(ctx: AuthContext) -> None:
+    """Only officers handle taxpayers live; administrators audit, auditors read.
+
+    Claiming a case, replying to the taxpayer and holding a case's collision
+    lock are an officer's work (``ura_staff``). An administrator audits the
+    service officers give and has no live tools, so the API refuses the write
+    rather than relying on the console hiding a button. The operator key (no
+    user) keeps its break-glass path, as in :func:`_require_staff_writer`.
+    """
+    if ctx.user and ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="only officers handle cases live")
+
+
 def _run_online_evaluation() -> None:
     """One scheduled evaluation run; failures are counted, never raised."""
     try:
@@ -3262,10 +3275,11 @@ def ticket_presence_endpoint(
 ) -> dict:
     """Heartbeat: this officer has the case open (collision lock).
 
-    Officers and admins only: an auditor reads a case without claiming it, so
-    the console sends no heartbeat for them and the API refuses one.
+    Officers only: an auditor reads a case without claiming it and an
+    administrator does not work cases, so the console sends no heartbeat for
+    either and the API refuses one.
     """
-    _require_staff_writer(ctx)
+    _require_live_officer(ctx)
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -3973,10 +3987,11 @@ async def update_ticket_endpoint(
     fields on purpose — an officer's candid note is not something the
     taxpayer should ever read.
 
-    Officers and admins only; every accepted change is recorded as
-    ``staff.ticket_updated`` with the fields changed (a reply as its length).
+    Officers only (administrators audit, auditors read); every accepted change
+    is recorded as ``staff.ticket_updated`` with the fields changed (a reply as
+    its length).
     """
-    _require_staff_writer(ctx)
+    _require_live_officer(ctx)
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = await request.json()
@@ -4236,9 +4251,9 @@ def _require_receptionist_call(call_id: str, ctx: AuthContext) -> dict[str, Any]
 
 
 def _desk_writer(ctx: AuthContext) -> None:
-    """Auditors see every call but take, hold and end none."""
-    if ctx.role not in ("ura_staff", "ura_admin"):
-        raise HTTPException(status_code=403, detail="Read-only role")
+    """Officers take, hold and end calls; auditors watch and administrators audit."""
+    if ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="Only officers take, hold and end calls")
 
 
 def _desk_officer_name(ctx: AuthContext) -> str:
@@ -4285,14 +4300,13 @@ async def get_call_brief_endpoint(
 
 @app.post("/v1/admin/calls/{call_id}/claim", tags=["admin"])
 async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
-    """Take a call the AI handed over (a supervisor may step into one it is handling): first wins, the rest get 409."""
+    """Take a call the AI handed over: first wins, the rest get 409. A call the AI is still handling is not taken."""
     from .receptionist import desk
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
-        result = await desk.claim(call_id, ctx.user_id, chat_model=getattr(app.state, "model", None),
-                                  officer_name=_desk_officer_name(ctx), is_supervisor=ctx.role == "ura_admin")
+        result = await desk.claim(call_id, ctx.user_id, officer_name=_desk_officer_name(ctx))
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_claimed")
@@ -4307,7 +4321,7 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
-        result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
+        result = await desk.release(call_id, ctx.user_id)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_released")
@@ -4322,8 +4336,7 @@ async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_adm
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
-        result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None),
-                                is_admin=ctx.role == "ura_admin")
+        result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None))
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_ended_call")
@@ -4343,7 +4356,7 @@ async def hold_call_endpoint(
     _desk_writer(ctx)
     on = bool(body.get("on", True))
     try:
-        result = await desk.hold(call_id, ctx.user_id, on=on, is_admin=ctx.role == "ura_admin")
+        result = await desk.hold(call_id, ctx.user_id, on=on)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_hold_on" if on else "officer_hold_off")
@@ -4366,7 +4379,7 @@ async def transfer_call_endpoint(
     note = str(body.get("note") or "").strip()
     try:
         result = await desk.transfer(call_id, ctx.user_id, team=team, target_officer_id=target_officer_id,
-                                     note=note, is_admin=ctx.role == "ura_admin")
+                                     note=note)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_transferred")
@@ -4398,7 +4411,6 @@ async def wrapup_call_endpoint(
             ticket_action=ticket_action,
             rating=rating,
             rating_note=rating_note,
-            is_admin=ctx.role == "ura_admin",
         )
     except desk.DeskError as exc:
         return _desk_error(exc)
@@ -4419,7 +4431,7 @@ async def callback_done_endpoint(
     _desk_writer(ctx)
     note = str(body.get("note") or "").strip()
     try:
-        result = await desk.callback_done(call_id, ctx.user_id, note=note, is_admin=ctx.role == "ura_admin")
+        result = await desk.callback_done(call_id, ctx.user_id, note=note)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_callback_done")

@@ -50,6 +50,7 @@ import SloGaugeCard from "../../components/charts/SloGaugeCard";
 import { plainSeconds } from "../../components/charts/chartTheme";
 import dynamic from "next/dynamic";
 import { routeFromMetricKey } from "../../components/charts/LatencyChart";
+import { watchesLiveQueue } from "../../lib/roles";
 import "./analytics.css";
 
 const ChartSkeleton = () => <Skeleton height={260} />;
@@ -115,8 +116,22 @@ function formatSeconds(seconds: number | undefined | null): string {
 }
 
 
-function Dashboard() {
+/** A queue row: a link into the case for a reader who can open it, plain text otherwise. */
+function QueueRowShell({ href, children }: { href?: string; children: React.ReactNode }) {
+  return href ? (
+    <a className="an-queue-link" href={href}>
+      {children}
+    </a>
+  ) : (
+    <div className="an-queue-link is-static">{children}</div>
+  );
+}
+
+function Dashboard({ role }: { role?: string }) {
   const [days, setDays] = useState(30);
+  // Auditors can open the queue to read a case; administrators audit from here
+  // and do not work cases, so for them the rows are figures, not links.
+  const opensQueue = watchesLiveQueue(role);
   const dash = useDashboard(days);
   const feedback = useFeedbackSummary(days);
   const journeys = useJourneyFunnel(days);
@@ -318,9 +333,11 @@ function Dashboard() {
                 id="an-queue"
                 title="Waiting for an officer"
                 end={
-                  <a className="ops-btn is-ghost is-sm" href="/admin/tickets?status=open">
-                    Work the queue
-                  </a>
+                  opensQueue ? (
+                    <a className="ops-btn is-ghost is-sm" href="/admin/tickets?status=open">
+                      Open the queue
+                    </a>
+                  ) : undefined
                 }
                 flush
                 bare
@@ -329,9 +346,8 @@ function Dashboard() {
                   <ul className="an-queue">
                     {ticketQueue.data.tickets.map((ticket) => (
                       <li key={ticket.id}>
-                        <a
-                          className="an-queue-link"
-                          href={`/admin/tickets?ticket=${encodeURIComponent(ticket.id)}`}
+                        <QueueRowShell
+                          href={opensQueue ? `/admin/tickets?ticket=${encodeURIComponent(ticket.id)}` : undefined}
                         >
                           <span
                             className={`ops-chip ops-chip-caps ${
@@ -355,7 +371,7 @@ function Dashboard() {
                           <span className="an-queue-time">
                             {formatSeconds(ticket.updated_at)}
                           </span>
-                        </a>
+                        </QueueRowShell>
                       </li>
                     ))}
                   </ul>
@@ -426,7 +442,7 @@ function Dashboard() {
 export default function AnalyticsDashboard() {
   return (
     <StaffGuard current="/analytics" requireRoles={["ura_admin", "ura_auditor"]}>
-      {() => <Dashboard />}
+      {(who) => <Dashboard role={who.role} />}
     </StaffGuard>
   );
 }

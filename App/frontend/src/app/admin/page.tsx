@@ -1,11 +1,13 @@
 "use client";
 
 /**
- * Operations overview — what needs attention right now.
+ * Operations overview — the administrator's read-only board.
  *
- * `/admin/tickets` is the workbench and `/analytics` is observability.
- * This page is the morning board: SLA, authority, and the cases waiting
- * longest — each one a deep link into the queue.
+ * Officers work the queue (`/agent`, `/admin/tickets`, `/calls`); an
+ * administrator audits the service they give and handles no taxpayer live, so
+ * nothing here claims, replies or links into the live queue. What it shows:
+ * the service levels officers are keeping, who is on duty, and whether the
+ * answer-authority manifest is fresh.
  *
  * Three things it gained in the console redesign:
  *
@@ -23,14 +25,14 @@ import StaffGuard from "../../components/StaffGuard";
 import { OpsPage, OpsPanel } from "../../components/ops/OpsPage";
 import { StatCard } from "../../components/ops/StatCard";
 import { Freshness, PeriodPicker } from "../../components/ops/Controls";
-import { EmptyState, ErrorState, Skeleton, SkeletonRows, SkeletonStats } from "../../components/ops/States";
+import { ErrorState, Skeleton, SkeletonRows, SkeletonStats } from "../../components/ops/States";
 import { useSkeletonVisible } from "../../hooks/useLoadingPhase";
 import { Sparkline } from "../../components/ops/Sparkline";
-import { ArrowUpRightIcon } from "../../components/ops/icons";
+import { OfficersOnDuty } from "../../components/staff/OfficersOnDuty";
 import { useTicketQueueFull, useTicketSla, useTicketStats } from "../../hooks/useAnalyticsDashboard";
 import { useClientClock } from "../../hooks/useClientClock";
 import { authHeaders } from "../../lib/authSession";
-import { formatDuration, waitingFor, waitTone } from "../../lib/ticketUi";
+import { formatDuration } from "../../lib/ticketUi";
 import { dailyCounts, formatDelta, previousWindow, toDelta } from "../../lib/trends";
 import "./admin.css";
 
@@ -74,10 +76,6 @@ function useAuthorityStatus() {
 
 const PRIORITY_ORDER = ["urgent", "high", "normal", "low"] as const;
 
-/** Rows the board loads for its "waiting longest" list. Not a total — every
- *  count on this page comes from an endpoint that knows the whole queue. */
-const QUEUE_PAGE = 20;
-
 function Overview() {
   const [days, setDays] = useState(30);
 
@@ -87,28 +85,17 @@ function Overview() {
   // endpoints can support without inventing anything.
   const statsPrev = useTicketStats(days * 2);
   const sla = useTicketSla(days);
-  const queue = useTicketQueueFull("open", "", "", 20);
   // Every status, for the arrivals shape. Ordered urgent-first server-side, so
   // a full page is a biased sample and the chart says so instead of drawing it.
   const all = useTicketQueueFull("", "", "", 200);
   const authority = useAuthorityStatus();
   const now = useClientClock();
 
-  const allOpen = queue.data?.tickets ?? [];
-  // Ten is a board, not a backlog — the panel header links to the full queue.
-  const items = allOpen.slice(0, 10);
   const awaiting = sla.data?.awaiting_first_response ?? 0;
   const breaching = sla.data?.breaching ?? 0;
-  // Server-side, over the live open+assigned population. Derived from
-  // `allOpen` this was capped at the 20 rows this page loads, so a queue of
-  // 2,500 unclaimed cases reported 20 — beside an "Open escalations" tile
-  // that reported the real total.
+  // Server-side, over the live open+assigned population — never counted from
+  // a page of rows, which capped it at the page size.
   const unassigned = sla.data?.unassigned ?? 0;
-  // The queue page is ordered urgent-first, so every urgent open case is on it
-  // until there are more than a page of them. Past that the count has quietly
-  // stopped counting, and the chip says "20+" rather than a number.
-  const urgent = allOpen.filter((t) => t.priority === "urgent").length;
-  const queueTruncated = allOpen.length >= QUEUE_PAGE;
 
   const raisedDelta = toDelta(
     stats.data?.total,
@@ -141,11 +128,10 @@ function Overview() {
     void stats.refetch();
     void statsPrev.refetch();
     void sla.refetch();
-    void queue.refetch();
     void all.refetch();
   };
 
-  const anyFetching = stats.isFetching || sla.isFetching || queue.isFetching;
+  const anyFetching = stats.isFetching || sla.isFetching || all.isFetching;
   const periodLabel = `previous ${days} days`;
 
   // The summary tiles are fed by two independent queries, and this used to read
@@ -156,7 +142,6 @@ function Overview() {
   // Each flag then goes through the ladder (see useLoadingPhase), so a request
   // that returns inside 300ms never flashes a skeleton at all.
   const summaryLoading = useSkeletonVisible(stats.isLoading || sla.isLoading);
-  const queueLoading = useSkeletonVisible(queue.isLoading);
   const arrivalsLoading = useSkeletonVisible(all.isLoading);
   const authorityLoading = useSkeletonVisible(authority.loading);
   const workloadLoading = useSkeletonVisible(stats.isLoading || sla.isLoading);
@@ -165,7 +150,7 @@ function Overview() {
     <OpsPage
       eyebrow="Work"
       title="Operations overview"
-      description={`Escalations raised in the last ${days} days, plus the service levels and answer authority of the queue as it stands right now. Every tile links into the queue it counts.`}
+      description={`Escalations raised in the last ${days} days, the service levels officers are keeping right now, and who is on duty. Read-only: officers work the queue, and this page audits it.`}
       actions={
         <>
           <Freshness
@@ -174,10 +159,6 @@ function Overview() {
             onRefresh={refresh}
           />
           <PeriodPicker days={days} onChange={setDays} />
-          <a className="ops-btn is-primary" href="/admin/tickets">
-            Open the full queue
-            <ArrowUpRightIcon />
-          </a>
         </>
       }
     >
@@ -194,36 +175,31 @@ function Overview() {
           <SkeletonStats count={6} />
         ) : (
           <div className="ops-stat-grid">
+            {/* Figures, not links: the queue they count is the officers' to work. */}
             <StatCard
               label="Open escalations"
               value={String(stats.data?.open ?? 0)}
               hint={`${stats.data?.total ?? 0} raised in the period`}
-              href="/admin/tickets?status=open"
               loading={stats.isLoading}
             />
             {/* The next three are the live queue, not the period. `sla_stats`
                 bounds its medians by the window and deliberately does not bound
                 the breach and awaiting counts — an SLA number that expired with
-                the date range would be useless. The hints say so, and each one
-                links to the population it counts rather than to a narrower
-                status view that shows fewer rows than the tile promised. */}
+                the date range would be useless. The hints say so. */}
             <StatCard
               label="Awaiting first response"
               value={String(awaiting)}
               hint="right now, nobody has replied yet"
-              href="/admin/tickets?status=any"
             />
             <StatCard
               label="Past 24-hour SLA"
               value={String(breaching)}
               hint="right now, open or in progress, over 24h"
-              href="/admin/tickets?status=any"
             />
             <StatCard
               label="Unassigned"
               value={String(unassigned)}
               hint="right now, waiting to be claimed"
-              href="/admin/tickets?status=any"
             />
             <StatCard
               label="Median first response"
@@ -319,65 +295,13 @@ function Overview() {
 
       <div className="ov-cols">
         <OpsPanel
-          id="q-h"
-          title="Waiting longest"
-          className="ov-queue-panel"
-          flush
+          id="d-h"
+          title="Officers on duty"
+          className="ov-duty-panel"
           bare
-          end={
-            <>
-              {urgent > 0 ? (
-                <span className="ops-chip is-danger">
-                  {queueTruncated ? `${urgent}+` : urgent} urgent
-                </span>
-              ) : null}
-              {/* Was `All ${allOpen.length} open`, which named the size of the
-                  page this panel had loaded — "All 20 open" on a queue of two
-                  and a half thousand. The real total is one tile away; this is
-                  a link, so it does not need to restate it. */}
-              <a className="ops-btn is-ghost is-sm" href="/admin/tickets?status=open">
-                All open
-              </a>
-            </>
-          }
+          note="Who is signed in to the console and whether they can take the next case or call. Officers set this themselves; it changes as they take and finish calls."
         >
-          {queueLoading ? (
-            <SkeletonRows rows={5} height={52} />
-          ) : queue.isError ? (
-            <ErrorState body="The queue did not load." onRetry={() => void queue.refetch()} />
-          ) : items.length > 0 ? (
-            <ul className="ov-queue">
-              {items.map((t) => {
-                const tone = waitTone(t.created_at, t.first_response_at, t.reply_at);
-                return (
-                  <li key={t.id}>
-                    <a className="ov-q-link" href={`/admin/tickets?ticket=${encodeURIComponent(t.id)}`}>
-                      <span className={`ov-pri ov-pri-${t.priority}`}>{t.priority}</span>
-                      <span className="ov-q-body">
-                        <span className="ov-q-topic">{t.handoff?.topic || t.reason || "Escalation"}</span>
-                        <span className="ov-q-query">{t.user_query}</span>
-                        <span className="ov-q-meta">
-                          {t.team ? <span>{t.team.replace(/_/g, " ")}</span> : null}
-                          <span>{t.assignee ? `Assigned ${t.assignee}` : "Unassigned"}</span>
-                        </span>
-                      </span>
-                      <span
-                        className={`ov-q-wait${tone === "ok" ? "" : ` is-${tone}`}`}
-                        title="Waiting since escalation"
-                      >
-                        {waitingFor(t.created_at)}
-                      </span>
-                    </a>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <EmptyState
-              title="The queue is clear"
-              body="No open escalation is waiting for a first reply. New arrivals appear here and announce themselves at the top of the console."
-            />
-          )}
+          <OfficersOnDuty />
         </OpsPanel>
 
         <div className="ov-side">

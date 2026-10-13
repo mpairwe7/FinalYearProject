@@ -14,6 +14,7 @@ import {
 } from "../../lib/ticketUi";
 import { analyticsApi } from "../../services/analyticsApi";
 import { Skeleton } from "../ops/States";
+import { isLiveOfficer } from "../../lib/roles";
 import type { StaffIdentity } from "../StaffGuard";
 import { TicketComposer } from "./TicketComposer";
 import "./staffTickets.css";
@@ -80,7 +81,8 @@ export function TicketCase({
   const handoff = ticket?.handoff ?? {};
   const transcript = ticket?.transcript ?? [];
   const warm = handoff.transfer_style === "warm";
-  const canAct = who?.role !== "ura_auditor";
+  // Officers reply and claim; an auditor reads the case.
+  const canAct = isLiveOfficer(who?.role);
   const tone = ticket ? waitTone(ticket.created_at, ticket.first_response_at, ticket.reply_at) : "ok";
   const handle = officerHandle(who);
   const isVernacular = Boolean(ticket?.locale && ticket.locale !== "en");
@@ -301,7 +303,7 @@ export function TicketCase({
         />
       ) : (
         <p className="st-readonly">
-          Auditor view — replies and assignment stay with tax agents and administrators.
+          Read-only view — replies and assignment stay with the tax agents working the queue.
         </p>
       )}
     </article>

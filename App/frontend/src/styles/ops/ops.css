@@ -373,14 +373,6 @@
   padding: var(--ops-space-4) 0 0;
 }
 
-/* Rows keep their own inline padding so the hover surface has shape, which
-   would otherwise indent their text past the heading. Pulling the list out by
-   that much lines the text up and lets the hover bleed to the section's edges —
-   the usual treatment for a list that is not inside a box. */
-.ops-panel.is-bare .ov-queue {
-  margin-inline: calc(var(--ops-space-3) * -1);
-}
-
 /* The opposite treatment: a panel lifted off the page.
 
    For the one section on a page that is an *instrument* rather than a reading —
