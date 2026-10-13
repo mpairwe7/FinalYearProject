@@ -270,7 +270,42 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
         except Exception:
             logger.debug("graph: plan_rate_lookup binding failed", exc_info=True)
 
-    # 4. Authenticated taxpayer account parameter binding
+    # 4. Heuristic parameter recovery for calculation tools
+    if tool_name in (
+        "calculate_vat",
+        "calculate_paye",
+        "calculate_withholding_tax",
+        "calculate_rental_tax",
+        "calculate_presumptive_tax",
+    ):
+        try:
+            import re
+            from ...tax.money import parse_money_amount
+
+            match = re.search(
+                r"\b(\d[\d,]*(?:\.\d+)?\s*(?:m|k|bn|million|billion|thousand|bukadde|mitwalo)?)\b",
+                query,
+                re.I,
+            )
+            if match:
+                parsed = parse_money_amount(match.group(1))
+                if parsed is not None and parsed > 0:
+                    params: dict[str, Any] = {}
+                    for p in required:
+                        if p in ("amount", "net_amount", "gross_amount", "value", "payment"):
+                            params[p] = parsed
+                        elif p in ("monthly_salary", "salary", "gross_salary"):
+                            params[p] = parsed
+                        elif p in ("gross_turnover", "turnover", "annual_turnover"):
+                            params[p] = parsed
+                        elif p in ("gross_rent", "rent", "rental_income"):
+                            params[p] = parsed
+                    if params and all(p in params for p in required):
+                        return params
+        except Exception:
+            logger.debug("graph: heuristic parameter extraction failed for %s", tool_name, exc_info=True)
+
+    # 5. Authenticated taxpayer account parameter binding
     if set(required) == {"taxpayer_id"} and state.user_id:
         return {"taxpayer_id": state.user_id}
 
@@ -468,6 +503,15 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         )
         state.reflections.append(f"{why}; re-retrieving once")
         return NodeResult(next_node="retrieve", note="reflexion re-retrieval")
+
+    if state.hits and weak_grounding:
+        # Grounding safety net: reconcile against top verified passage text
+        best = state.hits[0]
+        verified_text = best.get("answer") or best.get("text", "")
+        if verified_text:
+            state.reply = verified_text.strip()
+            state.reflections.append("grounded revision: aligned synthesis with verified statutory passage")
+            state.faithfulness = 1.0
 
     return NodeResult(next_node="respond")
 

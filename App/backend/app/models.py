@@ -488,10 +488,21 @@ class SynthesizeRequest(BaseModel):
         description="Voice id (e.g. en_US-lessac-medium, luganda-vits-v1)",
     )
     language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 language code")
+    locale: str | None = Field(None, pattern=r"^[a-z]{2,3}$", description="Alias for language (e.g. en, lg, sw)")
     streaming: bool = Field(False, description="Emit audio as a sentence-chunked stream")
     format: Literal["wav", "opus"] = Field(
         "wav", description="/v1/tts/stream only: 'opus' for Ogg/Opus pieces, about a tenth the size of WAV"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_language_and_locale(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("locale") and not data.get("language"):
+                data["language"] = data["locale"]
+            elif data.get("language") and not data.get("locale"):
+                data["locale"] = data["language"]
+        return data
 
 
 class SynthesizeResponse(BaseModel):

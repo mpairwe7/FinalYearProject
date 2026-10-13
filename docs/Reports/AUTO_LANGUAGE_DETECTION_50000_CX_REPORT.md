@@ -1,6 +1,6 @@
 # 50,000-Scenario Auto Language Detection Ultra-Scale Benchmark Report (EN / LG / SW)
 **Uganda Revenue Authority (URA) AI Taxpayer Assistant**  
-**Evaluation Date**: 2026-10-08T20:32:20Z  
+**Evaluation Date**: 2026-10-13T22:31:19Z  
 **Target Gateway**: `https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/chat`  
 **Dataset Scale**: 50,000 Complex Customer Experience (CX) Scenarios  
 **Evaluation Mode**: 100% Autonomous Server-Side Language Detection (Zero Client Override)  
@@ -16,11 +16,11 @@
 | **English (`en`) Accuracy** | ≥ 95.0% | **100.0%** (20000 / 20,000) | **MET** ✅ |
 | **Luganda (`lg`) Accuracy** | ≥ 95.0% | **100.0%** (15000 / 15,000) | **MET** ✅ |
 | **Swahili (`sw`) Accuracy** | ≥ 95.0% | **100.0%** (15000 / 15,000) | **MET** ✅ |
-| **Algorithm Latency (p50)** | < 1,000 µs | **24.0 µs** (0.05 ms) | **SUB-MILLISECOND** ⚡ |
-| **Algorithm Latency (p95)** | < 2,000 µs | **942.4 µs** (0.97 ms) | **SUB-MILLISECOND** ⚡ |
-| **Live Gateway Sample Accuracy** | ≥ 95.0% | **100.0%** (28/28) | **PERFECT** ✅ |
-| **Live Gateway Median Latency** | < 2,000 ms | **1275.1 ms** | **HIGH SPEED** 🚀 |
-| **Processing Throughput** | > 100 scenarios/s | **148.9 scenarios/sec** | **EXCEEDED** 🚀 |
+| **Algorithm Latency (p50)** | < 1,000 µs | **23.0 µs** (0.05 ms) | **SUB-MILLISECOND** ⚡ |
+| **Algorithm Latency (p95)** | < 2,000 µs | **950.9 µs** (0.97 ms) | **SUB-MILLISECOND** ⚡ |
+| **Live Gateway Sample Accuracy** | ≥ 95.0% | **100.0%** (24/24) | **PERFECT** ✅ |
+| **Live Gateway Median Latency** | < 2,000 ms | **519.1 ms** | **HIGH SPEED** 🚀 |
+| **Processing Throughput** | > 100 scenarios/s | **654.8 scenarios/sec** | **EXCEEDED** 🚀 |
 
 ---
 
@@ -30,9 +30,9 @@ Balanced distribution across **English (20,000)**, **Luganda (15,000)**, and **S
 
 | Language | Volume | Correct | Accuracy (%) | Mean Algorithm Latency (µs) |
 |---|:---:|:---:|:---:|:---:|
-| **English (`en`)** | 20,000 | 20000 | **100.0%** | 885.4 µs |
-| **Luganda (`lg`)** | 15,000 | 15000 | **100.0%** | 20.1 µs |
-| **Swahili (`sw`)** | 15,000 | 15000 | **100.0%** | 21.5 µs |
+| **English (`en`)** | 20,000 | 20000 | **100.0%** | 889.8 µs |
+| **Luganda (`lg`)** | 15,000 | 15000 | **100.0%** | 19.1 µs |
+| **Swahili (`sw`)** | 15,000 | 15000 | **100.0%** | 20.2 µs |
 
 ### Confusion Matrix
 | Expected \ Detected | Detected English (`en`) | Detected Luganda (`lg`) | Detected Swahili (`sw`) |
