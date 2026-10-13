@@ -97,79 +97,18 @@
   gap: var(--ops-band);
 }
 
-/* Queue list --------------------------------------------------------------- */
+/* Officers on duty -------------------------------------------------------- */
 
-.ov-queue {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: var(--ops-space-1);
-}
-
-.ov-q-link {
-  display: grid;
-  grid-template-columns: 62px 1fr auto;
-  align-items: center;
-  gap: var(--ops-space-3);
-  padding: 10px var(--ops-space-3);
-  border-radius: var(--ops-radius-sm);
-  text-decoration: none;
-  color: inherit;
-  transition: background var(--ops-dur-fast) var(--ops-ease);
-}
-
-.ov-q-link:hover {
-  background: var(--ops-row-hover);
-}
-
-.ov-q-link:focus-visible {
-  outline: var(--ops-focus-ring) solid var(--ops-focus);
-  outline-offset: -1px;
-}
-
-.ov-q-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.ov-q-topic {
+.ov-duty-summary {
+  margin: 0 0 var(--ops-space-3);
   font-size: var(--ops-text-sm);
-  font-weight: var(--ops-weight-semi);
-  color: var(--text-0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ov-q-query {
-  font-size: var(--ops-text-xs);
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ov-q-meta {
-  display: flex;
-  gap: var(--ops-space-2);
-  flex-wrap: wrap;
-  font-size: var(--ops-text-2xs);
-  color: var(--text-3);
-}
-
-.ov-q-wait {
-  font-size: var(--ops-text-xs);
-  font-weight: var(--ops-weight-semi);
   color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
 
-.ov-q-wait.is-warn   { color: var(--ops-warn); }
-.ov-q-wait.is-breach { color: var(--ops-bad); }
+.ov-duty-summary strong {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
 
 /* Priority pill — one definition, shared by the overview and the mix bars.
    /agent and /admin/tickets use the `.st-pri-*` twin in staffTickets.css. */
@@ -317,13 +256,6 @@
   .ov-volume {
     grid-template-columns: 1fr;
     gap: var(--ops-space-3);
-  }
-  .ov-q-link {
-    grid-template-columns: 56px 1fr;
-  }
-  .ov-q-wait {
-    grid-column: 2;
-    justify-self: end;
   }
 }
 

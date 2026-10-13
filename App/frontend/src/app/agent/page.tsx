@@ -288,7 +288,7 @@ export function AgentQueue({ who }: { who: StaffIdentity }) {
 
 export default function AgentPage() {
   return (
-    <StaffGuard current="/agent" requireRoles={["ura_staff", "ura_admin"]}>
+    <StaffGuard current="/agent" requireRoles={["ura_staff"]}>
       {(who) => <AgentQueue who={who} />}
     </StaffGuard>
   );

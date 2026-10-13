@@ -329,9 +329,10 @@ caller hears the AI first.
 | An uncertain answer (confidence 0.35–0.50), a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
 | The caller speaks of ending their life (English, *okwetta*, *kujiua*) | Before anything else, and never read as a goodbye: the crisis lines in full, with the emergency numbers in words, the counselling line on screen (0800 21 21 21), then *"Would you like me to connect you to a URA officer as well?"*. On yes, or at once if they also asked for a person, an **urgent** transfer; on no, the numbers stay on screen and the AI stays with them. The ticket carries no crisis text | `safety_concern` |
 
-Officers (`ura_staff`) cannot take a call the AI is still handling: the claim
-API answers 403 and the console hides **Take over**. A supervisor
-(`ura_admin`) can step in (`officer_takeover`). Every AI question is the only
+Nobody takes a call the AI is still handling: the claim API answers 403 and
+the console offers no **Take over**. Only officers (`ura_staff`) work calls at
+all; administrators audit the service and are refused every call-desk action
+(since 2026-10-13, `docs/plans/admin-service-quality-audit-plan.md`). Every AI question is the only
 question in its turn, so "yes" can only mean one thing. A "yes" or "okay" said
 over an answer, before its question was heard, is a backchannel: the question
 is asked again, and nothing is acted on. An at-risk caller who talked over the
@@ -372,9 +373,8 @@ officer offer and moved on is offered again with the next answer.
 3. **Take call** (or `A`) claims it — first officer wins; a second gets *"Taken by Officer
    …"*. The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
    asked for, then the audio joins: the caller's player is cleared and they hear *"You're
-   now connected to Officer {Name}."* in the call's language. **Take over** does the same
-   for a call the AI is still handling; it is a supervisor's (`ura_admin`) action only —
-   officers take the calls the AI hands over.
+   now connected to Officer {Name}."* in the call's language. Officers take the calls the
+   AI hands over; a call the AI is still handling cannot be taken.
 4. The AI goes silent: caller audio goes to the officer only, and anything the AI was
    still saying is dropped. Officer audio streams directly to the caller socket.
 5. `EnergyVAD` segments officer speech, transcribes turns, and records them in the live transcript.

@@ -47,13 +47,14 @@ const DETAIL = {
   ],
 };
 
-function renderPage() {
+/** The queue as StaffGuard renders it: always for a signed-in identity. */
+function renderPage(role = "ura_staff") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchInterval: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <StaffTicketQueue />
+      <StaffTicketQueue who={{ authenticated: true, role, email: "desk@ura.go.ug" }} />
     </QueryClientProvider>,
   );
 }
@@ -126,9 +127,12 @@ describe("StaffTicketQueue", () => {
     fireEvent.change(box, { target: { value: "Your TIN was reactivated." } });
     fireEvent.click(screen.getByRole("button", { name: /send reply/i }));
 
+    // Replying to an unowned case claims it for the officer who replied.
     await waitFor(() =>
       expect(analyticsApi.updateTicket).toHaveBeenCalledWith("tkt-1", {
         officer_reply: "Your TIN was reactivated.",
+        assignee: "desk@ura.go.ug",
+        status: "assigned",
       }),
     );
   });
@@ -179,6 +183,14 @@ describe("StaffTicketQueue", () => {
     const box = await screen.findByLabelText("Reply to the taxpayer");
     fireEvent.change(box, { target: { value: "Your TIN was reactivated." } });
     expect(screen.getByRole("button", { name: /send reply/i })).toBeDisabled();
+  });
+
+  it("gives an auditor the case to read and nothing to reply with", async () => {
+    renderPage("ura_auditor");
+    fireEvent.click(await screen.findByText(/User explicitly asked for a human/));
+    await screen.findByText("Let me check.");
+    expect(screen.queryByLabelText("Reply to the taxpayer")).not.toBeInTheDocument();
+    expect(screen.getByText(/Read-only view/)).toBeInTheDocument();
   });
 
   it("will not send an empty reply", async () => {

@@ -49,8 +49,15 @@ async function visitInTheme(page: Page, path: string, theme: Theme) {
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 }
 
-/** A minimal but valid operations API for the routes below. */
-async function prepareStaffSession(page: Page) {
+/**
+ * A minimal but valid operations API for the routes below, signed in as *role*.
+ *
+ * Officers (`ura_staff`) open the queue and the call desk; administrators open
+ * the audit and configuration pages and are refused the live ones. Called a
+ * second time on the same page, the later `/v1/me` stub wins (Playwright
+ * matches the most recently added route first).
+ */
+async function prepareStaffSession(page: Page, role = "ura_admin") {
   await page.addInitScript(() => {
     window.localStorage.setItem("ura_auth_token", "e2e-a11y-admin-token");
     window.localStorage.setItem("ura_analytics_consent", "false");
@@ -68,7 +75,7 @@ async function prepareStaffSession(page: Page) {
     route.fulfill({
       json: {
         authenticated: true,
-        role: "ura_admin",
+        role,
         email: "accessibility.audit@ura.go.ug",
         external_id: "e2e-a11y-admin",
         tenant_id: "default",
@@ -255,28 +262,36 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
     // themes. That is inherently past the 30s default, and was already close to
     // it at four routes.
     test.slow();
-    await prepareStaffSession(page);
 
     // Every console route, including the two that used to sit outside it.
     // /analytics in particular was never audited: it was not behind StaffGuard,
-    // so this suite's staff session did not reach it.
-    const routes = [
-      ["/admin", "Operations overview"],
-      ["/agent", "My queue"],
-      ["/admin/tickets", "Escalation queue"],
-      ["/admin/flags", "Feature flags"],
-      ["/admin/overrides", "Answer overrides"],
-      ["/admin/outbox", "Notification outbox"],
-      ["/analytics", "Analytics Dashboard"],
-      ["/analytics/evaluation", "Answer evaluation"],
-      ["/calls", "Phone Calls"],
-    ] as const;
+    // so this suite's staff session did not reach it. Each is visited as the
+    // role that opens it: administrators audit and configure, officers work
+    // the queue and the call desk.
+    const routesByRole = {
+      ura_admin: [
+        ["/admin", "Operations overview"],
+        ["/admin/flags", "Feature flags"],
+        ["/admin/overrides", "Answer overrides"],
+        ["/admin/outbox", "Notification outbox"],
+        ["/analytics", "Analytics Dashboard"],
+        ["/analytics/evaluation", "Answer evaluation"],
+      ],
+      ura_staff: [
+        ["/agent", "My queue"],
+        ["/admin/tickets", "Escalation queue"],
+        ["/calls", "Phone Calls"],
+      ],
+    } as const;
 
-    for (const theme of ["light", "dark"] as const) {
-      for (const [path, heading] of routes) {
-        await visitInTheme(page, path, theme);
-        await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-        await expectNoSeriousOrCritical(page, `${path} (${theme})`);
+    for (const [role, routes] of Object.entries(routesByRole)) {
+      await prepareStaffSession(page, role);
+      for (const theme of ["light", "dark"] as const) {
+        for (const [path, heading] of routes) {
+          await visitInTheme(page, path, theme);
+          await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+          await expectNoSeriousOrCritical(page, `${path} as ${role} (${theme})`);
+        }
       }
     }
   });
@@ -301,7 +316,7 @@ test.describe("keyboard and focus regression checks", () => {
   });
 
   test("composer controls and staff tabs are reachable without a pointer", async ({ page }) => {
-    await prepareStaffSession(page);
+    await prepareStaffSession(page, "ura_staff");
     await page.goto("/");
     await expect(page.getByLabel("Type your message")).toBeVisible();
     await expect(page.getByLabel("Start speaking")).toBeVisible();

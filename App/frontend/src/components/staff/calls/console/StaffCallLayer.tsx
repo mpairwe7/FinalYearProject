@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { StaffIdentity } from '@/components/StaffGuard';
+import { isLiveOfficer } from '@/lib/roles';
 import { isTypingTarget } from '@/lib/ticketUi';
 import { acquireLobby } from '@/services/callLobbySocket';
 import { toggleHold, toggleMute } from '@/services/officerCallSession';
@@ -13,9 +14,6 @@ import { CallConsoleBar } from './CallConsoleBar';
 import { DeviceCheckDialog } from './DeviceCheckDialog';
 import { usePresenceHeartbeat } from './usePresenceHeartbeat';
 import './callConsole.css';
-
-/** Roles that take calls; auditors watch. */
-const CALL_TAKERS = new Set(['ura_staff', 'ura_admin']);
 
 /**
  * The console's call layer (plan §8.2): the call bar, transfer alerts, the
@@ -28,7 +26,9 @@ export function StaffCallLayer({ role, who }: { role: string; who?: StaffIdentit
   const lobbyStatus = useCallConsoleStore((s) => s.lobbyStatus);
   const requestDesk = useCallConsoleStore((s) => s.requestDesk);
   const [deviceOpen, setDeviceOpen] = useState(false);
-  const canTake = CALL_TAKERS.has(role);
+  // Officers take calls; auditors watch. StaffGuard does not mount this layer
+  // for administrators, who audit the service rather than answer callers.
+  const canTake = isLiveOfficer(role);
 
   useEffect(() => acquireLobby(), []);
   usePresenceHeartbeat(canTake ? who?.external_id || who?.email || 'staff' : undefined);

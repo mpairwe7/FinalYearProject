@@ -96,6 +96,22 @@ def test_an_auditor_cannot_change_a_ticket_but_an_officer_can(client, tenant):
     assert accepted.status_code == 200
 
 
+def test_an_administrator_audits_a_ticket_but_does_not_work_it(client, tenant):
+    """Officers handle taxpayers live; an administrator audits the service and works no case."""
+    ticket_id = _ticket()
+    admin = _headers("adm-2", "ura_admin", tenant)
+    refused = client.patch(
+        f"/v1/admin/tickets/{ticket_id}",
+        headers=admin,
+        json={"status": "assigned", "assignee": "adm-2", "officer_reply": "We are looking into it."},
+    )
+    assert refused.status_code == 403
+    ticket = db.get_ticket(ticket_id)
+    assert (ticket["status"], ticket["assignee"], ticket["officer_reply"]) == ("open", "", "")
+    assert client.post(f"/v1/admin/tickets/{ticket_id}/presence", headers=admin).status_code == 403
+    assert client.get(f"/v1/admin/tickets/{ticket_id}", headers=admin).status_code == 200
+
+
 def test_staff_actions_and_transcript_reads_are_recorded_without_content(client, tenant, ledger_on):
     ticket_id = _ticket()
     officer = _headers("off-2", "ura_staff", tenant)

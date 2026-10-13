@@ -691,8 +691,9 @@ async def officer_audio_endpoint(websocket: WebSocket, call_id: str) -> None:
             room.remove_listener(queue)
             return
 
-    # Auditors are refused on active audio bridge (view only)
-    if role not in ("ura_staff", "ura_admin"):
+    # Only officers join a caller's audio: auditors listen at most, and
+    # administrators audit the service rather than handle callers.
+    if role != "ura_staff":
         await websocket.close(code=4403)
         return
 
