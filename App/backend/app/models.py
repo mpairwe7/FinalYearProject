@@ -436,6 +436,53 @@ class TaxpayerReplyRequest(BaseModel):
     locale: str = Field("en", pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")
 
 
+class OfficerChatMessage(BaseModel):
+    seq: int
+    sender: Literal["taxpayer", "officer", "system"]
+    #: What the taxpayer reads: an officer's message in their language when it
+    #: was translated. A ``system`` message is a marker (``chat_ended``) the
+    #: client words in the taxpayer's language.
+    text: str
+    officer_name: str = ""
+    created_at: float
+
+
+class ChatRatingState(BaseModel):
+    requested: bool = False
+    submitted: bool = False
+
+
+class OfficerChatThreadResponse(BaseModel):
+    """``GET /v1/escalate/{ticket_id}/messages`` — the taxpayer's live view of the chat."""
+
+    ticket_id: str
+    #: ``waiting`` (in the queue — the AI still answers), ``officer`` (an
+    #: officer has the case and the AI is paused), ``ended``, or ``none`` for
+    #: a call's ticket, which has no chat.
+    chat_state: Literal["waiting", "officer", "ended", "none"]
+    officer_name: str = ""
+    messages: list[OfficerChatMessage] = Field(default_factory=list)
+    last_seq: int = 0
+    csat: ChatRatingState = Field(default_factory=ChatRatingState)
+
+
+class ChatRatingRequest(BaseModel):
+    """The taxpayer's rating of an officer chat: 1 (very dissatisfied) to 5, or ``null`` to skip."""
+
+    score: int | None = Field(None, ge=1, le=5)
+    comment: str = Field("", max_length=1000)
+
+
+class EndChatRequest(BaseModel):
+    """An officer ends a live chat: an optional closing message and how it ended."""
+
+    closing_message: str = Field("", max_length=4000)
+    #: The closing message in the taxpayer's language, from the composer's
+    #: preview; translated on the server when missing for a non-English case.
+    closing_message_localized: str = Field("", max_length=4000)
+    outcome: Literal["resolved", "wontfix"] = "resolved"
+
+
 class FeedbackSummary(BaseModel):
     period_days: int
     total: int

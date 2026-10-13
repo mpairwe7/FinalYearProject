@@ -386,7 +386,79 @@ never arrive.
 
 The officer's reply is delivered back into the same conversation on the
 taxpayer's next turn (`_deliver_officer_reply` in `service.py`), which is why
-`conversation_id` matters more than anything else in the body.
+`conversation_id` matters more than anything else in the body. Once an officer
+takes the case the chat follows it live (below).
+
+---
+
+### Live Chat with the Officer: the Thread
+
+The taxpayer's chat polls this while its case waits or is with an officer
+(every 3 s, 10 s with the tab hidden). An officer taking the case switches the
+chat to them and pauses the assistant; the officer ending it asks for a rating
+and hands the taxpayer back.
+
+```http
+GET /v1/escalate/{ticket_id}/messages?after_seq=0
+```
+
+Open to unauthenticated callers, like the case itself — the ticket id is the
+capability the taxpayer holds — but **exact id only**: unlike
+`GET /v1/escalate/{ticket_id}` there is no search fallback that could answer for
+someone else's case (`TIC-…` references are 422). Rate-limited by
+`CHAT_POLL_RATE_LIMIT` (default `120/minute`). Reading the officer's latest
+message here counts as delivering it, so the next assistant turn does not
+repeat it.
+
+**Response**
+```json
+{
+  "ticket_id": "6f1c…",
+  "chat_state": "officer",
+  "officer_name": "Officer Nakato",
+  "messages": [
+    {"seq": 1, "sender": "officer", "text": "Which period?", "officer_name": "Officer Nakato", "created_at": 1790000000.0},
+    {"seq": 2, "sender": "taxpayer", "text": "March 2026.", "officer_name": "", "created_at": 1790000060.0}
+  ],
+  "last_seq": 2,
+  "csat": {"requested": false, "submitted": false}
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `chat_state` | `waiting` (in the queue; the assistant still answers) · `officer` (an officer has the case: the taxpayer's messages go to them) · `ended` · `none` (a call's ticket: no chat) |
+| `messages` | The thread after `after_seq`, oldest first. An officer's message is in the taxpayer's language when it was translated. `sender: "system"` with text `chat_ended` marks the end |
+| `csat` | Whether the taxpayer has been asked to rate the chat, and has |
+
+`POST /v1/escalate/{ticket_id}/reply` adds the taxpayer's message to the same
+thread (its response carries the message's `seq`) and answers **409** once an
+officer has ended the chat: an ended chat is not reopened by a message nobody
+is reading. A new problem is a new escalation.
+
+---
+
+### Live Chat with the Officer: Rate It
+
+```http
+POST /v1/escalate/{ticket_id}/csat
+```
+
+The taxpayer's 5-level rating of a chat an officer ended — very dissatisfied
+(1) to very satisfied (5) — or `score: null` to skip. Once per chat and only
+after it ended (409 otherwise); exact id only; rate-limited with `RATE_LIMIT`.
+The comment is redacted and kept only with a rating. Administrators read
+these on `/admin/quality` (`GET /v1/admin/quality/ratings`).
+
+**Request Body**
+```json
+{"score": 2, "comment": "Took too long to answer."}
+```
+
+**Response**
+```json
+{"ok": true, "ticket_id": "6f1c…", "status": "answered"}
+```
 
 ---
 
@@ -703,7 +775,10 @@ GET /v1/admin/quality/summary?days=30
 }
 ```
 
-`ai_chat` is the same block as `summary` below.
+`ai_chat` is the same block as `summary` below. `officer_chat` is the
+officer-chat satisfaction headline: `asked`, `answered`, `response_rate`,
+`average` (of 5), `csat_pct` (share of 4–5), `low` (ratings of 1–2),
+`distribution`, `sentiment` and `previous` (`asked`, `average`, `csat_pct`).
 
 ---
 
@@ -784,6 +859,52 @@ GET /v1/admin/quality/ai-chat/{conversation_id}
                "retrieval_mode": "hybrid", "is_break": true}]
 }
 ```
+
+---
+
+### Service-Quality Audit: Satisfaction Ratings
+
+How taxpayers rated the service they got from officers, one stream at a time.
+A rating is recorded when it is **asked for**, so the response rate is a count:
+`asked` is every chat ended, `answered` those rated.
+
+```http
+GET /v1/admin/quality/ratings?source=chat_officer_csat&days=30&score=&officer=&status=&limit=25&offset=0
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `source` | `chat_officer_csat` (taxpayer rates an officer chat). `call_officer_csat`, `call_ai_review_end` and `call_ai_review_transfer` are reserved for the call streams |
+| `days` | Period, 1–90 (default 30) |
+| `score` | Only ratings of this level (1–5) |
+| `officer` | Only this officer's ratings (`officer_id` from `summary.by_officer`) |
+| `status` | `answered` · `skipped` · `no_answer` |
+| `limit`, `offset` | Page of ratings (limit ≤ 100) |
+
+**Response**
+```json
+{
+  "source": "chat_officer_csat", "period_days": 30, "truncated": false,
+  "summary": {
+    "asked": 6, "answered": 4, "skipped": 1, "no_answer": 0, "pending": 1,
+    "response_rate": 66.7, "average": 3.25, "csat_pct": 50.0, "low": 1,
+    "distribution": {"1": 0, "2": 1, "3": 1, "4": 1, "5": 1},
+    "by_officer": [{"officer_id": "…", "officer_name": "Officer Okello", "handled": 3, "rated": 2,
+                    "average": 2.5, "csat_pct": 0.0, "low": 1}],
+    "by_week": [{"week": "2026-W41", "rated": 4, "average": 3.25, "csat_pct": 50.0}]
+  },
+  "previous": {"asked": 4, "average": 4.0, "csat_pct": 75.0},
+  "total": 4, "limit": 25, "offset": 0,
+  "ratings": [{"id": "…", "status": "answered", "score": 2, "sentiment": "negative",
+               "comment": "Took too long to answer.", "ticket_id": "…", "officer_name": "Officer Okello",
+               "team": "domestic_taxes", "topic": "vat", "created_at": 1790000000.0}]
+}
+```
+
+The list leads with the lowest score, then the newest, and never names the
+taxpayer. Administrators and auditors only; officers get 403. A rating opens
+its case through `GET /v1/admin/tickets/{ticket_id}` (recorded as
+`staff.ticket_viewed`).
 
 ---
 
@@ -1506,7 +1627,12 @@ GET /v1/admin/tickets/{ticket_id}
 |-----------|------|----------|-------------|
 | `ticket_id` | string | Yes | Ticket identifier |
 
-**Response**: Full ticket object with conversation context, assignee, status, priority, and staff notes.
+**Response**: Full ticket object with conversation context, assignee, status, priority, and staff notes, plus:
+
+| Field | Description |
+|-------|-------------|
+| `messages` | The live chat with the taxpayer in order: `seq`, `sender` (`taxpayer` · `officer` · `system`), `text` (English), `text_localized` (as delivered), `officer_name`, `created_at` |
+| `chat` | `state` (`waiting` · `officer` · `ended` · `none`), `officer_name`, `ended_at`, `ended_by_name`, `outcome`, and `rating` (`status`, `score`, `comment`) once the taxpayer was asked |
 
 ---
 
@@ -1534,6 +1660,31 @@ PATCH /v1/admin/tickets/{ticket_id}
 | `priority` | string | No | `low`, `medium`, `high`, `critical` |
 
 **Response**: Updated ticket object.
+
+Officers (`ura_staff`) only. On a text case, `officer_reply` is also a message
+in the live chat, and an officer assigning the case to themselves takes the
+chat. Setting `status` to `resolved` or `wontfix` on a live text chat **ends
+it** exactly as End chat does (below), with `officer_reply` as the closing
+message; the response then carries `"chat_state": "ended"`.
+
+---
+
+#### End a Live Chat
+
+```http
+POST /v1/admin/tickets/{ticket_id}/end-chat
+```
+
+```json
+{"closing_message": "I have cancelled the duplicate. Goodbye.", "closing_message_localized": "", "outcome": "resolved"}
+```
+
+The officer ends the chat: the optional closing message is sent (translated
+for a non-English case, as a reply is), the thread is marked ended, the ticket
+is resolved or closed (`outcome`: `resolved` · `wontfix`), the taxpayer is
+asked to rate the chat, and `escalation.chat_ended` goes to the staff stream.
+Officers only (administrators and auditors 403); recorded as
+`staff.chat_ended`. 409 for a call's ticket or a chat that has already ended.
 
 ---
 
@@ -1575,7 +1726,9 @@ WS /v1/admin/tickets/stream
 ```
 
 Staff-only, read-only. Pushes `escalation.created` triage metadata
-(no transcript). The staff UI invalidates the queue on each event.
+(no transcript), and `escalation.taxpayer_reply` / `escalation.chat_ended`
+for live chats. The staff UI invalidates the queue on each event, and the open
+case on the chat events.
 
 ---
 

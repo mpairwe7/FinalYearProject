@@ -125,6 +125,9 @@ export interface TicketTranscriptTurn {
   created_at: number;
   sources?: string[];
   topic_tag?: string;
+  /** A follow-up the taxpayer sent after escalating (empty `bot_reply`). The
+   *  live chat itself is `messages` on the ticket. */
+  sender?: "taxpayer";
 }
 
 /**
@@ -147,6 +150,54 @@ export interface TicketDetail extends TicketQueueItem {
   first_response_at?: number;
   resolved_at?: number;
   reply_delivered_at?: number;
+  /** The live chat with the taxpayer, in order (taxpayer, officer, system). */
+  messages?: TicketChatMessage[];
+  /** Where that chat stands, who has it, and how the taxpayer rated it. */
+  chat?: TicketChatInfo;
+}
+
+/** One message of the live chat, as staff read it (English, and as delivered). */
+export interface TicketChatMessage {
+  seq: number;
+  sender: "taxpayer" | "officer" | "system";
+  text: string;
+  text_localized?: string;
+  officer_name?: string;
+  created_at: number;
+}
+
+export type OfficerChatState = "waiting" | "officer" | "ended" | "none";
+
+export interface TicketChatInfo {
+  state: OfficerChatState;
+  officer_name: string;
+  ended_at?: number | null;
+  ended_by_name?: string;
+  outcome?: "" | "resolved" | "wontfix";
+  rating?: { status: RatingStatus; score: number | null; comment: string } | null;
+}
+
+/** The taxpayer's poll of their live chat (`GET /v1/escalate/{id}/messages`). */
+export interface OfficerChatThread {
+  ticket_id: string;
+  chat_state: OfficerChatState;
+  officer_name: string;
+  messages: Array<{
+    seq: number;
+    sender: "taxpayer" | "officer" | "system";
+    /** An officer's message in the taxpayer's language when it was translated. */
+    text: string;
+    officer_name?: string;
+    created_at: number;
+  }>;
+  last_seq: number;
+  csat: { requested: boolean; submitted: boolean };
+}
+
+export interface EndChatBody {
+  closing_message?: string;
+  closing_message_localized?: string;
+  outcome: "resolved" | "wontfix";
 }
 
 export interface EscalationCaseDetail {
@@ -522,6 +573,93 @@ export interface AiChatTimeline {
 export interface QualitySummary {
   period_days: number;
   ai_chat: AiChatSummary;
+  officer_chat?: RatingsHeadline;
+}
+
+export type RatingSource =
+  | "chat_officer_csat"
+  | "call_officer_csat"
+  | "call_ai_review_end"
+  | "call_ai_review_transfer";
+
+export type RatingStatus = "pending" | "answered" | "skipped" | "no_answer";
+
+/** The figures every satisfaction stream shares. */
+export interface RatingsFigures {
+  asked: number;
+  answered: number;
+  response_rate: number | null;
+  average: number | null;
+  /** Share of answered ratings that were 4 or 5. */
+  csat_pct: number | null;
+  /** Ratings of 1 or 2. */
+  low: number;
+  distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
+  sentiment: Record<"positive" | "neutral" | "negative" | "unclear", number>;
+}
+
+export interface RatingsHeadline extends RatingsFigures {
+  truncated: boolean;
+  previous: { asked: number; average: number | null; csat_pct: number | null };
+}
+
+export interface OfficerRatingRow {
+  officer_id: string;
+  officer_name: string;
+  handled: number;
+  rated: number;
+  average: number | null;
+  csat_pct: number | null;
+  low: number;
+}
+
+export interface ServiceRating {
+  id: string;
+  source: RatingSource;
+  channel: string;
+  subject: string;
+  status: RatingStatus;
+  score: number | null;
+  sentiment: string;
+  comment: string;
+  ticket_id: string;
+  call_id: string;
+  conversation_id: string;
+  officer_id: string;
+  officer_name: string;
+  team: string;
+  topic: string;
+  locale: string;
+  created_at: number;
+  answered_at: number | null;
+}
+
+export interface RatingsAudit {
+  source: RatingSource;
+  period_days: number;
+  truncated: boolean;
+  summary: RatingsFigures & {
+    skipped: number;
+    no_answer: number;
+    pending: number;
+    by_officer: OfficerRatingRow[];
+    by_week: Array<{ week: string; rated: number; average: number; csat_pct: number | null }>;
+  };
+  previous: { asked: number; average: number | null; csat_pct: number | null };
+  total: number;
+  limit: number;
+  offset: number;
+  ratings: ServiceRating[];
+}
+
+export interface RatingsQuery {
+  source?: RatingSource;
+  days?: number;
+  score?: number | null;
+  officer?: string;
+  status?: "" | "answered" | "skipped" | "no_answer";
+  limit?: number;
+  offset?: number;
 }
 
 export interface AiChatQuery {
@@ -587,12 +725,37 @@ export const analyticsApi = {
   publicTicketStatus: (ticketId: string) =>
     fetchJson<EscalationCaseDetail>(`/v1/escalate/${encodeURIComponent(ticketId)}`),
   replyToPublicTicket: (ticketId: string, message: string, locale = "en") =>
-    fetchJson<{ ok: boolean; ticket_id: string; status: string; message: string }>(
+    fetchJson<{ ok: boolean; ticket_id: string; status: string; message: string; seq?: number }>(
       `/v1/escalate/${encodeURIComponent(ticketId)}/reply`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, locale }),
+      },
+    ),
+  /** The taxpayer's live chat with the officer: messages after *afterSeq*, its state, the rating. */
+  publicTicketMessages: (ticketId: string, afterSeq = 0) =>
+    fetchJson<OfficerChatThread>(
+      `/v1/escalate/${encodeURIComponent(ticketId)}/messages?after_seq=${Math.max(0, Math.floor(afterSeq))}`,
+    ),
+  /** The taxpayer rates the chat an officer ended: 1–5, or null to skip. */
+  submitTicketCsat: (ticketId: string, score: number | null, comment = "") =>
+    fetchJson<{ ok: boolean; ticket_id: string; status: "answered" | "skipped" }>(
+      `/v1/escalate/${encodeURIComponent(ticketId)}/csat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ score, comment }),
+      },
+    ),
+  /** An officer ends a live chat (officers only). */
+  endChat: (ticketId: string, body: EndChatBody) =>
+    fetchJson<{ status: string; ticket_id: string; chat_state: OfficerChatState }>(
+      `/v1/admin/tickets/${encodeURIComponent(ticketId)}/end-chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       },
     ),
   ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
@@ -698,6 +861,21 @@ export const analyticsApi = {
   },
   qualityAiChatTimeline: (conversationId: string) =>
     fetchJson<AiChatTimeline>(`/v1/admin/quality/ai-chat/${encodeURIComponent(conversationId)}`),
+  qualityRatings: ({
+    source = "chat_officer_csat",
+    days = 30,
+    score = null,
+    officer = "",
+    status = "",
+    limit = 25,
+    offset = 0,
+  }: RatingsQuery = {}) => {
+    const params = new URLSearchParams({ source, days: String(days), limit: String(limit), offset: String(offset) });
+    if (score != null) params.set("score", String(score));
+    if (officer) params.set("officer", officer);
+    if (status) params.set("status", status);
+    return fetchJson<RatingsAudit>(`/v1/admin/quality/ratings?${params.toString()}`);
+  },
   auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(

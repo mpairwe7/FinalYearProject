@@ -227,12 +227,47 @@ function qualityFixture() {
   return { summary, page, timeline };
 }
 
+/** Officer-chat ratings, as GET /v1/admin/quality/ratings returns them: one low, one high. */
+function ratingsFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const rating = (id: string, score: number, officer: [string, string], extra: Record<string, unknown> = {}) => ({
+    id, source: "chat_officer_csat", channel: "chat", subject: "officer", status: "answered", score,
+    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "", ticket_id: `tkt-${id}`,
+    call_id: "", conversation_id: `conv-${id}`, officer_id: officer[0], officer_name: officer[1], team: "domestic_taxes",
+    topic: "vat", locale: "en", created_at: now - 900, answered_at: now - 600, ...extra,
+  });
+  return {
+    source: "chat_officer_csat",
+    period_days: 30,
+    truncated: false,
+    summary: {
+      asked: 3, answered: 2, skipped: 1, no_answer: 0, pending: 0, response_rate: 66.7, average: 3.5, csat_pct: 50, low: 1,
+      distribution: { "1": 0, "2": 1, "3": 0, "4": 0, "5": 1 },
+      sentiment: { positive: 1, neutral: 0, negative: 1, unclear: 0 },
+      by_officer: [
+        { officer_id: "u-okello", officer_name: "Officer Okello", handled: 2, rated: 1, average: 2, csat_pct: 0, low: 1 },
+        { officer_id: "u-nakato", officer_name: "Officer Nakato", handled: 1, rated: 1, average: 5, csat_pct: 100, low: 0 },
+      ],
+      by_week: [],
+    },
+    previous: { asked: 2, average: 4, csat_pct: 50 },
+    total: 2,
+    limit: 25,
+    offset: 0,
+    ratings: [
+      rating("low", 2, ["u-okello", "Officer Okello"], { comment: "Took too long to answer." }),
+      rating("high", 5, ["u-nakato", "Officer Nakato"]),
+    ],
+  };
+}
+
 async function stubQualityAudit(page: Page) {
   const q = qualityFixture();
   await page.route("**/api/v1/admin/quality/ai-chat/*", (route) => route.fulfill({ json: q.timeline }));
   await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
     route.fulfill({ json: { summary: q.summary, page: q.page } }),
   );
+  await page.route("**/api/v1/admin/quality/ratings?**", (route) => route.fulfill({ json: ratingsFixture() }));
 }
 
 /**
@@ -480,6 +515,21 @@ test.describe("Staff UI on Chromium", () => {
       await expect(timeline.getByText("Last helpful answer before it")).toBeVisible();
       await expect(page).toHaveURL(/conversation=conv-went-wrong/);
     });
+
+    test("audits officer chats: lowest rating first, opened read-only", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      await page.goto("/admin/quality?tab=officer-chat");
+      await expect(page.getByRole("tab", { name: "Officer chats" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByLabel("Officer chat satisfaction summary")).toContainText("3.5/5");
+      const first = page.locator(".qa-convs > li").first();
+      await expect(first).toContainText("2/5 · Dissatisfied");
+      await expect(first).toContainText("Officer Okello");
+      await first.getByRole("button").click();
+      const chat = page.getByRole("article", { name: "Officer chat" });
+      await expect(chat.getByRole("region", { name: "Chat with the taxpayer" })).toBeVisible();
+      await expect(chat.getByRole("textbox")).toHaveCount(0);
+      await expect(page).toHaveURL(/tab=officer-chat.*ticket=tkt-low|ticket=tkt-low.*tab=officer-chat/);
+    });
   });
 
   test.describe("/agent queue", () => {
@@ -590,6 +640,7 @@ test.describe("Staff UI on Chromium", () => {
       ura_admin: [
         "/admin",
         "/admin/quality",
+        "/admin/quality?tab=officer-chat",
         "/admin/flags",
         "/admin/overrides",
         "/admin/outbox",

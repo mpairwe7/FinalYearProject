@@ -73,6 +73,8 @@ interface ChatInputProps {
   selectedConnectorNamespaces?: string[];
   onOpenConnectors?: () => void;
   onToggleConnector?: (namespace: string) => void;
+  /** Overrides the default placeholder (a live chat with an officer: "Message the officer…"). */
+  placeholder?: string;
 }
 
 /** Inline waveform — 5 bars responsive to live microphone levels when available */
@@ -126,6 +128,7 @@ function ChatInputInner({
   autoSend = false,
   chatConnectors = [],
   connectorsEnabled = false,
+  placeholder,
   connectorsLoading = false,
   connectorsError = false,
   selectedConnectorNamespaces = [],
@@ -476,7 +479,7 @@ function ChatInputInner({
           id="composer-input"
           aria-label={t('composer.label')}
           aria-multiline="true"
-          placeholder={voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder')}
+          placeholder={placeholder ?? (voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder'))}
           value={message}
           rows={1}
           enterKeyHint="send"

@@ -155,12 +155,25 @@ function ChatMessageInner({
   );
 
   return (
-    <article className={`message-row message-row-${turn.role}`}>
-      <div className={`avatar ${turn.role}`} aria-hidden="true">
-        {turn.role === 'user' ? <UserIcon /> : <BotIcon />}
+    <article className={`message-row message-row-${turn.role}${isOfficerReply ? ' message-row-officer' : ''}`}>
+      <div className={`avatar ${turn.role}${isOfficerReply ? ' officer' : ''}`} aria-hidden="true">
+        {turn.role === 'user' || isOfficerReply ? <UserIcon /> : <BotIcon />}
       </div>
-      <div className={`bubble ${turn.role}`}>
-        <span className="sr-only">{turn.role === 'user' ? 'You said' : 'Assistant replied'}</span>
+      <div className={`bubble ${turn.role}${isOfficerReply ? ' officer' : ''}`}>
+        <span className="sr-only">
+          {turn.role === 'user'
+            ? 'You said'
+            : isOfficerReply
+              ? t('officerChat.officerReplied', { name: turn.officerName || t('officerChat.officerLabel') })
+              : 'Assistant replied'}
+        </span>
+        {/* A person wrote this, not the assistant: say who, in words. */}
+        {isOfficerReply && (
+          <p className="officer-label" aria-hidden="true">
+            {t('officerChat.officerLabel')}
+            {turn.officerName ? ` · ${turn.officerName}` : ''}
+          </p>
+        )}
         {/* What the working indicator leaves behind. Above the answer, where
             the indicator itself was, so the turn ends where it was running. */}
         {isAssistant && phaseLabel && phaseStartedAt != null && (
@@ -519,6 +532,7 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.conversationId === next.conversationId &&
     prev.answerNumber === next.answerNumber &&
     prev.turn.serverTurnId === next.turn.serverTurnId &&
+    prev.turn.officerName === next.turn.officerName &&
     prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&

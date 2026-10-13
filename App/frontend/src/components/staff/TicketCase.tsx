@@ -17,6 +17,7 @@ import { Skeleton } from "../ops/States";
 import { isLiveOfficer } from "../../lib/roles";
 import type { StaffIdentity } from "../StaffGuard";
 import { TicketComposer } from "./TicketComposer";
+import { TicketChatThread } from "./TicketChatThread";
 import "./staffTickets.css";
 
 function PresenceBeat({ ticketId, viewer }: { ticketId: string; viewer: string }) {
@@ -79,7 +80,9 @@ export function TicketCase({
 }) {
   const [transMode, setTransMode] = useState<"both" | "en" | "orig">("both");
   const handoff = ticket?.handoff ?? {};
-  const transcript = ticket?.transcript ?? [];
+  // The conversation as it stood at escalation. The taxpayer's later messages
+  // belong to the chat with the officer, shown on their own below.
+  const transcript = (ticket?.transcript ?? []).filter((turn) => turn.sender !== "taxpayer");
   const warm = handoff.transfer_style === "warm";
   // Officers reply and claim; an auditor reads the case.
   const canAct = isLiveOfficer(who?.role);
@@ -290,6 +293,8 @@ export function TicketCase({
           </ol>
         )}
       </section>
+
+      {ticket.modality !== "voice" ? <TicketChatThread ticket={ticket} /> : null}
 
       {canAct ? (
         <TicketComposer

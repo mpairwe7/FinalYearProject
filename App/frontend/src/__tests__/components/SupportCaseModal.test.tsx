@@ -88,6 +88,16 @@ describe("SupportCaseModal", () => {
     expect(await screen.findByText(/Message sent to officer/i)).toBeInTheDocument();
   });
 
+  it("is the case's details, not a second place to write, while the officer chats in the main conversation", async () => {
+    vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValue(mockCase);
+    render(
+      <SupportCaseModal isOpen={true} onClose={vi.fn()} ticketId="abcdef12-3456-7890-abcd-ef1234567890" liveChat />
+    );
+    expect(await screen.findByText(/Rental tax calculation dispute/i)).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("Your chat with the officer continues in the main conversation.");
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
   it("calls onClose when close button clicked", async () => {
     vi.spyOn(analyticsApi, "publicTicketStatus").mockResolvedValueOnce(mockCase);
     const onClose = vi.fn();

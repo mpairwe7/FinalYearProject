@@ -476,6 +476,7 @@ def init_db() -> None:
     logger.info("Postgres analytics schema ready")
     from . import database as _database
 
+    _database.init_module_schemas()
     _database.migrate_legacy_conversation_state_keys()
     cleanup_expired_data()
 
@@ -558,6 +559,9 @@ def cleanup_expired_data() -> dict[str, int]:
             conn.rollback()
             logger.exception("TTL cleanup failed for tickets and voice calls")
             deleted["tickets"] = 0
+    from .database import module_retention
+
+    deleted.update(module_retention())
     return deleted
 
 

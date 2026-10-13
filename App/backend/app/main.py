@@ -74,12 +74,14 @@ from .models import (
     CFRelayChatRequest,
     CFRelayEmbedRequest,
     CFRelayVectorizeQueryRequest,
+    ChatRatingRequest,
     ChatRequest,
     ChatResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
     DocumentAnalysisResponse,
+    EndChatRequest,
     EscalationDetailResponse,
     EscalationRequest,
     EscalationResponse,
@@ -92,6 +94,7 @@ from .models import (
     FeedbackSummary,
     HealthResponse,
     JourneyFunnelResponse,
+    OfficerChatThreadResponse,
     OfflineAdminStats,
     OfflineStatusResponse,
     OfflineSyncRequest,
@@ -869,6 +872,9 @@ _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
 _JOURNEY_ABANDON_AFTER_HOURS = max(1, int(os.getenv("JOURNEY_ABANDON_AFTER_HOURS", "24")))
 _EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
 _DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
+#: The taxpayer's chat polls its officer thread every few seconds (more often
+#: than a person types), so the poll has its own, higher ceiling.
+_CHAT_POLL_RATE_LIMIT = os.getenv("CHAT_POLL_RATE_LIMIT", "120/minute")
 _SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
 _DOCUMENT_MULTIPART_OVERHEAD_BYTES = int(
     os.getenv("DOCUMENT_MULTIPART_OVERHEAD_BYTES", str(512 * 1024))
@@ -2950,9 +2956,22 @@ def reply_to_escalation(
         raise HTTPException(status_code=404, detail="Support case not found")
 
     tid = str(ticket.get("id") or clean_id)
+    from . import officer_chat
+
+    chat = officer_chat.get_chat(tid)
+    if officer_chat.chat_state(ticket, chat) == "ended" and officer_chat.ended_by_officer(chat):
+        # An officer ended this chat and the taxpayer has been handed back to
+        # the assistant; a message here would reopen a closed case unseen.
+        raise HTTPException(status_code=409, detail="This chat with the officer has ended")
     updated = db.append_taxpayer_reply(tid, body.message)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to record taxpayer reply")
+    seq = 0
+    if officer_chat.is_text(ticket):
+        try:
+            seq = int(officer_chat.append_message(ticket, "taxpayer", body.message)["seq"])
+        except Exception:
+            logger.warning("taxpayer message not added to the chat thread of %s", tid, exc_info=True)
 
     try:
         from .ticket_events import build_event, publish
@@ -2965,8 +2984,89 @@ def reply_to_escalation(
         "ok": True,
         "ticket_id": tid,
         "status": updated.get("status", "open"),
+        "seq": seq,
         "message": "Your reply was received by the URA officer.",
     }
+
+
+@app.get("/v1/escalate/{ticket_id}/messages", response_model=OfficerChatThreadResponse, tags=["chat"])
+@limiter.limit(_CHAT_POLL_RATE_LIMIT)
+def escalation_messages(
+    request: Request,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{8,64}$"),
+    after_seq: int = Query(0, ge=0),
+) -> OfficerChatThreadResponse:
+    """The taxpayer's live chat with the officer: new messages, its state, the rating.
+
+    The chat polls this while a case is waiting or with an officer. It answers
+    to the **exact** ticket id only — the id is the capability the taxpayer
+    holds, so unlike the status lookup there is no search fallback that could
+    answer for someone else's case. An officer's message is returned in the
+    taxpayer's language when it was translated. Reading the officer's latest
+    message here counts as delivering it, so the next AI turn does not repeat it.
+    """
+    from . import officer_chat
+
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+    chat = officer_chat.get_chat(ticket_id)
+    rows = officer_chat.list_messages(ticket_id, after_seq=after_seq)
+    last_seq = int(rows[-1]["seq"]) if rows else after_seq
+    if ticket.get("officer_reply") and not ticket.get("reply_delivered_at"):
+        latest_officer = officer_chat.last_seq(ticket_id, sender="officer")
+        if latest_officer and latest_officer <= last_seq:
+            with contextlib.suppress(Exception):
+                db.mark_reply_delivered(ticket_id)
+    return OfficerChatThreadResponse(
+        ticket_id=ticket_id,
+        chat_state=officer_chat.chat_state(ticket, chat),
+        officer_name=officer_chat.officer_name_for(ticket, chat),
+        messages=[
+            {
+                "seq": int(r["seq"]),
+                "sender": r["sender"],
+                "text": (r.get("text_localized") or r.get("text") or "") if r["sender"] == "officer" else (r.get("text") or ""),
+                "officer_name": r.get("officer_name") or "",
+                "created_at": float(r.get("created_at") or 0.0),
+            }
+            for r in rows
+        ],
+        last_seq=last_seq,
+        csat=officer_chat.csat_state(ticket, chat),
+    )
+
+
+@app.post("/v1/escalate/{ticket_id}/csat", tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def rate_officer_chat(
+    request: Request,
+    body: ChatRatingRequest,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{8,64}$"),
+) -> dict:
+    """The taxpayer rates the chat an officer just ended (1–5), or skips (``score: null``).
+
+    Once per chat, and only after the officer ended it — that is when the
+    chat asks. Exact ticket id only, as for the thread. The rating is the
+    officer's service quality, read by administrators on ``/admin/quality``.
+    """
+    from . import officer_chat, service_ratings
+
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+    state = officer_chat.csat_state(ticket, officer_chat.get_chat(ticket_id))
+    if not state["requested"]:
+        raise HTTPException(status_code=409, detail="This chat has not ended, so it cannot be rated yet")
+    if state["submitted"]:
+        raise HTTPException(status_code=409, detail="This chat has already been rated")
+    officer_chat.submit_csat(ticket, score=body.score, comment=body.comment)
+    outcome = "answered" if body.score is not None else "skipped"
+    metrics.inc(
+        "service_rating_total",
+        labels={"source": "chat_officer_csat", "sentiment": service_ratings.sentiment_for_score(body.score) or "skipped"},
+    )
+    return {"ok": True, "ticket_id": ticket_id, "status": outcome}
 
 
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
@@ -4004,10 +4104,28 @@ def get_ticket_endpoint(
     who read it is part of the audit trail (the call desk already logs its
     caller-history views the same way).
     """
+    from . import officer_chat, service_ratings
+
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
+    # The live chat with the taxpayer, in order, and how it ended and was rated.
+    chat = officer_chat.get_chat(ticket_id)
+    ticket["messages"] = officer_chat.thread_for_staff(ticket_id)
+    rating = service_ratings.find("chat_officer_csat", ticket_id=ticket_id) if officer_chat.is_text(ticket) else None
+    ticket["chat"] = {
+        "state": officer_chat.chat_state(ticket, chat),
+        "officer_name": officer_chat.officer_name_for(ticket, chat),
+        "ended_at": (chat or {}).get("ended_at"),
+        "ended_by_name": (chat or {}).get("ended_by_name") or "",
+        "outcome": (chat or {}).get("outcome") or "",
+        "rating": (
+            {"status": rating.get("status"), "score": rating.get("score"), "comment": rating.get("comment") or ""}
+            if rating
+            else None
+        ),
+    }
     _audit_staff_action(ctx, "staff.ticket_viewed", {"ticket_id": ticket_id})
     return ticket
 
@@ -4058,28 +4176,56 @@ async def update_ticket_endpoint(
         except Exception:
             pass
 
-    if officer_reply and not officer_reply_localized:
-        ticket = await asyncio.to_thread(db.get_ticket, ticket_id)
-        if ticket:
-            t_loc = (locale or ticket.get("locale") or "en").lower().strip()
-            if t_loc not in ("", "en"):
-                try:
-                    from .service import localize_reply
-                    officer_reply_localized = localize_reply(officer_reply, t_loc)
-                except Exception:
-                    logger.debug("auto-localizing officer reply failed", exc_info=True)
+    from . import officer_chat
 
-    ok = await asyncio.to_thread(
-        db.update_ticket,
-        ticket_id,
-        status=status,
-        assignee=assignee,
-        staff_note=staff_note,
-        priority=priority,
-        officer_reply=officer_reply,
-        officer_reply_localized=officer_reply_localized,
-        locale=locale,
+    before = await asyncio.to_thread(db.get_ticket, ticket_id)
+    if officer_reply and not officer_reply_localized:
+        officer_reply_localized = await asyncio.to_thread(
+            _localize_for_ticket, officer_reply, locale or (before or {}).get("locale") or "en"
+        )
+
+    # Resolving or closing a live text chat *is* ending it: the taxpayer is
+    # told, asked to rate it, and handed back to the assistant — the same as
+    # the End chat button, so the status stepper and "Send & end chat" agree.
+    ends_chat = bool(
+        before
+        and status in officer_chat.OUTCOMES
+        and officer_chat.is_text(before)
+        and officer_chat.chat_state(before) != "ended"
     )
+    if ends_chat:
+        ok = True
+        if any(v is not None for v in (assignee, staff_note, priority, locale)):
+            ok = await asyncio.to_thread(
+                db.update_ticket, ticket_id, assignee=assignee, staff_note=staff_note, priority=priority, locale=locale
+            )
+        if ok:
+            refreshed = await asyncio.to_thread(db.get_ticket, ticket_id) or before
+            await asyncio.to_thread(
+                officer_chat.end_chat,
+                refreshed,
+                officer_id=ctx.user_id or "",
+                officer_name=_desk_officer_name(ctx),
+                outcome=str(status),
+                closing_message=officer_reply or "",
+                closing_localized=officer_reply_localized or "",
+            )
+    else:
+        ok = await asyncio.to_thread(
+            db.update_ticket,
+            ticket_id,
+            status=status,
+            assignee=assignee,
+            staff_note=staff_note,
+            priority=priority,
+            officer_reply=officer_reply,
+            officer_reply_localized=officer_reply_localized,
+            locale=locale,
+        )
+        if ok and before and officer_chat.is_text(before):
+            await asyncio.to_thread(
+                _note_officer_chat_turn, before, ctx, officer_reply, officer_reply_localized, assignee, status
+            )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
     changed = {
@@ -4092,7 +4238,97 @@ async def update_ticket_endpoint(
     if officer_reply is not None:
         changed["officer_reply_chars"] = len(officer_reply)
     _audit_staff_action(ctx, "staff.ticket_updated", {"ticket_id": ticket_id, **changed})
+    if ends_chat:
+        _audit_staff_action(ctx, "staff.chat_ended", {"ticket_id": ticket_id, "outcome": status, "via": "status"})
+        return {"status": "ok", "ticket_id": ticket_id, "chat_state": "ended"}
     return {"status": "ok", "ticket_id": ticket_id}
+
+
+def _localize_for_ticket(text: str, ticket_locale: str) -> str | None:
+    """An officer's English message in the taxpayer's language (None for English or on failure)."""
+    t_loc = (ticket_locale or "en").lower().strip()
+    if t_loc in ("", "en"):
+        return None
+    try:
+        from .service import localize_reply
+
+        return localize_reply(text, t_loc)
+    except Exception:
+        logger.debug("auto-localizing officer reply failed", exc_info=True)
+        return None
+
+
+def _note_officer_chat_turn(
+    ticket: dict[str, Any],
+    ctx: AuthContext,
+    officer_reply: str | None,
+    officer_reply_localized: str | None,
+    assignee: str | None,
+    status: str | None,
+) -> None:
+    """Keep the chat thread in step with a ticket change: the reply, and who has the case."""
+    from . import officer_chat
+
+    name = _desk_officer_name(ctx)
+    took_case = bool(assignee)
+    if officer_reply or took_case or status == "assigned":
+        officer_chat.note_officer(ticket, ctx.user_id or "", name, took_case=took_case)
+    if officer_reply:
+        officer_chat.append_message(
+            ticket,
+            "officer",
+            officer_reply,
+            text_localized=officer_reply_localized or "",
+            officer_id=ctx.user_id or "",
+            officer_name=name,
+        )
+
+
+@app.post("/v1/admin/tickets/{ticket_id}/end-chat", tags=["admin"])
+async def end_ticket_chat(
+    request: Request,
+    body: EndChatRequest,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """An officer ends a live chat with a taxpayer.
+
+    Writes the optional closing message (translated for a non-English case,
+    as a reply is), marks the end in the thread, resolves or closes the ticket
+    (``outcome``), asks the taxpayer to rate the chat and tells the staff
+    console (``escalation.chat_ended``). The taxpayer's chat then shows the
+    rating and hands them back to the assistant. Officers only; recorded as
+    ``staff.chat_ended``. 409 for a call's ticket or a chat that has ended.
+    """
+    _require_live_officer(ctx)
+    from . import officer_chat
+
+    ticket = await asyncio.to_thread(db.get_ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    if not officer_chat.is_text(ticket):
+        raise HTTPException(status_code=409, detail="This case is a call, not a chat")
+    if officer_chat.chat_state(ticket) == "ended":
+        raise HTTPException(status_code=409, detail="This chat has already ended")
+    closing = body.closing_message.strip()
+    closing_localized = body.closing_message_localized.strip()
+    if closing and not closing_localized:
+        closing_localized = await asyncio.to_thread(_localize_for_ticket, closing, ticket.get("locale") or "en") or ""
+    result = await asyncio.to_thread(
+        officer_chat.end_chat,
+        ticket,
+        officer_id=ctx.user_id or "",
+        officer_name=_desk_officer_name(ctx),
+        outcome=body.outcome,
+        closing_message=closing,
+        closing_localized=closing_localized,
+    )
+    _audit_staff_action(
+        ctx,
+        "staff.chat_ended",
+        {"ticket_id": ticket_id, "outcome": body.outcome, "via": "end_chat", "closing_message_chars": len(closing)},
+    )
+    return {"status": "ok", **result}
 
 
 @app.get("/v1/admin/voice_audit", tags=["admin"])

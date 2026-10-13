@@ -81,6 +81,12 @@ export interface ChatTurn {
    *  the chat response). A rating sends it, so the audit knows which answer
    *  was rated. Absent on turns the server did not log, like the greeting. */
   serverTurnId?: string;
+  /** A line from the chat itself rather than a message ("an officer has
+   *  joined", "the chat has ended"). Rendered as a notice, never rated. */
+  notice?: ChatNoticeKind;
+  /** The officer who wrote this turn (an officer's message in a live chat),
+   *  or who joined or ended it (a notice). */
+  officerName?: string;
   citations?: Citation[];
   faithfulnessScore?: number | null;
   retrievalMode?: string;
@@ -112,6 +118,24 @@ export interface ChatTurn {
   };
 }
 
+/** The chat's own notices: an officer joining, and the hand-back to the AI. */
+export type ChatNoticeKind = 'officer_joined' | 'officer_left';
+
+/** Where the live chat with an officer stands, as the server last said. */
+export type OfficerChatState = 'waiting' | 'officer' | 'ended' | 'none';
+
+/**
+ * The taxpayer's side of a live chat with an officer, kept per conversation so
+ * a reload resumes where it was: the case, the last thread message already
+ * shown (so none is shown twice) and the state.
+ */
+export interface OfficerChatSync {
+  ticketId: string;
+  lastSeq: number;
+  state: OfficerChatState;
+  officerName?: string;
+}
+
 export interface Conversation {
   id: string;
   title: string;
@@ -128,6 +152,8 @@ export interface Conversation {
   titleCustom?: boolean;
   /** Active escalation ticket ID associated with this conversation */
   activeTicketId?: string;
+  /** The live chat with an officer on that ticket, if one has started. */
+  officerChat?: OfficerChatSync;
 }
 
 /**
@@ -170,6 +196,8 @@ interface ChatStore {
   conversations: Conversation[];
   activeConversationId: string | null;
   activeTicketId: string | null;
+  /** The active conversation's live chat with an officer. */
+  officerChat: OfficerChatSync | null;
   supportCaseOpen: boolean;
   // Actions
   setMessage: (value: string) => void;
@@ -185,6 +213,8 @@ interface ChatStore {
    */
   adoptResponseLocale: (locale: string, source?: string) => void;
   setActiveTicketId: (ticketId: string | null) => void;
+  /** Record where the live officer chat stands (null when it is over). */
+  setOfficerChat: (sync: OfficerChatSync | null) => void;
   setSupportCaseOpen: (open: boolean) => void;
   addTurns: (turns: ChatTurn[]) => void;
   updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
@@ -272,6 +302,9 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     turn.faithfulnessScore = value.faithfulnessScore;
   }
   if (typeof value.retrievalMode === 'string') turn.retrievalMode = value.retrievalMode;
+  if (typeof value.serverTurnId === 'string' && value.serverTurnId) turn.serverTurnId = value.serverTurnId;
+  if (value.notice === 'officer_joined' || value.notice === 'officer_left') turn.notice = value.notice;
+  if (typeof value.officerName === 'string' && value.officerName) turn.officerName = value.officerName.slice(0, 128);
   if (typeof value.escalationRequired === 'boolean') turn.escalationRequired = value.escalationRequired;
   if (typeof value.escalationReason === 'string') turn.escalationReason = value.escalationReason;
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
@@ -316,6 +349,22 @@ function sanitizeTurns(value: unknown): ChatTurn[] {
   return value.map(sanitizeTurn).filter((turn): turn is ChatTurn => Boolean(turn)).slice(-MAX_TURNS);
 }
 
+const OFFICER_CHAT_STATES: readonly OfficerChatState[] = ['waiting', 'officer', 'ended', 'none'];
+
+function sanitizeOfficerChat(value: unknown): OfficerChatSync | null {
+  if (!isRecord(value) || typeof value.ticketId !== 'string' || !value.ticketId) return null;
+  const state = OFFICER_CHAT_STATES.includes(value.state as OfficerChatState)
+    ? (value.state as OfficerChatState)
+    : 'waiting';
+  const sync: OfficerChatSync = {
+    ticketId: value.ticketId,
+    lastSeq: typeof value.lastSeq === 'number' && Number.isFinite(value.lastSeq) ? Math.max(0, value.lastSeq) : 0,
+    state,
+  };
+  if (typeof value.officerName === 'string' && value.officerName) sync.officerName = value.officerName.slice(0, 128);
+  return sync;
+}
+
 function sanitizeConversation(value: unknown): Conversation | null {
   if (!isRecord(value)) return null;
   const id = typeof value.id === 'string' && value.id ? value.id : null;
@@ -337,6 +386,8 @@ function sanitizeConversation(value: unknown): Conversation | null {
   if (value.pinned === true) conversation.pinned = true;
   if (value.titleCustom === true) conversation.titleCustom = true;
   if (typeof value.activeTicketId === 'string' && value.activeTicketId) conversation.activeTicketId = value.activeTicketId;
+  const sync = sanitizeOfficerChat(value.officerChat);
+  if (sync) conversation.officerChat = sync;
   return conversation;
 }
 
@@ -585,6 +636,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   conversations: [] as Conversation[],
   activeConversationId: null as string | null,
   activeTicketId: null as string | null,
+  officerChat: null as OfficerChatSync | null,
   supportCaseOpen: false,
 
   setMessage: (value) => {
@@ -621,6 +673,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       set({ activeTicketId: ticketId });
     }
   },
+  setOfficerChat: (sync) => {
+    const cid = get().activeConversationId;
+    set((state) => ({
+      officerChat: sync,
+      conversations: cid
+        ? state.conversations.map((c) => (c.id === cid ? { ...c, officerChat: sync || undefined } : c))
+        : state.conversations,
+    }));
+    if (cid) get().saveCurrentSession();
+  },
   setSupportCaseOpen: (open) => set({ supportCaseOpen: open }),
 
   addTurns: (turns) =>
@@ -646,6 +708,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       localeExplicit: false,
       activeConversationId: null,
       activeTicketId: null,
+      officerChat: null,
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -662,7 +725,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   /** Save the current chat as a conversation (or update existing). */
   saveCurrentSession: () => {
-    const { chat, conversations, activeConversationId } = get();
+    const { chat, conversations, activeConversationId, activeTicketId, officerChat } = get();
     // Only save if there are user messages
     if (chat.length <= 1) {
       writePersistedChatState(get());
@@ -675,6 +738,10 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
     const id = activeConversationId ?? generateId();
     const conv: Conversation = { id, title, preview, turns: chat, createdAt: now, updatedAt: now };
+    // The open case and its live chat belong to this conversation, so a
+    // reload or a switch back resumes them.
+    if (activeTicketId) conv.activeTicketId = activeTicketId;
+    if (officerChat) conv.officerChat = officerChat;
     const existing = conversations.find((c) => c.id === id);
 
     if (existing) {
@@ -684,7 +751,15 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
         activeConversationId: id,
         conversations: conversations.map((c) =>
           c.id === id
-            ? { ...c, title: c.titleCustom ? c.title : title, preview, turns: chat, updatedAt: now }
+            ? {
+                ...c,
+                title: c.titleCustom ? c.title : title,
+                preview,
+                turns: chat,
+                updatedAt: now,
+                activeTicketId: activeTicketId || undefined,
+                officerChat: officerChat || undefined,
+              }
             : c,
         ),
       });
@@ -706,6 +781,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       message: '',
       activeConversationId: null,
       activeTicketId: null,
+      officerChat: null,
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -730,6 +806,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       activeConversationId: id,
       message: '',
       activeTicketId: target.activeTicketId || null,
+      officerChat: target.officerChat || null,
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -740,7 +817,14 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     const { conversations, activeConversationId } = get();
     const filtered = conversations.filter((c) => c.id !== id);
     if (id === activeConversationId) {
-      set({ conversations: filtered, chat: [GREETING], activeConversationId: null, message: '' });
+      set({
+        conversations: filtered,
+        chat: [GREETING],
+        activeConversationId: null,
+        message: '',
+        activeTicketId: null,
+        officerChat: null,
+      });
     } else {
       set({ conversations: filtered });
     }
@@ -792,6 +876,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       chat: [GREETING],
       activeConversationId: null,
       message: '',
+      activeTicketId: null,
+      officerChat: null,
     });
     writePersistedChatState(get());
   },
@@ -812,6 +898,9 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       localeExplicit: persisted.localeExplicit === true,
       conversations: persisted.conversations,
       activeConversationId: activeConversation?.id ?? null,
+      // A reload mid-case resumes the case and its live chat.
+      activeTicketId: activeConversation?.activeTicketId ?? null,
+      officerChat: activeConversation?.officerChat ?? null,
     });
     writePersistedChatState(get());
   },

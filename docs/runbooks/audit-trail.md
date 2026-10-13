@@ -48,6 +48,8 @@ these appends one hash-chained row to `audit_events`:
 | `generate` | The assistant answers — on **every** transport: `/v1/chat`, the SSE stream, the WebSocket stream, voice chat, multimodal and the call receptionist (field `channel`) | see [The answer record](#the-answer-record) |
 | `tool_confirm` | A taxpayer confirms or refuses an action (existing) | tool, decision |
 | `staff.call_reviewed` | A call is rated | `call_id`, `rating`, `note_chars` |
+| `staff.chat_ended` | An officer ends a live chat — **End chat**, or resolving/closing a live text case | `ticket_id`, `outcome` (`resolved` / `wontfix`), `via` (`end_chat` / `status`), `closing_message_chars` |
+| `staff.conversation_viewed` | A rated conversation is opened in the quality audit (`/admin/quality`) | `conversation_id` |
 | `voice_staff_viewed_call` | A call and its transcript are opened (call detail, or the live call view) | call id (`session_id`) |
 | `voice_staff_listened_call` | Someone listens in to a live call, before any audio flows | call id, `transport` (`livekit` / `websocket`) |
 | `voice_staff_viewed_brief` / `voice_staff_viewed_caller_history` | A call brief or a caller's history is opened | call id |

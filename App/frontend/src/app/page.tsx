@@ -49,6 +49,8 @@ import LoadingState from '../components/LoadingState';
 import ChatHeader from '../components/ChatHeader';
 import { useCallStore } from '../store/useCallStore';
 import { useIdentity } from '../hooks/useIdentity';
+import { useOfficerChat } from '../hooks/useOfficerChat';
+import { ChatNotice } from '../components/ChatNotice';
 import type { SettingsTab } from '../components/settings/SettingsDialog';
 
 const ConversationSearch = dynamic(() => import('../components/ConversationSearch'), { ssr: false });
@@ -56,6 +58,7 @@ const SettingsDialog = dynamic(() => import('../components/settings/SettingsDial
 const CallScreen = dynamic(() => import('../components/call/CallScreen').then((m) => m.CallScreen), { ssr: false });
 const DocumentInspectionModal = dynamic(() => import('../components/DocumentInspectionModal').then((m) => m.DocumentInspectionModal), { ssr: false });
 const SupportCaseModal = dynamic(() => import('../components/SupportCaseModal').then((m) => m.SupportCaseModal), { ssr: false });
+const ServiceRatingDialog = dynamic(() => import('../components/ServiceRatingDialog').then((m) => m.ServiceRatingDialog), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -266,6 +269,10 @@ export default function Page() {
   );
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // The live chat with an officer once one takes the case. It holds while an
+  // answer streams, because the stream writes into the last turn.
+  const officerChat = useOfficerChat({ hold: isLoading });
+  const { withOfficer, sendToOfficer } = officerChat;
   const [turnPhase, setTurnPhase] = useState<TurnPhase | null>(null);
   /** Stamped once per turn and held across every phase change, so the timer
    *  runs continuously and the closing "Thought for …" is the real duration. */
@@ -1037,6 +1044,18 @@ export default function Page() {
       dictationFinalRef.current = '';
       recognitionRef.current?.stop();
     }
+    // An officer has the case: the message is theirs, and the assistant waits
+    // until they end the chat.
+    if (withOfficer) {
+      setMessage('');
+      shouldStickToBottomRef.current = true;
+      const delivered = await sendToOfficer(text);
+      if (!delivered) {
+        setMessage(text);
+        setChatLiveStatus(t('officerChat.sendFailed'));
+      }
+      return;
+    }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
       .map((a) => ({
@@ -1468,7 +1487,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession, withOfficer, sendToOfficer]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1830,7 +1849,7 @@ export default function Page() {
     const map: Record<string, number> = {};
     let n = 0;
     for (const turn of chat) {
-      if (turn.role !== 'assistant' || turn.id === 'greeting-0' || turn.retrievalMode === 'officer_reply') continue;
+      if (turn.role !== 'assistant' || turn.id === 'greeting-0' || turn.retrievalMode === 'officer_reply' || turn.notice) continue;
       map[turn.id] = ++n;
     }
     return map;
@@ -1904,7 +1923,24 @@ export default function Page() {
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
     dictationNotice,
     onStop: stopGeneration,
+    // With an officer, the composer is a plain message box to them: files,
+    // connectors and voice mode are the assistant's tools.
+    ...(officerChat.withOfficer
+      ? { onAttachFiles: undefined, onVoiceModeChange: undefined, placeholder: t('officerChat.placeholder') }
+      : {}),
   };
+
+  // Say so when an officer joins or the chat hands back to the assistant.
+  const officerStateRef = useRef(officerChat.state);
+  useEffect(() => {
+    const before = officerStateRef.current;
+    officerStateRef.current = officerChat.state;
+    if (officerChat.state === 'officer' && before !== 'officer') {
+      setChatLiveStatus(t('officerChat.joined', { name: officerChat.officerName || t('officerChat.officerLabel') }));
+    } else if (officerChat.state === null && before && chat[chat.length - 1]?.notice === 'officer_left') {
+      setChatLiveStatus(t('officerChat.ended'));
+    }
+  }, [officerChat.state, officerChat.officerName, chat, t]);
 
   // ---- Render ----
 
@@ -1998,7 +2034,7 @@ export default function Page() {
       />
 
       {activeTicketId && (
-        <div className="chat-case-banner">
+        <div className="chat-case-banner" data-officer-chat={officerChat.state ?? undefined}>
           <button
             type="button"
             className="chat-case-pill"
@@ -2009,6 +2045,17 @@ export default function Page() {
             <span className="chat-case-text">Support Case #TIC-{activeTicketId.slice(0, 8).toUpperCase()}</span>
             <span className="chat-case-action">Open Case Room ↗</span>
           </button>
+          {officerChat.state === 'officer' || officerChat.state === 'waiting' ? (
+            <p className={`chat-case-status${officerChat.sendFailed ? ' is-error' : ''}`}>
+              {officerChat.sendFailed
+                ? t('officerChat.sendFailed')
+                : officerChat.state === 'officer'
+                  ? t('officerChat.withOfficerBanner', {
+                      name: officerChat.officerName || t('officerChat.officerLabel'),
+                    })
+                  : t('officerChat.waitingBanner')}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -2076,6 +2123,7 @@ export default function Page() {
                    by "Thought for …" when the turn ends. */
                 const isPending =
                   isLoading && turnPhase !== null && i === chat.length - 1 && turn.role === 'assistant';
+                if (turn.notice) return <ChatNotice key={turn.id} turn={turn} />;
                 return (
                   <ChatMessage
                     key={turn.id}
@@ -2194,7 +2242,16 @@ export default function Page() {
         onClose={() => setSupportCaseOpen(false)}
         ticketId={activeTicketId}
         conversationId={activeConversationId}
+        liveChat={officerChat.state === 'officer' || officerChat.state === 'ended'}
       />
+
+      {officerChat.ratingOpen && (
+        <ServiceRatingDialog
+          officerName={officerChat.officerName}
+          onSubmit={officerChat.submitRating}
+          onSkip={officerChat.skipRating}
+        />
+      )}
 
       <CallScreen />
 
