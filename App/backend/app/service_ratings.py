@@ -372,6 +372,37 @@ def audit(
     }
 
 
+def problems(days: int, *, tenant_id: str | None = None, limit: int = MAX_ROWS, now: float | None = None) -> list[dict[str, Any]]:
+    """The answered ratings that call for a read: negative ones, every stream, newest first.
+
+    An officer chat or call rated 1 or 2 is stored as ``negative``, as is a
+    caller who said the AI did not help, so one condition finds all three.
+    """
+    _ensure()
+    now = time.time() if now is None else now
+    clauses = ["status = 'answered'", "sentiment = 'negative'", "created_at >= ?", "created_at < ?"]
+    params: list[Any] = [now - days * 86400, now]
+    if tenant_id is not None:
+        clauses.append("tenant_id = ?")
+        params.append(tenant_id)
+    params.append(max(1, int(limit)))
+    rows = db.query_all(
+        f"SELECT * FROM service_ratings WHERE {' AND '.join(clauses)} "  # noqa: S608 - fixed clauses
+        "ORDER BY COALESCE(answered_at, created_at) DESC LIMIT ?",
+        tuple(params),
+    )
+    return [_public(r) for r in rows]
+
+
+def exists(rating_id: str, *, tenant_id: str | None = None) -> bool:
+    _ensure()
+    if tenant_id is None:
+        row = db.query_one("SELECT id FROM service_ratings WHERE id = ?", (rating_id,))
+    else:
+        row = db.query_one("SELECT id FROM service_ratings WHERE id = ? AND tenant_id = ?", (rating_id, tenant_id))
+    return row is not None
+
+
 def headline(source: str, days: int, *, tenant_id: str | None = None, now: float | None = None) -> dict[str, Any]:
     """The overview's figures for one source: this period and the one before."""
     if source not in SOURCES:

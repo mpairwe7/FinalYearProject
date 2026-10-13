@@ -156,6 +156,52 @@ async function stubQualityAudit(page: Page) {
   await page.route("**/api/v1/admin/quality/ratings?**", (route) =>
     route.fulfill({ json: ratingsFixture(new URL(route.request().url()).searchParams.get("source") || undefined) }),
   );
+  // The overview's headline per stream, and the Needs review queue.
+  const headline = (source: string) => {
+    const r = ratingsFixture(source);
+    return { truncated: false, ...r.summary, previous: r.previous };
+  };
+  await page.route("**/api/v1/admin/quality/summary**", (route) =>
+    route.fulfill({
+      json: {
+        period_days: 30,
+        needs_review: { open: 2, action_needed: 1 },
+        ai_chat: q.summary,
+        officer_chat: headline("chat_officer_csat"),
+        ai_calls: { end: headline("call_ai_review_end"), transfer: headline("call_ai_review_transfer") },
+        officer_calls: headline("call_officer_csat"),
+      },
+    }),
+  );
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/v1/admin/quality/needs-review**", (route) =>
+    route.fulfill({
+      json: {
+        period_days: 30, truncated: false, counts: { open: 2, action_needed: 1, reviewed: 0, all: 3 },
+        total: 3, limit: 25, offset: 0,
+        items: [
+          {
+            item_type: "ai_chat", item_id: "conv-went-wrong", stream: "ai_chat", title: "AI chat went wrong at answer 3",
+            quote: "What if I am a sole proprietor?", comment: "That is wrong.", topic: "vat_registration", locale: "lg",
+            officer_name: "", occurred_at: now - 60,
+            link: { tab: "ai-chat", param: "conversation", value: "conv-went-wrong" }, review: null,
+          },
+          {
+            item_type: "rating", item_id: "low", stream: "officer_chat", title: "Officer chat rated 2/5 — Officer Okello",
+            quote: "", comment: "Took too long to answer.", topic: "vat", locale: "en", officer_name: "Officer Okello",
+            occurred_at: now - 600, link: { tab: "officer-chat", param: "ticket", value: "tkt-low" },
+            review: { status: "action_needed", note: "Coach on response times", reviewer_name: "auditor@ura.go.ug", updated_at: now - 30 },
+          },
+          {
+            item_type: "rating", item_id: "call-ai-low", stream: "ai_call",
+            title: "Caller said the AI didn't help (while being transferred)", quote: "", comment: "It didn't help me",
+            topic: "vat", locale: "en", officer_name: "", occurred_at: now - 900,
+            link: { tab: "ai-calls", param: "", value: "" }, review: null,
+          },
+        ],
+      },
+    }),
+  );
 }
 
 /**
@@ -368,7 +414,7 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
   });
 
   test("has no serious or critical axe violations on every required staff surface in both themes", async ({ page }) => {
-    // Eighteen navigations and eighteen axe passes: nine console routes in two
+    // Twenty-eight navigations and axe passes: fourteen console routes in two
     // themes. That is inherently past the 30s default, and was already close to
     // it at four routes.
     test.slow();
@@ -380,11 +426,12 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
     // the queue and the call desk.
     const routesByRole = {
       ura_admin: [
-        ["/admin", "Operations overview"],
+        ["/admin", "Service quality overview"],
         ["/admin/quality", "Service quality audit"],
         ["/admin/quality?tab=officer-chat", "Service quality audit"],
         ["/admin/quality?tab=ai-calls", "Service quality audit"],
         ["/admin/quality?tab=officer-calls", "Service quality audit"],
+        ["/admin/quality?tab=needs-review", "Service quality audit"],
         ["/admin/flags", "Feature flags"],
         ["/admin/overrides", "Answer overrides"],
         ["/admin/outbox", "Notification outbox"],

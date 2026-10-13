@@ -41,6 +41,7 @@ def test_seed_loads_overrides_reminders_and_ticket(mem_db) -> None:
     assert first["reminders"] == 2
     assert first["tickets"] == 1
     assert first["feedback"] == 1
+    assert first["quality"] == 1
     hit = lookup("What is the VAT rate?")
     assert hit is not None
     assert "18%" in hit["reply"]
@@ -52,4 +53,19 @@ def test_seed_loads_overrides_reminders_and_ticket(mem_db) -> None:
     second = seed()
     assert second["tickets"] == 0
     assert second["feedback"] == 0
-    assert len(db.list_tickets(limit=50)) == 1
+    assert second["quality"] == 0
+    # The JSON seed's ticket, and the quality-audit demo's officer chat.
+    assert len(db.list_tickets(limit=50)) == 2
+
+
+def test_the_quality_audit_demo_fills_every_tab_and_needs_review(mem_db) -> None:
+    from app import audit_reviews, quality_audit, service_ratings
+
+    seed()
+    conv = quality_audit.ai_chat_timeline("proto-conv-went-wrong")
+    assert conv is not None and (conv["pattern"], conv["break_answer"]) == ("went_wrong", 3)
+    assert service_ratings.headline("chat_officer_csat", 30)["average"] == 2.0
+    assert service_ratings.headline("call_ai_review_transfer", 30)["sentiment"]["negative"] == 1
+    assert service_ratings.headline("call_officer_csat", 30)["answered"] == 1
+    streams = {i["stream"] for i in audit_reviews.needs_review(30, status="open", limit=100)["items"]}
+    assert streams == {"ai_chat", "officer_chat", "ai_call"}

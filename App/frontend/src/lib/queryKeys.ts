@@ -64,6 +64,8 @@ export const queryKeys = {
     ticket: (id: string) => ['quality', 'ticket', id] as const,
     /** A call opened from the audit (read once: each read is recorded). */
     call: (id: string) => ['quality', 'call', id] as const,
+    needsReview: (days: number, status: string, stream: string, limit: number) =>
+      ['quality', 'needsReview', { days, status, stream, limit }] as const,
   },
   speech: {
     all: () => ['speech'] as const,

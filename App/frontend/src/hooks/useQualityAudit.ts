@@ -4,9 +4,16 @@
  * Read-only and not live: an audit reads a period, so these re-fetch on a
  * refresh or a filter change rather than on a poll.
  */
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../lib/queryKeys";
-import { analyticsApi, type AiChatQuery, type RatingsQuery } from "../services/analyticsApi";
+import {
+  analyticsApi,
+  type AiChatQuery,
+  type NeedsReviewItem,
+  type NeedsReviewQuery,
+  type RatingsQuery,
+  type ReviewStatus,
+} from "../services/analyticsApi";
 import { callsApi } from "../services/callsApi";
 
 export function useQualitySummary(days = 30) {
@@ -92,5 +99,35 @@ export function useAuditedCall(callId: string | null) {
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
     retry: 1,
+  });
+}
+
+/** The Needs review queue: counts, and a page of items newest first. */
+export function useNeedsReview({ days = 30, status = "open", stream = "", limit = 25 }: NeedsReviewQuery = {}) {
+  return useQuery({
+    queryKey: queryKeys.quality.needsReview(days, status, stream, limit),
+    queryFn: () => analyticsApi.qualityNeedsReview({ days, status, stream, limit }),
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
+    retry: 1,
+  });
+}
+
+/** Record a decision on an item; the queue, the counts and the overview re-read. */
+export function useSetReview() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      item,
+      status,
+      note,
+    }: {
+      item: Pick<NeedsReviewItem, "item_type" | "item_id">;
+      status: ReviewStatus | "open";
+      note?: string;
+    }) => analyticsApi.setQualityReview(item.item_type, item.item_id, status, note ?? ""),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: queryKeys.quality.all() });
+    },
   });
 }

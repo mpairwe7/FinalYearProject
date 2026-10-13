@@ -273,6 +273,46 @@ function ratingsFixture(source = "chat_officer_csat") {
   };
 }
 
+/** One stream's headline, as GET /v1/admin/quality/summary carries it. */
+function headlineFixture(source: string) {
+  const r = ratingsFixture(source);
+  const { asked, answered, response_rate, average, csat_pct, low, distribution, sentiment, positive_pct, negative_pct } =
+    r.summary;
+  return {
+    truncated: false, asked, answered, response_rate, average: source.startsWith("call_ai") ? null : average,
+    csat_pct: source.startsWith("call_ai") ? null : csat_pct, low, distribution, sentiment, positive_pct, negative_pct,
+    previous: r.previous,
+  };
+}
+
+/** The Needs review queue: a chat that went wrong, a low officer chat, a caller the AI did not help. */
+function needsReviewFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const items = [
+    {
+      item_type: "ai_chat", item_id: "conv-went-wrong", stream: "ai_chat", title: "AI chat went wrong at answer 3",
+      quote: "What if I am a sole proprietor?", comment: "That is wrong.", topic: "vat_registration", locale: "lg",
+      officer_name: "", occurred_at: now - 60, link: { tab: "ai-chat", param: "conversation", value: "conv-went-wrong" },
+      review: null,
+    },
+    {
+      item_type: "rating", item_id: "low", stream: "officer_chat", title: "Officer chat rated 2/5 — Officer Okello",
+      quote: "", comment: "Took too long to answer.", topic: "vat", locale: "en", officer_name: "Officer Okello",
+      occurred_at: now - 600, link: { tab: "officer-chat", param: "ticket", value: "tkt-low" }, review: null,
+    },
+    {
+      item_type: "rating", item_id: "call-ai-low", stream: "ai_call",
+      title: "Caller said the AI didn't help (while being transferred)", quote: "", comment: "It didn't help me",
+      topic: "vat", locale: "en", officer_name: "", occurred_at: now - 900,
+      link: { tab: "ai-calls", param: "", value: "" }, review: null,
+    },
+  ];
+  return {
+    period_days: 30, truncated: false, counts: { open: 3, action_needed: 0, reviewed: 0, all: 3 },
+    total: items.length, limit: 25, offset: 0, items,
+  };
+}
+
 async function stubQualityAudit(page: Page) {
   const q = qualityFixture();
   await page.route("**/api/v1/admin/quality/ai-chat/*", (route) => route.fulfill({ json: q.timeline }));
@@ -282,6 +322,19 @@ async function stubQualityAudit(page: Page) {
   await page.route("**/api/v1/admin/quality/ratings?**", (route) =>
     route.fulfill({ json: ratingsFixture(new URL(route.request().url()).searchParams.get("source") || undefined) }),
   );
+  await page.route("**/api/v1/admin/quality/summary**", (route) =>
+    route.fulfill({
+      json: {
+        period_days: 30,
+        needs_review: { open: 3, action_needed: 0 },
+        ai_chat: q.summary,
+        officer_chat: headlineFixture("chat_officer_csat"),
+        ai_calls: { end: headlineFixture("call_ai_review_end"), transfer: headlineFixture("call_ai_review_transfer") },
+        officer_calls: headlineFixture("call_officer_csat"),
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/quality/needs-review**", (route) => route.fulfill({ json: needsReviewFixture() }));
 }
 
 /**
@@ -406,58 +459,60 @@ test.describe("Staff UI on Chromium", () => {
     test.beforeEach(async ({ page }) => {
       await signedInAs(page, "ura_admin");
       await page.goto("/admin");
-      await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Service quality overview" })).toBeVisible();
     });
 
-    test("renders every metric from the API, humanised", async ({ page }) => {
-      // Six since the SLA/assignment board landed: open, awaiting first reply,
-      // past the 24h SLA, unassigned, then the two medians. The tiles are the
-      // console's shared `.ops-stat` since the redesign; the numbers and their
-      // order are unchanged.
-      const metrics = page.locator(".ops-stat-grid .ops-stat");
-      await expect(metrics).toHaveCount(6);
-      // 11_820s → 3.3h and 7_200s → 2.0h: the formatDuration() contract, which
-      // reports medians in decimal hours (h+m is kept for per-ticket waits,
-      // where the minutes are what an officer is actually watching).
-      await expect(metrics.nth(4)).toContainText("3.3h");
-      await expect(metrics.nth(5)).toContainText("2.0h");
-      await expect(metrics.nth(0)).toContainText("4");
-      await expect(metrics.nth(1)).toContainText("3");
-      // The last two come from the SLA payload's live counts. `unassigned` used
-      // to be counted from the queue rows this page had loaded — three of them,
-      // all unclaimed — so the tile agreed with the stub by accident and was
-      // capped at the page size against a real backend.
-      await expect(metrics.nth(2)).toContainText("2");
-      await expect(metrics.nth(3)).toContainText("42");
+    test("leads with the four streams' ratings, each opening its tab", async ({ page }) => {
+      const tiles = page.locator(".ov-stats .ops-stat");
+      await expect(tiles).toHaveCount(4);
+      await expect(tiles.nth(0)).toContainText("AI answers found helpful");
+      await expect(tiles.nth(0)).toContainText("66.7%");
+      await expect(tiles.nth(0)).toContainText("down 3.3 points from 70% in the period before");
+      // Both moments together: 2 of the 4 callers who answered said it helped.
+      await expect(tiles.nth(1)).toContainText("Callers said the AI helped");
+      await expect(tiles.nth(1)).toContainText("50%");
+      await expect(tiles.nth(2)).toContainText("3.5/5");
+      await expect(tiles.nth(3)).toContainText("Officer call satisfaction");
+      const hrefs = await tiles.evaluateAll((els) => els.map((el) => el.getAttribute("href")));
+      expect(hrefs).toEqual([
+        "/admin/quality",
+        "/admin/quality?tab=ai-calls",
+        "/admin/quality?tab=officer-chat",
+        "/admin/quality?tab=officer-calls",
+      ]);
+      // The escalation board it replaced is gone.
+      await expect(page.getByLabel("Escalation summary")).toHaveCount(0);
+      await expect(page.getByLabel("Escalation volume")).toHaveCount(0);
     });
 
     test("attention is carried by the figures, not by tinting the tiles", async ({ page }) => {
-      // The tiles used to take a `tone` and paint a 3px inset accent edge for
-      // it. The console rebuild dropped both: a coloured bar down the side of a
-      // card is decoration this console does not use, and what a tile means is
-      // in its label, value and hint. So the two tiles that would once have been
-      // tinted — awaiting_first_response = 3 and 3 unassigned — have to read
-      // just as clearly with nothing colouring them.
-      const metrics = page.locator(".ops-stat-grid .ops-stat");
-      await expect(metrics.nth(1)).toContainText("Awaiting first response");
-      await expect(metrics.nth(1)).toContainText("3");
-      await expect(metrics.nth(1)).toContainText("nobody has replied yet");
-      await expect(metrics.nth(3)).toContainText("Unassigned");
-      // 42 from the SLA payload, not 3 — the number of rows the queue mock
-      // returns. Deriving this from the loaded page capped it at the page
-      // size, so a queue of thousands reported the page length.
-      await expect(metrics.nth(3)).toContainText("42");
-      await expect(metrics.nth(3)).toContainText("waiting to be claimed");
-
-      // No tile carries a status class, and every tile shares one surface —
-      // the guard against the accent edge or a colour wash coming back.
-      await expect(page.locator(".ops-stat.is-warn, .ops-stat.is-danger, .ops-stat.is-good")).toHaveCount(
-        0,
-      );
+      // A coloured bar down the side of a card is decoration this console does
+      // not use; what a tile means is in its label, value and hint.
+      const tiles = page.locator(".ov-stats .ops-stat");
+      await expect(tiles).toHaveCount(4);
+      await expect(page.locator(".ops-stat.is-warn, .ops-stat.is-danger, .ops-stat.is-good")).toHaveCount(0);
       const backgrounds = new Set(
-        await metrics.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor)),
+        await tiles.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor)),
       );
       expect(backgrounds.size).toBe(1);
+    });
+
+    test("lists what is waiting for a review, each opening where it is read", async ({ page }) => {
+      const list = page.getByRole("list", { name: "Needs review, newest first" });
+      await expect(list.getByRole("listitem")).toHaveCount(3);
+      await expect(list.getByRole("link", { name: "AI chat went wrong at answer 3" })).toHaveAttribute(
+        "href",
+        "/admin/quality?conversation=conv-went-wrong",
+      );
+      await expect(list.getByRole("link", { name: /Officer chat rated 2\/5/ })).toHaveAttribute(
+        "href",
+        "/admin/quality?tab=officer-chat&ticket=tkt-low",
+      );
+      await expect(page.getByText("3 open", { exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: /Open the Needs review queue/ })).toHaveAttribute(
+        "href",
+        "/admin/quality?tab=needs-review",
+      );
     });
 
     test("lists the officers on duty, available first, with nothing to take", async ({ page }) => {
@@ -475,27 +530,31 @@ test.describe("Staff UI on Chromium", () => {
     test("answer-authority panel reports the manifest state", async ({ page }) => {
       await expect(page.getByRole("heading", { name: "Answer authority" })).toBeVisible();
       await expect(page.locator(".ov-chip.good")).toHaveText("Fresh");
-      const kv = page.locator(".ov-kv dd");
+      const kv = page.locator('section[aria-labelledby="a-h"] .ov-kv dd');
       await expect(kv.nth(1)).toHaveText("2026-07");
       await expect(kv.nth(2)).toHaveText("12 of 120 days");
       // sources_checked, the key the endpoint actually emits.
       await expect(kv.nth(3)).toHaveText("2 checked");
     });
 
-    test("service-level tiles are figures, not links into the officers' queue", async ({ page }) => {
-      for (const label of ["Open escalations", "Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
-        const tile = page.locator(".ops-stat", { hasText: label });
-        await expect(tile).not.toHaveAttribute("href", /.*/);
-      }
+    test("service levels are figures, not links into the officers' queue", async ({ page }) => {
+      const levels = page.locator('section[aria-labelledby="s-h"]');
+      const kv = levels.locator(".ov-kv dd");
+      await expect(kv.nth(0)).toHaveText("4");
+      await expect(kv.nth(1)).toHaveText("2");
+      // 11_820s → 3.3h and 7_200s → 2.0h: the formatDuration() contract, which
+      // reports medians in decimal hours.
+      await expect(kv.nth(2)).toHaveText("3.3h");
+      await expect(kv.nth(3)).toHaveText("2.0h");
+      await expect(levels.getByRole("link")).toHaveCount(0);
       await expect(page.locator('main a[href^="/admin/tickets"], main a[href^="/agent"], main a[href^="/calls"]')).toHaveCount(0);
     });
 
     test("two-column at desktop, single column below 900px", async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 900 });
       expect(await columnCount(page, ".ov-cols")).toBe(2);
-      // The 1.45fr/1fr split must actually favour the queue. The right column
-      // is now a stack of two panels (authority + workload), so measure the
-      // columns rather than assuming each is a single section.
+      // The 1.45fr/1fr split must favour the Needs review list over the side
+      // column's stack of panels.
       const [q, a] = await page.locator(".ov-cols > *").evaluateAll((els) =>
         els.map((e) => e.getBoundingClientRect().width),
       );
@@ -582,6 +641,28 @@ test.describe("Staff UI on Chromium", () => {
       await expect(call).toContainText("Explained the refund timeline.");
       await expect(call).toContainText("Where is my refund?");
       await expect(page).toHaveURL(/call=call-low/);
+    });
+
+    test("records a decision on a Needs review item, on the audit's own route", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      const puts: Array<{ url: string; body: unknown }> = [];
+      await page.route("**/api/v1/admin/quality/reviews/**", (route) => {
+        puts.push({ url: route.request().url(), body: route.request().postDataJSON() });
+        return route.fulfill({ json: { item_type: "ai_chat", item_id: "conv-went-wrong", review: null } });
+      });
+      await page.goto("/admin/quality?tab=needs-review");
+      await expect(page.getByRole("tab", { name: "Needs review" })).toHaveAttribute("aria-selected", "true");
+      const list = page.getByRole("list", { name: "Needs review" });
+      await expect(list.getByRole("listitem")).toHaveCount(3);
+      await expect(list.getByRole("listitem").first()).toContainText("Asked: What if I am a sole proprietor?");
+      const decision = page.getByRole("group", { name: "Decision on: AI chat went wrong at answer 3" });
+      await decision.getByRole("button", { name: "Add a note" }).click();
+      await decision.getByLabel("Note").fill("Sole proprietors can register");
+      await decision.getByRole("button", { name: "Action needed" }).click();
+      await expect.poll(() => puts.length).toBe(1);
+      expect(puts[0].url).toMatch(/\/v1\/admin\/quality\/reviews\/ai_chat\/conv-went-wrong$/);
+      expect(puts[0].body).toEqual({ status: "action_needed", note: "Sole proprietors can register" });
+      await expect(page.getByRole("button", { name: "Export 3 as CSV" })).toBeEnabled();
     });
   });
 
@@ -696,6 +777,7 @@ test.describe("Staff UI on Chromium", () => {
         "/admin/quality?tab=officer-chat",
         "/admin/quality?tab=ai-calls",
         "/admin/quality?tab=officer-calls",
+        "/admin/quality?tab=needs-review",
         "/admin/flags",
         "/admin/overrides",
         "/admin/outbox",

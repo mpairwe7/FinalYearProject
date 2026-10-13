@@ -751,10 +751,14 @@ GET /v1/admin/quality/summary?days=30
 ```json
 {
   "period_days": 30,
+  "needs_review": {"open": 3, "action_needed": 1},
   "ai_chat": { "rated_answers": 12, "helpful_pct": 66.7, "patterns": {"went_wrong": 2, "…": 0},
                "previous": {"rated_answers": 10, "helpful_pct": 70.0, "truncated": false}, "…": "…" }
 }
 ```
+
+`needs_review` counts what the Needs review queue (below) holds in the period:
+items nobody has decided yet (`open`), and those marked `action_needed`.
 
 `ai_chat` is the same block as `summary` below. `officer_chat`,
 `officer_calls` and `ai_calls.end` / `ai_calls.transfer` are the satisfaction
@@ -893,6 +897,93 @@ neutral, positive), then the newest, and never names the taxpayer. For a
 spoken review, `comment` is the transcript of what the caller said (redacted). Administrators and auditors only; officers get 403. A rating opens
 its case through `GET /v1/admin/tickets/{ticket_id}` (recorded as
 `staff.ticket_viewed`).
+
+---
+
+### Service-Quality Audit: Needs Review
+
+One queue across the four streams, holding only what calls for a person to
+look: an AI chat that went wrong or was never found helpful, or a 👎 with a
+comment; an officer chat or call rated 1 or 2; a caller whose spoken review
+said the AI did not help. Newest first. The queue is computed from the
+ratings when it is read; only the decisions on it are stored.
+Administrators and auditors only; officers get 403.
+
+```http
+GET /v1/admin/quality/needs-review?days=30&status=open&stream=&limit=25&offset=0
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `days` | 1–90 |
+| `status` | `open` (nothing decided yet, the default) · `action_needed` · `reviewed` · `all` |
+| `stream` | `ai_chat` · `officer_chat` · `officer_call` · `ai_call`; empty for all |
+| `limit`, `offset` | Page of items (limit ≤ 100) |
+
+Anything else in `status` or `stream` is 422.
+
+**Response**
+```json
+{
+  "period_days": 30, "truncated": false,
+  "counts": {"open": 3, "action_needed": 1, "reviewed": 2, "all": 6},
+  "total": 3, "limit": 25, "offset": 0,
+  "items": [{
+    "item_type": "ai_chat", "item_id": "conv-…", "stream": "ai_chat",
+    "title": "AI chat went wrong at answer 3",
+    "quote": "What if I am a sole proprietor?", "comment": "That is wrong.",
+    "topic": "vat_registration", "locale": "lg", "officer_name": "", "occurred_at": 1790000000.0,
+    "link": {"tab": "ai-chat", "param": "conversation", "value": "conv-…"},
+    "review": null
+  }, {
+    "item_type": "rating", "item_id": "…", "stream": "officer_chat",
+    "title": "Officer chat rated 2/5 — Officer Okello", "quote": "", "comment": "Took too long to answer.",
+    "link": {"tab": "officer-chat", "param": "ticket", "value": "…"},
+    "review": {"status": "action_needed", "note": "Coach on response times",
+               "reviewer_name": "auditor@ura.go.ug", "updated_at": 1790000100.0}
+  }]
+}
+```
+
+`item_type` is `ai_chat` (keyed by the conversation, or `msg:<message id>`
+for a rating from before answers were linked) or `rating` (a
+`service_ratings` id). `link` says where the item is read in full on
+`/admin/quality` — the tab and the parameter that opens it. `truncated` is the
+AI-chat sample flag, as above. No item names the taxpayer.
+
+---
+
+### Service-Quality Audit: Record a Decision
+
+Mark a Needs review item Reviewed or Action needed, with a note, or reopen
+it. Like sealing the audit trail, this adds an audit note and changes no case,
+so auditors may make it as well as administrators; officers get 403. The note
+is redacted before it is stored (≤ 1,000 characters). Each call is recorded in
+the audit trail as `staff.quality_reviewed` with the item, the status and the
+note's length — not its text. 404 for an item the audit cannot see; 422 for an
+unknown `item_type` or `status`.
+
+```http
+PUT /v1/admin/quality/reviews/{item_type}/{item_id}
+```
+
+**Request Body**
+```json
+{"status": "action_needed", "note": "Sole proprietors can register — fix the override."}
+```
+
+`status` is `reviewed`, `action_needed` or `open` (reopen: the decision is
+removed and the item is open again).
+
+**Response**
+```json
+{"item_type": "ai_chat", "item_id": "conv-…",
+ "review": {"status": "action_needed", "note": "Sole proprietors can register — fix the override.",
+            "reviewer_name": "auditor@ura.go.ug", "updated_at": 1790000100.0}}
+```
+
+`review` is `null` after a reopen. Decisions are kept 90 days, and dropped
+with the rating or conversation they are about.
 
 ---
 

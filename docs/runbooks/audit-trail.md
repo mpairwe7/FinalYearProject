@@ -11,18 +11,24 @@ after a QA audit of the auditor dashboard and a review of the ledger itself
 | Action | `ura_staff` (officer) | `ura_admin` | `ura_auditor` |
 | --- | --- | --- | --- |
 | Read tickets, transcripts, calls, analytics | yes | yes | yes |
-| Change a ticket, reply to a taxpayer, heartbeat a case | yes | yes | **no (403)** |
-| Take, give back, hold, transfer, wrap up or end a call; set desk presence | yes | yes | **no (403)** |
+| Change a ticket, reply to a taxpayer, end a live chat, heartbeat a case | yes | **no (403)** | **no (403)** |
+| Take, give back, hold, transfer, wrap up or end a call; set desk presence | yes | **no (403)** | **no (403)** |
 | Rate a call (review) | yes | yes | **no (403)** |
 | Listen in to a live call | yes | yes | yes (recorded) |
 | Toggle a flag, edit a staff-written answer | no | yes | **no (403)** |
+| Read the service-quality audit (`/admin/quality`) | **no (403)** | yes | yes |
+| Mark a Needs review item Reviewed / Action needed | **no (403)** | yes | yes |
 | Read and verify the audit trail (`/admin/audit`) | **no (403)** | yes | yes |
 | Seal the audit trail ("Seal now") | **no (403)** | yes | yes |
 
-Every "no" is enforced by the API (`_require_staff_writer`,
-`_require_audit_reader`, `_desk_writer`, the admin checks on flags and
-overrides), not only hidden in the console. Sealing sits with the audit
-readers because it adds a seal and never changes a row. Before 2026-09-29 the ticket
+Every "no" is enforced by the API (`_require_live_officer`,
+`_require_staff_writer`, `_require_audit_reader`, `_desk_writer`, the admin
+checks on flags and overrides), not only hidden in the console. Only officers
+handle taxpayers live: since the 2026-10 service-quality audit an
+administrator audits the service officers give and has no queue, case or call
+desk of their own. Sealing and quality-audit decisions sit with the audit
+readers because each adds an audit note and never changes a case or a row.
+Officers do not audit their own service. Before 2026-09-29 the ticket
 endpoints relied on the console alone: an auditor's direct API call could
 resolve a ticket or send a reply to a taxpayer.
 
@@ -31,8 +37,10 @@ recorded as actor `operator-key`.
 
 `tests/test_auditor_controls.py::test_every_admin_write_route_refuses_an_auditor`
 walks every `POST`/`PUT`/`PATCH`/`DELETE` route under `/v1/admin` in the live
-app and requires a 403 for an auditor; the only listed exception is sealing. A
-new staff write that forgets its role check fails that test.
+app — including those registered on included routers, such as
+`routes/quality.py` — and requires a 403 for an auditor. The listed exceptions
+are the two audit notes: sealing the trail and recording a quality-audit
+decision. A new staff write that forgets its role check fails that test.
 
 ## What is recorded
 
@@ -50,6 +58,7 @@ these appends one hash-chained row to `audit_events`:
 | `staff.call_reviewed` | A call is rated | `call_id`, `rating`, `note_chars` |
 | `staff.chat_ended` | An officer ends a live chat — **End chat**, or resolving/closing a live text case | `ticket_id`, `outcome` (`resolved` / `wontfix`), `via` (`end_chat` / `status`), `closing_message_chars` |
 | `staff.conversation_viewed` | A rated conversation is opened in the quality audit (`/admin/quality`) | `conversation_id` |
+| `staff.quality_reviewed` | An item in the quality audit's Needs review queue is marked Reviewed or Action needed, or reopened | `item_type` (`ai_chat` / `rating`), `item_id`, `status` (`reviewed` / `action_needed` / `open`), `note_chars` |
 | `voice_staff_viewed_call` | A call and its transcript are opened (call detail, or the live call view) | call id (`session_id`) |
 | `voice_staff_listened_call` | Someone listens in to a live call, before any audio flows | call id, `transport` (`livekit` / `websocket`) |
 | `voice_staff_viewed_brief` / `voice_staff_viewed_caller_history` | A call brief or a caller's history is opened | call id |

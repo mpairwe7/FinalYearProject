@@ -157,6 +157,11 @@ def conversation_row(key: str, items: Sequence[dict[str, Any]]) -> dict[str, Any
         "break_question": (broke.get("user_query") or "") if broke else "",
         "helpful_before_break": bool(before and before.get("rating") == "up"),
         "comments": sum(1 for r in items if (r.get("comment") or "").strip()),
+        # The latest thing a taxpayer wrote with a 👎: what Needs review quotes.
+        "down_comment": next(
+            ((r.get("comment") or "").strip() for r in reversed(items) if r.get("rating") == "down" and (r.get("comment") or "").strip()),
+            "",
+        ),
         "topic": next((r.get("topic_tag") for r in items if r.get("topic_tag")), "") or "",
         "locale": next((r.get("locale") for r in items if r.get("locale")), "") or "",
         "first_rated_at": min(float(r.get("created_at") or 0) for r in items),
@@ -307,6 +312,15 @@ def ai_chat_summary(days: int, *, tenant_id: str | None = None, now: float | Non
     }
 
 
+def rated_conversations(
+    days: int, *, tenant_id: str | None = None, now: float | None = None
+) -> tuple[list[dict[str, Any]], bool]:
+    """Every rated conversation of the period, as rows (and whether the period was truncated)."""
+    now = time.time() if now is None else now
+    rows, truncated = _rated_answers(now - days * 86400, now, tenant_id)
+    return [conversation_row(k, v) for k, v in group_conversations(rows).items()], truncated
+
+
 def ai_chat_conversations(
     days: int,
     *,
@@ -320,9 +334,7 @@ def ai_chat_conversations(
     now: float | None = None,
 ) -> dict[str, Any]:
     """One page of rated conversations, the worst patterns and the newest first."""
-    now = time.time() if now is None else now
-    rows, truncated = _rated_answers(now - days * 86400, now, tenant_id)
-    convs = [conversation_row(k, v) for k, v in group_conversations(rows).items()]
+    convs, truncated = rated_conversations(days, tenant_id=tenant_id, now=now)
     if pattern:
         convs = [c for c in convs if c["pattern"] == pattern]
     if topic:

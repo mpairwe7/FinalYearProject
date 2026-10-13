@@ -517,6 +517,55 @@ export interface QualitySummary {
   /** The caller's spoken review of the AI, at goodbye and while transferring. */
   ai_calls?: { end: RatingsHeadline; transfer: RatingsHeadline };
   officer_calls?: RatingsHeadline;
+  /** What the Needs review queue holds. */
+  needs_review?: { open: number; action_needed: number };
+}
+
+export type ReviewStatus = "reviewed" | "action_needed";
+export type NeedsReviewStream = "ai_chat" | "officer_chat" | "officer_call" | "ai_call";
+
+/** An auditor's decision on an item. */
+export interface QualityReview {
+  status: ReviewStatus;
+  note: string;
+  reviewer_name: string;
+  updated_at: number;
+}
+
+/** One item in the Needs review queue. */
+export interface NeedsReviewItem {
+  item_type: "ai_chat" | "rating";
+  item_id: string;
+  stream: NeedsReviewStream;
+  title: string;
+  /** The question at the point it went wrong (AI chats). */
+  quote: string;
+  /** What the taxpayer or caller wrote or said. */
+  comment: string;
+  topic: string;
+  locale: string;
+  officer_name: string;
+  occurred_at: number;
+  /** Where to read it on /admin/quality: `?tab=` and the parameter that opens it. */
+  link: { tab: string; param: string; value: string };
+  review: QualityReview | null;
+}
+
+export interface NeedsReviewPage {
+  period_days: number;
+  truncated: boolean;
+  counts: { open: number; action_needed: number; reviewed: number; all: number };
+  total: number;
+  limit: number;
+  offset: number;
+  items: NeedsReviewItem[];
+}
+
+export interface NeedsReviewQuery {
+  days?: number;
+  status?: "open" | "action_needed" | "reviewed" | "all";
+  stream?: "" | NeedsReviewStream;
+  limit?: number;
 }
 
 export type RatingSentiment = "positive" | "neutral" | "negative" | "unclear";
@@ -811,6 +860,21 @@ export const analyticsApi = {
     if (sentiment) params.set("sentiment", sentiment);
     return fetchJson<RatingsAudit>(`/v1/admin/quality/ratings?${params.toString()}`);
   },
+  qualityNeedsReview: ({ days = 30, status = "open", stream = "", limit = 25 }: NeedsReviewQuery = {}) => {
+    const params = new URLSearchParams({ days: String(days), status, limit: String(limit) });
+    if (stream) params.set("stream", stream);
+    return fetchJson<NeedsReviewPage>(`/v1/admin/quality/needs-review?${params.toString()}`);
+  },
+  /** Mark an item Reviewed or Action needed (with a note); `open` reopens it. */
+  setQualityReview: (itemType: NeedsReviewItem["item_type"], itemId: string, status: ReviewStatus | "open", note = "") =>
+    fetchJson<{ item_type: string; item_id: string; review: QualityReview | null }>(
+      `/v1/admin/quality/reviews/${encodeURIComponent(itemType)}/${encodeURIComponent(itemId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, note }),
+      },
+    ),
   auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(

@@ -717,18 +717,19 @@ def init_db() -> None:
 
 
 def init_module_schemas() -> None:
-    """Tables owned by their own modules (officer chat threads, service ratings).
+    """Tables owned by their own modules (officer chat threads, service ratings, audit reviews).
 
     Portable DDL through :func:`execute_script`, so both backends call this
     from their ``init_db``.
     """
     try:
-        from . import officer_chat, service_ratings
+        from . import audit_reviews, officer_chat, service_ratings
 
         officer_chat.init_schema()
         service_ratings.init_schema()
+        audit_reviews.init_schema()
     except Exception:
-        logger.exception("officer chat / service rating schema init failed")
+        logger.exception("officer chat / service rating / audit review schema init failed")
 
 
 def module_retention(now: float | None = None) -> dict[str, int]:
@@ -741,6 +742,13 @@ def module_retention(now: float | None = None) -> dict[str, int]:
         deleted["service_ratings"] = service_ratings.purge_expired(_FEEDBACK_TTL_DAYS, now=now)
     except Exception:
         logger.exception("TTL cleanup failed for officer chat threads / service ratings")
+    try:
+        from . import audit_reviews
+
+        # After the ratings and feedback purges: a decision outlives no item.
+        deleted["audit_reviews"] = audit_reviews.purge(now=now)
+    except Exception:
+        logger.exception("TTL cleanup failed for audit reviews")
     return deleted
 
 
