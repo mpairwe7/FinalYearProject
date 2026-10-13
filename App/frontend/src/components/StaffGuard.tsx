@@ -44,6 +44,7 @@ import {
   ChartIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
+  ClipboardCheckIcon,
   FlagIcon,
   GaugeIcon,
   InboxIcon,
@@ -51,6 +52,7 @@ import {
   PanelLeftIcon,
   PhoneIcon,
   SendIcon,
+  ShieldIcon,
   SlidersIcon,
 } from "./ops/icons";
 import SettingsDialog, { type SettingsTab } from "./settings/SettingsDialog";
@@ -113,6 +115,8 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
   "/admin/connectors": ListIcon,
   "/analytics": ChartIcon,
   "/analytics/evaluation": BeakerIcon,
+  "/admin/quality": ClipboardCheckIcon,
+  "/admin/audit": ShieldIcon,
 };
 
 /**

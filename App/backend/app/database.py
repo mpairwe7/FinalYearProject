@@ -928,6 +928,17 @@ def init_db() -> None:
     _ensure_column(conn, "feedback", "retrieval_mode", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "workflow_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "step_id", "TEXT DEFAULT ''")
+    # Which answer of which conversation a rating is on, and what the answer
+    # was built from, copied while the conversation log still keeps it — the
+    # service-quality audit reads a conversation's ratings in order.
+    _ensure_column(conn, "feedback", "conversation_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "turn_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "turn_index", "INTEGER")
+    _ensure_column(conn, "feedback", "locale", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "topic_tag", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "sources_json", "TEXT DEFAULT '[]'")
+    _ensure_column(conn, "feedback", "confidence", "REAL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_conversation ON feedback(conversation_id, turn_index)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
@@ -1108,12 +1119,26 @@ def save_feedback(
     retrieval_mode: str = "",
     workflow_id: str = "",
     step_id: str = "",
+    tenant_id: str = "default",
+    conversation_id: str = "",
+    turn_id: str = "",
+    turn_index: int | None = None,
+    locale: str = "",
+    topic_tag: str = "",
+    sources_json: str = "[]",
+    confidence: float | None = None,
 ) -> dict[str, Any]:
     """Persist a feedback entry and return it.
 
     *retrieval_mode*, *workflow_id* and *step_id* say which route or journey
     step produced the rated reply; they are identifiers validated at the API
     boundary (``FeedbackRequest``), never free text.
+
+    *conversation_id*, *turn_id* and *turn_index* say which answer of which
+    conversation is rated; *locale*, *topic_tag*, *sources_json* and
+    *confidence* are copied from that answer's log row so the audit can read
+    them after the conversation itself has expired. An empty *user_id* is an
+    anonymous rating: nothing ties it to a person.
     """
     from .guardrails import redact_pii_text
 
@@ -1126,11 +1151,14 @@ def save_feedback(
     try:
         conn.execute(
             """INSERT INTO feedback (id, message_id, session_id, user_id, rating, comment,
-               user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id,
+               tenant_id, conversation_id, turn_id, turn_index, locale, topic_tag, sources_json, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
                 retrieval_mode or "", workflow_id or "", step_id or "",
+                tenant_id or "default", conversation_id or "", turn_id or "", turn_index,
+                locale or "", topic_tag or "", sources_json or "[]", confidence,
             ),
         )
         conn.commit()
@@ -1371,6 +1399,7 @@ def log_conversation(
     tenant_id: str = "default",
     user_message_en: str = "",
     bot_reply_en: str = "",
+    row_id: str | None = None,
 ) -> str:
     """Log a conversation turn and return the stable thread id.
 
@@ -1381,6 +1410,10 @@ def log_conversation(
     in Luganda or Swahili: the question as routed and the answer before
     translation. Model-facing history reads them (G119); transcripts, exports
     and the audit trail keep the original.
+
+    ``row_id`` is the turn's id when the transport chose it (the ``turn_id`` it
+    returned with the answer, so a 👍/👎 can name the row it rates); a fresh
+    one otherwise.
     """
     conn = _get_connection()
     from .guardrails import redact_pii_text
@@ -1389,7 +1422,9 @@ def log_conversation(
     bot_reply = redact_pii_text(bot_reply)
     user_message_en = redact_pii_text(user_message_en or "")
     bot_reply_en = redact_pii_text(bot_reply_en or "")
-    row_id = str(uuid.uuid4())
+    # The transport mints the turn id before generating, so it can hand it to
+    # the client with the answer and a rating can name the row it rates.
+    row_id = row_id or str(uuid.uuid4())
     thread_id = conversation_id or row_id
     try:
         conn.execute(

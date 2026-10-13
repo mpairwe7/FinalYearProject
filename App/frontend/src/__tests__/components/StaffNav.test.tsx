@@ -71,6 +71,9 @@ describe("StaffNav", () => {
     for (const name of ["My queue", "All tickets", "Calls"]) {
       expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
     }
+    // What an administrator does instead: audit the service.
+    expect(screen.getByRole("link", { name: "Quality audit" })).toHaveAttribute("href", "/admin/quality");
+    expect(screen.getByRole("link", { name: "Audit trail" })).toBeInTheDocument();
   });
 
   it("gives an officer the queue, the tickets and the call desk", () => {
@@ -79,6 +82,7 @@ describe("StaffNav", () => {
       expect(screen.getByRole("link", { name })).toBeInTheDocument();
     }
     expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Quality audit" })).not.toBeInTheDocument();
   });
 
   it("offers the search field as a field, not a keyboard chord", () => {

@@ -223,7 +223,7 @@ POST /v1/chat/stream
 | Event | Data | Description |
 |-------|------|-------------|
 | `phase` | string | What the server is doing right now — see the table below |
-| `metadata` | JSON | Sources, citations, retrieval mode, locale (sent first) |
+| `metadata` | JSON | Sources, citations, retrieval mode, locale, and `turn_id` — the answer's id in the conversation log, which a rating sends back (sent first) |
 | `token` | string | Generated text chunk (sanitized, XSS-safe) |
 | `revision` | string | The **whole** reply, replacing what was streamed so far |
 | `agent_trace` | JSON | Buffered retrieval/tool trace, emitted just before `grounding` |
@@ -398,6 +398,15 @@ Submit thumbs-up/down feedback on a chatbot response.
 POST /v1/feedback
 ```
 
+Open to anyone, signed in or not (rate-limited like `/v1/chat`). A rating is
+tied to its user only when they have analytics consent; otherwise it is stored
+with no user id — the answer is rated, the rater is not recorded. With
+`turn_id` (from the chat response) the rating is linked to the answer it rates:
+its conversation, its position (`turn_index`, 1 = first answer) and its
+sources, topic and language are copied from the conversation log, and the
+logged question and reply are kept instead of the client's copy. The
+service-quality audit (`GET /v1/admin/quality/ai-chat`) reads these links.
+
 **Request Body**
 ```json
 {
@@ -421,10 +430,15 @@ POST /v1/feedback
 | `retrieval_mode` | string | No | Route that produced the reply (e.g. `workflow`, `hybrid`) |
 | `workflow_id` | string | No | Guided journey the reply belongs to (e.g. `tax_clearance`) |
 | `step_id` | string | No | Journey step the reply asked (e.g. `collect_returns_filed`) |
+| `conversation_id` | string | No | Conversation the answer belongs to |
+| `turn_id` | string | No | The answer's `turn_id` from the chat response |
+| `turn_index` | integer | No | The answer's position in its conversation, 1 for the first (used only when `turn_id` is unknown) |
 
 The three context fields are identifiers only: lowercase letters, digits and
 `_`, at most 64 characters. Anything else is refused with 422. They let
 `GET /v1/analytics/journeys` attribute ratings to journey steps.
+`conversation_id` and `turn_id` take `[A-Za-z0-9_-]`, at most 64 characters. A
+`turn_id` that is not in the named conversation is not linked.
 
 **Response**
 ```json
@@ -440,7 +454,9 @@ The three context fields are identifiers only: lowercase letters, digits and
 
 ### Update Feedback Comment
 
-Add a follow-up comment to existing feedback (avoids duplicate entries).
+Add a follow-up comment to existing feedback (avoids duplicate entries). The
+rating must be the same rater's — the same user, or for an anonymous rating,
+anonymous — and takes one comment; 404 otherwise.
 
 ```http
 PATCH /v1/feedback/{message_id}/comment
@@ -665,6 +681,109 @@ POST /v1/admin/audit/seal
 
 `{"sealed": false, "anchor": null}` when there is nothing new to seal, or
 another replica sealed the same rows first.
+
+---
+
+### Service-Quality Audit: Summary
+
+Headline figures for the administrator's audit (`/admin/quality`), one block
+per stream audited. Administrators and auditors only — officers (`ura_staff`)
+get 403: auditing the service is not the job of the people giving it.
+
+```http
+GET /v1/admin/quality/summary?days=30
+```
+
+**Response**
+```json
+{
+  "period_days": 30,
+  "ai_chat": { "rated_answers": 12, "helpful_pct": 66.7, "patterns": {"went_wrong": 2, "…": 0},
+               "previous": {"rated_answers": 10, "helpful_pct": 70.0, "truncated": false}, "…": "…" }
+}
+```
+
+`ai_chat` is the same block as `summary` below.
+
+---
+
+### Service-Quality Audit: AI Answers in Chat
+
+How taxpayers rated the AI's chat answers, and one page of rated
+conversations, worst first. Each conversation's ratings are read in answer
+order and given a pattern: `went_wrong` (a helpful answer, then it ends
+unhelpful), `never_helpful`, `recovered` (ends helpful after an unhelpful one)
+or `all_helpful`. `break_answer` is where it went wrong: the first unhelpful
+answer after a helpful one (else the first unhelpful one). An answer rated
+twice counts once, the latest. Officer replies relayed into the chat are left
+out. One period reads at most 5,000 ratings; beyond that `truncated` is true.
+
+```http
+GET /v1/admin/quality/ai-chat?days=30&pattern=&topic=&locale=&with_comment=false&limit=25&offset=0
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `days` | 1–90 |
+| `pattern` | `went_wrong`, `never_helpful`, `recovered` or `all_helpful`; empty for all (anything else 422) |
+| `topic`, `locale` | Exact topic tag / language code; `unclassified` / `unknown` for none |
+| `with_comment` | Only conversations with a comment |
+| `limit`, `offset` | Page of conversations (limit ≤ 100) |
+
+**Response**
+```json
+{
+  "summary": {
+    "rated_answers": 12, "helpful": 8, "unhelpful": 4, "helpful_pct": 66.7, "comments": 2,
+    "conversations": 5, "unlinked_answers": 0,
+    "patterns": {"went_wrong": 2, "never_helpful": 1, "recovered": 0, "all_helpful": 2},
+    "median_break_answer": 3,
+    "by_position": [{"position": "1", "rated": 5, "helpful": 5, "helpful_pct": 100.0}, "…"],
+    "by_topic": [{"key": "vat_registration", "rated": 6, "helpful": 3, "unhelpful": 3, "helpful_pct": 50.0}],
+    "by_route": ["…"], "by_language": ["…"], "by_day": ["…"],
+    "previous": {"rated_answers": 10, "helpful_pct": 70.0, "truncated": false},
+    "truncated": false
+  },
+  "page": {
+    "total": 1, "limit": 25, "offset": 0, "truncated": false,
+    "conversations": [{
+      "conversation_id": "conv-…", "pattern": "went_wrong",
+      "ratings": [{"answer": 1, "rating": "up"}, {"answer": 2, "rating": "up"}, {"answer": 3, "rating": "down"}],
+      "break_answer": 3, "break_question": "What if I am a sole proprietor?", "helpful_before_break": true,
+      "comments": 1, "topic": "vat_registration", "locale": "lg", "last_rated_at": 1790000000.0
+    }]
+  }
+}
+```
+
+Ratings given before answers were linked have no conversation; each is listed
+as its own answer with `linked: false`.
+
+---
+
+### Service-Quality Audit: One Conversation
+
+One conversation answer by answer, with its ratings and where it went wrong
+(`is_break`). The conversation log is kept `CONVERSATION_TTL_DAYS` and ratings
+90 days: once the log has expired, `transcript_complete` is false and only
+the rated answers remain, from the copy each rating kept. Opening one is
+recorded in the audit trail as `staff.conversation_viewed`. 404 for an
+unknown conversation.
+
+```http
+GET /v1/admin/quality/ai-chat/{conversation_id}
+```
+
+**Response**
+```json
+{
+  "conversation_id": "conv-…", "pattern": "went_wrong", "break_answer": 3,
+  "transcript_complete": true, "transcript_kept_days": 7,
+  "answers": [{"answer": 3, "turn_id": "…", "question": "…", "reply": "…", "sources": ["vat-act.pdf"],
+               "confidence": 0.4, "rating": "down", "comment": "That is wrong.",
+               "retrieval_mode": "hybrid", "is_break": true}]
+}
+```
 
 ---
 
@@ -1965,6 +2084,7 @@ class ChatResponse(BaseModel):
     retrieval_mode: str = "keyword"  # hybrid | keyword | blocked | abstained
     model: str = "ura-qwen2.5-3b-instruct"
     conversation_id: str | None = None
+    turn_id: str | None = None  # this answer's id in the conversation log; a rating sends it back
     locale: str = "en"
     escalation_required: bool = False
     escalation_reason: str = ""
@@ -1984,6 +2104,10 @@ class FeedbackRequest(BaseModel):
     retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
     workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
     step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    # Which answer of which conversation is rated (service-quality audit).
+    conversation_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$")
+    turn_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$")
+    turn_index: int | None = Field(None, ge=1, le=1000)
 ```
 
 ### FeedbackResponse

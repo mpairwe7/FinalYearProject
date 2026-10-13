@@ -166,6 +166,18 @@ export const en = {
   'message.sources': 'Sources ({count})',
   'message.helpful': 'Helpful',
   'message.notHelpful': 'Not helpful',
+  'message.rateHelpful': 'Helpful response',
+  'message.rateNotHelpful': 'Unhelpful response',
+  'message.feedbackGroup': 'Response feedback',
+  'message.feedbackSending': 'Sending…',
+  'message.feedbackThanks': 'Thanks for your feedback',
+  'message.feedbackThanksDetailed': 'Thanks for your detailed feedback',
+  'message.feedbackFailed': 'Failed to send',
+  'message.feedbackRetry': 'Retry',
+  'message.feedbackCommentLabel': 'Feedback comment',
+  'message.feedbackCommentPlaceholder': 'What could be improved? (optional)',
+  'message.feedbackSend': 'Send',
+  'message.feedbackSkip': 'Skip',
   'message.thinking': 'Searching the URA knowledge base…',
   // Turn phases. `phase.translating` is the one that matters most to
   // translate: it only ever shows on a non-English turn, and it is there to

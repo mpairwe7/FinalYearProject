@@ -420,6 +420,9 @@ async def _run_response_create(
                 meta_payload = dict(payload) if isinstance(payload, dict) else {}
                 if event_type == "metadata" and "response_id" not in meta_payload:
                     meta_payload["response_id"] = response_id
+                if event_type == "metadata":
+                    # The logged turn's id, as on REST and SSE: a rating names it.
+                    meta_payload.setdefault("turn_id", response_id)
                 await _send_json(websocket, {"type": frame_type, **meta_payload})
             elif event_type == "error":
                 err_payload = payload if isinstance(payload, dict) else {"message": str(payload)}
@@ -743,6 +746,7 @@ def _log_ws_turn(
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
             tenant_id=tenant_id or "default",
+            row_id=response_id or None,
             **flags.experiment_log_fields(
                 subject=user_id or None,
                 locale=str(result.get("locale") or ""),

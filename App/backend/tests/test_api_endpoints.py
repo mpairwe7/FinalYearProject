@@ -170,9 +170,12 @@ class ClassificationKnowledge(_Base):
 # Feedback (current_user; summary is admin)
 # ---------------------------------------------------------------------------
 class FeedbackEndpoints(_Base):
-    def test_feedback_requires_authenticated_analytics_consent(self):
-        r = _client().post("/v1/feedback", json={"message_id": "m1", "rating": "up"})
-        self.assertEqual(r.status_code, 403)
+    def test_feedback_is_accepted_anonymously_and_records_no_rater(self):
+        # A rating without analytics consent rates the answer, not the person.
+        r = _client().post("/v1/feedback", json={"message_id": "m-anon-1", "rating": "up"})
+        self.assertEqual(r.status_code, 200, r.text)
+        row = db.query_one("SELECT user_id FROM feedback WHERE id = ?", (r.json()["id"],))
+        self.assertEqual(row["user_id"], "")
 
     def test_feedback_invalid_rating_422(self):
         r = _client().post("/v1/feedback", json={"message_id": "m1", "rating": "maybe"})
@@ -183,11 +186,11 @@ class FeedbackEndpoints(_Base):
         r = _client().post("/v1/feedback", json={"message_id": "m1", "rating": "up"})
         self.assertEqual(r.status_code, 401)
 
-    def test_feedback_comment_requires_analytics_consent(self):
+    def test_feedback_comment_on_an_unknown_rating_is_404(self):
         r = _client().patch(
             "/v1/feedback/does-not-exist/comment", json={"comment": "hello"}
         )
-        self.assertEqual(r.status_code, 403)
+        self.assertEqual(r.status_code, 404)
 
     def test_feedback_summary_requires_admin(self):
         c = _client()

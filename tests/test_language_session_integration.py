@@ -111,6 +111,16 @@ class TestStreamLanguage:
         assert meta["locale"] == "en"
         assert meta["locale_source"] == "client_explicit"
 
+    def test_the_metadata_frame_names_the_row_the_turn_is_logged_under(self, client, pinned):
+        # A 👍/👎 sends this id back, so the audit can tie the rating to the
+        # answer it rates (docs/plans/admin-service-quality-audit-plan.md §B1).
+        conversation_id = uuid.uuid4().hex
+        meta = _stream(client, {"message": SW_TIN, "conversation_id": conversation_id})[0]
+        row = database.query_one(
+            "SELECT conversation_id FROM conversations WHERE id = ?", (meta["turn_id"],)
+        )
+        assert row is not None and row["conversation_id"] == conversation_id
+
 
 class TestRestLanguageContinuity:
     def test_thread_language_carries_until_a_clear_switch(self, client, pinned):

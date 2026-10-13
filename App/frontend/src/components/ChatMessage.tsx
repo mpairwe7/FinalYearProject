@@ -94,6 +94,9 @@ interface ChatMessageProps {
   onListen: (turnId: string, text: string) => void;
   /** Where an officer's reply comes back to. Null before the first turn. */
   conversationId: string | null;
+  /** This AI answer's position in the conversation (1 = first), sent with a
+   *  rating so the audit can see where a conversation went wrong. */
+  answerNumber?: number;
   /** Set only on the turn currently being answered — see page.tsx. */
   phaseLabel?: string;
   phaseVariant?: string;
@@ -133,6 +136,7 @@ function ChatMessageInner({
   isTransitioning,
   onListen,
   conversationId,
+  answerNumber,
   phaseLabel,
   phaseVariant,
   phaseStartedAt,
@@ -141,6 +145,9 @@ function ChatMessageInner({
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
+  // An officer's reply relayed into the chat is not the AI's answer: officers
+  // are rated on their own service, not with the answer thumbs.
+  const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const t = useTranslation();
   const deadlineEvent = useMemo(
     () => (isAssistant && !isGreeting ? detectDeadlineInMessage(turn.content) : null),
@@ -467,19 +474,19 @@ function ChatMessageInner({
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
             <CopyButton text={stripCitationMarkers(turn.content)} />
-            <FeedbackButtons
-              messageId={turn.id}
-              userQuery={userQuery}
-              botReply={turn.content}
-              retrievalMode={turn.retrievalMode}
-              workflowId={turn.workflow?.id}
-              stepId={turn.workflow?.step_id}
-            />
-          </div>
-        )}
-        {isAssistant && isGreeting && (
-          <div className="bubble-actions">
-            <FeedbackButtons messageId={turn.id} userQuery="" botReply={turn.content} />
+            {!isOfficerReply && (
+              <FeedbackButtons
+                messageId={turn.id}
+                userQuery={userQuery}
+                botReply={turn.content}
+                retrievalMode={turn.retrievalMode}
+                workflowId={turn.workflow?.id}
+                stepId={turn.workflow?.step_id}
+                conversationId={conversationId}
+                turnId={turn.serverTurnId}
+                answerNumber={answerNumber}
+              />
+            )}
           </div>
         )}
       </div>
@@ -510,6 +517,8 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.phaseVariant === next.phaseVariant &&
     prev.phaseStartedAt === next.phaseStartedAt &&
     prev.conversationId === next.conversationId &&
+    prev.answerNumber === next.answerNumber &&
+    prev.turn.serverTurnId === next.turn.serverTurnId &&
     prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&

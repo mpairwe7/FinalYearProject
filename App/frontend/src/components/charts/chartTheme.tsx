@@ -131,6 +131,24 @@ export function retrievalModeLabel(mode: string): string {
 }
 
 /**
+ * How a rated conversation went, in words.
+ *
+ * The audit's pattern codes (`went_wrong`, `recovered`…) are read from the
+ * order of a conversation's 👍/👎. The first is the one the audit exists for:
+ * a helpful answer, then a follow-up that was not.
+ */
+export const PATTERN_LABEL: Record<string, string> = {
+  went_wrong: "Went wrong after a helpful answer",
+  never_helpful: "Never found helpful",
+  recovered: "Recovered after an unhelpful answer",
+  all_helpful: "Helpful throughout",
+};
+
+export function patternLabel(pattern: string): string {
+  return PATTERN_LABEL[pattern] ?? pattern.replaceAll("_", " ");
+}
+
+/**
  * The evaluation metrics, in words.
  *
  * These eight names are the RAG-evaluation literature's, and on a page whose

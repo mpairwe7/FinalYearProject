@@ -427,6 +427,21 @@ def init_db() -> None:
             # Which route / journey step produced a rated reply (journey analytics).
             for _col in ("retrieval_mode", "workflow_id", "step_id"):
                 cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} TEXT DEFAULT ''")
+            # Which answer of which conversation a rating is on (service-quality
+            # audit); mirrors database.init_db.
+            for _col, _ddl in (
+                ("conversation_id", "TEXT DEFAULT ''"),
+                ("turn_id", "TEXT DEFAULT ''"),
+                ("turn_index", "INTEGER"),
+                ("locale", "TEXT DEFAULT ''"),
+                ("topic_tag", "TEXT DEFAULT ''"),
+                ("sources_json", "TEXT DEFAULT '[]'"),
+                ("confidence", "DOUBLE PRECISION"),
+            ):
+                cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_conversation ON feedback(conversation_id, turn_index)"
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
             cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
@@ -560,7 +575,16 @@ def save_feedback(
     retrieval_mode: str = "",
     workflow_id: str = "",
     step_id: str = "",
+    tenant_id: str = "default",
+    conversation_id: str = "",
+    turn_id: str = "",
+    turn_index: int | None = None,
+    locale: str = "",
+    topic_tag: str = "",
+    sources_json: str = "[]",
+    confidence: float | None = None,
 ) -> dict[str, Any]:
+    """Mirrors :func:`database.save_feedback`."""
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
@@ -575,11 +599,14 @@ def save_feedback(
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO feedback (id, message_id, session_id, user_id, rating,
-                    comment, user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    comment, user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id,
+                    tenant_id, conversation_id, turn_id, turn_index, locale, topic_tag, sources_json, confidence)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
                     retrieval_mode or "", workflow_id or "", step_id or "",
+                    tenant_id or "default", conversation_id or "", turn_id or "", turn_index,
+                    locale or "", topic_tag or "", sources_json or "[]", confidence,
                 ),
             )
         conn.commit()
@@ -813,6 +840,7 @@ def log_conversation(
     tenant_id: str = "default",
     user_message_en: str = "",
     bot_reply_en: str = "",
+    row_id: str | None = None,
 ) -> str:
     """Mirrors :func:`database.log_conversation` exactly.
 
@@ -832,7 +860,9 @@ def log_conversation(
     bot_reply = redact_pii_text(bot_reply)
     user_message_en = redact_pii_text(user_message_en or "")
     bot_reply_en = redact_pii_text(bot_reply_en or "")
-    row_id = str(uuid.uuid4())
+    # The transport mints the turn id before generating, so it can hand it to
+    # the client with the answer and a rating can name the row it rates.
+    row_id = row_id or str(uuid.uuid4())
     thread_id = conversation_id or row_id
     with pool.connection() as conn:
         with conn.cursor() as cur:

@@ -432,6 +432,108 @@ export interface AnswerOverride {
   enabled?: boolean;
 }
 
+/* ── Service-quality audit (GET /v1/admin/quality/*) ────────────────────── */
+
+/** How a rated conversation went, worst first. See app/quality_audit.py. */
+export type QualityPattern = "went_wrong" | "never_helpful" | "recovered" | "all_helpful";
+
+export interface QualityBreakdownRow {
+  key: string;
+  rated: number;
+  helpful: number;
+  unhelpful: number;
+  helpful_pct: number | null;
+}
+
+export interface AiChatSummary {
+  period_days: number;
+  /** More rated answers than one period reads; the figures are a sample. */
+  truncated: boolean;
+  rated_answers: number;
+  helpful: number;
+  unhelpful: number;
+  helpful_pct: number | null;
+  comments: number;
+  conversations: number;
+  /** Ratings from before they were linked to a conversation. */
+  unlinked_answers: number;
+  patterns: Record<QualityPattern, number>;
+  median_break_answer: number | null;
+  by_position: { position: string; rated: number; helpful: number; helpful_pct: number | null }[];
+  by_topic: QualityBreakdownRow[];
+  by_route: QualityBreakdownRow[];
+  by_language: QualityBreakdownRow[];
+  by_day: { day: string; rated: number; helpful: number; helpful_pct: number | null }[];
+  previous: { rated_answers: number; helpful_pct: number | null; truncated: boolean };
+}
+
+export interface RatedConversation {
+  conversation_id: string | null;
+  key: string;
+  linked: boolean;
+  pattern: QualityPattern;
+  ratings: { answer: number | null; rating: "up" | "down" }[];
+  rated_answers: number;
+  unhelpful: number;
+  break_answer: number | null;
+  break_question: string;
+  helpful_before_break: boolean;
+  comments: number;
+  topic: string;
+  locale: string;
+  first_rated_at: number;
+  last_rated_at: number;
+}
+
+export interface AiChatPage {
+  period_days: number;
+  truncated: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  conversations: RatedConversation[];
+}
+
+export interface AiChatTimelineAnswer {
+  answer: number | null;
+  turn_id: string;
+  question: string;
+  reply: string;
+  created_at: number | null;
+  sources: string[];
+  confidence: number | null;
+  topic: string;
+  rating: "up" | "down" | null;
+  comment: string;
+  retrieval_mode: string;
+  is_break: boolean;
+}
+
+export interface AiChatTimeline {
+  conversation_id: string;
+  pattern: QualityPattern;
+  break_answer: number | null;
+  /** False once the conversation log has expired: only rated answers remain. */
+  transcript_complete: boolean;
+  transcript_kept_days: number;
+  answers: AiChatTimelineAnswer[];
+}
+
+export interface QualitySummary {
+  period_days: number;
+  ai_chat: AiChatSummary;
+}
+
+export interface AiChatQuery {
+  days?: number;
+  pattern?: QualityPattern | "";
+  topic?: string;
+  locale?: string;
+  withComment?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 const BASE = "/api";
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -585,6 +687,17 @@ export const analyticsApi = {
     return fetchJson<AuditEventsPage>(`/v1/admin/audit/events?${params.toString()}`);
   },
   auditVerify: () => fetchJson<AuditVerification>("/v1/admin/audit/verify"),
+  qualitySummary: (days = 30) => fetchJson<QualitySummary>(`/v1/admin/quality/summary?days=${days}`),
+  qualityAiChat: ({ days = 30, pattern = "", topic = "", locale = "", withComment = false, limit = 25, offset = 0 }: AiChatQuery = {}) => {
+    const params = new URLSearchParams({ days: String(days), limit: String(limit), offset: String(offset) });
+    if (pattern) params.set("pattern", pattern);
+    if (topic) params.set("topic", topic);
+    if (locale) params.set("locale", locale);
+    if (withComment) params.set("with_comment", "true");
+    return fetchJson<{ summary: AiChatSummary; page: AiChatPage }>(`/v1/admin/quality/ai-chat?${params.toString()}`);
+  },
+  qualityAiChatTimeline: (conversationId: string) =>
+    fetchJson<AiChatTimeline>(`/v1/admin/quality/ai-chat/${encodeURIComponent(conversationId)}`),
   auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(

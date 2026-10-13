@@ -87,6 +87,10 @@ class ChatResponse(BaseModel):
     )
     model: str = "Sunbird/Sunflower-14B-FP8"
     conversation_id: str | None = None
+    turn_id: str | None = Field(
+        None,
+        description="This answer's id in the conversation log; a 👍/👎 on it names this id (POST /v1/feedback)",
+    )
     locale: str = Field("en", description="Locale used for this response")
     locale_source: str = Field(
         "",
@@ -223,6 +227,11 @@ class FeedbackRequest(BaseModel):
     retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Route that produced the reply")
     workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Guided journey the reply belongs to")
     step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Journey step the reply asked")
+    # Which answer of which conversation is rated, so the audit can read a
+    # conversation's ratings in order and find where it went wrong.
+    conversation_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$", description="Conversation the answer belongs to")
+    turn_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$", description="The answer's turn_id from the chat response")
+    turn_index: int | None = Field(None, ge=1, le=1000, description="The answer's position in its conversation (1 = first)")
 
 
 class FeedbackResponse(BaseModel):

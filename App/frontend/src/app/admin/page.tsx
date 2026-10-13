@@ -28,6 +28,7 @@ import { Freshness, PeriodPicker } from "../../components/ops/Controls";
 import { ErrorState, Skeleton, SkeletonRows, SkeletonStats } from "../../components/ops/States";
 import { useSkeletonVisible } from "../../hooks/useLoadingPhase";
 import { Sparkline } from "../../components/ops/Sparkline";
+import { ArrowUpRightIcon } from "../../components/ops/icons";
 import { OfficersOnDuty } from "../../components/staff/OfficersOnDuty";
 import { useTicketQueueFull, useTicketSla, useTicketStats } from "../../hooks/useAnalyticsDashboard";
 import { useClientClock } from "../../hooks/useClientClock";
@@ -159,6 +160,10 @@ function Overview() {
             onRefresh={refresh}
           />
           <PeriodPicker days={days} onChange={setDays} />
+          <a className="ops-btn is-primary" href="/admin/quality">
+            Open quality audit
+            <ArrowUpRightIcon />
+          </a>
         </>
       }
     >
