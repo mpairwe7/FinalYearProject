@@ -286,46 +286,50 @@ class TestGoalTrackingAndSchemaVersioning(unittest.TestCase):
         self.assertEqual(reconstituted.replan_count, 1)
 
 
-@pytest.mark.asyncio
-async def test_async_runtime_interruption_and_aresume():
-    store = InMemoryCheckpointStore()
-    thread_id = "th-async-hitl-200"
+def test_async_runtime_interruption_and_aresume():
+    import asyncio
 
-    action = TaxpayerActionRequest(
-        action_type="customs_clear",
-        description="Clear customs consignment #998",
-        requires_consent=True,
-        authorized=False,
-    )
+    async def _run():
+        store = InMemoryCheckpointStore()
+        thread_id = "th-async-hitl-200"
 
-    async def async_gate(s: AgentGraphState) -> NodeResult:
-        if s.pending_action and not s.pending_action.authorized:
-            s.outcome = GraphOutcome.WAITING_USER
-            s.reply = "Customs clearance requires taxpayer confirmation."
-            return NodeResult(next_node="act", outcome=GraphOutcome.WAITING_USER)
-        return NodeResult(next_node="act")
+        action = TaxpayerActionRequest(
+            action_type="customs_clear",
+            description="Clear customs consignment #998",
+            requires_consent=True,
+            authorized=False,
+        )
 
-    async def async_act(s: AgentGraphState) -> NodeResult:
-        s.observations.append({"ok": True, "customs_receipt": "REC-7766"})
-        s.reply = f"Consignment cleared with receipt {s.observations[0]['customs_receipt']}"
-        s.outcome = GraphOutcome.ANSWERED
-        return NodeResult(next_node=END, outcome=GraphOutcome.ANSWERED)
+        async def async_gate(s: AgentGraphState) -> NodeResult:
+            if s.pending_action and not s.pending_action.authorized:
+                s.outcome = GraphOutcome.WAITING_USER
+                s.reply = "Customs clearance requires taxpayer confirmation."
+                return NodeResult(next_node="act", outcome=GraphOutcome.WAITING_USER)
+            return NodeResult(next_node="act")
 
-    runtime = GraphRuntime(
-        nodes={"gate": async_gate, "act": async_act},
-        entry="gate",
-        checkpointer=store,
-    )
+        async def async_act(s: AgentGraphState) -> NodeResult:
+            s.observations.append({"ok": True, "customs_receipt": "REC-7766"})
+            s.reply = f"Consignment cleared with receipt {s.observations[0]['customs_receipt']}"
+            s.outcome = GraphOutcome.ANSWERED
+            return NodeResult(next_node=END, outcome=GraphOutcome.ANSWERED)
 
-    state = AgentGraphState(query="Clear consignment #998", pending_action=action)
-    paused = await runtime.arun(state, thread_id=thread_id)
-    assert paused.outcome == GraphOutcome.WAITING_USER
-    assert "confirmation" in paused.reply
+        runtime = GraphRuntime(
+            nodes={"gate": async_gate, "act": async_act},
+            entry="gate",
+            checkpointer=store,
+        )
 
-    resumed = await runtime.aresume(
-        thread_id=thread_id,
-        resume_payload={"approved": True},
-        start_node="act",
-    )
-    assert resumed.outcome == GraphOutcome.ANSWERED
-    assert "REC-7766" in resumed.reply
+        state = AgentGraphState(query="Clear consignment #998", pending_action=action)
+        paused = await runtime.arun(state, thread_id=thread_id)
+        assert paused.outcome == GraphOutcome.WAITING_USER
+        assert "confirmation" in paused.reply
+
+        resumed = await runtime.aresume(
+            thread_id=thread_id,
+            resume_payload={"approved": True},
+            start_node="act",
+        )
+        assert resumed.outcome == GraphOutcome.ANSWERED
+        assert "REC-7766" in resumed.reply
+
+    asyncio.run(_run())
