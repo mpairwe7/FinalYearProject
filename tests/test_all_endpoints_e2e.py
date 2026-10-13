@@ -156,6 +156,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/quality/ai-chat"),
     ("GET", "/v1/admin/quality/ai-chat/{conversation_id}"),
     ("GET", "/v1/admin/quality/ratings"),
+    ("GET", "/v1/admin/quality/needs-review"),
+    ("PUT", "/v1/admin/quality/reviews/{item_type}/{item_id}"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -318,6 +320,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/quality/ai-chat"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
     ("GET", "/v1/admin/quality/ai-chat/{conversation_id}"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
     ("GET", "/v1/admin/quality/ratings"): "App/backend/tests/test_service_ratings.py:RatingsRouteTests",
+    ("GET", "/v1/admin/quality/needs-review"): "App/backend/tests/test_audit_reviews.py:QueueRouteTests",
+    ("PUT", "/v1/admin/quality/reviews/{item_type}/{item_id}"): "App/backend/tests/test_audit_reviews.py:ReviewRouteTests",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("PUT", "/v1/me/profile"): "test_me_endpoints",
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -501,10 +505,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (120 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (122 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 120, f"expected 120 HTTP endpoints, found {len(http)}"
+    assert len(http) == 122, f"expected 122 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 

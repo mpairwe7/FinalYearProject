@@ -29,9 +29,11 @@ both light and dark themes:
 | Taxpayer chat and composer | `/` |
 | Account settings | header **More options** → **Settings** |
 | Sign in | `/signin` |
-| Operations overview | `/admin` |
+| Service quality overview | `/admin` |
+| Service-quality audit: AI answers in chat, AI on calls, officer chats, officer calls, Needs review | `/admin/quality` and its `?tab=` views |
 | Agent work queue | `/agent` |
 | Escalation queue and reply composer | `/admin/tickets` |
+| Call desk | `/calls` |
 | Feature flag console | `/admin/flags` |
 | Answer overrides | `/admin/overrides` |
 | Notification outbox | `/admin/outbox` |

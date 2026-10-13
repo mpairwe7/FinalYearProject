@@ -20,6 +20,8 @@ import {
   type AiChatPage,
   type AiChatSummary,
   type AiChatTimeline,
+  type NeedsReviewItem,
+  type NeedsReviewPage,
   type RatingsAudit,
   type ServiceRating,
   type TicketDetail,
@@ -277,6 +279,7 @@ describe("Officer chats tab", () => {
       "AI on calls",
       "Officer chats",
       "Officer calls",
+      "Needs review",
     ]);
   });
 
@@ -480,6 +483,130 @@ describe("Officer calls tab", () => {
     expect(within(call).queryByRole("textbox")).toBeNull();
     expect(window.location.search).toContain("call=call_abc12345");
     expect(callsApi.getCall).toHaveBeenCalledTimes(1);
+  });
+});
+
+const QUEUE_ITEMS: NeedsReviewItem[] = [
+  {
+    item_type: "ai_chat", item_id: "conv-went-wrong", stream: "ai_chat", title: "AI chat went wrong at answer 3",
+    quote: "What if I am a sole proprietor?", comment: "That is wrong.", topic: "vat_registration", locale: "lg",
+    officer_name: "", occurred_at: NOW - 60, link: { tab: "ai-chat", param: "conversation", value: "conv-went-wrong" },
+    review: null,
+  },
+  {
+    item_type: "rating", item_id: "r-low", stream: "officer_chat", title: "Officer chat rated 2/5 — Officer Okello",
+    quote: "", comment: "Took too long to answer.", topic: "vat", locale: "en", officer_name: "Officer Okello",
+    occurred_at: NOW - 600, link: { tab: "officer-chat", param: "ticket", value: "abc12345-0000" },
+    review: { status: "action_needed", note: "Coach on refunds", reviewer_name: "Auditor A", updated_at: NOW - 30 },
+  },
+];
+
+function queuePage(items: NeedsReviewItem[]): NeedsReviewPage {
+  return {
+    period_days: 30,
+    truncated: false,
+    counts: { open: 1, action_needed: 1, reviewed: 0, all: 2 },
+    total: items.length,
+    limit: 25,
+    offset: 0,
+    items,
+  };
+}
+
+describe("Needs review tab", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/quality?tab=needs-review");
+    vi.spyOn(analyticsApi, "qualityNeedsReview").mockResolvedValue(queuePage(QUEUE_ITEMS));
+    vi.spyOn(analyticsApi, "setQualityReview").mockResolvedValue({
+      item_type: "ai_chat",
+      item_id: "conv-went-wrong",
+      review: { status: "reviewed", note: "", reviewer_name: "admin@ura.go.ug", updated_at: NOW },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("lists what is waiting with where to read it, and the counts per status", async () => {
+    renderPage();
+    expect(screen.getByRole("tab", { name: "Needs review" })).toHaveAttribute("aria-selected", "true");
+    const list = await screen.findByRole("list", { name: "Needs review" });
+    const items = within(list).getAllByRole("listitem");
+    expect(items[0].textContent).toContain("Asked: What if I am a sole proprietor?");
+    expect(items[0].textContent).toContain("Said: That is wrong.");
+    expect(within(items[0]).getByRole("link", { name: /Open/ })).toHaveAttribute("href", "/admin/quality?conversation=conv-went-wrong");
+    expect(within(items[1]).getByRole("link", { name: /Open/ })).toHaveAttribute(
+      "href",
+      "/admin/quality?tab=officer-chat&ticket=abc12345-0000",
+    );
+    // Who decided, and what.
+    expect(items[1].textContent).toMatch(/Action needed by Auditor A/);
+    expect(items[1].textContent).toContain("Coach on refunds");
+    const filters = screen.getByRole("group", { name: "Show items" });
+    expect(within(filters).getByRole("button", { name: /Open/ }).textContent).toContain("1");
+    expect(analyticsApi.qualityNeedsReview).toHaveBeenCalledWith(expect.objectContaining({ status: "open" }));
+  });
+
+  it("filters by status and by stream through the API", async () => {
+    renderPage();
+    await screen.findByRole("list", { name: "Needs review" });
+    fireEvent.click(within(screen.getByRole("group", { name: "Show items" })).getByRole("button", { name: /Action needed/ }));
+    await waitFor(() =>
+      expect(analyticsApi.qualityNeedsReview).toHaveBeenLastCalledWith(expect.objectContaining({ status: "action_needed" })),
+    );
+    fireEvent.click(within(screen.getByRole("group", { name: "From" })).getByRole("button", { name: "Officer call" }));
+    await waitFor(() =>
+      expect(analyticsApi.qualityNeedsReview).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: "action_needed", stream: "officer_call" }),
+      ),
+    );
+  });
+
+  it("records a decision with its note, and reopens one", async () => {
+    renderPage();
+    const decision = await screen.findByRole("group", { name: "Decision on: AI chat went wrong at answer 3" });
+    fireEvent.click(within(decision).getByRole("button", { name: "Add a note" }));
+    fireEvent.change(within(decision).getByLabelText("Note"), { target: { value: "  Sole proprietors can register  " } });
+    fireEvent.click(within(decision).getByRole("button", { name: "Action needed" }));
+    await waitFor(() =>
+      expect(analyticsApi.setQualityReview).toHaveBeenCalledWith(
+        "ai_chat",
+        "conv-went-wrong",
+        "action_needed",
+        "Sole proprietors can register",
+      ),
+    );
+    const decided = screen.getByRole("group", { name: "Decision on: Officer chat rated 2/5 — Officer Okello" });
+    expect(within(decided).getByRole("button", { name: "Action needed" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(decided).getByRole("button", { name: "Reopen" }));
+    await waitFor(() => expect(analyticsApi.setQualityReview).toHaveBeenLastCalledWith("rating", "r-low", "open", ""));
+  });
+
+  it("says when a decision did not save", async () => {
+    vi.spyOn(analyticsApi, "setQualityReview").mockRejectedValue(new Error("403 Forbidden"));
+    renderPage();
+    const decision = await screen.findByRole("group", { name: "Decision on: AI chat went wrong at answer 3" });
+    fireEvent.click(within(decision).getByRole("button", { name: "Mark reviewed" }));
+    expect(await within(decision).findByRole("alert")).toHaveTextContent(/Could not save the decision/);
+  });
+
+  it("exports the list as it stands", async () => {
+    const create = vi.fn(() => "blob:queue");
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderPage();
+    await screen.findByRole("list", { name: "Needs review" });
+    fireEvent.click(screen.getByRole("button", { name: "Export 2 as CSV" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so when nothing is waiting", async () => {
+    vi.spyOn(analyticsApi, "qualityNeedsReview").mockResolvedValue(queuePage([]));
+    renderPage();
+    expect(await screen.findByText("Nothing waiting for a review")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export 0 as CSV" })).toBeDisabled();
   });
 });
 

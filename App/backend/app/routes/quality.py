@@ -14,7 +14,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Path, Query, Request
+
+from ..models import QualityReviewRequest
 
 if TYPE_CHECKING:
     from ..auth import AuthContext
@@ -45,12 +47,14 @@ def quality_summary(request: Request, days: int = _DAYS) -> dict[str, Any]:
     """Headline figures for the audit overview: one block per stream audited so far."""
     from .. import quality_audit
 
-    from .. import service_ratings
+    from .. import audit_reviews, service_ratings
 
     ctx = _audit_reader(request)
     tenant = _tenant_scope(ctx)
     return {
         "period_days": days,
+        # What the queue holds for a person to look at (the overview's panel).
+        "needs_review": audit_reviews.counts(days, tenant_id=tenant),
         "ai_chat": quality_audit.ai_chat_summary(days, tenant_id=tenant),
         "officer_chat": service_ratings.headline("chat_officer_csat", days, tenant_id=tenant),
         # The caller's spoken review of the AI: at goodbye, and while transferring.
@@ -148,3 +152,76 @@ def quality_ratings(
         limit=limit,
         offset=offset,
     )
+
+
+def _reviewer_name(ctx: AuthContext) -> str:
+    """Who decided, as the queue shows it: their name, username or email (never a bare ``sub``)."""
+    claims = ctx.claims or {}
+    return (
+        str(claims.get("name") or "").strip()
+        or str(claims.get("given_name") or "").strip()
+        or str(claims.get("preferred_username") or "").strip()
+        or (ctx.user.email if ctx.user else "")
+        or ctx.user_id
+        or "operator key"
+    )[:128]
+
+
+@router.get("/v1/admin/quality/needs-review")
+def quality_needs_review(
+    request: Request,
+    days: int = _DAYS,
+    status: str = Query("open", pattern=r"^(open|action_needed|reviewed|all)$"),
+    stream: str = Query("", pattern=r"^(|ai_chat|officer_chat|officer_call|ai_call)$"),
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10_000),
+) -> dict[str, Any]:
+    """The items across the four streams that call for a person to look, with what was decided.
+
+    An AI chat that went wrong or was never found helpful, or a 👎 with a
+    comment; an officer chat or call rated 1 or 2; a caller who said the AI
+    did not help. Newest first. ``status=open`` is what nobody has decided yet.
+    """
+    from .. import audit_reviews
+
+    ctx = _audit_reader(request)
+    return audit_reviews.needs_review(
+        days, tenant_id=_tenant_scope(ctx), status=status, stream=stream, limit=limit, offset=offset
+    )
+
+
+@router.put("/v1/admin/quality/reviews/{item_type}/{item_id}")
+def quality_set_review(
+    request: Request,
+    item_type: str = Path(..., pattern=r"^(ai_chat|rating)$"),
+    item_id: str = Path(..., pattern=r"^[A-Za-z0-9_:.-]{1,128}$"),
+    body: QualityReviewRequest = Body(...),
+) -> dict[str, Any]:
+    """Mark an item Reviewed or Action needed, with a note; ``open`` reopens it.
+
+    Administrators and auditors: like sealing the audit trail, it adds an
+    audit note and changes no case. Recorded as ``staff.quality_reviewed``
+    (the note as its length). 404 for an item the audit cannot see.
+    """
+    from .. import audit_reviews
+    from ..main import _audit_staff_action
+
+    ctx = _audit_reader(request)
+    tenant = _tenant_scope(ctx)
+    if not audit_reviews.item_exists(item_type, item_id, tenant_id=tenant):
+        raise HTTPException(status_code=404, detail="item not found")
+    review = audit_reviews.set_review(
+        item_type,
+        item_id,
+        status=body.status,
+        note=body.note,
+        reviewer_id=ctx.user_id or "",
+        reviewer_name=_reviewer_name(ctx),
+        tenant_id=tenant,
+    )
+    _audit_staff_action(
+        ctx,
+        "staff.quality_reviewed",
+        {"item_type": item_type, "item_id": item_id, "status": body.status, "note_chars": len(body.note.strip())},
+    )
+    return {"item_type": item_type, "item_id": item_id, "review": review}

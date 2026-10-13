@@ -20,6 +20,8 @@
  *   ends a live chat, per officer, with the chat itself one click away.
  * - **Officer calls** — how satisfied callers told the officer they were, as
  *   the officer recorded it at wrap-up, with the call one click away.
+ * - **Needs review** — the items across all four that call for a person to
+ *   look, each marked Reviewed or Action needed with a note (on the audit trail).
  *
  * Reads only. `?tab=`, `?conversation=`, `?ticket=` and `?call=` make a view a link.
  */
@@ -37,6 +39,8 @@ import { RatingStrip } from "../../../components/quality/RatingStrip";
 import { ConversationTimeline } from "../../../components/quality/ConversationTimeline";
 import { RatingsPanel } from "../../../components/quality/RatingsPanel";
 import { AiCallsPanel } from "../../../components/quality/AiCallsPanel";
+import { NeedsReviewPanel } from "../../../components/quality/NeedsReviewPanel";
+import { csvFilename, csvTime, downloadCsv, toCsv } from "../../../lib/csv";
 import { useAiChatAudit } from "../../../hooks/useQualityAudit";
 import { useSkeletonVisible } from "../../../hooks/useLoadingPhase";
 import { callLanguageName } from "../../../lib/callLanguage";
@@ -57,6 +61,7 @@ const TABS = [
   { id: "ai-calls", label: "AI on calls", heading: "What callers said about the AI" },
   { id: "officer-chat", label: "Officer chats", heading: "Officer chats" },
   { id: "officer-calls", label: "Officer calls", heading: "Officer calls" },
+  { id: "needs-review", label: "Needs review", heading: "Needs review" },
 ] as const;
 type QualityTab = (typeof TABS)[number]["id"];
 /** The URL parameter each tab owns, cleared when another tab is chosen. */
@@ -65,6 +70,7 @@ const TAB_PARAM: Record<QualityTab, string> = {
   "ai-calls": "",
   "officer-chat": "ticket",
   "officer-calls": "call",
+  "needs-review": "",
 };
 
 function readTab(): QualityTab {
@@ -161,6 +167,24 @@ function BreakdownTable({
         </table>
       </TableScroll>
     </div>
+  );
+}
+
+/** The conversations as listed, for the record: their strips, patterns and break points. */
+export function conversationsCsv(conversations: RatedConversation[]): string {
+  return toCsv(
+    ["conversation", "pattern", "ratings", "went_wrong_at_answer", "question_there", "comments", "topic", "language", "last_rated_utc"],
+    conversations.map((c) => [
+      c.conversation_id ?? c.key,
+      patternLabel(c.pattern),
+      c.ratings.map((r) => (r.rating === "up" ? "helpful" : r.rating === "down" ? "not helpful" : "not rated")).join(" / "),
+      c.break_answer ?? "",
+      c.break_question,
+      c.comments,
+      c.topic,
+      c.locale,
+      csvTime(c.last_rated_at),
+    ]),
   );
 }
 
@@ -308,6 +332,14 @@ export function AiChatAudit({ days, onUpdated }: { days: number; onUpdated?: (at
               <input type="checkbox" checked={withComment} onChange={(e) => setWithComment(e.target.checked)} />
               With a comment
             </label>
+            <button
+              type="button"
+              className="ops-btn is-sm is-ghost"
+              disabled={!page?.conversations.length}
+              onClick={() => page && downloadCsv(conversationsCsv(page.conversations), csvFilename("quality-ai-chat"))}
+            >
+              Export {page?.conversations.length ?? 0} as CSV
+            </button>
           </div>
         }
       >
@@ -428,6 +460,8 @@ function QualityAudit() {
           <RatingsPanel key="call" source="call_officer_csat" days={days} onUpdated={setUpdatedAt} />
         ) : tab === "ai-calls" ? (
           <AiCallsPanel days={days} onUpdated={setUpdatedAt} />
+        ) : tab === "needs-review" ? (
+          <NeedsReviewPanel days={days} onUpdated={setUpdatedAt} />
         ) : (
           <AiChatAudit days={days} onUpdated={setUpdatedAt} />
         )}

@@ -305,3 +305,45 @@ every panel says the same thing, and is pinned by
 | `bunx tsc --noEmit` | clean |
 | `bun run lint` | clean (same pre-existing `<img>` warning) |
 | `bun run test` (vitest) | **221 / 221 pass** |
+
+## Follow-up, 2026-10 — `/admin` becomes the service quality overview
+
+The service-quality audit
+([plan](plans/admin-service-quality-audit-plan.md)) split the roles: officers
+(`ura_staff`) handle taxpayers live, and an administrator audits the service
+they and the AI give. An escalation board on `/admin` — six queue tiles, a
+volume strip, a priority mix and a workload panel — described work the
+administrator no longer does. The page is now where the audit starts.
+
+| Was ("Operations overview", eyebrow *Work*) | Now ("Service quality overview", eyebrow *Audit*) |
+|---|---|
+| Six escalation tiles (open, awaiting first response, past SLA, unassigned, two medians) | Four tiles, one per audited stream: *AI answers found helpful*, *Callers said the AI helped*, *Officer chat satisfaction*, *Officer call satisfaction*. Each compares against the period before in the audit's own words ("down 3.3 points from 70% in the period before") and opens its tab of `/admin/quality` |
+| Escalation volume strip, sparkline and priority mix | Removed — the volume of escalations is a queue figure, and `/analytics` still charts it |
+| "Workload" panel | Removed |
+| — | **Needs review**: the newest six open items of the quality audit's queue, each opening where it is read in full, and "See all N" into `?tab=needs-review` |
+| Officers on duty, Answer authority | Kept, read-only |
+| — | **Service levels**: open escalations, past the 24-hour SLA right now, median first response, median time to resolve. Figures, never links into the queue |
+
+`/admin/quality` gained a fifth tab, **Needs review**: one queue across the
+four streams (an AI chat that went wrong, an officer chat or call rated 1 or 2,
+a caller who said the AI did not help), filterable by decision and by stream.
+Each item takes a decision — *Reviewed* or *Action needed*, with a note — that
+is recorded on the audit trail (`staff.quality_reviewed`) and shows who made it
+and when. The queue, the ratings lists and the AI-chat conversations export as
+CSV through one helper, `lib/csv.ts`, which also defuses spreadsheet formulas
+in what a taxpayer wrote (OWASP CSV injection guidance); the audit trail's
+export moved onto it.
+
+The two halves of the console do not cross: nothing on `/admin` or
+`/admin/quality` links into `/agent`, `/admin/tickets` or `/calls`, which the
+unit and browser tests both check.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `src/__tests__/app/adminOverview.test.tsx` | the four tiles against the summary payload, the Needs review links, no queue links, roster and authority kept |
+| `src/__tests__/app/adminQuality.test.tsx` | the Needs review tab: filters through the API, a decision with its note, reopen, a failed save, CSV export |
+| `src/__tests__/lib/csv.test.ts` | quoting, the formula guard, the export's columns |
+| `e2e/staff-ui.spec.ts` | the overview (tiles and their links, Needs review, roster, authority, service levels, columns, no sideways scroll at six widths); a decision recorded on the Needs review tab; `?tab=needs-review` in the every-route sweep |
+| `e2e/a11y.spec.ts` | `/admin` and `/admin/quality?tab=needs-review` in both themes, no serious or critical axe violations |

@@ -312,8 +312,13 @@ def test_one_tenant_failing_to_seal_does_not_leave_the_others_unsealed(tenant, m
 # ---------------------------------------------------------------------------
 # QA pass after #515 (call desk): completeness, not just the routes we know of
 # ---------------------------------------------------------------------------
-#: Writes an auditor may make: adding a seal changes no row.
-_AUDITOR_MAY_WRITE = {("POST", "/v1/admin/audit/seal")}
+#: Writes an auditor may make: adding a seal changes no row, and nor does a
+#: decision in the quality audit's Needs review queue — an audit note about
+#: an item, not a change to the case it is about.
+_AUDITOR_MAY_WRITE = {
+    ("POST", "/v1/admin/audit/seal"),
+    ("PUT", "/v1/admin/quality/reviews/{item_type}/{item_id}"),
+}
 _WRITE_BODIES = {
     "/v1/admin/overrides": {"query": "What is VAT?", "reply": "18%."},
     "/v1/admin/calls/{call_id}/review": {"rating": 4, "note": "fine"},
@@ -340,6 +345,22 @@ def _receptionist_call(tenant: str) -> str:
     return call_id
 
 
+def _all_routes(routes, prefix: str = ""):
+    """``(full path, route)`` for every route, descending into included routers.
+
+    FastAPI 0.141 includes routers lazily: a flat walk of ``app.routes`` sees
+    one ``_IncludedRouter`` per router, so the quality, connector and offline
+    routes were never checked here.
+    """
+    for route in routes:
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            context = getattr(route, "include_context", None)
+            yield from _all_routes(original.routes, prefix + (getattr(context, "prefix", "") or ""))
+            continue
+        yield prefix + getattr(route, "path", ""), route
+
+
 def test_every_admin_write_route_refuses_an_auditor(client, tenant):
     """Enumerates the live routes, so a new staff write that forgets its role check fails here."""
     from fastapi.routing import APIRoute
@@ -356,22 +377,22 @@ def test_every_admin_write_route_refuses_an_auditor(client, tenant):
     }
     auditor = _headers("aud-matrix", "ura_auditor", tenant)
     checked, leaks = [], []
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/v1/admin"):
+    for path, route in _all_routes(app.routes):
+        if not isinstance(route, APIRoute) or not path.startswith("/v1/admin"):
             continue
         for method in sorted(route.methods & {"POST", "PUT", "PATCH", "DELETE"}):
-            if (method, route.path) in _AUDITOR_MAY_WRITE:
+            if (method, path) in _AUDITOR_MAY_WRITE:
                 continue
             response = client.request(
                 method,
-                route.path.format(**ids),
+                path.format(**ids),
                 headers=auditor,
-                json=_WRITE_BODIES.get(route.path, {}),
-                params=_WRITE_PARAMS.get(route.path),
+                json=_WRITE_BODIES.get(path, {}),
+                params=_WRITE_PARAMS.get(path),
             )
-            checked.append(f"{method} {route.path}")
+            checked.append(f"{method} {path}")
             if response.status_code != 403:
-                leaks.append(f"{method} {route.path} -> {response.status_code}")
+                leaks.append(f"{method} {path} -> {response.status_code}")
     assert leaks == []
     assert len(checked) >= 15, checked  # 15 on 2026-09-29; the matrix grows with the API
 

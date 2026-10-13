@@ -647,6 +647,99 @@
 .qa-said-chip.is-neutral { color: var(--ops-warn-ink); background: var(--ops-warn-fill); border-color: var(--ops-warn-line); }
 .qa-said-chip.is-positive { color: var(--ops-good-ink); background: var(--ops-good-fill); border-color: var(--ops-good-line); }
 
+/* Needs review: one item, its decision under it. */
+.qa-review-filters {
+  justify-content: space-between;
+}
+
+.qa-review-item {
+  display: grid;
+  gap: var(--ops-space-2);
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
+}
+
+.qa-review-title {
+  font-size: var(--ops-text-sm);
+  color: var(--text-0);
+}
+
+.qa-review-item .qa-conv-break {
+  margin: 0;
+}
+
+.qa-stream-chip {
+  display: inline-flex;
+  padding: 1px var(--ops-space-2);
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-semi);
+  letter-spacing: var(--ops-tracking-caps);
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.qa-review-open {
+  margin-left: auto;
+  font-weight: var(--ops-weight-semi);
+  color: var(--ops-info-ink);
+}
+
+.qa-review {
+  display: grid;
+  gap: var(--ops-space-2);
+  padding-top: var(--ops-space-2);
+  border-top: 1px solid var(--ops-hairline);
+}
+
+.qa-review-state {
+  margin: 0;
+  font-size: var(--ops-text-sm);
+  color: var(--text-1);
+}
+
+.qa-review-state.is-action_needed strong {
+  color: var(--ops-warn-ink);
+}
+
+.qa-review-state.is-reviewed strong {
+  color: var(--ops-good-ink);
+}
+
+.qa-review-note {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+}
+
+.qa-review-field {
+  display: grid;
+  gap: 4px;
+  font-size: var(--ops-text-xs);
+  color: var(--text-2);
+}
+
+.qa-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ops-space-2);
+}
+
+.qa-review-actions .ops-btn[aria-pressed="true"] {
+  border-color: var(--ops-line-strong);
+  background: var(--ops-row-active);
+}
+
+.qa-review-saving,
+.qa-count-badge {
+  font-size: var(--ops-text-xs);
+  color: var(--text-3);
+}
+
 @media (max-width: 1100px) {
   .qa-stats {
     --ops-stat-cols: 2;

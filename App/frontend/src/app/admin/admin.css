@@ -1,82 +1,14 @@
 /* Operations overview and the admin sub-pages that share its furniture.
    Layout only — every size, colour and radius comes from styles/ops/tokens.css. */
 
-/* Volume strip -------------------------------------------------------------
-   The trend, the delta and the mix all describe one number (escalations raised
-   in the period), so they share one card instead of being scattered across
-   tiles that count other things. */
+/* Headline figures ---------------------------------------------------------
+   One per audited stream, each opening its tab of the quality audit. Stepped
+   down by this file's own queries so the order the stylesheets load in cannot
+   keep four columns on a phone. */
 
-.ov-volume {
-  display: grid;
-  grid-template-columns: minmax(180px, 220px) 1fr minmax(200px, 280px);
-  gap: var(--ops-space-5);
-  align-items: center;
-  margin: var(--ops-space-4) 0 var(--ops-band);
-  padding: var(--ops-space-4) var(--ops-space-5);
-  background: var(--ops-panel);
-  border: 1px solid var(--ops-line);
-  border-radius: var(--ops-radius-md);
-  box-shadow: var(--ops-elev-1);
-}
-
-.ov-volume-lead {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ops-space-1);
-}
-
-.ov-volume-chart {
-  min-width: 0;
-}
-
-.ov-volume-mix {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ops-space-2);
-}
-
-.ov-mix {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 5px;
-}
-
-.ov-mix li {
-  display: grid;
-  grid-template-columns: 62px 1fr 28px;
-  align-items: center;
-  gap: var(--ops-space-2);
-}
-
-.ov-mix-bar {
-  height: 6px;
-  border-radius: var(--ops-radius-pill);
-  background: var(--ops-row-active);
-  overflow: hidden;
-}
-
-.ov-mix-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--text-3);
-}
-
-/* Priority is an ordered severity, so the fill follows the status scale rather
-   than a categorical hue — and the word itself sits in the chip beside it, so
-   colour is never the only channel. */
-.ov-mix-fill.is-urgent { background: var(--ops-bad); }
-.ov-mix-fill.is-high   { background: var(--ops-warn); }
-.ov-mix-fill.is-normal { background: var(--ops-series-1); }
-.ov-mix-fill.is-low    { background: var(--text-3); }
-
-.ov-mix-count {
-  font-size: var(--ops-text-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-2);
-  text-align: right;
+.ov-stats {
+  --ops-stat-cols: 4;
+  margin-bottom: var(--ops-band);
 }
 
 /* Two-column body ---------------------------------------------------------- */
@@ -110,7 +42,60 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Priority pill — one definition, shared by the overview and the mix bars.
+/* Needs review ------------------------------------------------------------- */
+
+.ov-review-list {
+  list-style: none;
+  margin: 0 0 var(--ops-space-3);
+  padding: 0;
+  display: grid;
+  gap: var(--ops-space-2);
+}
+
+.ov-review-item {
+  display: grid;
+  gap: var(--ops-space-1);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-row);
+}
+
+.ov-review-top {
+  display: flex;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
+}
+
+.ov-review-when {
+  margin-left: auto;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-review-title {
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+  overflow-wrap: anywhere;
+}
+
+.ov-review-title:hover,
+.ov-review-title:focus-visible {
+  color: var(--ops-info-ink);
+}
+
+.ov-review-said {
+  margin: 0;
+  font-size: var(--ops-text-xs);
+  line-height: var(--ops-lh-normal);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* Priority pill — one definition, shared by the admin pages.
    /agent and /admin/tickets use the `.st-pri-*` twin in staffTickets.css. */
 
 /* Three levels, told apart by ink alone — see `.ops-chip` in ops.css for why
@@ -234,15 +219,9 @@
   color: var(--text-3);
 }
 
-@media (max-width: 1080px) {
-  .ov-volume {
-    grid-template-columns: minmax(160px, 200px) 1fr;
-  }
-  .ov-volume-mix {
-    grid-column: 1 / -1;
-  }
-  .ov-mix li {
-    grid-template-columns: 62px 1fr 28px;
+@media (max-width: 1100px) {
+  .ov-stats {
+    --ops-stat-cols: 2;
   }
 }
 
@@ -253,9 +232,8 @@
 }
 
 @media (max-width: 640px) {
-  .ov-volume {
-    grid-template-columns: 1fr;
-    gap: var(--ops-space-3);
+  .ov-stats {
+    --ops-stat-cols: 1;
   }
 }
 

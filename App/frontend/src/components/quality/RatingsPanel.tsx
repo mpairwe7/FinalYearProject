@@ -21,6 +21,7 @@ import type { RatingSource, RatingsAudit, ServiceRating } from "../../services/a
 import { SatisfactionDistribution } from "./SatisfactionDistribution";
 import { OfficerChatDetail } from "./OfficerChatDetail";
 import { OfficerCallDetail } from "./OfficerCallDetail";
+import { csvFilename, csvTime, downloadCsv, toCsv } from "../../lib/csv";
 
 /** The words that differ between the chat and the call streams. */
 const COPY = {
@@ -102,6 +103,25 @@ export function ratingText(rating: Pick<ServiceRating, "status" | "score">, kind
   if (rating.status === "skipped") return "Skipped the rating";
   if (rating.status === "no_answer") return COPY[kind].noAnswer;
   return "Not answered yet";
+}
+
+/** The ratings as listed, for the record. */
+export function ratingsCsv(ratings: ServiceRating[], kind: Kind): string {
+  return toCsv(
+    ["rating", "score", "status", "comment", "officer", "team", "topic", "language", "answered_utc", kind === "call" ? "call_id" : "ticket_id"],
+    ratings.map((r) => [
+      ratingText(r, kind),
+      r.score ?? "",
+      r.status,
+      r.comment,
+      r.officer_name,
+      r.team,
+      r.topic,
+      r.locale,
+      csvTime(r.answered_at || r.created_at),
+      caseOf(r, kind),
+    ]),
+  );
 }
 
 function caseOf(rating: ServiceRating, kind: Kind): string {
@@ -318,6 +338,14 @@ export function RatingsPanel({
                 {officerName} ✕
               </button>
             ) : null}
+            <button
+              type="button"
+              className="ops-btn is-sm is-ghost"
+              disabled={!data?.ratings.length}
+              onClick={() => data && downloadCsv(ratingsCsv(data.ratings, kind), csvFilename(`quality-officer-${kind}s`))}
+            >
+              Export {data?.ratings.length ?? 0} as CSV
+            </button>
           </div>
         }
       >

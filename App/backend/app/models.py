@@ -473,6 +473,16 @@ class ChatRatingRequest(BaseModel):
     comment: str = Field("", max_length=1000)
 
 
+class QualityReviewRequest(BaseModel):
+    """An auditor's decision on an item in the quality audit's Needs review queue.
+
+    ``open`` takes a decided item back to the queue.
+    """
+
+    status: Literal["reviewed", "action_needed", "open"]
+    note: str = Field("", max_length=1000)
+
+
 class EndChatRequest(BaseModel):
     """An officer ends a live chat: an optional closing message and how it ended."""
 

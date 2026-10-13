@@ -6,6 +6,7 @@
  * summary and the CSV evidence export in one tested place, apart from the page.
  */
 import type { AuditEvent, AuditVerification } from "../services/analyticsApi";
+import { toCsv } from "./csv";
 
 const EVENT_LABEL: Record<string, string> = {
   "staff.ticket_updated": "Changed a ticket",
@@ -17,6 +18,7 @@ const EVENT_LABEL: Record<string, string> = {
   "staff.call_reviewed": "Rated a call",
   "staff.chat_ended": "Ended a live chat with a taxpayer",
   "staff.conversation_viewed": "Opened a rated conversation in the quality audit",
+  "staff.quality_reviewed": "Marked an item in the quality audit's Needs review",
   voice_staff_viewed_call: "Opened a call and its transcript",
   voice_staff_listened_call: "Listened in to a live call",
   voice_staff_viewed_brief: "Opened a call brief",
@@ -46,6 +48,7 @@ export const AUDIT_FILTERS: readonly { value: string; label: string }[] = [
   { value: "staff.ticket_updated", label: "Ticket changes" },
   { value: "staff.chat_ended", label: "Live chats ended" },
   { value: "staff.conversation_viewed", label: "Rated conversations opened" },
+  { value: "staff.quality_reviewed", label: "Quality audit decisions" },
   { value: "staff.flag", label: "Feature switch changes" },
   { value: "staff.override", label: "Staff-written answer changes" },
   { value: "voice_staff", label: "Calls opened or listened to" },
@@ -84,16 +87,7 @@ export function summarizePayload(payload: Record<string, unknown>, max = 140): s
   return text.length > max ? `${text.slice(0, max - 1)}…` : text || "—";
 }
 
-/**
- * A spreadsheet treats a cell starting with = + - @ (or a tab / carriage
- * return) as a formula, so an exported value like "=HYPERLINK(...)" would run
- * when an auditor opens the file. Such cells are prefixed with a quote
- * (OWASP CSV injection guidance); every cell is quoted and inner quotes doubled.
- */
-function csvCell(value: string): string {
-  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-  return `"${safe.replaceAll('"', '""')}"`;
-}
+/* Cells are escaped by lib/csv.ts: formula-looking values are neutralised. */
 
 /** CSV evidence file for *events*, one row per event, oldest last as shown. */
 export function auditEventsToCsv(events: AuditEvent[]): string {
@@ -108,7 +102,7 @@ export function auditEventsToCsv(events: AuditEvent[]): string {
     summarizePayload(e.payload, 10_000),
     e.row_hash,
   ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  return toCsv(header, rows);
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {

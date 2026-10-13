@@ -15,8 +15,8 @@ bun run lint
 | Path | Role |
 | --- | --- |
 | `src/app/page.tsx` | Taxpayer chat |
-| `src/app/admin/` | Overview, flags, overrides, outbox, audit trail |
-| `src/app/admin/quality/` | Service-quality audit (admin + auditor), tabs in `?tab=`: AI answers in chat, AI on calls, officer chats, officer calls |
+| `src/app/admin/` | Service quality overview (`/admin`), flags, overrides, outbox, audit trail |
+| `src/app/admin/quality/` | Service-quality audit (admin + auditor), tabs in `?tab=`: AI answers in chat, AI on calls, officer chats, officer calls, Needs review (decisions via `PUT /v1/admin/quality/reviews/…`) |
 | `src/components/quality/` | Audit pieces: rating strip, position chart, conversation timeline, ratings panel (chats and calls), satisfaction levels, AI-calls panel |
 | `src/components/rating/SatisfactionScale.tsx` | The one 5-face satisfaction scale (taxpayer rating dialog, officer wrap-up) |
 | `src/hooks/useOfficerChat.ts` | Taxpayer side of a live officer chat: thread poll, notices, rating, hand-back to the AI |
