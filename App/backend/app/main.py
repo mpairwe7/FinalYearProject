@@ -4143,10 +4143,23 @@ async def wrapup_call_endpoint(
             ticket_action=ticket_action,
             rating=rating,
             rating_note=rating_note,
+            # What the caller said when the officer asked how satisfied they
+            # were: the officer's service, audited on /admin/quality.
+            caller_satisfaction=body.get("caller_satisfaction"),
+            caller_satisfaction_status=body.get("caller_satisfaction_status"),
+            officer_name=_desk_officer_name(ctx),
         )
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_wrapup_saved")
+    recorded = result.get("caller_satisfaction") or {}
+    if recorded.get("recorded"):
+        from .service_ratings import sentiment_for_score
+
+        metrics.inc(
+            "service_rating_total",
+            labels={"source": "call_officer_csat", "sentiment": sentiment_for_score(recorded.get("score")) or "no_answer"},
+        )
     return result
 
 

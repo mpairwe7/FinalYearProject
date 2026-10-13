@@ -756,10 +756,13 @@ GET /v1/admin/quality/summary?days=30
 }
 ```
 
-`ai_chat` is the same block as `summary` below. `officer_chat` is the
-officer-chat satisfaction headline: `asked`, `answered`, `response_rate`,
-`average` (of 5), `csat_pct` (share of 4–5), `low` (ratings of 1–2),
-`distribution`, `sentiment` and `previous` (`asked`, `average`, `csat_pct`).
+`ai_chat` is the same block as `summary` below. `officer_chat`,
+`officer_calls` and `ai_calls.end` / `ai_calls.transfer` are the satisfaction
+headlines of those streams: `asked`, `answered`, `response_rate`, `average`
+(of 5), `csat_pct` (share of 4–5), `low` (ratings of 1–2), `distribution`,
+`sentiment` with `positive_pct` / `negative_pct` (the words view — the only
+one for the caller's spoken review of the AI, which has no score), and
+`previous` (the same figures for the period before).
 
 ---
 
@@ -855,11 +858,12 @@ GET /v1/admin/quality/ratings?source=chat_officer_csat&days=30&score=&officer=&s
 
 | Parameter | Description |
 |-----------|-------------|
-| `source` | `chat_officer_csat` (taxpayer rates an officer chat). `call_officer_csat`, `call_ai_review_end` and `call_ai_review_transfer` are reserved for the call streams |
+| `source` | `chat_officer_csat` (taxpayer rates an officer chat), `call_officer_csat` (the officer records how satisfied the caller said they were, at wrap-up), `call_ai_review_end` / `call_ai_review_transfer` (the caller's spoken answer to the AI's "was this call helpful?", at goodbye or while transferring) |
 | `days` | Period, 1–90 (default 30) |
 | `score` | Only ratings of this level (1–5) |
 | `officer` | Only this officer's ratings (`officer_id` from `summary.by_officer`) |
 | `status` | `answered` · `skipped` · `no_answer` |
+| `sentiment` | `positive` · `neutral` · `negative` · `unclear` — for the spoken review |
 | `limit`, `offset` | Page of ratings (limit ≤ 100) |
 
 **Response**
@@ -872,7 +876,9 @@ GET /v1/admin/quality/ratings?source=chat_officer_csat&days=30&score=&officer=&s
     "distribution": {"1": 0, "2": 1, "3": 1, "4": 1, "5": 1},
     "by_officer": [{"officer_id": "…", "officer_name": "Officer Okello", "handled": 3, "rated": 2,
                     "average": 2.5, "csat_pct": 0.0, "low": 1}],
-    "by_week": [{"week": "2026-W41", "rated": 4, "average": 3.25, "csat_pct": 50.0}]
+    "by_week": [{"week": "2026-W41", "rated": 4, "average": 3.25, "csat_pct": 50.0, "positive_pct": 50.0, "negative_pct": 25.0}],
+    "by_language": [{"locale": "lg", "asked": 3, "response_rate": 66.7, "rated": 2, "average": 3.5, "csat_pct": 50.0,
+                     "positive_pct": 50.0, "negative_pct": 50.0}]
   },
   "previous": {"asked": 4, "average": 4.0, "csat_pct": 75.0},
   "total": 4, "limit": 25, "offset": 0,
@@ -882,8 +888,9 @@ GET /v1/admin/quality/ratings?source=chat_officer_csat&days=30&score=&officer=&s
 }
 ```
 
-The list leads with the lowest score, then the newest, and never names the
-taxpayer. Administrators and auditors only; officers get 403. A rating opens
+The list leads with the lowest score (a spoken review sorts negative, unclear,
+neutral, positive), then the newest, and never names the taxpayer. For a
+spoken review, `comment` is the transcript of what the caller said (redacted). Administrators and auditors only; officers get 403. A rating opens
 its case through `GET /v1/admin/tickets/{ticket_id}` (recorded as
 `staff.ticket_viewed`).
 
@@ -1666,6 +1673,31 @@ Staff-only, read-only. Pushes `escalation.created` triage metadata
 (no transcript), and `escalation.taxpayer_reply` / `escalation.chat_ended`
 for live chats. The staff UI invalidates the queue on each event, and the open
 case on the chat events.
+
+---
+
+#### Call wrap-up: the caller's satisfaction
+
+```http
+POST /v1/admin/calls/{call_id}/wrapup
+```
+
+```json
+{"outcome": "resolved", "note": "Explained the refund timeline.", "ticket_action": "resolve",
+ "caller_satisfaction": 4, "caller_satisfaction_status": "answered",
+ "rating": 3, "rating_note": "Missed the PRN question"}
+```
+
+Officers only. `caller_satisfaction` is what the caller told the officer when
+asked before the call ended, 1 (very dissatisfied) to 5 (very satisfied);
+`caller_satisfaction_status: "not_said"` (with no score) records that they did
+not say. Stored as `call_officer_csat` under the officer and the call's team,
+topic and language; a wrap-up posted again keeps the first one; 400 for a
+score outside 1–5 or a score with `not_said`. The console requires one of the
+two; a request without either records nothing, as before. `rating` /
+`rating_note` are separate and optional: the officer's own rating of how the AI
+handled the call before the transfer. The response's `caller_satisfaction`
+says what was recorded.
 
 ---
 

@@ -33,6 +33,7 @@ from .hub import hub
 from .metrics import get_aggregate_metrics, record_call_end_metrics
 from .officer import OfficerLeg
 from .pipeline import build_call_pipeline
+from .review import settle as review_settle
 from .state import registry
 from .store import (
     create_call,
@@ -491,6 +492,9 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             abandoned_while_waiting = (room.state.mode == "transferring")
             if abandoned_while_waiting:
                 update_call(call_id, needs_callback=1, callback_reason="caller_left_waiting", outcome="abandoned")
+            # A review question the caller hung up on is unanswered. Here as
+            # well as in room.end: a call the desk ended is already "ended".
+            review_settle(room)
             await room.end("caller_hangup")
             record_call_end_metrics(call_id, room.state)
             asyncio.create_task(asyncio.to_thread(generate_call_summary, call_id))

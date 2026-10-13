@@ -149,6 +149,21 @@ export function patternLabel(pattern: string): string {
 }
 
 /**
+ * What a caller's spoken answer to "was this call helpful?" came out as,
+ * in the words an auditor reads (review.py classifies it).
+ */
+export const SENTIMENT_LABEL: Record<string, string> = {
+  positive: "Said it helped",
+  neutral: "Said it partly helped",
+  negative: "Said it didn't help",
+  unclear: "Answer unclear",
+};
+
+export function sentimentLabel(sentiment: string): string {
+  return SENTIMENT_LABEL[sentiment] ?? sentiment.replaceAll("_", " ");
+}
+
+/**
  * The evaluation metrics, in words.
  *
  * These eight names are the RAG-evaluation literature's, and on a page whose

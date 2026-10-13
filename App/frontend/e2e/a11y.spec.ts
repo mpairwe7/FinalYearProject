@@ -101,35 +101,47 @@ function qualityFixture() {
   return { summary, page, timeline };
 }
 
-/** Officer-chat ratings, as GET /v1/admin/quality/ratings returns them: one low, one high. */
-function ratingsFixture() {
+/**
+ * Ratings, as GET /v1/admin/quality/ratings returns them for *source*: one low,
+ * one high. Officer chats name a ticket, officer calls a call; the caller's
+ * spoken review of the AI is rated in words (no score).
+ */
+function ratingsFixture(source = "chat_officer_csat") {
   const now = Math.floor(Date.now() / 1000);
+  const spoken = source.startsWith("call_ai");
+  const onCall = source.startsWith("call_");
   const rating = (id: string, score: number, officer: [string, string], extra: Record<string, unknown> = {}) => ({
-    id, source: "chat_officer_csat", channel: "chat", subject: "officer", status: "answered", score,
-    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "", ticket_id: `tkt-${id}`,
-    call_id: "", conversation_id: `conv-${id}`, officer_id: officer[0], officer_name: officer[1], team: "domestic_taxes",
+    id, source, channel: onCall ? "call" : "chat", subject: spoken ? "ai" : "officer", status: "answered",
+    score: spoken ? null : score,
+    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "",
+    ticket_id: onCall ? "" : `tkt-${id}`, call_id: onCall ? `call-${id}` : "", conversation_id: `conv-${id}`,
+    officer_id: spoken ? "" : officer[0], officer_name: spoken ? "" : officer[1], team: "domestic_taxes",
     topic: "vat", locale: "en", created_at: now - 900, answered_at: now - 600, ...extra,
   });
+  const period = { rated: 2, average: spoken ? null : 3.5, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 };
   return {
-    source: "chat_officer_csat",
+    source,
     period_days: 30,
     truncated: false,
     summary: {
       asked: 3, answered: 2, skipped: 1, no_answer: 0, pending: 0, response_rate: 66.7, average: 3.5, csat_pct: 50, low: 1,
       distribution: { "1": 0, "2": 1, "3": 0, "4": 0, "5": 1 },
       sentiment: { positive: 1, neutral: 0, negative: 1, unclear: 0 },
-      by_officer: [
+      positive_pct: 50,
+      negative_pct: 50,
+      by_officer: spoken ? [] : [
         { officer_id: "u-okello", officer_name: "Officer Okello", handled: 2, rated: 1, average: 2, csat_pct: 0, low: 1 },
         { officer_id: "u-nakato", officer_name: "Officer Nakato", handled: 1, rated: 1, average: 5, csat_pct: 100, low: 0 },
       ],
-      by_week: [],
+      by_week: [{ week: "2026-W41", ...period }],
+      by_language: [{ locale: "lg", asked: 3, response_rate: 66.7, ...period }],
     },
-    previous: { asked: 2, average: 4, csat_pct: 50 },
+    previous: { asked: 2, answered: 2, response_rate: 100, average: spoken ? null : 4, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 },
     total: 2,
     limit: 25,
     offset: 0,
     ratings: [
-      rating("low", 2, ["u-okello", "Officer Okello"], { comment: "Took too long to answer." }),
+      rating("low", 2, ["u-okello", "Officer Okello"], { comment: spoken ? "It didn't help me" : "Took too long to answer." }),
       rating("high", 5, ["u-nakato", "Officer Nakato"]),
     ],
   };
@@ -141,7 +153,9 @@ async function stubQualityAudit(page: Page) {
   await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
     route.fulfill({ json: { summary: q.summary, page: q.page } }),
   );
-  await page.route("**/api/v1/admin/quality/ratings?**", (route) => route.fulfill({ json: ratingsFixture() }));
+  await page.route("**/api/v1/admin/quality/ratings?**", (route) =>
+    route.fulfill({ json: ratingsFixture(new URL(route.request().url()).searchParams.get("source") || undefined) }),
+  );
 }
 
 /**
@@ -369,6 +383,8 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
         ["/admin", "Operations overview"],
         ["/admin/quality", "Service quality audit"],
         ["/admin/quality?tab=officer-chat", "Service quality audit"],
+        ["/admin/quality?tab=ai-calls", "Service quality audit"],
+        ["/admin/quality?tab=officer-calls", "Service quality audit"],
         ["/admin/flags", "Feature flags"],
         ["/admin/overrides", "Answer overrides"],
         ["/admin/outbox", "Notification outbox"],

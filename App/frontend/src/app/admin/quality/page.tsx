@@ -7,16 +7,21 @@
  * it; administrators no longer handle taxpayers live (docs/plans/
  * admin-service-quality-audit-plan.md), so this page is where their work is.
  *
- * Two tabs so far, one per stream audited:
+ * One tab per stream audited:
  *
  * - **AI answers · chat** — the taxpayers' 👍/👎. A rating names the answer it
  *   rates, so the page reads each conversation's ratings in order: the shape
  *   "✓ ✓ ✕" is a conversation that went wrong at its third answer, after two
  *   good ones, and the timeline opens at that answer.
+ * - **AI on calls** — what callers said when the AI asked "was this call
+ *   helpful?", at goodbye or while being transferred: the general opinion,
+ *   not call by call.
  * - **Officer chats** — the 5-level rating a taxpayer gives when an officer
  *   ends a live chat, per officer, with the chat itself one click away.
+ * - **Officer calls** — how satisfied callers told the officer they were, as
+ *   the officer recorded it at wrap-up, with the call one click away.
  *
- * Reads only. `?tab=`, `?conversation=` and `?ticket=` make a view a link.
+ * Reads only. `?tab=`, `?conversation=`, `?ticket=` and `?call=` make a view a link.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
@@ -31,6 +36,7 @@ import { PATTERN_ORDER, PatternBreakdown } from "../../../components/quality/Pat
 import { RatingStrip } from "../../../components/quality/RatingStrip";
 import { ConversationTimeline } from "../../../components/quality/ConversationTimeline";
 import { RatingsPanel } from "../../../components/quality/RatingsPanel";
+import { AiCallsPanel } from "../../../components/quality/AiCallsPanel";
 import { useAiChatAudit } from "../../../hooks/useQualityAudit";
 import { useSkeletonVisible } from "../../../hooks/useLoadingPhase";
 import { callLanguageName } from "../../../lib/callLanguage";
@@ -48,11 +54,18 @@ const PAGE = 25;
 
 const TABS = [
   { id: "ai-chat", label: "AI answers · chat", heading: "AI answers in chat" },
+  { id: "ai-calls", label: "AI on calls", heading: "What callers said about the AI" },
   { id: "officer-chat", label: "Officer chats", heading: "Officer chats" },
+  { id: "officer-calls", label: "Officer calls", heading: "Officer calls" },
 ] as const;
 type QualityTab = (typeof TABS)[number]["id"];
 /** The URL parameter each tab owns, cleared when another tab is chosen. */
-const TAB_PARAM: Record<QualityTab, string> = { "ai-chat": "conversation", "officer-chat": "ticket" };
+const TAB_PARAM: Record<QualityTab, string> = {
+  "ai-chat": "conversation",
+  "ai-calls": "",
+  "officer-chat": "ticket",
+  "officer-calls": "call",
+};
 
 function readTab(): QualityTab {
   if (typeof window === "undefined") return "ai-chat";
@@ -65,7 +78,7 @@ function writeTab(tab: QualityTab): void {
   const params = new URLSearchParams(window.location.search);
   if (tab === "ai-chat") params.delete("tab");
   else params.set("tab", tab);
-  for (const other of TABS) if (other.id !== tab) params.delete(TAB_PARAM[other.id]);
+  for (const other of TABS) if (other.id !== tab && TAB_PARAM[other.id]) params.delete(TAB_PARAM[other.id]);
   const qs = params.toString();
   try {
     window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
@@ -394,7 +407,7 @@ function QualityAudit() {
     <OpsPage
       eyebrow="Audit"
       title="Service quality audit"
-      description={`What taxpayers said about the service they got in the last ${days} days — the assistant's answers and the officers' chats. Read-only: it shows where the service went wrong so it can be put right.`}
+      description={`What taxpayers and callers said about the service they got in the last ${days} days — the assistant's answers, on chat and on calls, and the officers' chats and calls. Read-only: it shows where the service went wrong so it can be put right.`}
       actions={
         <>
           <Freshness
@@ -410,7 +423,11 @@ function QualityAudit() {
       <div id={`qa-panel-${tab}`} role="tabpanel" aria-labelledby={`qa-tab-${tab}`} className="qa-tabpanel">
         <h2 className="qa-section-title">{current.heading}</h2>
         {tab === "officer-chat" ? (
-          <RatingsPanel source="chat_officer_csat" days={days} onUpdated={setUpdatedAt} />
+          <RatingsPanel key="chat" source="chat_officer_csat" days={days} onUpdated={setUpdatedAt} />
+        ) : tab === "officer-calls" ? (
+          <RatingsPanel key="call" source="call_officer_csat" days={days} onUpdated={setUpdatedAt} />
+        ) : tab === "ai-calls" ? (
+          <AiCallsPanel days={days} onUpdated={setUpdatedAt} />
         ) : (
           <AiChatAudit days={days} onUpdated={setUpdatedAt} />
         )}

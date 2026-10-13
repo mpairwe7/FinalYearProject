@@ -26,8 +26,10 @@ from .config import (
     get_idle_reprompts,
     get_max_clarify_attempts,
     get_max_spoken_sentences,
+    get_review_answer_timeout_s,
     get_transfer_timeout_s,
 )
+from . import review as call_review
 from .hub import hub
 from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
@@ -248,9 +250,25 @@ _HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
 )
 
 
+#: A caller signing off without the word "goodbye": the whole turn is "bye",
+#: "that's all, thanks", "I'm done for today". Anchored, so "that is all the
+#: money I have" stays a question.
+_DONE_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:(?:ok(?:ay)?|thanks|thank\s+you|alright|great|no)\W+)*"
+    r"(?:that'?s\s+all|that\s+is\s+all|bye(?:\s+bye)?|i'?m\s+done)"
+    r"(?:\W+(?:for\s+(?:now|today)|thanks|thank\s+you|bye))*\W*$",
+    re.IGNORECASE,
+)
+
+
 def _is_control_request(pattern: re.Pattern[str], text: str) -> bool:
     """*text* is a short in-call request matching *pattern* (see _CONTROL_MAX_WORDS)."""
     return len(text.split()) <= _CONTROL_MAX_WORDS and pattern.search(text) is not None
+
+
+def _is_goodbye(text: str) -> bool:
+    """The caller is ending the call: "goodbye", "hang up", "that's all, thank you"."""
+    return _is_control_request(_HANGUP_VOICE_PATTERNS, text) or _DONE_RE.search(text) is not None
 
 
 _TRAILING_LIST_NUMBER_RE = re.compile(r"(?:^|\s)(\d{1,2})\.$")
@@ -486,11 +504,19 @@ class UraReceptionistBrain(LLMService):
 
         mean_prob = round(sum(word_probs) / len(word_probs), 3) if word_probs else None
 
+        # The answer to "was this call helpful?" is recorded as a review, not
+        # an utterance: "useless!!" there is an opinion of the call, and the
+        # at-risk watch (risk.py) must not read it as a caller in distress.
+        review_answer = (
+            self.room.state.review_state in call_review.ASKING
+            and not detect_crisis(user_text)
+            and (call_review.is_review_answer(user_text, language) or _is_goodbye(user_text))
+        )
         caller_turn = create_turn(
             call_id=self.room.call_id,
             seq=self.room.state.turn_seq,
             speaker="caller",
-            kind="utterance",
+            kind="review" if review_answer else "utterance",
             text=user_text,
             low_conf_words=low_conf_list,
             mean_word_prob=mean_prob,
@@ -499,7 +525,11 @@ class UraReceptionistBrain(LLMService):
 
         # Dispatch based on current mode
         if self.room.state.mode in ("bridged", "transferring", "ended"):
-            # Transcript recorded; no bot reply generated
+            # Transcript recorded; no bot reply generated — except the thanks
+            # for answering the review asked as the transfer began.
+            if review_answer and self.room.state.mode == "transferring" and self.room.state.review_state == "asking_transfer":
+                call_review.record(self.room, user_text, language)
+                await self._say_and_record(phrase("review_thanks_transfer", language), kind="notice")
             return
 
         # Mode is "ai"
@@ -508,7 +538,15 @@ class UraReceptionistBrain(LLMService):
         # short, never taken for a goodbye.
         if detect_crisis(user_text):
             self._take_offer()
+            # Never hang up on them because a review question was waiting.
+            self._drop_review_wait()
             await self._support_crisis(asked_for_person=is_human_request(user_text))
+            return
+
+        # 0a. The answer to "before you go, was this call helpful?"
+        if self.room.state.review_state == "asking_end" and await self._take_review_answer(
+            user_text, language, review_answer
+        ):
             return
 
         # 0b. The answer to the yes/no question the AI's last turn ended on.
@@ -575,8 +613,12 @@ class UraReceptionistBrain(LLMService):
             await self._say_and_record(phrase("slow_ack", language), kind="notice")
             return
 
-        # 1d. In-Call User Control: Voice Hangup / Disconnect
-        if _is_control_request(_HANGUP_VOICE_PATTERNS, user_text):
+        # 1d. In-Call User Control: Voice Hangup / Disconnect. A caller the AI
+        # has helped is asked, once, whether the call was helpful first.
+        if _is_goodbye(user_text):
+            if call_review.should_ask(self.room.state):
+                await self._ask_end_review(language)
+                return
             logger.info("Ending call %s: the caller said goodbye", self.room.call_id)
             await self._end_call_after(phrase("officer_closing", language), "caller_voice_hangup")
             return
@@ -833,7 +875,9 @@ class UraReceptionistBrain(LLMService):
         answer is still being worked out.
         """
         state = self.room.state
-        if state.mode != "ai" or self._answering:
+        # Waiting for the answer to the goodbye review is the review timer's
+        # silence (_review_answer_timeout), not an "are you still there?".
+        if state.mode != "ai" or self._answering or state.review_state == "asking_end":
             return
         state.idle_prompts += 1
         if state.idle_prompts <= get_idle_reprompts():
@@ -849,6 +893,59 @@ class UraReceptionistBrain(LLMService):
             # Speaking during the goodbye (handle_external_question resets the count) keeps the call.
             still_wanted=lambda: state.idle_prompts > get_idle_reprompts(),
         )
+
+    def _drop_review_wait(self) -> None:
+        """The caller moved on from the goodbye review: stop waiting for its answer."""
+        state = self.room.state
+        if state.review_state != "asking_end":
+            return
+        if state.review_timer_task is not None and not state.review_timer_task.done():
+            state.review_timer_task.cancel()
+        state.review_state = "moved_on"
+
+    async def _ask_end_review(self, language: str) -> None:
+        """Ask "was this call helpful?" before hanging up, and wait a while for the answer."""
+        call_review.ask(self.room, "asking_end")
+        question = phrase("review_ask_end", language)
+        await self._say_and_record(question, kind="review")
+        # The wait starts as the question goes out: allow for hearing it.
+        wait = get_review_answer_timeout_s() + 0.4 * len(question.split())
+        self.room.state.review_timer_task = asyncio.create_task(self._review_answer_timeout(wait))
+
+    async def _review_answer_timeout(self, wait: float) -> None:
+        """No answer to the goodbye review: record that, and say goodbye as usual."""
+        await asyncio.sleep(wait)
+        state = self.room.state
+        if state.review_state != "asking_end" or state.mode != "ai":
+            return
+        # This task is the timer settle() would cancel: let it finish instead.
+        state.review_timer_task = None
+        logger.info("Ending call %s: no answer to the review question", self.room.call_id)
+        call_review.settle(self.room)
+        await self._end_call_after(phrase("officer_closing", self.language), "caller_voice_hangup")
+
+    async def _take_review_answer(self, user_text: str, language: str, review_answer: bool) -> bool:
+        """Handle the caller's turn after the goodbye review; True when the call is ending.
+
+        An answer is stored and thanked, then the call ends. A goodbye with no
+        opinion is a skip. A new question instead is answered — the review was
+        asked once and is not asked again; it stays unanswered. An answer that
+        also asks something new is stored, and the question answered.
+        """
+        if not review_answer:
+            self._drop_review_wait()
+            return False
+        sentiment = call_review.classify_spoken_review(user_text, language)
+        if sentiment == "unclear" and _is_goodbye(user_text):
+            call_review.record(self.room, user_text, language, status="skipped")
+            await self._end_call_after(phrase("officer_closing", language), "caller_voice_hangup")
+            return True
+        call_review.record(self.room, user_text, language)
+        if call_review.asks_something(user_text):
+            return False
+        logger.info("Ending call %s: the caller answered the review (%s)", self.room.call_id, sentiment)
+        await self._end_call_after(phrase("review_thanks_end", language), "caller_voice_hangup")
+        return True
 
     async def _end_call_after(self, goodbye: str, reason: str, still_wanted: Any = None) -> None:
         """Say *goodbye*, then end the call once the caller has heard it.
@@ -1152,6 +1249,10 @@ class UraReceptionistBrain(LLMService):
         # Whatever the AI last asked is settled by the transfer: after a
         # timeout, a "yes" must not answer a question from before it.
         self._take_offer()
+        # A caller who asked for a person, after the AI has answered something,
+        # is asked how the AI did while the transfer goes ahead — never on a
+        # crisis, safety or failure transfer.
+        ask_review = reason == "caller_requested" and call_review.should_ask(self.room.state)
         # 1. Human oversight uses ticket_queue: if disabled, do NOT promise a handoff
         if not flags.is_enabled("ticket_queue"):
             await self._say_and_record(phrase("queue_disabled", self.language), kind="notice")
@@ -1171,7 +1272,11 @@ class UraReceptionistBrain(LLMService):
         )
 
         # 4. Spoken notice & status event to caller
-        await self._say_and_record(phrase("transfer", self.language), kind="handoff")
+        if ask_review:
+            call_review.ask(self.room, "asking_transfer")
+        await self._say_and_record(
+            phrase("review_ask_transfer" if ask_review else "transfer", self.language), kind="handoff"
+        )
         await self.push_frame(
             OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
         )
@@ -1208,6 +1313,9 @@ class UraReceptionistBrain(LLMService):
         status_event = close_transfer_on_timeout(self.room, ticket_ref)
         if status_event is None:
             return
+        # Nobody came: a review asked as the transfer began is now unanswered.
+        if state.review_state == "asking_transfer":
+            call_review.settle(self.room)
         await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)
         await self._say_and_record(phrase("officers_busy", self.language), kind="notice")
         if ticket_ref:

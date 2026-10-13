@@ -538,6 +538,115 @@
   gap: var(--ops-space-4);
 }
 
+/* A call's transcript in the audit drawer: bounded, scrolling on its own. */
+.qa-call-transcript {
+  display: flex;
+  flex-direction: column;
+  height: min(52vh, 520px);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  overflow: hidden;
+}
+
+/* The callers' review by moment: a stacked bar of words, never colour alone. */
+.qa-moments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--ops-space-4);
+}
+
+.qa-moment {
+  display: grid;
+  gap: var(--ops-space-2);
+}
+
+.qa-moment-name {
+  font-size: var(--ops-text-sm);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.qa-moment-n {
+  font-weight: var(--ops-weight-normal);
+  color: var(--text-3);
+}
+
+.qa-moment-bar {
+  display: flex;
+  height: 14px;
+  border-radius: var(--ops-radius-pill);
+  overflow: hidden;
+  background: var(--ops-track);
+}
+
+.qa-moment-seg.is-positive,
+.qa-moment-key.is-positive .qa-moment-swatch { background: var(--ops-good); }
+.qa-moment-seg.is-neutral,
+.qa-moment-key.is-neutral .qa-moment-swatch { background: var(--ops-warn); }
+.qa-moment-seg.is-negative,
+.qa-moment-key.is-negative .qa-moment-swatch { background: var(--ops-bad); }
+.qa-moment-seg.is-unclear,
+.qa-moment-key.is-unclear .qa-moment-swatch { background: var(--ops-neutral); }
+
+.qa-moment-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ops-space-2) var(--ops-space-4);
+  font-size: var(--ops-text-xs);
+  color: var(--text-2);
+}
+
+.qa-moment-key {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ops-space-1);
+}
+
+.qa-moment-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* What callers said */
+.qa-said-panel {
+  display: grid;
+  gap: var(--ops-space-3);
+}
+
+.qa-said-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-3);
+}
+
+.qa-said {
+  display: grid;
+  gap: 4px;
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
+}
+
+.qa-said-chip {
+  display: inline-flex;
+  padding: 1px var(--ops-space-2);
+  border-radius: var(--ops-radius-pill);
+  border: 1px solid var(--ops-line);
+  font-size: var(--ops-text-xs);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-1);
+}
+
+.qa-said-chip.is-negative { color: var(--ops-bad-ink); background: var(--ops-bad-fill); border-color: var(--ops-bad-line); }
+.qa-said-chip.is-neutral { color: var(--ops-warn-ink); background: var(--ops-warn-fill); border-color: var(--ops-warn-line); }
+.qa-said-chip.is-positive { color: var(--ops-good-ink); background: var(--ops-good-fill); border-color: var(--ops-good-line); }
+
 @media (max-width: 1100px) {
   .qa-stats {
     --ops-stat-cols: 2;

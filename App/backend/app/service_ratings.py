@@ -258,12 +258,15 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         )
     # Lowest average first: the order an auditor reads in.
     by_officer.sort(key=lambda o: (o["average"] if o["average"] is not None else 6, -o["handled"]))
-    weeks: dict[str, list[int]] = defaultdict(list)
+    # Every answered rating, so a stream rated in words (the caller's spoken
+    # review) has a trend as well as one rated in levels.
+    weeks: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for r in answered:
-        if r.get("score") is None:
-            continue
         week = datetime.fromtimestamp(float(r["created_at"]), tz=timezone.utc).strftime("%G-W%V")
-        weeks[week].append(int(r["score"]))
+        weeks[week].append(r)
+    languages: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        languages[r.get("locale") or "unknown"].append(r)
     return {
         "asked": asked,
         "answered": len(answered),
@@ -276,12 +279,49 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "low": sum(1 for s in scored if s <= 2),
         "distribution": {str(n): scored.count(n) for n in range(1, 6)},
         "sentiment": sentiments,
+        # The words view of the same answers: what share were positive.
+        "positive_pct": _share(sentiments["positive"], len(answered)),
+        "negative_pct": _share(sentiments["negative"], len(answered)),
         "by_officer": by_officer,
-        "by_week": [
-            {"week": w, "rated": len(s), "average": round(statistics.mean(s), 2), "csat_pct": _share(sum(1 for x in s if x >= 4), len(s))}
-            for w, s in sorted(weeks.items())
-        ],
+        "by_week": [_period(w, group) for w, group in sorted(weeks.items())],
+        "by_language": sorted(
+            (_language(code, group) for code, group in languages.items()),
+            key=lambda row: -row["asked"],
+        ),
     }
+
+
+def _figures(answered: list[dict[str, Any]]) -> dict[str, Any]:
+    scores = [int(r["score"]) for r in answered if r.get("score") is not None]
+    return {
+        "rated": len(answered),
+        "average": round(statistics.mean(scores), 2) if scores else None,
+        "csat_pct": _share(sum(1 for x in scores if x >= 4), len(scores)),
+        "positive_pct": _share(sum(1 for r in answered if r.get("sentiment") == "positive"), len(answered)),
+        "negative_pct": _share(sum(1 for r in answered if r.get("sentiment") == "negative"), len(answered)),
+    }
+
+
+def _period(week: str, answered: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"week": week, **_figures(answered)}
+
+
+def _language(code: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    answered = [r for r in rows if r.get("status") == "answered"]
+    return {"locale": code, "asked": len(rows), "response_rate": _share(len(answered), len(rows)), **_figures(answered)}
+
+
+#: How a rating without a score sorts against the 1–5 levels: the ones to
+#: read first lead, as a low score does.
+_SENTIMENT_RANK: dict[str, float] = {"negative": 1.5, "unclear": 2.5, "neutral": 3.0, "positive": 4.5}
+
+
+def _reading_order(row: dict[str, Any]) -> tuple[float, float]:
+    if row.get("score") is not None:
+        rank = float(row["score"])
+    else:
+        rank = _SENTIMENT_RANK.get(row.get("sentiment") or "", 6.0)
+    return rank, -float(row.get("answered_at") or row["created_at"])
 
 
 def audit(
@@ -292,6 +332,7 @@ def audit(
     score: int | None = None,
     officer_id: str = "",
     status: str = "",
+    sentiment: str = "",
     limit: int = 25,
     offset: int = 0,
     now: float | None = None,
@@ -310,8 +351,11 @@ def audit(
         listed = [r for r in listed if r.get("officer_id") == officer_id]
     if status:
         listed = [r for r in listed if r.get("status") == status]
-    # Lowest score first, then newest: the ratings that need reading lead.
-    listed.sort(key=lambda r: (r.get("score") if r.get("score") is not None else 6, -float(r.get("answered_at") or r["created_at"])))
+    if sentiment:
+        listed = [r for r in listed if r.get("sentiment") == sentiment]
+    # Lowest first (a score, or for a spoken review its sentiment), then
+    # newest: the ratings that need reading lead.
+    listed.sort(key=_reading_order)
     limit = max(1, min(int(limit), 100))
     offset = max(0, int(offset))
     prev = summarise(prev_rows)
@@ -320,7 +364,7 @@ def audit(
         "period_days": days,
         "truncated": truncated,
         "summary": summarise(rows),
-        "previous": {"asked": prev["asked"], "average": prev["average"], "csat_pct": prev["csat_pct"]},
+        "previous": _previous(prev),
         "total": len(listed),
         "limit": limit,
         "offset": offset,
@@ -338,12 +382,21 @@ def headline(source: str, days: int, *, tenant_id: str | None = None, now: float
     prev_rows, _ = _rows(source, now - 2 * span, now - span, tenant_id)
     figures = summarise(rows)
     prev = summarise(prev_rows)
-    keep = ("asked", "answered", "response_rate", "average", "csat_pct", "low", "distribution", "sentiment")
+    keep = (
+        "asked", "answered", "response_rate", "average", "csat_pct", "low", "distribution", "sentiment",
+        "positive_pct", "negative_pct",
+    )
     return {
         "truncated": truncated,
         **{k: figures[k] for k in keep},
-        "previous": {"asked": prev["asked"], "average": prev["average"], "csat_pct": prev["csat_pct"]},
+        "previous": _previous(prev),
     }
+
+
+def _previous(prev: dict[str, Any]) -> dict[str, Any]:
+    """The period before, as the headline compares against it."""
+    keep = ("asked", "answered", "response_rate", "average", "csat_pct", "positive_pct", "negative_pct")
+    return {k: prev[k] for k in keep}
 
 
 def _public(row: dict[str, Any]) -> dict[str, Any]:

@@ -14,14 +14,17 @@ import QualityAuditPage from "../../app/admin/quality/page";
 import { positionReading } from "../../components/quality/PositionChart";
 import { ratingStripLabel } from "../../components/quality/RatingStrip";
 import { distributionReading } from "../../components/quality/SatisfactionDistribution";
+import { combineAiCalls, momentReading } from "../../components/quality/AiCallsPanel";
 import {
   analyticsApi,
   type AiChatPage,
   type AiChatSummary,
   type AiChatTimeline,
   type RatingsAudit,
+  type ServiceRating,
   type TicketDetail,
 } from "../../services/analyticsApi";
+import { callsApi, type CallRecord } from "../../services/callsApi";
 
 vi.mock("../../components/StaffGuard", () => ({
   __esModule: true,
@@ -117,13 +120,16 @@ const RATINGS: RatingsAudit = {
     low: 1,
     distribution: { "1": 0, "2": 1, "3": 1, "4": 1, "5": 1 },
     sentiment: { positive: 2, neutral: 1, negative: 1, unclear: 0 },
+    positive_pct: 50,
+    negative_pct: 25,
     by_officer: [
       { officer_id: "off-b", officer_name: "Officer Okello", handled: 3, rated: 2, average: 2.5, csat_pct: 0, low: 1 },
       { officer_id: "off-a", officer_name: "Officer Nakato", handled: 3, rated: 2, average: 4.5, csat_pct: 100, low: 0 },
     ],
     by_week: [],
+    by_language: [],
   },
-  previous: { asked: 4, average: 4, csat_pct: 75 },
+  previous: { asked: 4, answered: 4, response_rate: 100, average: 4, csat_pct: 75, positive_pct: 75, negative_pct: 0 },
   total: 2,
   limit: 25,
   offset: 0,
@@ -261,8 +267,17 @@ describe("Officer chats tab", () => {
     expect(tab).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", tab.id);
     fireEvent.keyDown(tab, { key: "ArrowLeft" });
+    expect(screen.getByRole("tab", { name: "AI on calls" })).toHaveAttribute("aria-selected", "true");
+    expect(window.location.search).toContain("tab=ai-calls");
+    fireEvent.keyDown(screen.getByRole("tab", { name: "AI on calls" }), { key: "Home" });
     expect(screen.getByRole("tab", { name: "AI answers · chat" })).toHaveAttribute("aria-selected", "true");
     expect(window.location.search).not.toContain("tab=");
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "AI answers · chat",
+      "AI on calls",
+      "Officer chats",
+      "Officer calls",
+    ]);
   });
 
   it("leads with the average, the satisfied share, the response rate and the low ratings", async () => {
@@ -309,6 +324,165 @@ describe("Officer chats tab", () => {
   });
 });
 
+function spoken(source: RatingsAudit["source"], counts: RatingsAudit["summary"]["sentiment"], ratings: ServiceRating[], extra: Partial<RatingsAudit["summary"]> = {}): RatingsAudit {
+  const answered = counts.positive + counts.neutral + counts.negative + counts.unclear;
+  const share = (n: number) => (answered ? Math.round((n / answered) * 1000) / 10 : null);
+  return {
+    ...RATINGS,
+    source,
+    summary: {
+      ...RATINGS.summary,
+      asked: answered + 1,
+      answered,
+      skipped: 0,
+      no_answer: 1,
+      pending: 0,
+      response_rate: share(answered),
+      average: null,
+      csat_pct: null,
+      low: 0,
+      distribution: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 },
+      sentiment: counts,
+      positive_pct: share(counts.positive),
+      negative_pct: share(counts.negative),
+      by_officer: [],
+      by_week: [{ week: "2026-W41", rated: answered, average: null, csat_pct: null, positive_pct: share(counts.positive), negative_pct: share(counts.negative) }],
+      by_language: [{ locale: "lg", asked: answered + 1, response_rate: share(answered), rated: answered, average: null, csat_pct: null, positive_pct: share(counts.positive), negative_pct: share(counts.negative) }],
+      ...extra,
+    },
+    previous: { asked: 4, answered: 4, response_rate: 100, average: null, csat_pct: null, positive_pct: 75, negative_pct: 25 },
+    total: ratings.length,
+    ratings,
+  };
+}
+
+function said(id: string, source: ServiceRating["source"], sentiment: string, comment: string): ServiceRating {
+  return {
+    ...RATINGS.ratings[0],
+    id,
+    source,
+    channel: "call",
+    subject: "ai",
+    status: "answered",
+    score: null,
+    sentiment,
+    comment,
+    ticket_id: "",
+    call_id: `call-${id}`,
+    officer_id: "",
+    officer_name: "",
+    locale: "lg",
+  };
+}
+
+const AI_END = spoken("call_ai_review_end", { positive: 6, neutral: 1, negative: 1, unclear: 0 }, [
+  said("e1", "call_ai_review_end", "positive", "Yes, very helpful"),
+  said("e2", "call_ai_review_end", "negative", "It didn't help me"),
+]);
+const AI_TRANSFER = spoken("call_ai_review_transfer", { positive: 1, neutral: 1, negative: 2, unclear: 0 }, [
+  said("t1", "call_ai_review_transfer", "neutral", "A bit"),
+  said("t2", "call_ai_review_transfer", "negative", "No, I wanted a person"),
+]);
+
+describe("AI on calls tab", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/quality?tab=ai-calls");
+    vi.spyOn(analyticsApi, "qualityRatings").mockImplementation(async (q) =>
+      q?.source === "call_ai_review_transfer" ? AI_TRANSFER : AI_END,
+    );
+    vi.spyOn(callsApi, "getCall");
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads both moments, and their general opinion, not call by call", async () => {
+    renderPage();
+    expect(screen.getByRole("tab", { name: "AI on calls" })).toHaveAttribute("aria-selected", "true");
+    const stats = await screen.findByLabelText("Callers' review of the AI summary");
+    await waitFor(() => expect(within(stats).getByText("Said the AI helped")).toBeInTheDocument());
+    // 7 of the 12 who answered said it helped.
+    expect(stats.textContent).toContain("58.3%");
+    expect(stats.textContent).toContain("Callers asked");
+    expect(analyticsApi.qualityRatings).toHaveBeenCalledWith(expect.objectContaining({ source: "call_ai_review_end", status: "answered" }));
+    expect(analyticsApi.qualityRatings).toHaveBeenCalledWith(expect.objectContaining({ source: "call_ai_review_transfer" }));
+    const moments = screen.getByRole("list", { name: "What callers said, by when they were asked" });
+    expect(within(moments).getByText(/At the end of the call/)).toBeInTheDocument();
+    expect(within(moments).getByText(/While being transferred to an officer/)).toBeInTheDocument();
+  });
+
+  it("lists what callers said, the unhappy answers first, with no call to open", async () => {
+    renderPage();
+    const list = await screen.findByRole("heading", { name: "What callers said" });
+    const panel = list.closest("section") as HTMLElement;
+    await waitFor(() => expect(within(panel).getAllByRole("listitem").length).toBe(3));
+    const items = within(panel).getAllByRole("listitem").map((li) => li.textContent);
+    expect(items[0]).toMatch(/Said it didn't help/);
+    expect(items.join(" ")).not.toContain("Yes, very helpful");
+    expect(within(panel).queryAllByRole("button", { name: /didn't help me/ })).toHaveLength(0);
+    fireEvent.click(within(panel).getByRole("button", { name: "Said it helped" }));
+    expect(within(panel).getAllByRole("listitem").map((li) => li.textContent).join(" ")).toContain("Yes, very helpful");
+    expect(callsApi.getCall).not.toHaveBeenCalled();
+  });
+});
+
+const CALL_RATINGS: RatingsAudit = {
+  ...RATINGS,
+  source: "call_officer_csat",
+  summary: { ...RATINGS.summary, skipped: 0, pending: 0, no_answer: 2 },
+  ratings: [
+    { ...RATINGS.ratings[0], id: "c-low", source: "call_officer_csat", channel: "call", ticket_id: "", call_id: "call_abc12345", comment: "" },
+  ],
+  total: 1,
+};
+
+describe("Officer calls tab", () => {
+  beforeEach(() => {
+    window.history.replaceState(null, "", "/admin/quality?tab=officer-calls");
+    vi.spyOn(analyticsApi, "qualityRatings").mockResolvedValue(CALL_RATINGS);
+    vi.spyOn(callsApi, "getCall").mockResolvedValue({
+      call_id: "call_abc12345",
+      conversation_id: "conv-c",
+      locale: "lg",
+      status: "ended",
+      started_at: NOW - 900,
+      outcome: "resolved",
+      wrapup_note: "Explained the refund timeline.",
+      transferred: true,
+      turns: [
+        { id: "t1", call_id: "call_abc12345", seq: 1, speaker: "caller", kind: "utterance", text: "Where is my refund?", low_conf_words: [], mean_word_prob: 0.9, faithfulness: null, latencies: {}, created_at: NOW - 880 },
+        { id: "t2", call_id: "call_abc12345", seq: 2, speaker: "officer", kind: "utterance", text: "It is being processed.", low_conf_words: [], mean_word_prob: null, faithfulness: null, latencies: {}, created_at: NOW - 860 },
+      ],
+    } as unknown as CallRecord);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("reads the satisfaction callers gave the officer, in the call's own words", async () => {
+    renderPage();
+    const stats = await screen.findByLabelText("Officer call satisfaction summary");
+    await waitFor(() => expect(within(stats).getByText("Caller gave an answer")).toBeInTheDocument());
+    expect(stats.textContent).toContain("2 didn't say");
+    expect(analyticsApi.qualityRatings).toHaveBeenCalledWith(expect.objectContaining({ source: "call_officer_csat" }));
+    expect(screen.getByRole("heading", { name: "Rated calls" })).toBeInTheDocument();
+  });
+
+  it("opens the call read-only with the caller's satisfaction and the wrap-up", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /2\/5 · Dissatisfied/ }));
+    const call = await screen.findByRole("article", { name: "Officer call" });
+    await waitFor(() => expect(within(call).getByText("Where is my refund?")).toBeInTheDocument());
+    expect(within(call).getByText(/Caller satisfaction: 2\/5 · Dissatisfied/)).toBeInTheDocument();
+    expect(within(call).getByText(/Explained the refund timeline/)).toBeInTheDocument();
+    expect(within(call).queryByRole("textbox")).toBeNull();
+    expect(window.location.search).toContain("call=call_abc12345");
+    expect(callsApi.getCall).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("audit readings", () => {
   it("compares first answers with follow-ups in words", () => {
     expect(positionReading(SUMMARY.by_position)).toMatch(
@@ -323,6 +497,18 @@ describe("audit readings", () => {
   it("reads the satisfaction levels out in words", () => {
     expect(distributionReading(RATINGS.summary)).toBe("2 of 4 rated were satisfied or very satisfied; 1 (25%) were dissatisfied — enough to read each one.");
     expect(distributionReading({ ...RATINGS.summary, distribution: { "1": 0, "2": 0, "3": 0, "4": 0, "5": 0 } })).toMatch(/Nothing has been rated/);
+  });
+
+  it("compares the two moments callers are asked at, in words", () => {
+    const total = combineAiCalls([AI_END, AI_TRANSFER]);
+    expect([total.asked, total.answered, total.positivePct, total.negativePct]).toEqual([14, 12, 58.3, 25]);
+    expect(
+      momentReading([
+        { label: "end", answered: 8, positivePct: 75 },
+        { label: "transfer", answered: 4, positivePct: 25 },
+      ]),
+    ).toMatch(/75% of the time at the end of a call \(8 answered\) and 25% while being transferred \(4\): 50 points higher/);
+    expect(momentReading([])).toMatch(/No caller has answered/);
   });
 
   it("reads a rating strip out in order", () => {

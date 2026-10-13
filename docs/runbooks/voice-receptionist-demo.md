@@ -134,6 +134,8 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_SLOW_PAUSE_MS` | `600` | Silence after each sentence once the caller has asked the assistant to slow down (the local voices have no speed control) |
 | `RECEPTIONIST_IDLE_REPROMPT_S` | `12` | Caller silence, counted from the end of the assistant's speech, before it asks "Are you still there?"; `0` turns silence handling off |
 | `RECEPTIONIST_IDLE_REPROMPTS` | `1` | How many such checks before a still-silent call is ended (end reason `caller_idle`) and its call slot freed |
+| `RECEPTIONIST_CALL_REVIEW` | `true` | The AI asks "was this call helpful?" — once a call, only after it answered something — at goodbye, or while a caller who asked for an officer is transferred. Audited on `/admin/quality` (AI on calls) |
+| `RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S` | `10` | How long the AI waits for the answer to its goodbye review question before saying goodbye (recorded as no answer) |
 | `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
 | `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
 | `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
@@ -308,7 +310,7 @@ of these words is answered, not obeyed — in English, Luganda or Swahili:
 |---|---|
 | "Could you repeat that?", "Kiddemu", "Rudia tena" | repeats its last answer |
 | "Speak slower", "Yogera mpola", "Ongea polepole" | says it will slow down; every later sentence is followed by `RECEPTIONIST_SLOW_PAUSE_MS` of silence |
-| "Goodbye", "End the call", "Weeraba", "Kwaheri" | says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`) |
+| "Goodbye", "End the call", "Bye", "That's all, thank you", "Weeraba", "Kwaheri" | if the AI has answered something on this call, first asks *"Before you go, was this call helpful to you?"*, stores the answer (helped / partly / didn't help / unclear, with what was said), says *"Thank you for your feedback. Goodbye."* and ends the call; otherwise says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`). Silence after the review question for `RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S` is recorded as no answer and the call ends with the usual goodbye; a new question instead is answered, and the review is not asked again |
 | nothing, for `RECEPTIONIST_IDLE_REPROMPT_S` | asks "Are you still there?"; after `RECEPTIONIST_IDLE_REPROMPTS` such checks, says goodbye and ends the call (`caller_idle`) |
 | "Yes", "Tell me more", "Weeyongere", "Endelea" after *"Would you like more detail?"* | reads the rest of the answer, three sentences at a time |
 | "No", "That's all" after either question | *"No problem. What else can I help you with?"* |
@@ -340,7 +342,12 @@ officer offer and moved on is offered again with the next answer.
 
 ### Step 4: Transfer to Human Officer
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
-2. AI announces: *"I'm connecting you to a URA officer, please hold."*
+2. AI announces: *"I'm connecting you to a URA officer, please hold."* If it has answered
+   something on this call, it asks instead: *"I'm connecting you to a URA officer now. While
+   you wait, were my answers helpful so far?"* — the transfer is already under way. An answer
+   before the officer joins is stored (`call_ai_review_transfer`) and thanked (*"Thank you.
+   Please stay on the line; an officer will be with you shortly."*); the officer joining first,
+   or the caller hanging up, records no answer. Never asked on a crisis, safety or failure transfer.
 3. Status changes to **Transferring**, with the reference (`TIC-` and the ticket's first 8 characters) on the caller's screen.
 4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill: the
    topic and priority come from the handoff packet ("My account balance" → *Account
@@ -384,12 +391,18 @@ officer offer and moved on is offered again with the next answer.
 
 ### Step 6: Hang-up & Performance Evaluation
 1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
-   Goodbye."* and then hangs the caller up; the caller can hang up at any time.
+   Goodbye."* and then hangs the caller up; the caller can hang up at any time. Before
+   ending, the officer asks *"Were you satisfied with the help I gave you today?"* (the
+   End-call confirm reminds them).
 2. Background task runs `summary.py`:
    Generates a redacted structured JSON summary with subject, key facts, and resolution.
 3. Performance metrics are recorded in `voice_calls`:
    AI-only routing share (not confirmed resolution), turn latencies (p50/p95), ASR word confidence, barge-ins, and officer rating.
-4. Officer submits a 1-5 star review and note.
+4. The officer's wrap-up records **how satisfied the caller said they were** (required:
+   one of five faces, or "The caller didn't say"), stored as `call_officer_csat` and
+   audited on `/admin/quality` (Officer calls). Rating the AI's handling before the
+   transfer (1-5 stars and a note) is optional and offered only when the AI answered
+   something.
 5. The **Performance Overview** tab updates SLO gauge cards and KPI aggregates.
 
 ---

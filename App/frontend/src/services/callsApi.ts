@@ -11,7 +11,8 @@ export interface CallTurn {
   call_id: string;
   seq: number;
   speaker: 'caller' | 'assistant' | 'officer' | 'system';
-  kind: 'utterance' | 'clarify' | 'confirm' | 'answer' | 'filler' | 'handoff' | 'notice' | 'language';
+  /** `review`: the AI's "was this call helpful?" and the caller's answer to it. */
+  kind: 'utterance' | 'clarify' | 'confirm' | 'answer' | 'filler' | 'handoff' | 'notice' | 'language' | 'review';
   text: string;
   low_conf_words: Array<{ word: string; prob: number }>;
   mean_word_prob: number | null;
@@ -168,8 +169,13 @@ export interface WrapUpPayload {
   outcome: 'resolved' | 'follow_up' | 'callback' | 'referred' | 'abandoned' | 'ai_resolved';
   note: string;
   ticket_action?: 'resolve' | 'keep_open' | 'create';
+  /** The officer's own rating of how the AI handled the call before the transfer. */
   rating?: number;
   rating_note?: string;
+  /** How satisfied the caller said they were (1 very dissatisfied … 5 very satisfied). */
+  caller_satisfaction?: number;
+  /** `not_said`: the officer asked and the caller did not say. */
+  caller_satisfaction_status?: 'answered' | 'not_said';
 }
 
 export interface TransferPayload {

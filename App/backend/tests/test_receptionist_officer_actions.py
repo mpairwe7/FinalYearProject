@@ -24,6 +24,7 @@ class TestOfficerActions(unittest.IsolatedAsyncioTestCase):
         db.execute("DELETE FROM officer_presence")
         db.execute("DELETE FROM voice_calls")
         db.execute("DELETE FROM voice_call_turns")
+        db.execute("DELETE FROM service_ratings WHERE call_id LIKE 'call_csat%'")
         registry._rooms.clear()
         hub._lobby.clear()
 
@@ -171,6 +172,70 @@ class TestOfficerActions(unittest.IsolatedAsyncioTestCase):
         call_db = get_call("call_cb_out")
         self.assertEqual(call_db["needs_callback"], 1)
         self.assertEqual(call_db["callback_reason"], "officer_outcome")
+
+    # --- The caller's satisfaction, recorded by the officer at wrap-up ----------
+
+    def _satisfaction(self, call_id: str):
+        from app import service_ratings
+
+        return service_ratings.find("call_officer_csat", call_id=call_id)
+
+    async def test_wrapup_records_what_the_caller_said_about_the_service(self):
+        create_call("call_csat_1", status="ended", user_id="taxpayer_c1", locale="lg")
+        update_call("call_csat_1", target_team="domestic_taxes", topic="vat_refund")
+        res = await desk.wrapup(
+            "call_csat_1", "officer_nakato", outcome="resolved", note="Refund explained",
+            caller_satisfaction=2, caller_satisfaction_status="answered", officer_name="Officer Nakato",
+        )
+        self.assertEqual(res["caller_satisfaction"], {"status": "answered", "score": 2, "recorded": True})
+        row = self._satisfaction("call_csat_1")
+        self.assertEqual((row["status"], row["score"], row["sentiment"]), ("answered", 2, "negative"))
+        self.assertEqual((row["channel"], row["subject"]), ("call", "officer"))
+        self.assertEqual((row["officer_id"], row["officer_name"], row["team"]), ("officer_nakato", "Officer Nakato", "domestic_taxes"))
+        self.assertEqual((row["topic"], row["locale"], row["user_id"]), ("vat_refund", "lg", "taxpayer_c1"))
+        # The officer's rating of the AI is a separate, optional thing.
+        self.assertIsNone(get_call("call_csat_1")["officer_rating"])
+
+    async def test_a_caller_who_did_not_say_is_recorded_as_no_answer(self):
+        create_call("call_csat_2", status="ended")
+        await desk.wrapup("call_csat_2", "officer_x", outcome="resolved", note="Done",
+                          caller_satisfaction_status="not_said")
+        row = self._satisfaction("call_csat_2")
+        self.assertEqual((row["status"], row["score"]), ("no_answer", None))
+
+    async def test_an_invalid_satisfaction_is_refused_before_anything_is_saved(self):
+        create_call("call_csat_3", status="ended")
+        for score, status in ((0, "answered"), (6, None), ("4", None), (True, None), (3, "not_said"), (None, "maybe")):
+            with self.subTest(score=score, status=status), self.assertRaises(desk.DeskError) as raised:
+                await desk.wrapup("call_csat_3", "officer_x", outcome="resolved", note="Done",
+                                  caller_satisfaction=score, caller_satisfaction_status=status)
+            self.assertEqual(raised.exception.status, 400)
+        self.assertIsNone(get_call("call_csat_3")["wrapup_at"])
+        self.assertIsNone(self._satisfaction("call_csat_3"))
+
+    async def test_a_wrapup_without_it_records_nothing_and_a_second_keeps_the_first(self):
+        create_call("call_csat_4", status="ended")
+        await desk.wrapup("call_csat_4", "officer_x", outcome="resolved", note="Done")
+        self.assertIsNone(self._satisfaction("call_csat_4"))
+        await desk.wrapup("call_csat_4", "officer_x", outcome="resolved", note="Done", caller_satisfaction=5)
+        res = await desk.wrapup("call_csat_4", "officer_x", outcome="resolved", note="Again", caller_satisfaction=1)
+        self.assertFalse(res["caller_satisfaction"]["recorded"])
+        self.assertEqual(self._satisfaction("call_csat_4")["score"], 5)
+
+    async def test_the_wrapup_route_records_it_under_the_officers_name(self):
+        await self._make_bridged_room("call_csat_route", "officer_route")
+        client = TestClient(app)
+        officer = {"Authorization": f"Bearer {make_dev_token('nakato@ura.go.ug', role='ura_staff')}"}
+        bad = client.post("/v1/admin/calls/call_csat_route/wrapup", headers=officer,
+                          json={"outcome": "resolved", "note": "ok", "caller_satisfaction": 9})
+        self.assertEqual(bad.status_code, 400)
+        res = client.post("/v1/admin/calls/call_csat_route/wrapup", headers=officer,
+                          json={"outcome": "resolved", "note": "ok", "caller_satisfaction": 4,
+                                "caller_satisfaction_status": "answered"})
+        self.assertEqual(res.status_code, 200, res.text)
+        row = self._satisfaction("call_csat_route")
+        self.assertEqual(row["score"], 4)
+        self.assertTrue(row["officer_name"].startswith("Officer "), row["officer_name"])
 
     async def test_callback_done(self):
         create_call("call_done_1", status="ended")
