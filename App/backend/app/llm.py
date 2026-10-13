@@ -34,7 +34,7 @@ Environment variables:
     LLM_MODEL               – HF model ID (default: Sunbird/Sunflower-14B-FP8)
     LLM_MODEL_REVISION      – HF revision/commit SHA to pin (default: None)
     LLM_TRUST_REMOTE_CODE   – "true" to allow model-defined Python (default: false)
-    LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 131072)
+    LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192, up to 131072 with YaRN)
     LLM_TEMPERATURE         – generation temperature (default: 0.2)
     LLM_MAX_TOKENS          – max new tokens (default: 512)
     LLM_REPETITION_PENALTY  – repetition penalty, both paths (default: 1.1)
@@ -76,7 +76,7 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
 LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
-LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "131072"))
+LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
