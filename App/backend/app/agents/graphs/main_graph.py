@@ -316,8 +316,7 @@ def node_act(state: AgentGraphState) -> NodeResult:
             granted_purposes=state.granted_purposes,
             iteration=state.iterations,
         )
-        compacted_obs = compact_tool_observation(result.result)
-        state.budget.record(tool_name, arguments, compacted_obs)
+        state.budget.record(tool_name, arguments, result.result)
         state.tool_calls.append(
             {
                 "call_id": result.call_id,
@@ -326,7 +325,7 @@ def node_act(state: AgentGraphState) -> NodeResult:
                 "duration_ms": result.duration_ms,
             }
         )
-        state.observations.append(compacted_obs)
+        state.observations.append(result.result)
 
     return NodeResult(next_node="observe")
 

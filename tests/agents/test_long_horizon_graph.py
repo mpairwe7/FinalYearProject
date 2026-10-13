@@ -275,6 +275,13 @@ class TestGoalTrackingAndSchemaVersioning(unittest.TestCase):
             current_goal_id="g-1",
             pending_action=action,
             replan_count=1,
+            conversation_history=[{"user_message": "hi", "bot_reply": "hello"}],
+            hits=[{"id": "h1", "text": "passage"}],
+            sources=["doc.pdf"],
+            citations=[{"source": "doc.pdf", "citation_index": 1}],
+            reflections=["re-retrieving once"],
+            max_reflections=2,
+            max_handoffs=3,
         )
         d = state.to_dict()
         reconstituted = AgentGraphState.from_dict(d)
@@ -284,6 +291,24 @@ class TestGoalTrackingAndSchemaVersioning(unittest.TestCase):
         self.assertIsNotNone(reconstituted.pending_action)
         self.assertTrue(reconstituted.pending_action.authorized)
         self.assertEqual(reconstituted.replan_count, 1)
+        self.assertEqual(len(reconstituted.conversation_history), 1)
+        self.assertEqual(len(reconstituted.hits), 1)
+        self.assertEqual(reconstituted.sources, ["doc.pdf"])
+        self.assertEqual(len(reconstituted.citations), 1)
+        self.assertEqual(reconstituted.reflections, ["re-retrieving once"])
+        self.assertEqual(reconstituted.max_reflections, 2)
+        self.assertEqual(reconstituted.max_handoffs, 3)
+
+    def test_resume_rejects_non_waiting_checkpoint(self):
+        store = InMemoryCheckpointStore()
+        thread_id = "th-reject-1"
+        state = AgentGraphState(query="Test", outcome=GraphOutcome.ANSWERED)
+        store.save_checkpoint(thread_id, 1, "respond", state.to_dict())
+
+        runtime = GraphRuntime(nodes={"respond": lambda s: NodeResult(next_node=END)}, entry="respond", checkpointer=store)
+        with self.assertRaises(ValueError) as ctx:
+            runtime.resume(thread_id)
+        self.assertIn("not waiting for user consent", str(ctx.exception))
 
 
 def test_async_runtime_interruption_and_aresume():

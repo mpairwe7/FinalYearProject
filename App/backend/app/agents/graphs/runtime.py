@@ -132,8 +132,8 @@ class GraphRuntime:
         self._max_steps = max_steps
         self._checkpointer = checkpointer
 
-    def run(self, state: AgentGraphState, thread_id: str = "") -> AgentGraphState:
-        current = self._entry
+    def run(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+        current = entry or self._entry
         steps = 0
         while current != END:
             if steps >= self._max_steps:
@@ -200,12 +200,12 @@ class GraphRuntime:
 
         return state
 
-    async def arun(self, state: AgentGraphState, thread_id: str = "") -> AgentGraphState:
+    async def arun(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
         """Asynchronously dispatch nodes without blocking the asyncio event loop."""
         import asyncio
         import inspect
 
-        current = self._entry
+        current = entry or self._entry
         steps = 0
         while current != END:
             if steps >= self._max_steps:
@@ -295,26 +295,26 @@ class GraphRuntime:
             raise ValueError(f"No checkpoint found for thread {thread_id!r}")
 
         state = AgentGraphState.from_dict(data)
-        if resume_payload:
+        if state.outcome != GraphOutcome.WAITING_USER:
+            raise ValueError(f"Thread {thread_id!r} is not waiting for user consent (current outcome: {state.outcome})")
+
+        if resume_payload and resume_payload.get("approved"):
             if state.pending_action:
-                if resume_payload.get("approved"):
-                    state.pending_action.authorized = True
-                    state.outcome = GraphOutcome.ANSWERED
-                else:
-                    state.pending_action.authorized = False
-                    state.outcome = GraphOutcome.ESCALATED
-                    state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+                state.pending_action.authorized = True
+            state.outcome = GraphOutcome.ANSWERED
+        elif resume_payload:
+            if state.pending_action:
+                state.pending_action.authorized = False
+            state.outcome = GraphOutcome.ESCALATED
+            state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+        else:
+            state.outcome = GraphOutcome.ANSWERED
 
         entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
         if entry not in self._nodes:
             entry = self._entry
 
-        original_entry = self._entry
-        try:
-            self._entry = entry
-            return self.run(state, thread_id=thread_id)
-        finally:
-            self._entry = original_entry
+        return self.run(state, thread_id=thread_id, entry=entry)
 
     async def aresume(
         self,
@@ -332,23 +332,23 @@ class GraphRuntime:
             raise ValueError(f"No checkpoint found for thread {thread_id!r}")
 
         state = AgentGraphState.from_dict(data)
-        if resume_payload:
+        if state.outcome != GraphOutcome.WAITING_USER:
+            raise ValueError(f"Thread {thread_id!r} is not waiting for user consent (current outcome: {state.outcome})")
+
+        if resume_payload and resume_payload.get("approved"):
             if state.pending_action:
-                if resume_payload.get("approved"):
-                    state.pending_action.authorized = True
-                    state.outcome = GraphOutcome.ANSWERED
-                else:
-                    state.pending_action.authorized = False
-                    state.outcome = GraphOutcome.ESCALATED
-                    state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+                state.pending_action.authorized = True
+            state.outcome = GraphOutcome.ANSWERED
+        elif resume_payload:
+            if state.pending_action:
+                state.pending_action.authorized = False
+            state.outcome = GraphOutcome.ESCALATED
+            state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+        else:
+            state.outcome = GraphOutcome.ANSWERED
 
         entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
         if entry not in self._nodes:
             entry = self._entry
 
-        original_entry = self._entry
-        try:
-            self._entry = entry
-            return await self.arun(state, thread_id=thread_id)
-        finally:
-            self._entry = original_entry
+        return await self.arun(state, thread_id=thread_id, entry=entry)

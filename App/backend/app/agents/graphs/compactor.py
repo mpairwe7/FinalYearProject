@@ -56,7 +56,7 @@ def compact_tool_observation(obs: Any, max_tokens: int = MAX_OBSERVATION_TOKENS)
     if not isinstance(obs, dict):
         return {"data": str(obs)[:max_tokens * 3], "ok": True}
 
-    if not obs.get("ok", True):
+    if not obs.get("ok", True) or obs.get("error"):
         err_msg = str(obs.get("error", "tool failed"))[:300]
         return {"ok": False, "error": err_msg}
 
