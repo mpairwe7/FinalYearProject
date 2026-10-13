@@ -423,7 +423,7 @@ dialog.addmenu-dialog::backdrop,
 }
 
 .chatv2 .addmenu-opt-desc {
-  color: var(--text-2);
+  color: var(--text-1);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -669,7 +669,7 @@ dialog.connectors-dialog::backdrop,
 }
 
 .chatv2 .connectors-badge.is-demo {
-  color: var(--warning);
+  color: #873600;
   background: var(--cv2-warning-soft);
 }
 
@@ -690,7 +690,7 @@ dialog.connectors-dialog::backdrop,
 }
 
 .chatv2 .connectors-option-meta {
-  color: var(--text-2);
+  color: var(--text-1);
   font-size: 11.5px;
   line-height: 1.4;
 }
@@ -779,7 +779,7 @@ dialog.connectors-dialog::backdrop,
 .chatv2 .connectors-dialog-footer p {
   margin: 0;
   max-width: 250px;
-  color: var(--text-2);
+  color: var(--text-1);
   font-size: 11px;
   line-height: 1.5;
 }
