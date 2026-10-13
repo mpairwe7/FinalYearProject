@@ -40,18 +40,21 @@ import { cleanMarkdownForSpeech } from '../lib/answerText';
 import { audioSignifiers } from '../lib/audioSignifiers';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
+import dynamic from 'next/dynamic';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
 import ConversationRail from '../components/ConversationRail';
-import ConversationSearch from '../components/ConversationSearch';
 import LoadingState from '../components/LoadingState';
-import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import ChatHeader from '../components/ChatHeader';
-import { CallScreen } from '../components/call/CallScreen';
 import { useCallStore } from '../store/useCallStore';
-import { DocumentInspectionModal } from '../components/DocumentInspectionModal';
-import { SupportCaseModal } from '../components/SupportCaseModal';
 import { ConnectorsModal } from '../components/ConnectorsModal';
 import { useIdentity } from '../hooks/useIdentity';
+import type { SettingsTab } from '../components/settings/SettingsDialog';
+
+const ConversationSearch = dynamic(() => import('../components/ConversationSearch'), { ssr: false });
+const SettingsDialog = dynamic(() => import('../components/settings/SettingsDialog'), { ssr: false });
+const CallScreen = dynamic(() => import('../components/call/CallScreen').then((m) => m.CallScreen), { ssr: false });
+const DocumentInspectionModal = dynamic(() => import('../components/DocumentInspectionModal').then((m) => m.DocumentInspectionModal), { ssr: false });
+const SupportCaseModal = dynamic(() => import('../components/SupportCaseModal').then((m) => m.SupportCaseModal), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
