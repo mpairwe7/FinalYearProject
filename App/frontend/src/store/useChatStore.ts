@@ -75,6 +75,10 @@ export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** The server's id for this answer in its conversation log (`turn_id` on
+   *  the chat response). A rating sends it, so the audit knows which answer
+   *  was rated. Absent on turns the server did not log, like the greeting. */
+  serverTurnId?: string;
   citations?: Citation[];
   faithfulnessScore?: number | null;
   retrievalMode?: string;

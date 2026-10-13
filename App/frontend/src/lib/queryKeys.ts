@@ -44,6 +44,14 @@ export const queryKeys = {
     feedbackSummary: (days?: number) => ['analytics', 'feedbackSummary', days] as const,
     journeys: (days?: number) => ['analytics', 'journeys', days] as const,
   },
+  quality: {
+    /** Prefix of every service-quality audit query. */
+    all: () => ['quality'] as const,
+    summary: (days: number) => ['quality', 'summary', days] as const,
+    aiChat: (days: number, pattern: string, topic: string, locale: string, withComment: boolean, limit: number) =>
+      ['quality', 'aiChat', { days, pattern, topic, locale, withComment, limit }] as const,
+    aiChatTimeline: (conversationId: string) => ['quality', 'aiChatTimeline', conversationId] as const,
+  },
   speech: {
     all: () => ['speech'] as const,
     health: () => ['speech', 'health'] as const,

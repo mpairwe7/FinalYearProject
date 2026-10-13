@@ -1047,6 +1047,9 @@ def chat(
 ) -> ChatResponse:
     session_id = request.headers.get("X-Session-ID", "")
     request_id = getattr(request.state, "request_id", None)
+    # The answer's id in the conversation log, returned with it so a rating
+    # names the row it rates (see FeedbackRequest.turn_id).
+    turn_id = uuid.uuid4().hex
     t0 = time.perf_counter()
 
     attachments = documents.resolve_attachments(
@@ -1095,6 +1098,7 @@ def chat(
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
+            row_id=turn_id,
             **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or ""),
         )
     except Exception:
@@ -1119,7 +1123,7 @@ def chat(
             except Exception:
                 logger.debug("Escalation event tracking failed", exc_info=True)
 
-    return ChatResponse(**result)
+    return ChatResponse(**{**result, "turn_id": turn_id})
 
 
 # ---------------------------------------------------------------------------
@@ -1145,6 +1149,9 @@ async def chat_stream(
     attachments = documents.resolve_attachments(
         body.attachment_ids, session_id=session_id, user_id=ctx.user_id
     )
+    # Minted before generation: it goes out in the ``metadata`` frame, long
+    # before the turn is logged, so a rating can name the row it rates.
+    turn_id = uuid.uuid4().hex
 
     async def event_generator():
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
@@ -1173,7 +1180,9 @@ async def chat_stream(
                 }
                 continue
             if event_type == "_log":
-                _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
+                _log_stream_conversation(
+                    body, session_id, payload, user_id=ctx.user_id or "", turn_id=turn_id
+                )
                 continue
             if event_type.startswith("translation."):
                 # Reply localization is the slow leg of a non-English turn and
@@ -1197,7 +1206,9 @@ async def chat_stream(
             if event_type == "grounding" and agent_trace:
                 yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
                 agent_trace = []
-            if event_type == "metadata" or event_type == "grounding":
+            if event_type == "metadata":
+                yield {"event": event_type, "data": json.dumps({**payload, "turn_id": turn_id})}
+            elif event_type == "grounding":
                 yield {"event": event_type, "data": json.dumps(payload)}
             elif event_type == "error":
                 yield {"event": "error", "data": payload.get("message", "Internal server error")}
@@ -1234,6 +1245,7 @@ def _log_stream_conversation(
     session_id: str,
     log_payload: dict[str, Any],
     user_id: str = "",
+    turn_id: str | None = None,
 ) -> None:
     """Mirror the old SSE ``finally`` block — log to analytics DB."""
     from .service import ChatModel as _CM
@@ -1251,6 +1263,7 @@ def _log_stream_conversation(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
+            row_id=turn_id,
             **_experiment_log_fields(user_id, result.get("locale") or body.locale or ""),
         )
     except Exception:
@@ -2452,28 +2465,57 @@ def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict
 # ---------------------------------------------------------------------------
 # Feedback endpoints
 # ---------------------------------------------------------------------------
+def _feedback_rater(ctx: AuthContext) -> str:
+    """Whose rating this is: the user only with analytics consent, else nobody.
+
+    A 👍/👎 is accepted from anyone, signed in or not; it is tied to a person
+    only when they consented to analytics. Without that it is stored
+    anonymously — the answer is rated, the rater is not recorded.
+    """
+    if ctx.authenticated and ctx.user_id and db.has_active_consent(ctx.user_id, "analytics"):
+        return ctx.user_id
+    return ""
+
+
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["feedback"])
+@limiter.limit(_RATE_LIMIT)
 def submit_feedback(
+    request: Request,
     body: FeedbackRequest,
     ctx: AuthContext = Depends(current_user),
 ) -> FeedbackResponse:
-    """Submit thumbs-up/down feedback on a chatbot response."""
+    """Submit thumbs-up/down feedback on a chatbot response.
+
+    With ``turn_id`` (from the chat response) the rating is linked to the
+    answer it rates: its conversation, its position and what it was built
+    from are copied from the conversation log, and the logged question and
+    reply are kept rather than the client's copy.
+    """
+    from . import quality_audit
     from .service import ChatModel as _CM
 
-    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
-        raise HTTPException(status_code=403, detail="analytics consent is required for feedback")
+    tenant_id = ctx.tenant_id or "default"
+    turn = quality_audit.rated_turn(body.turn_id, body.conversation_id, tenant_id=tenant_id)
     metrics.inc("feedback_total", labels={"rating": body.rating})
     result = db.save_feedback(
         message_id=body.message_id,
         rating=body.rating,
         comment=body.comment,
         session_id=body.session_id,
-        user_id=ctx.user_id,
-        user_query=_CM.redact_for_storage(body.user_query),
-        bot_reply=_CM.redact_for_storage(body.bot_reply),
+        user_id=_feedback_rater(ctx),
+        user_query=turn.get("user_query") or _CM.redact_for_storage(body.user_query),
+        bot_reply=turn.get("bot_reply") or _CM.redact_for_storage(body.bot_reply),
         retrieval_mode=body.retrieval_mode,
         workflow_id=body.workflow_id,
         step_id=body.step_id,
+        tenant_id=tenant_id,
+        conversation_id=turn.get("conversation_id") or body.conversation_id,
+        turn_id=body.turn_id if turn else "",
+        turn_index=turn.get("turn_index") or body.turn_index,
+        locale=turn.get("locale", ""),
+        topic_tag=turn.get("topic_tag", ""),
+        sources_json=turn.get("sources_json", "[]"),
+        confidence=turn.get("confidence"),
     )
     return FeedbackResponse(**result)
 
@@ -2716,18 +2758,22 @@ def reply_to_escalation(
 
 
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
+@limiter.limit(_RATE_LIMIT)
 def update_feedback_comment(
+    request: Request,
     message_id: str,
     body: FeedbackCommentRequest,
     ctx: AuthContext = Depends(current_user),
 ) -> dict:
-    """Add a follow-up comment to existing feedback (avoids duplicate entries)."""
+    """Add a follow-up comment to existing feedback (avoids duplicate entries).
+
+    The rating it comments on must be the same rater's (the same user, or —
+    for an anonymous rating — anonymous), and gets one comment.
+    """
     from .service import ChatModel as _CM
 
-    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
-        raise HTTPException(status_code=403, detail="analytics consent is required for feedback")
     updated = db.update_feedback_comment(
-        message_id, _CM.redact_for_storage(body.comment), user_id=ctx.user_id
+        message_id, _CM.redact_for_storage(body.comment), user_id=_feedback_rater(ctx)
     )
     if not updated:
         raise HTTPException(
@@ -4538,6 +4584,11 @@ def register_external_connector(
         display_name=str(payload.get("display_name", "")),
         description=str(payload.get("description", "")),
     )
+
+
+from .routes.quality import router as quality_router
+
+app.include_router(quality_router)
 
 
 # ---------------------------------------------------------------------------

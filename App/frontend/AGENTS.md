@@ -15,7 +15,9 @@ bun run lint
 | Path | Role |
 | --- | --- |
 | `src/app/page.tsx` | Taxpayer chat |
-| `src/app/admin/` | Flags, tickets, overrides, outbox |
+| `src/app/admin/` | Overview, flags, overrides, outbox, audit trail |
+| `src/app/admin/quality/` | Service-quality audit (admin + auditor): where AI answers went wrong |
+| `src/components/quality/` | Audit pieces: rating strip, position chart, conversation timeline |
 | `src/app/agent/` | Officer workbench |
 | `src/components/staff/` | Queue, case, composer, live banner |
 | `src/components/charts/chartTheme.tsx` | Chart palette **and** the plain-language layer |
@@ -24,6 +26,9 @@ bun run lint
 | `src/lib/i18n/` | Taxpayer-surface dictionary (en / lg / sw) |
 
 Staff routes use `StaffGuard`. Do not claim flag toggles are cluster-wide.
+Live work (`/agent`, `/admin/tickets`, `/calls`, the call layer) is for
+`ura_staff`; administrators audit (`lib/roles.ts` `isLiveOfficer`,
+`watchesLiveQueue`). The API enforces the same split.
 
 ## Rules
 

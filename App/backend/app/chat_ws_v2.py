@@ -318,6 +318,9 @@ async def _run_response_create(
 
     final_log: dict[str, Any] | None = None
     full_reply = ""
+    # Minted before generating so the logged turn and the metadata frame carry
+    # the same id, which a rating names (see FeedbackRequest.turn_id).
+    turn_id = uuid.uuid4().hex
 
     try:
         async for event_type, payload in service_module.run_chat_turn(
@@ -371,7 +374,11 @@ async def _run_response_create(
             elif event_type == "revision":
                 await _send_json(websocket, {"type": frame_type, "text": payload})
             elif event_type in ("metadata", "grounding"):
-                await _send_json(websocket, {"type": frame_type, **payload})
+                meta_payload = dict(payload) if isinstance(payload, dict) else {}
+                if event_type == "metadata":
+                    # The logged turn's id, as on REST and SSE: a rating names it.
+                    meta_payload.setdefault("turn_id", turn_id)
+                await _send_json(websocket, {"type": frame_type, **meta_payload})
             elif event_type == "error":
                 err_payload = payload if isinstance(payload, dict) else {"message": str(payload)}
                 await _send_json(websocket, {"type": frame_type, **err_payload})
@@ -425,6 +432,7 @@ async def _run_response_create(
                 full_reply=full_reply,
                 log_payload=final_log,
                 user_id=session.user_id or "",
+                turn_id=turn_id,
             )
             # Update the in-memory history cache so subsequent turns can
             # skip the DB fetch.  Also pick up the conversation_id the
@@ -657,6 +665,7 @@ def _log_ws_turn(
     full_reply: str,
     log_payload: dict[str, Any],
     user_id: str = "",
+    turn_id: str | None = None,
 ) -> None:
     """Persist a chat-WS turn to the analytics DB (mirrors SSE behaviour)."""
     from .service import ChatModel as _CM
@@ -673,6 +682,7 @@ def _log_ws_turn(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
+            row_id=turn_id or None,
             **flags.experiment_log_fields(
                 subject=user_id or None,
                 locale=str(result.get("locale") or ""),

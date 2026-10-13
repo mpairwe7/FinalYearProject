@@ -113,10 +113,11 @@ export function landingPathForRole(role: string | undefined | null): string {
  * sees three sections rather than a flat row, which is the difference between
  * scanning and reading.
  */
-export type StaffSection = "work" | "configure" | "observe";
+export type StaffSection = "work" | "audit" | "configure" | "observe";
 
 export const SECTION_LABEL: Record<StaffSection, string> = {
   work: "Work",
+  audit: "Audit",
   configure: "Configure",
   observe: "Observe",
 };
@@ -167,6 +168,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     roles: ["ura_staff", "ura_auditor"],
   },
   {
+    href: "/admin/quality",
+    label: "Service quality audit",
+    navLabel: "Quality audit",
+    group: "audit",
+    blurb: "Where answers went wrong, from taxpayers' ratings",
+    roles: ["ura_admin", "ura_auditor"],
+  },
+  {
     href: "/admin/flags",
     label: "Flags",
     navLabel: "Flags",
@@ -210,7 +219,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     href: "/admin/audit",
     label: "Audit trail",
     navLabel: "Audit trail",
-    group: "observe",
+    group: "audit",
     blurb: "Who changed or read what, and proof the record is intact",
     roles: ["ura_admin", "ura_auditor"],
   },
@@ -226,7 +235,7 @@ export function staffSectionsFor(
   role: string | undefined | null,
 ): { group: StaffSection; label: string; items: StaffDestination[] }[] {
   const allowed = staffDestinationsFor(role);
-  return (["work", "configure", "observe"] as StaffSection[])
+  return (["work", "audit", "configure", "observe"] as StaffSection[])
     .map((group) => ({
       group,
       label: SECTION_LABEL[group],

@@ -108,6 +108,7 @@ async function signedInAs(page: Page, role: string) {
       },
     }),
   );
+  await stubQualityAudit(page);
   await page.route("**/api/v1/admin/officers/presence", (route) => {
     const now = Math.floor(Date.now() / 1000);
     return route.fulfill({
@@ -175,6 +176,62 @@ async function signedInAs(page: Page, role: string) {
         total: 3,
       },
     }),
+  );
+}
+
+/** A conversation that went wrong at its third answer, as GET /v1/admin/quality/ai-chat returns it. */
+function qualityFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const summary = {
+    period_days: 30, truncated: false, rated_answers: 12, helpful: 8, unhelpful: 4, helpful_pct: 66.7,
+    comments: 2, conversations: 5, unlinked_answers: 0,
+    patterns: { went_wrong: 2, never_helpful: 1, recovered: 0, all_helpful: 2 },
+    median_break_answer: 3,
+    by_position: [
+      { position: "1", rated: 5, helpful: 5, helpful_pct: 100 },
+      { position: "2", rated: 4, helpful: 2, helpful_pct: 50 },
+      { position: "3", rated: 3, helpful: 1, helpful_pct: 33.3 },
+      { position: "4", rated: 0, helpful: 0, helpful_pct: null },
+      { position: "5+", rated: 0, helpful: 0, helpful_pct: null },
+    ],
+    by_topic: [{ key: "vat_registration", rated: 6, helpful: 3, unhelpful: 3, helpful_pct: 50 }],
+    by_route: [{ key: "hybrid", rated: 10, helpful: 7, unhelpful: 3, helpful_pct: 70 }],
+    by_language: [{ key: "en", rated: 12, helpful: 8, unhelpful: 4, helpful_pct: 66.7 }],
+    by_day: [],
+    previous: { rated_answers: 10, helpful_pct: 70, truncated: false },
+  };
+  const page = {
+    period_days: 30, truncated: false, total: 1, limit: 25, offset: 0,
+    conversations: [{
+      conversation_id: "conv-went-wrong", key: "conv-went-wrong", linked: true, pattern: "went_wrong",
+      ratings: [{ answer: 1, rating: "up" }, { answer: 2, rating: "up" }, { answer: 3, rating: "down" }],
+      rated_answers: 3, unhelpful: 1, break_answer: 3, break_question: "What if I am a sole proprietor?",
+      helpful_before_break: true, comments: 1, topic: "vat_registration", locale: "lg",
+      first_rated_at: now - 600, last_rated_at: now - 60,
+    }],
+  };
+  const answer = (n: number, rating: string, question: string, reply: string, isBreak = false) => ({
+    answer: n, turn_id: `t${n}`, question, reply, created_at: now - 900 + n * 100, sources: ["vat-act.pdf"],
+    confidence: 0.7, topic: "vat_registration", rating, comment: isBreak ? "That is wrong." : "",
+    retrieval_mode: "hybrid", is_break: isBreak,
+  });
+  const timeline = {
+    conversation_id: "conv-went-wrong", pattern: "went_wrong", break_answer: 3, transcript_complete: true,
+    transcript_kept_days: 7,
+    answers: [
+      answer(1, "up", "How do I register for VAT?", "Apply on the eTax portal."),
+      answer(2, "up", "What documents do I need?", "Your TIN and certificate of incorporation."),
+      answer(3, "down", "What if I am a sole proprietor?", "Sole proprietors cannot register.", true),
+    ],
+  };
+  return { summary, page, timeline };
+}
+
+async function stubQualityAudit(page: Page) {
+  const q = qualityFixture();
+  await page.route("**/api/v1/admin/quality/ai-chat/*", (route) => route.fulfill({ json: q.timeline }));
+  await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
+    route.fulfill({ json: { summary: q.summary, page: q.page } }),
   );
 }
 
@@ -410,6 +467,21 @@ test.describe("Staff UI on Chromium", () => {
     });
   });
 
+  test.describe("/admin/quality audit", () => {
+    test("opens a conversation at the answer where it went wrong", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      await page.goto("/admin/quality");
+      await expect(page.getByRole("heading", { name: "Service quality audit" })).toBeVisible();
+      const row = page.getByRole("button", { name: /Went wrong at answer 3, after a helpful one/ });
+      await expect(row).toBeVisible();
+      await row.click();
+      const timeline = page.getByRole("article", { name: "Conversation timeline" });
+      await expect(timeline.getByText("Things went wrong here")).toBeVisible();
+      await expect(timeline.getByText("Last helpful answer before it")).toBeVisible();
+      await expect(page).toHaveURL(/conversation=conv-went-wrong/);
+    });
+  });
+
   test.describe("/agent queue", () => {
     test.beforeEach(async ({ page }) => {
       await signedInAs(page, "ura_staff");
@@ -515,7 +587,15 @@ test.describe("Staff UI on Chromium", () => {
     // Each route under the role that opens it: administrators the audit and
     // configuration pages, officers the queue.
     const ROUTES: Record<string, string[]> = {
-      ura_admin: ["/admin", "/admin/flags", "/admin/overrides", "/admin/outbox", "/analytics", "/analytics/evaluation"],
+      ura_admin: [
+        "/admin",
+        "/admin/quality",
+        "/admin/flags",
+        "/admin/overrides",
+        "/admin/outbox",
+        "/analytics",
+        "/analytics/evaluation",
+      ],
       ura_staff: ["/agent", "/admin/tickets"],
     };
 

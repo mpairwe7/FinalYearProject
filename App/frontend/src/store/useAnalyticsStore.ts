@@ -119,25 +119,41 @@ export function trackEvent(eventType: string, data: Record<string, unknown> = {}
 }
 
 /**
- * Submit feedback for a specific bot message.
- */
-/**
- * Where a rated reply came from. Sent with the rating so the analytics
- * journey panel can show which journey step taxpayers found least helpful.
- * Identifiers only; the API rejects anything but lowercase [a-z0-9_].
+ * Where a rated reply came from, and which answer of which conversation it is.
+ *
+ * `retrievalMode`, `workflowId` and `stepId` let the analytics journey panel
+ * show which journey step taxpayers found least helpful; the API rejects
+ * anything but lowercase [a-z0-9_] there. `conversationId`, `turnId` (the
+ * chat response's `turn_id`) and `answerNumber` let the service-quality audit
+ * read a conversation's ratings in order and find where it went wrong.
  */
 export interface FeedbackContext {
   retrievalMode?: string;
   workflowId?: string;
   stepId?: string;
+  conversationId?: string | null;
+  turnId?: string;
+  answerNumber?: number;
 }
 
 const CONTEXT_ID = /^[a-z0-9_]{1,64}$/;
+const THREAD_ID = /^[a-zA-Z0-9_-]{1,64}$/;
 
 function contextField(value: string | undefined): string {
   return value && CONTEXT_ID.test(value) ? value : '';
 }
 
+function threadField(value: string | null | undefined): string {
+  return value && THREAD_ID.test(value) ? value : '';
+}
+
+/**
+ * Rate one answer, 👍 or 👎.
+ *
+ * Sent whether or not analytics is allowed: a rating is about the answer.
+ * Without analytics consent it goes without the analytics session id, and the
+ * API stores it anonymously — the answer is rated, the rater is not recorded.
+ */
 export async function submitFeedback(
   messageId: string,
   rating: 'up' | 'down',
@@ -146,17 +162,23 @@ export async function submitFeedback(
   botReply: string = '',
   context: FeedbackContext = {},
 ): Promise<{ id: string } | null> {
-  if (!hasAnalyticsConsent()) return null;
-  const sessionId = getSessionId();
+  const sessionId = hasAnalyticsConsent() ? getSessionId() : '';
+  const answerNumber =
+    context.answerNumber && Number.isInteger(context.answerNumber) && context.answerNumber > 0
+      ? Math.min(context.answerNumber, 1000)
+      : null;
   try {
     const res = await fetchWithTimeout(`${API_URL}/v1/feedback`, {
       method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json', 'X-Session-ID': sessionId }),
+      headers: authHeaders({
+        'Content-Type': 'application/json',
+        ...(sessionId ? { 'X-Session-ID': sessionId } : {}),
+      }),
       body: JSON.stringify({
         message_id: messageId,
         rating,
         comment,
-        session_id: sessionId,
+        session_id: sessionId || null,
         user_query: userQuery,
         bot_reply: botReply,
         // A malformed identifier would make the API refuse the whole rating,
@@ -164,6 +186,9 @@ export async function submitFeedback(
         retrieval_mode: contextField(context.retrievalMode),
         workflow_id: contextField(context.workflowId),
         step_id: contextField(context.stepId),
+        conversation_id: threadField(context.conversationId),
+        turn_id: threadField(context.turnId),
+        turn_index: answerNumber,
       }),
     });
     if (!res.ok) return null;
@@ -180,11 +205,14 @@ export async function updateFeedbackComment(
   messageId: string,
   comment: string,
 ): Promise<boolean> {
-  if (!hasAnalyticsConsent()) return false;
+  const sessionId = hasAnalyticsConsent() ? getSessionId() : '';
   try {
     const res = await fetchWithTimeout(`${API_URL}/v1/feedback/${encodeURIComponent(messageId)}/comment`, {
       method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json', 'X-Session-ID': getSessionId() }),
+      headers: authHeaders({
+        'Content-Type': 'application/json',
+        ...(sessionId ? { 'X-Session-ID': sessionId } : {}),
+      }),
       body: JSON.stringify({ comment }),
     });
     return res.ok;

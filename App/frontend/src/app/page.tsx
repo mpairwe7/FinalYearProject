@@ -1055,6 +1055,7 @@ export default function Page() {
       }
       const content = cleanResponse(d.reply ?? '');
       const meta = {
+        serverTurnId: typeof d.turn_id === 'string' ? d.turn_id : undefined,
         citations: d.citations ?? [],
         faithfulnessScore: d.faithfulness_score ?? null,
         retrievalMode: d.retrieval_mode ?? 'keyword',
@@ -1157,6 +1158,7 @@ export default function Page() {
                 }
                 updateLastTurn((t) => ({
                   ...t,
+                  serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
                   citations: p.citations ?? t.citations,
                   faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
                   retrievalMode: p.retrieval_mode ?? t.retrievalMode,
@@ -1194,6 +1196,7 @@ export default function Page() {
               }
               updateLastTurn((t) => ({
                 ...t,
+                serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
                 citations: p.citations ?? t.citations,
                 faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
                 retrievalMode: p.retrieval_mode ?? t.retrievalMode,
@@ -1219,6 +1222,7 @@ export default function Page() {
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
               updateLastTurn((t) => ({
                 ...t,
+                serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
                 citations: p.citations ?? t.citations,
                 faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
                 retrievalMode: p.retrieval_mode ?? t.retrievalMode,
@@ -1719,6 +1723,19 @@ export default function Page() {
     return map;
   }, [chat]);
 
+  // Each AI answer's position in the conversation (1 = first), sent with a
+  // 👍/👎 so the audit can see where a conversation went wrong. The greeting
+  // and an officer's relayed reply are not AI answers and are not counted.
+  const answerNumbers = useMemo(() => {
+    const map: Record<string, number> = {};
+    let n = 0;
+    for (const turn of chat) {
+      if (turn.role !== 'assistant' || turn.id === 'greeting-0' || turn.retrievalMode === 'officer_reply') continue;
+      map[turn.id] = ++n;
+    }
+    return map;
+  }, [chat]);
+
   const handleDownloadReport = useCallback(async (docId: string, docName: string) => {
     try {
       const res = await fetch(`/api/v1/documents/${docId}/report`, {
@@ -1953,6 +1970,7 @@ export default function Page() {
                     isTransitioning={isTransitioning}
                     onListen={handleListenToReply}
                     conversationId={activeConversationId}
+                    answerNumber={answerNumbers[turn.id]}
                     phaseLabel={isPending ? t(PHASE_UI[turnPhase].label) : undefined}
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
