@@ -247,6 +247,20 @@ def get_hold_update_s() -> float:
     return max(0.0, _env_float("RECEPTIONIST_HOLD_UPDATE_S", 30.0))
 
 
+def get_call_review_enabled() -> bool:
+    """Whether the AI asks the caller "was this call helpful?" (at goodbye, or while transferring).
+
+    Asked at most once a call and only after the AI has answered something
+    (review.py). Off, no call is asked and the AI-calls audit stays empty.
+    """
+    return _env_bool("RECEPTIONIST_CALL_REVIEW", True)
+
+
+def get_review_answer_timeout_s() -> float:
+    """How long the AI waits for the answer to its goodbye review question before saying goodbye."""
+    return max(1.0, _env_float("RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S", 10.0))
+
+
 def local_barge_in_enabled() -> bool:
     """Whether the call's own VAD stops the assistant when the caller talks over it.
 

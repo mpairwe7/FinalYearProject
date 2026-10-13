@@ -120,6 +120,9 @@ export function CallTranscript({ turns, interimCaption, startedAt, flashSeq = nu
                   <span className="st-bubble-time">{formatClock(turn.created_at - startedAt)}</span>
                 )}
                 {isClarify && <span className="st-chip st-chip--clarify">Clarification</span>}
+                {turn.kind === 'review' && (
+                  <span className="st-chip st-chip--review">{isCaller ? 'Review answer' : 'Review question'}</span>
+                )}
                 {turn.mean_word_prob !== null && isCaller && (
                   <span className="st-bubble-meta">
                     ASR conf: {Math.round((turn.mean_word_prob || 0) * 100)}%

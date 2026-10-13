@@ -574,7 +574,12 @@ export interface QualitySummary {
   period_days: number;
   ai_chat: AiChatSummary;
   officer_chat?: RatingsHeadline;
+  /** The caller's spoken review of the AI, at goodbye and while transferring. */
+  ai_calls?: { end: RatingsHeadline; transfer: RatingsHeadline };
+  officer_calls?: RatingsHeadline;
 }
+
+export type RatingSentiment = "positive" | "neutral" | "negative" | "unclear";
 
 export type RatingSource =
   | "chat_officer_csat"
@@ -595,12 +600,37 @@ export interface RatingsFigures {
   /** Ratings of 1 or 2. */
   low: number;
   distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
-  sentiment: Record<"positive" | "neutral" | "negative" | "unclear", number>;
+  sentiment: Record<RatingSentiment, number>;
+  /** Share of answered ratings that were positive / negative (the words view). */
+  positive_pct: number | null;
+  negative_pct: number | null;
+}
+
+/** The period before, for the headline's comparison. */
+export interface RatingsPrevious {
+  asked: number;
+  answered: number;
+  response_rate: number | null;
+  average: number | null;
+  csat_pct: number | null;
+  positive_pct: number | null;
+  negative_pct: number | null;
+}
+
+/** One week, or one language: how many were rated and how they came out. */
+export interface RatingsPeriodFigures {
+  rated: number;
+  /** Of the 1–5 levels; null for a stream rated in words. */
+  average: number | null;
+  csat_pct: number | null;
+  /** Share of answered ratings that were positive / negative. */
+  positive_pct: number | null;
+  negative_pct: number | null;
 }
 
 export interface RatingsHeadline extends RatingsFigures {
   truncated: boolean;
-  previous: { asked: number; average: number | null; csat_pct: number | null };
+  previous: RatingsPrevious;
 }
 
 export interface OfficerRatingRow {
@@ -643,9 +673,10 @@ export interface RatingsAudit {
     no_answer: number;
     pending: number;
     by_officer: OfficerRatingRow[];
-    by_week: Array<{ week: string; rated: number; average: number; csat_pct: number | null }>;
+    by_week: Array<RatingsPeriodFigures & { week: string }>;
+    by_language: Array<RatingsPeriodFigures & { locale: string; asked: number; response_rate: number | null }>;
   };
-  previous: { asked: number; average: number | null; csat_pct: number | null };
+  previous: RatingsPrevious;
   total: number;
   limit: number;
   offset: number;
@@ -658,6 +689,7 @@ export interface RatingsQuery {
   score?: number | null;
   officer?: string;
   status?: "" | "answered" | "skipped" | "no_answer";
+  sentiment?: "" | RatingSentiment;
   limit?: number;
   offset?: number;
 }
@@ -867,6 +899,7 @@ export const analyticsApi = {
     score = null,
     officer = "",
     status = "",
+    sentiment = "",
     limit = 25,
     offset = 0,
   }: RatingsQuery = {}) => {
@@ -874,6 +907,7 @@ export const analyticsApi = {
     if (score != null) params.set("score", String(score));
     if (officer) params.set("officer", officer);
     if (status) params.set("status", status);
+    if (sentiment) params.set("sentiment", sentiment);
     return fetchJson<RatingsAudit>(`/v1/admin/quality/ratings?${params.toString()}`);
   },
   auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),

@@ -47,7 +47,8 @@ export const CallControls = forwardRef<
 
       {confirmEnd ? (
         <span className="cc-confirm" role="group" aria-label="End the call?">
-          End the call? The caller hears a goodbye.
+          End the call? The caller hears a goodbye. Before ending, ask: &ldquo;Were you satisfied with the
+          help I gave you today?&rdquo; You&apos;ll record their answer in the wrap-up.
           <button type="button" className="cc-btn cc-btn--danger" onClick={() => void endCall()} autoFocus>
             End call
           </button>

@@ -2,13 +2,13 @@
 
 /**
  * Satisfaction with the service officers gave: how taxpayers rated their
- * chats (and, in the next phase, callers their calls), on the one 5-level
- * scale the service asks with.
+ * chats, and what callers told the officer at the end of a call, on the one
+ * 5-level scale the service asks with.
  *
  * Headline figures with the period before, the five levels, a per-officer
  * table that leads with the lowest average, then the ratings themselves,
  * lowest first — the ones to read. A rating opens its case read-only.
- * `?ticket=` makes an opened case a link.
+ * `?ticket=` (a chat) or `?call=` (a call) makes an opened case a link.
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { OpsPanel, TableScroll } from "../ops/OpsPage";
@@ -20,6 +20,41 @@ import { useRatingsAudit } from "../../hooks/useQualityAudit";
 import type { RatingSource, RatingsAudit, ServiceRating } from "../../services/analyticsApi";
 import { SatisfactionDistribution } from "./SatisfactionDistribution";
 import { OfficerChatDetail } from "./OfficerChatDetail";
+import { OfficerCallDetail } from "./OfficerCallDetail";
+
+/** The words that differ between the chat and the call streams. */
+const COPY = {
+  chat: {
+    param: "ticket",
+    summary: "Officer chat satisfaction summary",
+    unit: "chats",
+    distribution: "How satisfied taxpayers were with their chat",
+    handled: "Chats ended",
+    answered: "Answered the rating",
+    list: "Rated chats",
+    note: "Lowest first, then newest. Open one to read the chat as the taxpayer and the officer wrote it.",
+    empty: "No officer chat was rated in this period",
+    emptyBody: "When an officer ends a chat, the taxpayer is asked to rate it; their answers appear here.",
+    close: "Close chat",
+    noAnswer: "No answer",
+  },
+  call: {
+    param: "call",
+    summary: "Officer call satisfaction summary",
+    unit: "calls",
+    distribution: "How satisfied callers said they were",
+    handled: "Calls wrapped up",
+    answered: "Caller gave an answer",
+    list: "Rated calls",
+    note: "Lowest first, then newest. Open one to read the call and the officer's wrap-up.",
+    empty: "No officer call was rated in this period",
+    emptyBody: "At wrap-up the officer records how satisfied the caller said they were; those answers appear here.",
+    close: "Close call",
+    noAnswer: "Caller didn't say",
+  },
+} as const;
+
+type Kind = keyof typeof COPY;
 
 const PAGE = 25;
 
@@ -60,23 +95,29 @@ function averageHint(audit: RatingsAudit): string {
   return `${direction} from ${before} in the period before`;
 }
 
-export function ratingText(rating: Pick<ServiceRating, "status" | "score">): string {
+export function ratingText(rating: Pick<ServiceRating, "status" | "score">, kind: Kind = "chat"): string {
   if (rating.status === "answered" && rating.score != null) {
     return `${rating.score}/5 · ${SATISFACTION_LABELS_EN[rating.score - 1]}`;
   }
   if (rating.status === "skipped") return "Skipped the rating";
-  if (rating.status === "no_answer") return "No answer";
+  if (rating.status === "no_answer") return COPY[kind].noAnswer;
   return "Not answered yet";
+}
+
+function caseOf(rating: ServiceRating, kind: Kind): string {
+  return kind === "call" ? rating.call_id : rating.ticket_id;
 }
 
 function RatingRow({
   rating,
+  kind,
   selected,
   onOpen,
 }: {
   rating: ServiceRating;
+  kind: Kind;
   selected: boolean;
-  onOpen: (ticketId: string) => void;
+  onOpen: (id: string) => void;
 }) {
   const low = rating.score != null && rating.score <= 2;
   const body = (
@@ -85,7 +126,7 @@ function RatingRow({
         <span className="qa-rating-face" aria-hidden="true">
           {rating.score != null ? SATISFACTION_FACES[rating.score - 1] : "–"}
         </span>
-        <span className={`qa-rating-score${low ? " is-low" : ""}`}>{ratingText(rating)}</span>
+        <span className={`qa-rating-score${low ? " is-low" : ""}`}>{ratingText(rating, kind)}</span>
         {rating.officer_name ? <span className="qa-rating-officer">{rating.officer_name}</span> : null}
       </span>
       {rating.comment ? (
@@ -100,13 +141,14 @@ function RatingRow({
       </span>
     </>
   );
-  if (!rating.ticket_id) return <div className="qa-conv is-static">{body}</div>;
+  const id = caseOf(rating, kind);
+  if (!id) return <div className="qa-conv is-static">{body}</div>;
   return (
     <button
       type="button"
       className={`qa-conv${selected ? " is-selected" : ""}`}
       aria-current={selected || undefined}
-      onClick={() => onOpen(rating.ticket_id)}
+      onClick={() => onOpen(id)}
     >
       {body}
     </button>
@@ -122,12 +164,14 @@ export function RatingsPanel({
   days: number;
   onUpdated?: (at: number) => void;
 }) {
+  const kind: Kind = source === "call_officer_csat" ? "call" : "chat";
+  const copy = COPY[kind];
   const [score, setScore] = useState<number | null>(null);
   const [officer, setOfficer] = useState("");
   const [limit, setLimit] = useState(PAGE);
-  const [selected, setSelected] = useState<string | null>(() => readParam("ticket"));
+  const [selected, setSelected] = useState<string | null>(() => readParam(copy.param));
 
-  useEffect(() => writeParam("ticket", selected), [selected]);
+  useEffect(() => writeParam(copy.param, selected), [copy.param, selected]);
   useEffect(() => setLimit(PAGE), [score, officer, days]);
 
   const audit = useRatingsAudit({ source, days, score, officer, limit });
@@ -161,7 +205,7 @@ export function RatingsPanel({
         </p>
       ) : null}
 
-      <section aria-label="Officer chat satisfaction summary">
+      <section aria-label={copy.summary}>
         {loading || !data || !summary ? (
           <SkeletonStats count={4} cols={4} />
         ) : (
@@ -176,14 +220,18 @@ export function RatingsPanel({
               value={pct(summary.csat_pct)}
               hint={
                 data.previous.csat_pct == null
-                  ? "share of rated chats"
-                  : `share of rated chats · ${data.previous.csat_pct}% in the period before`
+                  ? `share of rated ${copy.unit}`
+                  : `share of rated ${copy.unit} · ${data.previous.csat_pct}% in the period before`
               }
             />
             <StatCard
-              label="Answered the rating"
+              label={copy.answered}
               value={pct(summary.response_rate)}
-              hint={`${summary.answered} of ${summary.asked} asked · ${summary.skipped} skipped${summary.pending ? ` · ${summary.pending} not answered yet` : ""}`}
+              hint={
+                kind === "call"
+                  ? `${summary.answered} of ${summary.asked} recorded · ${summary.no_answer} didn't say`
+                  : `${summary.answered} of ${summary.asked} asked · ${summary.skipped} skipped${summary.pending ? ` · ${summary.pending} not answered yet` : ""}`
+              }
             />
             <StatCard
               label="Low ratings (1 or 2)"
@@ -196,7 +244,7 @@ export function RatingsPanel({
 
       {summary && summary.answered > 0 ? (
         <section className="ops-chart-grid is-2" aria-label="Satisfaction by level and by officer">
-          <SatisfactionDistribution figures={summary} title="How satisfied taxpayers were with their chat" />
+          <SatisfactionDistribution figures={summary} title={copy.distribution} />
           <div className="ops-chart-card">
             <div className="ops-chart-head">
               <h3 className="ops-chart-title">By officer</h3>
@@ -207,7 +255,7 @@ export function RatingsPanel({
                 <thead>
                   <tr>
                     <th scope="col">Officer</th>
-                    <th scope="col" className="is-num">Chats ended</th>
+                    <th scope="col" className="is-num">{copy.handled}</th>
                     <th scope="col" className="is-num">Rated</th>
                     <th scope="col" className="is-num">Average</th>
                     <th scope="col" className="is-num">Satisfied</th>
@@ -243,9 +291,9 @@ export function RatingsPanel({
 
       <OpsPanel
         id="qa-ratings-h"
-        title="Rated chats"
+        title={copy.list}
         bare
-        note="Lowest first, then newest. Open one to read the chat as the taxpayer and the officer wrote it."
+        note={copy.note}
         end={
           <div className="qa-filters">
             <div className="ops-segmented" role="group" aria-label="Show ratings">
@@ -287,7 +335,7 @@ export function RatingsPanel({
                 <ul className="qa-convs">
                   {data.ratings.map((r) => (
                     <li key={r.id}>
-                      <RatingRow rating={r} selected={r.ticket_id === selected} onOpen={open} />
+                      <RatingRow rating={r} kind={kind} selected={caseOf(r, kind) === selected} onOpen={open} />
                     </li>
                   ))}
                 </ul>
@@ -304,11 +352,11 @@ export function RatingsPanel({
               </>
             ) : (
               <EmptyState
-                title={score || officer ? "No rating matches" : "No officer chat was rated in this period"}
+                title={score || officer ? "No rating matches" : copy.empty}
                 body={
                   score || officer
                     ? "Clear the filter to see every rating."
-                    : "When an officer ends a chat, the taxpayer is asked to rate it; their answers appear here."
+                    : copy.emptyBody
                 }
               />
             )}
@@ -316,9 +364,16 @@ export function RatingsPanel({
           {selected ? (
             <div className="qa-detail-pane">
               <button type="button" className="ops-btn is-ghost is-sm qa-back" onClick={() => setSelected(null)}>
-                Close chat
+                {copy.close}
               </button>
-              <OfficerChatDetail ticketId={selected} />
+              {kind === "call" ? (
+                <OfficerCallDetail
+                  callId={selected}
+                  rating={data?.ratings.find((r) => r.call_id === selected) ?? null}
+                />
+              ) : (
+                <OfficerChatDetail ticketId={selected} />
+              )}
             </div>
           ) : null}
         </div>

@@ -130,10 +130,11 @@ class StoreTests(unittest.TestCase):
 
     def test_ratings_from_before_the_period_are_the_previous_figures(self):
         old = f"t-{uuid.uuid4().hex}"
+        tenant = f"ratings-prev-{uuid.uuid4().hex[:8]}"
         sr.request("chat_officer_csat", ticket_id=old, channel="chat", subject="officer",
-                   now=time.time() - 3 * 86400, tenant_id="ratings-prev")
+                   now=time.time() - 3 * 86400, tenant_id=tenant)
         sr.answer("chat_officer_csat", ticket_id=old, status="answered", score=5)
-        h = sr.headline("chat_officer_csat", 2, tenant_id="ratings-prev")
+        h = sr.headline("chat_officer_csat", 2, tenant_id=tenant)
         self.assertEqual((h["asked"], h["previous"]["asked"], h["previous"]["average"]), (0, 1, 5.0))
 
     def test_retention_purges_old_ratings(self):
@@ -143,14 +144,53 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(sr.find("chat_officer_csat", ticket_id=old))
 
 
+class SpokenReviewTests(unittest.TestCase):
+    """The caller's review of the AI is rated in words, not levels."""
+
+    def review(self, sentiment: str, *, locale: str = "en", tenant: str, comment: str = "") -> str:
+        call = f"call-{uuid.uuid4().hex[:10]}"
+        sr.request("call_ai_review_end", call_id=call, channel="call", subject="ai", tenant_id=tenant, locale=locale)
+        sr.answer("call_ai_review_end", call_id=call, status="answered", sentiment=sentiment, comment=comment or sentiment)
+        return call
+
+    def test_spoken_reviews_trend_by_the_share_that_found_it_helpful(self):
+        tenant = f"calls-{uuid.uuid4().hex[:8]}"
+        self.review("positive", tenant=tenant)
+        self.review("positive", tenant=tenant, locale="lg")
+        self.review("negative", tenant=tenant, locale="lg", comment="It didn't help")
+        call = f"call-{uuid.uuid4().hex[:10]}"
+        sr.request("call_ai_review_end", call_id=call, channel="call", subject="ai", tenant_id=tenant)
+        sr.answer("call_ai_review_end", call_id=call, status="no_answer")
+        figures = sr.audit("call_ai_review_end", 7, tenant_id=tenant, limit=100)["summary"]
+        self.assertEqual((figures["asked"], figures["answered"], figures["no_answer"]), (4, 3, 1))
+        self.assertEqual(figures["sentiment"]["positive"], 2)
+        self.assertIsNone(figures["average"])  # words, not levels
+        week = figures["by_week"][-1]
+        self.assertEqual((week["rated"], week["positive_pct"], week["negative_pct"], week["average"]), (3, 66.7, 33.3, None))
+        luganda = next(row for row in figures["by_language"] if row["locale"] == "lg")
+        self.assertEqual((luganda["asked"], luganda["positive_pct"]), (2, 50.0))
+
+    def test_what_callers_said_leads_with_the_negative_and_filters_by_sentiment(self):
+        tenant = f"calls-{uuid.uuid4().hex[:8]}"
+        self.review("positive", tenant=tenant)
+        self.review("neutral", tenant=tenant)
+        self.review("negative", tenant=tenant)
+        self.review("unclear", tenant=tenant)
+        page = sr.audit("call_ai_review_end", 7, tenant_id=tenant, limit=100)
+        self.assertEqual([r["sentiment"] for r in page["ratings"]], ["negative", "unclear", "neutral", "positive"])
+        only = sr.audit("call_ai_review_end", 7, tenant_id=tenant, sentiment="negative", limit=100)
+        self.assertEqual([r["sentiment"] for r in only["ratings"]], ["negative"])
+
+
 class RatingsRouteTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
 
     def test_administrators_and_auditors_read_the_ratings(self):
         ticket = f"t-{uuid.uuid4().hex}"
+        officer = f"off-r-{uuid.uuid4().hex[:8]}"
         sr.request("chat_officer_csat", ticket_id=ticket, channel="chat", subject="officer",
-                   officer_id="off-r", officer_name="Officer Route")
+                   officer_id=officer, officer_name="Officer Route")
         sr.answer("chat_officer_csat", ticket_id=ticket, status="answered", score=2)
         for who in (ADMIN, AUDITOR):
             r = self.client.get("/v1/admin/quality/ratings?source=chat_officer_csat&days=7&limit=100", headers=who)
@@ -159,7 +199,7 @@ class RatingsRouteTests(unittest.TestCase):
             self.assertEqual(body["source"], "chat_officer_csat")
             self.assertIn(ticket, [x["ticket_id"] for x in body["ratings"]])
             self.assertIn("Officer Route", [o["officer_name"] for o in body["summary"]["by_officer"]])
-        r = self.client.get("/v1/admin/quality/ratings?officer=off-r&score=2", headers=ADMIN)
+        r = self.client.get(f"/v1/admin/quality/ratings?officer={officer}&score=2", headers=ADMIN)
         self.assertEqual([x["ticket_id"] for x in r.json()["ratings"]], [ticket])
 
     def test_officers_do_not_read_their_own_audit(self):
@@ -175,6 +215,19 @@ class RatingsRouteTests(unittest.TestCase):
         self.assertIn("officer_chat", body)
         for key in ("asked", "answered", "response_rate", "average", "csat_pct", "low", "previous"):
             self.assertIn(key, body["officer_chat"])
+
+    def test_the_summary_carries_the_call_streams(self):
+        body = self.client.get("/v1/admin/quality/summary?days=7", headers=ADMIN).json()
+        self.assertEqual(set(body["ai_calls"]), {"end", "transfer"})
+        for block in (body["ai_calls"]["end"], body["ai_calls"]["transfer"], body["officer_calls"]):
+            self.assertIn("sentiment", block)
+            self.assertIn("previous", block)
+
+    def test_the_ratings_filter_by_sentiment_and_refuse_an_unknown_one(self):
+        r = self.client.get("/v1/admin/quality/ratings?source=call_ai_review_transfer&sentiment=negative", headers=AUDITOR)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(all(x["sentiment"] == "negative" for x in r.json()["ratings"]))
+        self.assertEqual(self.client.get("/v1/admin/quality/ratings?sentiment=angry", headers=ADMIN).status_code, 422)
 
 
 if __name__ == "__main__":

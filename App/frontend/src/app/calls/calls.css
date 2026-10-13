@@ -152,6 +152,18 @@
   border-color: #b45309;
 }
 
+/* The AI's review question and the caller's answer to it */
+.st-chip--review {
+  background: var(--ops-info-fill, #e0f2fe);
+  color: var(--ops-info-ink, #075985);
+  border: 1px solid var(--ops-info-line, #bae6fd);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+}
+
 /* Call language — "Luganda caller" in the queue and the case header */
 .st-chip--language {
   background: #e0f2fe;
@@ -829,6 +841,49 @@
 
 .cc-star-btn.is-active {
   color: #f59e0b;
+}
+
+/* The caller's satisfaction: required, so it is a fieldset with its own legend. */
+.cw-satisfaction {
+  margin: 0;
+  padding: var(--ops-space-3);
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+}
+
+.cw-satisfaction legend {
+  padding: 0 var(--ops-space-1);
+}
+
+.cw-satisfaction .cw-wrapup-hint {
+  margin: 0 0 var(--ops-space-2);
+}
+
+.cw-required {
+  margin-left: var(--ops-space-1);
+  font-size: var(--ops-text-2xs);
+  font-weight: var(--ops-weight-normal);
+  text-transform: uppercase;
+  letter-spacing: var(--ops-tracking-caps);
+  color: var(--ops-ink-muted);
+}
+
+.cw-not-said {
+  margin-top: var(--ops-space-2);
+}
+
+.cw-ai-review summary {
+  cursor: pointer;
+}
+
+.cw-ai-review[open] summary {
+  margin-bottom: var(--ops-space-2);
+}
+
+.cc-star-btn:focus-visible,
+.cw-ai-review summary:focus-visible {
+  outline: 2px solid var(--ops-focus);
+  outline-offset: 2px;
 }
 
 .cw-wrapup-actions {

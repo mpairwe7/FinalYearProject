@@ -11,7 +11,7 @@ high-risk processing; it is not a substitute for PDPO/DPO review.
 | Controller / DPO | URA — name, contact, appointment reference: `________________` |
 | System / release | URA Chatbot, issue #306, release/commit: `________________` |
 | Assessment date / review date | `________________` / `________________` |
-| Processing scope | Chat, identity/consent, uploads, memory, analytics, feedback, voice metadata, escalation tickets, live chats with officers and their satisfaction ratings. |
+| Processing scope | Chat, identity/consent, uploads, memory, analytics, feedback, voice metadata, escalation tickets, live chats with officers, and satisfaction ratings of chats and calls (including the caller's spoken answer to the AI's review question). |
 | Subjects | Taxpayers, prospective taxpayers, staff/officers, upload/document subjects. |
 | Sensitive/high-risk data | TINs, contact details, tax/document data, voice/transcript content, free-text tickets. |
 | Necessity / proportionality | Confirm purpose limitation, data minimisation, alternatives, and final lawful basis per ROPA activity. |

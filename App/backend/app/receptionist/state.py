@@ -92,6 +92,12 @@ class CallState:
     livekit_officer_route_active: bool = False
     reconnect_timer: asyncio.Task | None = None
     transfer_timer_task: asyncio.Task | None = None
+    # The caller's spoken review of the AI (review.py): "" (not asked),
+    # "asking_end" / "asking_transfer" (waiting for the answer), "moved_on"
+    # (asked, and the caller went on to a new question), "done".
+    review_state: str = ""
+    review_asked_at: float | None = None
+    review_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
     # the language the call is in *now*; these record how it got there.
     initial_locale: str = "en"
@@ -181,6 +187,13 @@ class CallRoom:
 
             if self.state.transfer_timer_task and not self.state.transfer_timer_task.done():
                 self.state.transfer_timer_task.cancel()
+            # A review question still waiting for its answer is now unanswered.
+            try:
+                from .review import settle
+
+                settle(self)
+            except Exception:
+                logger.debug("Could not settle the review of call %s", self.call_id, exc_info=True)
             if self.caller_reconnect_task and not self.caller_reconnect_task.done():
                 self.caller_reconnect_task.cancel()
 

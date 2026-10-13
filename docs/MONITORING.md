@@ -120,7 +120,7 @@ worker's numbers.
 | `ura_escalation_required_total` | counter | `channel` | Turns handed to a person |
 | `ura_escalation_requested_total` | counter | `outcome` | Taxpayer-initiated handoffs (`POST /v1/escalate`) |
 | `ura_feedback_total` | counter | `rating` | Thumbs up/down |
-| `ura_service_rating_total` | counter | `source`, `sentiment` | Satisfaction ratings of officer service (`source`: `chat_officer_csat`; `sentiment`: `positive`, `neutral`, `negative`, `skipped`) |
+| `ura_service_rating_total` | counter | `source`, `sentiment` | Satisfaction ratings (`source`: `chat_officer_csat`, `call_officer_csat`, `call_ai_review_end`, `call_ai_review_transfer`; `sentiment`: `positive`, `neutral`, `negative`, `unclear`, `skipped`, `no_answer`) |
 | `ura_chat_ws_active_connections`, `ura_voice_*` | gauge / counter / histogram | — | WebSocket and voice sessions (were never exposed before) |
 
 Answer-integrity counters (`ura_contradicted_reply_withheld_total`,

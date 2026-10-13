@@ -16,8 +16,8 @@ bun run lint
 | --- | --- |
 | `src/app/page.tsx` | Taxpayer chat |
 | `src/app/admin/` | Overview, flags, overrides, outbox, audit trail |
-| `src/app/admin/quality/` | Service-quality audit (admin + auditor), tabs in `?tab=`: where AI answers went wrong; officer-chat satisfaction |
-| `src/components/quality/` | Audit pieces: rating strip, position chart, conversation timeline, ratings panel, satisfaction levels |
+| `src/app/admin/quality/` | Service-quality audit (admin + auditor), tabs in `?tab=`: AI answers in chat, AI on calls, officer chats, officer calls |
+| `src/components/quality/` | Audit pieces: rating strip, position chart, conversation timeline, ratings panel (chats and calls), satisfaction levels, AI-calls panel |
 | `src/components/rating/SatisfactionScale.tsx` | The one 5-face satisfaction scale (taxpayer rating dialog, officer wrap-up) |
 | `src/hooks/useOfficerChat.ts` | Taxpayer side of a live officer chat: thread poll, notices, rating, hand-back to the AI |
 | `src/app/agent/` | Officer workbench |

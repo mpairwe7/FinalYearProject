@@ -227,35 +227,47 @@ function qualityFixture() {
   return { summary, page, timeline };
 }
 
-/** Officer-chat ratings, as GET /v1/admin/quality/ratings returns them: one low, one high. */
-function ratingsFixture() {
+/**
+ * Ratings, as GET /v1/admin/quality/ratings returns them for *source*: one low,
+ * one high. Officer chats name a ticket, officer calls a call; the caller's
+ * spoken review of the AI is rated in words (no score).
+ */
+function ratingsFixture(source = "chat_officer_csat") {
   const now = Math.floor(Date.now() / 1000);
+  const spoken = source.startsWith("call_ai");
+  const onCall = source.startsWith("call_");
   const rating = (id: string, score: number, officer: [string, string], extra: Record<string, unknown> = {}) => ({
-    id, source: "chat_officer_csat", channel: "chat", subject: "officer", status: "answered", score,
-    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "", ticket_id: `tkt-${id}`,
-    call_id: "", conversation_id: `conv-${id}`, officer_id: officer[0], officer_name: officer[1], team: "domestic_taxes",
+    id, source, channel: onCall ? "call" : "chat", subject: spoken ? "ai" : "officer", status: "answered",
+    score: spoken ? null : score,
+    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "",
+    ticket_id: onCall ? "" : `tkt-${id}`, call_id: onCall ? `call-${id}` : "", conversation_id: `conv-${id}`,
+    officer_id: spoken ? "" : officer[0], officer_name: spoken ? "" : officer[1], team: "domestic_taxes",
     topic: "vat", locale: "en", created_at: now - 900, answered_at: now - 600, ...extra,
   });
+  const period = { rated: 2, average: spoken ? null : 3.5, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 };
   return {
-    source: "chat_officer_csat",
+    source,
     period_days: 30,
     truncated: false,
     summary: {
       asked: 3, answered: 2, skipped: 1, no_answer: 0, pending: 0, response_rate: 66.7, average: 3.5, csat_pct: 50, low: 1,
       distribution: { "1": 0, "2": 1, "3": 0, "4": 0, "5": 1 },
       sentiment: { positive: 1, neutral: 0, negative: 1, unclear: 0 },
-      by_officer: [
+      positive_pct: 50,
+      negative_pct: 50,
+      by_officer: spoken ? [] : [
         { officer_id: "u-okello", officer_name: "Officer Okello", handled: 2, rated: 1, average: 2, csat_pct: 0, low: 1 },
         { officer_id: "u-nakato", officer_name: "Officer Nakato", handled: 1, rated: 1, average: 5, csat_pct: 100, low: 0 },
       ],
-      by_week: [],
+      by_week: [{ week: "2026-W41", ...period }],
+      by_language: [{ locale: "lg", asked: 3, response_rate: 66.7, ...period }],
     },
-    previous: { asked: 2, average: 4, csat_pct: 50 },
+    previous: { asked: 2, answered: 2, response_rate: 100, average: spoken ? null : 4, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 },
     total: 2,
     limit: 25,
     offset: 0,
     ratings: [
-      rating("low", 2, ["u-okello", "Officer Okello"], { comment: "Took too long to answer." }),
+      rating("low", 2, ["u-okello", "Officer Okello"], { comment: spoken ? "It didn't help me" : "Took too long to answer." }),
       rating("high", 5, ["u-nakato", "Officer Nakato"]),
     ],
   };
@@ -267,7 +279,9 @@ async function stubQualityAudit(page: Page) {
   await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
     route.fulfill({ json: { summary: q.summary, page: q.page } }),
   );
-  await page.route("**/api/v1/admin/quality/ratings?**", (route) => route.fulfill({ json: ratingsFixture() }));
+  await page.route("**/api/v1/admin/quality/ratings?**", (route) =>
+    route.fulfill({ json: ratingsFixture(new URL(route.request().url()).searchParams.get("source") || undefined) }),
+  );
 }
 
 /**
@@ -530,6 +544,45 @@ test.describe("Staff UI on Chromium", () => {
       await expect(chat.getByRole("textbox")).toHaveCount(0);
       await expect(page).toHaveURL(/tab=officer-chat.*ticket=tkt-low|ticket=tkt-low.*tab=officer-chat/);
     });
+
+    test("audits what callers said about the AI, as a whole", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      await page.goto("/admin/quality?tab=ai-calls");
+      await expect(page.getByRole("tab", { name: "AI on calls" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByLabel("Callers' review of the AI summary")).toContainText("Said the AI helped");
+      await expect(page.getByRole("list", { name: "What callers said, by when they were asked" })).toContainText(
+        "While being transferred to an officer",
+      );
+      const said = page.locator(".qa-said");
+      await expect(said.first()).toContainText("It didn't help me");
+      // The general opinion: no call to open from here.
+      await expect(said.first().getByRole("button")).toHaveCount(0);
+    });
+
+    test("audits officer calls: opens the call read-only with the caller's satisfaction", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      const now = Math.floor(Date.now() / 1000);
+      await page.route("**/api/v1/admin/calls/call-low", (route) =>
+        route.fulfill({
+          json: {
+            call_id: "call-low", conversation_id: "conv-low", locale: "en", status: "ended", started_at: now - 900,
+            outcome: "resolved", wrapup_note: "Explained the refund timeline.", transferred: true,
+            turns: [
+              { id: "t1", call_id: "call-low", seq: 1, speaker: "caller", kind: "utterance", text: "Where is my refund?",
+                low_conf_words: [], mean_word_prob: 0.9, faithfulness: null, latencies: {}, created_at: now - 880 },
+            ],
+          },
+        }),
+      );
+      await page.goto("/admin/quality?tab=officer-calls");
+      await expect(page.getByLabel("Officer call satisfaction summary")).toContainText("Caller gave an answer");
+      await page.locator(".qa-convs > li").first().getByRole("button").click();
+      const call = page.getByRole("article", { name: "Officer call" });
+      await expect(call).toContainText("Caller satisfaction: 2/5 · Dissatisfied");
+      await expect(call).toContainText("Explained the refund timeline.");
+      await expect(call).toContainText("Where is my refund?");
+      await expect(page).toHaveURL(/call=call-low/);
+    });
   });
 
   test.describe("/agent queue", () => {
@@ -641,6 +694,8 @@ test.describe("Staff UI on Chromium", () => {
         "/admin",
         "/admin/quality",
         "/admin/quality?tab=officer-chat",
+        "/admin/quality?tab=ai-calls",
+        "/admin/quality?tab=officer-calls",
         "/admin/flags",
         "/admin/overrides",
         "/admin/outbox",

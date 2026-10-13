@@ -213,6 +213,12 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
         room.state.officer_id = officer_id
         room.state.officer_name = name
         room.state.bridged_at = now
+    # The officer came before the caller answered the review asked as the
+    # transfer began: it is unanswered (review.py), never left pending.
+    if room.state.review_state == "asking_transfer":
+        from .review import settle
+
+        settle(room)
     # Answered: whatever an earlier unanswered transfer left owing is settled.
     update_call(room.call_id, status="bridged", officer_id=officer_id, bridged_at=now,
                 needs_callback=False, callback_reason="")
@@ -429,6 +435,27 @@ async def transfer(
         return {"transferred": True, "call_id": call_id, "target_team": team}
 
 
+def _caller_satisfaction(score: Any, status: str | None) -> tuple[str, int | None] | None:
+    """What the officer recorded of the caller's satisfaction: ``(status, score)``, or None.
+
+    ``answered`` with a score of 1–5, or ``not_said`` (the caller did not say)
+    with none. Neither given is a wrap-up from before the field existed, and
+    records nothing.
+    """
+    status = (status or "").strip() or None
+    if score is None and status is None:
+        return None
+    if status in (None, "answered"):
+        if isinstance(score, bool) or not isinstance(score, int) or not 1 <= score <= 5:
+            raise DeskError(400, "caller_satisfaction must be a whole number from 1 to 5")
+        return "answered", score
+    if status == "not_said":
+        if score is not None:
+            raise DeskError(400, "A caller who didn't say has no caller_satisfaction score")
+        return "no_answer", None
+    raise DeskError(400, "caller_satisfaction_status must be 'answered' or 'not_said'")
+
+
 async def wrapup(
     call_id: str,
     officer_id: str,
@@ -437,14 +464,26 @@ async def wrapup(
     ticket_action: str | None = None,
     rating: int | None = None,
     rating_note: str | None = None,
+    caller_satisfaction: Any = None,
+    caller_satisfaction_status: str | None = None,
+    officer_name: str = "",
 ) -> dict[str, Any]:
-    """Save call outcome and wrap-up notes, apply ticket action, restore presence."""
+    """Save call outcome and wrap-up notes, apply ticket action, restore presence.
+
+    *caller_satisfaction* is what the caller told the officer when asked
+    before the call ended, on the same 5-level scale taxpayers rate officer
+    chats with; it is the officer's service the administrators audit
+    (``service_ratings`` ``call_officer_csat``). *rating* is separate: the
+    officer's own rating of how the AI handled the call before the transfer.
+    A wrap-up posted again keeps the first satisfaction recorded.
+    """
     call = get_call(call_id)
     if not call:
         raise DeskError(404, "Call not found")
     valid_outcomes = {"resolved", "follow_up", "callback", "referred", "abandoned", "ai_resolved"}
     if outcome not in valid_outcomes:
         raise DeskError(400, f"Invalid outcome '{outcome}'")
+    satisfaction = _caller_satisfaction(caller_satisfaction, caller_satisfaction_status)
 
     now = time.time()
     needs_callback = 1 if outcome == "callback" else 0
@@ -466,6 +505,32 @@ async def wrapup(
             save_call_review(call_id, rating=int(rating), note=rating_note or "")
         except Exception:
             logger.debug("Failed saving review on wrapup for %s", call_id, exc_info=True)
+
+    satisfaction_recorded = False
+    if satisfaction is not None:
+        from .. import service_ratings
+
+        status, score = satisfaction
+        try:
+            service_ratings.request(
+                "call_officer_csat",
+                call_id=call_id,
+                channel="call",
+                subject="officer",
+                tenant_id=call.get("tenant_id") or "default",
+                conversation_id=call.get("conversation_id") or "",
+                officer_id=officer_id or "",
+                officer_name=officer_name,
+                team=call.get("target_team") or "",
+                topic=call.get("topic") or "",
+                locale=call.get("locale") or "",
+                user_id=call.get("user_id") or "",
+            )
+            satisfaction_recorded = service_ratings.answer(
+                "call_officer_csat", call_id=call_id, status=status, score=score
+            )
+        except Exception:
+            logger.warning("Failed recording caller satisfaction on wrapup for %s", call_id, exc_info=True)
 
     ticket_id = call.get("ticket_id")
     if ticket_action:
@@ -496,7 +561,14 @@ async def wrapup(
         "outcome": outcome,
         "officer_id": officer_id,
     })
-    return {"wrapped_up": True, "call_id": call_id, "outcome": outcome}
+    result: dict[str, Any] = {"wrapped_up": True, "call_id": call_id, "outcome": outcome}
+    if satisfaction is not None:
+        result["caller_satisfaction"] = {
+            "status": satisfaction[0],
+            "score": satisfaction[1],
+            "recorded": satisfaction_recorded,
+        }
+    return result
 
 
 async def callback_done(call_id: str, officer_id: str, note: str = "") -> dict[str, Any]:

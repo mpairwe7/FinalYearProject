@@ -53,6 +53,12 @@ def quality_summary(request: Request, days: int = _DAYS) -> dict[str, Any]:
         "period_days": days,
         "ai_chat": quality_audit.ai_chat_summary(days, tenant_id=tenant),
         "officer_chat": service_ratings.headline("chat_officer_csat", days, tenant_id=tenant),
+        # The caller's spoken review of the AI: at goodbye, and while transferring.
+        "ai_calls": {
+            "end": service_ratings.headline("call_ai_review_end", days, tenant_id=tenant),
+            "transfer": service_ratings.headline("call_ai_review_transfer", days, tenant_id=tenant),
+        },
+        "officer_calls": service_ratings.headline("call_officer_csat", days, tenant_id=tenant),
     }
 
 
@@ -116,10 +122,14 @@ def quality_ratings(
     score: int | None = Query(None, ge=1, le=5),
     officer: str = Query("", max_length=128),
     status: str = Query("", pattern=r"^(|answered|skipped|no_answer)$"),
+    sentiment: str = Query("", pattern=r"^(|positive|neutral|negative|unclear)$"),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0, le=10_000),
 ) -> dict[str, Any]:
-    """Satisfaction ratings of one stream: figures, per officer, per week, and the ratings, lowest first.
+    """Ratings of one stream: figures, per officer, week and language, and the ratings, lowest first.
+
+    The officer streams are rated 1–5; the caller's spoken review of the AI is
+    rated in words (``sentiment``), and sorts negative first.
 
     The list never names the taxpayer; each rating names the ticket or call it
     rates, which the drill-down opens through its own audited read.
@@ -134,6 +144,7 @@ def quality_ratings(
         score=score,
         officer_id=officer,
         status=status,
+        sentiment=sentiment,
         limit=limit,
         offset=offset,
     )

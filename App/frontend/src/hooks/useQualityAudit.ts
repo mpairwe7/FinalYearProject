@@ -7,6 +7,7 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../lib/queryKeys";
 import { analyticsApi, type AiChatQuery, type RatingsQuery } from "../services/analyticsApi";
+import { callsApi } from "../services/callsApi";
 
 export function useQualitySummary(days = 30) {
   return useQuery({
@@ -54,11 +55,12 @@ export function useRatingsAudit({
   score = null,
   officer = "",
   status = "",
+  sentiment = "",
   limit = 25,
 }: RatingsQuery = {}) {
   return useQuery({
-    queryKey: queryKeys.quality.ratings(source, days, score ?? null, officer, status, limit),
-    queryFn: () => analyticsApi.qualityRatings({ source, days, score, officer, status, limit }),
+    queryKey: queryKeys.quality.ratings(source, days, score ?? null, officer, status, limit, sentiment),
+    queryFn: () => analyticsApi.qualityRatings({ source, days, score, officer, status, sentiment, limit }),
     staleTime: 60_000,
     placeholderData: keepPreviousData,
     retry: 1,
@@ -75,6 +77,18 @@ export function useAuditedTicket(ticketId: string | null) {
     queryKey: queryKeys.quality.ticket(ticketId || ""),
     queryFn: () => analyticsApi.ticket(ticketId as string),
     enabled: Boolean(ticketId),
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 1,
+  });
+}
+
+/** One call as the audit opens it: read once, like a case (each read is recorded). */
+export function useAuditedCall(callId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.quality.call(callId || ""),
+    queryFn: () => callsApi.getCall(callId as string),
+    enabled: Boolean(callId),
     staleTime: 5 * 60_000,
     refetchOnWindowFocus: false,
     retry: 1,
