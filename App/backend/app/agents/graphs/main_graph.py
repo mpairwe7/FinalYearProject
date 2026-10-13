@@ -24,6 +24,7 @@ from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
 from ...text_signals import ABSTENTION_REPLY, CLARIFICATION_PROMPT, NO_HITS_REPLY
 from ..state import AgentRoute
+from .compactor import compact_tool_observation, node_context_compactor
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
 
@@ -106,7 +107,7 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
     if not flags.is_enabled("tool_rag"):
         # Flag off → accept the supervisor's raw whitelist
         state.plan = [t for t in state.plan if t in eligible]
-        return NodeResult(next_node="act")
+        return NodeResult(next_node="human_gate")
 
     selector = ToolRAGSelector()
     selection = selector.select(
@@ -123,6 +124,18 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
         seen.add(name)
         merged.append(name)
     state.plan = merged
+    return NodeResult(next_node="human_gate")
+
+
+def node_human_gate(state: AgentGraphState) -> NodeResult:
+    """Human-in-the-loop gate: interrupts or pauses execution if action requires taxpayer consent."""
+    if state.pending_action and state.pending_action.requires_consent and not state.pending_action.authorized:
+        state.outcome = GraphOutcome.WAITING_USER
+        state.reply = (
+            f"Action requires taxpayer authorization: {state.pending_action.description}. "
+            "Please confirm to proceed."
+        )
+        return NodeResult(next_node="act", outcome=GraphOutcome.WAITING_USER, note="awaiting taxpayer approval")
     return NodeResult(next_node="act")
 
 
@@ -303,7 +316,8 @@ def node_act(state: AgentGraphState) -> NodeResult:
             granted_purposes=state.granted_purposes,
             iteration=state.iterations,
         )
-        state.budget.record(tool_name, arguments, result.result)
+        compacted_obs = compact_tool_observation(result.result)
+        state.budget.record(tool_name, arguments, compacted_obs)
         state.tool_calls.append(
             {
                 "call_id": result.call_id,
@@ -312,7 +326,7 @@ def node_act(state: AgentGraphState) -> NodeResult:
                 "duration_ms": result.duration_ms,
             }
         )
-        state.observations.append(result.result)
+        state.observations.append(compacted_obs)
 
     return NodeResult(next_node="observe")
 
@@ -498,8 +512,10 @@ def build_main_graph(checkpointer: Any = None) -> GraphRuntime:
 
     actual_checkpointer = DurableCheckpointStore() if checkpointer is None else checkpointer
     nodes: dict[str, GraphNode] = {
+        "compactor": node_context_compactor,
         "route": node_route,
         "tool_rag_select": node_tool_rag_select,
+        "human_gate": node_human_gate,
         "act": node_act,
         "observe": node_observe,
         "retrieve": node_retrieve,
@@ -507,4 +523,4 @@ def build_main_graph(checkpointer: Any = None) -> GraphRuntime:
         "reflect": node_reflect,
         "respond": node_respond,
     }
-    return GraphRuntime(nodes=nodes, entry="route", max_steps=12, checkpointer=actual_checkpointer)
+    return GraphRuntime(nodes=nodes, entry="compactor", max_steps=14, checkpointer=actual_checkpointer)

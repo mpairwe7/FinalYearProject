@@ -128,7 +128,7 @@ User Query
 | Dense model | `BAAI/bge-m3` (1024-dim, multilingual, MTEB 63.0). Set via `DENSE_MODEL` + `DENSE_DIM` env vars. |
 | Sparse | BM25, encoded asymmetrically: documents carry term saturation, queries carry IDF, and their Qdrant dot product is the BM25 score. `bm25_state.json` stamps `encoding_version`; a state from an older index is queried its own way so an un-rebuilt collection keeps its ranking. |
 | Fusion | Distribution-Based Score Fusion (DBSF) via Qdrant query API by default (`HYBRID_FUSION=dbsf`, G127), outperforming RRF k=2 by +6 pts Luganda and +4 pts Swahili; falls back to RRF if configured. Graph leg continues to fuse via `rrf_fuse_ranked_lists` with `RRF_K=60`. |
-| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Governed by `RERANK_ENABLED=true` and dynamically by `flags.is_enabled("reranker")`. GPU compose overlays (`docker-compose.local-sunflower.yml`, `docker-compose.local-qwen.yml`) restore dense embeddings and reranking on GPU (`cuda:0`, G126). Outputs clean single-sigmoid probabilities (G129). |
+| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Governed by `RERANK_ENABLED=true` and dynamically by `flags.is_enabled("reranker")`. GPU compose overlay (`docker-compose.local-sunflower.yml`) restores dense embeddings and reranking on GPU (`cuda:0`, G126). Outputs clean single-sigmoid probabilities (G129). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 
@@ -138,7 +138,7 @@ User Query
 |---------|---------|---------|
 | Model | `Sunbird/Sunflower-14B-FP8` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
 | Backend | `local` (HF transformers) | `LLM_BACKEND` (`local` or `vllm`) |
-| Context window | 8192 tokens | `LLM_CONTEXT_WINDOW` |
+| Context window | 131072 tokens (128K–131K with YaRN) | `LLM_CONTEXT_WINDOW` |
 | Device | `auto` (GPU if available) | `LLM_DEVICE` |
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
@@ -241,7 +241,7 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   every older one. Before, the summary started at turn seven and turns four to
   six reached the model in neither.
 - **Prompt budget under vLLM (G120).** `llm._fit_to_context` asks the server for
-  its served window (`/v1/models` `max_model_len`, 4,096 for Sunflower) and the
+  its served window (`/v1/models` `max_model_len`, up to 131,072 for Sunflower with YaRN) and the
   prompt's exact token count (`/tokenize`); over budget it drops the oldest
   replayed exchanges whole, then shortens the passages, never the question or
   the answer-language instruction. The streamed answer, which had no budget,

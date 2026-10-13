@@ -208,14 +208,21 @@ services:
   # Requires an NVIDIA GPU + nvidia-container-toolkit on the host.
   # ---------------------------------------------------------------------------
   vllm:
-    image: vllm/vllm-openai:v0.6.6
+    image: vllm/vllm-openai:v0.8.5
     container_name: ura-vllm
     command: >
       --model ${LLM_MODEL:-Sunbird/Sunflower-14B-FP8}
       --port 8001
-      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-131072}
+      --hf-overrides '{"rope_scaling": {"factor": 4.0, "original_max_position_embeddings": 32768, "rope_type": "yarn", "type": "yarn"}, "max_position_embeddings": 131072}'
       --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.85}
       --dtype ${VLLM_DTYPE:-auto}
+      --enable-prefix-caching
+      --enable-chunked-prefill
+      --max-num-batched-tokens ${VLLM_MAX_BATCH_TOKENS:-16384}
+      --max-num-seqs ${VLLM_MAX_SEQS:-64}
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
     ports:
       - "${VLLM_PORT:-8001}:8001"
     environment:
@@ -240,52 +247,6 @@ services:
               capabilities: [gpu]
     profiles:
       - vllm
-    networks:
-      - ura-network
-
-  # ---------------------------------------------------------------------------
-  # vLLM Quantized — AWQ/GPTQ quantized model serving (profile: vllm-quantized)
-  # Enable with: docker compose --profile vllm-quantized up
-  # Serves AWQ 4-bit quantized models for 40% lower memory + 2x throughput.
-  # ---------------------------------------------------------------------------
-  vllm-quantized:
-    image: vllm/vllm-openai:v0.6.6
-    container_name: ura-vllm-quantized
-    command: >
-      --model ${LLM_QUANTIZED_MODEL:-Qwen/Qwen3-8B-AWQ}
-      --port 8002
-      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
-      --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.90}
-      --dtype auto
-      --quantization ${VLLM_QUANTIZATION:-awq}
-      --enable-prefix-caching
-      --max-num-batched-tokens ${VLLM_MAX_BATCH_TOKENS:-16384}
-      --max-num-seqs ${VLLM_MAX_SEQS:-64}
-    ports:
-      - "${VLLM_QUANTIZED_PORT:-8002}:8002"
-    environment:
-      - HF_TOKEN=${HF_TOKEN:-}
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
-    volumes:
-      - hf_cache:/root/.cache/huggingface
-      - ./artifacts/quantized:/app/quantized:ro
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8002/v1/models', timeout=5).status == 200 else 1)"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 180s
-    restart: unless-stopped
-    ipc: host
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
-    profiles:
-      - vllm-quantized
     networks:
       - ura-network
 

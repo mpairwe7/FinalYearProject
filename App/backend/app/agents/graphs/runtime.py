@@ -79,6 +79,11 @@ class DurableCheckpointStore(CheckpointStore):
         except Exception as exc:  # noqa: BLE001
             logger.debug("DurableCheckpointStore save error: %s", exc)
 
+    async def async_save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        import asyncio
+
+        await asyncio.to_thread(self.save_checkpoint, thread_id, step, node_name, state_dict)
+
     def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
         try:
             from ...database import get_agent_checkpoint
@@ -87,6 +92,11 @@ class DurableCheckpointStore(CheckpointStore):
         except Exception as exc:  # noqa: BLE001
             logger.debug("DurableCheckpointStore load error: %s", exc)
             return None
+
+    async def async_load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        import asyncio
+
+        return await asyncio.to_thread(self.load_checkpoint, thread_id)
 
 
 class GraphRuntime:
@@ -181,6 +191,8 @@ class GraphRuntime:
 
             if result.outcome is not None:
                 state.outcome = result.outcome
+            if result.outcome == GraphOutcome.WAITING_USER:
+                break
             if result.next_node == END:
                 break
             current = result.next_node
@@ -260,9 +272,83 @@ class GraphRuntime:
 
             if result.outcome is not None:
                 state.outcome = result.outcome
+            if result.outcome == GraphOutcome.WAITING_USER:
+                break
             if result.next_node == END:
                 break
             current = result.next_node
             steps += 1
 
         return state
+
+    def resume(
+        self,
+        thread_id: str,
+        resume_payload: dict[str, Any] | None = None,
+        start_node: str | None = None,
+    ) -> AgentGraphState:
+        """Resume a suspended or interrupted graph execution from its saved checkpoint."""
+        if not self._checkpointer:
+            raise RuntimeError("Cannot resume execution without a configured checkpointer")
+        data = self._checkpointer.load_checkpoint(thread_id)
+        if not data:
+            raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+
+        state = AgentGraphState.from_dict(data)
+        if resume_payload:
+            if state.pending_action:
+                if resume_payload.get("approved"):
+                    state.pending_action.authorized = True
+                    state.outcome = GraphOutcome.ANSWERED
+                else:
+                    state.pending_action.authorized = False
+                    state.outcome = GraphOutcome.ESCALATED
+                    state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+
+        entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
+        if entry not in self._nodes:
+            entry = self._entry
+
+        original_entry = self._entry
+        try:
+            self._entry = entry
+            return self.run(state, thread_id=thread_id)
+        finally:
+            self._entry = original_entry
+
+    async def aresume(
+        self,
+        thread_id: str,
+        resume_payload: dict[str, Any] | None = None,
+        start_node: str | None = None,
+    ) -> AgentGraphState:
+        """Asynchronously resume an interrupted graph execution from its checkpoint."""
+        if not self._checkpointer:
+            raise RuntimeError("Cannot resume execution without a configured checkpointer")
+        import asyncio
+
+        data = await asyncio.to_thread(self._checkpointer.load_checkpoint, thread_id)
+        if not data:
+            raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+
+        state = AgentGraphState.from_dict(data)
+        if resume_payload:
+            if state.pending_action:
+                if resume_payload.get("approved"):
+                    state.pending_action.authorized = True
+                    state.outcome = GraphOutcome.ANSWERED
+                else:
+                    state.pending_action.authorized = False
+                    state.outcome = GraphOutcome.ESCALATED
+                    state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+
+        entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
+        if entry not in self._nodes:
+            entry = self._entry
+
+        original_entry = self._entry
+        try:
+            self._entry = entry
+            return await self.arun(state, thread_id=thread_id)
+        finally:
+            self._entry = original_entry

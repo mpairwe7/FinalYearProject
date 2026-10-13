@@ -34,7 +34,7 @@ Environment variables:
     LLM_MODEL               – HF model ID (default: Sunbird/Sunflower-14B-FP8)
     LLM_MODEL_REVISION      – HF revision/commit SHA to pin (default: None)
     LLM_TRUST_REMOTE_CODE   – "true" to allow model-defined Python (default: false)
-    LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192)
+    LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 131072)
     LLM_TEMPERATURE         – generation temperature (default: 0.2)
     LLM_MAX_TOKENS          – max new tokens (default: 512)
     LLM_REPETITION_PENALTY  – repetition penalty, both paths (default: 1.1)
@@ -76,7 +76,7 @@ LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
 LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
-LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
+LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "131072"))
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
@@ -1583,6 +1583,7 @@ def generate(
                     repetition_penalty=LLM_REPETITION_PENALTY,
                     no_repeat_ngram_size=LLM_NO_REPEAT_NGRAM_SIZE,
                     do_sample=LLM_TEMPERATURE > 0,
+                    use_cache=True,
                     pad_token_id=_tokenizer.eos_token_id,
                 )
 
@@ -1594,6 +1595,13 @@ def generate(
     except Exception:
         logger.exception("LLM generation failed")
         return ""
+    finally:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 def classify_choice(reply: str, options: list[str]) -> str:
@@ -1656,6 +1664,7 @@ def classify_choice(reply: str, options: list[str]) -> str:
                     **inputs,
                     max_new_tokens=12,  # an option name and nothing else
                     do_sample=False,
+                    use_cache=True,
                     pad_token_id=_tokenizer.eos_token_id,
                 )
             text = _tokenizer.decode(
@@ -1665,6 +1674,13 @@ def classify_choice(reply: str, options: list[str]) -> str:
     except Exception:  # noqa: BLE001 — same: degrade to the deterministic result
         logger.debug("local choice classification failed", exc_info=True)
         return ""
+    finally:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 # One-shot exemplars for prompted MT into English, keyed by source locale.
@@ -1870,6 +1886,7 @@ def translate_text(
                     top_p=0.9,
                     do_sample=True,
                     repetition_penalty=1.3,
+                    use_cache=True,
                     pad_token_id=_tokenizer.eos_token_id,
                 )
 
@@ -1879,6 +1896,13 @@ def translate_text(
     except Exception:
         logger.exception("Translation generation failed")
         return ""
+    finally:
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -2760,6 +2784,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                             temperature=max(LLM_TEMPERATURE, 0.01),
                             top_p=0.95,
                             do_sample=LLM_TEMPERATURE > 0,
+                            use_cache=True,
                             pad_token_id=_tokenizer.eos_token_id,
                         )
                 gen_ids = output_ids[0][inputs["input_ids"].shape[1] :]
@@ -2767,6 +2792,13 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             except Exception:
                 logger.exception("generate_with_tools: iteration %d generation failed", iteration)
                 break
+            finally:
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
 
             parsed_calls = _parse_tool_calls(response)
 
