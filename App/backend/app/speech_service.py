@@ -2055,7 +2055,10 @@ class SpeechModel:
 
                 import numpy as np
 
-                samples, sr = self._spark_tts.synthesize(text, language=language)
+                spark_lang = language if language in spark_tts_salt.SPARK_TTS_SPEAKER_IDS else (
+                    "en" if "en" in spark_tts_salt.SPARK_TTS_SPEAKER_IDS else "lg"
+                )
+                samples, sr = self._spark_tts.synthesize(text, language=spark_lang)
                 pcm16 = (
                     np.asarray(samples, dtype="float32") * 32768
                 ).clip(-32768, 32767).astype("int16")
@@ -2162,12 +2165,14 @@ class SpeechModel:
         except Exception:
             logger.debug("edge-tts failed", exc_info=True)
 
-        # ③ Sunbird cloud TTS — English only by this point; every other locale
-        #    already tried it (and Spark-TTS-SALT before it) at ⓪ or ①.75, and
-        #    the gates are mutually exclusive so Sunbird is still attempted at
-        #    most once per request.
+        # ③ Sunbird cloud TTS or local neural fallback — English only by this point;
+        #    every other locale already tried it (and Spark-TTS-SALT before it)
+        #    at ⓪ or ①.75.
         if not prefer_native_voice and (language or "en") == "en":
             result = _try_sunbird()
+            if result:
+                return result
+            result = _try_spark_salt()
             if result:
                 return result
 

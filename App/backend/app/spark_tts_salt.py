@@ -112,7 +112,10 @@ SPARK_TTS_SPEAKER_IDS: dict[str, int] = {}
 for _locale, _default_id in (("lg", 248), ("sw", 246), ("ach", 241), ("nyn", 243)):
     _override = os.getenv(f"SPARK_TTS_SPEAKER_{_locale.upper()}", "")
     SPARK_TTS_SPEAKER_IDS[_locale] = int(_override) if _override else _default_id
-del _locale, _default_id, _override
+_en_override = os.getenv("SPARK_TTS_SPEAKER_EN", "").strip()
+if _en_override:
+    SPARK_TTS_SPEAKER_IDS["en"] = int(_en_override)
+del _locale, _default_id, _override, _en_override
 
 
 def speaker_id_for(language: str) -> int:

@@ -1,9 +1,9 @@
 {
   "meta": {
-    "timestamp": "2026-10-08T20:32:20Z",
+    "timestamp": "2026-10-13T22:31:19Z",
     "total_scenarios": 50000,
-    "total_duration_seconds": 335.76,
-    "throughput_scenarios_per_sec": 148.9,
+    "total_duration_seconds": 76.36,
+    "throughput_scenarios_per_sec": 654.8,
     "target_gateway": "https://struttingly-nongeological-briella.ngrok-free.dev"
   },
   "accuracy": {
@@ -12,37 +12,37 @@
     "error_count": 0
   },
   "algorithm_latency_microseconds": {
-    "p50_us": 24.0,
-    "p90_us": 917.1,
-    "p95_us": 942.4,
-    "p99_us": 1000.8,
-    "mean_us": 366.7
+    "p50_us": 23.0,
+    "p90_us": 921.4,
+    "p95_us": 950.9,
+    "p99_us": 1028.9,
+    "mean_us": 367.7
   },
   "live_gateway_probes": {
-    "probes_evaluated": 28,
-    "probes_passed": 28,
+    "probes_evaluated": 24,
+    "probes_passed": 24,
     "gateway_accuracy_pct": 100.0,
-    "gateway_p50_latency_ms": 1275.1,
-    "gateway_p95_latency_ms": 32783.0
+    "gateway_p50_latency_ms": 519.1,
+    "gateway_p95_latency_ms": 883.8
   },
   "language_breakdown": {
     "en": {
       "volume": 20000,
       "correct": 20000,
       "accuracy_pct": 100.0,
-      "mean_latency_us": 885.4
+      "mean_latency_us": 889.8
     },
     "lg": {
       "volume": 15000,
       "correct": 15000,
       "accuracy_pct": 100.0,
-      "mean_latency_us": 20.1
+      "mean_latency_us": 19.1
     },
     "sw": {
       "volume": 15000,
       "correct": 15000,
       "accuracy_pct": 100.0,
-      "mean_latency_us": 21.5
+      "mean_latency_us": 20.2
     }
   },
   "confusion_matrix": {

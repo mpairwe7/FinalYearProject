@@ -1,39 +1,39 @@
 {
   "summary": {
     "total_scenarios": 500,
-    "correct_classifications": 500,
-    "overall_accuracy_pct": 100.0,
-    "total_duration_s": 614.96,
-    "throughput_qps": 0.81,
-    "http_success_rate_pct": 100.0
+    "correct_classifications": 499,
+    "overall_accuracy_pct": 99.8,
+    "total_duration_s": 199.48,
+    "throughput_qps": 2.51,
+    "http_success_rate_pct": 99.8
   },
   "performance_percentiles_ms": {
-    "p50": 1022.6,
-    "p90": 14189.8,
-    "p95": 21967.9,
-    "p99": 36116.9,
-    "mean": 4304.6
+    "p50": 855.5,
+    "p90": 11888.4,
+    "p95": 19622.6,
+    "p99": 36536.2,
+    "mean": 3658.3
   },
   "language_breakdown": {
     "en": {
       "count": 170,
-      "correct": 170,
-      "accuracy_pct": 100.0,
-      "avg_lat_ms": 772.4,
-      "http_success_pct": 100.0
+      "correct": 169,
+      "accuracy_pct": 99.41,
+      "avg_lat_ms": 793.7,
+      "http_success_pct": 99.41
     },
     "lg": {
       "count": 165,
       "correct": 165,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 6382.1,
+      "avg_lat_ms": 4999.5,
       "http_success_pct": 100.0
     },
     "sw": {
       "count": 165,
       "correct": 165,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 5866.4,
+      "avg_lat_ms": 5249.0,
       "http_success_pct": 100.0
     }
   },
@@ -42,43 +42,43 @@
       "count": 73,
       "correct": 73,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 5043.2
+      "avg_lat_ms": 3783.5
     },
     "Domestic Taxes (PAYE & PWD)": {
       "count": 70,
-      "correct": 70,
-      "accuracy_pct": 100.0,
-      "avg_lat_ms": 4946.8
+      "correct": 69,
+      "accuracy_pct": 98.57,
+      "avg_lat_ms": 3523.7
     },
     "Excise Duty & Specific Rates": {
       "count": 72,
       "correct": 72,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 4705.1
+      "avg_lat_ms": 4807.7
     },
     "International Taxation & Corporate": {
       "count": 70,
       "correct": 70,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 4014.9
+      "avg_lat_ms": 3522.1
     },
     "Natural Conversational & Civic Intelligence": {
       "count": 70,
       "correct": 70,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 3624.6
+      "avg_lat_ms": 3677.6
     },
     "Tax Procedures & Disputes (TPCA)": {
       "count": 72,
       "correct": 72,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 4294.9
+      "avg_lat_ms": 3587.3
     },
     "Value Added Tax (VAT & Thresholds)": {
       "count": 73,
       "correct": 73,
       "accuracy_pct": 100.0,
-      "avg_lat_ms": 3494.5
+      "avg_lat_ms": 2666.4
     }
   },
   "length_breakdown": {
@@ -88,12 +88,21 @@
     },
     "medium (8-18 words)": {
       "count": 398,
-      "accuracy_pct": 100.0
+      "accuracy_pct": 99.75
     },
     "long (>18 words)": {
       "count": 0,
       "accuracy_pct": 0.0
     }
   },
-  "mismatches": []
+  "mismatches": [
+    {
+      "id": "REL-EN-168",
+      "query": "I need to know: Who made you and what is your role?",
+      "expected": "en",
+      "reported": "unknown",
+      "classified": "unknown",
+      "domain": "Domestic Taxes (PAYE & PWD)"
+    }
+  ]
 }
