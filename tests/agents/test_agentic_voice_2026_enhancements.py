@@ -154,6 +154,14 @@ def test_spoken_figure_guard_and_dictation_pauses():
         )
         assert bad_res.ok is False
         assert bad_res.status == "fallback_text_only"
+
+        # Vernacular spoken-word realization from clean_text_for_speech passes
+        from app.speech_normalization import clean_text_for_speech
+
+        lg_source = "VAT ku UGX 2,000,000 guli 18% (UGX 360,000)."
+        lg_spoken = clean_text_for_speech(lg_source, locale="lg")
+        lg_res = verify_spoken_figures(lg_source, lg_spoken, locale="lg")
+        assert lg_res.ok is True
     finally:
         flags.clear("spoken_figure_guard")
 
