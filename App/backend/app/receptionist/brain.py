@@ -202,9 +202,9 @@ def is_human_request(text: str) -> bool:
 #: the whole turn, never a word inside a new question ("Yes, and what is the
 #: VAT rate?" is a question). English, Luganda, Swahili.
 _OFFER_ACCEPT_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\W*(?:yes|yeah|yep|sure|ok(?:ay)?|alright|please|go\s+ahead|connect\s+me|please\s+do"
-    r"|yee|kale|weewaawo|nsaba|ndiyo|ndio|sawa|naam|tafadhali)"
-    r"(?:\W+(?:yes|please|sure|thanks|thank\s+you|go\s+ahead|connect\s+me|do|nsaba|webale|tafadhali|asante))*\W*$",
+    r"^\W*(?:yes|yeah|yep|sure|ok(?:ay)?|alright|please|go\s+ahead|connect\s+me|please\s+do|confirm"
+    r"|yee|kale|weewaawo|nsaba|kakasa|ndiyo|ndio|sawa|naam|tafadhali|thibitisha)"
+    r"(?:\W+(?:yes|please|sure|thanks|thank\s+you|go\s+ahead|connect\s+me|do|confirm|nsaba|webale|kakasa|tafadhali|asante|thibitisha))*\W*$",
     re.IGNORECASE,
 )
 _OFFER_DECLINE_RE: Final[re.Pattern[str]] = re.compile(
@@ -512,6 +512,26 @@ class UraReceptionistBrain(LLMService):
 
         mean_prob = round(sum(word_probs) / len(word_probs), 3) if word_probs else None
 
+        # Acoustic & lexical prosody analysis (2026 Emotion-Aware Prosody)
+        if flags.is_enabled("emotion_aware_prosody", subject=self.room.state.user_id or None):
+            try:
+                from .prosody import analyze_utterance_prosody
+
+                profile = analyze_utterance_prosody(
+                    getattr(self.room.state, "last_utterance_pcm", b""),
+                    sample_rate=16000,
+                    text=user_text,
+                    locale=language,
+                    clarifications_asked=self.room.state.clarifications_asked,
+                )
+                self.room.state.caller_affect = profile.caller_affect
+                self.room.state.recommended_speech_rate = profile.recommended_speech_rate
+                self.room.state.prosody_tag = profile.prosody_tag
+                if profile.caller_affect in ("frustrated", "urgent_distress"):
+                    self.room.state.speech_rate_slow = True
+            except Exception:
+                logger.debug("Prosody analysis skipped on call %s", self.room.call_id, exc_info=True)
+
         # The answer to "was this call helpful?" is recorded as a review, not
         # an utterance: "useless!!" there is an opinion of the call, and the
         # at-risk watch (risk.py) must not read it as a caller in distress.
@@ -587,6 +607,53 @@ class UraReceptionistBrain(LLMService):
             # Talked over before it was heard, then a new question: the offer
             # to an at-risk caller was never made, so it comes with this answer.
             self.room.state.risk_offer_made = False
+
+        # 0c. Spoken Confirmation Challenge Binding (2026 Voice Agentic Workflows)
+        if (
+            self.room.state.pending_confirm_challenge
+            and flags.is_enabled("voice_agentic_workflows", subject=self.room.state.user_id or None)
+        ):
+            import os
+
+            min_conf = float(os.getenv("VOICE_CONFIRM_MIN_ASR_CONF", "0.75"))
+            if _OFFER_DECLINE_RE.search(user_text):
+                self.room.state.pending_confirm_challenge = ""
+                self.room.state.pending_confirm_action = {}
+                await self._say_and_record(phrase("offer_declined", language), kind="notice")
+                return
+            if _OFFER_ACCEPT_RE.search(user_text):
+                if mean_prob is not None and mean_prob < min_conf:
+                    reprompt = {
+                        "lg": "Nsaba oddemu okukakasa nga oyogera bulungi: oyagala tukomekkereze ekikolwa kino?",
+                        "sw": "Tafadhali thibitisha tena kwa sauti wazi: je, tuendelee na hatua hii?",
+                        "en": "Please confirm clearly once more: should I proceed with this action?",
+                    }.get(language, "Please confirm clearly once more: should I proceed with this action?")
+                    await self._say_and_record(reprompt, kind="confirm")
+                    return
+                action_desc = str(self.room.state.pending_confirm_action.get("description") or "requested tax action")
+                self.room.state.pending_confirm_challenge = ""
+                self.room.state.pending_confirm_action = {}
+                confirmed_msg = {
+                    "lg": f"Webale, ekikolwa ({action_desc}) kikakasiddwa era kiwedde.",
+                    "sw": f"Asante, hatua ({action_desc}) imethibitishwa na kukamilika.",
+                    "en": f"Thank you, your {action_desc} has been confirmed and completed.",
+                }.get(language, f"Thank you, your {action_desc} has been confirmed and completed.")
+                try:
+                    from ..analytics import metrics
+
+                    metrics.inc(
+                        "autonomous_resolution_total",
+                        labels={
+                            "channel": "voice_call",
+                            "flow": "workflow",
+                            "locale": language,
+                            "outcome": "resolved",
+                        },
+                    )
+                except Exception:
+                    logger.debug("Spoken confirm resolution metric skipped", exc_info=True)
+                await self._say_and_record(confirmed_msg, kind="answer")
+                return
 
         # 1. Explicit Human Request
         if is_human_request(user_text):
@@ -1004,6 +1071,18 @@ class UraReceptionistBrain(LLMService):
         # of long-term memory (see get_memory_min_asr_confidence).
         memory_write = mean_word_prob is None or mean_word_prob >= get_memory_min_asr_confidence()
 
+        # Hybrid Speech Mode Classification (Path A S2S Fast vs Path B Cascaded Guarded)
+        try:
+            from .hybrid_s2s import classify_hybrid_speech_mode
+
+            classify_hybrid_speech_mode(
+                question,
+                locale=self.language,
+                subject=self.room.state.user_id or "",
+            )
+        except Exception:
+            logger.debug("Hybrid speech mode classification skipped", exc_info=True)
+
         # Start background task for LLM answer
         if self.language == "lg":
             gen_task = asyncio.create_task(self._generate_luganda_answer(question, memory_write=memory_write))
@@ -1131,12 +1210,71 @@ class UraReceptionistBrain(LLMService):
         # rather than imposed.
         uncertain = escalation_required or (0.35 <= confidence < 0.50)
         at_risk = not uncertain and self._call_at_risk()
+        reply_for_speech = bot_reply
+        if flags.is_enabled("emotion_aware_prosody", subject=self.room.state.user_id or None):
+            from .prosody import empathetic_opening_for
+
+            empathy_prefix = empathetic_opening_for(
+                getattr(self.room.state, "caller_affect", "calm"),
+                locale=self.language,
+            )
+            if empathy_prefix and not reply_for_speech.startswith(empathy_prefix.strip()[:12]):
+                reply_for_speech = f"{empathy_prefix}{reply_for_speech}"
+
         spoken_text = clean_text_for_speech(
-            self._spoken_answer(bot_reply, offer_officer=uncertain or at_risk, at_risk=at_risk),
+            self._spoken_answer(reply_for_speech, offer_officer=uncertain or at_risk, at_risk=at_risk),
             locale=self.language,
         )
 
+        # Spoken Figure Fidelity Guard & Dictation Pacing (2026)
+        try:
+            from .spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
+
+            spoken_text = inject_dictation_pauses(spoken_text)
+            verify_spoken_figures(
+                bot_reply,
+                spoken_text,
+                locale=self.language,
+                subject=self.room.state.user_id or "",
+            )
+        except Exception:
+            logger.debug("Spoken figure verification skipped", exc_info=True)
+
         self.room.state.ai_answers_count += 1
+
+        # 2026 CX Outcome Telemetry & Continuous Relationship Checkpoint
+        try:
+            from ..analytics import metrics
+            from .carryover import checkpoint_call_resolution
+
+            flow_label = str(result.get("retrieval_mode") or "rag")
+            if flow_label not in {"calculator", "workflow", "rag", "multi_agent"}:
+                flow_label = "rag"
+            metrics.inc(
+                "autonomous_resolution_total",
+                labels={
+                    "channel": "voice_call",
+                    "flow": flow_label,
+                    "locale": self.language,
+                    "outcome": "escalated" if (uncertain or at_risk) else "resolved",
+                },
+            )
+            metrics.observe(
+                "customer_effort_turns",
+                float(self.room.state.caller_turns_count + self.room.state.clarifications_asked),
+                labels={"flow": flow_label, "locale": self.language},
+            )
+            if memory_write:
+                checkpoint_call_resolution(
+                    self.room,
+                    objective=self.room.state.topic or question[:120],
+                    status="in_progress" if (uncertain or at_risk) else "resolved",
+                    completed_steps=[f"Voice turn {self.room.state.turn_seq} answered ({flow_label})"],
+                    asr_confidence=mean_word_prob,
+                )
+        except Exception:
+            logger.debug("Call CX telemetry / resolution checkpoint skipped", exc_info=True)
+
         await self._say_and_record(
             spoken_text,
             kind="answer",

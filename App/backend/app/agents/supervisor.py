@@ -302,6 +302,70 @@ class Supervisor:
 
         return refine(query, decision)
 
+    def plan_multi_agent_dag(
+        self,
+        query: str,
+        has_conversation_history: bool = False,
+        locale: str = "en",
+        *,
+        subject: str | None = None,
+    ) -> RouteDecision:
+        """Decompose compound multi-specialist queries into an ordered DAG of routes.
+
+        Gated by ``FLAG_MULTI_AGENT_DAG``. When off or when the query is single-domain,
+        returns :meth:`classify` unchanged.
+        """
+        base = self.classify(
+            query,
+            has_conversation_history=has_conversation_history,
+            locale=locale,
+        )
+        if not flags.is_enabled("multi_agent_dag", subject=subject):
+            return base
+        if base.route in (AgentRoute.ESCALATE, AgentRoute.CLARIFY, AgentRoute.GREET, AgentRoute.BLOCKED):
+            return base
+
+        q = (query or "").strip()
+        pats = self._patterns_for(locale)
+        probe = q[:_MAX_PATTERN_CHARS]
+
+        has_customs = any(p.search(q) for p in pats.customs)
+        has_calc = any(pat.search(probe) for pat, _, _ in pats.calc) or (
+            detect_calculator_intent(q) is not None and has_money_amount(q)
+        )
+        has_rate = any(pat.search(probe) for pat, _, _ in pats.rate)
+        has_temporal = any(pat.search(q) for pat, _, _ in pats.temporal)
+        has_domestic_tax = bool(
+            re.search(r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax|deferment|exemption)\b", q, re.I)
+        )
+
+        sub_routes: list[AgentRoute] = []
+        tools: list[str] = list(base.suggested_tools)
+
+        if has_customs and (has_domestic_tax or has_calc or has_rate):
+            sub_routes.extend([AgentRoute.CUSTOMS_SPECIALIST, AgentRoute.TAX_SPECIALIST])
+            for t in ("calculate_customs_duty", "calculate_vat", "lookup_rate", "search_ura_knowledge_base"):
+                if t not in tools:
+                    tools.append(t)
+        elif has_calc and has_temporal:
+            sub_routes.extend([AgentRoute.TOOLS, AgentRoute.TAX_SPECIALIST])
+            for t in ("get_filing_deadlines", "get_current_date", "search_ura_knowledge_base"):
+                if t not in tools:
+                    tools.append(t)
+
+        if len(sub_routes) >= 2:
+            if AgentRoute.TOOLS not in sub_routes and (has_calc or has_rate or has_temporal):
+                sub_routes.append(AgentRoute.TOOLS)
+            return RouteDecision(
+                route=sub_routes[0],
+                reason=f"multi_agent_dag({' -> '.join(r.value for r in sub_routes)}): {base.reason}",
+                confidence=max(base.confidence, 0.88),
+                suggested_tools=tools,
+                sub_routes=tuple(sub_routes),
+                requires_multi_agent=True,
+            )
+        return base
+
     def describe(self, locale: str = "en") -> dict[str, int]:
         """Return counts of registered patterns for introspection."""
         pats = for_locale(locale)

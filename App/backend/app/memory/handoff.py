@@ -40,6 +40,26 @@ class RecommendedAction:
 
 
 @dataclass
+class SLAContext:
+    """Service-level agreement timer and routing metadata for human or specialist handoffs."""
+
+    priority: str = "normal"  # "low" | "normal" | "high" | "urgent"
+    target_response_seconds: int = 120
+    deadline_utc: float = 0.0
+    breach_escalation_team: str = "tier2_domestic_taxes"
+
+
+@dataclass
+class ToolExecutionReceipt:
+    """Deterministic tool execution receipt carried across specialist or officer handoffs."""
+
+    tool_name: str
+    inputs_summary: str
+    deterministic_output: dict[str, Any] = field(default_factory=dict)
+    verified_at_utc: float = field(default_factory=time.time)
+
+
+@dataclass
 class HandoffEnvelope:
     """Standardized payload for inter-agent and human handoffs."""
 
@@ -56,6 +76,27 @@ class HandoffEnvelope:
     unverified_assumptions: list[str] = field(default_factory=list)
     blockers_and_risks: list[str] = field(default_factory=list)
     next_action: RecommendedAction = field(default_factory=lambda: RecommendedAction("", ""))
+    # v2.0 Continuous Relationship & Officer Co-Pilot extensions (October 2026)
+    case_reference: str = ""
+    source_channel: str = "web"  # "web" | "voice_call" | "voice_ws"
+    caller_affect: str = "calm"  # "calm" | "confused" | "frustrated" | "urgent_distress"
+    workflow_state_snapshot: dict[str, Any] = field(default_factory=dict)
+    tool_receipts: list[ToolExecutionReceipt] = field(default_factory=list)
+    sla: SLAContext = field(default_factory=SLAContext)
+    english_transcript_digest: list[dict[str, str]] = field(default_factory=list)
+    officer_macros: list[dict[str, str]] = field(default_factory=list)
+
+    def completeness_ratio(self) -> float:
+        """Compute structured handoff completeness score in [0.0, 1.0]."""
+        checks = (
+            bool(self.goal.primary_objective.strip()),
+            bool(self.goal.target_resolution.strip()),
+            bool(self.verified_evidence or self.tool_receipts),
+            bool(self.next_action.action_type.strip()),
+            bool(self.sla.target_response_seconds > 0),
+            bool(self.taxpayer_locale.strip()),
+        )
+        return round(sum(1 for c in checks if c) / len(checks), 3)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -72,6 +113,14 @@ class HandoffEnvelope:
             "unverified_assumptions": list(self.unverified_assumptions),
             "blockers_and_risks": list(self.blockers_and_risks),
             "next_action": asdict(self.next_action),
+            "case_reference": self.case_reference,
+            "source_channel": self.source_channel,
+            "caller_affect": self.caller_affect,
+            "workflow_state_snapshot": dict(self.workflow_state_snapshot),
+            "tool_receipts": [asdict(r) for r in self.tool_receipts],
+            "sla": asdict(self.sla),
+            "english_transcript_digest": list(self.english_transcript_digest),
+            "officer_macros": list(self.officer_macros),
         }
 
     @classmethod
@@ -101,6 +150,25 @@ class HandoffEnvelope:
             required_inputs=list(action_data.get("required_inputs", [])),
         )
 
+        receipts_list = [
+            ToolExecutionReceipt(
+                tool_name=str(r.get("tool_name", "")),
+                inputs_summary=str(r.get("inputs_summary", "")),
+                deterministic_output=dict(r.get("deterministic_output", {})),
+                verified_at_utc=float(r.get("verified_at_utc", time.time())),
+            )
+            for r in data.get("tool_receipts", [])
+            if isinstance(r, dict)
+        ]
+
+        sla_data = data.get("sla", {}) if isinstance(data.get("sla"), dict) else {}
+        sla = SLAContext(
+            priority=str(sla_data.get("priority", "normal")),
+            target_response_seconds=int(sla_data.get("target_response_seconds", 120)),
+            deadline_utc=float(sla_data.get("deadline_utc", 0.0)),
+            breach_escalation_team=str(sla_data.get("breach_escalation_team", "tier2_domestic_taxes")),
+        )
+
         return cls(
             handoff_id=str(data.get("handoff_id", "")),
             thread_id=str(data.get("thread_id", "")),
@@ -115,4 +183,12 @@ class HandoffEnvelope:
             unverified_assumptions=list(data.get("unverified_assumptions", [])),
             blockers_and_risks=list(data.get("blockers_and_risks", [])),
             next_action=next_action,
+            case_reference=str(data.get("case_reference", "")),
+            source_channel=str(data.get("source_channel", "web")),
+            caller_affect=str(data.get("caller_affect", "calm")),
+            workflow_state_snapshot=dict(data.get("workflow_state_snapshot", {})),
+            tool_receipts=receipts_list,
+            sla=sla,
+            english_transcript_digest=list(data.get("english_transcript_digest", [])),
+            officer_macros=list(data.get("officer_macros", [])),
         )

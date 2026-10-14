@@ -160,6 +160,8 @@ class AgentGraphState:
     escalation_reason: str = ""
     ticket_id: str = ""
     agent_role: str = "graph_agent"
+    sub_routes: list[str] = field(default_factory=list)
+    specialist_handoffs: list[dict[str, Any]] = field(default_factory=list)
 
     # -- Telemetry --
     trace: list[dict[str, Any]] = field(default_factory=list)  # (node, duration_ms)
@@ -233,6 +235,8 @@ class AgentGraphState:
             "escalation_reason": self.escalation_reason,
             "ticket_id": self.ticket_id,
             "agent_role": self.agent_role,
+            "sub_routes": list(self.sub_routes),
+            "specialist_handoffs": list(self.specialist_handoffs),
         }
 
     @classmethod
@@ -298,5 +302,7 @@ class AgentGraphState:
             escalation_reason=str(data.get("escalation_reason", "")),
             ticket_id=str(data.get("ticket_id", "")),
             agent_role=str(data.get("agent_role", "graph_agent")),
+            sub_routes=list(data.get("sub_routes", [])),
+            specialist_handoffs=list(data.get("specialist_handoffs", [])),
         )
         return state

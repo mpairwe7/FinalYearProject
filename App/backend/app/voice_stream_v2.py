@@ -333,6 +333,19 @@ class VoiceSessionV2:
             )
             voice_path = path_decision.path.value
 
+        try:
+            from .receptionist.hybrid_s2s import classify_hybrid_speech_mode
+
+            hybrid_decision = classify_hybrid_speech_mode(
+                query_text,
+                locale=detected_lang,
+                subject=self.user_id or "",
+            )
+            if hybrid_decision.mode == "s2s_fast" and not hybrid_decision.contains_numeric_or_statutory:
+                voice_path = "s2s_fast"
+        except Exception:
+            logger.debug("voice_stream_v2: hybrid speech gate skipped", exc_info=True)
+
         # ── Stage 4: LLM Generation ───────────────────────────────
         t0 = time.perf_counter()
 
@@ -394,6 +407,18 @@ class VoiceSessionV2:
 
         if self._cancelled.is_set():
             return
+
+        try:
+            from .receptionist.spoken_figure_guard import verify_spoken_figures
+
+            verify_spoken_figures(
+                reply_text,
+                reply_for_tts,
+                locale=detected_lang,
+                subject=self.user_id or "",
+            )
+        except Exception:
+            logger.debug("voice_stream_v2: spoken figure guard skipped", exc_info=True)
 
         # ── Stage 6: TTS (streaming V2 or sentence-chunked V1) ────
         tts_first_chunk_ms: float | None = None

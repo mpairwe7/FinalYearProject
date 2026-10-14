@@ -48,11 +48,21 @@ def node_route(state: AgentGraphState) -> NodeResult:
         return NodeResult(next_node="retrieve")
 
     has_history = bool(state.conversation_history)
-    decision = _supervisor.classify(
-        state.rewritten_query or state.query,
-        has_conversation_history=has_history,
-        locale=state.locale,
-    )
+    if flags.is_enabled("multi_agent_dag", subject=state.user_id or None):
+        decision = _supervisor.plan_multi_agent_dag(
+            state.rewritten_query or state.query,
+            has_conversation_history=has_history,
+            locale=state.locale,
+            subject=state.user_id or None,
+        )
+    else:
+        decision = _supervisor.classify(
+            state.rewritten_query or state.query,
+            has_conversation_history=has_history,
+            locale=state.locale,
+        )
+    if getattr(decision, "requires_multi_agent", False) and getattr(decision, "sub_routes", ()):
+        state.sub_routes = [r.value for r in decision.sub_routes]
 
     if decision.route == AgentRoute.CLARIFY:
         state.clarification_question = decision.clarification_question
@@ -378,8 +388,53 @@ def node_observe(state: AgentGraphState) -> NodeResult:
 
     Industry 2026 practice caps this at one hop (``max_handoffs``). Failed
     or unfillable tools are not evidence — they hand off to retrieve.
+    When ``multi_agent_dag`` is active and multiple specialist sub_routes
+    were planned, records a structured inter-specialist ``HandoffEnvelope``
+    and chains into ``retrieve`` so both tool observations and statutory
+    passages are fused into the final synthesis.
     """
-    if _usable_observations(state) or state.hits:
+    usable = _usable_observations(state)
+    from ...flags import flags
+
+    if (
+        len(state.sub_routes) >= 2
+        and not state.hits
+        and state.handoff_count < max(1, state.max_handoffs)
+        and flags.is_enabled("multi_agent_dag", subject=state.user_id or None)
+    ):
+        state.handoff_count += 1
+        state.handoff_from = state.sub_routes[0]
+        target_spec = state.sub_routes[1]
+        state.handoff_reason = f"multi_agent_dag_chain:{state.handoff_from}->{target_spec}"
+        try:
+            from ...memory.handoff import HandoffEnvelope, HandoffGoal, ToolExecutionReceipt
+
+            receipts = [
+                ToolExecutionReceipt(
+                    tool_name=str(tc.get("name", "tool")),
+                    inputs_summary=state.rewritten_query or state.query,
+                    deterministic_output=obs if isinstance(obs, dict) else {},
+                )
+                for tc, obs in zip(state.tool_calls, usable, strict=False)
+            ]
+            env = HandoffEnvelope(
+                thread_id=state.current_goal_id or "dag-turn",
+                tenant_id=state.tenant_id,
+                source_agent=state.handoff_from,
+                target_channel=target_spec,
+                goal=HandoffGoal(
+                    primary_objective=state.rewritten_query or state.query,
+                    target_resolution=f"Combine {state.handoff_from} tool outputs with {target_spec} statutory rules",
+                ),
+                taxpayer_locale=state.locale,
+                tool_receipts=receipts,
+            )
+            state.specialist_handoffs.append(env.to_dict())
+        except Exception:
+            logger.debug("graph: specialist handoff envelope creation skipped", exc_info=True)
+        return NodeResult(next_node="retrieve", note="multi_agent_dag specialist handoff to retrieve")
+
+    if usable or state.hits:
         return NodeResult(next_node="synthesize")
     if state.handoff_count < state.max_handoffs:
         state.handoff_count += 1
@@ -446,6 +501,10 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
         if not state.reply:
             best = state.hits[0]
             state.reply = best.get("answer") or best.get("text", "")
+        if usable and state.specialist_handoffs:
+            tool_parts = [p for p in (_format_observation_prose(obs) for obs in usable[:2]) if p]
+            if tool_parts:
+                state.reply = "\n\n".join([*tool_parts, state.reply]).strip()
     elif usable:
         parts = []
         for obs in usable[:3]:

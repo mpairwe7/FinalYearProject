@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (51 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (58 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -430,8 +430,18 @@ App/backend/app/
 │   ├── semantic.py      #   User facts with time-based decay
 │   ├── episodic.py      #   Conversation summaries by topic
 │   ├── working.py       #   Standalone in-process helper; service uses shared TTL storage
+│   ├── handoff.py       #   Standardized HandoffEnvelope v2 (SLAContext, ToolExecutionReceipt)
+│   ├── resolution_ledger.py # Longitudinal ResolutionCase persistence across Voice & Web
 │   ├── extractor.py     #   Rule-based fact extraction from turns
 │   └── decay.py         #   Time-based fact decay
+│
+├── receptionist/        # Full-duplex Pipecat/LiveKit voice receptionist & Officer Call Desk
+│   ├── pipeline.py      #   Cascaded & multilingual Pipecat pipeline assembly
+│   ├── brain.py         #   Voice turn orchestration, clarification, spoken confirm, transfer
+│   ├── hybrid_s2s.py    #   Hybrid S2S vs regulated cascaded speech router & semantic endpointing
+│   ├── prosody.py       #   Zero-VRAM acoustic prosody & caller affect analyzer
+│   ├── spoken_figure_guard.py # Spoken-figure round-trip verification & dictation pacing
+│   └── transfer.py      #   Ticket creation, HandoffEnvelope v2 dispatch, SLA countdown
 │
 └── audit/               # Immutable audit ledger (Phase 21, UDPA compliance)
     ├── ledger.py        #   Hash-chained append-only log (SHA-256)
@@ -609,6 +619,13 @@ The speech engine prioritizes local neural models on GPU, falling back through p
    - YaRN RoPE 131k token allocation compactor with real-time context-rot analytics (`rot_risk_threshold: 0.85`).
 5. **EU AI Act Article 50(2) Compliance**:
    - Every synthesized audio WAV embeds an IPTC `trainedAlgorithmicMedia` INFO chunk, providing verifiable machine-readable marking of AI-generated synthetic speech.
+6. **Hybrid Speech S2S + Regulated Cascaded Router & Spoken Figure Guard (`receptionist/hybrid_s2s.py`, `receptionist/spoken_figure_guard.py`)**:
+   - Routes low-risk conversational turns through fast S2S (`s2s_fast`) while strictly enforcing the cascaded English-router + `mt.protect_figures` path (`cascaded_guarded`) whenever numbers, tax rates, TINs, or statutory claims are present.
+   - Adaptive semantic endpointing extends silence tolerance (`1100ms`) mid-TIN/PRN and snaps to `320ms` on complete utterances.
+   - Verifies that statutory figures survive speech normalization and synthesis (`spoken_figure_guard`) and injects dictation pauses into spelled-out TIN/PRN digit sequences.
+7. **Continuous Relationship Orchestration & Multi-Agent Specialist DAG (`memory/resolution_ledger.py`, `agents/supervisor.py`, `agents/graphs/main_graph.py`)**:
+   - Consent-gated `ResolutionCase` ledger tracks multi-step resolution progress across Voice Calls, Web Chat, and background `mcp_tasks` with bidirectional carryover (`carryover.py`).
+   - `HandoffEnvelope` v2 adds `SLAContext`, `ToolExecutionReceipt`, `caller_affect`, and one-click `officer_macros` for both peer-specialist DAG chaining and live Officer Call Desk handoffs (`officer_voice_copilot`).
 
 ### VAD & Audio Handling
 
@@ -636,6 +653,12 @@ Energy-based VAD with hysteresis (numpy only, no silero-vad dependency):
 | `voice_stream_total_latency_seconds` | histogram | End-to-end turn latency |
 | `voice_barge_in_total` | counter | Barge-in interruptions |
 | `voice_vad_utterances_total` | counter | VAD-detected utterances |
+| `ura_autonomous_resolution_total` | counter | End-to-end autonomous vs escalated resolution by channel, flow, and locale |
+| `ura_customer_effort_turns` | histogram | Turns and clarifications required per call/chat resolution |
+| `ura_voice_hybrid_route_total` | counter | Hybrid speech routing split (`s2s_fast` vs `cascaded_guarded`) |
+| `ura_spoken_figure_verification_total` | counter | Spoken figure verification results (`verified`, `fallback_text_only`) |
+| `ura_handoff_envelope_completeness_ratio` | histogram | Completeness score `[0..1]` of `HandoffEnvelope` v2 packets |
+| `ura_relationship_resumption_total` | counter | Cross-channel `ResolutionCase` resumption and completion counts |
 
 ## Feature Flags (`flags.py`)
 
@@ -669,9 +692,16 @@ All major subsystems are behind feature flags for progressive rollout:
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 | `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
 | `receptionist_language_detection` | off | Receptionist follows caller language (en, sw and lg all on the local engine: Whisper-SALT, Sunflower, Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
+| `hybrid_speech_s2s` | off | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`): fast conversational S2S path for low-risk turns, regulated figure-protected cascaded path for statutory/numeric turns |
+| `voice_agentic_workflows` | off | Guided multi-step workflows, calculator MCP tools, and spoken confirmation tokens inside live `/v1/calls/stream` voice calls |
+| `multi_agent_dag` | off | Multi-specialist DAG chaining (`CUSTOMS_SPECIALIST` + `TAX_SPECIALIST` + `TOOLS`) with `HandoffEnvelope` v2 verification in `agents/graphs/main_graph.py` |
+| `continuous_relationship_memory` | off | Longitudinal `ResolutionCase` persistence (`memory/resolution_ledger.py`), bidirectional `Voice <-> Web` carryover, and background `mcp_tasks` continuation |
+| `emotion_aware_prosody` | off | Acoustic prosody extraction (`receptionist/prosody.py`) in `CallerAudioTap` and dynamic empathy/pacing conditioning in TTS |
+| `spoken_figure_guard` | off | Acoustic & lexical digit verification (`receptionist/spoken_figure_guard.py`) and dictation pauses on synthesized TTS audio containing statutory figures, TINs, or PRNs |
+| `officer_voice_copilot` | off | Streams live ASR transcripts, English router views, and statutory rate cards to the officer desk while a voice call is bridged to `ura_staff` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**51** in total, including the per-phase switches for voice, offline and
+**58** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

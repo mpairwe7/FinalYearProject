@@ -146,6 +146,15 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
 | `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
 | `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
+| `FLAG_HYBRID_SPEECH_S2S` | `false` | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`) |
+| `FLAG_VOICE_AGENTIC_WORKFLOWS` | `false` | Spoken confirmation token binding & guided workflows on live calls |
+| `FLAG_EMOTION_AWARE_PROSODY` | `false` | Acoustic prosody & caller affect conditioning (`receptionist/prosody.py`) |
+| `FLAG_SPOKEN_FIGURE_GUARD` | `false` | Dictation pauses & spoken figure verification (`receptionist/spoken_figure_guard.py`) |
+| `FLAG_OFFICER_VOICE_COPILOT` | `false` | Live ASR + English router view assist on the officer console during bridged calls |
+| `FLAG_CONTINUOUS_RELATIONSHIP_MEMORY` | `false` | Longitudinal `ResolutionCase` checkpointing & bidirectional `Voice <-> Web` carryover |
+| `ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS` | unset (`55` when set) | Tighter character cap on the opening clause to reduce Orpheus first-audio TTFB |
+| `VOICE_SEMANTIC_ENDPOINT_MIN_SILENCE_MS` | `320` | Minimum semantic endpointing silence for syntactically complete turns |
+| `VOICE_SEMANTIC_ENDPOINT_NUMERIC_SILENCE_MS` | `1100` | Extended silence tolerance when caller is mid-number (TIN/PRN) or mid-conjunction |
 
 Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
 provider session window any more. See Pipecat's

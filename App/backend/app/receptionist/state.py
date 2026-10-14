@@ -111,6 +111,17 @@ class CallState:
     # The chat the caller rang from and what it carried over (carryover.py).
     parent_conversation_id: str = ""
     chat_context: str = ""
+    # 2026 Agentic Voice CX extensions (prosody, hybrid S2S, speculative prefetch, spoken confirm)
+    last_utterance_pcm: bytes = b""
+    caller_affect: str = "calm"
+    recommended_speech_rate: float = 1.0
+    prosody_tag: str = "<neutral>"
+    semantic_endpoint_silence_ms: int = 500
+    prefetched_query: str = ""
+    prefetched_hits: list[dict[str, Any]] = field(default_factory=list)
+    pending_confirm_challenge: str = ""
+    pending_confirm_action: dict[str, Any] = field(default_factory=dict)
+    last_handoff_envelope: dict[str, Any] = field(default_factory=dict)
 
 
 class CallRoom:

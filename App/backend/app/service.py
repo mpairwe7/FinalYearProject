@@ -4432,6 +4432,20 @@ class ChatModel:
         last_topic = str(working.get("last_topic", "")).strip()
         if last_topic:
             lines.append(f"- Last conversation topic: {last_topic}")
+        raw_case = working.get("active_resolution_case")
+        if (
+            isinstance(raw_case, dict)
+            and flags.is_enabled("continuous_relationship_memory", subject=user_id)
+        ):
+            try:
+                from .memory.resolution_ledger import ResolutionCase, build_resumption_prompt
+
+                case = ResolutionCase.from_dict(raw_case)
+                resumption_note = build_resumption_prompt(case, target_locale="en")
+                if resumption_note:
+                    lines.append(f"- {resumption_note}")
+            except Exception:
+                logger.debug("resolution_case prompt injection skipped", exc_info=True)
 
         # The taxpayer's saved answer language seeds a conversation whose first
         # message gives no language of its own ("TIN?"). English is the

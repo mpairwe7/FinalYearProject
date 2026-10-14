@@ -416,6 +416,50 @@ _REGISTRY: dict[str, Flag] = {
             "Auto-detect conversational factual disputes, log discrepancy reports, "
             "and apply active statutory precedences & tombstones.",
         ),
+        # Phase 31 (2026) — Agentic Voice CX & Continuous Relationship Orchestration
+        Flag(
+            "hybrid_speech_s2s",
+            False,
+            "Enable the Hybrid S2S + Cascaded Speech Router in voice pipelines "
+            "(fast S2S path for conversational turns, regulated figure-protected "
+            "cascaded path for statutory/numeric turns).",
+        ),
+        Flag(
+            "voice_agentic_workflows",
+            False,
+            "Enable guided multi-step workflows, calculator MCP tools, and spoken "
+            "confirmation tokens inside live voice receptionist calls.",
+        ),
+        Flag(
+            "multi_agent_dag",
+            False,
+            "Enable multi-specialist DAG chaining (CUSTOMS_SPECIALIST + TAX_SPECIALIST "
+            "+ TOOLS) with HandoffEnvelope verification in the graph orchestrator.",
+        ),
+        Flag(
+            "continuous_relationship_memory",
+            False,
+            "Enable longitudinal ResolutionCase persistence, bidirectional Voice <-> Web "
+            "carryover, and post-call background task continuation.",
+        ),
+        Flag(
+            "emotion_aware_prosody",
+            False,
+            "Enable acoustic prosody analysis (pitch, energy, speech rate) in "
+            "CallerAudioTap and dynamic empathy/pacing conditioning in TTS.",
+        ),
+        Flag(
+            "spoken_figure_guard",
+            False,
+            "Run acoustic digit verification on synthesized TTS audio when replies "
+            "contain statutory rates, UGX amounts, TINs, or PRNs.",
+        ),
+        Flag(
+            "officer_voice_copilot",
+            False,
+            "Stream live ASR transcripts, English translations, and statutory rate "
+            "cards to the officer desk while a voice call is bridged to staff.",
+        ),
     ]
 }
 
@@ -578,6 +622,9 @@ class FeatureFlags:
                 "corrective_rag",
                 "query_decomposition",
                 "evaluator_optimizer",
+                "hybrid_speech_s2s",
+                "multi_agent_dag",
+                "spoken_figure_guard",
             )
         }
 
