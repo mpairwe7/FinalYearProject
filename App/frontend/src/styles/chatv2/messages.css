@@ -239,7 +239,9 @@
 .chat-case-banner {
   display: flex;
   justify-content: center;
-  padding: 6px 16px;
+  align-items: center;
+  padding: 12px 16px;
+  margin-top: 24px;
   position: relative;
   z-index: 10;
 }
@@ -248,7 +250,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 10px 16px;
+  min-height: 44px;
   border-radius: 9999px;
   background: #ecfdf5;
   border: 1px solid #10b981;
