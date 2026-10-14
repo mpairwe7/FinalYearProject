@@ -279,6 +279,9 @@ class RegistryIntegrityTests(unittest.TestCase):
             "workflow_specialist_bridge",
             "proactive_resolution_continuation",
             "officer_ai_co_execution",
+            "low_bandwidth_voice_codec",
+            "call_drop_resume",
+            "offline_action_outbox",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

@@ -494,6 +494,25 @@ _REGISTRY: dict[str, Flag] = {
             "Enable pre-verified bilingual draft replies on the officer workbench "
             "and Officer -> AI procedural follow-up delegation.",
         ),
+        # Phase 33 (2026) — Low-Bandwidth 2G/3G Voice Resilience & Offline Action Outbox
+        Flag(
+            "low_bandwidth_voice_codec",
+            False,
+            "Negotiate low-bitrate 8kHz mu-law / 12kbps Opus framing and "
+            "caption-first audio degradation on 2G/3G or Data Saver voice connections.",
+        ),
+        Flag(
+            "call_drop_resume",
+            False,
+            "Enable HMAC-signed call_resume_token and 45-second caller reconnect "
+            "grace window on mobile voice socket drops.",
+        ),
+        Flag(
+            "offline_action_outbox",
+            False,
+            "Enable PWA offline calculator/workflow action outbox sync into "
+            "verified_slot_bank and ResolutionCase upon network recovery.",
+        ),
     ]
 }
 
@@ -661,6 +680,8 @@ class FeatureFlags:
                 "spoken_figure_guard",
                 "eq_adaptive_retrieval",
                 "workflow_specialist_bridge",
+                "low_bandwidth_voice_codec",
+                "call_drop_resume",
             )
         }
 

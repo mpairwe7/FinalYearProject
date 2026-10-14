@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (63 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (68 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -706,9 +706,12 @@ All major subsystems are behind feature flags for progressive rollout:
 | `workflow_specialist_bridge` | off | Allows active guided workflows (`workflows/registry.py`) to delegate mid-flow calculations to MCP calculator tools and bind results into pending slots |
 | `proactive_resolution_continuation` | off | Writes localized continuation cards to `reminder_inbox` when background `mcp_tasks` or officer reviews complete on an open `ResolutionCase` |
 | `officer_ai_co_execution` | off | Enables figure-protected bilingual draft replies (`officer_chat.py`) and `Officer -> AI` procedural workflow delegation |
+| `low_bandwidth_voice_codec` | off | Negotiates 8 kHz G.711 μ-law / 12 kbps Opus framing (`receptionist/low_bandwidth.py`) and caption-first audio degradation on 2G/3G or Data Saver links |
+| `call_drop_resume` | off | Mints HMAC-signed single-use `call_resume_ticket` for 45-second caller reconnect recovery on mobile socket drops |
+| `offline_action_outbox` | off | Syncs queued PWA offline calculator receipts and workflow slots into `verified_slot_bank` and `ResolutionCase` upon reconnection |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**63** in total, including the per-phase switches for voice, offline and
+**68** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

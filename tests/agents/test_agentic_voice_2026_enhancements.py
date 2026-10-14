@@ -64,6 +64,9 @@ def test_2026_flags_registered_and_logged_variants():
         "workflow_specialist_bridge",
         "proactive_resolution_continuation",
         "officer_ai_co_execution",
+        "low_bandwidth_voice_codec",
+        "call_drop_resume",
+        "offline_action_outbox",
     ):
         assert name in all_flags
         assert all_flags[name] is False
@@ -74,6 +77,8 @@ def test_2026_flags_registered_and_logged_variants():
     assert "spoken_figure_guard" in variants
     assert "eq_adaptive_retrieval" in variants
     assert "workflow_specialist_bridge" in variants
+    assert "low_bandwidth_voice_codec" in variants
+    assert "call_drop_resume" in variants
 
 
 def test_hybrid_speech_s2s_router_and_semantic_endpointing():
@@ -502,3 +507,162 @@ def test_phase32_proactive_continuation_and_officer_ai_co_execution(tmp_db):
     finally:
         flags.clear("proactive_resolution_continuation")
         flags.clear("officer_ai_co_execution")
+
+
+def test_phase33_dynamic_turn_stop_and_bantu_acronym_phonetics():
+    from types import SimpleNamespace
+
+    from app.receptionist.turns import apply_dynamic_turn_timeout, effective_turn_timeout_s
+    from app.speech_normalization import phoneticize_bantu_acronyms
+
+    state = CallState(call_id="c-p33", conversation_id="conv-p33", locale="lg")
+    room = CallRoom(call_id="c-p33", state=state)
+    dummy_strategy = SimpleNamespace(_user_speech_timeout=1.0)
+
+    state.semantic_endpoint_silence_ms = 320
+    assert effective_turn_timeout_s(room) == 0.32
+    assert apply_dynamic_turn_timeout(dummy_strategy, room) == 0.32
+    assert dummy_strategy._user_speech_timeout == 0.32
+
+    state.semantic_endpoint_silence_ms = 1100
+    assert effective_turn_timeout_s(room) == 1.1
+    assert apply_dynamic_turn_timeout(dummy_strategy, room) == 1.1
+    assert dummy_strategy._user_speech_timeout == 1.1
+
+    phon = phoneticize_bantu_acronyms("Nsaba okumanya ku TIN ne PRN yange.", locale="lg")
+    assert "T-I-N" in phon
+    assert "P-R-N" in phon
+
+
+def test_phase33_low_bandwidth_mulaw_codec_and_call_drop_resume(monkeypatch):
+    import os
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.receptionist.low_bandwidth import (
+        mint_call_resume_ticket,
+        mulaw_8k_to_pcm16_16k,
+        negotiate_low_bandwidth_mode,
+        pcm16_16k_to_mulaw_8k,
+        verify_call_resume_ticket,
+    )
+
+    # 1. 16kHz PCM16 <-> 8kHz G.711 mu-law (4x compression)
+    t = np.linspace(0, 1.0, 16000, endpoint=False)
+    sine_pcm16 = (np.sin(2 * np.pi * 440 * t) * 20000).astype(np.int16).tobytes()
+    assert len(sine_pcm16) == 32000
+    mulaw = pcm16_16k_to_mulaw_8k(sine_pcm16)
+    assert len(mulaw) == 8000
+    restored = mulaw_8k_to_pcm16_16k(mulaw)
+    assert len(restored) == 32000
+    orig_arr = np.frombuffer(sine_pcm16, dtype=np.int16).astype(np.float32)
+    rest_arr = np.frombuffer(restored, dtype=np.int16).astype(np.float32)
+    corr = float(np.corrcoef(orig_arr, rest_arr)[0, 1])
+    assert corr > 0.95
+
+    flags.set("low_bandwidth_voice_codec", True)
+    flags.set("call_drop_resume", True)
+    try:
+        prof_2g = negotiate_low_bandwidth_mode({"effective_type": "2g", "save_data": True})
+        assert prof_2g.enabled is True
+        assert prof_2g.codec == "mulaw_8k"
+        assert prof_2g.sample_rate == 8000
+        assert prof_2g.caption_only is False
+
+        prof_slow2g = negotiate_low_bandwidth_mode({"effective_type": "slow-2g", "rtt_ms": 1800})
+        assert prof_slow2g.enabled is True
+        assert prof_slow2g.caption_only is True
+
+        # Fail closed when signing material is absent
+        monkeypatch.delenv("RECEPTIONIST_RESUME_SECRET", raising=False)
+        monkeypatch.delenv("AUTH_DEV_SECRET", raising=False)
+        assert mint_call_resume_ticket("call-p33-0", "conv-p33-0", user_id="1000333222") == ""
+
+        monkeypatch.setenv("RECEPTIONIST_RESUME_SECRET", os.urandom(16).hex())
+        ticket_str = mint_call_resume_ticket(
+            "call-p33-1",
+            "conv-p33-1",
+            user_id="1000333222",
+            tenant_id="default",
+        )
+        assert ticket_str
+
+        # Malformed / non-ASCII input returns None without raising
+        assert verify_call_resume_ticket("non-ascii-body-é.sig-é") is None
+
+        # Concurrent redemption race: exactly one of two synchronized callers succeeds
+        barrier = threading.Barrier(2)
+
+        def _redeem():
+            barrier.wait(timeout=5.0)
+            return verify_call_resume_ticket(
+                ticket_str,
+                expected_call_id="call-p33-1",
+                expected_user_id="1000333222",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f1 = pool.submit(_redeem)
+            f2 = pool.submit(_redeem)
+            outcomes = [f1.result(timeout=5.0), f2.result(timeout=5.0)]
+
+        succeeded = [o for o in outcomes if o is not None]
+        assert len(succeeded) == 1
+        assert succeeded[0]["cid"] == "call-p33-1"
+        # Sequential replay must also be rejected
+        assert verify_call_resume_ticket(ticket_str, expected_call_id="call-p33-1") is None
+    finally:
+        flags.clear("low_bandwidth_voice_codec")
+        flags.clear("call_drop_resume")
+
+
+def test_phase33_acoustic_risk_escalation_and_offline_action_outbox_sync(tmp_db):
+    from app.receptionist.risk import evaluate_call_risk
+    from app.receptionist.state import registry
+    from app.receptionist.store import create_call
+
+    create_call(call_id="call-risk-33", conversation_id="conv-risk-33", locale="lg")
+    state = CallState(call_id="call-risk-33", conversation_id="conv-risk-33", locale="lg")
+    state.caller_affect = "frustrated"
+    room = CallRoom(call_id="call-risk-33", state=state)
+    registry._rooms["call-risk-33"] = room
+
+    flags.set("emotion_aware_prosody", True)
+    flags.set("offline_action_outbox", True)
+    try:
+        risk_res = evaluate_call_risk("call-risk-33")
+        assert risk_res["level"] == "at_risk"
+        assert "distress" in risk_res["signals"]
+
+        memsvc = get_memory_service()
+        u = tmp_db.upsert_user(external_id="1000666777", tenant_id="default")
+        uid = u["id"]
+        tmp_db.grant_consent(uid, "personalization", "2026-04")
+
+        batch = [
+            {
+                "tool": "calculate_vat",
+                "summary": "Computed 18% VAT on UGX 4,000,000 (UGX 720,000)",
+                "slots": {"tin": "1000666777", "annual_turnover": 160000000},
+            },
+            {
+                "slots": {"filing_period": "2026-09"},
+            },
+        ]
+        sync_out = memsvc.resolution_ledger.sync_offline_actions(uid, batch, tenant_id="default")
+        assert sync_out["ok"] is True
+        assert sync_out["synced_count"] == 2
+        assert sync_out["slots_merged"]["tin"] == "1000666777"
+        assert sync_out["slots_merged"]["filing_period"] == "2026-09"
+        active_case = memsvc.get_active_resolution_case(uid, tenant_id="default")
+        assert active_case is not None
+        assert active_case.source_channel == "offline_pwa"
+
+        # Retrying the same already-applied batch should report 0 newly applied actions
+        retry_out = memsvc.resolution_ledger.sync_offline_actions(uid, batch, tenant_id="default")
+        assert retry_out["ok"] is True
+        assert retry_out["synced_count"] == 0
+    finally:
+        registry._rooms.pop("call-risk-33", None)
+        flags.clear("emotion_aware_prosody")
+        flags.clear("offline_action_outbox")

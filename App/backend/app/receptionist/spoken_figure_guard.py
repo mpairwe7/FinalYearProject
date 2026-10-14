@@ -172,15 +172,30 @@ def verify_spoken_figures(
     detected = mt.figures(spoken_text, locale=loc) | mt.figures(spoken_text, locale="en")
     if not expected.issubset(detected):
         strip_chars = "()[]\"'.,;:!?-"
+        norm_spoken_raw = (
+            (spoken_text or "")
+            .lower()
+            .replace(",", " ")
+            .replace("\u2013", " ")
+            .replace("\u2014", " ")
+            .replace("-", " ")
+        )
         spoken_tokens = [
             tok.strip(strip_chars)
-            for tok in (spoken_text or "").lower().replace(",", " ").split()
+            for tok in norm_spoken_raw.split()
             if tok.strip(strip_chars)
         ]
         for missing_val in list(expected - detected):
             for phrase in _spoken_realizations_for(missing_val, loc):
+                norm_phrase_raw = (
+                    phrase.lower()
+                    .replace(",", " ")
+                    .replace("\u2013", " ")
+                    .replace("\u2014", " ")
+                    .replace("-", " ")
+                )
                 phrase_norm = " ".join(
-                    t.strip(strip_chars) for t in phrase.replace(",", " ").split() if t.strip(strip_chars)
+                    t.strip(strip_chars) for t in norm_phrase_raw.split() if t.strip(strip_chars)
                 )
                 if phrase_norm and _exact_spoken_phrase_in(phrase_norm, spoken_tokens):
                     detected.add(missing_val)

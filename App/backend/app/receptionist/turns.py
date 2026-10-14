@@ -26,7 +26,25 @@ VAD_STOP_SECS = 0.5
 BARGE_IN_MIN_WORDS = 2
 
 
-def build_cascaded_turn_strategies() -> Any:
+def effective_turn_timeout_s(room: Any = None) -> float:
+    """Resolve the active turn stop timeout (s), reading semantic endpointing when available."""
+    state = getattr(room, "state", None)
+    sem_ms = getattr(state, "semantic_endpoint_silence_ms", None)
+    if isinstance(sem_ms, int | float) and 150 <= sem_ms <= 3000:
+        return round(float(sem_ms) / 1000.0, 3)
+    return get_turn_timeout_s()
+
+
+def apply_dynamic_turn_timeout(strategy: Any, room: Any = None) -> float:
+    """Refresh the stop strategy's speech timeout from ``room.state.semantic_endpoint_silence_ms``."""
+    timeout_s = effective_turn_timeout_s(room)
+    strategy._user_speech_timeout = timeout_s
+    if hasattr(strategy, "_timeout"):
+        strategy._timeout = timeout_s
+    return timeout_s
+
+
+def build_cascaded_turn_strategies(room: Any = None) -> Any:
     """``UserTurnStrategies`` for the cascaded engine. Needs Pipecat."""
     from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame
     from pipecat.turns.types import ProcessFrameResult
@@ -55,10 +73,24 @@ def build_cascaded_turn_strategies() -> Any:
                 return ProcessFrameResult.CONTINUE
             return await super().process_frame(frame)
 
+    class DynamicSpeechTimeoutTurnStopStrategy(SpeechTimeoutUserTurnStopStrategy):
+        """Refreshes user_speech_timeout on each frame from room.state.semantic_endpoint_silence_ms."""
+
+        def __init__(self, *, room_ref: Any = None, **kwargs: Any) -> None:
+            self._room_ref = room_ref
+            super().__init__(
+                user_speech_timeout=effective_turn_timeout_s(room_ref),
+                **kwargs,
+            )
+
+        async def process_frame(self, frame: Frame) -> ProcessFrameResult:
+            apply_dynamic_turn_timeout(self, self._room_ref)
+            return await super().process_frame(frame)
+
     return UserTurnStrategies(
         start=[
             VADWhileBotQuietStartStrategy(),
             MinWordsUserTurnStartStrategy(min_words=BARGE_IN_MIN_WORDS),
         ],
-        stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=get_turn_timeout_s())],
+        stop=[DynamicSpeechTimeoutTurnStopStrategy(room_ref=room)],
     )
