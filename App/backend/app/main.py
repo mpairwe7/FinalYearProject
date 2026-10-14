@@ -3904,13 +3904,17 @@ def review_call_endpoint(
     body: dict = Body(...),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Submit an officer rating (1-5) and note for a call."""
+    """Submit an officer's rating (1-5) and note for a call.
+
+    Officers only, like every other call-desk write: an administrator audits
+    the service officers give (`/admin/quality`) and an auditor reads it.
+    """
     import re
     from .receptionist.store import get_call, save_call_review
     from .tenancy import tenant_enabled
 
-    if ctx.role not in ("ura_staff", "ura_admin"):
-        raise HTTPException(status_code=403, detail="Only staff and admins can submit reviews")
+    if ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="Only officers rate calls")
 
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")

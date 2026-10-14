@@ -13,7 +13,7 @@ after a QA audit of the auditor dashboard and a review of the ledger itself
 | Read tickets, transcripts, calls, analytics | yes | yes | yes |
 | Change a ticket, reply to a taxpayer, end a live chat, heartbeat a case | yes | **no (403)** | **no (403)** |
 | Take, give back, hold, transfer, wrap up or end a call; set desk presence | yes | **no (403)** | **no (403)** |
-| Rate a call (review) | yes | yes | **no (403)** |
+| Rate a call (review) | yes | **no (403)** | **no (403)** |
 | Listen in to a live call | yes | yes | yes (recorded) |
 | Toggle a flag, edit a staff-written answer | no | yes | **no (403)** |
 | Read the service-quality audit (`/admin/quality`) | **no (403)** | yes | yes |
