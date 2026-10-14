@@ -70,7 +70,7 @@ When completely disconnected, the browser serves `offline.html`, which includes:
 * **Debounced Form Draft Persistence:** Taxpayer inquiry drafts are debounced (400 ms) and saved to local storage under `ura-chat-store.draftMessage`.
 * **Visibility State Flush (`page.tsx`):** On `visibilitychange` (`hidden`) and `window.pagehide`, in-progress chat sessions and message drafts are immediately committed to persistent storage without awaiting debounce timeouts.
 * **Multi-Step Stepper & Journey Recovery:** `sanitizeTurn()` explicitly retains `workflow` (interactive wizards, current step, option widgets), `nextActions`, and `resources` across sessions and reloads, preventing taxpayer data loss during mobile multitasking.
-* **Offline Action Outbox & Low-Bandwidth Voice Codec (`FLAG_OFFLINE_ACTION_OUTBOX`, `FLAG_LOW_BANDWIDTH_VOICE_CODEC`, `FLAG_CALL_DROP_RESUME`):** Queued offline calculator receipts and workflow slots sync into `ResolutionLedger.sync_offline_actions()` (`verified_slot_bank` and `ResolutionCase`) upon network recovery, while 2G/3G voice sessions negotiate 8 kHz G.711 μ-law framing (75% bandwidth reduction) and 45-second HMAC-signed call drop-resume tickets (`receptionist/low_bandwidth.py`).
+* **Offline Action Outbox & Low-Bandwidth Voice Codec (`FLAG_OFFLINE_ACTION_OUTBOX`, `FLAG_LOW_BANDWIDTH_VOICE_CODEC`, `FLAG_CALL_DROP_RESUME`):** Backend support for syncing offline actions into `verified_slot_bank` and `ResolutionCase` is defined by `ResolutionLedger.sync_offline_actions()`, while 2G/3G voice sessions negotiate 8 kHz G.711 μ-law framing (75% bandwidth reduction) and 45-second HMAC-signed call drop-resume tickets (`receptionist/low_bandwidth.py`).
 
 ---
 

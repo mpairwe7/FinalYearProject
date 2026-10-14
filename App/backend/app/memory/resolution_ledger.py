@@ -317,29 +317,49 @@ class ResolutionLedger:
             if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
                 return {"synced_count": 0, "slots_merged": {}, "skipped": "consent_required"}
 
+            existing_slots = self.get_verified_slots(user_id, tenant_id=tenant)
+            existing_case = self.get_active_case(user_id, tenant_id=tenant)
+            existing_steps = set(existing_case.completed_steps if existing_case is not None else [])
+
             merged_slots: dict[str, Any] = {}
             completed_notes: list[str] = []
+            seen_notes = set(existing_steps)
+            action_outcomes: list[tuple[bool, bool]] = []
             last_objective = ""
             for item in actions[:25]:
                 if not isinstance(item, dict):
                     continue
+                has_new_slot = False
                 slots = item.get("slots")
                 if isinstance(slots, dict):
                     for k, v in slots.items():
-                        if k and v not in ("", None):
-                            merged_slots[str(k)] = v
+                        key = str(k) if k else ""
+                        if key and v not in ("", None):
+                            prev_val = merged_slots.get(key, existing_slots.get(key))
+                            if prev_val != v:
+                                has_new_slot = True
+                            merged_slots[key] = v
+                has_new_note = False
                 tool = str(item.get("tool") or item.get("workflow_id") or "").strip()
                 summary = str(item.get("summary") or "").strip()
                 if tool or summary:
-                    completed_notes.append(f"Offline {tool}: {summary}".strip(": "))
+                    note = f"Offline {tool}: {summary}".strip(": ")
+                    if note and note not in seen_notes:
+                        seen_notes.add(note)
+                        completed_notes.append(note)
+                        has_new_note = True
                     if not last_objective:
                         last_objective = summary or f"Offline {tool}"
+                if has_new_slot or has_new_note:
+                    action_outcomes.append((has_new_slot, has_new_note))
 
+            slots_ok = True
             if merged_slots:
-                self.store_verified_slots(user_id, merged_slots, tenant_id=tenant)
+                slots_ok = bool(self.store_verified_slots(user_id, merged_slots, tenant_id=tenant))
 
+            checkpoint_ok = True
             if completed_notes:
-                case = self.get_active_case(user_id, tenant_id=tenant) or ResolutionCase(
+                case = existing_case or ResolutionCase(
                     user_id=user_id,
                     tenant_id=tenant,
                     source_channel="offline_pwa",
@@ -349,25 +369,37 @@ class ResolutionLedger:
                 for note in completed_notes:
                     if note not in case.completed_steps:
                         case.completed_steps.append(note)
-                self.checkpoint(user_id, case, tenant_id=tenant)
-                try:
-                    from ..analytics import metrics
+                checkpoint_ok = bool(self.checkpoint(user_id, case, tenant_id=tenant))
+                if checkpoint_ok:
+                    try:
+                        from ..analytics import metrics
 
-                    metrics.inc(
-                        "relationship_resumption_total",
-                        labels={
-                            "from_channel": "offline_pwa",
-                            "to_channel": "web",
-                            "status": "resumed",
-                        },
-                    )
-                except Exception as _exc:  # noqa: BLE001
-                    _ = _exc
+                        metrics.inc(
+                            "relationship_resumption_total",
+                            labels={
+                                "from_channel": "offline_pwa",
+                                "to_channel": "web",
+                                "status": "resumed",
+                            },
+                        )
+                    except Exception as _exc:  # noqa: BLE001
+                        _ = _exc
 
-            return {
-                "synced_count": len(completed_notes) or (1 if merged_slots else 0),
-                "slots_merged": merged_slots,
+            applied_count = sum(
+                1
+                for needs_slots, needs_note in action_outcomes
+                if (not needs_slots or slots_ok) and (not needs_note or checkpoint_ok)
+            )
+            all_ok = slots_ok and checkpoint_ok
+            result: dict[str, Any] = {
+                "ok": all_ok,
+                "synced_count": applied_count,
+                "slots_merged": merged_slots if slots_ok else {},
             }
+            if not all_ok:
+                result["partial"] = applied_count > 0
+                result["error"] = "persistence_write_failed"
+            return result
         except Exception:
             logger.debug("resolution_ledger: sync_offline_actions failed", exc_info=True)
             return {"synced_count": 0, "slots_merged": {}}

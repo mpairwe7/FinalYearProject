@@ -17,6 +17,7 @@ import hmac
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -27,7 +28,8 @@ from ..flags import flags
 
 logger = logging.getLogger(__name__)
 
-_CONSUMED_RESUME_NONCES: set[str] = set()
+_CONSUMED_RESUME_NONCES: dict[str, float] = {}
+_NONCE_LOCK = threading.Lock()
 _MAX_CONSUMED_NONCES = 2048
 
 
@@ -39,8 +41,10 @@ def get_caller_reconnect_grace_s() -> int:
         return 45
 
 
-def _signing_material() -> bytes:
-    raw = os.getenv("AUTH_DEV_SECRET", "ura-voice-resume-default-key")
+def _signing_material() -> bytes | None:
+    raw = (os.getenv("RECEPTIONIST_RESUME_SECRET") or os.getenv("AUTH_DEV_SECRET") or "").strip()
+    if not raw:
+        return None
     return hashlib.sha256(f"ura-call-resume:{raw}".encode()).digest()
 
 
@@ -136,6 +140,9 @@ def mint_call_resume_ticket(
     """Mint an HMAC-signed, single-use caller resume ticket for dropped mobile voice sockets."""
     if not flags.is_enabled("call_drop_resume", subject=user_id or None):
         return ""
+    key = _signing_material()
+    if key is None:
+        return ""
     ttl = ttl_seconds if ttl_seconds is not None else get_caller_reconnect_grace_s()
     payload = {
         "cid": call_id,
@@ -146,7 +153,7 @@ def mint_call_resume_ticket(
         "exp": round(time.time() + max(5, ttl), 2),
     }
     raw_body = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode()).decode("ascii")
-    sig = hmac.new(_signing_material(), raw_body.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+    sig = hmac.new(key, raw_body.encode("ascii"), hashlib.sha256).hexdigest()[:32]
     return f"{raw_body}.{sig}"
 
 
@@ -160,17 +167,23 @@ def verify_call_resume_ticket(
     """Verify and consume a single-use caller resume ticket; returns claims or ``None``."""
     if not resume_ticket or "." not in resume_ticket:
         return None
-    raw_body, sig = resume_ticket.rsplit(".", 1)
-    expected_sig = hmac.new(_signing_material(), raw_body.encode("ascii"), hashlib.sha256).hexdigest()[:32]
-    if not hmac.compare_digest(sig, expected_sig):
+    key = _signing_material()
+    if key is None:
         return None
     try:
-        payload = json.loads(base64.urlsafe_b64decode(raw_body.encode("ascii")).decode("utf-8"))
+        raw_body, sig = resume_ticket.rsplit(".", 1)
+        raw_body_bytes = raw_body.encode("ascii")
+        sig_ascii = sig.encode("ascii").decode("ascii")
+        expected_sig = hmac.new(key, raw_body_bytes, hashlib.sha256).hexdigest()[:32]
+        if not hmac.compare_digest(sig_ascii, expected_sig):
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(raw_body_bytes).decode("utf-8"))
+        if not isinstance(payload, dict):
+            return None
+        exp_ts = float(payload.get("exp") or 0.0)
     except Exception:
         return None
-    if not isinstance(payload, dict):
-        return None
-    if float(payload.get("exp") or 0.0) <= time.time():
+    if exp_ts <= time.time():
         return None
     if expected_call_id and payload.get("cid") != expected_call_id:
         return None
@@ -179,11 +192,21 @@ def verify_call_resume_ticket(
     if expected_tenant_id and payload.get("tid") != expected_tenant_id:
         return None
     nonce = str(payload.get("nonce") or "")
-    if not nonce or nonce in _CONSUMED_RESUME_NONCES:
+    if not nonce:
         return None
     if not flags.is_enabled("call_drop_resume", subject=str(payload.get("uid") or "") or None):
         return None
-    if len(_CONSUMED_RESUME_NONCES) >= _MAX_CONSUMED_NONCES:
-        _CONSUMED_RESUME_NONCES.clear()
-    _CONSUMED_RESUME_NONCES.add(nonce)
+    with _NONCE_LOCK:
+        now = time.time()
+        if exp_ts <= now:
+            return None
+        for n, e in list(_CONSUMED_RESUME_NONCES.items()):
+            if e <= now:
+                del _CONSUMED_RESUME_NONCES[n]
+        if nonce in _CONSUMED_RESUME_NONCES:
+            return None
+        if len(_CONSUMED_RESUME_NONCES) >= _MAX_CONSUMED_NONCES:
+            oldest_nonce = min(_CONSUMED_RESUME_NONCES, key=_CONSUMED_RESUME_NONCES.__getitem__)
+            del _CONSUMED_RESUME_NONCES[oldest_nonce]
+        _CONSUMED_RESUME_NONCES[nonce] = exp_ts
     return payload

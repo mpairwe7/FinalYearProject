@@ -1618,7 +1618,7 @@ _WHT_SUBTYPE_RES: list[tuple[str, re.Pattern[str]]] = [
     ),
     ("withholding_betting_winnings", re.compile(r"\b(betting|gaming|gambl\w+|michezo\s+ya\s+kubahatisha|okuteega|ezaala)\b", re.IGNORECASE)),
     ("withholding_services", re.compile(r"\b(services?|professional\s+fees?|emirimu\s+egy'ekikugu|huduma\s+za\s+kitaalamu)\b", re.IGNORECASE)),
-    ("withholding_goods", re.compile(r"\b(goods|bidhaa|byamaguzi)\b", re.IGNORECASE)),
+    ("withholding_goods", re.compile(r"\b(goods|bidhaa|e?byamaguzi)\b", re.IGNORECASE)),
 ]
 
 
