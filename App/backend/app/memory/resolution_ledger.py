@@ -42,6 +42,7 @@ class ResolutionCase:
     completed_steps: list[str] = field(default_factory=list)
     pending_steps: list[str] = field(default_factory=list)
     handoff_envelope: dict[str, Any] = field(default_factory=dict)
+    verified_slot_bank: dict[str, Any] = field(default_factory=dict)
     background_task_id: str = ""
     updated_at: float = field(default_factory=time.time)
     expires_at: float = 0.0
@@ -64,6 +65,7 @@ class ResolutionCase:
             completed_steps=list(data.get("completed_steps") or []),
             pending_steps=list(data.get("pending_steps") or []),
             handoff_envelope=dict(data.get("handoff_envelope") or {}),
+            verified_slot_bank=dict(data.get("verified_slot_bank") or {}),
             background_task_id=str(data.get("background_task_id") or ""),
             updated_at=float(data.get("updated_at") or now),
             expires_at=float(data.get("expires_at") or (now + get_resolution_case_ttl_seconds())),
@@ -218,8 +220,78 @@ class ResolutionLedger:
                 }
             )
             case.handoff_envelope["verified_evidence"] = ev
-        self.checkpoint(user_id, case, tenant_id=tenant_id)
+        ok = self.checkpoint(user_id, case, tenant_id=tenant_id)
+        if completed_step and ok:
+            try:
+                from .. import database as db
+                from ..flags import flags
+
+                if flags.is_enabled("proactive_resolution_continuation", subject=user_id):
+                    summary_msg = build_resumption_prompt(case, target_locale=case.locale)
+                    if evidence_note:
+                        summary_msg = f"{summary_msg} ({evidence_note})".strip()
+                    db.upsert_reminder_inbox(
+                        user_id=user_id,
+                        deadline_name=f"Resolution Update: {case.primary_objective[:48]}",
+                        due_date=time.strftime("%Y-%m-%d", time.gmtime(time.time() + 86400)),
+                        message=summary_msg or f"Background task {task_id} completed for {case.case_id}.",
+                    )
+            except Exception:
+                logger.debug("resolution_ledger: proactive reminder creation skipped", exc_info=True)
         return case
+
+    def store_verified_slots(
+        self,
+        user_id: str,
+        slots: dict[str, Any],
+        *,
+        tenant_id: str = "default",
+    ) -> bool:
+        """Persist validated workflow/calculator slots in shared working memory for zero-effort prefill."""
+        if not user_id or not slots:
+            return False
+        try:
+            from .. import database as db
+
+            tenant = tenant_id or "default"
+            if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
+                return False
+            existing = db.get_working_memory(user_id, tenant_id=tenant) or {}
+            bank = dict(existing.get("verified_slot_bank") or {})
+            for k, v in slots.items():
+                if k and v not in ("", None):
+                    bank[str(k)] = v
+            return db.upsert_working_memory(
+                user_id,
+                tenant,
+                {"verified_slot_bank": bank},
+                ttl_seconds=get_resolution_case_ttl_seconds(),
+            )
+        except Exception:
+            logger.debug("resolution_ledger: store_verified_slots failed", exc_info=True)
+            return False
+
+    def get_verified_slots(
+        self,
+        user_id: str,
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        """Read consented verified slots for zero-effort workflow prefill."""
+        if not user_id:
+            return {}
+        try:
+            from .. import database as db
+
+            tenant = tenant_id or "default"
+            if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
+                return {}
+            working = db.get_working_memory(user_id, tenant_id=tenant) or {}
+            bank = working.get("verified_slot_bank")
+            return dict(bank) if isinstance(bank, dict) else {}
+        except Exception:
+            logger.debug("resolution_ledger: get_verified_slots failed", exc_info=True)
+            return {}
 
     def mark_resolved(
         self,

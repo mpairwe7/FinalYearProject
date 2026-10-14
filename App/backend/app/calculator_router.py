@@ -182,6 +182,18 @@ _DEFINITIONAL_OPENER_RE = re.compile(
     r"\bwhat\s+(?:is|'s|are|does|do)\b",
     re.IGNORECASE,
 )
+
+#: Terse "<tax> on/for/ku/kwa <amount>" phrasings ("VAT on 1.5m",
+#: "VAT ku UGX 2,000,000", "VAT kwa UGX 2,000,000", "PAYE kwa mshahara wa UGX 2,000,000")
+#: that carry a named tax and a money amount without an explicit verb.
+_TERSE_TAX_ON_AMOUNT_RE = re.compile(
+    r"^(?:(?:omusolo\s{1,4}gwa|kodi\s{1,4}ya|ushuru\s{1,4}wa)\s{1,4})?"
+    r"(?:v\.?a\.?t\.?|vati|value\s{1,4}added\s{1,4}tax|paye|pay\s{1,4}as\s{1,4}you\s{1,4}earn|"
+    r"withholding(?:\s{1,4}tax)?|wht|rental(?:\s{1,4}(?:income\s{1,4})?tax)?|"
+    r"corporation(?:\s{1,4}tax)?|corporate(?:\s{1,4}tax)?|customs(?:\s{1,4}duty)?|import\s{1,4}duty)"
+    r"\s{1,4}(?:on|for|ku|kwa)\s",
+    re.IGNORECASE,
+)
 # A question about what a published figure IS must never open a calculator that
 # asks the taxpayer for an amount. Measured against a live Sunflower-14B-FP8 +
 # hybrid-Qdrant stack on 2026-09-02 (GAPS §2.11, G42), two phrasings slipped
@@ -365,8 +377,8 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
-    ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*|supplier\w*|vendor\w*|freelanc\w*|individual)\b", re.IGNORECASE)),
-    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock)\b", re.IGNORECASE)),
+    ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*|supplier\w*|vendor\w*|freelanc\w*|individual|e?mpeereza|buweereza|huduma)\b", re.IGNORECASE)),
+    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock|ebyamaguzi|bidhaa)\b", re.IGNORECASE)),
 ]
 
 _EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
@@ -657,7 +669,8 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         return None
 
     if not _CALC_VERB_RE.search(text) and not (
-        has_money_amount(text) and _DEFINITIONAL_OPENER_RE.search(text)
+        has_money_amount(text)
+        and (_DEFINITIONAL_OPENER_RE.search(text) or _TERSE_TAX_ON_AMOUNT_RE.search(text))
     ):
         return None
 

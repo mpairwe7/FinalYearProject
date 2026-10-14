@@ -4432,6 +4432,12 @@ class ChatModel:
         last_topic = str(working.get("last_topic", "")).strip()
         if last_topic:
             lines.append(f"- Last conversation topic: {last_topic}")
+        if flags.is_enabled("zero_effort_slot_prefill", subject=user_id):
+            slot_bank = working.get("verified_slot_bank")
+            if isinstance(slot_bank, dict):
+                for sk, sv in slot_bank.items():
+                    if sk and sv not in ("", None) and sk not in prefill_slots:
+                        prefill_slots[str(sk)] = sv
         raw_case = working.get("active_resolution_case")
         if (
             isinstance(raw_case, dict)
@@ -8281,10 +8287,16 @@ class ChatModel:
             p_eff = (p_due / val) * 100 if val > 0 else 0
             p_takehome = paye_result.get("net_take_home", val - p_due)
             band = paye_result.get("band", {})
-            band_str = (
-                f"30% marginal (UGX {band.get('lower', 485000):,.0f}–{band.get('upper', 10000000):,.0f})"
-                if band else "Standard resident PAYE band"
-            )
+            if isinstance(band, dict) and band:
+                lower_val = float(band.get("lower") or 0)
+                upper_val = band.get("upper")
+                m_pct = float(band.get("marginal_rate") or 0.30) * 100
+                if upper_val is None:
+                    band_str = f"{m_pct:.0f}% marginal (above UGX {lower_val:,.0f})"
+                else:
+                    band_str = f"{m_pct:.0f}% marginal (UGX {lower_val:,.0f}–{float(upper_val):,.0f})"
+            else:
+                band_str = "Standard resident PAYE band"
             lines.append("### 1. 💼 Employment Income (PAYE - Monthly Salary)")
             lines.append(f"- Gross Monthly Salary: **{amt_str}**")
             lines.append(f"- PAYE Due ({p_eff:.1f}% effective): **UGX {p_due:,.0f}** per month")
