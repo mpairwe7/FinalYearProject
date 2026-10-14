@@ -80,7 +80,12 @@ _GUIDANCE: dict[str, dict[str, Any]] = {
 }
 
 
-def assess(message: str, history: list[str] | None = None) -> dict[str, Any]:
+def assess(
+    message: str,
+    history: list[str] | None = None,
+    *,
+    record_metric: bool = True,
+) -> dict[str, Any]:
     """Classify *message* and return handling guidance.
 
     Classification comes from :func:`app.text_signals.detect_user_distress`
@@ -145,7 +150,7 @@ def assess(message: str, history: list[str] | None = None) -> dict[str, Any]:
 
     priority_boost = "high" if offer_human else "normal"
 
-    if kind:
+    if kind and record_metric:
         try:
             from ..flags import flags
 

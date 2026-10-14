@@ -105,6 +105,38 @@ def _spoken_realizations_for(val: float, locale: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(candidates))
 
 
+_CONTINUATION_NUMBER_WORDS: frozenset[str] = frozenset({
+    "hundred", "thousand", "million", "billion", "point",
+    "kikumi", "bikumi", "lukumi", "nkumi", "enkumi", "mutwalo", "mitwalo", "emitwalo",
+    "kakadde", "akakadde", "bukadde", "obukadde", "kawumbi", "akawumbi", "buwumbi", "obuwumbi",
+    "mia", "elfu", "laki", "milioni", "bilioni", "nukta",
+})
+
+
+def _exact_spoken_phrase_in(phrase_norm: str, spoken_tokens: list[str]) -> bool:
+    """True when *phrase_norm* appears as a complete number phrase in *spoken_tokens*.
+
+    Rejects prefix matches where the next token continues a larger number
+    (e.g. ``one hundred and eighteen`` inside ``one hundred and eighteen thousand``).
+    """
+    p_tokens = phrase_norm.split()
+    if not p_tokens or len(p_tokens) > len(spoken_tokens):
+        return False
+    plen = len(p_tokens)
+    for idx in range(len(spoken_tokens) - plen + 1):
+        if spoken_tokens[idx : idx + plen] != p_tokens:
+            continue
+        nxt = spoken_tokens[idx + plen] if (idx + plen) < len(spoken_tokens) else ""
+        if nxt in _CONTINUATION_NUMBER_WORDS or nxt in _DIGIT_WORDS:
+            continue
+        if nxt in ("and", "na") and (idx + plen + 1) < len(spoken_tokens):
+            after_conj = spoken_tokens[idx + plen + 1]
+            if after_conj in _CONTINUATION_NUMBER_WORDS or after_conj in _DIGIT_WORDS:
+                continue
+        return True
+    return False
+
+
 def verify_spoken_figures(
     source_text: str,
     spoken_text: str,
@@ -139,11 +171,18 @@ def verify_spoken_figures(
 
     detected = mt.figures(spoken_text, locale=loc) | mt.figures(spoken_text, locale="en")
     if not expected.issubset(detected):
-        spoken_norm_low = " ".join((spoken_text or "").lower().replace(",", " ").split())
+        strip_chars = "()[]\"'.,;:!?-"
+        spoken_tokens = [
+            tok.strip(strip_chars)
+            for tok in (spoken_text or "").lower().replace(",", " ").split()
+            if tok.strip(strip_chars)
+        ]
         for missing_val in list(expected - detected):
             for phrase in _spoken_realizations_for(missing_val, loc):
-                phrase_norm = " ".join(phrase.replace(",", " ").split())
-                if phrase_norm and phrase_norm in spoken_norm_low:
+                phrase_norm = " ".join(
+                    t.strip(strip_chars) for t in phrase.replace(",", " ").split() if t.strip(strip_chars)
+                )
+                if phrase_norm and _exact_spoken_phrase_in(phrase_norm, spoken_tokens):
                     detected.add(missing_val)
                     break
     text_ok = expected.issubset(detected) or mt.figures_survived(source_text, spoken_text, locale=loc)

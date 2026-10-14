@@ -220,23 +220,24 @@ class ResolutionLedger:
                 }
             )
             case.handoff_envelope["verified_evidence"] = ev
-        self.checkpoint(user_id, case, tenant_id=tenant_id)
-        try:
-            from .. import database as db
-            from ..flags import flags
+        ok = self.checkpoint(user_id, case, tenant_id=tenant_id)
+        if completed_step and ok:
+            try:
+                from .. import database as db
+                from ..flags import flags
 
-            if flags.is_enabled("proactive_resolution_continuation", subject=user_id):
-                summary_msg = build_resumption_prompt(case, target_locale=case.locale)
-                if evidence_note:
-                    summary_msg = f"{summary_msg} ({evidence_note})".strip()
-                db.upsert_reminder_inbox(
-                    user_id=user_id,
-                    deadline_name=f"Resolution Update: {case.primary_objective[:48]}",
-                    due_date=time.strftime("%Y-%m-%d", time.gmtime(time.time() + 86400)),
-                    message=summary_msg or f"Background task {task_id} completed for {case.case_id}.",
-                )
-        except Exception:
-            logger.debug("resolution_ledger: proactive reminder creation skipped", exc_info=True)
+                if flags.is_enabled("proactive_resolution_continuation", subject=user_id):
+                    summary_msg = build_resumption_prompt(case, target_locale=case.locale)
+                    if evidence_note:
+                        summary_msg = f"{summary_msg} ({evidence_note})".strip()
+                    db.upsert_reminder_inbox(
+                        user_id=user_id,
+                        deadline_name=f"Resolution Update: {case.primary_objective[:48]}",
+                        due_date=time.strftime("%Y-%m-%d", time.gmtime(time.time() + 86400)),
+                        message=summary_msg or f"Background task {task_id} completed for {case.case_id}.",
+                    )
+            except Exception:
+                logger.debug("resolution_ledger: proactive reminder creation skipped", exc_info=True)
         return case
 
     def store_verified_slots(

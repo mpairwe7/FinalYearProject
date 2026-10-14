@@ -1351,7 +1351,7 @@ def extract_retrieval_preferences(query: str) -> dict[str, Any]:
             if flags.is_enabled("eq_adaptive_retrieval"):
                 from .tools.empathy import assess as _assess_eq
 
-                eq = _assess_eq(text)
+                eq = _assess_eq(text, record_metric=False)
                 if eq.get("retrieval_preference_terms"):
                     prefer["eq_relief_terms"] = eq["retrieval_preference_terms"]
                     prefer["eq_affect"] = eq.get("kind", "")
@@ -1393,10 +1393,13 @@ def plan_retrieval(query: str) -> dict[str, Any]:
     prefer = extract_retrieval_preferences(query)
     subqueries = decompose_query(query)
     eq_terms = str(prefer.get("eq_relief_terms") or "").strip()
-    if eq_terms and subqueries and len(subqueries) < 3:
+    if eq_terms and subqueries:
         relief_subq = f"{subqueries[0]} {eq_terms}".strip()
         if relief_subq not in subqueries:
-            subqueries = [*subqueries, relief_subq][:3]
+            if len(subqueries) < 3:
+                subqueries = [*subqueries, relief_subq]
+            else:
+                subqueries = [relief_subq, *subqueries[1:]]
     return {
         "filters": extract_retrieval_filters(query),
         "prefer": prefer,

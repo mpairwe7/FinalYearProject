@@ -288,8 +288,11 @@ class MemoryService:
         """Construct an immutable, structured handoff envelope for human or peer escalation."""
         import os
 
+        from ..flags import flags
+
+        eq_enabled = flags.is_enabled("eq_adaptive_retrieval", subject=user_id or None)
         effective_priority = priority or "normal"
-        if caller_affect in ("frustrated", "urgent_distress", "hardship") and effective_priority == "normal":
+        if eq_enabled and caller_affect in ("frustrated", "urgent_distress", "hardship") and effective_priority == "normal":
             effective_priority = "high"
         try:
             hardship_sla = max(15, int(os.getenv("EQ_HARDSHIP_SLA_TARGET_SECONDS", "45")))
@@ -299,7 +302,7 @@ class MemoryService:
             30
             if effective_priority == "urgent"
             else hardship_sla
-            if caller_affect in ("urgent_distress", "hardship")
+            if (eq_enabled and caller_affect in ("urgent_distress", "hardship"))
             else 60
             if effective_priority == "high"
             else 120

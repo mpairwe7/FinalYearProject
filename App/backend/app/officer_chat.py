@@ -367,10 +367,12 @@ def build_officer_copilot_draft(ticket: dict[str, Any], draft_en: str) -> dict[s
     try:
         from .service import localize_reply
 
-        localized = _redact(localize_reply(clean_en, locale))
-        figures_ok = mt.figures_survived(clean_en, localized, locale=locale)
-        if not figures_ok:
-            localized = clean_en
+        translated = localize_reply(clean_en, locale)
+        figures_ok = (
+            translated != clean_en
+            and mt.figures_survived(clean_en, translated, locale=locale)
+        )
+        localized = _redact(translated) if figures_ok else clean_en
         return {
             "draft_en": clean_en,
             "draft_localized": localized,
@@ -382,7 +384,7 @@ def build_officer_copilot_draft(ticket: dict[str, Any], draft_en: str) -> dict[s
             "draft_en": clean_en,
             "draft_localized": clean_en,
             "locale": locale,
-            "figures_verified": True,
+            "figures_verified": False,
         }
 
 
