@@ -497,93 +497,135 @@ YAML-defined guided workflows for procedural tax tasks:
 
 State machine: `WorkflowRegistry.advance(session, user_input)` validates slots, advances steps, calls tools, and persists to `workflow_sessions` table.
 
-## Speech Pipeline (Phase 16)
+## Speech & Voice Pipeline Architecture (2026 Production & GPU Topology)
 
-| Component | Backend | Model/API | Purpose |
-|-----------|---------|-----------|---------|
-| ASR | sherpa / transformers | Whisper Small + LoRA adapters | Speech-to-text (5 languages) |
-| TTS | piper / sherpa | Piper native voices | Text-to-speech (5 languages) |
-| MT | prompted / ONNX | Qwen3-8B prompted or ONNX | Machine translation |
-| Cloud fallback | Sunbird AI | `api.sunbird.ai` | ASR/TTS/MT for Ugandan languages |
+The system deploys an enterprise-grade multimodal speech and streaming voice architecture tailored for Ugandan taxpayer interaction across English and native African languages (Luganda, Swahili, Runyankole, Acholi).
 
-**Compound voice pipeline** (`POST /v1/voice/chat`): Audio → ASR → [MT to en] → LLM RAG → [MT to locale] → TTS → Audio
+### Local Docker GPU & Ngrok Serving Topology
 
-## Streaming Voice Engine (Phase 23)
-
-Phase 23 transforms the batch voice pipeline into a **streaming voice-first** interface:
-
-### Architecture
+The local serving stack operates across dedicated hardware allocations on NVIDIA RTX A6000 GPUs:
 
 ```
-Client PCM chunks  ──▶  VAD  ──▶  utterance buffer
-                                      │
-                                      ▼  (utterance complete)
-                          ASR ──▶ [MT] ──▶ LLM ──▶ [MT] ──▶ TTS
-                                                              │
-                          ◄── sentence chunks ◄───────────────┘
-                          (cancellable via barge-in)
+[ Public Ngrok Ingress: https://*.ngrok-free.dev ]
+                       │
+                       ▼
+            [ ura-app-frontend (Next.js 16+, port 3032) ]
+                       │
+         ┌─────────────┴─────────────┐
+         ▼                           ▼
+[ /api/v1/calls/stream ]     [ /api/v1/voice/chat ]
+         │                           │
+         └─────────────┬─────────────┘
+                       ▼
+        [ ura-app-api:gpu (FastAPI on GPU 3, port 8083) ]
+         ├── ASR: Sunbird/asr-whisper-large-v3-salt (cuda:0)
+         ├── TTS: Sunbird/spark-tts-salt + BiCodec (cuda:0)
+         ├── Dense: BAAI/bge-m3 (cuda:0)
+         ├── Reranker: mixedbread-ai/mxbai-rerank-base-v2 (cuda:0)
+         └── Prompted MT: via vLLM Sunflower
+                       │
+         ┌─────────────┼───────────────────────────┐
+         ▼             ▼                           ▼
+[ ura-app-vllm ] [ ura-app-qdrant ]      [ ura-app-orpheus-tts ]
+ (GPU 2: 131k YaRN) (v1.19.0 Vectors)     (Optional Sidecar: 8100)
 ```
 
-### New Modules
+1. **vLLM Generator Pod (`ura-app-vllm-sunflower`)**:
+   - Dedicated to **GPU 2** (40.1 GB VRAM allocated, 85% utilization ceiling).
+   - Serves `Sunbird/Sunflower-14B-FP8` with **YaRN RoPE context extension** (`factor: 4.0`, `max_model_len: 131,072`).
+   - Supports native tool-calling via `--enable-auto-tool-choice --tool-call-parser hermes` and chunked prefill (`max_num_batched_tokens: 16,384`).
+2. **API & Speech Host (`ura-app-api:gpu`)**:
+   - Dedicated to **GPU 3** (12.6 GB VRAM allocated, 36.5 GB headroom).
+   - In-process CUDA backends: `Sunbird/asr-whisper-large-v3-salt` for speech recognition and `Sunbird/spark-tts-salt` for local neural synthesis with pinned BiCodec checkout (`/opt/spark-tts`).
+   - BAAI/bge-m3 dense embedder and cross-encoder reranker both run on CUDA.
+3. **Voice Sidecar (`ura-app-orpheus-tts`)**:
+   - Optional dedicated sidecar serving `Sunbird/orpheus-3b-tts-multilingual` (`http://orpheus-tts:8100`) providing ultra-fast native Luganda, Swahili, and English speech generation (~350ms TTFB).
+4. **State & Caching Subsystems**:
+   - `ura-app-qdrant`: Vector database on port 6333 with HNSW indexing and alias-based zero-downtime collection swapping.
+   - `ura-app-redis`: Redis 7.4-Alpine for distributed rate-limiting and semantic cache.
+   - `ura-app-connectors`: Sandboxed simulator gateway over MCP `2026-07-28` protocols.
 
-| Module | File | Purpose |
-|--------|------|---------|
-| Voice Stream Engine | `voice_stream.py` | VADConfig, VoiceSession (energy-based VAD, barge-in, sentence-chunked TTS) |
-| WebSocket Handler | `voice_ws.py` | Duplex WebSocket protocol for `/v1/voice/chat/stream` |
-| Voice Consent | `voice_consent.py` | Voice-specific consent (NDPA 2019), audit log, retention policy |
-| Offline RAG | `offline_rag.py` | FAISS index + ONNX embedder for offline retrieval fallback |
-| Accent Detector | `accent_detector.py` | Prosodic-feature accent classifier, routes to accent-specific LoRA adapters |
+---
 
-### VAD (Voice Activity Detection)
+### Voice & Speech Serving Flows
+
+#### 1. Full-Duplex Real-Time Voice Calls (`/v1/calls/stream` & `/v1/voice/chat/stream`)
+- **Transport**: WebSockets / WebRTC audio streaming managed via **Pipecat** and **LiveKit**.
+- **Voice Activity Detection (VAD)**: Energy-based VAD with hysteresis (`VOICE_VAD_ENERGY_THRESHOLD=0.015`, `VOICE_VAD_SILENCE_MS=600ms`), filtering noise without heavy dependencies.
+- **Acoustic Entity & Lexicon Repair (`receptionist/lexicon.py`)**:
+  - Automatically reconstructs acoustic numbers (NINs, PRNs, phone numbers, money figures) and corrects phonetic homophones across Luganda (`ebizimbe`, `amagoba`, `omusolo`) and Swahili (`ushuru`, `forodha`, `mahindi`).
+- **Low-Latency Streaming Synthesis**: Sentence-chunked audio streaming emits audio chunks as each sentence finishes generation, achieving sub-second initial voice latency.
+- **Officer Call Desk Handoff**: When dispute or distress thresholds trigger escalation, the call transfers seamlessly to live URA staff at `/v1/officer/calls/*` with caller transcript carryover, collision locking, SLA timer, and post-call CSAT rating capture.
+
+#### 2. REST Voice Chat Pipeline (`POST /v1/voice/chat`)
+- Ingests audio payloads (PCM, WAV, MP3).
+- **Pipeline**: Inbound Audio → ASR Transcribe → Language Detection (Lingua) → [Prompted MT to English] → RAG / Tool Execution → [Prompted MT to Target Locale] → TTS Synthesize → Outbound Audio + Transcript.
+
+#### 3. Streaming Reply Speech (`GET /v1/chat/stream/speech`)
+- Streams sentence-by-sentence synthesized audio chunks paired with text generation tokens for accessible audio narration in the web UI.
+
+---
+
+### Multi-Tier Fallback Chains
+
+The speech engine prioritizes local neural models on GPU, falling back through progressively wider tiers to guarantee zero-silence resilience:
+
+#### ASR (Speech-to-Text) Fallback Hierarchy
+1. `⓪ Whisper-SALT`: `Sunbird/asr-whisper-large-v3-salt` (Local GPU `cuda:0`, 1.5B params). Single fine-tune natively transcribing English, Luganda, Swahili, Runyankole, and Acholi. Uses forced language token IDs (`lg`: 50355, `sw`: 50318, `en`: 50259).
+2. `① Whisper + LoRA`: In-process HuggingFace `openai/whisper-small` with language-specific fine-tuned PEFT LoRA adapters.
+3. `② Local Sherpa ASR`: Offline ONNX/Sherpa runtime for CPU fallback.
+4. `③ faster-whisper`: CTranslate2 INT8 multilingual engine.
+5. `④ Sunbird Cloud API`: `api.sunbird.ai/tasks/stt` cloud service for Ugandan vernaculars.
+6. `⑤ Cloudflare Workers AI`: `@cf/openai/whisper-large-v3-turbo` as ultimate cloud failover.
+
+#### TTS (Text-to-Speech) Fallback Hierarchy
+1. `⓪.5 Orpheus-3B-TTS`: Local GPU sidecar (`http://orpheus-tts:8100`) delivering sub-400ms TTFB for Luganda, Swahili, and English. If the sidecar is unreachable, a 30-second cooldown is enforced to eliminate timeout delays on subsequent calls.
+2. `⓪.75 Spark-TTS-SALT`: In-process local GPU (`cuda:0`) neural voice (`Sunbird/spark-tts-salt` with BiCodec tokenizer/detokenizer) for `lg`, `sw`, `ach`, `nyn`.
+3. `① Edge Neural TTS`: Microsoft Edge Neural TTS (`edge-tts`) for English voices (`en-US-JennyNeural`, `en-GB-SoniaNeural`).
+4. `①.5 Local Piper / Sherpa`: Offline VITS/Piper voices loaded from `artifacts/speech/tts/speakers`.
+5. `② Sunbird Cloud API`: `api.sunbird.ai/tasks/tts` native voice endpoints.
+6. `③ Cloudflare Workers AI TTS`: Remote cloud voice fallback.
+
+#### Machine Translation (MT) Hierarchy
+1. `Prompted MT (Local Sunflower-14B-FP8)`:
+   - Configured via `RETRIEVAL_MT_BACKEND=local` and `REPLY_MT_BACKEND=local`.
+   - Utilizes the in-memory Sunflower model for zero-egress, high-fidelity bidirectional translation between English and Luganda/Swahili.
+2. `Sunbird Cloud Translation API`:
+   - Remote fallback (`api.sunbird.ai/tasks/translate`) protected by circuit breaker and per-account retry budget.
+   - **Figure-Fidelity Guard (`mt.py`)**: Asserts that financial numbers, percentages, and statutory tax rates survive translation intact without corruption or omission.
+
+---
+
+### Recent Enhancements & Gap Closures (October 2026)
+
+1. **Vernacular Query Rewriting (G135)**:
+   - `query.rewrite()` detects language/locale and automatically bypasses English dictionary fuzzy spell correction when handling African languages (`lg`, `sw`, `nyn`, `ach`), preventing native vocabulary (e.g. Swahili `nini`) from being mutated into English words (`nin`).
+2. **Operator Readiness Probe Observability (G137)**:
+   - `/ready` endpoint introspects and advertises active cross-encoder reranker presence, dense device (`cuda:0`), procedural memory readiness, and local prompted MT status (`prompted_local` vs `sunbird`).
+3. **Scoped Output Redaction Exemption (G143)**:
+   - `_ACTIVE_USER_STATED_IDS` ContextVar threads taxpayer-declared TINs and PRNs into `OutputGuard.redact_pii()`, preventing response censorship of the user's own identifiers while ensuring payment cards and passwords remain unconditionally redacted.
+4. **4-Tier Cognitive Memory Integration**:
+   - Working memory entity extraction (business names, locations, amounts) combined with procedural trajectory exemplars for statutory tax operations (TIN registration, VAT return filing, assessment objections).
+   - YaRN RoPE 131k token allocation compactor with real-time context-rot analytics (`rot_risk_threshold: 0.85`).
+5. **EU AI Act Article 50(2) Compliance**:
+   - Every synthesized audio WAV embeds an IPTC `trainedAlgorithmicMedia` INFO chunk, providing verifiable machine-readable marking of AI-generated synthetic speech.
+
+### VAD & Audio Handling
 
 Energy-based VAD with hysteresis (numpy only, no silero-vad dependency):
-
 - **Energy threshold:** configurable via `VOICE_VAD_ENERGY_THRESHOLD` (default 0.015)
 - **Silence duration:** `VOICE_VAD_SILENCE_MS` (default 600ms) before declaring utterance end
 - **Min speech duration:** `VOICE_VAD_MIN_SPEECH_MS` (default 250ms) to filter false triggers
 - **Max utterance:** `VOICE_VAD_MAX_UTTERANCE_S` (default 30s) to bound resource usage
-- **Sensitivity presets:** `low`, `medium`, `high` — adjustable per-session
-
-### Barge-in
-
-Users can interrupt assistant speech at any time. The `VoiceSession._cancelled` asyncio Event aborts TTS between sentence chunks. The WebSocket client sends `{"type": "barge_in"}` and the server immediately stops generating audio.
-
-### Sentence-Chunked TTS
-
-`SpeechModel.synthesize_sentences()` splits reply text on sentence boundaries and synthesizes each independently through the existing TTS fallback chain. First audio byte arrives after first sentence (~200-400ms), meeting the < 800ms p95 latency target.
-
-### Offline RAG
-
-`OfflineRAGPipeline` provides on-device retrieval when Qdrant is unavailable:
-
-1. Pre-exported FAISS flat/IVF index from the same knowledge base
-2. ONNX-quantized bge-m3 embedder for query encoding
-3. Compressed passage metadata (JSONL.gz)
-4. Automatic fallback triggered by Qdrant circuit breaker
-
-Bundle target: < 100 MB for mobile deployment. Export via `scripts/export_offline_bundle.py`.
-
-### Accent Adaptation
-
-`AccentDetector` classifies audio accents in < 50ms using prosodic features (RMS, ZCR, spectral centroid, speaking rate). Supported profiles:
-
-- `ug_english_central` — Kampala / Central Uganda English
-- `ug_english_eastern` — Eastern Uganda English
-- `ug_english_western` — Western Uganda English
-- `luganda_kampala` — Luganda (Kampala dialect)
-- `code_switch_en_lg` — Mixed English-Luganda code-switching
-
-When confidence > 0.7, the ASR routes to an accent-specific Whisper LoRA adapter for improved WER.
 
 ### Voice Consent & Governance
-
 - **Consent purposes:** `voice_recording` (required for audio processing), `voice_analytics`
 - **Privacy:** Raw audio never stored by default — only SHA-256 hash in audit trail
 - **Audit:** `voice_audit_log` table with immutable event logging, chained into existing `AuditLedger`
 - **Retention:** configurable TTLs (raw audio 24h, transcripts 90d, analytics 365d)
 - **Admin:** `GET /v1/admin/voice_audit` for regulatory review
 
-### Metrics
+### Voice Metrics
 
 | Metric | Type | Description |
 |--------|------|-------------|
