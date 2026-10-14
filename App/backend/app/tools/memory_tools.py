@@ -39,7 +39,23 @@ class MemoryRecallTool(Tool):
                 },
             },
             "required": ["query"],
+            "additionalProperties": False,
         },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "query": {"type": "string"},
+                "memory_type": {"type": "string"},
+                "count": {"type": "integer"},
+                "results": {"type": "array"},
+                "explanation": {"type": "string"},
+                "error": {"type": "string"},
+            },
+            "required": ["ok"],
+        },
+        risk="low",
+        namespace="core",
     )
 
     def execute(
@@ -127,7 +143,23 @@ class MemoryStoreTool(Tool):
                 },
             },
             "required": ["key", "value"],
+            "additionalProperties": False,
         },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "fact_id": {"type": "string"},
+                "key": {"type": "string"},
+                "value": {"type": "string"},
+                "status": {"type": "string"},
+                "explanation": {"type": "string"},
+                "error": {"type": "string"},
+            },
+            "required": ["ok"],
+        },
+        risk="low",
+        namespace="core",
     )
 
     def execute(
@@ -147,6 +179,7 @@ class MemoryStoreTool(Tool):
 
         import time
         import uuid
+
         from ..memory import UserFact, get_memory_service
 
         memsvc = get_memory_service()
@@ -192,7 +225,22 @@ class MemoryDiscardTool(Tool):
                 },
             },
             "required": ["fact_id"],
+            "additionalProperties": False,
         },
+        output_schema={
+            "type": "object",
+            "properties": {
+                "ok": {"type": "boolean"},
+                "fact_id": {"type": "string"},
+                "status": {"type": "string"},
+                "reason": {"type": "string"},
+                "explanation": {"type": "string"},
+                "error": {"type": "string"},
+            },
+            "required": ["ok"],
+        },
+        risk="low",
+        namespace="core",
     )
 
     def execute(
@@ -207,6 +255,7 @@ class MemoryDiscardTool(Tool):
             return {"ok": False, "error": "user_id required to discard facts"}
 
         import time
+
         from .. import database as db
 
         try:

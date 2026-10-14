@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 
 # Ensure repo root is on sys.path
-_root = Path(__file__).resolve().parents[3]
+from .._root import PROJECT_ROOT as _root
+
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 for candidate in (_root, _root / "app", Path("/app")):
