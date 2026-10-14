@@ -155,6 +155,8 @@ All switches and thresholds are configured via environment variables:
 | `ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS` | unset (`55` when set) | Tighter character cap on the opening clause to reduce Orpheus first-audio TTFB |
 | `VOICE_SEMANTIC_ENDPOINT_MIN_SILENCE_MS` | `320` | Minimum semantic endpointing silence for syntactically complete turns |
 | `VOICE_SEMANTIC_ENDPOINT_NUMERIC_SILENCE_MS` | `1100` | Extended silence tolerance when caller is mid-number (TIN/PRN) or mid-conjunction |
+| `FLAG_LOW_BANDWIDTH_VOICE_CODEC` | `false` | Negotiates 8 kHz μ-law / 12 kbps Opus framing and caption-first degradation on 2G/3G links (`receptionist/low_bandwidth.py`) |
+| `FLAG_CALL_DROP_RESUME` | `false` | Enables HMAC-signed caller drop-resume ticket (`RECEPTIONIST_CALLER_RECONNECT_GRACE_S=45`) |
 
 Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
 provider session window any more. See Pipecat's

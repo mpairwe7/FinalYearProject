@@ -293,6 +293,85 @@ class ResolutionLedger:
             logger.debug("resolution_ledger: get_verified_slots failed", exc_info=True)
             return {}
 
+    def sync_offline_actions(
+        self,
+        user_id: str,
+        actions: list[dict[str, Any]],
+        *,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        """Sync queued PWA offline calculator receipts and workflow slots upon reconnection.
+
+        Gated by ``FLAG_OFFLINE_ACTION_OUTBOX`` and active ``personalization`` consent.
+        """
+        from ..flags import flags
+
+        if not user_id or not actions:
+            return {"synced_count": 0, "slots_merged": {}}
+        if not flags.is_enabled("offline_action_outbox", subject=user_id):
+            return {"synced_count": 0, "slots_merged": {}, "skipped": "flag_disabled"}
+        try:
+            from .. import database as db
+
+            tenant = tenant_id or "default"
+            if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
+                return {"synced_count": 0, "slots_merged": {}, "skipped": "consent_required"}
+
+            merged_slots: dict[str, Any] = {}
+            completed_notes: list[str] = []
+            last_objective = ""
+            for item in actions[:25]:
+                if not isinstance(item, dict):
+                    continue
+                slots = item.get("slots")
+                if isinstance(slots, dict):
+                    for k, v in slots.items():
+                        if k and v not in ("", None):
+                            merged_slots[str(k)] = v
+                tool = str(item.get("tool") or item.get("workflow_id") or "").strip()
+                summary = str(item.get("summary") or "").strip()
+                if tool or summary:
+                    completed_notes.append(f"Offline {tool}: {summary}".strip(": "))
+                    if not last_objective:
+                        last_objective = summary or f"Offline {tool}"
+
+            if merged_slots:
+                self.store_verified_slots(user_id, merged_slots, tenant_id=tenant)
+
+            if completed_notes:
+                case = self.get_active_case(user_id, tenant_id=tenant) or ResolutionCase(
+                    user_id=user_id,
+                    tenant_id=tenant,
+                    source_channel="offline_pwa",
+                    primary_objective=last_objective or "Offline tax calculation follow-up",
+                    status="awaiting_user_action",
+                )
+                for note in completed_notes:
+                    if note not in case.completed_steps:
+                        case.completed_steps.append(note)
+                self.checkpoint(user_id, case, tenant_id=tenant)
+                try:
+                    from ..analytics import metrics
+
+                    metrics.inc(
+                        "relationship_resumption_total",
+                        labels={
+                            "from_channel": "offline_pwa",
+                            "to_channel": "web",
+                            "status": "resumed",
+                        },
+                    )
+                except Exception as _exc:  # noqa: BLE001
+                    _ = _exc
+
+            return {
+                "synced_count": len(completed_notes) or (1 if merged_slots else 0),
+                "slots_merged": merged_slots,
+            }
+        except Exception:
+            logger.debug("resolution_ledger: sync_offline_actions failed", exc_info=True)
+            return {"synced_count": 0, "slots_merged": {}}
+
     def mark_resolved(
         self,
         user_id: str,

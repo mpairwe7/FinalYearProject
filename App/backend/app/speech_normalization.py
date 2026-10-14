@@ -421,3 +421,24 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
     t = re.sub(r"\n\s*\n+", "\n\n", t)
 
     return t.strip()
+
+
+_BANTU_ACRONYM_PHONETICS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bTIN\b"), "T-I-N"),
+    (re.compile(r"\bNIN\b"), "N-I-N"),
+    (re.compile(r"\bPRN\b"), "P-R-N"),
+)
+
+
+def phoneticize_bantu_acronyms(text: str, locale: str = "lg") -> str:
+    """Spell out bare English acronyms (TIN -> T-I-N) for Orpheus Bantu voices (lg/sw).
+
+    Prevents Orpheus-3B from reading 'TIN' as the English word 'team' or 'tin'
+    inside Luganda and Swahili sentences (see voice-receptionist-demo.md §6).
+    """
+    if not text or (locale or "").lower() not in ("lg", "sw"):
+        return text or ""
+    out = text
+    for pat, repl in _BANTU_ACRONYM_PHONETICS:
+        out = pat.sub(repl, out)
+    return out

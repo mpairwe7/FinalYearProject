@@ -84,6 +84,18 @@ def evaluate_call_risk(call_id: str) -> dict[str, Any]:
     if distress_detected:
         signals.append("distress")
 
+    # 3b. Acoustic Prosody Frustration / Distress (Phase 33, 2026)
+    try:
+        from ..flags import flags
+
+        room = registry.get(call_id)
+        if room is not None and flags.is_enabled("emotion_aware_prosody", subject=getattr(room.state, "user_id", "") or None):
+            affect = getattr(room.state, "caller_affect", "calm")
+            if affect in ("frustrated", "urgent_distress") and "distress" not in signals:
+                signals.append("distress")
+    except Exception:
+        logger.debug("Acoustic risk signal evaluation skipped", exc_info=True)
+
     # 4. Low word confidence twice (< 0.5)
     low_prob_turns = [
         t for t in turns

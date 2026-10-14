@@ -26,7 +26,16 @@ VAD_STOP_SECS = 0.5
 BARGE_IN_MIN_WORDS = 2
 
 
-def build_cascaded_turn_strategies() -> Any:
+def effective_turn_timeout_s(room: Any = None) -> float:
+    """Resolve the active turn stop timeout (s), reading semantic endpointing when available."""
+    state = getattr(room, "state", None)
+    sem_ms = getattr(state, "semantic_endpoint_silence_ms", None)
+    if isinstance(sem_ms, int | float) and 150 <= sem_ms <= 3000:
+        return round(float(sem_ms) / 1000.0, 3)
+    return get_turn_timeout_s()
+
+
+def build_cascaded_turn_strategies(room: Any = None) -> Any:
     """``UserTurnStrategies`` for the cascaded engine. Needs Pipecat."""
     from pipecat.frames.frames import BotStartedSpeakingFrame, BotStoppedSpeakingFrame, Frame
     from pipecat.turns.types import ProcessFrameResult
@@ -60,5 +69,5 @@ def build_cascaded_turn_strategies() -> Any:
             VADWhileBotQuietStartStrategy(),
             MinWordsUserTurnStartStrategy(min_words=BARGE_IN_MIN_WORDS),
         ],
-        stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=get_turn_timeout_s())],
+        stop=[SpeechTimeoutUserTurnStopStrategy(user_speech_timeout=effective_turn_timeout_s(room))],
     )

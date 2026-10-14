@@ -122,6 +122,11 @@ class CallState:
     pending_confirm_challenge: str = ""
     pending_confirm_action: dict[str, Any] = field(default_factory=dict)
     last_handoff_envelope: dict[str, Any] = field(default_factory=dict)
+    # Phase 33 (2026) — 2G/3G Low-Bandwidth Codec & Call Drop Resume
+    low_bandwidth_mode: bool = False
+    audio_codec: str = "pcm16_16k"
+    caption_only_degraded: bool = False
+    resume_ticket_nonce: str = ""
 
 
 class CallRoom:

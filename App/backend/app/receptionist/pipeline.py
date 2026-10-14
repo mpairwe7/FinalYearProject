@@ -107,7 +107,7 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
     context_aggregator = LLMContextAggregatorPair(
         LLMContext(),
         user_params=LLMUserAggregatorParams(
-            user_turn_strategies=build_cascaded_turn_strategies(),
+            user_turn_strategies=build_cascaded_turn_strategies(room=room),
             # Whisper-SALT is segmented: its transcript can take a couple of
             # seconds after the caller stops on a long Luganda turn. This is
             # only the backstop for a turn no strategy ever closes.

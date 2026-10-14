@@ -378,7 +378,7 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
     ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*|supplier\w*|vendor\w*|freelanc\w*|individual|e?mpeereza|buweereza|huduma)\b", re.IGNORECASE)),
-    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock|ebyamaguzi|bidhaa)\b", re.IGNORECASE)),
+    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock|e?byamaguzi|bidhaa)\b", re.IGNORECASE)),
 ]
 
 _EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
