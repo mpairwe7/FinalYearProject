@@ -164,6 +164,8 @@ class ConversationEntities:
     taxpayer_types: list[str] = field(default_factory=list)
     amounts: list[str] = field(default_factory=list)
     reference_numbers: list[str] = field(default_factory=list)
+    business_names: list[str] = field(default_factory=list)
+    locations: list[str] = field(default_factory=list)
     active_subject: str = ""
 
 
@@ -174,6 +176,8 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
     taxpayer_types: list[str] = []
     amounts: list[str] = []
     ref_numbers: list[str] = []
+    business_names: list[str] = []
+    locations: list[str] = []
     active_subject = ""
 
     amount_re = re.compile(
@@ -184,6 +188,15 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
     ref_re = re.compile(
         r"\b(?:TIN|PRN|ARN|REF|ASSESSMENT)(?:[-\s#:]|(?:is|no\.?|number)\s*)+([A-Z0-9]{5,18})\b",
         re.I,
+    )
+    loc_re = re.compile(
+        r"\b(?:in|at|from|district of|city of|municipality of)\s+(Kampala|Entebbe|Jinja|Mbale|Masaka|Mbarara|Gulu|Arua|Busia|Malaba|Tororo|Kasese|Lira|Mukono|Wakiso|Soroti|Hoima|Fort Portal|Kabale|Iganga|Njeru)\b"
+        r"|\b(Kampala|Entebbe|Jinja|Mbale|Masaka|Mbarara|Gulu|Arua|Busia|Malaba|Tororo|Kasese|Lira|Mukono|Wakiso|Soroti|Hoima|Fort Portal|Kabale|Iganga|Njeru)\s+(?:district|city|branch|factory|premises|station|office)\b",
+        re.I,
+    )
+    biz_re = re.compile(
+        r"\b(?:called|named|company(?: name is| called)?|business(?: name is| called)?)\s+([A-Z0-9][A-Za-z0-9&'\s]{2,40}(?:Millers|Enterprises|Limited|Ltd|Company|Co\b|Factory|Traders|Store|Holdings|Works|Services|Logistics|Industries|Imports|Exports)?)\b"
+        r"|\b([A-Z][a-zA-Z0-9&']+(?:\s+[A-Z][a-zA-Z0-9&']+)*\s+(?:Millers|Enterprises|Limited|Ltd|Company|Co\b|Factory|Traders|Holdings|Industries|Logistics))\b",
     )
 
     for turn in turns:
@@ -227,12 +240,28 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
             if ref not in ref_numbers:
                 ref_numbers.append(ref)
 
+        # Operating locations
+        found_locs = loc_re.findall(user_msg)
+        for loc in found_locs:
+            loc_val = (loc[0] or loc[1] if isinstance(loc, tuple) else loc).strip().capitalize()
+            if loc_val and loc_val not in locations:
+                locations.append(loc_val)
+
+        # Business and entity names
+        found_biz = biz_re.findall(user_msg)
+        for biz in found_biz:
+            biz_val = (biz[0] or biz[1] if isinstance(biz, tuple) else biz).strip()
+            if biz_val and len(biz_val) > 2 and biz_val not in business_names:
+                business_names.append(biz_val)
+
     return ConversationEntities(
         tax_topics=topics,
         tax_topic_keys=topic_keys,
         taxpayer_types=taxpayer_types,
         amounts=amounts,
         reference_numbers=ref_numbers,
+        business_names=business_names,
+        locations=locations,
         active_subject=active_subject,
     )
 
@@ -245,6 +274,10 @@ def summarize_older_turns(turns: list[dict[str, str]]) -> str:
     entities = extract_conversation_entities(turns)
     lines: list[str] = []
 
+    if entities.business_names:
+        lines.append(f"Entity/business name: {', '.join(entities.business_names)}.")
+    if entities.locations:
+        lines.append(f"Operating location/district: {', '.join(entities.locations)}.")
     if entities.tax_topics:
         lines.append(f"Tax domains discussed: {', '.join(entities.tax_topics)}.")
     if entities.taxpayer_types:

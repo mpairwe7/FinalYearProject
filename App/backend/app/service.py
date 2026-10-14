@@ -4456,6 +4456,84 @@ class ChatModel:
             "preferred_locale": preferred_locale,
         }
 
+    @staticmethod
+    def _synthesize_session_working_context(
+        conv_ctx: Any,
+    ) -> dict[str, Any] | None:
+        """Synthesize in-dialogue working memory context for an active session."""
+        if not conv_ctx:
+            return None
+        ent = (
+            conv_ctx.get("active_entities")
+            if isinstance(conv_ctx, dict)
+            else getattr(conv_ctx, "active_entities", None)
+        )
+        if not ent:
+            return None
+        biz_names = getattr(ent, "business_names", []) or []
+        locs = getattr(ent, "locations", []) or []
+        types = getattr(ent, "taxpayer_types", []) or []
+        amts = getattr(ent, "amounts", []) or []
+        if not (biz_names or locs or types or amts):
+            return None
+        ctx_lines: list[str] = []
+        if biz_names:
+            ctx_lines.append(f"- Business/entity name: {', '.join(biz_names)}")
+        if locs:
+            ctx_lines.append(f"- Operating location/district: {', '.join(locs)}")
+        if types:
+            ctx_lines.append(f"- Taxpayer status/type: {', '.join(types)}")
+        if amts:
+            ctx_lines.append(f"- Stated financial amounts: {', '.join(amts[-3:])}")
+        return {
+            "consent_granted": False,
+            "profile": {},
+            "prefill_slots": {},
+            "prompt_context": "## Current Session Taxpayer Working Context\n" + "\n".join(ctx_lines),
+            "preferred_locale": "",
+        }
+
+    @staticmethod
+    def _get_procedural_guidance_context(query: str) -> str:
+        """Retrieve verified procedural workflow guidance for statutory operations."""
+        try:
+            from .memory import get_memory_service
+
+            exemplar = get_memory_service().procedural.find_exemplar(query)
+            if not exemplar or not exemplar.plan:
+                return ""
+            lines = [
+                f"## Statutory Procedural Checklist ({exemplar.intent.replace('_', ' ').title()})",
+                f"Standard Operating Sequence: {' -> '.join(exemplar.plan)}",
+            ]
+            if exemplar.demonstration_turn:
+                for k, v in exemplar.demonstration_turn.items():
+                    if isinstance(v, list):
+                        lines.append(f"- {k.replace('_', ' ').title()}: {', '.join(str(i) for i in v)}")
+                    else:
+                        lines.append(f"- {k.replace('_', ' ').title()}: {v}")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
+    @classmethod
+    def _build_effective_personalization_context(
+        cls,
+        personalization: dict[str, Any] | None,
+        conv_ctx: Any,
+        query: str,
+    ) -> str:
+        """Combine persistent user profile, working memory, and statutory guidance."""
+        p_ctx = (personalization or {}).get("prompt_context", "")
+        if not p_ctx and conv_ctx:
+            working_ctx = cls._synthesize_session_working_context(conv_ctx)
+            if working_ctx:
+                p_ctx = working_ctx.get("prompt_context", "")
+        proc_guide = cls._get_procedural_guidance_context(query)
+        if proc_guide:
+            p_ctx = f"{p_ctx}\n\n{proc_guide}".strip() if p_ctx else proc_guide
+        return p_ctx
+
     def _guard_both_forms(self, message: str, english_form: str) -> GuardResult:
         """Input guard on *message* and, when it differs, on its English form.
 
@@ -8802,6 +8880,7 @@ class ChatModel:
             # 0. Multi-turn memory — fetch rolling conversation context
             conversation_history: list[dict[str, str]] = []
             context_summary = ""
+            conv_ctx: Any = None
             history_session_id = session_id
             if conversation_id or history_session_id:
                 try:
@@ -9985,8 +10064,8 @@ class ChatModel:
                         conversation_history=conversation_history or None,
                         locale=locale,
                         tool_names=force_tool_whitelist,
-                        personalization_context=(
-                            (personalization or {}).get("prompt_context", "")
+                        personalization_context=self._build_effective_personalization_context(
+                            personalization, conv_ctx, router_rewritten or router_message
                         ),
                         tone_hint=tone_hint,
                         tenant_id=tenant_id or "default",
@@ -10109,8 +10188,8 @@ class ChatModel:
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
-                            personalization_context=(
-                                (personalization or {}).get("prompt_context", "")
+                            personalization_context=self._build_effective_personalization_context(
+                                personalization, conv_ctx, router_rewritten or router_message
                             ),
                             tone_hint=tone_hint,
                             context_summary=context_summary,
@@ -10200,8 +10279,8 @@ class ChatModel:
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
-                            personalization_context=(personalization or {}).get(
-                                "prompt_context", ""
+                            personalization_context=self._build_effective_personalization_context(
+                                personalization, conv_ctx, router_rewritten or router_message
                             ),
                             tone_hint=tone_hint,
                         )
@@ -10675,6 +10754,7 @@ class ChatModel:
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
         context_summary = ""
+        conv_ctx: Any = None
         if conversation_history_override is not None:
             from .context_manager import context_manager
 
@@ -11117,7 +11197,9 @@ class ChatModel:
                     "ticket_id": ticket_id,
                     "_hits": [],
                     "_history": [],
-                    "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                "_personalization_context": self._build_effective_personalization_context(
+                    personalization, conv_ctx, rewritten or message
+                ),
                 }
             if route_decision.route == AgentRoute.TOOLS:
                 agent_role = "tool_specialist"
@@ -11579,7 +11661,9 @@ class ChatModel:
             "_history": conversation_history,
             "_context_summary": context_summary,
             "_rewritten": rewritten,
-            "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            "_personalization_context": self._build_effective_personalization_context(
+                personalization, conv_ctx, rewritten or message
+            ),
             "_tone_hint": tone_hint,
             "_distress": distress,
             "_force_agentic": force_agentic,
