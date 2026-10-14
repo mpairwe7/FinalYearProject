@@ -2603,8 +2603,7 @@ def _closing_courtesy_reply(message: str, locale: str = "en") -> str:
 
 
 _CONTACT_ASK_RE = re.compile(
-    r"\b(how\s+can\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+[^?]*?(?:help|assistance)\s+from)|"
-    r"how\s+do\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+[^?]*?(?:help|assistance)\s+from)|"
+    r"\b(how\s+(?:can|do)\s+i\s+(?:contact|reach|call|get\s+in\s+touch\s+with|get\s+(?:help|assistance)\s+from)|"
     r"where\s+can\s+i\s+get\s+(?:help|assistance)|"
     r"i\s+need\s+help\s+from\s+ura|"
     r"how\s+to\s+contact\s+ura|"
@@ -3566,14 +3565,11 @@ def localize_reply(reply: str, locale: str) -> str:
     # are never mangled by MT and never falsely trigger figure-change guards.
     contact_footer_present = False
     source_to_translate = text
-    footer_match = re.search(
-        r"\n*If you get stuck at any step, URA is happy to help:[^\n]*(?:\n[^\n]*?(?:0800|0772|whatsapp)[^\n]*)*",
-        text,
-        re.IGNORECASE,
-    )
-    if footer_match:
+    footer_lead = "if you get stuck at any step, ura is happy to help:"
+    footer_idx = text.lower().find(footer_lead)
+    if footer_idx != -1:
         contact_footer_present = True
-        source_to_translate = (text[:footer_match.start()] + text[footer_match.end():]).strip()
+        source_to_translate = text[:footer_idx].strip()
     elif CONTACT_FOOTER in text:
         contact_footer_present = True
         source_to_translate = text.replace(CONTACT_FOOTER, "").strip()
