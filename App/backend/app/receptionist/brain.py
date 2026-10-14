@@ -247,8 +247,9 @@ _SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+#: "goodbye" also as speech-to-text writes it: "good bye", "good-bye".
 _HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:hang\s+up|end\s+(?:the\s+)?call|disconnect|goodbye"
+    r"\b(?:hang\s+up|end\s+(?:the\s+)?call|disconnect|good[\s-]?bye"
     r"|komya\s+essimu|katikoma\s+wano|weeraba"
     r"|kata\s+simu|maliza\s+simu|kwaheri)\b",
     re.IGNORECASE,
@@ -260,7 +261,7 @@ _HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
 #: money I have" stays a question.
 _DONE_RE: Final[re.Pattern[str]] = re.compile(
     r"^\W*(?:(?:ok(?:ay)?|thanks|thank\s+you|alright|great|no)\W+)*"
-    r"(?:that'?s\s+all|that\s+is\s+all|bye(?:\s+bye)?|i'?m\s+done)"
+    r"(?:that'?s\s+all|that\s+is\s+all|(?:good[\s-]?)?bye(?:\s+bye)?|i'?m\s+done)"
     r"(?:\W+(?:for\s+(?:now|today)|thanks|thank\s+you|bye))*\W*$",
     re.IGNORECASE,
 )
