@@ -28,6 +28,7 @@ import {
   useTicketSla,
   useUpdateTicket,
 } from "../../hooks/useAnalyticsDashboard";
+import type { TicketPatch } from "../../services/analyticsApi";
 import {
   isMine,
   officerHandle,
@@ -67,28 +68,42 @@ export function AgentQueue({ who }: { who: StaffIdentity }) {
   // Below 960px the queue and the case are alternating views, so this — and
   // not the fallback below — decides which of the two is on screen; keeping
   // them separate is what lets "Back to queue" actually go back.
-  const openedId =
-    view.ticket && tickets.some((ticket) => ticket.id === view.ticket) ? view.ticket : null;
+  //
+  // It stays open even once it is no longer in the list shown. It used to be
+  // dropped the moment it left the list — and claiming a case takes it out of
+  // Next up — so the pane silently swapped to the next taxpayer's case and the
+  // officer's next reply went to them.
+  const openedId = view.ticket || null;
 
   // Land on the top of the queue rather than an empty pane: above 960px both
   // panes are on screen together, so an empty one is just wasted space on a
   // work queue. (/admin/tickets is the browse-everything console and starts
-  // empty on purpose — this page does not.)
+  // empty on purpose — this page does not.) Only until a case is opened.
   const activeId = openedId ?? tickets[0]?.id ?? null;
 
   const { data: detail, isLoading: detailLoading, error: detailError } = useTicket(activeId);
   const select = (id: string) => setView({ ticket: id });
+
+  /**
+   * Change a case. It is pinned first, so the top-of-queue pick cannot move
+   * under the officer while the change lands; a case they claim follows them
+   * to Mine, still open.
+   */
+  const act = (id: string, patch: TicketPatch) => {
+    if (view.ticket !== id) setView({ ticket: id });
+    const claiming = Boolean(handle) && patch.assignee === handle && !view.mine;
+    update.mutate(
+      { id, patch },
+      { onSuccess: () => (claiming ? setView({ status: "assigned", mine: true, ticket: id }) : undefined) },
+    );
+  };
 
   useQueueHotkeys({
     ids: tickets.map((ticket) => ticket.id),
     selectedId: activeId,
     onSelect: select,
     onAssignMe: activeId && handle
-      ? () =>
-          update.mutate({
-            id: activeId,
-            patch: { assignee: handle, status: "assigned" },
-          })
+      ? () => act(activeId, { assignee: handle, status: "assigned" })
       : undefined,
     replySelector: "[data-ticket-reply]",
   });
@@ -274,7 +289,7 @@ export function AgentQueue({ who }: { who: StaffIdentity }) {
               pending={update.isPending}
               isError={update.isError}
               isSuccess={update.isSuccess}
-              onPatch={(patch) => update.mutate({ id: activeId, patch })}
+              onPatch={(patch) => act(activeId, patch)}
               onBack={() => setView({ ticket: "" })}
             />
           ) : (
