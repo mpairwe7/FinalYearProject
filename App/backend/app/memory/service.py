@@ -30,6 +30,8 @@ from typing import Any
 
 from .episodic import EpisodicMemory, EpisodicSummary
 from .extractor import FactExtractor
+from .handoff import EvidenceCard, HandoffEnvelope, HandoffGoal, RecommendedAction
+from .procedural import ProceduralMemory
 from .semantic import SemanticMemory, UserFact
 from .working import WORKING_TTL_SECONDS
 
@@ -54,6 +56,7 @@ class MemoryService:
         self.episodic = EpisodicMemory()
         self.semantic = SemanticMemory()
         self.extractor = FactExtractor()
+        self.procedural = ProceduralMemory()
 
     # -- Consent-gated reads -------------------------------------------
     def _has_consent(
@@ -251,6 +254,32 @@ class MemoryService:
         except Exception:
             logger.debug("episodic: turn count unavailable", exc_info=True)
             return 0
+
+    def create_handoff_envelope(
+        self,
+        thread_id: str,
+        user_id: str,
+        objective: str,
+        target_resolution: str,
+        tenant_id: str = "default",
+        evidence: list[EvidenceCard] | None = None,
+        blockers: list[str] | None = None,
+        next_action_type: str = "assist_taxpayer",
+        suggested_message: str = "",
+    ) -> HandoffEnvelope:
+        """Construct an immutable, structured handoff envelope for human or peer escalation."""
+        return HandoffEnvelope(
+            thread_id=thread_id,
+            tenant_id=tenant_id,
+            goal=HandoffGoal(primary_objective=objective, target_resolution=target_resolution),
+            taxpayer_tin=user_id if user_id and user_id.isdigit() and len(user_id) == 10 else "",
+            verified_evidence=evidence or [],
+            blockers_and_risks=blockers or [],
+            next_action=RecommendedAction(
+                action_type=next_action_type,
+                suggested_message=suggested_message,
+            ),
+        )
 
     # -- Working memory -----------------------------------------------
     def update_working(self, user_id: str, tenant_id: str = "default", **fields: Any) -> None:
