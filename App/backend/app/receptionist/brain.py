@@ -18,6 +18,7 @@ from ..text_signals import detect_crisis
 from .clarify import ClarifyGate, ClarifyState
 from .config import (
     KNOWN_LANGUAGES,
+    _env_float,
     get_clarify_threshold,
     get_clarify_threshold_for,
     get_default_language,
@@ -613,9 +614,7 @@ class UraReceptionistBrain(LLMService):
             self.room.state.pending_confirm_challenge
             and flags.is_enabled("voice_agentic_workflows", subject=self.room.state.user_id or None)
         ):
-            import os
-
-            min_conf = float(os.getenv("VOICE_CONFIRM_MIN_ASR_CONF", "0.75"))
+            min_conf = _env_float("VOICE_CONFIRM_MIN_ASR_CONF", 0.75)
             if _OFFER_DECLINE_RE.search(user_text):
                 self.room.state.pending_confirm_challenge = ""
                 self.room.state.pending_confirm_action = {}
@@ -1227,18 +1226,37 @@ class UraReceptionistBrain(LLMService):
         )
 
         # Spoken Figure Fidelity Guard & Dictation Pacing (2026)
-        try:
-            from .spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
+        speak_allowed = True
+        if flags.is_enabled("spoken_figure_guard", subject=self.room.state.user_id or None):
+            try:
+                from .spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
 
-            spoken_text = inject_dictation_pauses(spoken_text)
-            verify_spoken_figures(
-                bot_reply,
-                spoken_text,
-                locale=self.language,
-                subject=self.room.state.user_id or "",
-            )
-        except Exception:
-            logger.debug("Spoken figure verification skipped", exc_info=True)
+                paused_text = inject_dictation_pauses(spoken_text)
+                ver = verify_spoken_figures(
+                    bot_reply,
+                    paused_text,
+                    locale=self.language,
+                    subject=self.room.state.user_id or "",
+                )
+                if ver.ok:
+                    spoken_text = paused_text
+                else:
+                    fallback_spoken = clean_text_for_speech(
+                        self._spoken_answer(bot_reply, offer_officer=uncertain or at_risk, at_risk=at_risk),
+                        locale="en",
+                    )
+                    ver_en = verify_spoken_figures(
+                        bot_reply,
+                        fallback_spoken,
+                        locale="en",
+                        subject=self.room.state.user_id or "",
+                    )
+                    if ver_en.ok:
+                        spoken_text = fallback_spoken
+                    else:
+                        speak_allowed = False
+            except Exception:
+                logger.debug("Spoken figure verification skipped", exc_info=True)
 
         self.room.state.ai_answers_count += 1
 
@@ -1280,6 +1298,7 @@ class UraReceptionistBrain(LLMService):
             kind="answer",
             faithfulness=faithfulness,
             latencies={"brain_ms": gen_latency_ms},
+            speak=speak_allowed,
         )
 
     def _call_at_risk(self) -> bool:

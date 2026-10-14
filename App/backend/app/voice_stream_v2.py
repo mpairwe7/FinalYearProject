@@ -341,7 +341,14 @@ class VoiceSessionV2:
                 locale=detected_lang,
                 subject=self.user_id or "",
             )
-            if hybrid_decision.mode == "s2s_fast" and not hybrid_decision.contains_numeric_or_statutory:
+            s2s_renderer_active = (
+                self._streaming_tts is not None and flags.is_enabled("streaming_tts_v2")
+            )
+            if (
+                hybrid_decision.mode == "s2s_fast"
+                and not hybrid_decision.contains_numeric_or_statutory
+                and s2s_renderer_active
+            ):
                 voice_path = "s2s_fast"
         except Exception:
             logger.debug("voice_stream_v2: hybrid speech gate skipped", exc_info=True)
@@ -411,12 +418,18 @@ class VoiceSessionV2:
         try:
             from .receptionist.spoken_figure_guard import verify_spoken_figures
 
-            verify_spoken_figures(
+            ver = verify_spoken_figures(
                 reply_text,
                 reply_for_tts,
                 locale=detected_lang,
                 subject=self.user_id or "",
             )
+            if not ver.ok:
+                logger.warning(
+                    "voice_stream_v2: spoken figure verification failed for locale=%s; reverting to verified English text",
+                    detected_lang,
+                )
+                reply_for_tts = reply_text
         except Exception:
             logger.debug("voice_stream_v2: spoken figure guard skipped", exc_info=True)
 

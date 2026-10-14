@@ -368,6 +368,7 @@ def node_act(state: AgentGraphState) -> NodeResult:
                 "name": tool_name,
                 "ok": result.ok,
                 "duration_ms": result.duration_ms,
+                "result": result.result,
             }
         )
         state.observations.append(result.result)
@@ -383,15 +384,50 @@ def _usable_observations(state: AgentGraphState) -> list:
     ]
 
 
+_SPECIALIST_DEFAULT_TOOLS: dict[str, tuple[str, ...]] = {
+    "customs_specialist": ("calculate_customs_duty", "lookup_rate"),
+    "tax_specialist": (
+        "calculate_vat",
+        "calculate_paye",
+        "calculate_withholding_tax",
+        "calculate_rental_tax",
+        "lookup_rate",
+    ),
+    "tools": ("lookup_rate", "get_filing_deadlines", "get_current_date"),
+}
+
+
+def _build_aligned_tool_receipts(state: AgentGraphState) -> list[Any]:
+    """Build ToolExecutionReceipt list aligned strictly with each successful tool_call."""
+    from ...memory.handoff import ToolExecutionReceipt
+
+    receipts: list[ToolExecutionReceipt] = []
+    for idx, tc in enumerate(state.tool_calls):
+        if not isinstance(tc, dict) or not tc.get("ok"):
+            continue
+        obs = tc.get("result")
+        if obs is None and idx < len(state.observations):
+            obs = state.observations[idx]
+        if isinstance(obs, dict) and obs.get("ok", True):
+            receipts.append(
+                ToolExecutionReceipt(
+                    tool_name=str(tc.get("name", "tool")),
+                    inputs_summary=state.rewritten_query or state.query,
+                    deterministic_output=obs,
+                )
+            )
+    return receipts
+
+
 def node_observe(state: AgentGraphState) -> NodeResult:
     """ReAct observe: keep, retrieve once, or synthesise an empty plan.
 
     Industry 2026 practice caps this at one hop (``max_handoffs``). Failed
     or unfillable tools are not evidence — they hand off to retrieve.
     When ``multi_agent_dag`` is active and multiple specialist sub_routes
-    were planned, records a structured inter-specialist ``HandoffEnvelope``
-    and chains into ``retrieve`` so both tool observations and statutory
-    passages are fused into the final synthesis.
+    were planned, records a structured inter-specialist ``HandoffEnvelope``,
+    advances the route cursor, and dispatches the next specialist's tools
+    (or statutory retrieval) before final synthesis.
     """
     usable = _usable_observations(state)
     from ...flags import flags
@@ -399,24 +435,19 @@ def node_observe(state: AgentGraphState) -> NodeResult:
     if (
         len(state.sub_routes) >= 2
         and not state.hits
-        and state.handoff_count < max(1, state.max_handoffs)
+        and state.handoff_count < max(2, state.max_handoffs + 1)
         and flags.is_enabled("multi_agent_dag", subject=state.user_id or None)
     ):
         state.handoff_count += 1
         state.handoff_from = state.sub_routes[0]
         target_spec = state.sub_routes[1]
+        state.sub_routes = list(state.sub_routes[1:])
+        state.agent_role = target_spec
         state.handoff_reason = f"multi_agent_dag_chain:{state.handoff_from}->{target_spec}"
         try:
-            from ...memory.handoff import HandoffEnvelope, HandoffGoal, ToolExecutionReceipt
+            from ...memory.handoff import HandoffEnvelope, HandoffGoal
 
-            receipts = [
-                ToolExecutionReceipt(
-                    tool_name=str(tc.get("name", "tool")),
-                    inputs_summary=state.rewritten_query or state.query,
-                    deterministic_output=obs if isinstance(obs, dict) else {},
-                )
-                for tc, obs in zip(state.tool_calls, usable, strict=False)
-            ]
+            receipts = _build_aligned_tool_receipts(state)
             env = HandoffEnvelope(
                 thread_id=state.current_goal_id or "dag-turn",
                 tenant_id=state.tenant_id,
@@ -432,7 +463,27 @@ def node_observe(state: AgentGraphState) -> NodeResult:
             state.specialist_handoffs.append(env.to_dict())
         except Exception:
             logger.debug("graph: specialist handoff envelope creation skipped", exc_info=True)
-        return NodeResult(next_node="retrieve", note="multi_agent_dag specialist handoff to retrieve")
+
+        # Dispatch target_spec's bindable specialist tools before retrieval when available
+        if flags.is_enabled("tool_use") and state.iterations < state.max_iterations:
+            already_called = {str(tc.get("name", "")) for tc in state.tool_calls if isinstance(tc, dict)}
+            already_skipped = {str(sk.get("name", "")) for sk in state.skipped_tools if isinstance(sk, dict)}
+            candidate_tools = _SPECIALIST_DEFAULT_TOOLS.get(target_spec, ())
+            next_tools = [
+                t
+                for t in candidate_tools
+                if t not in already_called
+                and t not in already_skipped
+                and bind_arguments(t, state) is not None
+            ]
+            if next_tools:
+                state.plan = next_tools
+                return NodeResult(
+                    next_node="tool_rag_select",
+                    note=f"multi_agent_dag dispatch to {target_spec}",
+                )
+
+        return NodeResult(next_node="retrieve", note=f"multi_agent_dag specialist handoff to {target_spec} retrieve")
 
     if usable or state.hits:
         return NodeResult(next_node="synthesize")

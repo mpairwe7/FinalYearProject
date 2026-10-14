@@ -206,7 +206,8 @@ def test_multi_agent_dag_supervisor_and_graph_handoff():
         assert len(state.sub_routes) >= 2
 
         obs_res = node_observe(state)
-        assert obs_res.next_node == "retrieve"
+        assert obs_res.next_node in ("tool_rag_select", "retrieve")
+        assert state.agent_role == "tax_specialist"
         assert len(state.specialist_handoffs) == 1
         assert state.specialist_handoffs[0]["source_agent"] == "customs_specialist"
         assert state.specialist_handoffs[0]["target_channel"] == "tax_specialist"
