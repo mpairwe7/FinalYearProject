@@ -194,6 +194,9 @@ _PENDING_TURN_AUDIT: contextvars.ContextVar[dict[str, Any] | None] = contextvars
 _ACTIVE_TENANT_ID: contextvars.ContextVar[str] = contextvars.ContextVar(
     "active_conversation_tenant", default=""
 )
+_ACTIVE_USER_STATED_IDS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
+    "active_user_stated_ids", default=()
+)
 
 
 def _state_conversation_id(conversation_id: str) -> str:
@@ -4932,14 +4935,20 @@ class ChatModel:
                     best = question
         return best
 
-    def _finalize_reply(self, reply: str, attachments: list[Any] | None = None) -> str:
+    def _finalize_reply(
+        self,
+        reply: str,
+        attachments: list[Any] | None = None,
+        allowed_values: Iterable[str] | None = None,
+    ) -> str:
         """Apply response-side safety cleanup to generated, revised, and cached text."""
         raw = str(reply or "").strip()
         # If the output accidentally parrots internal prompt scaffolding:
         if ("<untrusted_user_document>" in raw or raw.startswith("[User-attached document:")) and attachments:
             return self._format_attachment_fallback_reply(attachments)
 
-        cleaned = self._output_guard.redact_pii(raw)
+        effective_allowed = set(allowed_values or ()) | set(_ACTIVE_USER_STATED_IDS.get())
+        cleaned = self._output_guard.redact_pii(raw, allowed_values=effective_allowed)
         cleaned = self._output_guard.sanitize(cleaned)
         # Strip any accidental leakage of attachment prompt wrapper scaffolding
         cleaned = re.sub(r"</?untrusted_user_document>", "", cleaned)
@@ -8865,6 +8874,8 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
+        user_stated_ids = tuple(re.findall(r"\b\d{10}\b|\b[A-Z0-9]{10,18}\b", message))
+        _ACTIVE_USER_STATED_IDS.set(user_stated_ids)
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
         # outside SUPPORTED_LOCALES is gated to English here — see
@@ -8949,7 +8960,9 @@ class ChatModel:
             #     coreference resolution from history (Phase 4)
             with trace_stage("query_rewrite", timings=timings):
                 if flags.is_enabled("query_rewrite"):
-                    rewritten = rewrite_query(message, history=conversation_history or None)
+                    rewritten = rewrite_query(
+                        message, history=conversation_history or None, locale=requested_locale
+                    )
                 else:
                     rewritten = normalize_query(message)
 
@@ -10744,6 +10757,8 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
+        user_stated_ids = tuple(re.findall(r"\b\d{10}\b|\b[A-Z0-9]{10,18}\b", message))
+        _ACTIVE_USER_STATED_IDS.set(user_stated_ids)
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
         # outside SUPPORTED_LOCALES is gated to English here — see
@@ -10783,7 +10798,9 @@ class ChatModel:
 
         # Query rewriting (Phase 4)
         if flags.is_enabled("query_rewrite"):
-            rewritten = rewrite_query(message, history=conversation_history or None)
+            rewritten = rewrite_query(
+                message, history=conversation_history or None, locale=requested_locale
+            )
         else:
             rewritten = normalize_query(message)
 

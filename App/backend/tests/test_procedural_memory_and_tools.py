@@ -151,6 +151,38 @@ class TestContextRotAnalytics(unittest.TestCase):
         analysis = analyze_context_window(state)
         self.assertIn(analysis["rot_risk"], ("medium", "high"))
 
+    def test_compact_prompt_context(self) -> None:
+        from app.agents.graphs import compact_prompt_context
+
+        history = [{"user_message": f"turn {i}", "bot_reply": f"answer {i}"} for i in range(10)]
+        compacted_hist, summary, analytics = compact_prompt_context("What is PAYE?", history, max_verbatim_turns=4)
+        self.assertEqual(len(compacted_hist), 4)
+        self.assertIn("Earlier", summary)
+        self.assertIn("rot_risk", analytics)
+
+
+class TestScopedRedactionAndVernacularRewrite(unittest.TestCase):
+    def test_user_stated_identifier_is_exempt_from_output_redaction(self) -> None:
+        from app.guardrails import redact_pii_text
+
+        text = "Your TIN is 1000123456 and email is user@example.com."
+        # Without allowed_values, TIN is redacted
+        redacted = redact_pii_text(text)
+        self.assertIn("[REDACTED_UG_TIN]", redacted)
+
+        # With user stated TIN allowed, TIN is preserved
+        preserved = redact_pii_text(text, allowed_values=["1000123456"])
+        self.assertIn("1000123456", preserved)
+        self.assertIn("[REDACTED_EMAIL]", preserved)
+
+    def test_vernacular_query_skips_english_spell_corrector(self) -> None:
+        from app.query import rewrite
+
+        sw_query = "PAYE ni nini na inalipwa lini?"
+        rewritten = rewrite(sw_query, locale="sw")
+        # Ensure Swahili 'nini' was not mutated into English 'nin'
+        self.assertIn("nini", rewritten)
+
 
 if __name__ == "__main__":
     unittest.main()

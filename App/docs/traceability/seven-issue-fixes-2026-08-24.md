@@ -182,7 +182,7 @@ here, and the cu128 pin in `Dockerfile.gpu` has since made the GPU path real.
 1. **Perceptual verification** of Spark-TTS-SALT output — still open from
    2026-08-22, unchanged by this work.
 2. **A real browser pass** over the redesigned dashboard. The sandbox cannot
-   paint (see `docs/TEST_REPORT_2026-06-10.md`); the labels are asserted from
+   paint (see `docs/EVALUATION_REPORT.md`); the labels are asserted from
    the bundle and from `plainLanguage.test.tsx`, not from a screenshot.
 3. **Streaming vs non-streaming retrieval.** The same Luganda TIN-registration
    question answered on `/v1/chat` and abstained on `/v1/chat/stream`. The

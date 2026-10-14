@@ -24,7 +24,6 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Production gates](PRODUCTION_GATES.md) | When remaining prototype gaps become start blockers |
 | [Traceability: 2026-08-18 gates](../App/docs/traceability/prototype-production-gates-2026-08-18.md) | Decision log — prototype gaps, production blockers, how to re-verify |
 | [Monitoring & Observability](MONITORING.md) | OpenTelemetry, Prometheus, Grafana, alerting, SLOs |
-| [Mobile Setup](MOBILE_SETUP.md) | Flutter Android/iOS build, on-device LLM, App Store compliance |
 | [Mobile Architecture](MOBILE_ARCHITECTURE.md) | Layered architecture, Riverpod 2.6 Notifier, go_router, design tokens, 7 ADRs |
 | **Testing & Quality** |
 | [Frontend Tests](../App/frontend/vitest.config.ts) | Vitest unit/component tests + coverage thresholds |

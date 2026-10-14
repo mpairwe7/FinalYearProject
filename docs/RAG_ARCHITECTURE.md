@@ -215,6 +215,7 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
 **Query Rewriting** (`query.py`):
 - 15+ abbreviation expansions: TIN, VAT, PAYE, EFRIS, DTS, TREP, CIT, PIT, WHIT, ETAX, etc.
 - 20+ spelling corrections for common URA domain misspellings
+- Vernacular-aware spellcheck guard (G135): `rewrite(..., locale=...)` skips English dictionary fuzzy spell correction on non-English queries (`lg`, `sw`, `nyn`, `ach`), preventing native vocabulary (e.g. Swahili `nini`) from mutating into English words.
 - Coreference resolution: detects pronouns (it, that, this, they) and prepends context from last assistant reply
 
 **Multi-turn Memory** (`database.py`):
@@ -276,6 +277,14 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   30-minute expiry, so a new worker can continue using the same state. Its
   `last_topic` is the topic the taxpayer named (or the guided journey), not the
   role that answered.
+- **4-Tier Cognitive Architecture (`memory/`)**:
+  - **Working Memory**: In-dialogue slot tracking and entity extraction (business names, locations/districts, amounts, reference numbers) synthesized into `## Current Session Taxpayer Working Context` without violating privacy boundaries.
+  - **Episodic Memory**: Coarse conversational summaries, interaction timelines, and topic tags.
+  - **Semantic Memory**: Granular, confidence-filtered fact triplets with statutory citations (`memory_store`, `memory_recall`, `memory_discard` tools).
+  - **Procedural Memory**: Statutory SOP checklists, skills, and trajectory exemplars (`ProceduralMemory`, `TrajectoryExemplar`) for TIN registration, VAT return filing, and assessment objections.
+- **Standardized Handoff Envelopes (`memory/handoff.py`)**: Structured handoff packets (`HandoffEnvelope`, `HandoffGoal`, `EvidenceCard`, `RecommendedAction`) providing cross-agent and officer desk state continuity.
+- **Context Compactor & Rot Analytics (`compactor.py`)**: YaRN RoPE 131k token budget monitoring with dynamic observation compaction and context rot risk alerting.
+- **Scoped Output Redaction Exemption (G143)**: `_ACTIVE_USER_STATED_IDS` ContextVar threads user-declared TINs/PRNs into `OutputGuard.redact_pii()`, preventing response censorship of the taxpayer's own identifiers.
 
 **Where state lives** (the session / user / app / invocation scopes of Google
 ADK's state model, mapped onto this system):

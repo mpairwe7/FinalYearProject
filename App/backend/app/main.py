@@ -1096,15 +1096,25 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     from . import sunbird
     from .query import language_detection_backend
 
+    retrieval_mt = os.getenv("RETRIEVAL_MT_BACKEND", "").lower()
+    if sunbird.is_available():
+        trans_cap = "sunbird"
+    elif retrieval_mt in ("local", "prompted") or os.getenv("LLM_ENABLED", "true").lower() == "true":
+        trans_cap = "prompted_local"
+    else:
+        trans_cap = "unavailable"
+
+    has_reranker = bool(getattr(getattr(model, "_retriever", None), "_reranker", None))
+    dense_dev = str(getattr(getattr(model, "_retriever", None), "_dense_device", "cpu"))
+
     capabilities = {
         "language_detection": language_detection_backend(),
-        "translation": "sunbird" if sunbird.is_available() else "unavailable",
-        # Not the same question as "translation": Sunbird's per-account retry
-        # falls over to a second account, and with only one configured there
-        # is nowhere to fall over to. "fallback" alone means the primary token
-        # is missing, not that the fallback is doing its job.
+        "translation": trans_cap,
         "sunbird_accounts": sunbird.account_summary(),
         "retrieval": retrieval_mode,
+        "reranker": "active" if has_reranker else "disabled",
+        "dense_device": dense_dev,
+        "procedural_memory": "active",
     }
     return HealthResponse(
         status="ready" if qdrant_healthy else "degraded",

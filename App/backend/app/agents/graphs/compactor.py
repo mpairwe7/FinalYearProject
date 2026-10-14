@@ -184,3 +184,48 @@ def node_context_compactor(state: AgentGraphState) -> NodeResult:
 
     # Default forward edge to route node
     return NodeResult(next_node="route")
+
+
+def compact_prompt_context(
+    query: str,
+    conversation_history: list[dict[str, str]] | None,
+    context_summary: str = "",
+    max_verbatim_turns: int = MAX_VERBATIM_TURNS,
+) -> tuple[list[dict[str, str]], str, dict[str, Any]]:
+    """Compact conversation history and compute rot analytics for prompt construction."""
+    history = list(conversation_history or [])
+    updated_summary = context_summary
+    if len(history) > max_verbatim_turns:
+        recent = history[-max_verbatim_turns:]
+        older = history[:-max_verbatim_turns]
+        from ...context_manager import summarize_older_turns
+
+        older_summary = summarize_older_turns(older)
+        if older_summary:
+            updated_summary = (
+                f"{updated_summary} [Earlier: {older_summary}]".strip()
+                if updated_summary
+                else older_summary
+            )
+        history = recent
+
+    from ...llm import LLM_CONTEXT_WINDOW, _estimate_tokens, _served_context_window
+
+    query_tokens = _estimate_tokens(query)
+    summary_tokens = _estimate_tokens(updated_summary)
+    history_tokens = sum(
+        _estimate_tokens(str(m.get("user_message") or m.get("content") or "") + " " + str(m.get("bot_reply") or ""))
+        for m in history
+    )
+    total_estimated = query_tokens + summary_tokens + history_tokens
+    served = _served_context_window()
+    window = served if served > 0 else LLM_CONTEXT_WINDOW
+    utilization_pct = round((total_estimated / max(window, 1)) * 100, 2)
+    rot_risk = "high" if utilization_pct > 75.0 else ("medium" if utilization_pct > 50.0 else "low")
+    analytics = {
+        "estimated_tokens": total_estimated,
+        "context_window": window,
+        "utilization_pct": utilization_pct,
+        "rot_risk": rot_risk,
+    }
+    return history, updated_summary, analytics
