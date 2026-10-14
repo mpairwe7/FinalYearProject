@@ -1,9 +1,8 @@
-"""Working memory — 30-minute TTL, in-process dict (Redis-ready).
+"""Standalone process-local working-memory utility with a 30-minute TTL.
 
-Phase 16 Lite: process-local dict with monotonic expiry.  Upgrade
-path for multi-replica deploys is a Redis hash keyed on
-``working:{user_id}`` with a TTL; the public API stays the same
-so the swap is one-line.
+The production :class:`MemoryService` stores working state in the shared
+analytics backend so reads and erasure behave consistently across workers.
+This class remains available for isolated callers and unit tests.
 """
 
 from __future__ import annotations

@@ -25,6 +25,12 @@ describe('i18n', () => {
     expect(translate('sw', 'rail.newChat')).toBe('Mazungumzo mapya');
   });
 
+  it('shows the attachment privacy reminder in all supported taxpayer languages', () => {
+    expect(translate('en', 'composer.attachPrivacyNotice')).toContain('Hide passwords');
+    expect(translate('lg', 'composer.attachPrivacyNotice')).toContain('Kweka ebisumuluzo');
+    expect(translate('sw', 'composer.attachPrivacyNotice')).toContain('Ficha nywila');
+  });
+
   it('falls back to English rather than rendering a key or a blank', () => {
     // Deliberately not translated in either dictionary.
     expect(lg['message.escalated']).toBeUndefined();

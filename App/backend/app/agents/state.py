@@ -69,6 +69,8 @@ class RouteDecision:
     confidence: float  # 0.0 – 1.0
     suggested_tools: list[str] = field(default_factory=list)
     clarification_question: str = ""
+    sub_routes: tuple[AgentRoute, ...] = ()
+    requires_multi_agent: bool = False
 
 
 class AgentState(TypedDict, total=False):

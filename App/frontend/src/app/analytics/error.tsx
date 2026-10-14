@@ -1,6 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
+
+import { reportClientError } from "@/lib/client-errors";
 import "./analytics.css";
 
 /**
@@ -20,6 +22,10 @@ export default function AnalyticsError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    reportClientError("boundary", error, error.digest ?? "");
+  }, [error]);
+
   return (
     <main className="ops-page is-narrow" id="staff-main">
       <div className="ops-empty">

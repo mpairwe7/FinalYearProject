@@ -97,15 +97,35 @@ BM25_STATE_PATH = Path(
 # ---------------------------------------------------------------------------
 # Index builder
 # ---------------------------------------------------------------------------
+def _build_contextual_prefix(doc: dict[str, Any]) -> str:
+    """Generate an Anthropic Contextual Retrieval prefix from document metadata."""
+    parts = []
+    title = doc.get("title") or doc.get("source") or ""
+    if title:
+        parts.append(f"Document: {Path(str(title)).stem.replace('_', ' ').title()}")
+    category = doc.get("category") or doc.get("tag") or doc.get("tax_head")
+    if category:
+        parts.append(f"Domain: {str(category).replace('_', ' ').title()}")
+    fy = doc.get("fiscal_year")
+    if fy:
+        parts.append(f"Scope: {fy}")
+    if not parts:
+        return ""
+    return "[" + " | ".join(parts) + "]\n"
+
+
 def _embedding_text(doc: dict[str, Any]) -> str:
     """Return the text to embed and BM25-fit for *doc*.
 
-    PDF chunks carry an ``embed_text`` that prepends the contextual prefix
-    (document + heading trail) to the chunk body, so an isolated chunk stays
-    retrievable without polluting the text that gets displayed and cited.
-    Every other corpus embeds its ``text`` verbatim.
+    Anthropic Contextual Retrieval standard (2026):
+    Prepend a situational contextual prefix (document, domain, fiscal year)
+    to the body for embedding and BM25 indexing, while keeping doc["text"] clean
+    for display and citation generation.
     """
-    return doc.get("embed_text") or doc["text"]
+    if doc.get("embed_text"):
+        return doc["embed_text"]
+    prefix = _build_contextual_prefix(doc)
+    return (prefix + doc["text"]).strip() if prefix else doc["text"]
 
 
 def annotate_fiscal_year(documents: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -226,6 +246,19 @@ def build_index(
         logger.info("Deleted existing collection '%s'", collection)
 
     if collection not in existing or recreate:
+        quantization_cfg = None
+        if not SPARSE_ONLY_INDEX and os.getenv("QDRANT_QUANTIZATION_ENABLED", "true").lower() == "true":
+            try:
+                quantization_cfg = models.ScalarQuantization(
+                    scalar=models.ScalarQuantizationConfig(
+                        type=models.ScalarType.INT8,
+                        quantile=0.99,
+                        always_ram=True,
+                    )
+                )
+            except Exception:
+                logger.debug("ScalarQuantization configuration not supported by current qdrant client")
+
         client.create_collection(
             collection_name=collection,
             vectors_config=(
@@ -243,6 +276,7 @@ def build_index(
                     index=models.SparseIndexParams(on_disk=False),
                 ),
             },
+            quantization_config=quantization_cfg,
         )
         logger.info(
             "Created Qdrant collection '%s' (%s)",

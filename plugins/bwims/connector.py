@@ -24,9 +24,8 @@ class BwimsConsignmentStatusTool(Tool):
         return ToolSchema(
             name="bwims_consignment_status",
             description=(
-                "Track imported cargo stored in customs bonded warehouses under the IM7 warehousing regime. "
-                "Retrieves warehouse location, quantity in bond, CIF value, warehousing date, "
-                "and alerts if cargo has exceeded the statutory 9-month warehousing limit under EACCMA."
+                "Read sample consignment and warehouse fixtures from the local BWIMS simulator. It does not check a real "
+                "customs entry, determine a legal deadline, or update customs status."
             ),
             parameters={
                 "type": "object",
@@ -44,7 +43,7 @@ class BwimsConsignmentStatusTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "found": {"type": "boolean"},
-                    "consignment": {"type": "object"},
+                    "consignment": {"type": ["object", "null"]},
                     "days_in_storage": {"type": "integer"},
                     "is_overstayed": {"type": "boolean"},
                     "message": {"type": "string"},
@@ -169,6 +168,7 @@ class BwimsReleaseClearanceTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="bwims",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),

@@ -158,6 +158,35 @@ describe("ChatMessage", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("rates an AI answer, and names which answer of which conversation it is", async () => {
+    const fetchMock = vi.fn(
+      async (_url: RequestInfo | URL, _init?: RequestInit) =>
+        ({ ok: true, json: async () => ({ id: "fb-1" }) }) as Response,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderMsg({ ...assistantTurn, serverTurnId: "turn-abc123" }, { answerNumber: 2 });
+    fireEvent.click(screen.getByRole("button", { name: "Unhelpful response" }));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({ rating: "down", conversation_id: "conv-1", turn_id: "turn-abc123", turn_index: 2 });
+    vi.unstubAllGlobals();
+  });
+
+  it("offers no thumbs on an officer's reply or on the greeting: neither is an AI answer", () => {
+    const { unmount } = renderMsg({ ...assistantTurn, id: "o1", retrievalMode: "officer_reply" });
+    expect(screen.queryByRole("button", { name: "Helpful response" })).not.toBeInTheDocument();
+    unmount();
+    renderMsg({ ...assistantTurn, id: "greeting-0", content: "Hello" });
+    expect(screen.queryByRole("button", { name: "Helpful response" })).not.toBeInTheDocument();
+  });
+
+  it("says an officer's message is from the officer, by name, not from the assistant", () => {
+    renderMsg({ ...assistantTurn, id: "o2", retrievalMode: "officer_reply", officerName: "Officer Nakato", content: "Which period?" });
+    expect(screen.getByText("URA officer · Officer Nakato")).toBeInTheDocument();
+    expect(screen.getByText("Officer Nakato replied")).toHaveClass("sr-only");
+    expect(screen.queryByText("Assistant replied")).not.toBeInTheDocument();
+  });
+
   it("shows Listen button for assistant messages", () => {
     renderMsg(assistantTurn);
     expect(screen.getByLabelText(/Listen in English/)).toBeInTheDocument();

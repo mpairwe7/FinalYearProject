@@ -48,12 +48,33 @@ import {
 import JourneyFunnelTable from "../../components/charts/JourneyFunnelTable";
 import SloGaugeCard from "../../components/charts/SloGaugeCard";
 import { plainSeconds } from "../../components/charts/chartTheme";
-import TopicBarChart from "../../components/charts/TopicBarChart";
-import FeedbackPieChart from "../../components/charts/FeedbackPieChart";
-import RetrievalModeChart from "../../components/charts/RetrievalModeChart";
-import LatencyChart, { routeFromMetricKey } from "../../components/charts/LatencyChart";
-import TicketStatusChart from "../../components/charts/TicketStatusChart";
+import dynamic from "next/dynamic";
+import { routeFromMetricKey } from "../../components/charts/LatencyChart";
+import { watchesLiveQueue } from "../../lib/roles";
 import "./analytics.css";
+
+const ChartSkeleton = () => <Skeleton height={260} />;
+
+const TopicBarChart = dynamic(() => import("../../components/charts/TopicBarChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const FeedbackPieChart = dynamic(() => import("../../components/charts/FeedbackPieChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const RetrievalModeChart = dynamic(() => import("../../components/charts/RetrievalModeChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const LatencyChart = dynamic(() => import("../../components/charts/LatencyChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
+const TicketStatusChart = dynamic(() => import("../../components/charts/TicketStatusChart"), {
+  loading: ChartSkeleton,
+  ssr: false,
+});
 
 function formatUptime(s: number): string {
   const d = Math.floor(s / 86400);
@@ -95,8 +116,22 @@ function formatSeconds(seconds: number | undefined | null): string {
 }
 
 
-function Dashboard() {
+/** A queue row: a link into the case for a reader who can open it, plain text otherwise. */
+function QueueRowShell({ href, children }: { href?: string; children: React.ReactNode }) {
+  return href ? (
+    <a className="an-queue-link" href={href}>
+      {children}
+    </a>
+  ) : (
+    <div className="an-queue-link is-static">{children}</div>
+  );
+}
+
+function Dashboard({ role }: { role?: string }) {
   const [days, setDays] = useState(30);
+  // Auditors can open the queue to read a case; administrators audit from here
+  // and do not work cases, so for them the rows are figures, not links.
+  const opensQueue = watchesLiveQueue(role);
   const dash = useDashboard(days);
   const feedback = useFeedbackSummary(days);
   const journeys = useJourneyFunnel(days);
@@ -298,9 +333,11 @@ function Dashboard() {
                 id="an-queue"
                 title="Waiting for an officer"
                 end={
-                  <a className="ops-btn is-ghost is-sm" href="/admin/tickets?status=open">
-                    Work the queue
-                  </a>
+                  opensQueue ? (
+                    <a className="ops-btn is-ghost is-sm" href="/admin/tickets?status=open">
+                      Open the queue
+                    </a>
+                  ) : undefined
                 }
                 flush
                 bare
@@ -309,9 +346,8 @@ function Dashboard() {
                   <ul className="an-queue">
                     {ticketQueue.data.tickets.map((ticket) => (
                       <li key={ticket.id}>
-                        <a
-                          className="an-queue-link"
-                          href={`/admin/tickets?ticket=${encodeURIComponent(ticket.id)}`}
+                        <QueueRowShell
+                          href={opensQueue ? `/admin/tickets?ticket=${encodeURIComponent(ticket.id)}` : undefined}
                         >
                           <span
                             className={`ops-chip ops-chip-caps ${
@@ -335,7 +371,7 @@ function Dashboard() {
                           <span className="an-queue-time">
                             {formatSeconds(ticket.updated_at)}
                           </span>
-                        </a>
+                        </QueueRowShell>
                       </li>
                     ))}
                   </ul>
@@ -406,7 +442,7 @@ function Dashboard() {
 export default function AnalyticsDashboard() {
   return (
     <StaffGuard current="/analytics" requireRoles={["ura_admin", "ura_auditor"]}>
-      {() => <Dashboard />}
+      {(who) => <Dashboard role={who.role} />}
     </StaffGuard>
   );
 }

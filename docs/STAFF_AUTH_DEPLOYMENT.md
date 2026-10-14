@@ -146,6 +146,25 @@ FastAPI process at start; changing them restarts the Space but needs no rebuild.
 | `OIDC_AUDIENCE` | `https://ura-chatbot/api` |
 | `OIDC_JWKS_URL` | `https://dev-s16d7m00eyrksjy2.us.auth0.com/.well-known/jwks.json` |
 | `OIDC_ROLE_CLAIM` | *unset* — Auth0 delivers roles in `permissions`, which is probed by default |
+| `OIDC_USERINFO_URL` | *unset* — defaults to `<OIDC_ISSUER>/userinfo` |
+| `OIDC_USERINFO_ENABLED` | *unset* (on) — `false` turns the profile lookup off |
+| `OIDC_USERINFO_CACHE_TTL_S` / `OIDC_USERINFO_TIMEOUT_S` | *unset* — `3600` / `2` |
+
+### Names and email
+
+Auth0's access token for the API carries `sub` and `permissions`, but no name
+or email. When a verified RS256 token has no `email`, the backend asks
+`/userinfo` with the same token (the console requests `openid profile email`,
+so the token's audience includes it). It does this once per person: the answer
+is cached for an hour, a failure for five minutes, and a profile for another
+`sub` is ignored (`App/backend/app/auth/userinfo.py`). That is where the email
+on `/v1/me` and the officer name shown to taxpayers and spoken to callers come
+from.
+
+Without a usable name the console says **"URA officer"**, never the account id.
+A database user's `name` is their email, so the officer name falls back to the
+nickname ("Officer Officer.staff"). Set a first name (`given_name`) on the user
+in Auth0 to show "Officer Nakato".
 
 ## Roles
 
@@ -220,6 +239,7 @@ blocked and sign-in fails with an opaque `NetworkError`.
 | `invalid token: audience mismatch` | `OIDC_AUDIENCE` ≠ the API identifier |
 | `invalid token: unexpected alg: HS256` | expected in RS256 mode; also confirms `AUTH_ALG=RS256` is live |
 | Officer refused with role `public` | roles not in a probed claim, or RBAC not enabled on the API |
+| Officers shown as "URA officer", `/v1/me` with no email | `/userinfo` unreachable from the backend, or the token was issued without the `openid` scope (its audience then lacks `/userinfo`) |
 | `unauthorized_client` at the token endpoint | app registered as Regular Web App instead of SPA |
 | `invalid_request` — *Client "…" is not authorized to access resource server "…"* | the API exists but the application is not authorized for it (Auth0 side) |
 | `access_denied` — *Service not found: <audience>* | no API registered with that identifier |

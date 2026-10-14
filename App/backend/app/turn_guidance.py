@@ -164,5 +164,17 @@ def apply_turn_guidance(
         ):
             actions.append(HANDOFF_ACTION)
 
+    # Anticipatory civic nudges based on tax topic
+    topic = str(result.get("current_topic") or "").lower()
+    text_check = f"{message} {rewritten}".lower()
+    if ("vat" in topic or "vat" in text_check) and "workflow" not in str(result.get("retrieval_mode") or ""):
+        nudge = "Check monthly VAT return deadline (15th of each month)"
+        if nudge not in actions and len(actions) < 4:
+            actions.append(nudge)
+    elif ("paye" in topic or "paye" in text_check) and "workflow" not in str(result.get("retrieval_mode") or ""):
+        nudge = "Check monthly PAYE remittance deadline (15th of each month)"
+        if nudge not in actions and len(actions) < 4:
+            actions.append(nudge)
+
     result["next_actions"] = actions
     return result

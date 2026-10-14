@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,8 @@ STORE_RAW_PROMPTS = os.getenv("STORE_RAW_PROMPTS", "false").lower() == "true"
 ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
 # P1-5: abstention threshold on the normalized [0,1] reranker scale.
 ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
+ABSTENTION_THRESHOLD_NORM_LG = float(os.getenv("ABSTENTION_THRESHOLD_NORM_LG", "0.20"))
+ABSTENTION_THRESHOLD_NORM_SW = float(os.getenv("ABSTENTION_THRESHOLD_NORM_SW", "0.20"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
 # ---------------------------------------------------------------------------
@@ -86,7 +89,7 @@ def _canonicalize_text(text: str) -> str:
 # the SYSTEM_PROMPT in llm.py — any signature line added there must also
 # appear here to remain detectable.
 _PROMPT_SIGNATURE_PHRASES: tuple[str, ...] = (
-    "URA Digital Assistant",
+    "You are the URA Digital Assistant",
     "official AI helper",
     "Answer ONLY from the provided context passages",
     "Do NOT use prior knowledge",
@@ -321,6 +324,29 @@ class InputGuard:
 # ---------------------------------------------------------------------------
 # Indirect prompt injection defence (LLM01 — retrieved-content vector)
 # ---------------------------------------------------------------------------
+def _neutralise_injection(text: str) -> tuple[str, bool]:
+    """Replace each injection phrase in *text*: ``(scrubbed, found)``.
+
+    A phrase hidden with homoglyphs or zero-width characters is found on the
+    canonical form but cannot be cut out of the original: ``found`` is then
+    True while :func:`_injection_present` still holds for the result.
+    """
+    scrubbed = text
+    found = False
+    canonical = _canonicalize_text(scrubbed)
+    for pattern in _INJECTION_PATTERNS:
+        if pattern.search(scrubbed) or pattern.search(canonical):
+            scrubbed = pattern.sub("[REDACTED_INSTRUCTION]", scrubbed)
+            canonical = _canonicalize_text(scrubbed)
+            found = True
+    return scrubbed, found
+
+
+def _injection_present(text: str) -> bool:
+    canonical = _canonicalize_text(text)
+    return any(pattern.search(text) or pattern.search(canonical) for pattern in _INJECTION_PATTERNS)
+
+
 def scan_retrieved_text(text: str) -> tuple[str, bool]:
     """Neutralise injection patterns embedded in retrieved passages.
 
@@ -331,17 +357,50 @@ def scan_retrieved_text(text: str) -> tuple[str, bool]:
 
     Returns (scrubbed_text, was_scrubbed).
     """
-    scrubbed = text
-    was_scrubbed = False
-    canonical = _canonicalize_text(scrubbed)
-    for pattern in _INJECTION_PATTERNS:
-        if pattern.search(scrubbed) or pattern.search(canonical):
-            scrubbed = pattern.sub("[REDACTED_INSTRUCTION]", scrubbed)
-            canonical = _canonicalize_text(scrubbed)
-            was_scrubbed = True
+    scrubbed, was_scrubbed = _neutralise_injection(text)
     if was_scrubbed:
         logger.warning("Indirect injection scrubbed in retrieved passage (%d chars)", len(text))
     return scrubbed, was_scrubbed
+
+
+def scan_external_tool_text(text: str) -> tuple[str, bool]:
+    """Neutralize instruction-like text returned by an external tool.
+
+    Remote tools can return attacker-controlled content. Apply the same
+    injection patterns used for retrieved passages, and withhold text when
+    normalization reveals an instruction that cannot be removed safely.
+    """
+    scrubbed, found = _neutralise_injection(text)
+    if not found:
+        return text, False
+    if _injection_present(scrubbed):
+        logger.warning("Instruction-like text in external tool output withheld (%d chars)", len(text))
+        return "[External tool output withheld because it contained unsafe instructions.]", True
+    logger.warning("Instruction-like text in external tool output scrubbed (%d chars)", len(text))
+    return scrubbed, True
+
+
+#: What a replayed turn becomes when its injection cannot be cut out.
+REPLAY_WITHHELD = "[An earlier message was withheld: it contained instructions addressed to the assistant.]"
+
+
+def scan_replayed_text(text: str) -> tuple[str, bool]:
+    """Neutralise injection patterns in a stored turn before it is replayed (G123).
+
+    Conversation history goes back into the next prompts. That includes turns
+    the input guard refused, which are stored for the transcript, and
+    instructions the guard missed. An injection kept in history is OWASP
+    ASI06's memory poisoning: one message steers every later turn. A phrase
+    that can be cut out is redacted as in retrieved passages. A turn whose
+    phrase survives that (hidden with homoglyphs or zero-width characters) is
+    withheld whole. Returns ``(text, was_scrubbed)``.
+    """
+    scrubbed, found = _neutralise_injection(text)
+    if not found:
+        return text, False
+    if _injection_present(scrubbed):
+        return REPLAY_WITHHELD, True
+    return scrubbed, True
 
 
 def is_official_ura_email(email: str) -> bool:
@@ -372,28 +431,35 @@ def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
     return bool(_CURRENCY_INDICATORS_BEFORE.search(before) or _CURRENCY_INDICATORS_AFTER.search(after))
 
 
-def redact_pii_text(text: str) -> str:
+def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> str:
     """Replace detected PII with redaction markers.
 
     Shared utility used by both OutputGuard (response side) and
     database writes (storage side) to prevent PII persistence.
     Public official URA/government contact addresses (e.g. services@ura.go.ug,
     info@ura.go.ug) are exempt so taxpayers receive valid contact channels.
+    Taxpayer-stated identifiers (in *allowed_values*) are exempted from
+    output redaction so the assistant does not redact the user's own input back to them (G143).
     """
+    allowed_set = {str(v).strip() for v in (allowed_values or []) if str(v).strip()}
     result = text
     for pii_type, pattern in _PII_PATTERNS:
         if pii_type == "email":
             def _replace_email(m: re.Match[str]) -> str:
                 addr = m.group(0)
-                if is_official_ura_email(addr):
+                if is_official_ura_email(addr) or addr in allowed_set:
                     return addr
                 return "[REDACTED_EMAIL]"
 
             result = pattern.sub(_replace_email, result)
         elif pii_type == "ug_tin":
             def _replace_tin(m: re.Match[str]) -> str:
+                val = m.group(0)
                 if _is_currency_boundary(m, result):
-                    return m.group(0)
+                    return val
+                raw_digits = re.sub(r"\D", "", val)
+                if raw_digits in allowed_set or val in allowed_set:
+                    return val
                 return "[REDACTED_UG_TIN]"
 
             result = pattern.sub(_replace_tin, result)
@@ -416,6 +482,48 @@ def contains_pii(text: str) -> bool:
         elif pattern.search(text):
             return True
     return False
+
+
+class StreamingDLPFilter:
+    """Zero-latency streaming Data Loss Prevention (DLP) filter.
+
+    Buffers a trailing boundary window across chunks so multi-character sensitive
+    tokens (14-char Ugandan NINs, 10-digit TINs, phone numbers, credit card sequences)
+    that split across streaming token chunk boundaries are caught and sanitized
+    without introducing user-perceptible latency.
+    """
+
+    def __init__(self, buffer_size: int = 24) -> None:
+        self._buffer_size = buffer_size
+        self._buffer = ""
+
+    def process_chunk(self, chunk: str) -> str:
+        """Feed a new chunk of streamed text; returns sanitized text ready to yield."""
+        if not chunk:
+            return ""
+        self._buffer += chunk
+        # If there is whitespace or punctuation boundary, flush safe complete words immediately
+        last_boundary = max(self._buffer.rfind(" "), self._buffer.rfind("\n"), self._buffer.rfind("\t"))
+        if last_boundary != -1:
+            to_sanitize = self._buffer[:last_boundary + 1]
+            sanitized = redact_pii_text(to_sanitize)
+            self._buffer = self._buffer[last_boundary + 1:]
+            return sanitized
+        if len(self._buffer) > self._buffer_size:
+            flushable_len = len(self._buffer) - self._buffer_size
+            sanitized_full = redact_pii_text(self._buffer)
+            emit = sanitized_full[:flushable_len]
+            self._buffer = sanitized_full[flushable_len:]
+            return emit
+        return ""
+
+    def flush(self) -> str:
+        """Flush any remaining buffered text at the end of the stream."""
+        if not self._buffer:
+            return ""
+        remaining = redact_pii_text(self._buffer)
+        self._buffer = ""
+        return remaining
 
 
 _LISTISH_VERB_RE = re.compile(
@@ -543,9 +651,16 @@ class OutputGuard:
         return stripped
 
     @staticmethod
-    def redact_pii(text: str) -> str:
-        """Replace detected PII with redaction markers (LLM02)."""
-        return redact_pii_text(text)
+    def redact_pii(text: str, allowed_values: Iterable[str] | None = None) -> str:
+        """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
+        if allowed_values is None:
+            try:
+                from .service import _ACTIVE_USER_STATED_IDS
+
+                allowed_values = _ACTIVE_USER_STATED_IDS.get()
+            except Exception:
+                allowed_values = ()
+        return redact_pii_text(text, allowed_values=allowed_values)
 
     @staticmethod
     def sanitize(text: str) -> str:
@@ -876,7 +991,13 @@ class OutputGuard:
             return True
         from .retriever import LEXICAL_RELEVANCE_FLOOR, hit_relevance
 
-        eff_threshold = threshold if locale in ("", "en") else min(threshold, 0.02)
+        loc = (locale or "en").strip().lower().split("-")[0]
+        if loc == "lg":
+            eff_threshold = ABSTENTION_THRESHOLD_NORM_LG
+        elif loc == "sw":
+            eff_threshold = ABSTENTION_THRESHOLD_NORM_SW
+        else:
+            eff_threshold = threshold
 
         scores = [r for h in hits if (r := hit_relevance(h)) is not None]
         if scores:

@@ -7,24 +7,16 @@ Provides:
    taxpayer status, figures, reference numbers, and core subject entities across turns.
 3. ``RollingContextManager``: Hierarchical context manager maintaining:
    - Verbatim recent turns (last 4-6 turns) for high-fidelity prompt generation.
-   - Compact abstractive rolling summary of older turns (1..N-K) to prevent
+   - Compact structured rolling summary of older turns (1..N-K) to prevent
      memory loss in extended multi-turn sessions (>5 turns).
-   - In-session working memory caching keyed on conversation_id.
+   - Structured entities extracted from the bounded history window.
 """
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
-
-from .memory.working import WorkingMemory
-
-logger = logging.getLogger(__name__)
-
-# Global session working memory singleton (30 min TTL)
-_SESSION_WORKING_MEMORY = WorkingMemory(ttl_seconds=30 * 60)
 
 # ---------------------------------------------------------------------------
 # Known Tax Domain Patterns & Entities
@@ -34,11 +26,11 @@ _TAX_TOPIC_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
     (re.compile(r"\b(paye|pay\s+as\s+you\s+earn|salary|gross\s+pay|net\s+pay|employment\s+income)\b", re.I), "PAYE (Pay As You Earn)", "paye"),
     (re.compile(r"\b(efris|electronic\s+fiscal\s+(?:receipting|invoicing|device|system)?)\b", re.I), "EFRIS", "efris"),
     (re.compile(r"\b(value\s+added\s+tax|vat\b)\b", re.I), "Value Added Tax (VAT)", "vat"),
-    (re.compile(r"\b(withholding\s+tax|wht\b)\b", re.I), "Withholding Tax (WHT)", "wht"),
+    (re.compile(r"\b(withholding\s+tax|wht\b|kodi\s+ya\s+zuio|zuio)\b", re.I), "Withholding Tax (WHT)", "wht"),
     (re.compile(r"\b(corporat(?:e|ion)\s+(?:income\s+)?tax|company\s+tax|cit\b)\b", re.I), "Corporation Tax (CIT)", "cit"),
     (re.compile(r"\b(register(?:ing|ation)?\s+for\s+(?:a\s+)?tin|get\s+(?:a\s+)?tin|apply\s+for\s+(?:a\s+)?tin|tin\s+registration|obtain\s+(?:a\s+)?tin)\b", re.I), "TIN Registration", "tin_registration"),
     (re.compile(r"\b(tin\b|tax\s+identification\s+number)\b", re.I), "TIN", "tin"),
-    (re.compile(r"\b(customs|import\s+duty|export\s+duty|tariffs?|clearance|asycuda|single\s+customs)\b", re.I), "Customs & Import/Export Duty", "customs"),
+    (re.compile(r"\b(customs|forodha|import\s+duty|export\s+duty|tariffs?|clearance|asycuda|single\s+customs)\b", re.I), "Customs & Import/Export Duty", "customs"),
     (re.compile(r"\b(stamp\s+duty|land\s+transfer|property\s+transfer)\b", re.I), "Stamp Duty", "stamp_duty"),
     (re.compile(r"\b(local\s+excise\s+duty|excise\s+duty|dts|digital\s+tax\s+stamps?)\b", re.I), "Excise Duty / DTS", "excise_duty"),
     (re.compile(r"\b(motor\s+vehicle|logbook|driving\s+licen[sc]e|number\s+plate|vehicle\s+transfer)\b", re.I), "Motor Vehicle Registration", "motor_vehicle"),
@@ -56,6 +48,50 @@ _TAXPAYER_STATUS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+#: Earlier turns the LLM prompt replays verbatim (``llm._build_messages``).
+#: Every older turn is in the rolling summary instead, so none falls between
+#: the two (G120: the prompt used the last three while the summary started at
+#: turn seven, and turns four to six reached the model in neither).
+PROMPT_VERBATIM_TURNS = 3
+
+_TURN_EXTRAS = ("locale", "user_message_en", "bot_reply_en")
+
+
+def _with_locale(turn: dict[str, str], source: dict[str, Any]) -> dict[str, str]:
+    """*turn* plus *source*'s stored ``locale`` and English forms, when present."""
+    for key in _TURN_EXTRAS:
+        stored = str(source.get(key) or "").strip()
+        if stored:
+            turn[key] = stored
+    return turn
+
+
+def english_view(turns: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Turns as the models should read them: in English, with instructions neutralised.
+
+    A Luganda or Swahili turn is stored with its English form (G119). The
+    generator answers in English, and the rewriter, entity extraction and
+    summary match English patterns, so they all read that form; the stored
+    ``locale`` is kept for the answer-language decision.
+
+    Every model-facing replay of history comes through here, so this is where
+    an instruction stored in history is neutralised before it reaches a prompt
+    again (G123, :func:`app.guardrails.scan_replayed_text`). Transcripts,
+    exports and the audit trail read the stored turns, not this view.
+    """
+    from .guardrails import scan_replayed_text
+
+    out: list[dict[str, str]] = []
+    for turn in turns:
+        user_text, _ = scan_replayed_text(turn.get("user_message_en") or turn.get("user_message", ""))
+        reply_text, _ = scan_replayed_text(turn.get("bot_reply_en") or turn.get("bot_reply", ""))
+        view = {"user_message": user_text, "bot_reply": reply_text}
+        if turn.get("locale"):
+            view["locale"] = turn["locale"]
+        out.append(view)
+    return out
+
+
 def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """Normalize any history format into standard turn pairs.
 
@@ -63,6 +99,10 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
     - Standard turn dicts: ``{"user_message": "...", "bot_reply": "..."}``
     - Role-based message lists: ``[{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]``
     - Mixed or legacy keys: ``{"query": ..., "reply": ...}`` or ``{"user": ..., "assistant": ...}``
+
+    A turn's stored ``locale`` (the language it was answered in) is kept when
+    present: the answer language of the next turn is continued from it rather
+    than re-detected from text (:mod:`app.language_state`).
     """
     if not history:
         return []
@@ -70,10 +110,13 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
     # Case 1: Already paired turn dicts
     if all(isinstance(h, dict) and ("user_message" in h or "bot_reply" in h) for h in history):
         return [
-            {
-                "user_message": str(h.get("user_message") or "").strip(),
-                "bot_reply": str(h.get("bot_reply") or "").strip(),
-            }
+            _with_locale(
+                {
+                    "user_message": str(h.get("user_message") or "").strip(),
+                    "bot_reply": str(h.get("bot_reply") or "").strip(),
+                },
+                h,
+            )
             for h in history
             if isinstance(h, dict) and (h.get("user_message") or h.get("bot_reply"))
         ]
@@ -91,9 +134,10 @@ def normalize_history_turns(history: list[dict[str, Any]] | None) -> list[dict[s
         if role == "user":
             if current_user:
                 turns.append({"user_message": current_user, "bot_reply": ""})
-            current_user = content
+            current_user = str(item.get("content_en") or "").strip() or content
         elif role in ("assistant", "system", "bot", "model"):
-            turns.append({"user_message": current_user, "bot_reply": content})
+            reply = str(item.get("content_en") or "").strip() or content
+            turns.append(_with_locale({"user_message": current_user, "bot_reply": reply}, item))
             current_user = ""
         elif "user_message" in item or "bot_reply" in item:
             turns.append({
@@ -120,6 +164,8 @@ class ConversationEntities:
     taxpayer_types: list[str] = field(default_factory=list)
     amounts: list[str] = field(default_factory=list)
     reference_numbers: list[str] = field(default_factory=list)
+    business_names: list[str] = field(default_factory=list)
+    locations: list[str] = field(default_factory=list)
     active_subject: str = ""
 
 
@@ -130,6 +176,8 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
     taxpayer_types: list[str] = []
     amounts: list[str] = []
     ref_numbers: list[str] = []
+    business_names: list[str] = []
+    locations: list[str] = []
     active_subject = ""
 
     amount_re = re.compile(
@@ -141,12 +189,21 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
         r"\b(?:TIN|PRN|ARN|REF|ASSESSMENT)(?:[-\s#:]|(?:is|no\.?|number)\s*)+([A-Z0-9]{5,18})\b",
         re.I,
     )
+    loc_re = re.compile(
+        r"\b(?:in|at|from|district of|city of|municipality of)\s+(Kampala|Entebbe|Jinja|Mbale|Masaka|Mbarara|Gulu|Arua|Busia|Malaba|Tororo|Kasese|Lira|Mukono|Wakiso|Soroti|Hoima|Fort Portal|Kabale|Iganga|Njeru)\b"
+        r"|\b(Kampala|Entebbe|Jinja|Mbale|Masaka|Mbarara|Gulu|Arua|Busia|Malaba|Tororo|Kasese|Lira|Mukono|Wakiso|Soroti|Hoima|Fort Portal|Kabale|Iganga|Njeru)\s+(?:district|city|branch|factory|premises|station|office)\b",
+        re.I,
+    )
+    biz_re = re.compile(
+        r"\b(?:called|named|company(?: name is| called)?|business(?: name is| called)?)\s+([A-Z0-9][A-Za-z0-9&'\s]{2,40}(?:Millers|Enterprises|Limited|Ltd|Company|Co\b|Factory|Traders|Store|Holdings|Works|Services|Logistics|Industries|Imports|Exports)?)\b"
+        r"|\b([A-Z][a-zA-Z0-9&']+(?:\s+[A-Z][a-zA-Z0-9&']+)*\s+(?:Millers|Enterprises|Limited|Ltd|Company|Co\b|Factory|Traders|Holdings|Industries|Logistics))\b",
+    )
 
     for turn in turns:
         user_msg = turn.get("user_message", "")
-        bot_reply = turn.get("bot_reply", "")
 
-        # Tax Topics: match user message first for active topic
+        # Only derive persistent context from user input. Assistant-generated
+        # claims are not evidence about the taxpayer's circumstances.
         user_matched_topic = ""
         for pat, label, key in _TAX_TOPIC_PATTERNS:
             if pat.search(user_msg):
@@ -155,15 +212,15 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
                     topic_keys.append(key)
                 user_matched_topic = label
 
+        if not user_matched_topic and re.search(r"\b(omusolo|kodi|ushuru)\b", user_msg, re.I):
+            label, key = "Tax", "general_tax"
+            if label not in topics:
+                topics.append(label)
+                topic_keys.append(key)
+            user_matched_topic = label
+
         if user_matched_topic:
             active_subject = user_matched_topic
-        else:
-            for pat, label, key in _TAX_TOPIC_PATTERNS:
-                if pat.search(bot_reply):
-                    if label not in topics:
-                        topics.append(label)
-                        topic_keys.append(key)
-                    active_subject = label
 
         # Taxpayer status
         for pat, status_label in _TAXPAYER_STATUS_PATTERNS:
@@ -183,12 +240,28 @@ def extract_conversation_entities(turns: list[dict[str, str]]) -> ConversationEn
             if ref not in ref_numbers:
                 ref_numbers.append(ref)
 
+        # Operating locations
+        found_locs = loc_re.findall(user_msg)
+        for loc in found_locs:
+            loc_val = (loc[0] or loc[1] if isinstance(loc, tuple) else loc).strip().capitalize()
+            if loc_val and loc_val not in locations:
+                locations.append(loc_val)
+
+        # Business and entity names
+        found_biz = biz_re.findall(user_msg)
+        for biz in found_biz:
+            biz_val = (biz[0] or biz[1] if isinstance(biz, tuple) else biz).strip()
+            if biz_val and len(biz_val) > 2 and biz_val not in business_names:
+                business_names.append(biz_val)
+
     return ConversationEntities(
         tax_topics=topics,
         tax_topic_keys=topic_keys,
         taxpayer_types=taxpayer_types,
         amounts=amounts,
         reference_numbers=ref_numbers,
+        business_names=business_names,
+        locations=locations,
         active_subject=active_subject,
     )
 
@@ -201,6 +274,10 @@ def summarize_older_turns(turns: list[dict[str, str]]) -> str:
     entities = extract_conversation_entities(turns)
     lines: list[str] = []
 
+    if entities.business_names:
+        lines.append(f"Entity/business name: {', '.join(entities.business_names)}.")
+    if entities.locations:
+        lines.append(f"Operating location/district: {', '.join(entities.locations)}.")
     if entities.tax_topics:
         lines.append(f"Tax domains discussed: {', '.join(entities.tax_topics)}.")
     if entities.taxpayer_types:
@@ -208,19 +285,9 @@ def summarize_older_turns(turns: list[dict[str, str]]) -> str:
     if entities.amounts:
         lines.append(f"Financial figures mentioned: {', '.join(entities.amounts[-3:])}.")
     if entities.reference_numbers:
-        lines.append(f"Reference IDs: {', '.join(entities.reference_numbers)}.")
-
-    # Extract key user intent queries from the older turns
-    key_queries: list[str] = []
-    for turn in turns:
-        u = turn.get("user_message", "").strip()
-        if len(u) > 5 and u not in key_queries:
-            # Clean punctuation and keep short
-            key_queries.append(u[:80] + ("..." if len(u) > 80 else ""))
-
-    if key_queries:
-        sampled = key_queries if len(key_queries) <= 5 else key_queries[:2] + key_queries[-3:]
-        lines.append(f"Previous inquiries: {'; '.join(sampled)}.")
+        lines.append("A tax or payment reference number appeared earlier; its value is omitted.")
+    if not lines and turns:
+        lines.append(f"Earlier turns: {len(turns)} prior exchanges.")
 
     return " ".join(lines)
 
@@ -254,35 +321,24 @@ class RollingContextManager:
         raw_history: list[dict[str, Any]] | None,
         conversation_id: str = "",
     ) -> ConversationContext:
-        """Construct a multi-turn context object with rolling summary and entity slots."""
-        normalized = normalize_history_turns(raw_history)
+        """Construct a multi-turn context object with rolling summary and entity slots.
+
+        Every turn is in its model-facing (English) form, see
+        :func:`english_view`. ``recent_turns`` is the last ``recent_limit``
+        turns, for the rewriter and the language decision; the summary covers
+        every turn the prompt does not replay verbatim
+        (:data:`PROMPT_VERBATIM_TURNS`).
+        """
+        normalized = english_view(normalize_history_turns(raw_history))
+        if self.max_total_turns > 0 and len(normalized) > self.max_total_turns:
+            normalized = normalized[-self.max_total_turns :]
         total = len(normalized)
 
         entities = extract_conversation_entities(normalized)
 
-        if total <= self.recent_limit:
-            recent = normalized
-            summary = ""
-        else:
-            older_turns = normalized[:-self.recent_limit]
-            recent = normalized[-self.recent_limit:]
-            summary = summarize_older_turns(older_turns)
-
-        # Cache in-session working state
-        if conversation_id:
-            try:
-                _SESSION_WORKING_MEMORY.update(
-                    conversation_id,
-                    active_subject=entities.active_subject,
-                    tax_topics=entities.tax_topics,
-                    taxpayer_types=entities.taxpayer_types,
-                    amounts=entities.amounts[-3:],
-                    reference_numbers=entities.reference_numbers[-2:],
-                    summary=summary,
-                    turn_count=total,
-                )
-            except Exception:
-                logger.debug("Failed to update session working memory", exc_info=True)
+        recent = normalized[-self.recent_limit:] if self.recent_limit > 0 else normalized
+        verbatim = max(1, min(PROMPT_VERBATIM_TURNS, self.recent_limit or PROMPT_VERBATIM_TURNS))
+        summary = summarize_older_turns(normalized[:-verbatim]) if total > verbatim else ""
 
         return ConversationContext(
             recent_turns=recent,
@@ -291,13 +347,6 @@ class RollingContextManager:
             total_turns=total,
             all_turns=normalized,
         )
-
-    def get_session_state(self, session_key: str) -> dict[str, Any] | None:
-        """Retrieve active working session state."""
-        if not session_key:
-            return None
-        return _SESSION_WORKING_MEMORY.get(session_key)
-
 
 # Global helper instance
 context_manager = RollingContextManager()

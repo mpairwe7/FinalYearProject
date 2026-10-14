@@ -65,6 +65,26 @@ describe("StaffNav", () => {
     expect(search.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("gives an administrator no live-work destinations: officers work cases, admins audit", () => {
+    renderNav();
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
+    for (const name of ["My queue", "All tickets", "Calls"]) {
+      expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
+    }
+    // What an administrator does instead: audit the service.
+    expect(screen.getByRole("link", { name: "Quality audit" })).toHaveAttribute("href", "/admin/quality");
+    expect(screen.getByRole("link", { name: "Audit trail" })).toBeInTheDocument();
+  });
+
+  it("gives an officer the queue, the tickets and the call desk", () => {
+    renderNav({ ...ADMIN, role: "ura_staff", email: "officer@ura.go.ug" });
+    for (const name of ["My queue", "All tickets", "Calls"]) {
+      expect(screen.getByRole("link", { name })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Quality audit" })).not.toBeInTheDocument();
+  });
+
   it("offers the search field as a field, not a keyboard chord", () => {
     renderNav();
     const search = screen.getByRole("button", { name: "Search" });

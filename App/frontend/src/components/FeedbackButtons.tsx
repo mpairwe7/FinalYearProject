@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useOptimistic, useTransition } from 'react';
+import { useTranslation } from '../lib/i18n';
 import { submitFeedback, updateFeedbackComment, trackFeedbackGiven } from '../store/useAnalyticsStore';
 
 interface FeedbackButtonsProps {
@@ -12,6 +13,12 @@ interface FeedbackButtonsProps {
   /** Guided journey and step the reply belongs to, when it asked a step. */
   workflowId?: string;
   stepId?: string;
+  /** The conversation the answer is in, and the answer's `turn_id` from the
+   *  chat response: the audit reads a conversation's ratings in order. */
+  conversationId?: string | null;
+  turnId?: string;
+  /** The answer's position in its conversation, 1 for the first. */
+  answerNumber?: number;
 }
 
 const ThumbsUpIcon = ({ filled }: { filled?: boolean }) => (
@@ -43,7 +50,11 @@ export default function FeedbackButtons({
   retrievalMode,
   workflowId,
   stepId,
+  conversationId,
+  turnId,
+  answerNumber,
 }: FeedbackButtonsProps) {
+  const t = useTranslation();
   const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [feedbackState, setFeedbackState] = useState<FeedbackState>('idle');
   const [showComment, setShowComment] = useState(false);
@@ -72,6 +83,9 @@ export default function FeedbackButtons({
         retrievalMode,
         workflowId,
         stepId,
+        conversationId,
+        turnId,
+        answerNumber,
       });
       if (result) {
         setRating(value);
@@ -85,7 +99,7 @@ export default function FeedbackButtons({
         setFeedbackState('error');
       }
     });
-  }, [feedbackState, messageId, userQuery, botReply, retrievalMode, workflowId, stepId, setOptimisticRating]);
+  }, [feedbackState, messageId, userQuery, botReply, retrievalMode, workflowId, stepId, conversationId, turnId, answerNumber, setOptimisticRating]);
 
   const handleCommentSubmit = useCallback(async () => {
     if (!comment.trim() || !rating) return;
@@ -106,15 +120,15 @@ export default function FeedbackButtons({
   const isDisabled = feedbackState === 'submitted' || feedbackState === 'submitting';
 
   return (
-    <div className="feedback-container" role="group" aria-label="Response feedback">
+    <div className="feedback-container" role="group" aria-label={t('message.feedbackGroup')}>
       <div className="feedback-buttons">
         <button
           className={`feedback-btn ${optimisticRating === 'up' ? 'active up' : ''}`}
           onClick={() => handleRate('up')}
           disabled={isDisabled}
-          aria-label="Helpful response"
+          aria-label={t('message.rateHelpful')}
           aria-pressed={optimisticRating === 'up'}
-          title="Helpful"
+          title={t('message.helpful')}
         >
           <ThumbsUpIcon filled={optimisticRating === 'up'} />
         </button>
@@ -122,34 +136,34 @@ export default function FeedbackButtons({
           className={`feedback-btn ${optimisticRating === 'down' ? 'active down' : ''}`}
           onClick={() => handleRate('down')}
           disabled={isDisabled}
-          aria-label="Unhelpful response"
+          aria-label={t('message.rateNotHelpful')}
           aria-pressed={optimisticRating === 'down'}
-          title="Not helpful"
+          title={t('message.notHelpful')}
         >
           <ThumbsDownIcon filled={optimisticRating === 'down'} />
         </button>
 
         {feedbackState === 'submitting' && (
-          <span className="feedback-status" aria-live="polite">Sending...</span>
+          <span className="feedback-status" aria-live="polite">{t('message.feedbackSending')}</span>
         )}
         {feedbackState === 'submitted' && !showComment && (
           <span className="feedback-thanks" aria-live="polite">
-            {commentSent ? 'Thanks for your detailed feedback' : 'Thanks for your feedback'}
+            {commentSent ? t('message.feedbackThanksDetailed') : t('message.feedbackThanks')}
           </span>
         )}
         {feedbackState === 'error' && (
           <span className="feedback-error" aria-live="assertive">
-            Failed to send{' '}
-            <button className="feedback-retry" onClick={handleRetry}>Retry</button>
+            {t('message.feedbackFailed')}{' '}
+            <button className="feedback-retry" onClick={handleRetry}>{t('message.feedbackRetry')}</button>
           </span>
         )}
       </div>
 
       {showComment && (
-        <div className="feedback-comment" role="form" aria-label="Additional feedback">
+        <div className="feedback-comment" role="form" aria-label={t('message.feedbackCommentLabel')}>
           <input
             className="feedback-comment-input"
-            placeholder="What could be improved? (optional)"
+            placeholder={t('message.feedbackCommentPlaceholder')}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             onKeyDown={(e) => {
@@ -159,18 +173,18 @@ export default function FeedbackButtons({
               }
             }}
             maxLength={500}
-            aria-label="Feedback comment"
+            aria-label={t('message.feedbackCommentLabel')}
             autoFocus
           />
           <div className="feedback-comment-actions">
             <button className="feedback-btn small" onClick={handleCommentSubmit} disabled={!comment.trim()}>
-              Send
+              {t('message.feedbackSend')}
             </button>
             <button
               className="feedback-btn small"
               onClick={() => { setShowComment(false); setComment(''); }}
             >
-              Skip
+              {t('message.feedbackSkip')}
             </button>
           </div>
         </div>

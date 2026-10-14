@@ -12,7 +12,7 @@
 # lines but cannot see an ARG default, which is how this sat on 3.11.11
 # (Debian 12.10, OpenSSL 3.0.15) with 4 critical and 42 high fixable OS
 # findings in the Trivy image scan.
-FROM python:3.11.16-slim-bookworm AS builder
+FROM python:3.14.8-slim-bookworm AS builder
 
 # Install uv for fast dependency resolution
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /usr/local/bin/uv
@@ -47,12 +47,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Production image
 # -----------------------------------------------------------------------------
-FROM python:3.11.16-slim-bookworm AS runtime
+FROM python:3.14.8-slim-bookworm AS runtime
+
+# Keep OS packages current with bookworm-security errata (fixes perl-base,
+# libpcre2, openssl/libssl3 CVEs).
+RUN apt-get update && apt-get -y --no-install-recommends upgrade \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # The base image's own packaging tools are never used here (the app runs from
-# /opt/venv) and were its only remaining HIGH findings (wheel 0.45.1, the
-# jaraco.context that setuptools vendors).
-RUN python -m pip uninstall -y setuptools wheel
+# /opt/venv) and contain vendored dependencies (pip vendors msgpack and urllib3;
+# setuptools vendors jaraco.context).
+RUN python -m pip uninstall -y pip setuptools wheel && \
+    rm -rf /usr/local/lib/python3.14/site-packages/*
 
 # Labels for container registry
 LABEL org.opencontainers.image.title="URA Chatbot API" \
@@ -97,4 +104,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 EXPOSE 8000
 
 # Start API server
+# Which commit this image was built from: exported as ura_build_info and
+# recorded in every audit row's provenance. Declared last so a new commit does
+# not invalidate any cached layer above.
+ARG GIT_SHA=""
+ENV APP_BUILD_SHA=${GIT_SHA}
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -1,14 +1,11 @@
-"""Standalone FastAPI Application for Uganda Registration Services Bureau (URSB).
+"""Development-only dashboard for the local URSB simulator.
 
 Features:
 - Dedicated SQLite database (data_store/ursb_system.db)
-- Mandatory Auth Gate with URSB Security CAPTCHA verification
-- 1-click Demo Account presets (Kakira Sugar, Nile Breweries, Pearl Organic Coffee)
-- Business entity search by name, BRN, or registration number
-- Company incorporation with automatic registration number generation (URSB-CO-XXXXX)
-- Form 20 particulars of directors & secretaries
-- Legal compliance audit & URA Non-Individual TIN readiness verification
-- MCP 2026 tools gateway (/mcp/manifest, /mcp/call)
+- Demo login screen and sample accounts (not production authentication)
+- Local sample business searches and registration references
+- Example director fields and compliance status from fixtures
+- No connection to URSB or standards-compliant MCP transport
 """
 
 from __future__ import annotations
@@ -31,7 +28,12 @@ from fastapi.responses import HTMLResponse  # noqa: E402
 
 os.environ.setdefault("URSB_DB_PATH", str(_root / "data_store" / "ursb_system.db"))
 
-from plugins.apps.common_ui import COMMON_AUTH_JS, COMMON_CSS, render_logo  # noqa: E402
+from plugins.apps.common_ui import (  # noqa: E402
+    COMMON_AUTH_JS,
+    COMMON_CSS,
+    install_simulator_safety_boundary,
+    render_logo,
+)
 from plugins.ursb import UrsbClient, UrsbConnector, UrsbService  # noqa: E402
 
 service = UrsbService()
@@ -39,7 +41,8 @@ client = UrsbClient(service=service)
 connector = UrsbConnector(service=service)
 connector.initialize()
 
-app = FastAPI(title="URSB Business Registry Standalone System", version="1.0.0")
+app = FastAPI(title="URSB Simulator Demo", version="1.0.0")
+install_simulator_safety_boundary(app)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -257,7 +260,6 @@ def index() -> str:  # noqa: S608
       <div>URSB Standalone Node v1.0.0 · Database: <code>ursb_system.db</code></div>
       <div>
         <a href="/docs">Swagger API Docs</a> |
-        <a href="/mcp/manifest">MCP Tool Manifest</a> |
         <a href="/health">Health Probe</a>
       </div>
     </div>
@@ -315,7 +317,6 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('ursb_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
-      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('ursb', res.body.user.business_name, res.body.user.registration_number)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';
@@ -497,7 +498,7 @@ def compliance(registration_number: str) -> dict[str, Any]:
     return client.check_compliance(registration_number=registration_number)
 
 
-@app.get("/mcp/manifest")
+@app.get("/mcp/manifest", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_manifest() -> dict[str, Any]:
     return {
         "schema_version": "2026-07-28",
@@ -506,7 +507,7 @@ def mcp_manifest() -> dict[str, Any]:
     }
 
 
-@app.post("/mcp/call")
+@app.post("/mcp/call", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_call(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     name = body.get("name")
     args = body.get("arguments", {})

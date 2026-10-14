@@ -5,7 +5,7 @@
  * Aligned with WCAG 2.1 AA (keyboard navigation, aria-labels).
  */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ChatInput from "../../components/ChatInput";
 import type { PendingAttachment } from "../../lib/attachments";
@@ -110,42 +110,236 @@ describe("ChatInput attachments", () => {
 
   it("renders the attach button only when onAttachFiles is provided", () => {
     const { unmount } = render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
-    expect(screen.getByLabelText(/Attach a document/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Add a file, photo, or connector/)).toBeInTheDocument();
     unmount();
     render(<ChatInput {...defaults} />);
-    expect(screen.queryByLabelText(/Attach a document/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Add a file, photo, or connector/)).not.toBeInTheDocument();
   });
 
-  it("renders the Add button and opens Grok-style dropdown with Upload, Photo, and Connector options", async () => {
+  it("opens the add menu in a native dialog, in the top layer", async () => {
+    // Inside the composer's stacking context the menu was painted over by the
+    // transcript once a conversation had messages (found in the live UI).
+    render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("composer-add-btn"));
+
+    const dialog = document.querySelector("dialog.addmenu-dialog");
+    expect(dialog).not.toBeNull();
+    expect(dialog).toHaveAttribute("aria-labelledby", "composer-attach-title");
+    expect(within(dialog as HTMLElement).getAllByRole("menuitem")).toHaveLength(3);
+    // The first row is the focused one, so arrow keys work at once.
+    expect(screen.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toHaveFocus();
+  });
+
+  it("offers document and photo attachments with the privacy reminder", async () => {
     render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
     const addBtn = screen.getByTestId("composer-add-btn");
     expect(addBtn).toBeInTheDocument();
 
     await userEvent.click(addBtn);
 
-    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+    expect(screen.getByText("Upload a file or screenshot")).toBeInTheDocument();
     expect(screen.getByText("Take a photo")).toBeInTheDocument();
-    expect(screen.getByText("Add connector")).toBeInTheDocument();
+    expect(screen.getByText(/Files upload for analysis\. Hide passwords, one-time codes/)).toBeInTheDocument();
+    expect(screen.getByText("Add a connector")).toBeInTheDocument();
   });
 
-  it("navigates to connectors view and allows popup connect", async () => {
-    render(<ChatInput {...defaults} onAttachFiles={vi.fn()} />);
-    const addBtn = screen.getByTestId("composer-add-btn");
-    await userEvent.click(addBtn);
+  it("opens the connector picker, exposes safe service state, and adds a removable chip", async () => {
+    const connector = {
+      namespace: "efris",
+      label: "EFRIS",
+      description: "Check invoice status.",
+      operation_count: 1,
+      read_only: true as const,
+    };
+    const onToggleConnector = vi.fn();
+    const props = {
+      ...defaults,
+      onAttachFiles: vi.fn(),
+      chatConnectors: [connector],
+      connectorsEnabled: true,
+      onToggleConnector,
+    };
+    const { rerender } = render(<ChatInput {...props} />);
 
-    const connectorOpt = screen.getByText("Add connector");
-    await userEvent.click(connectorOpt);
+    await userEvent.click(screen.getByTestId("composer-add-btn"));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Add a connector/ }));
 
-    expect(screen.getByText("Connect extra systems")).toBeInTheDocument();
-    expect(screen.getByText(/Electronic Fiscal Receipting/)).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog", { name: "URA services" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByText("Approved services available: 1.")).toBeInTheDocument();
+    expect(screen.getByText("Choose the services you want to look things up in during this chat.")).toBeInTheDocument();
+    const option = screen.getByRole("button", { name: /EFRIS/ });
+    expect(option).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(option);
+    expect(onToggleConnector).toHaveBeenCalledWith("efris");
 
-    const disconnectButtons = screen.getAllByRole("button", { name: /Disconnect/ });
-    expect(disconnectButtons.length).toBeGreaterThan(0);
+    rerender(<ChatInput {...props} selectedConnectorNamespaces={["efris"]} />);
+    expect(dialog.querySelector(".connectors-option")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Remove EFRIS from this chat")).toBeInTheDocument();
+  });
 
-    // Clicking back returns to main menu
-    const backBtn = screen.getByLabelText("Back to add menu");
-    await userEvent.click(backBtn);
-    expect(screen.getByText("Upload a file")).toBeInTheDocument();
+  describe("connector picker", () => {
+    const efris = {
+      namespace: "efris",
+      label: "EFRIS",
+      description: "Demo data only — not connected to live URA systems. Reads a sample taxpayer profile.",
+      summary: "Reads a sample taxpayer profile.",
+      mode: "simulation" as const,
+      status: "available" as const,
+      operation_count: 2,
+      operations: [
+        { name: "efris_taxpayer_status", title: "Taxpayer status", description: "Reads a profile." },
+        { name: "efris_invoice_status", title: "Invoice status", description: "Reads an invoice." },
+      ],
+      read_only: true as const,
+    };
+    const ursb = {
+      ...efris,
+      namespace: "ursb",
+      label: "URSB",
+      status: "unavailable" as const,
+      operation_count: 1,
+      operations: [{ name: "ursb_verify_business", title: "Verify a business", description: "" }],
+    };
+    const open = async (props: Record<string, unknown>) => {
+      render(<ChatInput {...defaults} onAttachFiles={vi.fn()} connectorsEnabled {...props} />);
+      await userEvent.click(screen.getByTestId("composer-add-btn"));
+      await userEvent.click(screen.getByRole("menuitem", { name: /Add a connector/ }));
+      return screen.getByRole("dialog", { name: "URA services" });
+    };
+
+    it("says a practice system is demo data, and what the service can look up", async () => {
+      const dialog = await open({ chatConnectors: [efris] });
+
+      expect(within(dialog).getByText("Demo data")).toBeInTheDocument();
+      expect(within(dialog).getByText(/Taxpayer status · Invoice status/)).toBeInTheDocument();
+      // The summary, not the description that already carries the demo notice.
+      expect(within(dialog).getByText("Reads a sample taxpayer profile.")).toBeInTheDocument();
+      expect(within(dialog).queryByText(/Demo data only —/)).not.toBeInTheDocument();
+    });
+
+    it("does not let a service that is not answering be chosen", async () => {
+      const onToggleConnector = vi.fn();
+      const dialog = await open({ chatConnectors: [efris, ursb], onToggleConnector });
+
+      const unavailable = within(dialog).getByRole("button", { name: /URSB/ });
+      expect(unavailable).toBeDisabled();
+      expect(within(dialog).getByText("This service is not responding right now.")).toBeInTheDocument();
+      await userEvent.click(unavailable);
+      expect(onToggleConnector).not.toHaveBeenCalled();
+      expect(within(dialog).getByRole("button", { name: /EFRIS/ })).toBeEnabled();
+    });
+
+    it("counts what is selected, and clears it in one step", async () => {
+      const onToggleConnector = vi.fn();
+      const dialog = await open({
+        chatConnectors: [efris],
+        selectedConnectorNamespaces: ["efris"],
+        onToggleConnector,
+      });
+
+      expect(within(dialog).getByText("1 selected")).toBeInTheDocument();
+      await userEvent.click(within(dialog).getByRole("button", { name: "Remove all" }));
+      expect(onToggleConnector).toHaveBeenCalledWith("efris");
+    });
+
+    it("closes from Done", async () => {
+      const dialog = await open({ chatConnectors: [efris] });
+
+      await userEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+
+      expect(screen.queryByRole("dialog", { name: "URA services" })).not.toBeInTheDocument();
+    });
+
+    it("offers a retry when the catalog could not be loaded", async () => {
+      const onOpenConnectors = vi.fn();
+      const dialog = await open({ chatConnectors: [], connectorsError: true, onOpenConnectors });
+      onOpenConnectors.mockClear();
+
+      await userEvent.click(within(dialog).getByRole("button", { name: "Try again" }));
+
+      expect(onOpenConnectors).toHaveBeenCalledTimes(1);
+    });
+
+    it("marks a demo service on its chip so it is not read as a live one", async () => {
+      render(
+        <ChatInput
+          {...defaults}
+          onAttachFiles={vi.fn()}
+          connectorsEnabled
+          chatConnectors={[efris]}
+          selectedConnectorNamespaces={["efris"]}
+        />,
+      );
+
+      expect(screen.getByTitle("Demo data")).toHaveTextContent("Demo");
+    });
+  });
+
+  it("shows an attached image as itself on its chip", () => {
+    render(
+      <ChatInput
+        {...defaults}
+        onAttachFiles={vi.fn()}
+        attachments={[{ ...readyAttachment, name: "portal.png", previewUrl: "data:image/jpeg;base64,/9j/4AAQ" }]}
+      />,
+    );
+
+    const thumb = document.querySelector("img.attachment-thumb");
+    expect(thumb).toHaveAttribute("src", "data:image/jpeg;base64,/9j/4AAQ");
+    expect(thumb).toHaveAttribute("alt", "");
+  });
+
+  it("keeps connector access available after the attachment limit is reached", async () => {
+    render(
+      <ChatInput
+        {...defaults}
+        onAttachFiles={vi.fn()}
+        attachments={[readyAttachment, { ...readyAttachment, clientId: "c2" }, { ...readyAttachment, clientId: "c3" }]}
+      />,
+    );
+
+    await userEvent.click(screen.getByTestId("composer-add-btn"));
+    expect(screen.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Take a photo/ })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: /Add a connector/ })).toBeEnabled();
+  });
+
+  it("adds the image prompt only when the attachment handler accepts an image", async () => {
+    const image = new File(["pixels"], "portal.png", { type: "image/png" });
+    const onAttachFiles = vi.fn(() => [image]);
+    const onMessageChange = vi.fn();
+    const { container } = render(
+      <ChatInput {...defaults} onAttachFiles={onAttachFiles} onMessageChange={onMessageChange} />,
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][multiple]');
+    expect(input).not.toBeNull();
+
+    await userEvent.upload(input!, image);
+
+    expect(onAttachFiles).toHaveBeenCalledOnce();
+    expect(onMessageChange).toHaveBeenCalledWith(
+      "Please review this image and help me understand what to do next.",
+    );
+  });
+
+  it("does not add an image prompt when the attachment handler rejects the image", async () => {
+    const image = new File(["pixels"], "portal.png", { type: "image/png" });
+    const onMessageChange = vi.fn();
+    const { container } = render(
+      <ChatInput
+        {...defaults}
+        onAttachFiles={vi.fn(() => [])}
+        onMessageChange={onMessageChange}
+      />,
+    );
+    const input = container.querySelector<HTMLInputElement>('input[type="file"][multiple]');
+    expect(input).not.toBeNull();
+
+    await userEvent.upload(input!, image);
+
+    expect(onMessageChange).not.toHaveBeenCalled();
   });
 
   it("does not render any composer-connector-bar keeping prompt area clean", () => {

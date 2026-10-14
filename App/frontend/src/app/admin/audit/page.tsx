@@ -28,6 +28,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../../../components/ops/St
 import { analyticsApi } from "../../../services/analyticsApi";
 import type { AuditVerification } from "../../../services/analyticsApi";
 import { queryKeys } from "../../../lib/queryKeys";
+import { downloadCsv } from "../../../lib/csv";
 import {
   AUDIT_FILTERS,
   auditEventsToCsv,
@@ -49,17 +50,6 @@ function shortHash(hash: string): string {
   return hash ? `${hash.slice(0, 10)}…` : "—";
 }
 
-/** Save *csv* as a file. Plain browser download; this page is not sandboxed. */
-function downloadCsv(csv: string, filename: string): void {
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
 
 interface SealControl {
   onSeal: () => void;

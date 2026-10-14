@@ -52,6 +52,43 @@ class RecordingTransport:
         return {"ok": True, "routed_to": self.name, "explanation": "stub"}
 
 
+class ConfirmingTransport:
+    """A side-effecting server that only runs after the MCP approval replay."""
+
+    name = "recording:confirming"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.descriptor = {
+            "name": "write_record",
+            "description": "Write a record",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"record": {"type": "string"}},
+                "required": ["record"],
+                "additionalProperties": False,
+            },
+            "_meta": {
+                "ug.go.ura.chatbot/risk": "medium",
+                "ug.go.ura.chatbot/namespace": "confirming",
+                "ug.go.ura.chatbot/allowedRoles": ["verified_taxpayer"],
+                "ug.go.ura.chatbot/requiredScopes": [],
+                "ug.go.ura.chatbot/scopeExemptRoles": [],
+                "ug.go.ura.chatbot/requiresConfirmation": True,
+            },
+        }
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        return [self.descriptor]
+
+    def describe(self, tool_name: str) -> dict[str, Any] | None:
+        return self.descriptor if tool_name == self.descriptor["name"] else None
+
+    def call(self, tool_name: str, arguments: dict[str, Any], **_: Any) -> dict[str, Any]:
+        self.calls.append(dict(arguments))
+        return {"ok": True, "record_id": "created"}
+
+
 class RoutingTests(unittest.TestCase):
     def test_default_bindings_are_all_in_process(self) -> None:
         transports = build_transports()
@@ -197,6 +234,44 @@ class FallbackValidatorTests(unittest.TestCase):
 
 
 class IdempotencyTests(unittest.TestCase):
+    def test_confirmation_proposal_does_not_execute_and_approval_is_idempotent(self) -> None:
+        remote = ConfirmingTransport()
+        client = MCPClient({"confirming": remote})
+
+        proposal_result = client.call_tool(
+            "write_record",
+            {"record": "draft"},
+            user_id="taxpayer-1",
+            user_role="verified_taxpayer",
+        )
+        self.assertTrue(proposal_result.ok)
+        self.assertFalse(proposal_result.result["submitted"])
+        self.assertIn("idempotency_key", proposal_result.result["proposal"])
+        self.assertEqual(remote.calls, [])
+
+        idem = proposal_result.result["proposal"]["idempotency_key"]
+        confirmed = client.call_tool(
+            "write_record",
+            {"record": "draft", "submit": True, "idempotency_key": idem},
+            user_id="taxpayer-1",
+            user_role="verified_taxpayer",
+            confirmed=True,
+            idempotency_key=idem,
+        )
+        self.assertTrue(confirmed.ok)
+        self.assertEqual(remote.calls, [{"record": "draft"}])
+
+        replay = client.call_tool(
+            "write_record",
+            {"record": "draft", "submit": True, "idempotency_key": idem},
+            user_id="taxpayer-1",
+            user_role="verified_taxpayer",
+            confirmed=True,
+            idempotency_key=idem,
+        )
+        self.assertTrue(replay.replayed)
+        self.assertEqual(len(remote.calls), 1)
+
     def test_a_repeated_key_replays_instead_of_re_executing(self) -> None:
         remote = RecordingTransport()
         client = MCPClient({"tax_calculator": remote})

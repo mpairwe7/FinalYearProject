@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
-from plugins.base import SystemConnector, Tool, ToolSchema
+from plugins.base import MCPResource, SystemConnector, Tool, ToolSchema
 
 from .client import EfrisClient
 from .service import EfrisService
@@ -24,9 +25,8 @@ class EfrisFiscalInvoiceTool(Tool):
         return ToolSchema(
             name="efris_fiscal_invoice",
             description=(
-                "Issue or verify URA EFRIS fiscal documents. Allows generating a 20-digit "
-                "Fiscal Document Number (FDN) with QR code or authenticating an existing "
-                "invoice FDN and verification code."
+                "Create or check sample fiscal-document records in the local EFRIS simulator. "
+                "Generated FDN-shaped values are not official fiscal documents and cannot be verified by URA."
             ),
             parameters={
                 "type": "object",
@@ -91,6 +91,7 @@ class EfrisFiscalInvoiceTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="efris",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
@@ -146,8 +147,8 @@ class EfrisTaxpayerStatusTool(Tool):
         return ToolSchema(
             name="efris_taxpayer_status",
             description=(
-                "Query taxpayer EFRIS compliance status, integration mode (EFD vs system-to-system), "
-                "active terminal serial numbers, and VAT status."
+                "Read a sample taxpayer profile from the local EFRIS simulator. This does not check URA registration, "
+                "VAT status, or terminal readiness."
             ),
             parameters={
                 "type": "object",
@@ -192,8 +193,7 @@ class EfrisStockManagementTool(Tool):
         return ToolSchema(
             name="efris_stock_management",
             description=(
-                "Manage taxpayer stock inventory on EFRIS. Query current stock quantities on hand "
-                "or record stock additions from local purchases or customs imports."
+                "Read or change sample inventory in the local EFRIS simulator; no URA stock record is checked or changed."
             ),
             parameters={
                 "type": "object",
@@ -237,6 +237,7 @@ class EfrisStockManagementTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="efris",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin", "taxpayer"),
@@ -286,9 +287,8 @@ class EfrisCreditNoteTool(Tool):
         return ToolSchema(
             name="efris_credit_note",
             description=(
-                "Create a credit note on URA EFRIS against an issued fiscal document (FDN). "
-                "Required when goods are returned, price discounts are applied, or invoicing errors occur. "
-                "Requires elevated consent."
+                "Create a sample credit-note record in the local EFRIS simulator. It does not adjust an official invoice "
+                "or URA account. Requires elevated consent."
             ),
             parameters={
                 "type": "object",
@@ -406,6 +406,75 @@ class EfrisConnector(SystemConnector):
             "tools": [t.schema.name for t in self._tools],
             "database": self._service.get_stats(),
         }
+
+    def get_resources(self) -> list[MCPResource]:
+        return [
+            MCPResource(
+                uri="efris://taxpayers/profile",
+                name="EFRIS Taxpayer Fiscal Status",
+                description="Read-only fiscal profile, VAT registration status, and active devices by TIN.",
+            ),
+            MCPResource(
+                uri="efris://inventory/stock",
+                name="EFRIS Product Stock Ledger",
+                description="Read-only inventory balance and commodity classification codes.",
+            ),
+        ]
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        if uri == "efris://taxpayers/profile":
+            stats = self._service.get_stats()
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({"description": "EFRIS Taxpayer Fiscal Status", "stats": stats}),
+                    }
+                ]
+            }
+        if uri == "efris://inventory/stock":
+            stats = self._service.get_stats()
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({"description": "EFRIS Product Stock Ledger", "stats": stats}),
+                    }
+                ]
+            }
+        raise KeyError(f"EFRIS resource not found: '{uri}'")
+
+    def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
+        """Issue an offsetting EFRIS credit note to reverse a mistakenly issued invoice."""
+        if action_type in ("efris_fiscal_invoice", "issue"):
+            fdn = action_payload.get("fdn") or action_payload.get("original_fdn")
+            seller_tin = action_payload.get("seller_tin")
+            amount = float(
+                action_payload.get("total_gross")
+                or action_payload.get("amount")
+                or action_payload.get("adjusted_amount")
+                or 0.0
+            )
+            if fdn and seller_tin:
+                if amount <= 0.0:
+                    try:
+                        inv = self._service.get_invoice_by_fdn(str(fdn))
+                        if inv:
+                            amount = float(inv.total_gross)
+                    except Exception:
+                        pass
+                if amount > 0.0:
+                    res = self._client.create_credit_note(
+                        original_fdn=str(fdn),
+                        seller_tin=str(seller_tin),
+                        reason="INVOICING_ERROR",
+                        adjusted_amount=amount,
+                        description="Automated Saga rollback compensation",
+                    )
+                    return {"ok": res.get("ok", False), "action": "credit_note_issued", "details": res}
+        return {"ok": False, "supported": False, "message": f"Cannot compensate '{action_type}'"}
 
     def shutdown(self) -> None:
         self._healthy = False

@@ -49,11 +49,13 @@ services:
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true
       - FLAG_HANDOFF_SUMMARIES=true
+      - FLAG_MEMORY_ENABLED=true
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.
       - WHISPER_SALT_DEVICE=${SPEECH_DEVICE:-cuda:0}
       - SPARK_TTS_DEVICE=${SPEECH_DEVICE:-cuda:0}
+      - SPARK_TTS_SPEAKER_EN=${SPARK_TTS_SPEAKER_EN:-248}
       # The base file pins the reranker to cpu to dodge a GPU-0 startup stall
       # on the shared box. This overlay already reserves one specific card, so
       # that hazard doesn't apply — and with a working CUDA build the reranker
@@ -165,6 +167,8 @@ services:
       - type: bind
         source: /mnt/nas1/caches/huggingface_cache
         target: /app/hf_cache
+    ports:
+      - "18100:8100"
     ipc: host
     restart: unless-stopped
     deploy:

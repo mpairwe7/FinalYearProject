@@ -2,7 +2,7 @@
 
 import React, { useCallback, useState } from 'react';
 import { authHeaders } from '../lib/authSession';
-import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
+import { getChatSessionId } from '../lib/chatSession';
 import { useTranslation } from '../lib/i18n';
 import { useChatStore } from '../store/useChatStore';
 import { LoadingDots, UserIcon } from './Icons';
@@ -52,7 +52,9 @@ export default function HumanHandoff({ conversationId, locale, reason }: HumanHa
         headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           conversation_id: conversationId || undefined,
-          session_id: getAnalyticsSessionId(),
+          // The session the chat's history is bound to: the officer's
+          // transcript snapshot is read with it.
+          session_id: getChatSessionId(),
           reason: (reason || '').slice(0, 1000),
           locale,
         }),

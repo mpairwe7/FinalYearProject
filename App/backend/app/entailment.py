@@ -321,6 +321,8 @@ def numeric_contradiction(claim: str, context: str, user_query: str = "") -> boo
         # A claim stating Uganda's official statutory 18% VAT rate does not contradict a withholding or income tax passage
         if model_pct == {"18"} and ("vat" in claim.lower() or "value added" in claim.lower()):
             pass
+        elif "exempt" in claim.lower() or "zero-rated" in claim.lower() or "zero rated" in claim.lower():
+            pass
         else:
             def _tax_head(text: str) -> str | None:
                 tl = text.lower()

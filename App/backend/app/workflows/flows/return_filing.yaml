@@ -3,7 +3,8 @@ name: Return Filing
 version: "1"
 description: >
   Guide a taxpayer through the key details needed to file a URA return
-  and highlight the next portal actions.
+  and highlight the next portal actions. This guide does not prepare or submit
+  a return on the taxpayer's behalf.
 requires_auth: false
 
 trigger_phrases:
@@ -78,11 +79,13 @@ steps:
       - return_forms
 
   - id: summary
-    title: "Submit the return"
+    title: "Continue in the URA portal"
     question: >
-      Next step: sign in to the URA portal, open the returns module, select
-      the correct tax type and filing period, validate the declaration, submit
-      it, and keep the acknowledgement or PRN if payment is due.
+      This chat has not prepared or submitted your return. Sign in to the
+      official URA portal, open the returns module, select the tax type and
+      filing period, review the figures, then submit and keep the acknowledgement.
+      If payment is due, use the PRN shown by the portal. Do not share your
+      password, one-time code, or payment credentials in chat.
     slot: ""
     validator: text
     # Ids in app/verified_resources.py — every link there was checked live.

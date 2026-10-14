@@ -17,7 +17,7 @@
 
 import { getAuthToken } from '@/lib/authSession';
 import { resetAudioLevels, setInputLevel, setOutputLevel } from '@/services/audioLevelBus';
-import { callsApi } from '@/services/callsApi';
+import { callsApi, type WrapUpPayload } from '@/services/callsApi';
 import { PCMPlayer } from '@/services/pcmPlayer';
 import { LiveKitCallSession } from '@/services/liveKitCallSession';
 import { AudioRecorder } from '@/services/voiceService';
@@ -311,13 +311,7 @@ export async function endCall(): Promise<void> {
   }
 }
 
-export async function wrapUpCall(payload: {
-  outcome: 'resolved' | 'follow_up' | 'callback' | 'referred' | 'abandoned' | 'ai_resolved';
-  note: string;
-  ticket_action?: 'resolve' | 'keep_open' | 'create';
-  rating?: number;
-  rating_note?: string;
-}): Promise<void> {
+export async function wrapUpCall(payload: WrapUpPayload): Promise<void> {
   if (!current || (current.state !== 'wrap_up' && current.state !== 'bridged')) return;
   const { callId } = current;
   try {

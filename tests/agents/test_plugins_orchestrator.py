@@ -74,7 +74,7 @@ class TestEfrisSampleSystem:
         assert len(resp["fdn"]) == 20
         assert resp["fdn"].startswith("01")
         assert len(resp["verification_code"]) == 6
-        assert "efris.ura.go.ug/verify" in resp["qr_code_url"]
+        assert resp["qr_code_url"] == ""
         assert resp["net_amount"] == 100000.0
         assert resp["tax_amount"] == 18000.0
         assert resp["gross_amount"] == 118000.0
@@ -189,15 +189,16 @@ class TestDigitalTaxStampsSystem:
         assert res["status"] == "EXPIRED"
         assert "EXPIRED" in res["message"]
 
-    def test_verify_counterfeit_stamp(self):
+    def test_unknown_stamp_code_is_not_labeled_counterfeit(self):
         service = DigitalTaxStampsService(db_path=":memory:")
         client = DigitalTaxStampsClient(service=service)
 
         res = client.verify_stamp("DTS-FAKE-999999999")
         assert res["ok"] is False
-        assert res["is_authentic"] is False
-        assert res["status"] == "COUNTERFEIT"
+        assert res["is_authentic"] is None
+        assert res["status"] == "UNKNOWN"
         assert "0800 117 000" in res["error"]
+        assert "does not establish whether a physical product is genuine or counterfeit" in res["error"]
 
     def test_order_stamps_and_prn_generation(self):
         service = DigitalTaxStampsService(db_path=":memory:")
@@ -263,6 +264,16 @@ class TestDigitalTaxStampsSystem:
 # Plugin Orchestrator Tests
 # ---------------------------------------------------------------------------
 class TestPluginOrchestrator:
+    def test_local_simulator_plugins_stay_disabled_in_production_even_with_flag(self, monkeypatch):
+        monkeypatch.setenv("APP_ENV", "production")
+        monkeypatch.setenv("FLAG_ENTERPRISE_CONNECTORS", "true")
+
+        orchestrator = PluginOrchestrator()
+        orchestrator.initialize_default_plugins()
+
+        assert orchestrator.list_plugins() == []
+        assert orchestrator.get_all_tools() == []
+
     def test_orchestrator_initializes_default_plugins(self):
         orchestrator = PluginOrchestrator()
         orchestrator.initialize_default_plugins()
@@ -703,6 +714,9 @@ class TestMultiSystemOrchestration:
         u_res = fresh_registry.call("ursb_verify_business", {"query": "Nile Breweries Limited"})
         assert u_res["ok"] is True
         assert u_res["found"] is True
+        assert u_res["mode"] == "simulation"
+        assert u_res["live"] is False
+        assert "No live" in u_res["simulation_notice"]
 
         # Execute BWIMS tool via ToolRegistry
         b_res = fresh_registry.call("bwims_consignment_status", {"entry_number": "2026-ASY-IM7-88912"})
@@ -718,6 +732,8 @@ class TestMultiSystemOrchestration:
         p_res = fresh_registry.call("payment_view_status", {"prn": "226030001001"})
         assert p_res["ok"] is True
         assert p_res["is_cleared"] is True
+        assert p_res["mode"] == "simulation"
+        assert p_res["live"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -814,4 +830,3 @@ class TestPaymentSystem:
         assert res["is_compliant"] is True
         assert res["advance_tax_assessed_ugx"] == 280000.0
         assert res["capacity"] == 14
-

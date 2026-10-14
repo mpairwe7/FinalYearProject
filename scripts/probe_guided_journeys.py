@@ -65,7 +65,7 @@ CASES: list[Case] = [
     Case("VAT walkthrough starts return flow", ["Walk me through filing my VAT return"],
          workflow="Return Filing"),
     Case("help-me TIN starts flow, no stress opener", ["Help me register for a TIN"],
-         workflow="TIN Registration", reply_lacks=[STRESS_OPENER]),
+         workflow="TIN Registration Guide", reply_lacks=[STRESS_OPENER]),
     Case("PRN guide starts payment flow", ["Guide me to generate a PRN"], workflow="Payment Assistance"),
     Case("customs guide starts flow", ["Guide me through customs clearance"], workflow="Customs Clearance"),
     Case("objection help starts flow", ["Help me file an objection"], workflow="Objection or Dispute"),

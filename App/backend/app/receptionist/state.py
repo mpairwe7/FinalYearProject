@@ -92,6 +92,12 @@ class CallState:
     livekit_officer_route_active: bool = False
     reconnect_timer: asyncio.Task | None = None
     transfer_timer_task: asyncio.Task | None = None
+    # The caller's spoken review of the AI (review.py): "" (not asked),
+    # "asking_end" / "asking_transfer" (waiting for the answer), "moved_on"
+    # (asked, and the caller went on to a new question), "done".
+    review_state: str = ""
+    review_asked_at: float | None = None
+    review_timer_task: asyncio.Task | None = None
     # Multilingual calls (receptionist_language_detection). `locale` above is
     # the language the call is in *now*; these record how it got there.
     initial_locale: str = "en"
@@ -102,6 +108,20 @@ class CallState:
     language_overrides: int = 0
     lid_latencies_ms: list[float] = field(default_factory=list)
     lid_confidences: list[float] = field(default_factory=list)
+    # The chat the caller rang from and what it carried over (carryover.py).
+    parent_conversation_id: str = ""
+    chat_context: str = ""
+    # 2026 Agentic Voice CX extensions (prosody, hybrid S2S, speculative prefetch, spoken confirm)
+    last_utterance_pcm: bytes = b""
+    caller_affect: str = "calm"
+    recommended_speech_rate: float = 1.0
+    prosody_tag: str = "<neutral>"
+    semantic_endpoint_silence_ms: int = 500
+    prefetched_query: str = ""
+    prefetched_hits: list[dict[str, Any]] = field(default_factory=list)
+    pending_confirm_challenge: str = ""
+    pending_confirm_action: dict[str, Any] = field(default_factory=dict)
+    last_handoff_envelope: dict[str, Any] = field(default_factory=dict)
 
 
 class CallRoom:
@@ -178,6 +198,13 @@ class CallRoom:
 
             if self.state.transfer_timer_task and not self.state.transfer_timer_task.done():
                 self.state.transfer_timer_task.cancel()
+            # A review question still waiting for its answer is now unanswered.
+            try:
+                from .review import settle
+
+                settle(self)
+            except Exception:
+                logger.debug("Could not settle the review of call %s", self.call_id, exc_info=True)
             if self.caller_reconnect_task and not self.caller_reconnect_task.done():
                 self.caller_reconnect_task.cancel()
 

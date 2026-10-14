@@ -54,7 +54,7 @@ function renderDialog(props: Partial<React.ComponentProps<typeof SettingsDialog>
 beforeEach(() => {
   localStorage.clear();
   vi.restoreAllMocks();
-  useChatStore.setState({ locale: "en", conversations: [] });
+  useChatStore.setState({ locale: "en", localeExplicit: false, conversations: [] });
   useVoiceStore.setState({ voiceByLocale: {} });
 });
 
@@ -94,6 +94,18 @@ describe("SettingsDialog", () => {
     renderDialog();
     fireEvent.change(screen.getByLabelText("Response language"), { target: { value: "lg" } });
     expect(useChatStore.getState().locale).toBe("lg");
+    expect(useChatStore.getState().localeExplicit).toBe(true);
+  });
+
+  it("offers auto-detect, which is the default", () => {
+    renderDialog();
+    const select = screen.getByLabelText("Response language") as HTMLSelectElement;
+    expect(select.value).toBe("auto");
+    fireEvent.change(select, { target: { value: "sw" } });
+    expect(useChatStore.getState().localeExplicit).toBe(true);
+    fireEvent.change(select, { target: { value: "auto" } });
+    expect(useChatStore.getState().localeExplicit).toBe(false);
+    expect(useChatStore.getState().locale).toBe("sw");
   });
 
   it("saves a narration voice against the language it belongs to", async () => {

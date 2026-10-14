@@ -7,6 +7,9 @@ Each fact is one (subject, predicate, object) triple with:
 - ``provenance`` — ``conversation_id`` + ``turn_id`` + ``extractor_model``
 - ``extracted_at`` — unix epoch; feeds decay
 - ``superseded_by`` — nullable, set when a newer fact overrides this one
+- ``invalidated_at`` — when it was superseded: the fact is kept, with the
+  time it stopped being true, rather than overwritten (the validity model
+  of temporal agent-memory stores such as Zep/Graphiti)
 
 Retrieval applies consent gating + temporal decay at query time;
 facts below ``decay_floor`` are excluded from results but preserved
@@ -22,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass
@@ -32,6 +36,12 @@ from .decay import compute_decayed_confidence
 logger = logging.getLogger(__name__)
 
 SEMANTIC_TTL_DAYS = int(os.getenv("SEMANTIC_TTL_DAYS", "365"))
+
+#: Categories that hold one value at a time: a new value supersedes the old.
+#: Industries and registrations can be several at once, so they accumulate.
+SINGLE_VALUED_CATEGORIES: frozenset[str] = frozenset(
+    {"taxpayer_type", "fiscal_year", "primary_language", "detail_level"}
+)
 
 
 @dataclass
@@ -96,15 +106,50 @@ class SemanticMemory:
                 conversation_id  TEXT DEFAULT '',
                 turn_id          TEXT DEFAULT '',
                 extractor_model  TEXT DEFAULT '',
-                superseded_by    TEXT
+                superseded_by    TEXT,
+                invalidated_at   DOUBLE PRECISION
             );
             CREATE INDEX IF NOT EXISTS idx_facts_user
                 ON user_facts(user_id);
+            CREATE INDEX IF NOT EXISTS idx_facts_tenant_user
+                ON user_facts(tenant_id, user_id);
             CREATE INDEX IF NOT EXISTS idx_facts_user_category
                 ON user_facts(user_id, category);
             CREATE INDEX IF NOT EXISTS idx_facts_extracted
                 ON user_facts(extracted_at);
             """
+        )
+        # Databases created before facts kept the time they were invalidated.
+        try:
+            db.execute("ALTER TABLE user_facts ADD COLUMN invalidated_at DOUBLE PRECISION")
+        except Exception as exc:
+            duplicate_column = (
+                (isinstance(exc, sqlite3.OperationalError) and "duplicate column name" in str(exc).lower())
+                or getattr(exc, "sqlstate", None) == "42701"
+                or "already exists" in str(exc).lower()
+                or "duplicate column" in str(exc).lower()
+            )
+            if not duplicate_column:
+                raise
+            logger.debug("user_facts.invalidated_at already present")
+        # Preserve the most recent duplicate from older per-turn writes, then
+        # enforce one active copy of each exact fact across later retries.
+        rows = db.query_all(
+            """SELECT fact_id, tenant_id, user_id, category, subject, predicate, object_value
+               FROM user_facts ORDER BY extracted_at DESC"""
+        )
+        seen: set[tuple[str, ...]] = set()
+        for row in rows:
+            key = tuple(str(row[k] or "") for k in (
+                "tenant_id", "user_id", "category", "subject", "predicate", "object_value"
+            ))
+            if key in seen:
+                db.execute("DELETE FROM user_facts WHERE fact_id = ?", (row["fact_id"],))
+            else:
+                seen.add(key)
+        db.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_facts_identity
+               ON user_facts(tenant_id, user_id, category, subject, predicate, object_value)"""
         )
 
     # -- Writes --------------------------------------------------------
@@ -121,9 +166,44 @@ class SemanticMemory:
                    (fact_id, user_id, tenant_id, category, subject,
                     predicate, object_value, confidence, extracted_at,
                     conversation_id, turn_id, extractor_model, superseded_by)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(tenant_id, user_id, category, subject, predicate, object_value)
+                   DO UPDATE SET
+                       confidence = CASE WHEN excluded.confidence > user_facts.confidence
+                                         THEN excluded.confidence ELSE user_facts.confidence END,
+                       extracted_at = excluded.extracted_at,
+                       conversation_id = excluded.conversation_id,
+                       turn_id = excluded.turn_id,
+                       extractor_model = excluded.extractor_model,
+                       superseded_by = NULL,
+                       invalidated_at = NULL""",
                 tuple(fact.to_row()),
             )
+            stored = db.query_one(
+                """SELECT fact_id FROM user_facts
+                   WHERE tenant_id = ? AND user_id = ? AND category = ? AND subject = ?
+                     AND predicate = ? AND object_value = ?""",
+                (fact.tenant_id, fact.user_id, fact.category, fact.subject, fact.predicate, fact.object_value),
+            )
+            if stored:
+                fact.fact_id = str(stored["fact_id"])
+                if fact.category in SINGLE_VALUED_CATEGORIES:
+                    db.execute(
+                        """UPDATE user_facts SET superseded_by = ?, invalidated_at = ?
+                           WHERE tenant_id = ? AND user_id = ? AND category = ?
+                             AND subject = ? AND predicate = ? AND object_value != ?
+                             AND superseded_by IS NULL""",
+                        (
+                            fact.fact_id,
+                            time.time(),
+                            fact.tenant_id,
+                            fact.user_id,
+                            fact.category,
+                            fact.subject,
+                            fact.predicate,
+                            fact.object_value,
+                        ),
+                    )
         except Exception:
             logger.exception("semantic write failed")
             raise
@@ -138,8 +218,12 @@ class SemanticMemory:
 
         try:
             return db.execute(
-                "UPDATE user_facts SET superseded_by = ? WHERE fact_id = ?",
-                (new_fact_id, old_fact_id),
+                """UPDATE user_facts SET superseded_by = ?, invalidated_at = ? WHERE fact_id = ?
+                   AND EXISTS (SELECT 1 FROM user_facts AS newer
+                               WHERE newer.fact_id = ?
+                                 AND newer.user_id = user_facts.user_id
+                                 AND newer.tenant_id = user_facts.tenant_id)""",
+                (new_fact_id, time.time(), old_fact_id, new_fact_id),
             ) > 0
         except Exception:
             logger.exception("semantic supersede failed")
@@ -149,6 +233,7 @@ class SemanticMemory:
     def read(
         self,
         user_id: str,
+        tenant_id: str = "default",
         category: str | None = None,
         min_confidence: float = 0.5,
         decay_floor: float = 0.3,
@@ -158,8 +243,8 @@ class SemanticMemory:
         """Return active facts above the decay floor."""
         from .. import database as db
 
-        sql = "SELECT * FROM user_facts WHERE user_id = ?"
-        params: list[Any] = [user_id]
+        sql = "SELECT * FROM user_facts WHERE tenant_id = ? AND user_id = ?"
+        params: list[Any] = [tenant_id or "default", user_id]
         if category:
             sql += " AND category = ?"
             params.append(category)
@@ -204,12 +289,15 @@ class SemanticMemory:
         return results
 
     # -- Deletes / erasure --------------------------------------------
-    def forget_user(self, user_id: str) -> int:
+    def forget_user(self, user_id: str, tenant_id: str = "default") -> int:
         """Delete every fact for this user (UDPA right-to-erasure)."""
         from .. import database as db
 
         try:
-            return db.execute("DELETE FROM user_facts WHERE user_id = ?", (user_id,))
+            return db.execute(
+                "DELETE FROM user_facts WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", user_id),
+            )
         except Exception:
             logger.exception("semantic forget failed")
             return 0

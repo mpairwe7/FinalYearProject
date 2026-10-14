@@ -294,3 +294,40 @@ if __name__ == "__main__":
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestQualityRegressionGate:
+    """A metric may not fall more than the tolerance below the committed baseline."""
+
+    def test_regression_below_baseline_fails_even_above_the_floor(self):
+        from ml.pipelines.quality_gates import check_regressions
+
+        checks = check_regressions(
+            {"faithfulness": {"mean": 0.80}, "answer_relevancy": {"mean": 0.70}},
+            {"metrics": {"faithfulness": 0.858, "answer_relevancy": 0.678}},
+            0.03,
+        )
+        by_name = {c["name"]: c for c in checks}
+        assert by_name["regression.faithfulness"]["passed"] is False
+        assert by_name["regression.answer_relevancy"]["passed"] is True
+
+    def test_a_metric_missing_from_the_run_fails(self):
+        from ml.pipelines.quality_gates import check_regressions
+
+        checks = check_regressions({}, {"metrics": {"faithfulness": 0.8}}, 0.03)
+        assert checks[0]["passed"] is False and checks[0]["value"] == "missing"
+
+    @pytest.mark.parametrize("baseline", [None, {}, {"metrics": {}}, ["not", "a", "dict"]])
+    def test_an_unusable_baseline_fails_instead_of_skipping(self, baseline):
+        from ml.pipelines.quality_gates import check_regressions
+
+        checks = check_regressions({"faithfulness": {"mean": 0.9}}, baseline, 0.03)
+        assert [c["name"] for c in checks] == ["regression.baseline"]
+        assert checks[0]["passed"] is False
+
+    def test_committed_baseline_is_well_formed(self):
+        from pathlib import Path
+
+        baseline = json.loads((Path(__file__).parent.parent / "ml/configs/quality_baseline.json").read_text())
+        assert set(baseline["metrics"]) >= {"faithfulness", "answer_relevancy", "context_recall"}
+        assert all(0.0 <= v <= 1.0 for v in baseline["metrics"].values())

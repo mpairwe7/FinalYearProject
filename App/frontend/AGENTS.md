@@ -15,15 +15,22 @@ bun run lint
 | Path | Role |
 | --- | --- |
 | `src/app/page.tsx` | Taxpayer chat |
-| `src/app/admin/` | Flags, tickets, overrides, outbox |
+| `src/app/admin/` | Service quality overview (`/admin`), flags, overrides, outbox, audit trail |
+| `src/app/admin/quality/` | Service-quality audit (admin + auditor), tabs in `?tab=`: AI answers in chat, AI on calls, officer chats, officer calls, Needs review (decisions via `PUT /v1/admin/quality/reviews/…`) |
+| `src/components/quality/` | Audit pieces: rating strip, position chart, conversation timeline, ratings panel (chats and calls), satisfaction levels, AI-calls panel |
+| `src/components/rating/SatisfactionScale.tsx` | The one 5-face satisfaction scale (taxpayer rating dialog, officer wrap-up) |
+| `src/hooks/useOfficerChat.ts` | Taxpayer side of a live officer chat: thread poll, notices, rating, hand-back to the AI |
 | `src/app/agent/` | Officer workbench |
-| `src/components/staff/` | Queue, case, composer, live banner |
+| `src/components/staff/` | Queue, case, live chat thread, composer (End chat), live banner |
 | `src/components/charts/chartTheme.tsx` | Chart palette **and** the plain-language layer |
 | `src/lib/ticketUi.ts` | SLA / breach helpers |
 | `src/lib/oidcFlow.ts` | Authorize + RP-initiated logout |
 | `src/lib/i18n/` | Taxpayer-surface dictionary (en / lg / sw) |
 
 Staff routes use `StaffGuard`. Do not claim flag toggles are cluster-wide.
+Live work (`/agent`, `/admin/tickets`, `/calls`, the call layer) is for
+`ura_staff`; administrators audit (`lib/roles.ts` `isLiveOfficer`,
+`watchesLiveQueue`). The API enforces the same split.
 
 ## Rules
 

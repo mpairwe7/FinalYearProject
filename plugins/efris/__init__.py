@@ -40,8 +40,8 @@ class EfrisPlugin(Plugin):
             display_name="Electronic Fiscal Receipting and Invoicing System",
             version="1.0.0",
             description=(
-                "Connects the agentic URA system to EFRIS for real-time fiscal invoice generation, "
-                "FDN verification, stock inventory tracking, credit notes, and taxpayer terminal readiness."
+                "Local EFRIS simulator for sample fiscal invoices, FDN verification, stock inventory, "
+                "credit notes, and taxpayer terminal readiness; it does not connect to URA."
             ),
             author="URA IT Innovation & Modernization",
             system_type="e-invoicing",

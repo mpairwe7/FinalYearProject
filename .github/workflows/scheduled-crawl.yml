@@ -17,7 +17,7 @@ on:
         type: string
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: scheduled-crawl
@@ -30,6 +30,8 @@ jobs:
   guard:
     name: Last day of month?
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       proceed: ${{ steps.check.outputs.proceed }}
     steps:
@@ -48,6 +50,8 @@ jobs:
   crawl:
     name: Crawl ura.go.ug
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: guard
     # A manual run is always intentional, so it bypasses the calendar guard.
     if: github.event_name == 'workflow_dispatch' || needs.guard.outputs.proceed == 'true'

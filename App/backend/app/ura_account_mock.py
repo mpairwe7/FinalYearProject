@@ -82,3 +82,94 @@ def lookup_mock(taxpayer_id: str) -> dict[str, Any]:
         "mode": "mock",
         "profile": profile,
     }
+
+
+def generate_mock_prn(
+    tax_type: str = "Income Tax",
+    amount_ugx: float | int = 0,
+    tin: str = "1999999999",
+    taxpayer_name: str = "Sandbox Taxpayer",
+) -> dict[str, Any]:
+    """Generate a realistic simulated PRN voucher for sandbox/prototype execution."""
+    import time
+    import random
+
+    now = time.time()
+    prn_suffix = f"{random.randint(10000000, 99999999)}"
+    prn = f"26{prn_suffix}"
+    expiry_time = now + (21 * 86400)
+    amt_formatted = f"UGX {amount_ugx:,.0f}" if amount_ugx else "UGX 0"
+
+    return {
+        "ok": True,
+        "live": False,
+        "source": "mock_prn_gateway",
+        "prn": prn,
+        "search_code": f"ASMT-{random.randint(100000, 999999)}",
+        "tax_head": (tax_type or "General Tax").title(),
+        "amount_ugx": float(amount_ugx),
+        "amount_formatted": amt_formatted,
+        "tin": tin or "1999999999",
+        "taxpayer_name": taxpayer_name or "Sandbox Taxpayer",
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)),
+        "expires_at": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(expiry_time)),
+        "expiry_days": 21,
+    }
+
+
+def format_prn_voucher_reply(voucher: dict[str, Any], locale: str = "en") -> str:
+    """Format a transactional PRN voucher into clear, actionable instructions."""
+    prn = voucher.get("prn", "")
+    code = voucher.get("search_code", "")
+    tax = voucher.get("tax_head", "Tax Assessment")
+    amt = voucher.get("amount_formatted", "UGX 0")
+    tin = voucher.get("tin", "1999999999")
+    name = voucher.get("taxpayer_name", "Sandbox Taxpayer")
+    exp = voucher.get("expires_at", "").split()[0]
+
+    if locale == "lg":
+        return (
+            f"### 🧾 Satifiketi y'Ensasula ya PRN (Voucher)\n"
+            f"*Enkola: Ey'okukakasa mu Sandbox (Simulated Voucher)*\n\n"
+            f"- **Namba ya PRN**: `{prn}`\n"
+            f"- **Ensimbi Ezisasulwa**: **{amt}**\n"
+            f"- **Ekika ky'Omusolo**: {tax}\n"
+            f"- **Omusasuzi**: {name} (`TIN: {tin}`)\n"
+            f"- **Namba y'Okunoonyereza**: `{code}`\n"
+            f"- **Ekoma Okukola**: {exp} (ennaku 21)\n\n"
+            f"**Engeri gy'Osasulamu**:\n"
+            f"1. **Mobile Money**: Koona `*165#` (MTN) oba `*185#` (Airtel) → Sasula URA → Yingiza PRN `{prn}`.\n"
+            f"2. **Bbanka Yonna**: Ttwaala namba ya PRN eya digito 10 ku kaawunta ya bbanka yonna mu Uganda.\n"
+            f"3. **Omukutu gwa URA**: Sasulira ku yintaneeti: https://ura.go.ug → e-Services → Make a Payment."
+        )
+
+    if locale == "sw":
+        return (
+            f"### 🧾 Vocha ya Nambari ya Malipo (PRN)\n"
+            f"*Hali: Jaribio la Sandbox (Simulated Voucher)*\n\n"
+            f"- **Nambari ya PRN**: `{prn}`\n"
+            f"- **Kiasi cha Kulipwa**: **{amt}**\n"
+            f"- **Aina ya Kodi**: {tax}\n"
+            f"- **Mlipakodi**: {name} (`TIN: {tin}`)\n"
+            f"- **Nambari ya Rejea**: `{code}`\n"
+            f"- **Mwisho wa Matumizi**: {exp} (siku 21)\n\n"
+            f"**Jinsi ya Kukamilisha Malipo**:\n"
+            f"1. **Pesa kwa Simu**: Piga `*165#` (MTN) au `*185#` (Airtel) → Lipa Kodi ya URA → Weka PRN `{prn}`.\n"
+            f"2. **Benki Yoyote ya Biashara**: Peana nambari hii ya PRN yenye tarakimu 10 kwa kaunta ya benki.\n"
+            f"3. **Tovuti ya URA**: Lipa mtandaoni kwa kadi (Visa/Mastercard): https://ura.go.ug."
+        )
+
+    return (
+        f"### 🧾 Payment Registration Number (PRN) Voucher\n"
+        f"*Mode: Prototype Sandbox / Simulated Payment Voucher*\n\n"
+        f"- **PRN Number**: `{prn}`\n"
+        f"- **Amount Payable**: **{amt}**\n"
+        f"- **Tax Head**: {tax}\n"
+        f"- **Taxpayer Name**: {name} (`TIN: {tin}`)\n"
+        f"- **Search / Assessment Code**: `{code}`\n"
+        f"- **Valid Until**: {exp} (21 calendar days)\n\n"
+        f"**How to Complete Payment**:\n"
+        f"1. **Mobile Money**: Dial `*165#` (MTN) or `*185#` (Airtel) → Pay Services / Pay Bill → URA Taxes → Enter PRN `{prn}`.\n"
+        f"2. **Commercial Bank Counter**: Present the 10-digit PRN to any bank teller across Uganda.\n"
+        f"3. **Online Card Payment**: Pay directly online using VISA / Mastercard via the official e-Services portal: https://ura.go.ug/en/domestic-taxes/make-a-payment/."
+    )

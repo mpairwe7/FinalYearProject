@@ -72,25 +72,26 @@ class DigitalTaxStampsService:
         return f"{prefix}{now.strftime('%y%m')}{10000 + secrets.randbelow(90000)}"
 
     def verify_stamp(self, request: StampVerificationRequest) -> StampVerificationResponse:
-        """Verify digital tax stamp authenticity (Kakasa protocol)."""
+        """Look up a local sample status; this cannot authenticate a physical stamp."""
         stamp_code = request.stamp_code.strip()
         record = self._db.get_stamp(stamp_code)
         if not record:
             return StampVerificationResponse(
                 ok=False,
                 stamp_code=stamp_code,
-                is_authentic=False,
-                status=StampStatus.COUNTERFEIT,
+                is_authentic=None,
+                status=StampStatus.UNKNOWN,
                 product_category="UNKNOWN",
                 brand_name="UNVERIFIED COMMODITY",
-                manufacturer_name="UNAUTHORIZED ENTITY",
+                manufacturer_name="UNKNOWN",
                 manufacturer_tin="",
                 batch_number="",
                 production_date="",
                 expiry_date=None,
                 error=(
-                    f"Digital Tax Stamp code '{stamp_code}' is NOT recognized in the URA central registry. "
-                    "Product may be counterfeit or contraband. Report via toll-free 0800 117 000."
+                    f"Sample stamp code '{stamp_code}' is not in the local simulator fixtures. "
+                    "This result does not establish whether a physical product is genuine or counterfeit. "
+                    "Verify it through https://ura.go.ug or call URA on 0800 117 000 / 0800 217 000."
                 ),
             )
 
@@ -346,7 +347,7 @@ class DigitalTaxStampsService:
                     credit_allowable_ugx=0.0,
                     status="REJECTED",
                     message="",
-                    error=f"Taxpayer TIN '{tin}' not found in DTS registry.",
+                    error=f"Taxpayer TIN '{tin}' not found in the local DTS simulator fixtures.",
                 )
 
             if not request.damaged_serials:

@@ -1,82 +1,14 @@
 /* Operations overview and the admin sub-pages that share its furniture.
    Layout only — every size, colour and radius comes from styles/ops/tokens.css. */
 
-/* Volume strip -------------------------------------------------------------
-   The trend, the delta and the mix all describe one number (escalations raised
-   in the period), so they share one card instead of being scattered across
-   tiles that count other things. */
+/* Headline figures ---------------------------------------------------------
+   One per audited stream, each opening its tab of the quality audit. Stepped
+   down by this file's own queries so the order the stylesheets load in cannot
+   keep four columns on a phone. */
 
-.ov-volume {
-  display: grid;
-  grid-template-columns: minmax(180px, 220px) 1fr minmax(200px, 280px);
-  gap: var(--ops-space-5);
-  align-items: center;
-  margin: var(--ops-space-4) 0 var(--ops-band);
-  padding: var(--ops-space-4) var(--ops-space-5);
-  background: var(--ops-panel);
-  border: 1px solid var(--ops-line);
-  border-radius: var(--ops-radius-md);
-  box-shadow: var(--ops-elev-1);
-}
-
-.ov-volume-lead {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ops-space-1);
-}
-
-.ov-volume-chart {
-  min-width: 0;
-}
-
-.ov-volume-mix {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ops-space-2);
-}
-
-.ov-mix {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 5px;
-}
-
-.ov-mix li {
-  display: grid;
-  grid-template-columns: 62px 1fr 28px;
-  align-items: center;
-  gap: var(--ops-space-2);
-}
-
-.ov-mix-bar {
-  height: 6px;
-  border-radius: var(--ops-radius-pill);
-  background: var(--ops-row-active);
-  overflow: hidden;
-}
-
-.ov-mix-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--text-3);
-}
-
-/* Priority is an ordered severity, so the fill follows the status scale rather
-   than a categorical hue — and the word itself sits in the chip beside it, so
-   colour is never the only channel. */
-.ov-mix-fill.is-urgent { background: var(--ops-bad); }
-.ov-mix-fill.is-high   { background: var(--ops-warn); }
-.ov-mix-fill.is-normal { background: var(--ops-series-1); }
-.ov-mix-fill.is-low    { background: var(--text-3); }
-
-.ov-mix-count {
-  font-size: var(--ops-text-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-2);
-  text-align: right;
+.ov-stats {
+  --ops-stat-cols: 4;
+  margin-bottom: var(--ops-band);
 }
 
 /* Two-column body ---------------------------------------------------------- */
@@ -97,81 +29,73 @@
   gap: var(--ops-band);
 }
 
-/* Queue list --------------------------------------------------------------- */
+/* Officers on duty -------------------------------------------------------- */
 
-.ov-queue {
+.ov-duty-summary {
+  margin: 0 0 var(--ops-space-3);
+  font-size: var(--ops-text-sm);
+  color: var(--text-2);
+}
+
+.ov-duty-summary strong {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Needs review ------------------------------------------------------------- */
+
+.ov-review-list {
   list-style: none;
-  margin: 0;
+  margin: 0 0 var(--ops-space-3);
   padding: 0;
   display: grid;
-  gap: var(--ops-space-1);
+  gap: var(--ops-space-2);
 }
 
-.ov-q-link {
+.ov-review-item {
   display: grid;
-  grid-template-columns: 62px 1fr auto;
-  align-items: center;
-  gap: var(--ops-space-3);
-  padding: 10px var(--ops-space-3);
+  gap: var(--ops-space-1);
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-hairline);
   border-radius: var(--ops-radius-sm);
-  text-decoration: none;
-  color: inherit;
-  transition: background var(--ops-dur-fast) var(--ops-ease);
+  background: var(--ops-row);
 }
 
-.ov-q-link:hover {
-  background: var(--ops-row-hover);
-}
-
-.ov-q-link:focus-visible {
-  outline: var(--ops-focus-ring) solid var(--ops-focus);
-  outline-offset: -1px;
-}
-
-.ov-q-body {
+.ov-review-top {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  align-items: center;
+  gap: var(--ops-space-2);
+  flex-wrap: wrap;
 }
 
-.ov-q-topic {
+.ov-review-when {
+  margin-left: auto;
+  font-size: var(--ops-text-2xs);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-review-title {
   font-size: var(--ops-text-sm);
   font-weight: var(--ops-weight-semi);
   color: var(--text-0);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.ov-q-query {
+.ov-review-title:hover,
+.ov-review-title:focus-visible {
+  color: var(--ops-info-ink);
+}
+
+.ov-review-said {
+  margin: 0;
   font-size: var(--ops-text-xs);
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ov-q-meta {
-  display: flex;
-  gap: var(--ops-space-2);
-  flex-wrap: wrap;
-  font-size: var(--ops-text-2xs);
-  color: var(--text-3);
-}
-
-.ov-q-wait {
-  font-size: var(--ops-text-xs);
-  font-weight: var(--ops-weight-semi);
+  line-height: var(--ops-lh-normal);
   color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.ov-q-wait.is-warn   { color: var(--ops-warn); }
-.ov-q-wait.is-breach { color: var(--ops-bad); }
-
-/* Priority pill — one definition, shared by the overview and the mix bars.
+/* Priority pill — one definition, shared by the admin pages.
    /agent and /admin/tickets use the `.st-pri-*` twin in staffTickets.css. */
 
 /* Three levels, told apart by ink alone — see `.ops-chip` in ops.css for why
@@ -295,15 +219,9 @@
   color: var(--text-3);
 }
 
-@media (max-width: 1080px) {
-  .ov-volume {
-    grid-template-columns: minmax(160px, 200px) 1fr;
-  }
-  .ov-volume-mix {
-    grid-column: 1 / -1;
-  }
-  .ov-mix li {
-    grid-template-columns: 62px 1fr 28px;
+@media (max-width: 1100px) {
+  .ov-stats {
+    --ops-stat-cols: 2;
   }
 }
 
@@ -314,16 +232,8 @@
 }
 
 @media (max-width: 640px) {
-  .ov-volume {
-    grid-template-columns: 1fr;
-    gap: var(--ops-space-3);
-  }
-  .ov-q-link {
-    grid-template-columns: 56px 1fr;
-  }
-  .ov-q-wait {
-    grid-column: 2;
-    justify-self: end;
+  .ov-stats {
+    --ops-stat-cols: 1;
   }
 }
 
@@ -369,4 +279,219 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 12px;
+}
+/* Connector dialogs ------------------------------------------------------- */
+
+.connector-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(600px, calc(100vw - 32px));
+  max-height: min(90dvh, 780px);
+  margin: auto;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-lg);
+  background: var(--ops-panel);
+  color: var(--text-0);
+  box-shadow: var(--ops-elev-3);
+}
+
+.connector-dialog:not([open]) {
+  display: none;
+}
+
+.connector-dialog::backdrop {
+  background: rgba(8, 14, 27, 0.64);
+  backdrop-filter: blur(3px);
+}
+
+.connector-dialog-header,
+.connector-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-5) var(--ops-space-6);
+}
+
+.connector-dialog-header {
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.connector-dialog-header h2 {
+  margin: var(--ops-space-1) 0 0;
+  font-size: var(--ops-text-lg);
+  line-height: var(--ops-lh-tight);
+  font-weight: var(--ops-weight-semi);
+  color: var(--text-0);
+}
+
+.connector-dialog-close {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--ops-hairline);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-panel);
+  color: var(--text-1);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.connector-dialog-close:hover {
+  background: var(--ops-row-hover);
+  color: var(--text-0);
+}
+
+.connector-dialog-body {
+  display: grid;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-5) var(--ops-space-6);
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+}
+
+.connector-dialog-body h3 {
+  margin: 0;
+  color: var(--text-0);
+  font-size: var(--ops-text-base);
+  font-weight: var(--ops-weight-semi);
+}
+
+.connector-setup-note,
+.connector-config-error {
+  padding: var(--ops-space-3) var(--ops-space-4);
+  border: 1px solid var(--ops-info-line);
+  border-inline-start: 3px solid var(--ops-info-ink);
+  border-radius: var(--ops-radius-sm);
+  background: var(--ops-info-fill);
+  color: var(--text-1);
+}
+
+.connector-setup-note strong {
+  color: var(--text-0);
+}
+
+.connector-setup-note p {
+  margin: var(--ops-space-1) 0 0;
+}
+
+.connector-setup-steps {
+  display: grid;
+  gap: var(--ops-space-3);
+  margin: 0;
+  padding-inline-start: 22px;
+  color: var(--text-1);
+}
+
+.connector-setup-steps li {
+  padding-inline-start: var(--ops-space-1);
+}
+
+.connector-setup-steps li::marker {
+  color: var(--ops-info-ink);
+  font-weight: var(--ops-weight-bold);
+}
+
+.connector-deployment-copy {
+  margin: calc(-1 * var(--ops-space-3)) 0 0;
+  color: var(--text-1);
+}
+
+.connector-runbook-reference {
+  margin: 0;
+  padding-top: var(--ops-space-3);
+  border-top: 1px solid var(--ops-hairline);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.connector-runbook-reference code {
+  color: var(--text-0);
+  font-family: var(--ops-font-mono);
+  font-size: var(--ops-text-xs);
+}
+
+.connector-dialog-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--ops-hairline);
+}
+
+/* Rows of the connectors board. Nothing defined these two classes, so the list
+   rendered with browser bullets and a 40px indent and each row's chips and
+   buttons ran together. */
+.ops-queue {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ops-queue-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--ops-space-4);
+  padding: var(--ops-space-3) var(--ops-space-2);
+  border-bottom: 1px solid var(--ops-hairline);
+}
+
+.ops-queue-row:last-child {
+  border-bottom: 0;
+}
+
+.ops-queue-row > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.ops-queue-row p {
+  margin: var(--ops-space-1) 0 0;
+  color: var(--text-1);
+  font-size: var(--ops-text-sm);
+  line-height: var(--ops-lh-normal);
+}
+
+.ops-queue-row p.ops-stat-hint {
+  color: var(--text-2);
+  font-size: var(--ops-text-xs);
+}
+
+@media (max-width: 720px) {
+  .ops-queue-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.connector-dialog :focus-visible {
+  outline: var(--ops-focus-ring) solid var(--ops-focus);
+  outline-offset: var(--ops-focus-gap);
+}
+
+@media (max-width: 520px) {
+  .connector-dialog {
+    width: calc(100vw - 24px);
+    max-height: min(92dvh, 780px);
+  }
+
+  .connector-dialog-header,
+  .connector-dialog-footer {
+    padding: var(--ops-space-4);
+  }
+
+  .connector-dialog-body {
+    padding: var(--ops-space-4);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .connector-dialog {
+    animation: none;
+    scroll-behavior: auto;
+  }
 }

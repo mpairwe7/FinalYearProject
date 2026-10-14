@@ -242,31 +242,54 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Add Menu Dialog (matching LanguageMenu design system)
+ * Add menu — what a person can put into this conversation.
+ *
+ * A centred panel on wide screens (the overlay pattern of the language picker
+ * above) and a bottom sheet on a phone, where a centred card is out of thumb
+ * reach. Rows are 60px tall: well over the 44px touch target. Colour comes
+ * from tokens only, so both themes keep their contrast (text-2 on surface-1
+ * is 4.7:1 light, 5.8:1 dark).
  * ------------------------------------------------------------------------- */
-.chatv2 .addmenu-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 350;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  animation: dlgv2-fade 140ms ease;
+.chatv2 .addmenu-anchor {
+  position: relative;
+  display: inline-flex;
 }
 
+/* A native <dialog> (see ModalDialog): it sits in the browser's top layer, so
+   nothing in the page — a message bubble, a toolbar — can paint over it. */
+dialog.addmenu-dialog,
 .chatv2 .addmenu-dialog {
-  display: flex;
-  flex-direction: column;
-  width: min(390px, 100%);
-  background: var(--bg-0);
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(86dvh, 640px);
+  padding: 0;
   border: 1px solid var(--border-0);
   border-radius: 18px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
   overflow: hidden;
+  color: var(--text-0);
+  background: var(--bg-0);
+  box-shadow: var(--shadow-lg);
+  z-index: 500;
   animation: dlgv2-pop 140ms ease;
+}
+
+dialog.addmenu-dialog:not([open]),
+.chatv2 .addmenu-dialog:not([open]) {
+  display: none;
+}
+
+dialog.addmenu-dialog::backdrop,
+.chatv2 .addmenu-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+}
+
+.chatv2 .addmenu-panel {
+  display: flex;
+  flex-direction: column;
+  max-height: min(86dvh, 640px);
 }
 
 .chatv2 .addmenu-head {
@@ -274,9 +297,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 15px 14px 12px 18px;
+  padding: 14px 10px 12px 18px;
   border-bottom: 1px solid var(--border-0);
   flex-shrink: 0;
+}
+
+.chatv2 .addmenu-head-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
 }
 
 .chatv2 .addmenu-head h2 {
@@ -286,36 +316,126 @@
   color: var(--text-0);
 }
 
+.chatv2 .addmenu-head-icon,
+.chatv2 .connectors-heading-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+}
+
+/* The shared close button is absolutely placed for the small confirm dialog;
+   in these headers it is simply the last item of the row. */
+.chatv2 .addmenu-head .dlgv2-x {
+  position: static;
+  width: 40px;
+  height: 40px;
+  flex: none;
+}
+
 .chatv2 .addmenu-list {
   padding: 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .chatv2 .addmenu-opt {
-  display: flex;
-  width: 100%;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  min-height: 60px;
   padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 14px;
   background: var(--surface-1);
-  cursor: pointer;
   color: var(--text-0);
-  font-family: inherit;
-  text-align: left;
-  transition: all 0.15s ease;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
-.chatv2 .addmenu-opt:hover,
-.chatv2 .addmenu-opt:focus-visible {
+.chatv2 .addmenu-opt:hover {
   background: var(--surface-2);
+  border-color: var(--border-1);
+}
+
+.chatv2 .addmenu-opt:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+.chatv2 .addmenu-opt:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.chatv2 .addmenu-opt:disabled:hover {
+  background: var(--surface-1);
   border-color: var(--border-0);
-  outline: none;
+}
+
+.chatv2 .addmenu-opt-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+}
+
+.chatv2 .addmenu-opt-icon.is-file {
+  color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+}
+
+.chatv2 .addmenu-opt-icon.is-camera {
+  color: var(--warning);
+  background: var(--cv2-warning-soft);
+}
+
+.chatv2 .addmenu-opt-icon.is-service {
+  color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .addmenu-opt-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chatv2 .addmenu-opt-title {
+  color: var(--text-0);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.chatv2 .addmenu-opt-desc {
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chatv2 .addmenu-opt-tag {
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--text-1);
+  background: var(--surface-3);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .chatv2 .addmenu-foot {
@@ -329,25 +449,544 @@
 }
 
 /* ---------------------------------------------------------------------------
- * Document Inspection & Tax Audit Modal
+ * Connector picker. A native <dialog>, so the browser contains focus, handles
+ * Escape and restores focus. Header and footer stay put; the list scrolls.
  * ------------------------------------------------------------------------- */
-.doc-modal-backdrop {
+dialog.connectors-dialog,
+.chatv2 .connectors-dialog {
   position: fixed;
   inset: 0;
+  margin: auto;
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(88dvh, 720px);
+  padding: 0;
+  border: 1px solid var(--border-0);
+  border-radius: 18px;
+  overflow: hidden;
+  color: var(--text-0);
+  background: var(--bg-0);
+  box-shadow: var(--shadow-lg);
   z-index: 500;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  animation: dlgv2-fade 140ms ease;
+  pointer-events: auto;
 }
 
+dialog.connectors-dialog:not([open]),
+.chatv2 .connectors-dialog:not([open]) {
+  display: none;
+}
+
+dialog.connectors-dialog::backdrop,
+.chatv2 .connectors-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.chatv2 .connectors-dialog-content {
+  display: flex;
+  flex-direction: column;
+  max-height: min(88dvh, 720px);
+}
+
+.chatv2 .connectors-head .connectors-heading-icon {
+  color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .connectors-count {
+  padding: 2px 9px;
+  border-radius: 999px;
+  color: var(--success);
+  background: var(--cv2-success-soft);
+  font-size: 11.5px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.chatv2 .connectors-dialog-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 16px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.chatv2 .connectors-intro {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.chatv2 .connectors-status-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 12px;
+  color: var(--text-1);
+  background: var(--surface-1);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.chatv2 .connectors-status-card[data-state="error"] {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  background: var(--cv2-danger-soft);
+}
+
+.chatv2 .connectors-status-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+
+.chatv2 .connectors-status-card[data-state="ready"] .connectors-status-dot {
+  background: var(--success);
+}
+
+.chatv2 .connectors-status-card[data-state="error"] .connectors-status-dot {
+  background: var(--danger);
+}
+
+.chatv2 .connectors-status-card[data-state="loading"] .connectors-status-dot {
+  background: var(--warning);
+}
+
+.chatv2 .connectors-status-card > span:not(.connectors-status-dot) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.chatv2 .connectors-retry {
+  flex: none;
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  color: var(--text-0);
+  background: var(--bg-0);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-retry:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.chatv2 .connectors-options {
+  display: grid;
+  gap: 8px;
+}
+
+.chatv2 .connectors-option {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--border-0);
+  border-radius: 14px;
+  color: var(--text-0);
+  background: var(--surface-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.chatv2 .connectors-option:hover:not(:disabled) {
+  border-color: var(--border-2);
+  background: var(--surface-2);
+}
+
+.chatv2 .connectors-option:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+.chatv2 .connectors-option.is-selected {
+  border-color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .connectors-option.is-unavailable {
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+.chatv2 .connectors-option-icon {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--cv2-accent);
+  background: var(--cv2-accent-soft);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.chatv2 .connectors-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.chatv2 .connectors-option-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.chatv2 .connectors-option-name {
+  color: var(--text-0);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.chatv2 .connectors-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.chatv2 .connectors-badge.is-demo {
+  color: #873600;
+  background: var(--cv2-warning-soft);
+}
+
+.chatv2 .connectors-badge.is-live {
+  color: var(--success);
+  background: var(--cv2-success-soft);
+}
+
+.chatv2 .connectors-badge.is-down {
+  color: var(--danger);
+  background: var(--cv2-danger-soft);
+}
+
+.chatv2 .connectors-option-description {
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chatv2 .connectors-option-meta {
+  color: var(--text-1);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.chatv2 .connectors-option-meta.is-warn {
+  color: var(--danger);
+}
+
+/* text-2 on the hover/selected backgrounds measured 4.47:1 — under 4.5. */
+.chatv2 .connectors-option:hover:not(:disabled) .connectors-option-meta,
+.chatv2 .connectors-option.is-selected .connectors-option-meta,
+.chatv2 .addmenu-opt:hover:not(:disabled) .addmenu-opt-desc {
+  color: var(--text-1);
+}
+
+.chatv2 .connectors-option:hover:not(:disabled) .connectors-option-meta.is-warn,
+.chatv2 .connectors-option.is-selected .connectors-option-meta.is-warn {
+  color: var(--danger);
+}
+
+.chatv2 .connectors-option-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 4px 11px;
+  border: 1px solid var(--border-1);
+  border-radius: 999px;
+  color: var(--text-0);
+  background: var(--bg-0);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.chatv2 .connectors-option.is-selected .connectors-option-action {
+  border-color: var(--success);
+  color: var(--success);
+  background: var(--bg-0);
+}
+
+.chatv2 .connectors-option:disabled .connectors-option-action {
+  color: var(--text-2);
+  background: transparent;
+}
+
+.chatv2 .connectors-details {
+  padding: 0 2px;
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+
+.chatv2 .connectors-details > summary {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  color: var(--text-1);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-details > summary:focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.chatv2 .connectors-details p {
+  margin: 4px 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chatv2 .connectors-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 18px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border-0);
+  background: var(--bg-1);
+  flex-shrink: 0;
+}
+
+.chatv2 .connectors-dialog-footer p {
+  margin: 0;
+  max-width: 250px;
+  color: var(--text-1);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.chatv2 .connectors-footer-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.chatv2 .connectors-close-button,
+.chatv2 .connectors-clear {
+  min-height: 44px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chatv2 .connectors-close-button {
+  min-width: 88px;
+  border: 1px solid var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  background: var(--cv2-accent);
+}
+
+.chatv2 .connectors-close-button:hover {
+  background: var(--cv2-accent-hover);
+  border-color: var(--cv2-accent-hover);
+}
+
+.chatv2 .connectors-clear {
+  border: 1px solid var(--border-1);
+  color: var(--text-1);
+  background: transparent;
+}
+
+.chatv2 .connectors-clear:hover {
+  background: var(--surface-2);
+}
+
+.chatv2 .connectors-dialog :focus-visible {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+/* The chips above the composer. */
+.chatv2 .composer-connectors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 8px 12px 0;
+}
+
+.chatv2 .composer-connector-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
+  border-radius: 999px;
+  color: var(--text-1);
+  background: var(--cv2-success-soft);
+  font-size: 12px;
+}
+
+.chatv2 .composer-connector-chip > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--success);
+}
+
+.chatv2 .composer-connector-demo {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--warning);
+  background: var(--cv2-warning-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.chatv2 .composer-connector-remove {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-2);
+  background: transparent;
+  cursor: pointer;
+}
+
+.chatv2 .composer-connector-remove:hover,
+.chatv2 .composer-connector-remove:focus-visible {
+  color: var(--text-0);
+  background: var(--surface-2);
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 1px;
+}
+
+/* A screenshot or photo shows as itself on its chip. */
+.chatv2 .attachment-thumb {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+
+/* Phones: both panels become bottom sheets, in reach of a thumb. */
+@keyframes addmenu-sheet-up {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  dialog.addmenu-dialog,
+  .chatv2 .addmenu-dialog {
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 88dvh;
+    margin: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    animation: addmenu-sheet-up 180ms ease;
+  }
+
+  .chatv2 .addmenu-panel {
+    max-height: calc(88dvh - env(safe-area-inset-bottom, 0px));
+  }
+
+  dialog.connectors-dialog,
+  .chatv2 .connectors-dialog {
+    inset: auto 0 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: 92dvh;
+    margin: 0;
+    border-radius: 20px 20px 0 0;
+    border-bottom: 0;
+    animation: addmenu-sheet-up 180ms ease;
+  }
+
+  .chatv2 .connectors-dialog-content {
+    max-height: 92dvh;
+  }
+
+  .chatv2 .connectors-option {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .chatv2 .connectors-option-action {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .chatv2 .connectors-dialog-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .chatv2 .connectors-dialog-footer p {
+    max-width: none;
+  }
+
+  .chatv2 .connectors-footer-actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  dialog.addmenu-dialog,
+  .chatv2 .addmenu-dialog,
+  dialog.connectors-dialog,
+  .chatv2 .connectors-dialog {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * Document Inspection & Tax Audit Modal
+ * ------------------------------------------------------------------------- */
 .doc-modal-container {
-  position: relative;
-  width: min(640px, 100%);
-  max-height: min(88vh, 760px);
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(88dvh, 760px);
+  padding: 0;
   background: var(--bg-0, #fff);
   border: 1px solid var(--border-0, #e0e0e0);
   border-radius: 16px;
@@ -356,6 +995,15 @@
   flex-direction: column;
   overflow: hidden;
   animation: dlgv2-pop 140ms ease;
+}
+
+.doc-modal-container:not([open]) {
+  display: none;
+}
+
+.doc-modal-container::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
 }
 
 .doc-modal-header {
@@ -396,6 +1044,10 @@
   text-overflow: ellipsis;
   max-width: 380px;
 }
+.doc-modal-title:focus {
+  outline: 2px solid var(--cv2-focus);
+  outline-offset: 3px;
+}
 
 .doc-modal-badges {
   display: flex;
@@ -408,8 +1060,8 @@
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(26, 58, 107, 0.1);
-  color: #1a3a6b;
+  background: var(--cv2-accent-soft);
+  color: var(--cv2-accent);
 }
 
 .doc-modal-meta-badge {
@@ -419,8 +1071,8 @@
 }
 
 .doc-modal-close-btn {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -433,6 +1085,15 @@
 .doc-modal-close-btn:hover {
   background: var(--surface-2, rgba(0, 0, 0, 0.05));
   color: var(--text-0, #111);
+}
+.doc-modal-close-btn:focus-visible,
+.doc-modal-step-copy:focus-visible,
+.doc-modal-close-secondary-btn:focus-visible,
+.doc-modal-report-btn:focus-visible,
+.doc-modal-prompt-btn:focus-visible,
+.doc-modal-entity-chip:focus-visible {
+  outline: 3px solid var(--cv2-focus);
+  outline-offset: 2px;
 }
 
 .doc-modal-body {
@@ -715,76 +1376,119 @@
 
 .portal-guidance-card {
   margin-top: 10px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(14, 165, 233, 0.07);
-  border: 1px solid rgba(14, 165, 233, 0.25);
+  padding: 16px;
+  border-radius: 14px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-0);
+  border-inline-start: 3px solid var(--cv2-focus);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
   box-sizing: border-box;
 }
 
 .portal-guidance-badge-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
-.portal-guidance-badge {
-  font-size: 11.5px;
+.portal-guidance-heading h3 {
+  margin: 3px 0 0;
+  color: var(--text-0);
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 650;
+}
+
+.portal-guidance-eyebrow {
+  color: var(--cv2-focus);
+  font-size: 11px;
+  line-height: 1.3;
   font-weight: 700;
-  color: #0284c7;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .portal-guidance-state {
+  display: grid;
+  gap: 2px;
+  max-width: min(100%, 260px);
+  padding: 8px 10px;
+  border: 1px solid var(--border-0);
+  border-radius: 10px;
+  background: var(--bg-0);
+  color: var(--text-1);
   font-size: 11px;
-  font-weight: 600;
-  padding: 1px 7px;
-  border-radius: 4px;
-  background: rgba(2, 132, 199, 0.12);
-  color: #0369a1;
+  line-height: 1.4;
+}
+
+.portal-guidance-state strong {
+  color: var(--text-0);
+  font-size: 12px;
 }
 
 .portal-guidance-issue {
   margin: 0;
-  font-size: 12.5px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 10px;
+  background: var(--cv2-warning-soft);
   color: var(--text-1, #333);
+  font-size: 12.5px;
   line-height: 1.45;
-  background: rgba(245, 158, 11, 0.08);
-  border-left: 3px solid #f59e0b;
-  padding: 6px 10px;
-  border-radius: 0 6px 6px 0;
+}
+
+.portal-guidance-issue strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-0);
+}
+
+.portal-guidance-issue p {
+  margin: 0;
 }
 
 .portal-guidance-steps-wrap {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .portal-guidance-steps-title {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-2, #666);
+  margin: 0;
+  color: var(--text-0);
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 650;
 }
 
 .portal-guidance-steps-list {
   margin: 0;
-  padding-left: 18px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text-0, #111);
+  padding-left: 22px;
+  color: var(--text-1);
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .portal-guidance-steps-list li {
-  margin-bottom: 4px;
+  padding-inline-start: 3px;
+  margin-bottom: 6px;
+}
+
+.portal-guidance-steps-list li::marker {
+  color: var(--cv2-focus);
+  font-weight: 700;
+}
+
+.portal-guidance-caution {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .portal-guidance-actions {
@@ -792,47 +1496,72 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 4px;
+  margin-top: 0;
 }
 
 .portal-action-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11.5px;
+  min-height: 40px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 5px 12px;
-  border-radius: 6px;
+  padding: 7px 14px;
+  border-radius: 9px;
   cursor: pointer;
   text-decoration: none;
-  transition: all 120ms ease;
+  transition: background-color 120ms ease, border-color 120ms ease;
   font-family: inherit;
 }
 
-.portal-action-btn.is-primary {
-  background: #0284c7;
-  color: #ffffff;
-  border: none;
+/* Text colour is the accent's own contrast colour: white on the dark
+   theme's light-grey accent was invisible. The `.chatv2 a` selectors keep the
+   global link colours (teal on hover, visited purple) off a button. */
+.portal-action-btn.is-primary,
+.chatv2 a.portal-action-btn.is-primary,
+.chatv2 a.portal-action-btn.is-primary:visited {
+  background: var(--cv2-accent);
+  color: var(--cv2-accent-contrast);
+  border: 1px solid var(--cv2-accent);
 }
 
-.portal-action-btn.is-primary:hover {
-  background: #0369a1;
+.portal-action-btn.is-primary:hover,
+.chatv2 a.portal-action-btn.is-primary:hover {
+  background: var(--cv2-accent-hover);
+  border-color: var(--cv2-accent-hover);
+  color: var(--cv2-accent-contrast);
 }
 
 .portal-action-btn.is-ghost {
-  background: transparent;
-  border: 1px solid rgba(2, 132, 199, 0.35);
-  color: #0284c7;
+  background: var(--bg-0);
+  border: 1px solid var(--border-1);
+  color: var(--text-0);
 }
 
 .portal-action-btn.is-ghost:hover {
-  background: rgba(2, 132, 199, 0.08);
+  background: var(--surface-2);
+}
+
+.portal-action-btn:focus-visible {
+  outline: 3px solid var(--cv2-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .portal-guidance-card {
+    padding: 14px;
+  }
+
+  .portal-guidance-state {
+    max-width: 100%;
+  }
 }
 
 /* Modal Portal Card */
 .doc-modal-portal-card {
-  background: rgba(14, 165, 233, 0.05);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: var(--surface-1);
+  border: 1px solid var(--border-0);
+  border-inline-start: 3px solid var(--cv2-focus);
   border-radius: 12px;
   padding: 16px;
   margin-bottom: 16px;
@@ -851,29 +1580,32 @@
   display: inline-block;
   font-size: 11.5px;
   font-weight: 600;
-  color: #0369a1;
-  background: rgba(2, 132, 199, 0.1);
+  color: var(--text-0);
+  background: var(--surface-2);
+  border: 1px solid var(--border-0);
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 7px;
   margin-top: 4px;
 }
 
 .doc-modal-portal-link {
   font-size: 12px;
   font-weight: 600;
-  color: #0284c7;
+  color: var(--cv2-focus);
   text-decoration: none;
 }
 
-.doc-modal-portal-link:hover {
+.doc-modal-portal-link:hover,
+.doc-modal-portal-link:focus-visible {
   text-decoration: underline;
 }
 
 .doc-modal-portal-issue-box {
-  background: rgba(245, 158, 11, 0.08);
-  border-left: 3px solid #f59e0b;
+  background: var(--cv2-warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-inline-start: 3px solid var(--warning);
   padding: 8px 12px;
-  border-radius: 0 8px 8px 0;
+  border-radius: 8px;
   margin-bottom: 12px;
   font-size: 12.5px;
 }
@@ -883,140 +1615,15 @@
   padding-left: 18px;
 }
 
+.doc-modal-portal-caution {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .doc-modal-hotspots-panel {
   margin-bottom: 14px;
-}
-
-.doc-modal-screen-canvas {
-  width: 100%;
-  height: 180px;
-  background: #0f172a;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  margin-bottom: 12px;
-  position: relative;
-}
-
-.doc-modal-canvas-screen-bar {
-  height: 24px;
-  background: rgba(255, 255, 255, 0.05);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.doc-modal-canvas-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-.doc-modal-canvas-dot.red { background: #ef4444; }
-.doc-modal-canvas-dot.yellow { background: #f59e0b; }
-.doc-modal-canvas-dot.green { background: #10b981; }
-
-.doc-modal-canvas-url {
-  font-size: 10px;
-  color: #94a3b8;
-  font-family: monospace;
-  margin-left: 6px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.doc-modal-canvas-viewport {
-  flex: 1;
-  position: relative;
-  background: radial-gradient(circle at 50% 50%, rgba(30, 41, 59, 0.5) 0%, rgba(15, 23, 42, 0.9) 100%);
-  width: 100%;
-}
-
-.doc-modal-canvas-box {
-  position: absolute;
-  border-radius: 6px;
-  border: 2px dashed #0284c7;
-  background: rgba(2, 132, 199, 0.15);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  transition: all 150ms ease;
-  box-sizing: border-box;
-}
-
-.doc-modal-canvas-box.is-error {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.2);
-}
-
-.doc-modal-canvas-box.is-action {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.2);
-}
-
-.doc-modal-canvas-box.is-selected {
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4), 0 0 12px currentColor;
-}
-
-.doc-modal-canvas-beacon {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  position: absolute;
-  top: 4px;
-  left: 4px;
-  animation: pulse-beacon 1.6s infinite;
-}
-
-@keyframes pulse-beacon {
-  0% { transform: scale(0.95); opacity: 0.8; }
-  50% { transform: scale(1.4); opacity: 0.3; }
-  100% { transform: scale(0.95); opacity: 0.8; }
-}
-
-.doc-modal-canvas-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: #ffffff;
-  background: rgba(0, 0, 0, 0.65);
-  padding: 2px 6px;
-  border-radius: 4px;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.doc-modal-hotspot-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  margin-bottom: 2px;
-}
-
-.doc-modal-dom-selector {
-  font-size: 9.5px;
-  font-family: monospace;
-  background: rgba(0, 0, 0, 0.06);
-  padding: 1px 4px;
-  border-radius: 3px;
-  color: var(--text-2, #64748b);
-}
-
-.doc-modal-hotspot-item {
-  cursor: pointer;
-  transition: all 120ms ease;
-}
-
-.doc-modal-hotspot-item.is-selected {
-  border-width: 2px;
-  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
 }
 
 .doc-modal-sub-title {
@@ -1026,38 +1633,38 @@
   color: var(--text-1, #333);
 }
 
-.doc-modal-hotspots-grid {
+.doc-modal-hotspots-note {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.doc-modal-hotspots-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 8px;
 }
 
 .doc-modal-hotspot-item {
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: 9px;
   border: 1px solid var(--border-0, #e0e0e0);
   background: var(--bg-0, #fff);
 }
 
 .doc-modal-hotspot-item.is-error {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.04);
+  border-inline-start: 3px solid var(--danger);
 }
 
 .doc-modal-hotspot-item.is-action {
-  border-color: rgba(16, 185, 129, 0.4);
-  background: rgba(16, 185, 129, 0.04);
+  border-inline-start: 3px solid var(--success);
 }
 
-.doc-modal-hotspot-tag {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  color: var(--text-2, #666);
-}
-
-.doc-modal-hotspot-inst {
-  margin: 2px 0 0;
+.doc-modal-hotspot-item p {
+  margin: 3px 0 0;
   font-size: 12px;
   color: var(--text-0, #111);
 }
@@ -1078,16 +1685,27 @@
 }
 
 .doc-modal-step-copy {
-  background: transparent;
-  border: none;
+  min-height: 36px;
+  padding: 0 9px;
+  border: 1px solid var(--border-0);
+  border-radius: 8px;
+  background: var(--bg-0);
+  color: var(--text-0);
   cursor: pointer;
-  padding: 0 4px;
-  opacity: 0.6;
-  transition: opacity 120ms ease;
+  font: inherit;
+  font-size: 11px;
 }
 
 .doc-modal-step-copy:hover {
-  opacity: 1;
+  background: var(--surface-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-modal-container,
+  .portal-action-btn {
+    animation: none;
+    transition: none;
+  }
 }
 
 /* -------------------------------------------------------------------------

@@ -24,8 +24,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
-  actions: read
 
 concurrency:
   group: codeql-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -35,6 +33,10 @@ jobs:
   analyze:
     name: "CodeQL: ${{ matrix.language }}"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
     timeout-minutes: 30
     strategy:
       fail-fast: false

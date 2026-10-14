@@ -525,7 +525,7 @@ _COMMON_ENGLISH_WORDS: frozenset[str] = frozenset({
     "much", "many", "more", "most", "some", "any", "no", "not", "all", "both", "half", "each", "every", "other", "another",
     "want", "need", "like", "know", "tell", "give", "take", "make", "get", "find", "check", "help",
     "pay", "paid", "paying", "rate", "rates", "year", "years", "month", "months", "day", "days", "date", "dates", "time", "times",
-    "good", "well", "great", "please", "thanks", "thank", "bye", "goodbye",
+    "good", "well", "great", "please", "thanks", "thank", "goodbye",
 })
 
 _LUGANDA_WORDS: frozenset[str] = frozenset({
@@ -536,6 +536,19 @@ _LUGANDA_WORDS: frozenset[str] = frozenset({
     "emmotoka", "pikipiki", "eppikipiki", "obwannannyini", "okukyusa", "obutonde",
     "ekibonerezo", "ebibonerezo", "okwemulugunya", "ebyamaguzi", "ebisale",
     "ebiwandiiko", "lole", "tulakita", "obupangisa", "mayumba", "nnyumba", "kyuma", "ekyuma",
+    "musolo", "banja", "ebisanyizo", "satifikeeti", "biruwa", "kiruwa", "obutalina", "talina", "lya", "bye",
+    "weeraba", "tunaalabagana", "edda", "bambi", "ŋŋamba", "ngamba", "nkulamusizza", "owange", "mwattu", "mubalire", "nnyamba",
+    # Function and question words for code-switched queries (G132)
+    "nga", "ku", "mu", "oba", "naye", "ne", "kiki", "ki", "nze", "gwe", "ffe",
+    "yange", "wange", "lyange", "kyange", "gwange", "yaffe", "kwe", "nnyinza",
+    "njagala", "mbuuza", "okumanya", "ssebo", "nnyabo", "ndowooza", "ntegeeza",
+    "nnyonnyola", "okusasula", "nsasula", "ngisasula", "okugisasula", "ddi",
+    "wano", "olwaleero", "jjuuzi", "tuyinza", "okwogera", "twogere",
+    "tewali", "sirina", "nina", "bwentyo", "ekyo", "kino", "kati",
+    "oli", "otya", "gyebale", "ko", "bulungi", "nnyo",
+    "mmeka", "bimeka", "meka", "etya", "zitya", "gitya", "atya", "lwaki",
+    "eri", "kiri", "ziri", "ngiwaayo", "ngifuna", "amateeka", "kkomo",
+    "buvunaanyizibwa", "bizinensi", "zaayo", "ekwatagana", "ebalirira", "okusasulwa",
 })
 
 _SWAHILI_WORDS: frozenset[str] = frozenset({
@@ -547,6 +560,14 @@ _SWAHILI_WORDS: frozenset[str] = frozenset({
     "risiti", "forodha", "mizigo", "mzigo", "msamaha", "kuagiza", "kusafirisha",
     "mfumo", "hifadhi", "pingamizi", "adhabu", "je", "malori", "yamesamehewa",
     "kusamehewa", "tozo", "kifaa", "inalipwaje",
+    "shikamoo", "afisa", "hujambo", "sijambo", "bwana", "kwaheri", "tutaonana", "baadaye",
+    "ningependa", "kujua", "samahani", "nijuze", "heshima", "kutoka", "mpakani", "mno", "eleza",
+    # Function and question words for code-switched queries (G132)
+    "ni", "ya", "za", "la", "cha", "vya", "kwamba", "lakini", "sana",
+    "mimi", "wewe", "yangu", "wangu", "yako", "nataka", "naomba", "tafadhali",
+    "ninahitaji", "nini", "gani", "lini", "vipi", "wapi", "ngapi",
+    "tuongee", "kiswahili", "hii", "hiyo", "kuna", "sijui", "sawa",
+    "yapi", "hawa", "kuhusu", "kisheria", "majukumu", "inahusiana",
 })
 
 _LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS
@@ -1018,27 +1039,39 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     if not text or len(text.strip()) < 4:
         return default_lang
 
-    # Understand syntax and typos before checking language
-    corrected = correct_spelling(normalize(text))
-    cleaned = corrected.strip().lower()
-    words = set(re.findall(r"[a-z']+", cleaned))
-    if not words:
+    # 1. Inspect raw tokens before any English spellcheck.
+    # Running English spellcheck on Swahili/Luganda corrupts words like 'nini' -> 'nin' (G132).
+    normalized = normalize(text)
+    cleaned = normalized.strip().lower()
+    raw_words = set(re.findall(r"[a-z'’ŋ]+", cleaned))
+    if not raw_words:
         return default_lang
+
+    lg_hits = len(raw_words & _LUGANDA_WORDS)
+    sw_hits = len(raw_words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
+    en_common = len(raw_words & _COMMON_ENGLISH_WORDS)
+
+    # 2. Check for noisy or misspelled English ONLY when vernacular markers are absent.
+    if lg_hits == 0 and sw_hits == 0:
+        corrected = correct_spelling(normalized)
+        corr_cleaned = corrected.strip().lower()
+        corr_words = set(re.findall(r"[a-z'’ŋ]+", corr_cleaned))
+        en_hits = len(corr_words & _COMMON_ENGLISH_WORDS) + len(corr_words & _TAX_DOMAIN_VOCAB)
+        if en_hits > 0:
+            return default_lang
+        detector_text = corrected
+        words = corr_words
+        cleaned = corr_cleaned
+    else:
+        # Code-switched query: tax terms (VAT, TIN, EFRIS, PAYE, withholding) are loanwords
+        # common in Ugandan vernacular and must not count as English evidence (G132).
+        detector_text = normalized
+        words = raw_words
+        en_hits = en_common
 
     n_words = max(len(words), 1)
 
-    # 1. Lexical markers for English, Luganda, and Swahili
-    en_hits = len(words & _COMMON_ENGLISH_WORDS) + len(words & _TAX_DOMAIN_VOCAB)
-    lg_hits = len(words & _LUGANDA_WORDS)
-    sw_hits = len(words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
-
-    # A misspelled or noisy English query (e.g. "wat is the vat rat?",
-    # "How do I pay assessmnt witholding tax?") resolves to English tokens and
-    # must NEVER be hijacked to Luganda or Swahili.
-    if en_hits > 0 and lg_hits == 0 and sw_hits == 0:
-        return default_lang
-
-    # 2. Strong lexical signals for supported Ugandan / East African locales
+    # 3. Strong lexical signals for supported Ugandan / East African locales
     if sw_hits > lg_hits and (sw_hits >= 2 or (sw_hits >= 1 and en_hits == 0)):
         return "sw"
     if lg_hits > sw_hits and (lg_hits >= 2 or (lg_hits >= 1 and en_hits == 0)):
@@ -1048,11 +1081,11 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     if lg_hits >= 2 and sw_hits == 0:
         return "lg"
 
-    # Consult statistical detector (lingua) on the corrected text
+    # Consult statistical detector (lingua)
     det = _get_language_detector()
     if det is not None:
         try:
-            result = det.detect(corrected)
+            result = det.detect(detector_text)
             if result.lang in SUPPORTED_LOCALES and result.is_confident(0.75):
                 # Extra guard: lingua must not override to lg/sw if English words dominate
                 if result.lang in ("lg", "sw") and en_hits > 0 and lg_hits == 0 and sw_hits == 0:
@@ -1105,10 +1138,17 @@ def detect_language(text: str, default_lang: str = "en") -> str:
 def rewrite(
     query: str,
     history: list[dict[str, str]] | None = None,
+    locale: str | None = None,
 ) -> str:
-    """Full query rewriting pipeline."""
+    """Full query rewriting pipeline.
+
+    Skips English dictionary spell correction on non-English locales
+    (lg, sw, nyn, ach) to prevent corruption of vernacular vocabulary (G135).
+    """
     q = normalize(query)
-    q = correct_spelling(q)
+    lang = (locale or detect_language(q) or "en").lower().split("-")[0]
+    if lang in ("en", ""):
+        q = correct_spelling(q)
     q = expand_abbreviations(q)
     if history:
         q = rewrite_with_history(q, history)
@@ -1127,8 +1167,16 @@ def rewrite(
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+|[—–:;]\s+")
 
 
+_TAX_KEYWORD_RE = re.compile(
+    r"\b(?:tax|vat|efris|tin|prn|paye|dts|duty|customs|penalty|receipt|invoice|"
+    r"assessment|objection|appeal|waiver|threshold|turnover|sales|audit|withholding|"
+    r"registration|filing|returns?|income|company|salary|clearance)\b",
+    re.IGNORECASE,
+)
+
+
 def extract_question_span(text: str) -> str:
-    """Return only the interrogative sentence(s) in *text*, or "" if none.
+    """Return the interrogative sentence(s) in *text*, enriched with core tax context if generic.
 
     Distress-framed messages ("I've tried three times and it still doesn't
     work!! What is EFRIS?", "I'm worried — What is EFRIS?") combine
@@ -1138,9 +1186,22 @@ def extract_question_span(text: str) -> str:
     a distressed turn should retrieve on this extracted span instead of the
     full rewritten text.
     """
-    sentences = _SENTENCE_BOUNDARY_RE.split((text or "").strip())
-    questions = [s.strip() for s in sentences if s.strip().endswith("?")]
-    return " ".join(questions)
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    sentences = [s.strip() for s in _SENTENCE_BOUNDARY_RE.split(raw) if s.strip()]
+    questions = [s for s in sentences if s.endswith("?")]
+    if not questions:
+        return ""
+
+    q_text = " ".join(questions)
+    # If the extracted question is generic ("What should I do?", "Can they do this?"),
+    # enrich it with prior sentences from the story that contain key tax entities:
+    if not _TAX_KEYWORD_RE.search(q_text):
+        context_sentences = [s for s in sentences if not s.endswith("?") and _TAX_KEYWORD_RE.search(s)]
+        if context_sentences:
+            return f"{' '.join(context_sentences[-2:])} {q_text}"
+    return q_text
 
 
 # ---------------------------------------------------------------------------
@@ -1239,13 +1300,13 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # already collapses whitespace runs to one space — independently removing
 # the long-run precondition these patterns would otherwise need.
 _DECOMPOSE_SPLIT_RE = re.compile(
-    r"\s+(?:and also|as well as|and then)\s+|"
-    r"\s*;\s+|"
-    r"\?\s+(?=(?:what|how|when|where|which|who)\b)",
+    r" (?:and also|as well as|and then) |"
+    r";\s*|"
+    r"\? (?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
-    r"\s+and\s+(?=(?:what|how|when|where|which|who)\b)",
+    r" and (?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 
@@ -1424,6 +1485,16 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
     return None
 
 
+def _reads_as_english(text: str) -> bool:
+    """Three or more words, at least two of them common English, none Luganda or Swahili."""
+    from .receptionist.language import lexical_hits  # imports this module
+
+    if len(re.findall(r"[a-z']+", text.lower())) < 3:
+        return False
+    hits = lexical_hits(text)
+    return hits["en"] >= 2 and hits["lg"] == 0 and hits["sw"] == 0
+
+
 def english_retrieval_query(query: str, locale: str | None) -> str:
     """Query text to search the English corpus with (G18).
 
@@ -1435,6 +1506,20 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     loc = (locale or "en").strip().lower().split("-")[0]
     if not text or loc in ("", "en"):
         return text
+    if _reads_as_english(text):
+        # A Luganda or Swahili turn whose search text is already English —
+        # the history-aware rewriter, reading English history (G119), often
+        # returns it so. Translating it "from Luganda" costs a model call and
+        # can only make it worse.
+        return text
+    if loc == "sw":
+        from .receptionist.lexicon import normalize_swahili_tax_query
+
+        text = normalize_swahili_tax_query(text)
+    elif loc == "lg":
+        from .receptionist.lexicon import normalize_luganda_tax_query
+
+        text = normalize_luganda_tax_query(text)
     english = translate_query_for_retrieval(text, loc)
     if not english or english.casefold() == text.casefold():
         return text

@@ -29,8 +29,10 @@ def env_val(key):
 
 
 def _req(url, *, headers, data=None, method="GET", timeout=60):
+    if not str(url).startswith("https://"):
+        raise ValueError("Only https URLs allowed")
     r = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(r, timeout=timeout) as resp:
+    with urllib.request.urlopen(r, timeout=timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         return resp.status, resp.read()
 
 

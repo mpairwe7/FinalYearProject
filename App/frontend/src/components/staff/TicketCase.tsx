@@ -14,8 +14,10 @@ import {
 } from "../../lib/ticketUi";
 import { analyticsApi } from "../../services/analyticsApi";
 import { Skeleton } from "../ops/States";
+import { isLiveOfficer } from "../../lib/roles";
 import type { StaffIdentity } from "../StaffGuard";
 import { TicketComposer } from "./TicketComposer";
+import { TicketChatThread } from "./TicketChatThread";
 import "./staffTickets.css";
 
 function PresenceBeat({ ticketId, viewer }: { ticketId: string; viewer: string }) {
@@ -78,9 +80,12 @@ export function TicketCase({
 }) {
   const [transMode, setTransMode] = useState<"both" | "en" | "orig">("both");
   const handoff = ticket?.handoff ?? {};
-  const transcript = ticket?.transcript ?? [];
+  // The conversation as it stood at escalation. The taxpayer's later messages
+  // belong to the chat with the officer, shown on their own below.
+  const transcript = (ticket?.transcript ?? []).filter((turn) => turn.sender !== "taxpayer");
   const warm = handoff.transfer_style === "warm";
-  const canAct = who?.role !== "ura_auditor";
+  // Officers reply and claim; an auditor reads the case.
+  const canAct = isLiveOfficer(who?.role);
   const tone = ticket ? waitTone(ticket.created_at, ticket.first_response_at, ticket.reply_at) : "ok";
   const handle = officerHandle(who);
   const isVernacular = Boolean(ticket?.locale && ticket.locale !== "en");
@@ -289,6 +294,8 @@ export function TicketCase({
         )}
       </section>
 
+      {ticket.modality !== "voice" ? <TicketChatThread ticket={ticket} /> : null}
+
       {canAct ? (
         <TicketComposer
           key={ticket.id}
@@ -301,7 +308,7 @@ export function TicketCase({
         />
       ) : (
         <p className="st-readonly">
-          Auditor view — replies and assignment stay with tax agents and administrators.
+          Read-only view — replies and assignment stay with the tax agents working the queue.
         </p>
       )}
     </article>

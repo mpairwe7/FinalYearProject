@@ -1,0 +1,252 @@
+{
+  "timestamp": "2026-10-07T12:02:30.960201+00:00",
+  "total_faqs": 5,
+  "accurate_total": 0,
+  "overall_accuracy_pct": 0.0,
+  "overall_p50_ms": 6708.5,
+  "overall_p90_ms": 22360.4,
+  "overall_p95_ms": 22360.4,
+  "overall_mean_ms": 9089.7,
+  "languages": {
+    "en": {
+      "count": 2,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "figure_fidelity_pct": 50.0,
+      "p50_latency_ms": 19001.7,
+      "p95_latency_ms": 22360.4,
+      "mean_latency_ms": 19001.7
+    },
+    "lg": {
+      "count": 2,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "figure_fidelity_pct": 50.0,
+      "p50_latency_ms": 3537.2,
+      "p95_latency_ms": 6708.5,
+      "mean_latency_ms": 3537.2
+    },
+    "sw": {
+      "count": 1,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "figure_fidelity_pct": 100.0,
+      "p50_latency_ms": 370.7,
+      "p95_latency_ms": 370.7,
+      "mean_latency_ms": 370.7
+    }
+  },
+  "domains": {
+    "domestic": {
+      "count": 5,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "p50_latency_ms": 6708.5
+    },
+    "customs": {
+      "count": 0,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "p50_latency_ms": 0.0
+    },
+    "efris": {
+      "count": 0,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "p50_latency_ms": 0.0
+    },
+    "transport": {
+      "count": 0,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "p50_latency_ms": 0.0
+    },
+    "tax_education": {
+      "count": 0,
+      "accurate_count": 0,
+      "accuracy_pct": 0.0,
+      "p50_latency_ms": 0.0
+    }
+  },
+  "sample_results": [
+    {
+      "faq_id": "REC200-0001",
+      "domain": "domestic",
+      "locale": "en",
+      "query": "Hello, I am registering a new bakery business in Kampala. What is my first tax obligation?",
+      "normalized_query": "Hello, I am registering a new bakery business in Kampala. What is my first tax obligation?",
+      "spoken_reply": "I'm sorry \u2014 I couldn't find a reliable answer to this in the U R A knowledge base, and I'd rather connect you with the right people than guess. Please contact U R A or call the toll-free Contact Centre on 0 800, 117, 0 0 0 / 0 800, 217, 0 0 0.",
+      "retrieval_mode": "abstained",
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "score_details": {
+        "matched_terms": [],
+        "missing_terms": [
+          "TIN",
+          "taxpayer identification number",
+          "register",
+          "ura"
+        ],
+        "matched_numbers": [],
+        "matched_citations": [],
+        "accuracy": 0.0,
+        "non_answer": true,
+        "language_ok": true,
+        "english_fallback": false,
+        "scorable": true
+      },
+      "latency_ms": 22360.4,
+      "stage_latency": {
+        "asr_ms": 308.0,
+        "gen_ms": 22050.8,
+        "norm_ms": 1.5
+      }
+    },
+    {
+      "faq_id": "REC200-0002",
+      "domain": "domestic",
+      "locale": "lg",
+      "query": "How do I get that individual and business TIN online?",
+      "normalized_query": "How do I get that individual and business TIN online?",
+      "spoken_reply": "To register an organisation (company, NGO, partnership) for a TIN:\nStep 1: Go to U R A dot go dot u g\nStep 2: Choose the standard Non-Individual TIN registration option\nStep 3: Fill in the organisation's details\nStep 4: Attach the incorporation/registration documents\nStep 5: Provide the TINs of the directors\nStep 6: Submit the application for U R A review\n\nNote: Instant TIN is only available to individuals with a NIN.",
+      "retrieval_mode": "faq_priority",
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "score_details": {
+        "matched_terms": [
+          "nin"
+        ],
+        "missing_terms": [
+          "portal",
+          "ura.go.ug",
+          "online",
+          "application"
+        ],
+        "matched_numbers": [],
+        "matched_citations": [],
+        "accuracy": 0.0,
+        "non_answer": false,
+        "language_ok": false,
+        "english_fallback": true,
+        "scorable": true
+      },
+      "latency_ms": 6708.5,
+      "stage_latency": {
+        "asr_ms": 308.0,
+        "gen_ms": 6399.2,
+        "norm_ms": 1.2
+      }
+    },
+    {
+      "faq_id": "REC200-0003",
+      "domain": "domestic",
+      "locale": "sw",
+      "query": "I have hired 4 bakers with monthly salaries of 450,000 UGX each. What tax must I deduct from them?",
+      "normalized_query": "I have hired 4 bakers with monthly salaries of 450,000 UGX each. What tax must I deduct from them?",
+      "spoken_reply": "Payee calculation, for the 2026 to 2027 financial year\nGross monthly salary: 450,000 Uganda shillings\nPayee due (5.6 percent effective): 25 thousand Uganda shillings per month\nNet take-home: 425,000 Uganda shillings\nBand applied: 25 percent marginal (410,000 Uganda shillings\u2013485,000 Uganda shillings)\nThis is net of Payee only \u2014 N-S-S-F (5 percent), Local Service Tax and any voluntary deductions still come off. Ask again with N-S-S-F included for a closer take-home figure. Statutory Basis: Income Tax Act\n\nAssumptions: resident employee (say \u201cnon-resident\u201d if not).",
+      "retrieval_mode": "calculator",
+      "is_accurate": false,
+      "figure_fidelity": true,
+      "score_details": {
+        "matched_terms": [],
+        "missing_terms": [
+          "PAYE",
+          "pay as you earn",
+          "employment income",
+          "deduct"
+        ],
+        "matched_numbers": [
+          "25,000"
+        ],
+        "matched_citations": [
+          "Income Tax Act"
+        ],
+        "accuracy": 0.0,
+        "non_answer": false,
+        "language_ok": false,
+        "english_fallback": true,
+        "scorable": true
+      },
+      "latency_ms": 370.7,
+      "stage_latency": {
+        "asr_ms": 308.0,
+        "gen_ms": 61.4,
+        "norm_ms": 1.1
+      }
+    },
+    {
+      "faq_id": "REC200-0004",
+      "domain": "domestic",
+      "locale": "en",
+      "query": "What is the monthly deadline to pay that deducted tax to URA?",
+      "normalized_query": "What is the monthly deadline to pay that deducted tax to URA?",
+      "spoken_reply": "I know deadlines can be stressful, so here's the quickest way forward.\n\nI'm sorry \u2014 I couldn't find a reliable answer to this in the U R A knowledge base, and I'd rather connect you with the right people than guess. Please contact U R A or call the toll-free Contact Centre on 0 800, 117, 0 0 0 / 0 800, 217, 0 0 0.",
+      "retrieval_mode": "abstained",
+      "is_accurate": false,
+      "figure_fidelity": false,
+      "score_details": {
+        "matched_terms": [
+          "deadline"
+        ],
+        "missing_terms": [
+          "15th",
+          "month",
+          "remit",
+          "pay"
+        ],
+        "matched_numbers": [],
+        "matched_citations": [],
+        "accuracy": 0.0,
+        "non_answer": true,
+        "language_ok": true,
+        "english_fallback": false,
+        "scorable": true
+      },
+      "latency_ms": 15642.9,
+      "stage_latency": {
+        "asr_ms": 308.0,
+        "gen_ms": 15334.0,
+        "norm_ms": 0.9
+      }
+    },
+    {
+      "faq_id": "REC200-0005",
+      "domain": "domestic",
+      "locale": "lg",
+      "query": "My estimated annual bakery turnover will be 180 million UGX. Must I register for VAT?",
+      "normalized_query": "My estimated annual bakery turnover will be 180 million UGX. Must I register for VAT?",
+      "spoken_reply": "VAT registration check, for the 2026 to 2027 financial year\nAnnual turnover: 180 million Uganda shillings\nRegistration threshold: 300 million Uganda shillings per year\nRegistration is not compulsory \u2014 you are below the threshold (headroom 120 million Uganda shillings). Voluntary registration is still available.\nStatutory Basis: Value Added Tax Act\n\nFigures use the official U R A 2026 to 2027 rate table.",
+      "retrieval_mode": "calculator",
+      "is_accurate": false,
+      "figure_fidelity": false,
+      "score_details": {
+        "matched_terms": [
+          "VAT"
+        ],
+        "missing_terms": [
+          "mandatory",
+          "compulsory",
+          "threshold",
+          "register"
+        ],
+        "matched_numbers": [
+          "300,000,000"
+        ],
+        "matched_citations": [
+          "Value Added Tax Act"
+        ],
+        "accuracy": 0.0,
+        "non_answer": false,
+        "language_ok": false,
+        "english_fallback": true,
+        "scorable": true
+      },
+      "latency_ms": 365.9,
+      "stage_latency": {
+        "asr_ms": 308.0,
+        "gen_ms": 56.9,
+        "norm_ms": 0.9
+      }
+    }
+  ]
+}

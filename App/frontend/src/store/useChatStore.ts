@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
 import type { DocumentAnalysisData } from '../lib/attachments';
 
@@ -61,6 +62,7 @@ export interface WorkflowState {
   step_title?: string;
   ui_widget?: 'options' | 'boolean' | 'text' | 'number' | 'portal_action' | string;
   options?: string[];
+  option_labels?: string[];
   portal_action?: { label: string; url: string; selector?: string } | null;
   all_steps?: WorkflowStepSummary[];
   resources?: ContextResource[];
@@ -75,6 +77,16 @@ export interface ChatTurn {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
+  /** The server's id for this answer in its conversation log (`turn_id` on
+   *  the chat response). A rating sends it, so the audit knows which answer
+   *  was rated. Absent on turns the server did not log, like the greeting. */
+  serverTurnId?: string;
+  /** A line from the chat itself rather than a message ("an officer has
+   *  joined", "the chat has ended"). Rendered as a notice, never rated. */
+  notice?: ChatNoticeKind;
+  /** The officer who wrote this turn (an officer's message in a live chat),
+   *  or who joined or ended it (a notice). */
+  officerName?: string;
   citations?: Citation[];
   faithfulnessScore?: number | null;
   retrievalMode?: string;
@@ -97,6 +109,31 @@ export interface ChatTurn {
    * in-flight state that produced it.
    */
   thoughtForMs?: number;
+  /** Knowledge discrepancy / bug report metadata if the turn disputed previous guidance */
+  discrepancyReport?: {
+    id: string;
+    status: string;
+    frequency_count?: number;
+    discrepancy_type?: string;
+  };
+}
+
+/** The chat's own notices: an officer joining, and the hand-back to the AI. */
+export type ChatNoticeKind = 'officer_joined' | 'officer_left';
+
+/** Where the live chat with an officer stands, as the server last said. */
+export type OfficerChatState = 'waiting' | 'officer' | 'ended' | 'none';
+
+/**
+ * The taxpayer's side of a live chat with an officer, kept per conversation so
+ * a reload resumes where it was: the case, the last thread message already
+ * shown (so none is shown twice) and the state.
+ */
+export interface OfficerChatSync {
+  ticketId: string;
+  lastSeq: number;
+  state: OfficerChatState;
+  officerName?: string;
 }
 
 export interface Conversation {
@@ -115,6 +152,8 @@ export interface Conversation {
   titleCustom?: boolean;
   /** Active escalation ticket ID associated with this conversation */
   activeTicketId?: string;
+  /** The live chat with an officer on that ticket, if one has started. */
+  officerChat?: OfficerChatSync;
 }
 
 /**
@@ -147,16 +186,35 @@ interface ChatStore {
   chat: ChatTurn[];
   speechState: SpeechState;
   locale: string;
+  /**
+   * True when the taxpayer picked `locale` themselves. False means auto-detect:
+   * `locale` is then only a hint (the last language the assistant answered in)
+   * and the backend decides from what was typed and the conversation so far.
+   */
+  localeExplicit: boolean;
   // Session management
   conversations: Conversation[];
   activeConversationId: string | null;
   activeTicketId: string | null;
+  /** The active conversation's live chat with an officer. */
+  officerChat: OfficerChatSync | null;
   supportCaseOpen: boolean;
   // Actions
   setMessage: (value: string) => void;
   setSpeechState: (state: SpeechState) => void;
+  /** The taxpayer picked a language. */
   setLocale: (locale: string) => void;
+  /** Go back to auto-detecting the answer language. */
+  setAutoDetectLocale: () => void;
+  /**
+   * Follow the language the backend answered in. Only `explicit_request`
+   * ("answer in Luganda", typed into the chat) becomes the taxpayer's choice;
+   * a detected or continued language stays a hint.
+   */
+  adoptResponseLocale: (locale: string, source?: string) => void;
   setActiveTicketId: (ticketId: string | null) => void;
+  /** Record where the live officer chat stands (null when it is over). */
+  setOfficerChat: (sync: OfficerChatSync | null) => void;
   setSupportCaseOpen: (open: boolean) => void;
   addTurns: (turns: ChatTurn[]) => void;
   updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
@@ -207,7 +265,10 @@ function deriveTitle(turns: ChatTurn[]): string {
   return first.content.slice(0, 60) + (first.content.length > 60 ? '...' : '');
 }
 
-type PersistedChatState = Pick<ChatStore, 'locale' | 'conversations' | 'activeConversationId'>;
+type PersistedChatState = Pick<ChatStore, 'locale' | 'conversations' | 'activeConversationId'> & {
+  localeExplicit?: boolean;
+  draftMessage?: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -241,11 +302,23 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
     turn.faithfulnessScore = value.faithfulnessScore;
   }
   if (typeof value.retrievalMode === 'string') turn.retrievalMode = value.retrievalMode;
+  if (typeof value.serverTurnId === 'string' && value.serverTurnId) turn.serverTurnId = value.serverTurnId;
+  if (value.notice === 'officer_joined' || value.notice === 'officer_left') turn.notice = value.notice;
+  if (typeof value.officerName === 'string' && value.officerName) turn.officerName = value.officerName.slice(0, 128);
   if (typeof value.escalationRequired === 'boolean') turn.escalationRequired = value.escalationRequired;
   if (typeof value.escalationReason === 'string') turn.escalationReason = value.escalationReason;
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
   if (typeof value.thoughtForMs === 'number' && Number.isFinite(value.thoughtForMs)) {
     turn.thoughtForMs = value.thoughtForMs;
+  }
+  const disc = value.discrepancyReport ?? (value as Record<string, unknown>).discrepancy_report;
+  if (isRecord(disc) && typeof disc.id === 'string') {
+    turn.discrepancyReport = {
+      id: disc.id,
+      status: String(disc.status || 'pending'),
+      frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+      discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+    };
   }
   if (Array.isArray(value.attachments)) {
     const attachments = value.attachments
@@ -258,6 +331,15 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
       });
     if (attachments.length) turn.attachments = attachments;
   }
+  if (Array.isArray(value.nextActions)) {
+    turn.nextActions = value.nextActions.filter((a): a is string => typeof a === 'string');
+  }
+  if (isRecord(value.workflow) && typeof value.workflow.id === 'string') {
+    turn.workflow = value.workflow as unknown as WorkflowState;
+  }
+  if (Array.isArray(value.resources)) {
+    turn.resources = value.resources.filter(isRecord) as unknown as ContextResource[];
+  }
 
   return turn;
 }
@@ -265,6 +347,22 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
 function sanitizeTurns(value: unknown): ChatTurn[] {
   if (!Array.isArray(value)) return [];
   return value.map(sanitizeTurn).filter((turn): turn is ChatTurn => Boolean(turn)).slice(-MAX_TURNS);
+}
+
+const OFFICER_CHAT_STATES: readonly OfficerChatState[] = ['waiting', 'officer', 'ended', 'none'];
+
+function sanitizeOfficerChat(value: unknown): OfficerChatSync | null {
+  if (!isRecord(value) || typeof value.ticketId !== 'string' || !value.ticketId) return null;
+  const state = OFFICER_CHAT_STATES.includes(value.state as OfficerChatState)
+    ? (value.state as OfficerChatState)
+    : 'waiting';
+  const sync: OfficerChatSync = {
+    ticketId: value.ticketId,
+    lastSeq: typeof value.lastSeq === 'number' && Number.isFinite(value.lastSeq) ? Math.max(0, value.lastSeq) : 0,
+    state,
+  };
+  if (typeof value.officerName === 'string' && value.officerName) sync.officerName = value.officerName.slice(0, 128);
+  return sync;
 }
 
 function sanitizeConversation(value: unknown): Conversation | null {
@@ -288,7 +386,22 @@ function sanitizeConversation(value: unknown): Conversation | null {
   if (value.pinned === true) conversation.pinned = true;
   if (value.titleCustom === true) conversation.titleCustom = true;
   if (typeof value.activeTicketId === 'string' && value.activeTicketId) conversation.activeTicketId = value.activeTicketId;
+  const sync = sanitizeOfficerChat(value.officerChat);
+  if (sync) conversation.officerChat = sync;
   return conversation;
+}
+
+/**
+ * The conversations the server still remembers. It deletes a conversation
+ * `CONVERSATION_TTL_DAYS` after its last turn, so an older one reopened here
+ * would continue without its history (G122). A pinned conversation is kept:
+ * the taxpayer chose to keep it. One stored without a time starts its clock now.
+ */
+function withinRetention(conversations: Conversation[], now: number = Date.now()): Conversation[] {
+  const ttl = conversationTtlMs();
+  return conversations
+    .map((conversation) => (conversation.updatedAt > 0 ? conversation : { ...conversation, updatedAt: now }))
+    .filter((conversation) => conversation.pinned || now - conversation.updatedAt < ttl);
 }
 
 function readPersistedChatState(): PersistedChatState | null {
@@ -308,10 +421,11 @@ function readPersistedChatState(): PersistedChatState | null {
     if (!state) return null;
 
     let conversations = Array.isArray(state.conversations)
-      ? state.conversations
-          .map(sanitizeConversation)
-          .filter((conversation): conversation is Conversation => Boolean(conversation))
-          .slice(0, MAX_SESSIONS)
+      ? withinRetention(
+          state.conversations
+            .map(sanitizeConversation)
+            .filter((conversation): conversation is Conversation => Boolean(conversation)),
+        ).slice(0, MAX_SESSIONS)
       : [];
 
     let activeConversationId =
@@ -340,10 +454,15 @@ function readPersistedChatState(): PersistedChatState | null {
       activeConversationId = null;
     }
 
+    const draftMessage = typeof state.draftMessage === 'string' ? state.draftMessage : '';
+
     return {
       locale: normalizeLocale(state.locale),
+      // Stored before the flag existed: auto-detect, the default.
+      localeExplicit: state.localeExplicit === true,
       conversations,
       activeConversationId,
+      draftMessage,
     };
   } catch {
     return null;
@@ -360,8 +479,10 @@ function writePersistedChatState(state: PersistedChatState): void {
       JSON.stringify({
         state: {
           locale: normalizeLocale(state.locale),
+          localeExplicit: state.localeExplicit === true,
           conversations: state.conversations.slice(0, MAX_SESSIONS),
           activeConversationId: state.activeConversationId,
+          draftMessage: state.draftMessage ?? '',
         },
         version: CHAT_STORAGE_VERSION,
       }),
@@ -491,20 +612,51 @@ export function cleanResponse(text: string): string {
   return normalizeAssistantResponse(cleaned || text.trim());
 }
 
+let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function debouncedSaveDraft(state: ChatStore): void {
+  if (draftSaveTimer) clearTimeout(draftSaveTimer);
+  draftSaveTimer = setTimeout(() => {
+    writePersistedChatState({
+      locale: state.locale,
+      localeExplicit: state.localeExplicit,
+      conversations: state.conversations,
+      activeConversationId: state.activeConversationId,
+      draftMessage: state.message,
+    });
+  }, 400);
+}
+
 export const useChatStore = create<ChatStore>()((set, get) => ({
   message: '',
   chat: [GREETING],
   speechState: 'idle' as SpeechState,
   locale: 'en',
+  localeExplicit: false,
   conversations: [] as Conversation[],
   activeConversationId: null as string | null,
   activeTicketId: null as string | null,
+  officerChat: null as OfficerChatSync | null,
   supportCaseOpen: false,
 
-  setMessage: (value) => set({ message: value }),
+  setMessage: (value) => {
+    set({ message: value });
+    debouncedSaveDraft(get());
+  },
   setSpeechState: (state) => set({ speechState: state }),
   setLocale: (locale) => {
-    set({ locale: normalizeLocale(locale) });
+    set({ locale: normalizeLocale(locale), localeExplicit: true });
+    writePersistedChatState(get());
+  },
+  setAutoDetectLocale: () => {
+    set({ localeExplicit: false });
+    writePersistedChatState(get());
+  },
+  adoptResponseLocale: (locale, source) => {
+    const next = normalizeLocale(locale);
+    const explicit = source === 'explicit_request' ? true : get().localeExplicit;
+    if (next === get().locale && explicit === get().localeExplicit) return;
+    set({ locale: next, localeExplicit: explicit });
     writePersistedChatState(get());
   },
   setActiveTicketId: (ticketId) => {
@@ -520,6 +672,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     } else {
       set({ activeTicketId: ticketId });
     }
+  },
+  setOfficerChat: (sync) => {
+    const cid = get().activeConversationId;
+    set((state) => ({
+      officerChat: sync,
+      conversations: cid
+        ? state.conversations.map((c) => (c.id === cid ? { ...c, officerChat: sync || undefined } : c))
+        : state.conversations,
+    }));
+    if (cid) get().saveCurrentSession();
   },
   setSupportCaseOpen: (open) => set({ supportCaseOpen: open }),
 
@@ -543,8 +705,10 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       chat: [GREETING],
       speechState: 'idle',
       locale: 'en',
+      localeExplicit: false,
       activeConversationId: null,
       activeTicketId: null,
+      officerChat: null,
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -561,7 +725,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   /** Save the current chat as a conversation (or update existing). */
   saveCurrentSession: () => {
-    const { chat, conversations, activeConversationId } = get();
+    const { chat, conversations, activeConversationId, activeTicketId, officerChat } = get();
     // Only save if there are user messages
     if (chat.length <= 1) {
       writePersistedChatState(get());
@@ -574,6 +738,10 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
     const id = activeConversationId ?? generateId();
     const conv: Conversation = { id, title, preview, turns: chat, createdAt: now, updatedAt: now };
+    // The open case and its live chat belong to this conversation, so a
+    // reload or a switch back resumes them.
+    if (activeTicketId) conv.activeTicketId = activeTicketId;
+    if (officerChat) conv.officerChat = officerChat;
     const existing = conversations.find((c) => c.id === id);
 
     if (existing) {
@@ -583,7 +751,15 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
         activeConversationId: id,
         conversations: conversations.map((c) =>
           c.id === id
-            ? { ...c, title: c.titleCustom ? c.title : title, preview, turns: chat, updatedAt: now }
+            ? {
+                ...c,
+                title: c.titleCustom ? c.title : title,
+                preview,
+                turns: chat,
+                updatedAt: now,
+                activeTicketId: activeTicketId || undefined,
+                officerChat: officerChat || undefined,
+              }
             : c,
         ),
       });
@@ -605,6 +781,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       message: '',
       activeConversationId: null,
       activeTicketId: null,
+      officerChat: null,
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -614,13 +791,22 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   switchSession: (id) => {
     const { saveCurrentSession } = get();
     saveCurrentSession();
-    const target = get().conversations.find((c) => c.id === id);
-    if (!target) return;
+    // A tab can stay open past the retention period: drop what the server has
+    // already forgotten before reopening anything (G122).
+    const conversations = withinRetention(get().conversations);
+    const target = conversations.find((c) => c.id === id);
+    if (!target) {
+      set({ conversations });
+      writePersistedChatState(get());
+      return;
+    }
     set({
+      conversations,
       chat: target.turns,
       activeConversationId: id,
       message: '',
       activeTicketId: target.activeTicketId || null,
+      officerChat: target.officerChat || null,
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -631,7 +817,14 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     const { conversations, activeConversationId } = get();
     const filtered = conversations.filter((c) => c.id !== id);
     if (id === activeConversationId) {
-      set({ conversations: filtered, chat: [GREETING], activeConversationId: null, message: '' });
+      set({
+        conversations: filtered,
+        chat: [GREETING],
+        activeConversationId: null,
+        message: '',
+        activeTicketId: null,
+        officerChat: null,
+      });
     } else {
       set({ conversations: filtered });
     }
@@ -675,11 +868,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
    * separate thing, removed by `DELETE /v1/me` (right to erasure).
    */
   clearAllSessions: () => {
+    // The server's copy of an anonymous history is bound to the chat session:
+    // a new one means it can no longer be resumed from this browser.
+    resetChatSession();
     set({
       conversations: [],
       chat: [GREETING],
       activeConversationId: null,
       message: '',
+      activeTicketId: null,
+      officerChat: null,
     });
     writePersistedChatState(get());
   },
@@ -693,12 +891,16 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       : null;
 
     set({
-      message: '',
+      message: persisted.draftMessage || '',
       chat: activeConversation?.turns.length ? activeConversation.turns : [GREETING],
       speechState: 'idle',
       locale: persisted.locale,
+      localeExplicit: persisted.localeExplicit === true,
       conversations: persisted.conversations,
       activeConversationId: activeConversation?.id ?? null,
+      // A reload mid-case resumes the case and its live chat.
+      activeTicketId: activeConversation?.activeTicketId ?? null,
+      officerChat: activeConversation?.officerChat ?? null,
     });
     writePersistedChatState(get());
   },

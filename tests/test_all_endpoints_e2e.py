@@ -89,6 +89,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/escalate"),
     ("GET", "/v1/escalate/{ticket_id}"),
     ("POST", "/v1/escalate/{ticket_id}/reply"),
+    ("GET", "/v1/escalate/{ticket_id}/messages"),
+    ("POST", "/v1/escalate/{ticket_id}/csat"),
     # --- Classification + knowledge (public) ---
     ("POST", "/classify"),
     ("POST", "/classify/batch"),
@@ -109,6 +111,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/feedback/summary"),
     # --- Analytics ---
     ("POST", "/v1/analytics/event"),
+    ("POST", "/v1/telemetry/vitals"),
+    ("POST", "/v1/telemetry/errors"),
     ("GET", "/v1/analytics/dashboard"),
     ("GET", "/v1/analytics/comparison"),
     ("GET", "/v1/analytics/journeys"),
@@ -121,16 +125,39 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/admin/tickets/{ticket_id}"),
     ("PATCH", "/v1/admin/tickets/{ticket_id}"),
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"),
+    ("POST", "/v1/admin/tickets/{ticket_id}/end-chat"),
     ("GET", "/v1/admin/flags"),
     ("PATCH", "/v1/admin/flags/{name}"),
     ("DELETE", "/v1/admin/flags/{name}"),
     ("GET", "/v1/admin/overrides"),
     ("PUT", "/v1/admin/overrides"),
     ("DELETE", "/v1/admin/overrides/{override_id}"),
+    ("GET", "/v1/admin/discrepancies"),
+    ("GET", "/v1/admin/discrepancies/stats"),
+    ("GET", "/v1/admin/discrepancies/{report_id}"),
+    ("POST", "/v1/admin/discrepancies/{report_id}/verify"),
+    ("POST", "/v1/admin/discrepancies/{report_id}/dismiss"),
+    ("GET", "/v1/admin/tombstones"),
+    ("POST", "/v1/admin/tombstones"),
+    ("DELETE", "/v1/admin/tombstones/{tombstone_id}"),
+    ("GET", "/v1/admin/precedences"),
+    ("POST", "/v1/admin/precedences"),
+    ("PATCH", "/v1/admin/precedences/{precedence_id}"),
+    ("DELETE", "/v1/admin/precedences/{precedence_id}"),
     ("GET", "/v1/admin/outbox"),
+    ("POST", "/v1/admin/outbox/dispatch"),
+    ("POST", "/v1/admin/outbox/test"),
+    ("POST", "/v1/admin/outbox/{notification_id}/retry"),
     ("GET", "/v1/admin/audit/events"),
     ("GET", "/v1/admin/audit/verify"),
     ("POST", "/v1/admin/audit/seal"),
+    # --- Service-quality audit (admin + auditor) ---
+    ("GET", "/v1/admin/quality/summary"),
+    ("GET", "/v1/admin/quality/ai-chat"),
+    ("GET", "/v1/admin/quality/ai-chat/{conversation_id}"),
+    ("GET", "/v1/admin/quality/ratings"),
+    ("GET", "/v1/admin/quality/needs-review"),
+    ("PUT", "/v1/admin/quality/reviews/{item_type}/{item_id}"),
     ("GET", "/v1/admin/voice_audit"),
     ("GET", "/v1/admin/offline_stats"),
     # --- Ops-key gated ---
@@ -173,6 +200,8 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("POST", "/v1/connectors/{name}/toggle"),
     ("GET", "/v1/connectors/{name}/records"),
     ("POST", "/v1/connectors/register"),
+    ("POST", "/v1/connectors/{name}/test"),
+    ("POST", "/v1/connectors/{name}/configure"),
     # --- Receptionist (simulated phone calls) ---
     ("GET", "/v1/admin/calls"),
     ("GET", "/v1/admin/calls/metrics"),
@@ -208,7 +237,9 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/chat"): "this:test_chat_happy_path + test_api_endpoints.ChatEndpoints",
     ("POST", "/v1/escalate"): "this:test_answer_integrity_integration + App/backend/tests/test_taxpayer_escalation.py",
     ("GET", "/v1/escalate/{ticket_id}"): "App/backend/tests/test_taxpayer_escalation.py",
-    ("POST", "/v1/escalate/{ticket_id}/reply"): "App/backend/tests/test_taxpayer_escalation.py",
+    ("POST", "/v1/escalate/{ticket_id}/reply"): "App/backend/tests/test_taxpayer_escalation.py + App/backend/tests/test_officer_chat.py",
+    ("GET", "/v1/escalate/{ticket_id}/messages"): "App/backend/tests/test_officer_chat.py:TaxpayerThreadTests",
+    ("POST", "/v1/escalate/{ticket_id}/csat"): "App/backend/tests/test_officer_chat.py:ChatRatingTests",
     ("POST", "/v1/chat/stream"): "test_fallback_integration.TestChatStreamEndpointFallback",
     ("POST", "/classify"): "test_api_endpoints.ClassificationKnowledge",
     ("POST", "/classify/batch"): "test_api_endpoints.ClassificationKnowledge",
@@ -226,6 +257,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("PATCH", "/v1/feedback/{message_id}/comment"): "this:test_feedback_comment_roundtrip",
     ("GET", "/v1/feedback/summary"): "test_api_endpoints.FeedbackEndpoints",
     ("POST", "/v1/analytics/event"): "test_api_endpoints.AnalyticsEndpoints",
+    ("POST", "/v1/telemetry/vitals"): "App/backend/tests/test_observability_endpoints.py",
+    ("POST", "/v1/telemetry/errors"): "App/backend/tests/test_observability_endpoints.py",
     ("GET", "/v1/analytics/dashboard"): "test_api_endpoints.AnalyticsEndpoints",
     ("GET", "/v1/analytics/comparison"): "test_api_endpoints.AnalyticsEndpoints",
     ("GET", "/v1/analytics/journeys"): "test_guided_journeys_integration:test_journey_funnel_endpoint",
@@ -237,6 +270,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status",
     ("PATCH", "/v1/admin/tickets/{ticket_id}"): "this:test_patch_ticket_updates_status + test_patch_ticket_noop_400",
     ("POST", "/v1/admin/tickets/{ticket_id}/presence"): "test_api_endpoints.AdminEndpoints.test_presence_heartbeats_the_viewer",
+    ("POST", "/v1/admin/tickets/{ticket_id}/end-chat"): "App/backend/tests/test_officer_chat.py:EndChatTests",
     ("GET", "/v1/admin/flags"): "test_api_endpoints.AdminEndpoints.test_flags_list_includes_protection",
     ("PATCH", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_admin_can_set_an_ephemeral_flag",
     ("DELETE", "/v1/admin/flags/{name}"): "test_api_endpoints.AdminEndpoints.test_clearing_an_override_restores_the_default",
@@ -263,10 +297,31 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("GET", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
     ("PUT", "/v1/admin/overrides"): "App.backend.tests.test_remaining_gaps",
     ("DELETE", "/v1/admin/overrides/{override_id}"): "App.backend.tests.test_remaining_gaps",
+    ("GET", "/v1/admin/discrepancies"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/discrepancies/stats"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/discrepancies/{report_id}"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/discrepancies/{report_id}/verify"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/discrepancies/{report_id}/dismiss"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/tombstones"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/tombstones"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("DELETE", "/v1/admin/tombstones/{tombstone_id}"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("GET", "/v1/admin/precedences"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("POST", "/v1/admin/precedences"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("PATCH", "/v1/admin/precedences/{precedence_id}"): "App.backend.tests.test_discrepancy_and_precedence",
+    ("DELETE", "/v1/admin/precedences/{precedence_id}"): "App.backend.tests.test_discrepancy_and_precedence",
     ("GET", "/v1/admin/outbox"): "App.backend.tests.test_remaining_gaps",
+    ("POST", "/v1/admin/outbox/dispatch"): "this:test_outbox_live_endpoints",
+    ("POST", "/v1/admin/outbox/test"): "this:test_outbox_live_endpoints",
+    ("POST", "/v1/admin/outbox/{notification_id}/retry"): "this:test_outbox_live_endpoints",
     ("GET", "/v1/admin/audit/events"): "test_auditor_controls:test_auditor_reads_the_trail_and_filters_it",
     ("GET", "/v1/admin/audit/verify"): "test_auditor_controls:test_verify_detects_a_tampered_row",
     ("POST", "/v1/admin/audit/seal"): "test_auditor_controls:test_sealing_is_for_audit_readers_and_catches_a_rewrite",
+    ("GET", "/v1/admin/quality/summary"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
+    ("GET", "/v1/admin/quality/ai-chat"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
+    ("GET", "/v1/admin/quality/ai-chat/{conversation_id}"): "App/backend/tests/test_quality_audit.py:AuditRouteTests",
+    ("GET", "/v1/admin/quality/ratings"): "App/backend/tests/test_service_ratings.py:RatingsRouteTests",
+    ("GET", "/v1/admin/quality/needs-review"): "App/backend/tests/test_audit_reviews.py:QueueRouteTests",
+    ("PUT", "/v1/admin/quality/reviews/{item_type}/{item_id}"): "App/backend/tests/test_audit_reviews.py:ReviewRouteTests",
     ("GET", "/v1/me/profile"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
     ("PUT", "/v1/me/profile"): "test_me_endpoints",
     ("GET", "/v1/me/consents"): "test_api_endpoints.MeEndpoints + test_me_endpoints",
@@ -281,6 +336,8 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/connectors/{name}/toggle"): "this:test_connectors_endpoints",
     ("GET", "/v1/connectors/{name}/records"): "this:test_connectors_endpoints",
     ("POST", "/v1/connectors/register"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/test"): "this:test_connectors_endpoints",
+    ("POST", "/v1/connectors/{name}/configure"): "this:test_connectors_endpoints",
     ("GET", "/v1/admin/calls"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/metrics"): "App.backend.tests.test_receptionist_ws",
     ("GET", "/v1/admin/calls/{call_id}"): "App.backend.tests.test_receptionist_ws",
@@ -389,12 +446,30 @@ _AUDIO = b"\x00\x01" * 512  # tiny raw PCM16 payload
 # ---------------------------------------------------------------------------
 # 1. Route-table drift guard
 # ---------------------------------------------------------------------------
+def _iter_routes(routes, prefix: str = ""):
+    """Yield ``(prefix, route)``, descending into included routers.
+
+    FastAPI 0.141 made ``include_router`` lazy: ``app.routes`` holds one
+    ``_IncludedRouter`` per call instead of copies of its routes, so the
+    connector and offline routers vanished from a flat walk while still
+    serving requests.
+    """
+    for route in routes:
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            context = getattr(route, "include_context", None)
+            yield from _iter_routes(original.routes, prefix + (getattr(context, "prefix", "") or ""))
+            continue
+        yield prefix, route
+
+
 def _live_route_table() -> set[tuple[str, str]]:
     table: set[tuple[str, str]] = set()
-    for route in app.routes:
+    for prefix, route in _iter_routes(app.routes):
         path = getattr(route, "path", None)
         if path is None:
             continue
+        path = prefix + path
         methods = getattr(route, "methods", None)
         if methods:
             for m in methods:
@@ -430,10 +505,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (94 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (122 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 94, f"expected 94 HTTP endpoints, found {len(http)}"
+    assert len(http) == 122, f"expected 122 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -703,8 +778,9 @@ def test_patch_ticket_noop_400():
 def test_feedback_comment_roundtrip():
     c = _client()
     mid = f"m-e2e-{uuid.uuid4().hex[:8]}"
-    # Feedback is analytics processing, so a user must give purpose-specific
-    # consent before the success path is available.
+    # With analytics consent a rating is tied to the user who gave it (and is
+    # reached by their export and erasure); without it, it is stored
+    # anonymously. This drives the consented path.
     consent = c.post(
         "/v1/me/consents/grant",
         headers=_bearer(USER),
@@ -790,40 +866,94 @@ def test_auth_dev_token():
 
 
 def test_connectors_endpoints():
-    """Verify GET /v1/connectors, POST /v1/connectors/{name}/toggle, GET /v1/connectors/{name}/records."""
+    """Connector operations are staff-only and describe local simulations accurately."""
     c = _client()
-    r1 = c.get("/v1/connectors")
+    assert c.get("/v1/connectors").status_code in (401, 503)
+    assert c.get("/v1/connectors", headers=_bearer(USER)).status_code == 403
+
+    r1 = c.get("/v1/connectors", headers=_bearer(STAFF))
     assert r1.status_code == 200
     data = r1.json()
     assert data["ok"] is True
+    assert data["live"] is False
+    assert data["mode"] == "simulation"
     assert len(data["connectors"]) >= 2
+    assert all(connector["live"] is False for connector in data["connectors"])
 
-    # Toggle connector
-    r2 = c.post("/v1/connectors/efris/toggle", json={"enable": True})
+    # Auditors can read status but cannot change connector availability.
+    auditor = _bearer(make_dev_token("e2e-auditor", role="ura_auditor"))
+    assert c.post("/v1/connectors/efris/toggle", json={"enable": True}, headers=auditor).status_code == 403
+
+    r2 = c.post("/v1/connectors/efris/toggle", json={"enable": True}, headers=_bearer(STAFF))
     assert r2.status_code == 200
     assert r2.json()["ok"] is True
+    assert c.post("/v1/connectors/efris/toggle", json={"enable": "false"}, headers=_bearer(STAFF)).status_code == 422
 
-    # Inspect records from independent database
-    r3 = c.get("/v1/connectors/efris/records?limit=3")
-    assert r3.status_code == 200
-    assert r3.json()["ok"] is True
-    assert "invoices" in r3.json()
+    # Raw fixture and taxpayer records are no longer exposed by the admin API.
+    r3 = c.get("/v1/connectors/efris/records?limit=3", headers=_bearer(STAFF))
+    assert r3.status_code == 410
+    assert "Raw connector records are not exposed" in r3.json()["detail"]
 
-    # Register external API/MCP connector
-    r4 = c.post(
-        "/v1/connectors/register",
+    # Arbitrary endpoints and browser-supplied credentials are not accepted.
+    r4 = c.post("/v1/connectors/register", headers=_bearer(STAFF))
+    assert r4.status_code == 410
+    assert "Dynamic connector registration is disabled" in r4.json()["detail"]
+
+    # Active diagnostic ping and capability test
+    r5 = c.post("/v1/connectors/efris/test", headers=_bearer(STAFF))
+    assert r5.status_code == 200
+    assert r5.json()["ok"] is True
+    assert "latency_ms" in r5.json()
+
+    # Runtime configuration is disabled; endpoint and credentials are deployment-only.
+    r6 = c.post("/v1/connectors/efris/configure", json={"mode": "simulation"}, headers=_bearer(STAFF))
+    assert r6.status_code == 410
+    assert "Runtime connector configuration is disabled" in r6.json()["detail"]
+
+
+def test_outbox_live_endpoints() -> None:
+    c = _client()
+    # Anonymous and non-staff rejected
+    assert c.get("/v1/admin/outbox").status_code in (401, 503)
+    assert c.post("/v1/admin/outbox/dispatch").status_code in (401, 503)
+    assert c.post("/v1/admin/outbox/test", json={"channel": "email", "recipient": "test@ura.go.ug", "message": "hi"}).status_code in (401, 503)
+
+    # Staff can query outbox and inspect live provider statuses
+    res = c.get("/v1/admin/outbox", headers=_bearer(STAFF))
+    assert res.status_code == 200
+    data = res.json()
+    assert "items" in data
+    assert "live" in data
+    assert "providers" in data
+    assert "stats" in data
+
+    # Staff can send a live test notification
+    test_res = c.post(
+        "/v1/admin/outbox/test",
         json={
-            "name": "stripe_payments",
-            "endpoint_url": "http://127.0.0.1:8200",
-            "api_key": "sec_test_stripe_token",  # pragma: allowlist secret
-            "system_type": "external_payment",
-            "display_name": "Stripe Gateway",
-            "description": "External payment processor",
+            "channel": "email",
+            "recipient": "taxpayer@ura.go.ug",
+            "message": "Your monthly VAT reminder is ready.",
+            "subject": "VAT Filing Reminder",
         },
+        headers=_bearer(STAFF),
     )
-    assert r4.status_code == 200
-    assert r4.json()["ok"] is True
-    assert r4.json()["status"] == "connected"
+    assert test_res.status_code == 200
+    test_data = test_res.json()
+    assert test_data["ok"] is True
+    assert "id" in test_data
+    nid = test_data["id"]
+
+    # Staff can retry notification
+    retry_res = c.post(f"/v1/admin/outbox/{nid}/retry", headers=_bearer(STAFF))
+    assert retry_res.status_code == 200
+    assert retry_res.json()["ok"] is True
+
+    # Staff can trigger outbox dispatch
+    dispatch_res = c.post("/v1/admin/outbox/dispatch", headers=_bearer(STAFF))
+    assert dispatch_res.status_code == 200
+    assert dispatch_res.json()["ok"] is True
+    assert "processed" in dispatch_res.json()
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-import { clearChatStore, mockBackend, openSettings, seedConsent } from "./helpers";
+import { clearChatStore, mockBackend, openSettings, seedConsent, sendMessage } from "./helpers";
 
 const WCAG_22_AA_TAGS = [
   "wcag2a",
@@ -31,8 +31,12 @@ function violationSummary(violations: Awaited<ReturnType<AxeBuilder["analyze"]>>
     .join("\n");
 }
 
-async function expectNoSeriousOrCritical(page: Page, surface: string) {
-  const results = await new AxeBuilder({ page }).withTags(WCAG_22_AA_TAGS).analyze();
+async function expectNoSeriousOrCritical(page: Page, surface: string, include: string[] = []) {
+  let builder = new AxeBuilder({
+    page: page as unknown as ConstructorParameters<typeof AxeBuilder>[0]["page"],
+  }).withTags(WCAG_22_AA_TAGS);
+  for (const selector of include) builder = builder.include(selector);
+  const results = await builder.analyze();
   const violations = results.violations.filter(
     (violation) => violation.impact === "critical" || violation.impact === "serious",
   );
@@ -49,8 +53,166 @@ async function visitInTheme(page: Page, path: string, theme: Theme) {
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 }
 
-/** A minimal but valid operations API for the routes below. */
-async function prepareStaffSession(page: Page) {
+/** A conversation that went wrong at its third answer, as GET /v1/admin/quality/ai-chat returns it. */
+function qualityFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const summary = {
+    period_days: 30, truncated: false, rated_answers: 12, helpful: 8, unhelpful: 4, helpful_pct: 66.7,
+    comments: 2, conversations: 5, unlinked_answers: 0,
+    patterns: { went_wrong: 2, never_helpful: 1, recovered: 0, all_helpful: 2 },
+    median_break_answer: 3,
+    by_position: [
+      { position: "1", rated: 5, helpful: 5, helpful_pct: 100 },
+      { position: "2", rated: 4, helpful: 2, helpful_pct: 50 },
+      { position: "3", rated: 3, helpful: 1, helpful_pct: 33.3 },
+      { position: "4", rated: 0, helpful: 0, helpful_pct: null },
+      { position: "5+", rated: 0, helpful: 0, helpful_pct: null },
+    ],
+    by_topic: [{ key: "vat_registration", rated: 6, helpful: 3, unhelpful: 3, helpful_pct: 50 }],
+    by_route: [{ key: "hybrid", rated: 10, helpful: 7, unhelpful: 3, helpful_pct: 70 }],
+    by_language: [{ key: "en", rated: 12, helpful: 8, unhelpful: 4, helpful_pct: 66.7 }],
+    by_day: [],
+    previous: { rated_answers: 10, helpful_pct: 70, truncated: false },
+  };
+  const page = {
+    period_days: 30, truncated: false, total: 1, limit: 25, offset: 0,
+    conversations: [{
+      conversation_id: "conv-went-wrong", key: "conv-went-wrong", linked: true, pattern: "went_wrong",
+      ratings: [{ answer: 1, rating: "up" }, { answer: 2, rating: "up" }, { answer: 3, rating: "down" }],
+      rated_answers: 3, unhelpful: 1, break_answer: 3, break_question: "What if I am a sole proprietor?",
+      helpful_before_break: true, comments: 1, topic: "vat_registration", locale: "lg",
+      first_rated_at: now - 600, last_rated_at: now - 60,
+    }],
+  };
+  const answer = (n: number, rating: string, question: string, reply: string, isBreak = false) => ({
+    answer: n, turn_id: `t${n}`, question, reply, created_at: now - 900 + n * 100, sources: ["vat-act.pdf"],
+    confidence: 0.7, topic: "vat_registration", rating, comment: isBreak ? "That is wrong." : "",
+    retrieval_mode: "hybrid", is_break: isBreak,
+  });
+  const timeline = {
+    conversation_id: "conv-went-wrong", pattern: "went_wrong", break_answer: 3, transcript_complete: true,
+    transcript_kept_days: 7,
+    answers: [
+      answer(1, "up", "How do I register for VAT?", "Apply on the eTax portal."),
+      answer(2, "up", "What documents do I need?", "Your TIN and certificate of incorporation."),
+      answer(3, "down", "What if I am a sole proprietor?", "Sole proprietors cannot register.", true),
+    ],
+  };
+  return { summary, page, timeline };
+}
+
+/**
+ * Ratings, as GET /v1/admin/quality/ratings returns them for *source*: one low,
+ * one high. Officer chats name a ticket, officer calls a call; the caller's
+ * spoken review of the AI is rated in words (no score).
+ */
+function ratingsFixture(source = "chat_officer_csat") {
+  const now = Math.floor(Date.now() / 1000);
+  const spoken = source.startsWith("call_ai");
+  const onCall = source.startsWith("call_");
+  const rating = (id: string, score: number, officer: [string, string], extra: Record<string, unknown> = {}) => ({
+    id, source, channel: onCall ? "call" : "chat", subject: spoken ? "ai" : "officer", status: "answered",
+    score: spoken ? null : score,
+    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "",
+    ticket_id: onCall ? "" : `tkt-${id}`, call_id: onCall ? `call-${id}` : "", conversation_id: `conv-${id}`,
+    officer_id: spoken ? "" : officer[0], officer_name: spoken ? "" : officer[1], team: "domestic_taxes",
+    topic: "vat", locale: "en", created_at: now - 900, answered_at: now - 600, ...extra,
+  });
+  const period = { rated: 2, average: spoken ? null : 3.5, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 };
+  return {
+    source,
+    period_days: 30,
+    truncated: false,
+    summary: {
+      asked: 3, answered: 2, skipped: 1, no_answer: 0, pending: 0, response_rate: 66.7, average: 3.5, csat_pct: 50, low: 1,
+      distribution: { "1": 0, "2": 1, "3": 0, "4": 0, "5": 1 },
+      sentiment: { positive: 1, neutral: 0, negative: 1, unclear: 0 },
+      positive_pct: 50,
+      negative_pct: 50,
+      by_officer: spoken ? [] : [
+        { officer_id: "u-okello", officer_name: "Officer Okello", handled: 2, rated: 1, average: 2, csat_pct: 0, low: 1 },
+        { officer_id: "u-nakato", officer_name: "Officer Nakato", handled: 1, rated: 1, average: 5, csat_pct: 100, low: 0 },
+      ],
+      by_week: [{ week: "2026-W41", ...period }],
+      by_language: [{ locale: "lg", asked: 3, response_rate: 66.7, ...period }],
+    },
+    previous: { asked: 2, answered: 2, response_rate: 100, average: spoken ? null : 4, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 },
+    total: 2,
+    limit: 25,
+    offset: 0,
+    ratings: [
+      rating("low", 2, ["u-okello", "Officer Okello"], { comment: spoken ? "It didn't help me" : "Took too long to answer." }),
+      rating("high", 5, ["u-nakato", "Officer Nakato"]),
+    ],
+  };
+}
+
+async function stubQualityAudit(page: Page) {
+  const q = qualityFixture();
+  await page.route("**/api/v1/admin/quality/ai-chat/*", (route) => route.fulfill({ json: q.timeline }));
+  await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
+    route.fulfill({ json: { summary: q.summary, page: q.page } }),
+  );
+  await page.route("**/api/v1/admin/quality/ratings?**", (route) =>
+    route.fulfill({ json: ratingsFixture(new URL(route.request().url()).searchParams.get("source") || undefined) }),
+  );
+  // The overview's headline per stream, and the Needs review queue.
+  const headline = (source: string) => {
+    const r = ratingsFixture(source);
+    return { truncated: false, ...r.summary, previous: r.previous };
+  };
+  await page.route("**/api/v1/admin/quality/summary**", (route) =>
+    route.fulfill({
+      json: {
+        period_days: 30,
+        needs_review: { open: 2, action_needed: 1 },
+        ai_chat: q.summary,
+        officer_chat: headline("chat_officer_csat"),
+        ai_calls: { end: headline("call_ai_review_end"), transfer: headline("call_ai_review_transfer") },
+        officer_calls: headline("call_officer_csat"),
+      },
+    }),
+  );
+  const now = Math.floor(Date.now() / 1000);
+  await page.route("**/api/v1/admin/quality/needs-review**", (route) =>
+    route.fulfill({
+      json: {
+        period_days: 30, truncated: false, counts: { open: 2, action_needed: 1, reviewed: 0, all: 3 },
+        total: 3, limit: 25, offset: 0,
+        items: [
+          {
+            item_type: "ai_chat", item_id: "conv-went-wrong", stream: "ai_chat", title: "AI chat went wrong at answer 3",
+            quote: "What if I am a sole proprietor?", comment: "That is wrong.", topic: "vat_registration", locale: "lg",
+            officer_name: "", occurred_at: now - 60,
+            link: { tab: "ai-chat", param: "conversation", value: "conv-went-wrong" }, review: null,
+          },
+          {
+            item_type: "rating", item_id: "low", stream: "officer_chat", title: "Officer chat rated 2/5 — Officer Okello",
+            quote: "", comment: "Took too long to answer.", topic: "vat", locale: "en", officer_name: "Officer Okello",
+            occurred_at: now - 600, link: { tab: "officer-chat", param: "ticket", value: "tkt-low" },
+            review: { status: "action_needed", note: "Coach on response times", reviewer_name: "auditor@ura.go.ug", updated_at: now - 30 },
+          },
+          {
+            item_type: "rating", item_id: "call-ai-low", stream: "ai_call",
+            title: "Caller said the AI didn't help (while being transferred)", quote: "", comment: "It didn't help me",
+            topic: "vat", locale: "en", officer_name: "", occurred_at: now - 900,
+            link: { tab: "ai-calls", param: "", value: "" }, review: null,
+          },
+        ],
+      },
+    }),
+  );
+}
+
+/**
+ * A minimal but valid operations API for the routes below, signed in as *role*.
+ *
+ * Officers (`ura_staff`) open the queue and the call desk; administrators open
+ * the audit and configuration pages and are refused the live ones. Called a
+ * second time on the same page, the later `/v1/me` stub wins (Playwright
+ * matches the most recently added route first).
+ */
+async function prepareStaffSession(page: Page, role = "ura_admin") {
   await page.addInitScript(() => {
     window.localStorage.setItem("ura_auth_token", "e2e-a11y-admin-token");
     window.localStorage.setItem("ura_analytics_consent", "false");
@@ -68,13 +230,14 @@ async function prepareStaffSession(page: Page) {
     route.fulfill({
       json: {
         authenticated: true,
-        role: "ura_admin",
+        role,
         email: "accessibility.audit@ura.go.ug",
         external_id: "e2e-a11y-admin",
         tenant_id: "default",
       },
     }),
   );
+  await stubQualityAudit(page);
   await page.route("**/api/v1/authority/status", (route) =>
     route.fulfill({
       // The endpoint returns a count, not a list — `sources` was never a key
@@ -251,38 +414,198 @@ test.describe("WCAG 2.2 AA automated route audit", () => {
   });
 
   test("has no serious or critical axe violations on every required staff surface in both themes", async ({ page }) => {
-    // Eighteen navigations and eighteen axe passes: nine console routes in two
+    // Twenty-eight navigations and axe passes: fourteen console routes in two
     // themes. That is inherently past the 30s default, and was already close to
     // it at four routes.
     test.slow();
-    await prepareStaffSession(page);
 
     // Every console route, including the two that used to sit outside it.
     // /analytics in particular was never audited: it was not behind StaffGuard,
-    // so this suite's staff session did not reach it.
-    const routes = [
-      ["/admin", "Operations overview"],
-      ["/agent", "My queue"],
-      ["/admin/tickets", "Escalation queue"],
-      ["/admin/flags", "Feature flags"],
-      ["/admin/overrides", "Answer overrides"],
-      ["/admin/outbox", "Notification outbox"],
-      ["/analytics", "Analytics Dashboard"],
-      ["/analytics/evaluation", "Answer evaluation"],
-      ["/calls", "Phone Calls"],
-    ] as const;
+    // so this suite's staff session did not reach it. Each is visited as the
+    // role that opens it: administrators audit and configure, officers work
+    // the queue and the call desk.
+    const routesByRole = {
+      ura_admin: [
+        ["/admin", "Service quality overview"],
+        ["/admin/quality", "Service quality audit"],
+        ["/admin/quality?tab=officer-chat", "Service quality audit"],
+        ["/admin/quality?tab=ai-calls", "Service quality audit"],
+        ["/admin/quality?tab=officer-calls", "Service quality audit"],
+        ["/admin/quality?tab=needs-review", "Service quality audit"],
+        ["/admin/flags", "Feature flags"],
+        ["/admin/overrides", "Answer overrides"],
+        ["/admin/outbox", "Notification outbox"],
+        ["/analytics", "Analytics Dashboard"],
+        ["/analytics/evaluation", "Answer evaluation"],
+      ],
+      ura_staff: [
+        ["/agent", "My queue"],
+        ["/admin/tickets", "Escalation queue"],
+        ["/calls", "Phone Calls"],
+      ],
+    } as const;
 
-    for (const theme of ["light", "dark"] as const) {
-      for (const [path, heading] of routes) {
-        await visitInTheme(page, path, theme);
-        await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-        await expectNoSeriousOrCritical(page, `${path} (${theme})`);
+    for (const [role, routes] of Object.entries(routesByRole)) {
+      await prepareStaffSession(page, role);
+      for (const theme of ["light", "dark"] as const) {
+        for (const [path, heading] of routes) {
+          await visitInTheme(page, path, theme);
+          await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+          await expectNoSeriousOrCritical(page, `${path} as ${role} (${theme})`);
+        }
       }
     }
   });
 });
 
+test.describe("live chat with an officer", () => {
+  test("the officer's messages, the notices and the rating dialog pass WCAG 2.2 AA, and the faces are keyboard-operable", async ({ page }) => {
+    const ticket = "abc12345-6789-4def-8123-456789abcdef";
+    let phase: "officer" | "ended" = "officer";
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page, { escalate: true, reply: "This requires human review." });
+    await page.route("**/api/v1/escalate", (route) =>
+      route.fulfill({ json: { ok: true, ticket_id: ticket, status: "open", message: "A URA officer has been asked to look at this." } }),
+    );
+    await page.route(`**/api/v1/escalate/${ticket}/messages**`, (route) =>
+      route.fulfill({
+        json: {
+          ticket_id: ticket,
+          chat_state: phase,
+          officer_name: "Officer Nakato",
+          messages: [{ seq: 1, sender: "officer", text: "Which period?", officer_name: "Officer Nakato", created_at: Date.now() / 1000 }],
+          last_seq: 1,
+          csat: { requested: phase === "ended", submitted: false },
+        },
+      }),
+    );
+    await page.route(`**/api/v1/escalate/${ticket}/csat`, (route) => route.fulfill({ json: { ok: true, status: "answered" } }));
+    await page.goto("/");
+    await sendMessage(page, "I was assessed VAT twice");
+    await page.getByTestId("handoff-request").click();
+    await expect(page.locator(".message-row-officer")).toBeVisible({ timeout: 15_000 });
+    // Scoped to what the live chat adds: the officer's message, the notice and
+    // the banner. The rest of the chat page has its own route audit.
+    await expectNoSeriousOrCritical(page, "chat with an officer", [".message-row-officer", ".chat-notice", ".chat-case-banner"]);
+
+    phase = "ended";
+    const dialog = page.getByRole("dialog", { name: "How was your chat with Officer Nakato?" });
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    // Focus starts on the scale; the arrows choose without a pointer.
+    await expect(dialog.getByRole("radio", { name: "3 of 5, Neutral" })).toBeFocused();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog.getByRole("radio", { name: "4 of 5, Satisfied" })).toBeChecked();
+    await expectNoSeriousOrCritical(page, "officer chat rating dialog", [".service-rating-dialog"]);
+  });
+});
+
 test.describe("keyboard and focus regression checks", () => {
+  test("connector picker supports keyboard selection, restores focus, and passes WCAG 2.2 AA", async ({ page }) => {
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page);
+    await page.route(
+      (url) => url.pathname === "/api/v1/connectors" && url.searchParams.get("view") === "chat",
+      (route) => route.fulfill({
+        json: {
+          ok: true,
+          enabled: true,
+          connectors: [
+            {
+              namespace: "efris",
+              label: "EFRIS",
+              description: "Demo data only — not connected to live URA systems. Reads a sample taxpayer profile.",
+              summary: "Reads a sample taxpayer profile.",
+              mode: "simulation",
+              status: "available",
+              operation_count: 2,
+              operations: [
+                { name: "efris_taxpayer_status", title: "Taxpayer status", description: "Reads a profile." },
+                { name: "efris_invoice_status", title: "Invoice status", description: "Reads an invoice." },
+              ],
+              read_only: true,
+            },
+            {
+              namespace: "ursb",
+              label: "URSB",
+              description: "Demo data only — not connected to live URA systems. Searches sample businesses.",
+              summary: "Searches sample businesses.",
+              mode: "simulation",
+              status: "unavailable",
+              operation_count: 1,
+              operations: [{ name: "ursb_verify_business", title: "Verify a business", description: "" }],
+              read_only: true,
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/");
+
+    const trigger = page.getByTestId("composer-add-btn");
+    await trigger.click();
+    await expect(page.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeFocused();
+    await expectNoSeriousOrCritical(page, "add menu");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+
+    const dialog = page.getByRole("dialog", { name: "URA services" });
+    await expect(dialog).toBeVisible();
+    // What a person needs before choosing: demo or live, answering or not.
+    await expect(dialog.getByText("Demo data").first()).toBeVisible();
+    await expect(dialog.getByRole("button", { name: /URSB/ })).toBeDisabled();
+    await expectNoSeriousOrCritical(page, "connector picker");
+    await page.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+
+    await trigger.click();
+    await expect(page.getByRole("menuitem", { name: /Upload a file or screenshot/ })).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    const connectorOption = dialog.getByRole("button", { name: /EFRIS/ });
+    await connectorOption.click();
+    await expect(connectorOption).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Remove EFRIS from this chat" })).toBeVisible();
+    await page.keyboard.press("Escape");
+  });
+
+  test("the add menu stays above an existing conversation", async ({ page }) => {
+    // Found in the live UI: the menu used to be an overlay inside the composer,
+    // and once the transcript had messages their text and buttons painted
+    // over it. It is a native <dialog> in the browser's top layer now.
+    await seedConsent(page);
+    await clearChatStore(page);
+    await mockBackend(page, { reply: "The standard VAT rate in Uganda is 18%." });
+    await page.goto("/");
+    await sendMessage(page, "What is the VAT rate?");
+    await expect(page.locator(".message-row-assistant").last()).toContainText("18%", { timeout: 15_000 });
+
+    await page.getByTestId("composer-add-btn").click();
+    const menu = page.locator("dialog.addmenu-dialog");
+    await expect(menu).toBeVisible();
+
+    const box = await menu.boundingBox();
+    expect(box).not.toBeNull();
+    // Every row's centre is hit-tested to the menu itself, not to the transcript.
+    for (const row of await menu.getByRole("menuitem").all()) {
+      const rowBox = await row.boundingBox();
+      expect(rowBox).not.toBeNull();
+      const owner = await page.evaluate(
+        ({ x, y }) => document.elementFromPoint(x, y)?.closest("dialog.addmenu-dialog") !== null,
+        { x: rowBox!.x + rowBox!.width / 2, y: rowBox!.y + rowBox!.height / 2 },
+      );
+      expect(owner).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(menu).not.toBeVisible();
+    await expect(page.getByTestId("composer-add-btn")).toBeFocused();
+  });
+
   test("header menu follows the menu-button keyboard pattern and restores focus", async ({ page }) => {
     await seedConsent(page);
     await clearChatStore(page);
@@ -301,7 +624,7 @@ test.describe("keyboard and focus regression checks", () => {
   });
 
   test("composer controls and staff tabs are reachable without a pointer", async ({ page }) => {
-    await prepareStaffSession(page);
+    await prepareStaffSession(page, "ura_staff");
     await page.goto("/");
     await expect(page.getByLabel("Type your message")).toBeVisible();
     await expect(page.getByLabel("Start speaking")).toBeVisible();

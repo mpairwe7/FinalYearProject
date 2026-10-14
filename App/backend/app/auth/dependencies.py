@@ -25,7 +25,7 @@ from typing import Any
 from fastapi import Depends, Header, HTTPException, Request
 
 from ..flags import flags
-from .jwt_auth import JWTAuthError, JWTVerifier
+from .jwt_auth import APP_ENV, JWTAuthError, JWTVerifier
 from .models import AuthUser
 
 logger = logging.getLogger(__name__)
@@ -234,8 +234,27 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
     try:
         claims = _get_verifier().verify(token)
     except JWTAuthError as e:
-        logger.info("JWT rejected: %s", e)
-        raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
+        verifier = _get_verifier()
+        if APP_ENV != "production" and verifier.dev_secret and "unexpected alg" in str(e):
+            try:
+                from .jwt_auth import _hs256_verify
+
+                claims = _hs256_verify(token, verifier.dev_secret)
+            except Exception:
+                request.state.security_reason = f"invalid token: {e}"[:160]
+                raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
+        else:
+            # Logged as an authn_login_fail security event by the request
+            # middleware (app.security_events), with this reason attached.
+            request.state.security_reason = f"invalid token: {e}"[:160]
+            raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
+    else:
+        # A provider's access token often carries no name or email; fill them
+        # from its profile (cached) so nobody is shown a bare account id.
+        if _get_verifier().alg == "RS256":
+            from .userinfo import with_profile
+
+            claims = with_profile(token, claims)
 
     user = _claims_to_user(claims)
     ctx = AuthContext(authenticated=True, user=user, claims=claims)

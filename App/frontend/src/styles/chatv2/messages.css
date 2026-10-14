@@ -180,11 +180,68 @@
   color: var(--text-1);
 }
 
+/* A URA officer's message in a live chat: a person, so a person's roundel in
+   the officer green and their name above the text. */
+.chatv2 .avatar.assistant.officer {
+  background: #047857;
+  color: #ffffff;
+}
+.chatv2 .officer-label {
+  margin: 0 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text-1);
+}
+
+/* The chat's own notices: an officer joined; the chat ended. */
+.chatv2 .chat-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px auto;
+  max-width: 640px;
+  width: 100%;
+}
+.chatv2 .chat-notice-line {
+  flex: 1 1 24px;
+  height: 1px;
+  background: var(--border-1);
+}
+.chatv2 .chat-notice-text {
+  margin: 0;
+  flex: 0 1 auto;
+  max-width: 80%;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-1);
+}
+.chatv2 .chat-notice.is-officer_joined .chat-notice-text {
+  color: var(--success);
+  font-weight: 600;
+}
+.chatv2 .chat-case-banner {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.chatv2 .chat-case-banner .chat-case-status {
+  margin: 0 0 0 10px;
+  align-self: center;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.chatv2 .chat-case-banner .chat-case-status.is-error {
+  color: var(--danger);
+}
+
 /* Persistent Case Support Room Banner & Pills */
 .chat-case-banner {
   display: flex;
   justify-content: center;
-  padding: 6px 16px;
+  align-items: center;
+  padding: 12px 16px;
+  margin-top: 24px;
   position: relative;
   z-index: 10;
 }
@@ -193,7 +250,8 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 10px 16px;
+  min-height: 44px;
   border-radius: 9999px;
   background: #ecfdf5;
   border: 1px solid #10b981;

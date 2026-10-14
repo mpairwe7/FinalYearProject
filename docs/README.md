@@ -14,7 +14,7 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Application** |
 | [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
 | [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
-| [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | 6 URA/URSB systems, Grok-style connectors, CAPTCHA gates, autonomous OCR TIN |
+| [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | Local connector simulators, safe staff controls, guide-only customer journeys, and their production boundary |
 | [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
 | [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
 | **Data & Evaluation** |
@@ -24,7 +24,6 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Production gates](PRODUCTION_GATES.md) | When remaining prototype gaps become start blockers |
 | [Traceability: 2026-08-18 gates](../App/docs/traceability/prototype-production-gates-2026-08-18.md) | Decision log — prototype gaps, production blockers, how to re-verify |
 | [Monitoring & Observability](MONITORING.md) | OpenTelemetry, Prometheus, Grafana, alerting, SLOs |
-| [Mobile Setup](MOBILE_SETUP.md) | Flutter Android/iOS build, on-device LLM, App Store compliance |
 | [Mobile Architecture](MOBILE_ARCHITECTURE.md) | Layered architecture, Riverpod 2.6 Notifier, go_router, design tokens, 7 ADRs |
 | **Testing & Quality** |
 | [Frontend Tests](../App/frontend/vitest.config.ts) | Vitest unit/component tests + coverage thresholds |

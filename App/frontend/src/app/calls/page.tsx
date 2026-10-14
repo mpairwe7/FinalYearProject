@@ -10,10 +10,10 @@ import { CallContextRail } from '@/components/staff/calls/CallContextRail';
 import { CallbacksList } from '@/components/staff/calls/CallbacksList';
 import { CallHistoryFilters } from '@/components/staff/calls/CallHistoryFilters';
 import { CallHistoryTable } from '@/components/staff/calls/CallHistoryTable';
-import { SupervisorBoard } from '@/components/staff/calls/SupervisorBoard';
 import SloGaugeCard from '@/components/charts/SloGaugeCard';
 import { ChartNote } from '@/components/charts/chartTheme';
 import { useCall, useCallHistory, useCallMetrics, useCalls } from '@/hooks/useCalls';
+import { isLiveOfficer } from '@/lib/roles';
 import { isTypingTarget } from '@/lib/ticketUi';
 import { acquireLobby } from '@/services/callLobbySocket';
 import { takeCall } from '@/services/officerCallSession';
@@ -23,7 +23,7 @@ import '@/styles/call/call.css';
 import './calls.css';
 import '@/app/agent/agent.css';
 
-const ALL_TABS = ['desk', 'callbacks', 'history', 'performance', 'supervisor'] as const;
+const ALL_TABS = ['desk', 'callbacks', 'history', 'performance'] as const;
 type CallTab = (typeof ALL_TABS)[number];
 
 const TAB_LABEL: Record<CallTab, string> = {
@@ -31,7 +31,6 @@ const TAB_LABEL: Record<CallTab, string> = {
   callbacks: 'Callbacks',
   history: 'History',
   performance: 'Performance',
-  supervisor: 'Supervisor',
 };
 
 function readUrl(): { tab: CallTab; call: string | null } {
@@ -64,7 +63,8 @@ function writeUrl(tab: CallTab, call: string | null): void {
  */
 export function StaffCalls({ who }: { who?: StaffIdentity }) {
   const role = who?.role || 'ura_staff';
-  const canTake = role === 'ura_staff' || role === 'ura_admin';
+  // Officers take calls; auditors watch the desk. Administrators do not open it.
+  const canTake = isLiveOfficer(role);
 
   const [tab, setTab] = useState<CallTab>(() => (useCallConsoleStore.getState().deskRequest ? 'desk' : readUrl().tab));
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -154,12 +154,6 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [tab, order, deskCallId, canTake, myCallId, sections.waiting]);
 
-  const availableTabs = useMemo(() => {
-    return role === 'ura_admin'
-      ? (['desk', 'callbacks', 'history', 'performance', 'supervisor'] as const)
-      : (['desk', 'callbacks', 'history', 'performance'] as const);
-  }, [role]);
-
   const waitingCount = sections.waiting.length;
   const callbacksCount = callbackCalls.length;
 
@@ -167,7 +161,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
     <OpsPage title="Phone Calls" description="Live calls, callers waiting for an officer, and how the receptionist is doing">
       <div className="ag-tabbar">
         <div className="ag-tabs" role="tablist">
-          {availableTabs.map((t) => (
+          {ALL_TABS.map((t) => (
             <button
               key={t}
               role="tab"
@@ -286,7 +280,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             }}
           />
         </div>
-      ) : tab === 'history' ? (
+      ) : (
         <div className="calls-history-tab">
           <CallHistoryFilters filters={historyFilters} onChange={setHistoryFilters} />
           {historyError ? (
@@ -314,17 +308,6 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
             </div>
           )}
         </div>
-      ) : (
-        tab === 'supervisor' && role === 'ura_admin' ? (
-          <SupervisorBoard
-            waitingCalls={sections.waiting}
-            metrics={metricsData}
-            onOpenCall={(id) => {
-              setSelectedId(id);
-              setTab('desk');
-            }}
-          />
-        ) : null
       )}
     </OpsPage>
   );
@@ -332,7 +315,7 @@ export function StaffCalls({ who }: { who?: StaffIdentity }) {
 
 export default function Page() {
   return (
-    <StaffGuard current="/calls" requireRoles={['ura_staff', 'ura_admin', 'ura_auditor']}>
+    <StaffGuard current="/calls" requireRoles={['ura_staff', 'ura_auditor']}>
       {(who) => <StaffCalls who={who} />}
     </StaffGuard>
   );

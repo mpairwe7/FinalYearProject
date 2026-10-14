@@ -16,15 +16,16 @@ On by default (`workflows` flag).
 
 | id | Name | Started by |
 | --- | --- | --- |
-| `tin_registration` | TIN Registration | trigger phrases |
+| `tin_registration` | TIN Registration Guide | trigger phrases |
 | `tin_procedure_help` | TIN Registration Help | the TIN-procedure path in `service.py` (no triggers) |
 | `return_filing` | Return Filing | trigger phrases |
 | `payment_assistance` | Payment Assistance | trigger phrases |
 | `tax_clearance` | Tax Clearance Certificate | trigger phrases |
 | `motor_vehicle_registration` | Motor Vehicle Registration | trigger phrases |
 | `customs_clearance` | Customs Clearance | trigger phrases |
+| `bwims_warehouse_guidance` | Bonded Warehouse & BWIMS Guidance | trigger phrases |
 | `objection_or_dispute` | Objection or Dispute | trigger phrases |
-| `audit_invoice_compliance` | Tax Invoice & EFRIS Compliance Audit | trigger phrases |
+| `audit_invoice_compliance` | Tax Invoice & EFRIS Document Review | trigger phrases |
 | `calc_*` (9 flows) | Calculators | the calculator router only (no triggers) |
 
 `tax_clearance` checks the four conditions URA applies before approving a
@@ -32,6 +33,29 @@ certificate and routes each unmet one to its fix; `motor_vehicle_registration`
 covers first registration and the move to digital number plates. Their YAML
 headers name the URA and Ministry of Works pages the steps come from; re-check
 those before changing a fee or a condition.
+
+The TIN registration, return filing, and payment workflows are guides only.
+They do not collect identity numbers, create a TIN, prepare or submit a return,
+generate a PRN, or process a payment. Their final step says to continue through
+the official URA portal. TIN workflow labels are curated for Luganda and
+Swahili; reply text is localized through `localize_reply` and falls back to
+English if localization fails its safety checks.
+
+The BWIMS guide asks only what type of help the user needs and their role. It
+does not query consignment records or collect TINs, customs entry numbers,
+PRNs, shipping references, or documents. It links to URA's public BWIMS and
+customs-system information.
+
+Invoice review records visible fields and taxpayer-reported amounts. It does
+not calculate VAT, look up TIN status, validate an EFRIS FDN, or decide
+input-tax eligibility. The invoice workflow asks whether TIN fields are present
+rather than requesting the full numbers; its name, step labels, and
+document-type buttons are curated for English, Luganda, and Swahili. Payment,
+return, and BWIMS choice labels are also curated; translated display labels
+never replace the canonical values used by workflow validators. Stepper,
+portal-action, and resource-card labels follow the selected English, Luganda,
+or Swahili locale. Resource titles and descriptions use the same safety-checked
+reply localization path and fall back to English if translation fails.
 
 ## How a journey starts
 

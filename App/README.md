@@ -1104,6 +1104,10 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `OIDC_JWKS_URL` | JWKS endpoint (required for RS256) | _unset_ |
 | `OIDC_JWKS_CACHE_TTL_S` | JWKS cache TTL in seconds | `3600` |
 | `OIDC_JWKS_TIMEOUT_S` | JWKS fetch timeout | `5` |
+| `OIDC_USERINFO_URL` | Profile endpoint for names and email when the access token has none | `<OIDC_ISSUER>/userinfo` |
+| `OIDC_USERINFO_ENABLED` | Ask the profile endpoint (RS256 tokens without `email` only) | `true` |
+| `OIDC_USERINFO_CACHE_TTL_S` | How long a person's profile is kept | `3600` |
+| `OIDC_USERINFO_TIMEOUT_S` | Profile fetch timeout | `2` |
 | `APP_ENV` | `development` or `production` (gates startup validation) | `development` |
 | **LoRA Adapters** | | |
 | `LORA_ADAPTER_PATH` | Single-language LoRA adapter path (backward-compat) | _unset_ |
@@ -1553,66 +1557,14 @@ This starts Redis, Qdrant, vLLM (`Sunbird/Sunflower-14B-FP8` — gated on HF,
 needs an approved `HF_TOKEN`; measured ~42 tok/s on an RTX A6000 via vLLM's
 Marlin FP8 kernel), the FastAPI backend, and the Next.js frontend together.
 Override the GPU with `SUNFLOWER_GPU_ID`, the model with `SUNFLOWER_MODEL`,
-and a local model directory with `SUNFLOWER_LOCAL_MODEL_DIR` — same pattern
-as `docker-compose.local-qwen.yml` below, with `SUNFLOWER_*` in place of
-`QWEN_*`.
-
-**Option B (rollback) — one-command Docker stack with local Qwen3-8B**
-(ungated, English-centric; use if HF access to Sunflower isn't granted):
-
-```bash
-# From App/
-docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
-```
-
-This starts Redis, Qdrant, vLLM (`Qwen/Qwen3-8B`), the FastAPI backend,
-and the Next.js frontend together.  The local override serves Qwen through
-vLLM on GPU 4 by default at `http://localhost:8011/v1`, points the backend at
-`http://vllm:8001/v1`, exposes the backend on `http://localhost:8083`,
-and exposes the frontend on `http://localhost:3032`.
-
-To use a different free GPU, set `QWEN_GPU_ID`:
-
-```bash
-QWEN_GPU_ID=7 docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
-```
-
-To use another Qwen model variant by Hugging Face ID, set `QWEN_MODEL`.
-The model must be available to vLLM, either downloadable from Hugging Face
-or already present in `${HOME}/.cache/huggingface`:
-
-```bash
-QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct QWEN_GPU_ID=4 \
-  docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
-```
-
-For fully offline startup with a model that is already in the Hugging Face
-cache, add `HF_HUB_OFFLINE=1`:
-
-```bash
-HF_HUB_OFFLINE=1 QWEN_MODEL=Qwen/Qwen2.5-3B-Instruct QWEN_GPU_ID=4 \
-  docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
-```
-
-To use a manually downloaded model directory on the local PC, point
-`QWEN_LOCAL_MODEL_DIR` at the host directory and set `QWEN_MODEL` to the
-container mount path `/models/local-qwen`. The host directory should contain
-the model files vLLM expects, such as `config.json`, tokenizer files, and
-the model weights (`*.safetensors`):
-
-```bash
-QWEN_LOCAL_MODEL_DIR=/home/$USER/models/Qwen2.5-3B-Instruct \
-QWEN_MODEL=/models/local-qwen \
-QWEN_GPU_ID=4 \
-  docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml up -d --build
-```
+and a local model directory with `SUNFLOWER_LOCAL_MODEL_DIR`.
 
 Useful follow-up commands:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml ps
-docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml logs -f api vllm
-docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml down
+docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml ps
+docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml logs -f api vllm
+docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml down
 ```
 
 Smoke checks:
@@ -1982,7 +1934,7 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 |---------|------|-----|-------------|
 | Backend (FastAPI) | 8083 container / 8887 local dev | API retrieval GPU mapping + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
 | Frontend (Next.js 16) | 3032 Compose / 13000 standalone | — | PWA + `/api` proxy + consent + analytics queue |
-| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `docker-compose.local-sunflower.yml` (default GPU 4; `QWEN_GPU_ID` via `docker-compose.local-qwen.yml` for the rollback) | Sunbird/Sunflower-14B-FP8 (or Qwen/Qwen3-8B rollback) + tool-calling via OpenAI-compatible API |
+| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `docker-compose.local-sunflower.yml` (default GPU 4) | Sunbird/Sunflower-14B-FP8 (131K YaRN context window) + tool-calling via OpenAI-compatible API |
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
 | Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
 | ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |

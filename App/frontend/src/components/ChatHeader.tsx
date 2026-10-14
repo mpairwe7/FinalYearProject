@@ -58,6 +58,9 @@ interface ChatHeaderProps {
   locale: string;
   localeOptions: readonly LanguageOption[];
   onLocaleChange: (code: string) => void;
+  /** True while the answer language is auto-detected rather than picked. */
+  localeAutoDetect?: boolean;
+  onLocaleAutoDetect?: () => void;
   /** Current conversation, shown at top left. Absent on the landing screen. */
   conversationTitle?: string;
   conversationPinned?: boolean;
@@ -81,6 +84,8 @@ export default function ChatHeader({
   locale,
   localeOptions,
   onLocaleChange,
+  localeAutoDetect,
+  onLocaleAutoDetect,
   conversationTitle,
   conversationPinned,
   onPinConversation,
@@ -269,7 +274,13 @@ export default function ChatHeader({
       {/* Language sits beside the 3-dot rather than inside it: it is the one
           setting people change often enough to want the current value visible
           — the trigger reads the locale back as EN / LG / SW. */}
-      <LanguageMenu locale={locale} options={localeOptions} onLocaleChange={onLocaleChange} />
+      <LanguageMenu
+        locale={locale}
+        options={localeOptions}
+        onLocaleChange={onLocaleChange}
+        autoDetect={localeAutoDetect}
+        onAutoDetect={onLocaleAutoDetect}
+      />
 
       <div className="hdrv2-kebab" ref={menuRef}>
         <button

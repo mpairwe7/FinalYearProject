@@ -15,6 +15,9 @@ export interface LiveEscalation {
  * Subscribe to `/v1/admin/tickets/stream`. The socket is read-only and
  * carries triage metadata only. On `escalation.created` the queue, SLA
  * and stats queries are invalidated so the officer does not wait for poll.
+ * A taxpayer's message in a live chat (`escalation.taxpayer_reply`) and the
+ * end of one (`escalation.chat_ended`) refresh that case and the queue, so
+ * the officer on it sees the message now rather than on the next re-poll.
  */
 export function useTicketStream(enabled: boolean): {
   latest: LiveEscalation | null;
@@ -53,7 +56,13 @@ export function useTicketStream(enabled: boolean): {
             reason?: string;
           };
           const kind = data.type || data.event;
-          if (kind !== "escalation.created" || !data.id) return;
+          if (!data.id) return;
+          if (kind === "escalation.taxpayer_reply" || kind === "escalation.chat_ended") {
+            client.invalidateQueries({ queryKey: queryKeys.tickets.detail(data.id) });
+            client.invalidateQueries({ queryKey: queryKeys.tickets.all() });
+            return;
+          }
+          if (kind !== "escalation.created") return;
           setLatest({
             id: data.id,
             priority: data.priority || "normal",

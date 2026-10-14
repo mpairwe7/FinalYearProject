@@ -98,6 +98,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         "slow_ack": "Of course. I'll slow down, with a pause between points. What is your question?",
         "offer_declined": "No problem. What else can I help you with?",
         "idle_goodbye": "I haven't heard anything, so I'll end the call now. Thank you for calling URA. Goodbye.",
+        # The caller's review of the AI (review.py): asked once, after an answer.
+        "review_ask_end": "Before you go, was this call helpful to you?",
+        "review_thanks_end": "Thank you for your feedback. Goodbye.",
+        "review_ask_transfer": "I'm connecting you to a URA officer now. While you wait, were my answers helpful so far?",
+        "review_thanks_transfer": "Thank you. Please stay on the line; an officer will be with you shortly.",
     },
     "lg": {
         "greeting": (
@@ -155,6 +160,10 @@ _PHRASES: dict[str, dict[str, str]] = {
         "slow_ack": "Kale. Nja kwogera mpola, nga nnyimiriramu wakati. Ekibuuzo kyo kiri kki?",
         "offer_declined": "Kale. Kiki ekirala kye nnyinza okukuyambako?",
         "idle_goodbye": "Siwulidde kintu kyonna, kale nkomya essimu kati. Webale okukuba essimu eri URA. Weeraba.",
+        "review_ask_end": "Nga tonnagenda, essimu eno ekuyambye?",
+        "review_thanks_end": "Webale okutugamba. Weeraba.",
+        "review_ask_transfer": "Kati nkuyunga ku mukozi wa URA. Nga olindirira, by'okuddamu byange bikuyambye?",
+        "review_thanks_transfer": "Webale. Sigala ku ssimu; omukozi ajja kukwogerako mangu.",
     },
     "sw": {
         "greeting": (
@@ -212,6 +221,10 @@ _PHRASES: dict[str, dict[str, str]] = {
         "slow_ack": "Sawa. Nitaongea polepole, nikipumzika kati ya hoja. Una swali gani?",
         "offer_declined": "Sawa. Nikusaidie nini kingine?",
         "idle_goodbye": "Sijasikia chochote, kwa hiyo nitakata simu sasa. Asante kwa kupiga simu URA. Kwaheri.",
+        "review_ask_end": "Kabla hujaondoka, je, simu hii imekusaidia?",
+        "review_thanks_end": "Asante kwa maoni yako. Kwaheri.",
+        "review_ask_transfer": "Ninakuunganisha na afisa wa URA sasa. Unaposubiri, je, majibu yangu yamekusaidia hadi sasa?",
+        "review_thanks_transfer": "Asante. Tafadhali endelea kusubiri; afisa atakuhudumia hivi punde.",
     },
 }
 

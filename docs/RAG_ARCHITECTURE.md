@@ -16,7 +16,7 @@ The URA Chatbot implements a production-grade Retrieval-Augmented Generation pip
 User Query
   │
   ├─► Stage 0: Conversation History (database.py)
-  │     └── Fetch 5-turn sliding window from SQLite/Postgres (keyed by session_id)
+  │     └── Fetch tenant + subject scoped history, or anonymous session scoped history
   │
   ├─► Stage 0b: Query Rewriting (query.py)  [FLAG_QUERY_REWRITE]
   │     ├── normalize() — whitespace cleanup
@@ -29,8 +29,11 @@ User Query
   │     ├── extract_retrieval_preferences() — soft tax-type / current-FY boost
   │     └── decompose_query() — multi-intent split  [FLAG_QUERY_DECOMPOSITION]
   │
-  ├─► Stage 0c: Language Detection (query.py)
-  │     └── Auto-detect locale (en, lg, sw, nyn, ach) via regex + word patterns
+  ├─► Stage 0c: Answer language (language_state.py) — conversation state
+  │     ├── typed request > picked language (locale_explicit) > stored thread
+  │     │   language until a clear switch > detection > profile > English
+  │     └── English router form (_english_router_form): workflows, calculator,
+  │         topic, FAQ authorization gate and input guard read the English
   │
   ├─► Stage 1: Input Guardrails (guardrails.py → InputGuard)
   │     ├── Length check (MAX_INPUT_LENGTH=2000)
@@ -52,9 +55,10 @@ User Query
   │     ├── Dense: BAAI/bge-m3 (1024-dim multilingual) → Qdrant ANN search
   │     │     └── Optional HyDE document as the *dense* query only  [FLAG_HYDE]
   │     ├── Sparse: BM25 on the taxpayer's original words (never HyDE)
-  │     ├── Fusion: Reciprocal Rank Fusion (RRF, k=RRF_K default 60)
+  │     ├── Fusion: Qdrant server-side RRF at Qdrant's default k=2 (RRF_K=60 applies only to the graph leg)
   │     ├── Graph leg: statutory rate claims fused by rank, not prepended  [FLAG_GRAPH_FUSION + FLAG_TAX_GRAPH]
   │     ├── Reranking: mxbai-rerank-base-v2 (500M, BEIR 55.6) — scores the raw query
+  │     │     (and, for lg/sw, its English form; keeps the higher). On only when RERANK_ENABLED=true
   │     └── Circuit breaker: thread-safe, exponential backoff (10s→300s)
   │
   ├─► Stage 3: Keyword Fallback
@@ -84,6 +88,10 @@ User Query
   │     ├── Agentic path: generate_with_tools() [FLAG_TOOL_USE]
   │     │   ├── Bounded tool-calling loop (max 3 iterations)
   │     │   └── Tools: calculators, rates, calendar, KB search, escalation
+  │     ├── Explicitly selected remote MCP connectors [FLAG_ENTERPRISE_CONNECTORS]
+  │     │   ├── Deployment-bound namespaces only; role and consent checked at dispatch
+  │     │   ├── Explicit read-only declarations required; local companion tools are read-only too
+  │     │   └── External tool output is screened as untrusted before the next agent turn
   │     └── vLLM path: OpenAI-compatible HTTP dispatch [LLM_BACKEND=vllm]
   │
   ├─► Stage 6: Output Guardrails (guardrails.py → OutputGuard)
@@ -119,8 +127,8 @@ User Query
 |-----------|---------|
 | Dense model | `BAAI/bge-m3` (1024-dim, multilingual, MTEB 63.0). Set via `DENSE_MODEL` + `DENSE_DIM` env vars. |
 | Sparse | BM25, encoded asymmetrically: documents carry term saturation, queries carry IDF, and their Qdrant dot product is the BM25 score. `bm25_state.json` stamps `encoding_version`; a state from an older index is queried its own way so an un-rebuilt collection keeps its ranking. |
-| Fusion | Reciprocal Rank Fusion (RRF) via Qdrant query API |
-| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0) |
+| Fusion | Distribution-Based Score Fusion (DBSF) via Qdrant query API by default (`HYBRID_FUSION=dbsf`, G127), outperforming RRF k=2 by +6 pts Luganda and +4 pts Swahili; falls back to RRF if configured. Graph leg continues to fuse via `rrf_fuse_ranked_lists` with `RRF_K=60`. |
+| Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Governed by `RERANK_ENABLED=true` and dynamically by `flags.is_enabled("reranker")`. GPU compose overlay (`docker-compose.local-sunflower.yml`) restores dense embeddings and reranking on GPU (`cuda:0`, G126). Outputs clean single-sigmoid probabilities (G129). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 
@@ -130,7 +138,7 @@ User Query
 |---------|---------|---------|
 | Model | `Sunbird/Sunflower-14B-FP8` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
 | Backend | `local` (HF transformers) | `LLM_BACKEND` (`local` or `vllm`) |
-| Context window | 8192 tokens | `LLM_CONTEXT_WINDOW` |
+| Context window | 131072 tokens (128K–131K with YaRN) | `LLM_CONTEXT_WINDOW` |
 | Device | `auto` (GPU if available) | `LLM_DEVICE` |
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
@@ -182,11 +190,19 @@ User Query
 
 **Locale in the streaming path.** `run_chat_turn` reassigns its `locale` from
 the retrieval result immediately after `generate_retrieval_only` returns, not
-from the caller's parameter. Detection runs *inside* that call, so a taxpayer
-who simply types Luganda arrives with `locale="en"` and the resolved value is
-only on the result. Keying off the parameter is what made the streaming path —
-the one the web and WebSocket clients actually use — answer non-English
-questions in English while `ChatModel.generate()` handled them correctly.
+from the caller's parameter. The decision is made *inside* that call
+(`app.language_state`, the same as `ChatModel.generate()`), so a taxpayer who
+simply types Luganda arrives with `locale="en"` and the resolved value is only
+on the result, with its `locale_source`. Keying off the parameter is what made
+the streaming path — the one the web and WebSocket clients actually use — answer
+non-English questions in English while `ChatModel.generate()` handled them
+correctly.
+
+**One routing contract for both paths.** `generate_retrieval_only` builds the
+same English router form as `generate()` and uses it for the FAQ authorization
+gate, guided workflows, the calculator, PRN generation, topic tracking and the
+input guard, and delivers an officer's reply before the bot answers (G114). The
+supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
 
 **Security in streaming path:**
 - Each token is XSS-sanitized via `OutputGuard.sanitize()`
@@ -199,12 +215,98 @@ questions in English while `ChatModel.generate()` handled them correctly.
 **Query Rewriting** (`query.py`):
 - 15+ abbreviation expansions: TIN, VAT, PAYE, EFRIS, DTS, TREP, CIT, PIT, WHIT, ETAX, etc.
 - 20+ spelling corrections for common URA domain misspellings
+- Vernacular-aware spellcheck guard (G135): `rewrite(..., locale=...)` skips English dictionary fuzzy spell correction on non-English queries (`lg`, `sw`, `nyn`, `ach`), preventing native vocabulary (e.g. Swahili `nini`) from mutating into English words.
 - Coreference resolution: detects pronouns (it, that, this, they) and prepends context from last assistant reply
 
 **Multi-turn Memory** (`database.py`):
-- 5-turn sliding window from SQLite conversation history
-- Keyed by `session_id` from `X-Session-ID` header
+- Up to 25 stored turns are summarized into a bounded context; the prompt receives
+  the recent window plus a coarse summary.
+- Authenticated reads require tenant, subject, and conversation identity. Anonymous
+  reads require the server-issued session identity; a bare conversation ID is not
+  sufficient.
+- The stored locale (the language each turn was answered in) is returned with each
+  turn and kept by `normalize_history_turns`, so language continuity reads it rather
+  than re-detecting old text. A typed request ("answer in English") or a language
+  the taxpayer picked (`locale_explicit: true`) takes priority; a short follow-up
+  stays in the thread's language and a substantive message in another language
+  switches it (`app.language_state`).
+- **Model-facing history is English (G119).** A Luganda or Swahili turn is stored
+  with its English form beside the original (`user_message_en`: the question as
+  routed; `bot_reply_en`: the answer before translation). The generator, the
+  rewriter, entity extraction and the rolling summary read the English
+  (`context_manager.english_view`); transcripts, exports and the audit trail keep
+  the original. Luganda costs about twice English's tokens, so this also halves
+  the context a Luganda thread uses.
+- **No turn falls between the prompt and the summary (G120).** The prompt replays
+  the last `PROMPT_VERBATIM_TURNS` (3) turns verbatim; the rolling summary covers
+  every older one. Before, the summary started at turn seven and turns four to
+  six reached the model in neither.
+- **Prompt budget under vLLM (G120).** `llm._fit_to_context` asks the server for
+  its served window (`/v1/models` `max_model_len`, up to 131,072 for Sunflower with YaRN) and the
+  prompt's exact token count (`/tokenize`); over budget it drops the oldest
+  replayed exchanges whole, then shortens the passages, never the question or
+  the answer-language instruction. The streamed answer, which had no budget,
+  goes through it too. Without `/tokenize` it estimates 2.5 characters per token.
 - History passed to both query rewriting and LLM generation
+- Topic and guided-workflow rows use an opaque key derived from the tenant,
+  authenticated subject or anonymous session, and conversation. Workflow reads,
+  writes, and completion also check the tenant column.
+
+**Personalization Memory** (`memory/`):
+- Semantic facts, episodic topic labels, and short-term working state are all
+  tenant-scoped. Reads and writes require active personalization consent.
+- Exact facts and one episode per conversation are upserted, so retries do not
+  multiply memory rows. A new value of a single-valued fact (taxpayer type,
+  fiscal year, preferred language, detail level) supersedes the old one, which is
+  kept with `invalidated_at`, the time it stopped being true (G121).
+- The episode is derived from the whole conversation each time a turn is
+  absorbed: its tax topics in the order first named ("Discussed VAT and PAYE."),
+  the first as `topic_tag`, and an honest `turn_count`. Topic tags match whole
+  words, read from a turn's English form (G119). Episodic storage keeps only
+  these coarse labels; it does not retain raw inquiry text or inferred distress.
+  `/v1/me/export` includes facts, episodes, and working state; withdrawal and
+  erasure remove all three.
+- Facts are read from the taxpayer's own words and from a Luganda or Swahili
+  turn's English form; a fact found only in the English form keeps 0.95 of its
+  confidence and records `extractor_model = rules-v1+en`.
+- Streamed turns (SSE, WebSocket) are written to memory once the reply is final
+  (`_finish_streamed_turn`); before, only the LangGraph branch wrote them. A call
+  turn heard below `RECEPTIONIST_MEMORY_MIN_ASR_CONF` (0.6) is answered but not
+  written: a mishearing must not become a fact about the caller.
+- Working state is stored in the selected shared analytics backend with a
+  30-minute expiry, so a new worker can continue using the same state. Its
+  `last_topic` is the topic the taxpayer named (or the guided journey), not the
+  role that answered.
+- **4-Tier Cognitive Architecture (`memory/`)**:
+  - **Working Memory**: In-dialogue slot tracking and entity extraction (business names, locations/districts, amounts, reference numbers) synthesized into `## Current Session Taxpayer Working Context` without violating privacy boundaries.
+  - **Episodic Memory**: Coarse conversational summaries, interaction timelines, and topic tags.
+  - **Semantic Memory**: Granular, confidence-filtered fact triplets with statutory citations (`memory_store`, `memory_recall`, `memory_discard` tools).
+  - **Procedural Memory**: Statutory SOP checklists, skills, and trajectory exemplars (`ProceduralMemory`, `TrajectoryExemplar`) for TIN registration, VAT return filing, and assessment objections.
+- **Standardized Handoff Envelopes (`memory/handoff.py`)**: Structured handoff packets (`HandoffEnvelope`, `HandoffGoal`, `EvidenceCard`, `RecommendedAction`) providing cross-agent and officer desk state continuity.
+- **Context Compactor & Rot Analytics (`compactor.py`)**: YaRN RoPE 131k token budget monitoring with dynamic observation compaction and context rot risk alerting.
+- **Scoped Output Redaction Exemption (G143)**: `_ACTIVE_USER_STATED_IDS` ContextVar threads user-declared TINs/PRNs into `OutputGuard.redact_pii()`, preventing response censorship of the taxpayer's own identifiers.
+
+**Where state lives** (the session / user / app / invocation scopes of Google
+ADK's state model, mapped onto this system):
+
+| Scope | Lifetime | Here |
+|---|---|---|
+| Invocation (`temp:`) | one turn | the English router form, the language decision, `turn_out` |
+| Session (no prefix) | one conversation | `conversations` turns (+ English forms), topic (`conversation_topics`), guided journey (`workflow_sessions`), answer language (the stored turn locale) |
+| User (`user:`) | across conversations, consented | `user_profiles`, `user_facts`, `episodic_summaries`, working state |
+| App (`app:`) | everyone | the corpus, rate tables, flags |
+
+A signed-out taxpayer's session is the browser's chat session id (`X-Session-ID`,
+`App/frontend/src/lib/chatSession.ts`). It is browser-wide, not per tab, and lives as
+long as the server keeps the conversations. A call started from the chat opens a new
+session carrying the chat's task and a coarse English account of it, only for the
+chat's owner (`receptionist/carryover.py`).
+
+**WebSocket resume** (`chat_ws_v2.py`):
+- Each completed response has a server-minted response ID. Resume requires an
+  unexpired mapping for that exact response, user, tenant, and conversation.
+- Anonymous sockets do not advertise durable resume. Same-socket history remains
+  connection-local and bounded; it is not a cross-replica checkpoint.
 
 **Semantic Cache** (`cache.py`):
 - Shares embedding model with retriever
@@ -234,7 +336,7 @@ questions in English while `ChatModel.generate()` handled them correctly.
 
 | Control | Implementation | Module |
 |---------|---------------|--------|
-| LLM01 Prompt Injection | 11 regex patterns + max length + system prompt isolation | `guardrails.py` → `InputGuard` |
+| LLM01 Prompt Injection | 11 regex patterns + max length + system prompt isolation; replayed history neutralised (`scan_replayed_text`, G123 / OWASP ASI06) | `guardrails.py` → `InputGuard`, `context_manager.english_view` |
 | LLM02 Sensitive Info Disclosure | Uganda-specific PII redaction (TIN, NID, phone, email, cards, passport; official @ura.go.ug emails preserved) | `guardrails.py` → `OutputGuard.redact_pii()` |
 | LLM03 Supply Chain | Pinned deps, Trivy scanning, SBOM, SHA-256 integrity | `requirements.txt`, CI/CD |
 | LLM04 Data Poisoning | Provenance tracking, quality gates, local inference | `governance/`, `ml/pipelines/` |
@@ -293,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (51 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (58 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -323,13 +425,23 @@ App/backend/app/
 │   ├── slots.py         #   Slot validators (TIN, email, phone, date, currency)
 │   └── flows/           #   YAML definitions (TIN registration, filing, payment, customs)
 │
-├── memory/              # Consent-gated personalization memory (Phase 16)
+├── memory/              # Consent-gated, tenant-scoped personalization memory (Phase 16)
 │   ├── service.py       #   Unified memory interface (MemoryService)
 │   ├── semantic.py      #   User facts with time-based decay
 │   ├── episodic.py      #   Conversation summaries by topic
-│   ├── working.py       #   Transient session state (last_topic, agent_role)
+│   ├── working.py       #   Standalone in-process helper; service uses shared TTL storage
+│   ├── handoff.py       #   Standardized HandoffEnvelope v2 (SLAContext, ToolExecutionReceipt)
+│   ├── resolution_ledger.py # Longitudinal ResolutionCase persistence across Voice & Web
 │   ├── extractor.py     #   Rule-based fact extraction from turns
 │   └── decay.py         #   Time-based fact decay
+│
+├── receptionist/        # Full-duplex Pipecat/LiveKit voice receptionist & Officer Call Desk
+│   ├── pipeline.py      #   Cascaded & multilingual Pipecat pipeline assembly
+│   ├── brain.py         #   Voice turn orchestration, clarification, spoken confirm, transfer
+│   ├── hybrid_s2s.py    #   Hybrid S2S vs regulated cascaded speech router & semantic endpointing
+│   ├── prosody.py       #   Zero-VRAM acoustic prosody & caller affect analyzer
+│   ├── spoken_figure_guard.py # Spoken-figure round-trip verification & dictation pacing
+│   └── transfer.py      #   Ticket creation, HandoffEnvelope v2 dispatch, SLA countdown
 │
 └── audit/               # Immutable audit ledger (Phase 21, UDPA compliance)
     ├── ledger.py        #   Hash-chained append-only log (SHA-256)
@@ -395,93 +507,142 @@ YAML-defined guided workflows for procedural tax tasks:
 
 State machine: `WorkflowRegistry.advance(session, user_input)` validates slots, advances steps, calls tools, and persists to `workflow_sessions` table.
 
-## Speech Pipeline (Phase 16)
+## Speech & Voice Pipeline Architecture (2026 Production & GPU Topology)
 
-| Component | Backend | Model/API | Purpose |
-|-----------|---------|-----------|---------|
-| ASR | sherpa / transformers | Whisper Small + LoRA adapters | Speech-to-text (5 languages) |
-| TTS | piper / sherpa | Piper native voices | Text-to-speech (5 languages) |
-| MT | prompted / ONNX | Qwen3-8B prompted or ONNX | Machine translation |
-| Cloud fallback | Sunbird AI | `api.sunbird.ai` | ASR/TTS/MT for Ugandan languages |
+The system deploys an enterprise-grade multimodal speech and streaming voice architecture tailored for Ugandan taxpayer interaction across English and native African languages (Luganda, Swahili, Runyankole, Acholi).
 
-**Compound voice pipeline** (`POST /v1/voice/chat`): Audio → ASR → [MT to en] → LLM RAG → [MT to locale] → TTS → Audio
+### Local Docker GPU & Ngrok Serving Topology
 
-## Streaming Voice Engine (Phase 23)
-
-Phase 23 transforms the batch voice pipeline into a **streaming voice-first** interface:
-
-### Architecture
+The local serving stack operates across dedicated hardware allocations on NVIDIA RTX A6000 GPUs:
 
 ```
-Client PCM chunks  ──▶  VAD  ──▶  utterance buffer
-                                      │
-                                      ▼  (utterance complete)
-                          ASR ──▶ [MT] ──▶ LLM ──▶ [MT] ──▶ TTS
-                                                              │
-                          ◄── sentence chunks ◄───────────────┘
-                          (cancellable via barge-in)
+[ Public Ngrok Ingress: https://*.ngrok-free.dev ]
+                       │
+                       ▼
+            [ ura-app-frontend (Next.js 16+, port 3032) ]
+                       │
+         ┌─────────────┴─────────────┐
+         ▼                           ▼
+[ /api/v1/calls/stream ]     [ /api/v1/voice/chat ]
+         │                           │
+         └─────────────┬─────────────┘
+                       ▼
+        [ ura-app-api:gpu (FastAPI on GPU 3, port 8083) ]
+         ├── ASR: Sunbird/asr-whisper-large-v3-salt (cuda:0)
+         ├── TTS: Sunbird/spark-tts-salt + BiCodec (cuda:0)
+         ├── Dense: BAAI/bge-m3 (cuda:0)
+         ├── Reranker: mixedbread-ai/mxbai-rerank-base-v2 (cuda:0)
+         └── Prompted MT: via vLLM Sunflower
+                       │
+         ┌─────────────┼───────────────────────────┐
+         ▼             ▼                           ▼
+[ ura-app-vllm ] [ ura-app-qdrant ]      [ ura-app-orpheus-tts ]
+ (GPU 2: 131k YaRN) (v1.19.0 Vectors)     (Optional Sidecar: 8100)
 ```
 
-### New Modules
+1. **vLLM Generator Pod (`ura-app-vllm-sunflower`)**:
+   - Dedicated to **GPU 2** (40.1 GB VRAM allocated, 85% utilization ceiling).
+   - Serves `Sunbird/Sunflower-14B-FP8` with **YaRN RoPE context extension** (`factor: 4.0`, `max_model_len: 131,072`).
+   - Supports native tool-calling via `--enable-auto-tool-choice --tool-call-parser hermes` and chunked prefill (`max_num_batched_tokens: 16,384`).
+2. **API & Speech Host (`ura-app-api:gpu`)**:
+   - Dedicated to **GPU 3** (12.6 GB VRAM allocated, 36.5 GB headroom).
+   - In-process CUDA backends: `Sunbird/asr-whisper-large-v3-salt` for speech recognition and `Sunbird/spark-tts-salt` for local neural synthesis with pinned BiCodec checkout (`/opt/spark-tts`).
+   - BAAI/bge-m3 dense embedder and cross-encoder reranker both run on CUDA.
+3. **Voice Sidecar (`ura-app-orpheus-tts`)**:
+   - Optional dedicated sidecar serving `Sunbird/orpheus-3b-tts-multilingual` (`http://orpheus-tts:8100`) providing ultra-fast native Luganda, Swahili, and English speech generation (~350ms TTFB).
+4. **State & Caching Subsystems**:
+   - `ura-app-qdrant`: Vector database on port 6333 with HNSW indexing and alias-based zero-downtime collection swapping.
+   - `ura-app-redis`: Redis 7.4-Alpine for distributed rate-limiting and semantic cache.
+   - `ura-app-connectors`: Sandboxed simulator gateway over MCP `2026-07-28` protocols.
 
-| Module | File | Purpose |
-|--------|------|---------|
-| Voice Stream Engine | `voice_stream.py` | VADConfig, VoiceSession (energy-based VAD, barge-in, sentence-chunked TTS) |
-| WebSocket Handler | `voice_ws.py` | Duplex WebSocket protocol for `/v1/voice/chat/stream` |
-| Voice Consent | `voice_consent.py` | Voice-specific consent (NDPA 2019), audit log, retention policy |
-| Offline RAG | `offline_rag.py` | FAISS index + ONNX embedder for offline retrieval fallback |
-| Accent Detector | `accent_detector.py` | Prosodic-feature accent classifier, routes to accent-specific LoRA adapters |
+---
 
-### VAD (Voice Activity Detection)
+### Voice & Speech Serving Flows
+
+#### 1. Full-Duplex Real-Time Voice Calls (`/v1/calls/stream` & `/v1/voice/chat/stream`)
+- **Transport**: WebSockets / WebRTC audio streaming managed via **Pipecat** and **LiveKit**.
+- **Voice Activity Detection (VAD)**: Energy-based VAD with hysteresis (`VOICE_VAD_ENERGY_THRESHOLD=0.015`, `VOICE_VAD_SILENCE_MS=600ms`), filtering noise without heavy dependencies.
+- **Acoustic Entity & Lexicon Repair (`receptionist/lexicon.py`)**:
+  - Automatically reconstructs acoustic numbers (NINs, PRNs, phone numbers, money figures) and corrects phonetic homophones across Luganda (`ebizimbe`, `amagoba`, `omusolo`) and Swahili (`ushuru`, `forodha`, `mahindi`).
+- **Low-Latency Streaming Synthesis**: Sentence-chunked audio streaming emits audio chunks as each sentence finishes generation, achieving sub-second initial voice latency.
+- **Officer Call Desk Handoff**: When dispute or distress thresholds trigger escalation, the call transfers seamlessly to live URA staff at `/v1/officer/calls/*` with caller transcript carryover, collision locking, SLA timer, and post-call CSAT rating capture.
+
+#### 2. REST Voice Chat Pipeline (`POST /v1/voice/chat`)
+- Ingests audio payloads (PCM, WAV, MP3).
+- **Pipeline**: Inbound Audio → ASR Transcribe → Language Detection (Lingua) → [Prompted MT to English] → RAG / Tool Execution → [Prompted MT to Target Locale] → TTS Synthesize → Outbound Audio + Transcript.
+
+#### 3. Streaming Reply Speech (`GET /v1/chat/stream/speech`)
+- Streams sentence-by-sentence synthesized audio chunks paired with text generation tokens for accessible audio narration in the web UI.
+
+---
+
+### Multi-Tier Fallback Chains
+
+The speech engine prioritizes local neural models on GPU, falling back through progressively wider tiers to guarantee zero-silence resilience:
+
+#### ASR (Speech-to-Text) Fallback Hierarchy
+1. `⓪ Whisper-SALT`: `Sunbird/asr-whisper-large-v3-salt` (Local GPU `cuda:0`, 1.5B params). Single fine-tune natively transcribing English, Luganda, Swahili, Runyankole, and Acholi. Uses forced language token IDs (`lg`: 50355, `sw`: 50318, `en`: 50259).
+2. `① Whisper + LoRA`: In-process HuggingFace `openai/whisper-small` with language-specific fine-tuned PEFT LoRA adapters.
+3. `② Local Sherpa ASR`: Offline ONNX/Sherpa runtime for CPU fallback.
+4. `③ faster-whisper`: CTranslate2 INT8 multilingual engine.
+5. `④ Sunbird Cloud API`: `api.sunbird.ai/tasks/stt` cloud service for Ugandan vernaculars.
+6. `⑤ Cloudflare Workers AI`: `@cf/openai/whisper-large-v3-turbo` as ultimate cloud failover.
+
+#### TTS (Text-to-Speech) Fallback Hierarchy
+1. `⓪.5 Orpheus-3B-TTS`: Local GPU sidecar (`http://orpheus-tts:8100`) delivering sub-400ms TTFB for Luganda, Swahili, and English. If the sidecar is unreachable, a 30-second cooldown is enforced to eliminate timeout delays on subsequent calls.
+2. `⓪.75 Spark-TTS-SALT`: In-process local GPU (`cuda:0`) neural voice (`Sunbird/spark-tts-salt` with BiCodec tokenizer/detokenizer) for `lg`, `sw`, `ach`, `nyn`.
+3. `① Edge Neural TTS`: Microsoft Edge Neural TTS (`edge-tts`) for English voices (`en-US-JennyNeural`, `en-GB-SoniaNeural`).
+4. `①.5 Local Piper / Sherpa`: Offline VITS/Piper voices loaded from `artifacts/speech/tts/speakers`.
+5. `② Sunbird Cloud API`: `api.sunbird.ai/tasks/tts` native voice endpoints.
+6. `③ Cloudflare Workers AI TTS`: Remote cloud voice fallback.
+
+#### Machine Translation (MT) Hierarchy
+1. `Prompted MT (Local Sunflower-14B-FP8)`:
+   - Configured via `RETRIEVAL_MT_BACKEND=local` and `REPLY_MT_BACKEND=local`.
+   - Utilizes the in-memory Sunflower model for zero-egress, high-fidelity bidirectional translation between English and Luganda/Swahili.
+2. `Sunbird Cloud Translation API`:
+   - Remote fallback (`api.sunbird.ai/tasks/translate`) protected by circuit breaker and per-account retry budget.
+   - **Figure-Fidelity Guard (`mt.py`)**: Asserts that financial numbers, percentages, and statutory tax rates survive translation intact without corruption or omission.
+
+---
+
+### Recent Enhancements & Gap Closures (October 2026)
+
+1. **Vernacular Query Rewriting (G135)**:
+   - `query.rewrite()` detects language/locale and automatically bypasses English dictionary fuzzy spell correction when handling African languages (`lg`, `sw`, `nyn`, `ach`), preventing native vocabulary (e.g. Swahili `nini`) from being mutated into English words (`nin`).
+2. **Operator Readiness Probe Observability (G137)**:
+   - `/ready` endpoint introspects and advertises active cross-encoder reranker presence, dense device (`cuda:0`), procedural memory readiness, and local prompted MT status (`prompted_local` vs `sunbird`).
+3. **Scoped Output Redaction Exemption (G143)**:
+   - `_ACTIVE_USER_STATED_IDS` ContextVar threads taxpayer-declared TINs and PRNs into `OutputGuard.redact_pii()`, preventing response censorship of the user's own identifiers while ensuring payment cards and passwords remain unconditionally redacted.
+4. **4-Tier Cognitive Memory Integration**:
+   - Working memory entity extraction (business names, locations, amounts) combined with procedural trajectory exemplars for statutory tax operations (TIN registration, VAT return filing, assessment objections).
+   - YaRN RoPE 131k token allocation compactor with real-time context-rot analytics (`rot_risk_threshold: 0.85`).
+5. **EU AI Act Article 50(2) Compliance**:
+   - Every synthesized audio WAV embeds an IPTC `trainedAlgorithmicMedia` INFO chunk, providing verifiable machine-readable marking of AI-generated synthetic speech.
+6. **Hybrid Speech S2S + Regulated Cascaded Router & Spoken Figure Guard (`receptionist/hybrid_s2s.py`, `receptionist/spoken_figure_guard.py`)**:
+   - Routes low-risk conversational turns through fast S2S (`s2s_fast`) while strictly enforcing the cascaded English-router + `mt.protect_figures` path (`cascaded_guarded`) whenever numbers, tax rates, TINs, or statutory claims are present.
+   - Adaptive semantic endpointing extends silence tolerance (`1100ms`) mid-TIN/PRN and snaps to `320ms` on complete utterances.
+   - Verifies that statutory figures survive speech normalization and synthesis (`spoken_figure_guard`) and injects dictation pauses into spelled-out TIN/PRN digit sequences.
+7. **Continuous Relationship Orchestration & Multi-Agent Specialist DAG (`memory/resolution_ledger.py`, `agents/supervisor.py`, `agents/graphs/main_graph.py`)**:
+   - Consent-gated `ResolutionCase` ledger tracks multi-step resolution progress across Voice Calls, Web Chat, and background `mcp_tasks` with bidirectional carryover (`carryover.py`).
+   - `HandoffEnvelope` v2 adds `SLAContext`, `ToolExecutionReceipt`, `caller_affect`, and one-click `officer_macros` for both peer-specialist DAG chaining and live Officer Call Desk handoffs (`officer_voice_copilot`).
+
+### VAD & Audio Handling
 
 Energy-based VAD with hysteresis (numpy only, no silero-vad dependency):
-
 - **Energy threshold:** configurable via `VOICE_VAD_ENERGY_THRESHOLD` (default 0.015)
 - **Silence duration:** `VOICE_VAD_SILENCE_MS` (default 600ms) before declaring utterance end
 - **Min speech duration:** `VOICE_VAD_MIN_SPEECH_MS` (default 250ms) to filter false triggers
 - **Max utterance:** `VOICE_VAD_MAX_UTTERANCE_S` (default 30s) to bound resource usage
-- **Sensitivity presets:** `low`, `medium`, `high` — adjustable per-session
-
-### Barge-in
-
-Users can interrupt assistant speech at any time. The `VoiceSession._cancelled` asyncio Event aborts TTS between sentence chunks. The WebSocket client sends `{"type": "barge_in"}` and the server immediately stops generating audio.
-
-### Sentence-Chunked TTS
-
-`SpeechModel.synthesize_sentences()` splits reply text on sentence boundaries and synthesizes each independently through the existing TTS fallback chain. First audio byte arrives after first sentence (~200-400ms), meeting the < 800ms p95 latency target.
-
-### Offline RAG
-
-`OfflineRAGPipeline` provides on-device retrieval when Qdrant is unavailable:
-
-1. Pre-exported FAISS flat/IVF index from the same knowledge base
-2. ONNX-quantized bge-m3 embedder for query encoding
-3. Compressed passage metadata (JSONL.gz)
-4. Automatic fallback triggered by Qdrant circuit breaker
-
-Bundle target: < 100 MB for mobile deployment. Export via `scripts/export_offline_bundle.py`.
-
-### Accent Adaptation
-
-`AccentDetector` classifies audio accents in < 50ms using prosodic features (RMS, ZCR, spectral centroid, speaking rate). Supported profiles:
-
-- `ug_english_central` — Kampala / Central Uganda English
-- `ug_english_eastern` — Eastern Uganda English
-- `ug_english_western` — Western Uganda English
-- `luganda_kampala` — Luganda (Kampala dialect)
-- `code_switch_en_lg` — Mixed English-Luganda code-switching
-
-When confidence > 0.7, the ASR routes to an accent-specific Whisper LoRA adapter for improved WER.
 
 ### Voice Consent & Governance
-
 - **Consent purposes:** `voice_recording` (required for audio processing), `voice_analytics`
 - **Privacy:** Raw audio never stored by default — only SHA-256 hash in audit trail
 - **Audit:** `voice_audit_log` table with immutable event logging, chained into existing `AuditLedger`
 - **Retention:** configurable TTLs (raw audio 24h, transcripts 90d, analytics 365d)
 - **Admin:** `GET /v1/admin/voice_audit` for regulatory review
 
-### Metrics
+### Voice Metrics
 
 | Metric | Type | Description |
 |--------|------|-------------|
@@ -492,6 +653,12 @@ When confidence > 0.7, the ASR routes to an accent-specific Whisper LoRA adapter
 | `voice_stream_total_latency_seconds` | histogram | End-to-end turn latency |
 | `voice_barge_in_total` | counter | Barge-in interruptions |
 | `voice_vad_utterances_total` | counter | VAD-detected utterances |
+| `ura_autonomous_resolution_total` | counter | End-to-end autonomous vs escalated resolution by channel, flow, and locale |
+| `ura_customer_effort_turns` | histogram | Turns and clarifications required per call/chat resolution |
+| `ura_voice_hybrid_route_total` | counter | Hybrid speech routing split (`s2s_fast` vs `cascaded_guarded`) |
+| `ura_spoken_figure_verification_total` | counter | Spoken figure verification results (`verified`, `fallback_text_only`) |
+| `ura_handoff_envelope_completeness_ratio` | histogram | Completeness score `[0..1]` of `HandoffEnvelope` v2 packets |
+| `ura_relationship_resumption_total` | counter | Cross-channel `ResolutionCase` resumption and completion counts |
 
 ## Feature Flags (`flags.py`)
 
@@ -502,7 +669,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `corrective_rag` | on | Re-retrieval on low quality |
 | `semantic_cache` | on | Cache similar queries |
 | `query_rewrite` | on | Spell/abbreviation/coreference |
-| `reranker` | on | Cross-encoder reranking |
+| `reranker` | on | Nothing: no code reads it. Reranking follows the `RERANK_ENABLED` env var (G126) |
 | `workflows` | on | Guided multi-step workflows |
 | `handoff_summaries` | on | Human triage packets |
 | `ticket_queue` | on | Persist escalations for the staff workbench |
@@ -525,9 +692,16 @@ All major subsystems are behind feature flags for progressive rollout:
 | `mcp_tasks` | off | `tasks` MCP namespace for long-running work |
 | `voice_receptionist` | off | Simulated phone receptionist and staff Calls page; production media uses self-hosted LiveKit WebRTC (see the receptionist runbook) |
 | `receptionist_language_detection` | off | Receptionist follows caller language (en, sw and lg all on the local engine: Whisper-SALT, Sunflower, Orpheus); caller/officer WebRTC media uses self-hosted LiveKit in production. See `docs/runbooks/voice-receptionist-demo.md` |
+| `hybrid_speech_s2s` | off | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`): fast conversational S2S path for low-risk turns, regulated figure-protected cascaded path for statutory/numeric turns |
+| `voice_agentic_workflows` | off | Guided multi-step workflows, calculator MCP tools, and spoken confirmation tokens inside live `/v1/calls/stream` voice calls |
+| `multi_agent_dag` | off | Multi-specialist DAG chaining (`CUSTOMS_SPECIALIST` + `TAX_SPECIALIST` + `TOOLS`) with `HandoffEnvelope` v2 verification in `agents/graphs/main_graph.py` |
+| `continuous_relationship_memory` | off | Longitudinal `ResolutionCase` persistence (`memory/resolution_ledger.py`), bidirectional `Voice <-> Web` carryover, and background `mcp_tasks` continuation |
+| `emotion_aware_prosody` | off | Acoustic prosody extraction (`receptionist/prosody.py`) in `CallerAudioTap` and dynamic empathy/pacing conditioning in TTS |
+| `spoken_figure_guard` | off | Acoustic & lexical digit verification (`receptionist/spoken_figure_guard.py`) and dictation pauses on synthesized TTS audio containing statutory figures, TINs, or PRNs |
+| `officer_voice_copilot` | off | Streams live ASR transcripts, English router views, and statutory rate cards to the officer desk while a voice call is bridged to `ura_staff` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**51** in total, including the per-phase switches for voice, offline and
+**58** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).
@@ -608,6 +782,7 @@ chunks do).
 | `FLAG_CORRECTIVE_RAG` | on | Re-retrieve on low calibrated relevance |
 | `FLAG_GRAPH_FUSION` + `FLAG_TAX_GRAPH` | **off** | Statutory graph as a third RRF leg |
 | `FLAG_TOOL_RAG` | **off** | Top-k tool schemas + rails. Dense embedder is injected from the retriever when loaded; a miss keeps rails only. A/B via `FLAG_TOOL_RAG_PERCENT`. |
+| `FLAG_KNOWLEDGE_DISCREPANCY_REPORTING` | on | Auto-detect conversational factual disputes, log discrepancy reports, and apply active statutory precedences & tombstones. |
 | `python -m app.freshness --check --write-status --notify` | — | Exit 1 on drift; writes status for `GET /v1/index/freshness`; Slack if `FRESHNESS_SLACK_WEBHOOK` is https |
 
 ### Answer language
@@ -721,7 +896,14 @@ Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17
 
 All settings are configurable via environment variables. See [API Reference → Environment Variables](API_REFERENCE.md#environment-variables) for the complete list, or [PROJECT_SETUP.md](PROJECT_SETUP.md#5-environment-configuration) for a quick-start `.env` template.
 
-- `FLAG_ENTERPRISE_CONNECTORS` (default `false` in production, `true` in development): Gates default local mock system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). In production (`APP_ENV=production`), local mock connectors are blocked unless this flag is explicitly enabled.
+- `FLAG_ENTERPRISE_CONNECTORS` (default `false`): Allows explicitly selected, deployment-bound remote MCP connectors to expose eligible read-only operations in taxpayer chat after review. It never lists a tool that exists only inside the API process. A simulator bound as a remote MCP server (`App/docker-compose.connectors.yml`) is listed as demo data (`mode: simulation`) outside production and is refused in production, which still requires a connector an operator declared `MCP_SERVER_MODE_<NAMESPACE>=live` and its authorization controls.
+
+These built-ins remain local simulators even when enabled; their status is not
+evidence of a live URA, NIRA, URSB, bank, or payment connection. Connector
+health is staff-only; raw connector records are no longer exposed. Connector writes require dispatch-time
+authorization, an explicit confirmation proposal, and an idempotency key.
+Browser-supplied remote connector registration is disabled until a reviewed
+server configuration and standards-compliant MCP negotiation are available.
 
 ## Dependencies
 
@@ -753,3 +935,12 @@ cryptography>=44.0.0
 # Observability (opt-in)
 opentelemetry-api, opentelemetry-sdk, opentelemetry-exporter-otlp-proto-grpc
 ```
+
+## Turns answered by a chosen service
+
+A turn that selected a connector and asked it for a record does not use retrieval as its
+answer. The passages are not given to the agent (`passages=[]`), the reply has no
+`sources` / `citations` / portal-form `resources`, and the abstention and escalation
+paths do not apply to it (an unreachable service says so; it does not fall back to
+passages, which is how a consignment status was once invented). See
+`docs/SYSTEM_CONNECTORS_AND_PLUGINS.md`.

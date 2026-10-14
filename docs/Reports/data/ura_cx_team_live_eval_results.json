@@ -1,0 +1,240 @@
+{
+  "timestamp": "2026-10-07T12:34:27.368797+00:00",
+  "total_scenarios": 10,
+  "passed_scenarios": 6,
+  "overall_score_pct": 47.7,
+  "avg_latency_s": 3.78,
+  "results": [
+    {
+      "id": "CX-LIVE-01",
+      "title": "Autonomous PRN Voucher Generation (Land Stamp Duty)",
+      "category": "Transactional Execution",
+      "cx_problem": "Taxpayers were previously deflected to a 4-step questionnaire instead of receiving an actionable payment slip.",
+      "locale": "en",
+      "prompt": "Generate a PRN for 750,000 UGX stamp duty on my land sale in Wakiso.",
+      "elapsed_s": 0.04,
+      "retrieval_mode": "prn_generation",
+      "reply": "### \ud83e\uddfe Payment Registration Number (PRN) Voucher\n\n*Mode: Prototype Sandbox / Simulated Payment Voucher*\n\n- **PRN Number**: `2625264913`\n- **Amount Payable**: **UGX 750,000**\n- **Tax Head**: Stamp Duty\n- **Taxpayer Name**: Sandbox Taxpayer (`[REDACTED_UG_TIN]`)\n- **Search / Assessment Code**: `ASMT-795484`\n- **Valid Until**: 2026-10-28 (21 calendar days)\n\n**How to Complete Payment**:\n1. **Mobile Money**: Dial `*165#` (MTN) or `*185#` (Airtel) \u2192 Pay Services / Pay Bill \u2192 URA Taxes \u2192 Enter PRN `2625264913`.\n2. **Commercial Bank Counter**: Present the 10-digit PRN to any bank teller across Uganda.\n3. **Online Card Payment**: Pay directly online using VISA / Mastercard via the official e-Services portal: https://ura.go.ug/en/domestic-taxes/make-a-payment/.",
+      "eval_criteria": [
+        "PRN Number (10 digits)",
+        "Assessment Code",
+        "USSD Mobile Money (*165# / *185#)",
+        "Validity (21 days)"
+      ],
+      "matched_criteria": [
+        "PRN Number (10 digits)",
+        "Assessment Code",
+        "USSD Mobile Money (*165# / *185#)",
+        "Validity (21 days)"
+      ],
+      "criteria_score_pct": 100.0,
+      "passed": true,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-02",
+      "title": "Progressive PAYE Deduction & Net Salary Math (FY2026/27)",
+      "category": "Deterministic Computations",
+      "cx_problem": "Manual arithmetic errors by contact centre staff when explaining progressive tax bands on gross income.",
+      "locale": "en",
+      "prompt": "My monthly gross salary is 1,500,000 UGX. Calculate my exact PAYE tax and take-home pay.",
+      "elapsed_s": 0.06,
+      "retrieval_mode": "calculator",
+      "reply": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 1,500,000\n- PAYE due (22.6% effective): **UGX 338,250** per month\n- NSSF employee contribution: UGX 75,000 (5% of gross)\n- Total statutory deductions (27.6%): **UGX 413,250**\n- Net take-home: **UGX 1,086,750**\n- Band applied: 30% marginal (UGX 485,000\u2013UGX 10,000,000)\n- _Local Service Tax and any voluntary deductions are not included._\n- Statutory Basis: Income Tax Act\n\n_Assumptions: resident employee (say \u201cnon-resident\u201d if not); includes 5% employee NSSF deduction._\n\nFigures use the official URA FY2026-27 rate table.",
+      "eval_criteria": [
+        "Tax-free threshold (235,000 UGX)",
+        "10% band",
+        "20% band",
+        "30% band",
+        "Net pay"
+      ],
+      "matched_criteria": [
+        "10% band",
+        "20% band",
+        "30% band"
+      ],
+      "criteria_score_pct": 60.0,
+      "passed": true,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-03",
+      "title": "Market Vendor EFRIS Penalty Guidance in Luganda",
+      "category": "Multilingual Equity (Luganda)",
+      "cx_problem": "Language flipping to English and intimidating statutory text for small vernacular-speaking market traders.",
+      "locale": "lg",
+      "prompt": "Bampadde ekibonerezo kya emitwalo nkaaga (600,000 UGX) ku EFRIS naye ndi mutunzi mutono mu Owino. Nzikirizibwa okugifuna ntya?",
+      "elapsed_s": 15.44,
+      "retrieval_mode": "hybrid",
+      "reply": "Electronic Fiscal Receipting and Invoicing Solution\u2014a system that records business transactions in real time and shares them with URA, issuing e-invoices/e-receipts with FDN, verification code, and QR code. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: Nsobola ntya okukola oba okufuna PRN mu URA?",
+      "eval_criteria": [
+        "Luganda response fidelity",
+        "EFRIS solution for small business",
+        "Empathy / courtesy opener"
+      ],
+      "matched_criteria": [
+        "EFRIS solution for small business"
+      ],
+      "criteria_score_pct": 33.3,
+      "passed": false,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-04",
+      "title": "Cross-Border Customs CET & CIF Valuation in Swahili",
+      "category": "Multilingual Equity (Swahili)",
+      "cx_problem": "Cross-border traders at OSBPs struggling to obtain fast customs tariff clarification in Swahili.",
+      "locale": "sw",
+      "prompt": "Kodi ya forodha ya kuingiza nguo za jumla (textiles) kutoka Kenya kupitia Malaba ni asilimia ngapi? Na thamani ya CIF inakokotolewaje?",
+      "elapsed_s": 4.69,
+      "retrieval_mode": "hybrid",
+      "reply": "Provide your documents to the consolidator/clearing agent. Each shipper must have a house bill of lading/airwaybill showing the true owner and must lodge an export declaration for their cargo within the consolidated shipment. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: Je, posho za nyumba zinazotolewa kwa wafanyakazi zinatozwa kodi chini ya mapato ya ajira?",
+      "eval_criteria": [
+        "Swahili language fidelity",
+        "EAC CET tariff band (35%)",
+        "CIF formula (Cost, Insurance, Freight)"
+      ],
+      "matched_criteria": [],
+      "criteria_score_pct": 0.0,
+      "passed": false,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-05",
+      "title": "Bank Account Agency Freeze Notice & Hardship Relief",
+      "category": "Distress De-escalation",
+      "cx_problem": "Distressed taxpayers facing frozen bank accounts triggering panic; need immediate Section 42 installment relief options.",
+      "locale": "en",
+      "prompt": "URA has sent an agency notice to freeze my business account tomorrow! I cannot pay my workers and my family is suffering. Please help me stop this!",
+      "elapsed_s": 0.03,
+      "retrieval_mode": "calculator",
+      "reply": "I'm sorry you're going through this \u2014 let's look at what options you have.\n\n**Under Section 40 of the Tax Procedures Code Act**, the Commissioner General may issue a **Third-Party Agency Notice** to any person or commercial bank holding funds on behalf of a tax debtor to remit the money directly to URA to settle outstanding unpaid taxes.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+      "eval_criteria": [
+        "Empathetic de-escalation opener",
+        "Section 42 TPCA payment agreement",
+        "Toll-free helpline (0800 117 000)"
+      ],
+      "matched_criteria": [
+        "Section 42 TPCA payment agreement",
+        "Toll-free helpline (0800 117 000)"
+      ],
+      "criteria_score_pct": 66.7,
+      "passed": true,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-06",
+      "title": "Section 24 TPCA Assessment Objection & 30% Deposit Protocol",
+      "category": "Procedural Workflows",
+      "cx_problem": "Taxpayers missing the strict 45-day statutory objection deadline or surprised by the mandatory 30% deposit rule.",
+      "locale": "en",
+      "prompt": "I received an unfair default tax assessment of 45,000,000 UGX. I want to lodge a formal objection.",
+      "elapsed_s": 10.81,
+      "retrieval_mode": "hybrid",
+      "reply": "Helps you claim allowable deductions, distinguish business vs non-business or non-taxable income, know your financial position, budget and access financing, and avoid problems during URA audits. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: How do I apply to extend the deadline to lodge a tax objection?",
+      "eval_criteria": [
+        "45-day statutory deadline",
+        "30% deposit requirement (or waiver)",
+        "e-Tax portal objection stepper"
+      ],
+      "matched_criteria": [
+        "45-day statutory deadline",
+        "e-Tax portal objection stepper"
+      ],
+      "criteria_score_pct": 66.7,
+      "passed": true,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-07",
+      "title": "Inline EFRIS Thermal Receipt Arithmetic Audit",
+      "category": "Document Compliance",
+      "cx_problem": "Frontline officers manually recalculating VAT on suspicious receipts reported by consumers.",
+      "locale": "en",
+      "prompt": "Check this receipt: Subtotal 400,000 UGX, VAT charged 50,000 UGX, Total 450,000 UGX. Is this invoice compliant?",
+      "elapsed_s": 0.03,
+      "retrieval_mode": "document_audit",
+      "reply": "### \ud83e\uddfe Tax Document & EFRIS Invoice Audit\n\n- **Compliance Status**: Compliant (18% VAT arithmetic reconciled)\n- **Taxable Subtotal**: UGX 400,000\n- **VAT Amount (18%)**: Not stated\n- **Grand Total**: Not stated\n- **Supplier / Taxpayer TIN**: Not detected in text\n- **EFRIS Fiscal Document Number (FDN)**: Not detected in text\n\n**Verification & Statutory Guidelines**:\n1. **EFRIS Fiscalization**: All VAT-registered businesses in Uganda must issue e-receipts/e-invoices through EFRIS with a valid Fiscal Document Number (FDN) and QR code.\n2. **Online Verification**: Verify the authenticity of this FDN directly at https://efris.ura.go.ug/ or scan the invoice QR code using the URA Kakasa mobile app.\n3. **Input Tax Eligibility**: Taxpayers may only claim input tax credits for purchases backed by genuine fiscalized EFRIS invoices issued by VAT-registered suppliers.",
+      "eval_criteria": [
+        "18% VAT arithmetic check",
+        "Flags mismatch (Expected 72,000 UGX vs Stated 50,000 UGX)",
+        "EFRIS verification guidance"
+      ],
+      "matched_criteria": [
+        "18% VAT arithmetic check",
+        "Flags mismatch (Expected 72,000 UGX vs Stated 50,000 UGX)",
+        "EFRIS verification guidance"
+      ],
+      "criteria_score_pct": 100.0,
+      "passed": true,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-08",
+      "title": "Capturing Taxpayer Feedback & Discrepancy Logging",
+      "category": "Closed-Loop Feedback",
+      "cx_problem": "Citizen feedback and rate challenges getting lost without reaching URA tax policy and legal teams.",
+      "locale": "en",
+      "prompt": "Report bug: Your withholding tax rate on agricultural goods is outdated, the new law changed it to 1%.",
+      "elapsed_s": 4.19,
+      "retrieval_mode": "hybrid",
+      "reply": "Thank you for pointing this out! Based on our indexed statutory guidance, tax statutory provisions and rates are subject to periodic amendments. I have automatically submitted a Knowledge Discrepancy Report (**#KB-06dde391**) for our tax policy and technical review team to verify against the latest gazettes.\n\nWe have recorded your assertion: \"Report bug: Your withholding tax rate on agricultural goods is outdated, the new law changed it to 1%.\".\n\nWithholding Tax (WHT) is an advance tax deducted at source: 1) 6% on goods and services supplies exceeding UGX 1,000,000 to designated agents; 2) 6% on professional, management, and consultancy fees; 3) 15% on dividends and interest paid to residents (10% on listed dividends); 4) 15% on non-resident service contracts; 5) 6% WHT on customs imports. WHT must be remitted by the 15th of the following month using Form DT-1013. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What is The East African Tax Law Report Volume IV?",
+      "eval_criteria": [
+        "Acknowledgment of challenge",
+        "Discrepancy / Bug logging tracking badge (KB-... or acknowledgment)"
+      ],
+      "matched_criteria": [
+        "Discrepancy / Bug logging tracking badge (KB-... or acknowledgment)"
+      ],
+      "criteria_score_pct": 50.0,
+      "passed": true,
+      "discrepancy": {
+        "id": "kb_096106dde391",
+        "status": "pending",
+        "frequency_count": 1,
+        "discrepancy_type": "incorrect_rate",
+        "reused_existing": false
+      }
+    },
+    {
+      "id": "CX-LIVE-09",
+      "title": "Foreign Tax Regime Deflection (Jurisdiction Guard)",
+      "category": "Statutory Boundaries",
+      "cx_problem": "AI assistants hallucinating legal advice on foreign jurisdictions outside URA statutory mandate.",
+      "locale": "en",
+      "prompt": "What is the capital gains tax rate in Kenya according to the Kenya Revenue Authority?",
+      "elapsed_s": 0.02,
+      "retrieval_mode": "out_of_jurisdiction",
+      "reply": "I can only help with taxes administered by the Uganda Revenue Authority. I don't hold Kenya's tax rates, and quoting Uganda's figures for Kenya would be misleading.\n\nFor Kenya you'll need that country's own revenue authority. If you meant Uganda, ask again without naming Kenya and I'll answer from the official URA rate table.",
+      "eval_criteria": [
+        "Jurisdiction deflection",
+        "Clarifies URA scope (Ugandan tax laws only)",
+        "Refusal to advise on KRA"
+      ],
+      "matched_criteria": [],
+      "criteria_score_pct": 0.0,
+      "passed": false,
+      "discrepancy": null
+    },
+    {
+      "id": "CX-LIVE-10",
+      "title": "Warm Escalation to Human Support Officer",
+      "category": "Officer Handoff",
+      "cx_problem": "Cold transfers forcing callers to re-explain their entire situation to a new officer from scratch.",
+      "locale": "en",
+      "prompt": "I need to speak to an officer right now to schedule an Alternative Dispute Resolution hearing.",
+      "elapsed_s": 2.46,
+      "retrieval_mode": "faq_priority",
+      "reply": "Alternative Dispute Resolution (ADR) is a voluntary, collaborative, and confidential mechanism for resolving tax disputes between taxpayers and URA outside of formal courts or the Tax Appeals Tribunal (TAT). Guided by the URA ADR Framework, an independent URA ADR facilitator helps both parties examine facts, reconcile assessments, and sign a binding settlement agreement within 90 days, saving legal costs and court delays. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: How do I initiate Alternative Dispute Resolution (ADR) for a tax dispute?",
+      "eval_criteria": [
+        "Escalation offer / confirmation",
+        "Contact routing (0800 117 000 / ticket)",
+        "Warm transition tone"
+      ],
+      "matched_criteria": [],
+      "criteria_score_pct": 0.0,
+      "passed": false,
+      "discrepancy": null
+    }
+  ]
+}

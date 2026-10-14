@@ -173,7 +173,22 @@ def _request(text: str, language: str, response_format: str) -> tuple[str, dict[
     return f"{_url()}/v1/audio/speech", body
 
 
-def split_for_voice(text: str, limit: int | None = None) -> list[str]:
+def _first_clause_max_chars() -> int | None:
+    raw = os.getenv("ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS", "").strip()
+    if not raw:
+        return None
+    try:
+        return max(30, int(raw))
+    except ValueError:
+        return None
+
+
+def split_for_voice(
+    text: str,
+    limit: int | None = None,
+    *,
+    first_clause_limit: int | None = None,
+) -> list[str]:
     """*text* in pieces of at most *limit* characters, cut at sentence, clause, then word breaks.
 
     The sidecar stops at ``ORPHEUS_MAX_TOKENS`` (1400 tokens, 16.98 s of audio)
@@ -181,18 +196,30 @@ def split_for_voice(text: str, limit: int | None = None) -> list[str]:
     was cut off mid-word on a call, and every /v1/voice/chat reply ended at
     exactly 16.98 s. Speech runs up to ~0.12 s a character when digits are read
     one by one, so the default 120 characters stays inside the cap.
+
+    When *first_clause_limit* (or ``ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS``) is set,
+    the very first clause is emitted with a tighter cap (~55 chars) so the
+    caller hears the opening audio ~140 ms sooner.
     """
     limit = limit or _max_chars()
-    if len(text) <= limit:
+    first_cap = first_clause_limit if first_clause_limit is not None else _first_clause_max_chars()
+    if len(text) <= limit and (first_cap is None or len(text) <= first_cap):
         return [text]
     units: list[str] = []
     for sentence in _SENTENCE_BREAK_RE.split(" ".join(text.split())):
-        if len(sentence) <= limit:
+        if len(sentence) <= limit and (units or first_cap is None or len(sentence) <= first_cap):
             units.append(sentence)
             continue
         for clause in _CLAUSE_BREAK_RE.split(sentence):
             units.extend([clause] if len(clause) <= limit else _pack(clause.split(" "), limit))
-    return _pack(units, limit)
+    packed = _pack(units, limit)
+    if first_cap is not None and packed and len(packed[0]) > first_cap:
+        clauses = _CLAUSE_BREAK_RE.split(packed[0])
+        if len(clauses) > 1 and len(clauses[0]) <= first_cap:
+            head = clauses[0]
+            tail = " ".join(clauses[1:])
+            return [head, *_pack([tail, *packed[1:]], limit)]
+    return packed
 
 
 def _pack(units: list[str], limit: int) -> list[str]:

@@ -33,14 +33,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write     # Sigstore OIDC token
-  packages: write     # Push attestation to registry
-  attestations: write # GitHub Attestations API
 
 jobs:
   sign-and-attest:
     name: "Sign & Attest"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write     # Sigstore OIDC token
+      packages: write     # Push attestation to registry
+      attestations: write # GitHub Attestations API
     timeout-minutes: 10
     steps:
       - name: Checkout code

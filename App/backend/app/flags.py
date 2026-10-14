@@ -336,8 +336,9 @@ _REGISTRY: dict[str, Flag] = {
         Flag(
             "enterprise_connectors",
             False,
-            "Enable enterprise system connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments). "
-            "In production (APP_ENV=production), local mock connectors are disabled unless this flag is on.",
+            "Expose explicitly selected, deployment-bound remote MCP connectors in taxpayer chat. "
+            "Only reviewed read-only operations are eligible. In-process simulator tools are never "
+            "listed; a simulator bound as a remote server is labelled as demo data and is refused in production.",
         ),
         # Phase 30 (2026) — next-generation architecture increments.
         # All default off and all subject-addressable, so each lands on a
@@ -408,6 +409,56 @@ _REGISTRY: dict[str, Flag] = {
             False,
             "Receptionist answers in the language the caller speaks (en/sw on Gemini Live, "
             "lg on the cascaded engine), detected per utterance; needs voice_receptionist",
+        ),
+        Flag(
+            "knowledge_discrepancy_reporting",
+            True,
+            "Auto-detect conversational factual disputes, log discrepancy reports, "
+            "and apply active statutory precedences & tombstones.",
+        ),
+        # Phase 31 (2026) — Agentic Voice CX & Continuous Relationship Orchestration
+        Flag(
+            "hybrid_speech_s2s",
+            False,
+            "Enable the Hybrid S2S + Cascaded Speech Router in voice pipelines "
+            "(fast S2S path for conversational turns, regulated figure-protected "
+            "cascaded path for statutory/numeric turns).",
+        ),
+        Flag(
+            "voice_agentic_workflows",
+            False,
+            "Enable guided multi-step workflows, calculator MCP tools, and spoken "
+            "confirmation tokens inside live voice receptionist calls.",
+        ),
+        Flag(
+            "multi_agent_dag",
+            False,
+            "Enable multi-specialist DAG chaining (CUSTOMS_SPECIALIST + TAX_SPECIALIST "
+            "+ TOOLS) with HandoffEnvelope verification in the graph orchestrator.",
+        ),
+        Flag(
+            "continuous_relationship_memory",
+            False,
+            "Enable longitudinal ResolutionCase persistence, bidirectional Voice <-> Web "
+            "carryover, and post-call background task continuation.",
+        ),
+        Flag(
+            "emotion_aware_prosody",
+            False,
+            "Enable acoustic prosody analysis (pitch, energy, speech rate) in "
+            "CallerAudioTap and dynamic empathy/pacing conditioning in TTS.",
+        ),
+        Flag(
+            "spoken_figure_guard",
+            False,
+            "Run acoustic digit verification on synthesized TTS audio when replies "
+            "contain statutory rates, UGX amounts, TINs, or PRNs.",
+        ),
+        Flag(
+            "officer_voice_copilot",
+            False,
+            "Stream live ASR transcripts, English translations, and statutory rate "
+            "cards to the officer desk while a voice call is bridged to staff.",
         ),
     ]
 }
@@ -500,9 +551,8 @@ class FeatureFlags:
         env_val = os.getenv(f"FLAG_{name.upper()}")
         if env_val is not None:
             return env_val.lower() in ("1", "true", "yes", "on")
-        if os.getenv("APP_ENV", "development").lower() == "production":
-            if name in _PRODUCTION_ON_FLAGS:
-                return True
+        if os.getenv("APP_ENV", "development").lower() == "production" and name in _PRODUCTION_ON_FLAGS:
+            return True
 
         rollout = _env_rollout(name, flag.rollout)
         if rollout is not None and rollout.is_addressed():
@@ -572,6 +622,9 @@ class FeatureFlags:
                 "corrective_rag",
                 "query_decomposition",
                 "evaluator_optimizer",
+                "hybrid_speech_s2s",
+                "multi_agent_dag",
+                "spoken_figure_guard",
             )
         }
 

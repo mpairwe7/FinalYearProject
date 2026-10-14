@@ -1,0 +1,55 @@
+id: bwims_warehouse_guidance
+name: Bonded Warehouse & BWIMS Guidance
+version: "1"
+description: >
+  Guide importers, clearing agents, and bonded warehouse operators to public URA
+  warehousing information. This guide does not query BWIMS, validate customs
+  references, change warehouse stock, or release goods.
+requires_auth: false
+
+trigger_phrases:
+  - "help me with bwims"
+  - "bwims guidance"
+  - "bonded warehouse help"
+  - "help with bonded warehousing"
+  - "help me clear bonded goods"
+  - "track bonded cargo"
+
+steps:
+  - id: collect_goal
+    title: "What do you need?"
+    question: >
+      What kind of help do you need: a general BWIMS or bonded-warehousing
+      overview, guidance on tracking cargo, clearing or releasing goods,
+      warehouse-operator guidance, reporting a BWIMS issue, or something else?
+      Please do not share TINs, entry numbers, PRNs, shipping references, or
+      documents in this chat.
+    slot: request_goal
+    validator: "enum[overview,track cargo,clear or release goods,warehouse operator guidance,report a BWIMS issue,other]"
+
+  - id: collect_role
+    title: "Your role"
+    question: >
+      Are you asking as an importer, a customs clearing agent, a bonded
+      warehouse operator, or another person? Do not include account or cargo
+      identifiers.
+    slot: user_role
+    validator: "enum[importer,clearing agent,warehouse operator,other]"
+
+  - id: summary
+    title: "Official next steps"
+    question: >
+      This chat has not queried BWIMS, checked cargo or customs status, created
+      a declaration, changed warehouse stock, or released goods. Use the linked
+      URA information pages for the current process; requirements and timelines
+      depend on the goods, declaration, and your role, so confirm them with URA
+      or your licensed customs clearing agent. Keep TINs, entry and shipping
+      references, PRNs, passwords, one-time codes,
+      and cargo documents out of chat. Local BWIMS connector results are sample
+      data and must not be used to make customs or release decisions.
+    slot: ""
+    validator: text
+    portal_action: bwims_portal
+    resources:
+      - bwims_portal
+      - customs_systems

@@ -1,4 +1,5 @@
 import React, { memo } from 'react';
+import { useTranslation } from '../lib/i18n';
 import type { ContextResource } from '../store/useChatStore';
 
 interface ResourceCardsProps {
@@ -6,16 +7,18 @@ interface ResourceCardsProps {
   title?: string;
 }
 
-function ResourceCardsInner({ resources, title = 'Official URA Forms, Templates & Sources' }: ResourceCardsProps) {
+function ResourceCardsInner({ resources, title }: ResourceCardsProps) {
+  const t = useTranslation();
   if (!resources || resources.length === 0) return null;
+  const heading = title ?? t('resource.title');
 
   return (
-    <div className="resource-cards-container" role="region" aria-label={title}>
+    <div className="resource-cards-container" role="region" aria-label={heading}>
       <div className="resource-cards-header">
         <span className="resource-cards-title-icon" aria-hidden="true">📂</span>
-        <span className="resource-cards-title">{title}</span>
+        <span className="resource-cards-title">{heading}</span>
         <span className="resource-cards-count-badge">{resources.length}</span>
-        <span className="resource-verified-banner" aria-label="Verified government source">✓ Official Verified Sources</span>
+        <span className="resource-verified-banner" aria-label={t('resource.verified')}>✓ {t('resource.verified')}</span>
       </div>
 
       <div className="resource-cards-grid">
@@ -24,6 +27,17 @@ function ResourceCardsInner({ resources, title = 'Official URA Forms, Templates 
           const isOnlineForm = res.type === 'online_form';
           const isStatute = res.type === 'statutory_source';
           const format = (res.format || (isOnlineForm ? 'web' : 'pdf')).toLowerCase();
+          const actionLabel = t(
+            isDownload
+              ? 'resource.action.download'
+              : isOnlineForm
+                ? 'resource.action.online'
+                : isStatute
+                  ? 'resource.action.statute'
+                  : 'resource.action.guide',
+          );
+          const actionIcon = isDownload ? '⤓' : '↗';
+          const actionClass = isDownload ? 'is-download' : 'is-portal';
 
           return (
             <div
@@ -33,15 +47,15 @@ function ResourceCardsInner({ resources, title = 'Official URA Forms, Templates 
             >
               <div className="resource-card-top">
                 <span className={`resource-type-pill is-${res.type || 'generic'}`}>
-                  {isDownload && '📥 Downloadable Form'}
-                  {isOnlineForm && '🌐 Online Form'}
-                  {isStatute && '⚖️ Statutory Law'}
-                  {!isDownload && !isOnlineForm && !isStatute && '📖 Official Guide'}
+                  {isDownload && `📥 ${t('resource.type.download')}`}
+                  {isOnlineForm && `🌐 ${t('resource.type.online')}`}
+                  {isStatute && `⚖️ ${t('resource.type.statute')}`}
+                  {!isDownload && !isOnlineForm && !isStatute && `📖 ${t('resource.type.guide')}`}
                 </span>
 
                 <div className="resource-meta-group">
                   {res.effective_year && (
-                    <span className="resource-year-tag" title="Effective statutory period">{res.effective_year}</span>
+                    <span className="resource-year-tag" title={t('resource.effectivePeriod')}>{res.effective_year}</span>
                   )}
                   {res.format && (
                     <span className={`resource-format-tag is-${format}`}>
@@ -62,14 +76,14 @@ function ResourceCardsInner({ resources, title = 'Official URA Forms, Templates 
 
               {res.citation && (
                 <div className="resource-citation-wrap">
-                  <span className="resource-citation-label">Statutory Basis:</span>
+                  <span className="resource-citation-label">{t('resource.statutoryBasis')}</span>
                   <span className="resource-citation-text">{res.citation}</span>
                 </div>
               )}
 
               {res.checklist && res.checklist.length > 0 && (
                 <div className="resource-checklist-wrap">
-                  <span className="resource-checklist-title">Checklist before submitting:</span>
+                  <span className="resource-checklist-title">{t('resource.checklist')}</span>
                   <ul className="resource-checklist-list">
                     {res.checklist.map((item, i) => (
                       <li key={i}>{item}</li>
@@ -83,19 +97,16 @@ function ResourceCardsInner({ resources, title = 'Official URA Forms, Templates 
                   href={res.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`resource-action-btn ${isDownload ? 'is-download' : 'is-portal'}`}
-                  title={`${isDownload ? 'Download' : 'Open'}: ${res.title}`}
+                  className={`resource-action-btn ${actionClass}`}
+                  title={`${actionLabel}: ${res.title}`}
                 >
-                  {isDownload && <><span>Download Template</span> <span aria-hidden="true">⤓</span></>}
-                  {isOnlineForm && <><span>Open Online Form</span> <span aria-hidden="true">↗</span></>}
-                  {isStatute && <><span>View Statute</span> <span aria-hidden="true">↗</span></>}
-                  {!isDownload && !isOnlineForm && !isStatute && <><span>Access Guide</span> <span aria-hidden="true">↗</span></>}
+                  <span>{actionLabel}</span> <span aria-hidden="true">{actionIcon}</span>
                 </a>
               </div>
 
               {res.source_domain && (
                 <div className="resource-domain-footnote">
-                  <span>Source: {res.source_domain}</span>
+                  <span>{t('resource.source', { domain: res.source_domain })}</span>
                 </div>
               )}
             </div>

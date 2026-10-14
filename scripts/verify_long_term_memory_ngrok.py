@@ -115,7 +115,11 @@ def post_chat(base_url: str, message: str, conversation_id: str | None = None) -
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "LongHorizonVerifier/2.0"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "LongHorizonVerifier/2.0",
+            "ngrok-skip-browser-warning": "1",
+        },
     )
     t0 = time.perf_counter()
     status_code = 0

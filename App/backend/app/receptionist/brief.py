@@ -35,7 +35,7 @@ import time
 from typing import Any
 
 from ..guardrails import redact_pii_text
-from .config import get_brief_every_turns, get_brief_model
+from .config import get_brief_every_turns
 from .hub import hub
 from .language import LANGUAGE_NAMES
 from .store import get_call, list_turns, register_turn_observer, unregister_turn_observer, update_call
@@ -197,30 +197,20 @@ def fallback_brief(call: dict[str, Any], turns: list[dict[str, Any]]) -> dict[st
 
 
 def _generate(prompt: str) -> tuple[dict[str, Any] | None, str]:
-    """Ask local Sunflower, then Gemini if it is down: (raw brief, model name)."""
+    """Ask local Sunflower: (raw brief, model name), or ``(None, "")`` when it is down.
 
-    def gemini() -> tuple[str, str]:
-        from ..providers.gateway import gemini_generate
-
-        model = get_brief_model()
-        return gemini_generate(prompt, system=BRIEF_SYSTEM, model=model, max_tokens=1500,
-                               temperature=0.0, locale="en"), model
-
-    def sunflower() -> tuple[str, str]:
+    Local only (decided 2026-09-30): a call transcript does not leave the
+    deployment. With vLLM down the caller still gets the deterministic brief.
+    """
+    try:
         from ..llm import _vllm_generate
 
         messages = [{"role": "system", "content": BRIEF_SYSTEM}, {"role": "user", "content": prompt}]
-        return _vllm_generate(messages, max_tokens=1200, temperature=0.0), "sunflower"
-
-    for generate in (sunflower, gemini):
-        try:
-            raw, model = generate()
-        except Exception:
-            logger.debug("Brief model %s failed", generate.__name__, exc_info=True)
-            continue
-        if raw:
-            return {"raw": raw}, model
-    return None, ""
+        raw = _vllm_generate(messages, max_tokens=1200, temperature=0.0)
+    except Exception:
+        logger.debug("Brief model failed", exc_info=True)
+        return None, ""
+    return ({"raw": raw}, "sunflower") if raw else (None, "")
 
 
 def build_brief(call_id: str, *, force: bool = False) -> dict[str, Any] | None:
@@ -259,6 +249,11 @@ def build_brief(call_id: str, *, force: bool = False) -> dict[str, Any] | None:
             transcript=_transcript(turns), language=LANGUAGE_NAMES.get(language, language),
             transfer=transfer, schema=_SCHEMA,
         )
+    chat_context = str(call.get("chat_context") or "").strip()
+    if chat_context:
+        # What the caller was doing in the chat before ringing (carryover.py):
+        # context for the officer, not a transcript turn, so nothing cites it.
+        prompt += f"\n\nBefore the call, the caller was using the chat (not a turn; context only): {chat_context}"
 
     started = time.perf_counter()
     reply, model = _generate(prompt)

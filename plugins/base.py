@@ -14,6 +14,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Tool schema and base conforming to URA agent framework & MCP
 # ---------------------------------------------------------------------------
+def readable_title(name: str, namespace: str = "") -> str:
+    """A function name as a person reads it, without its service's prefix.
+
+    ``bwims_consignment_status`` in the ``bwims`` namespace is "Consignment
+    status": the picker shows it under the service's own name, and
+    "Bwims consignment status" read as a typo. A name that is nothing but the
+    prefix is kept whole.
+    """
+    words = [word for word in name.split("_") if word]
+    prefixes = {word for word in namespace.split("_") if word}
+    if namespace:
+        prefixes.add(namespace)
+        prefixes.add("".join(word[0] for word in namespace.split("_") if word))
+    if len(words) > 1 and words[0] in prefixes:
+        words = words[1:]
+    return " ".join(words).capitalize()
+
+
 @dataclass(frozen=True)
 class ToolSchema:
     """Structural description of a tool, exported to the LLM and to MCP."""
@@ -40,10 +58,20 @@ class ToolSchema:
     idempotent: bool = True
     open_world: bool = False
 
+    def __post_init__(self) -> None:
+        if self.output_schema and isinstance(self.output_schema, dict):
+            if "properties" in self.output_schema and "ok" in self.output_schema["properties"]:
+                req = list(self.output_schema.get("required", []))
+                if "ok" not in req:
+                    req.append("ok")
+                    schema_copy = dict(self.output_schema)
+                    schema_copy["required"] = req
+                    object.__setattr__(self, "output_schema", schema_copy)
+
     def annotations(self) -> dict[str, Any]:
         """MCP annotations object for this tool."""
         return {
-            "title": self.title or self.name.replace("_", " ").capitalize(),
+            "title": self.title or readable_title(self.name, self.namespace),
             "readOnlyHint": self.read_only,
             "destructiveHint": self.destructive,
             "idempotentHint": self.idempotent,
@@ -66,11 +94,18 @@ class Tool(ABC):
     def to_openai_spec(self) -> dict[str, Any]:
         """Convert to the OpenAI/Qwen2.5 function-calling schema."""
         s = self.schema
+        description = s.description
+        if s.namespace in {"efris", "payment_system", "bwims", "tin_registration", "digital_tax_stamps", "ursb"}:
+            description = (
+                "LOCAL SIMULATOR ONLY. This tool does not contact or change an external government, identity, "
+                "customs, registry, bank, or payment system. "
+                + description
+            )
         return {
             "type": "function",
             "function": {
                 "name": s.name,
-                "description": s.description,
+                "description": description,
                 "parameters": s.parameters,
             },
         }
@@ -78,9 +113,16 @@ class Tool(ABC):
     def to_mcp_tool(self) -> dict[str, Any]:
         """Convert to an MCP Tool descriptor."""
         s = self.schema
+        description = s.description
+        if s.namespace in {"efris", "payment_system", "bwims", "tin_registration", "digital_tax_stamps", "ursb"}:
+            description = (
+                "LOCAL SIMULATOR ONLY. This tool does not contact or change an external government, identity, "
+                "customs, registry, bank, or payment system. "
+                + description
+            )
         descriptor: dict[str, Any] = {
             "name": s.name,
-            "description": s.description,
+            "description": description,
             "inputSchema": s.parameters,
             "annotations": s.annotations(),
             "_meta": {
@@ -121,6 +163,24 @@ class PluginMetadata:
     documentation_url: str = ""
 
 
+@dataclass(frozen=True)
+class MCPResource:
+    """Standardized URI-addressable, read-only data source conforming to the MCP specification."""
+
+    uri: str
+    name: str
+    description: str = ""
+    mime_type: str = "application/json"
+
+    def to_mcp_dict(self) -> dict[str, Any]:
+        return {
+            "uri": self.uri,
+            "name": self.name,
+            "description": self.description,
+            "mimeType": self.mime_type,
+        }
+
+
 class SystemConnector(ABC):
     """Abstract connector bridging an external or internal system to the agentic URA framework."""
 
@@ -147,6 +207,18 @@ class SystemConnector(ABC):
     @abstractmethod
     def get_status(self) -> dict[str, Any]:
         """Return structured diagnostics and status for the connector."""
+
+    def get_resources(self) -> list[MCPResource]:
+        """Return the list of read-only MCP resources addressable through this connector."""
+        return []
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        """Fetch read-only resource contents matching the specified URI."""
+        raise KeyError(f"Resource '{uri}' not found on connector '{self.system_name}'")
+
+    def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
+        """Universal Saga compensation interface for rolling back a previously executed action."""
+        return {"ok": False, "supported": False, "message": f"Compensation for '{action_type}' not supported"}
 
     def shutdown(self) -> None:  # noqa: B027
         """Gracefully release connector resources."""

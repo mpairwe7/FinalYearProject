@@ -19,6 +19,9 @@ export const queryKeys = {
     all: () => ['admin'] as const,
     flags: () => ['admin', 'flags'] as const,
     overrides: () => ['admin', 'overrides'] as const,
+    discrepancies: (status?: string, priority?: string) => ['admin', 'discrepancies', { status, priority }] as const,
+    tombstones: () => ['admin', 'tombstones'] as const,
+    precedences: () => ['admin', 'precedences'] as const,
     outbox: () => ['admin', 'outbox'] as const,
     evaluation: () => ['admin', 'evaluation'] as const,
     /** Prefix of every audit-trail query: invalidates events and the integrity check together. */
@@ -44,6 +47,29 @@ export const queryKeys = {
     feedbackSummary: (days?: number) => ['analytics', 'feedbackSummary', days] as const,
     journeys: (days?: number) => ['analytics', 'journeys', days] as const,
   },
+  quality: {
+    /** Prefix of every service-quality audit query. */
+    all: () => ['quality'] as const,
+    summary: (days: number) => ['quality', 'summary', days] as const,
+    aiChat: (days: number, pattern: string, topic: string, locale: string, withComment: boolean, limit: number) =>
+      ['quality', 'aiChat', { days, pattern, topic, locale, withComment, limit }] as const,
+    aiChatTimeline: (conversationId: string) => ['quality', 'aiChatTimeline', conversationId] as const,
+    ratings: (
+      source: string,
+      days: number,
+      score: number | null,
+      officer: string,
+      status: string,
+      limit: number,
+      sentiment = '',
+    ) => ['quality', 'ratings', { source, days, score, officer, status, limit, sentiment }] as const,
+    /** A case opened from the audit (read once: each read is recorded). */
+    ticket: (id: string) => ['quality', 'ticket', id] as const,
+    /** A call opened from the audit (read once: each read is recorded). */
+    call: (id: string) => ['quality', 'call', id] as const,
+    needsReview: (days: number, status: string, stream: string, limit: number) =>
+      ['quality', 'needsReview', { days, status, stream, limit }] as const,
+  },
   speech: {
     all: () => ['speech'] as const,
     health: () => ['speech', 'health'] as const,
@@ -55,5 +81,6 @@ export const queryKeys = {
     detail: (id: string) => ['calls', 'detail', id] as const,
     brief: (id: string) => ['calls', 'brief', id] as const,
     metrics: (days?: number) => ['calls', 'metrics', days] as const,
+    presence: () => ['calls', 'presence'] as const,
   },
 } as const;

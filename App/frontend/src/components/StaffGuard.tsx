@@ -31,7 +31,7 @@ import {
   subscribeAuthToken,
 } from "../lib/authSession";
 import { endOidcSession } from "../lib/oidcFlow";
-import { isStaffRole, signedInName, staffSectionsFor } from "../lib/roles";
+import { isStaffRole, signedInName, staffSectionsFor, watchesLiveQueue } from "../lib/roles";
 import { useTicketStream, type LiveEscalation } from "../hooks/useTicketStream";
 import AccountMenu from "./ops/AccountMenu";
 import {
@@ -44,6 +44,7 @@ import {
   ChartIcon,
   ChevronsLeftIcon,
   ChevronsRightIcon,
+  ClipboardCheckIcon,
   FlagIcon,
   GaugeIcon,
   InboxIcon,
@@ -51,6 +52,7 @@ import {
   PanelLeftIcon,
   PhoneIcon,
   SendIcon,
+  ShieldIcon,
   SlidersIcon,
 } from "./ops/icons";
 import SettingsDialog, { type SettingsTab } from "./settings/SettingsDialog";
@@ -110,8 +112,11 @@ const DESTINATION_ICON: Record<string, () => React.JSX.Element> = {
   "/admin/flags": FlagIcon,
   "/admin/overrides": SlidersIcon,
   "/admin/outbox": SendIcon,
+  "/admin/connectors": ListIcon,
   "/analytics": ChartIcon,
   "/analytics/evaluation": BeakerIcon,
+  "/admin/quality": ClipboardCheckIcon,
+  "/admin/audit": ShieldIcon,
 };
 
 /**
@@ -412,9 +417,16 @@ export default function StaffGuard({
           offset by the rail's current width. */}
       <div className="staff-shell-content">
         {/* Phone calls on every staff page: the call bar, transfer alerts and
-            the officer's own call, which outlives navigation (Call Desk §8.2). */}
-        <StaffCallLayer role={state.who.role} who={state.who} />
-        <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
+            the officer's own call, which outlives navigation (Call Desk §8.2).
+            The live queue is for the officers working it and the auditors
+            watching it; an administrator audits the service and gets neither
+            the call layer nor the new-escalation banner. */}
+        {watchesLiveQueue(state.who.role) ? (
+          <>
+            <StaffCallLayer role={state.who.role} who={state.who} />
+            <TicketLiveBanner latest={live.latest as LiveEscalation | null} />
+          </>
+        ) : null}
         {children(state.who)}
       </div>
       <CommandPalette

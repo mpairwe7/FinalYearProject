@@ -24,6 +24,7 @@ from ...mcp import get_client
 from ...mcp.tool_rag import ToolRAGSelector
 from ...text_signals import ABSTENTION_REPLY, CLARIFICATION_PROMPT, NO_HITS_REPLY
 from ..state import AgentRoute
+from .compactor import compact_tool_observation, node_context_compactor
 from .runtime import END, GraphNode, GraphRuntime, NodeResult
 from .state import AgentGraphState, GraphOutcome
 
@@ -47,11 +48,21 @@ def node_route(state: AgentGraphState) -> NodeResult:
         return NodeResult(next_node="retrieve")
 
     has_history = bool(state.conversation_history)
-    decision = _supervisor.classify(
-        state.rewritten_query or state.query,
-        has_conversation_history=has_history,
-        locale=state.locale,
-    )
+    if flags.is_enabled("multi_agent_dag", subject=state.user_id or None):
+        decision = _supervisor.plan_multi_agent_dag(
+            state.rewritten_query or state.query,
+            has_conversation_history=has_history,
+            locale=state.locale,
+            subject=state.user_id or None,
+        )
+    else:
+        decision = _supervisor.classify(
+            state.rewritten_query or state.query,
+            has_conversation_history=has_history,
+            locale=state.locale,
+        )
+    if getattr(decision, "requires_multi_agent", False) and getattr(decision, "sub_routes", ()):
+        state.sub_routes = [r.value for r in decision.sub_routes]
 
     if decision.route == AgentRoute.CLARIFY:
         state.clarification_question = decision.clarification_question
@@ -106,7 +117,7 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
     if not flags.is_enabled("tool_rag"):
         # Flag off → accept the supervisor's raw whitelist
         state.plan = [t for t in state.plan if t in eligible]
-        return NodeResult(next_node="act")
+        return NodeResult(next_node="human_gate")
 
     selector = ToolRAGSelector()
     selection = selector.select(
@@ -123,6 +134,18 @@ def node_tool_rag_select(state: AgentGraphState) -> NodeResult:
         seen.add(name)
         merged.append(name)
     state.plan = merged
+    return NodeResult(next_node="human_gate")
+
+
+def node_human_gate(state: AgentGraphState) -> NodeResult:
+    """Human-in-the-loop gate: interrupts or pauses execution if action requires taxpayer consent."""
+    if state.pending_action and state.pending_action.requires_consent and not state.pending_action.authorized:
+        state.outcome = GraphOutcome.WAITING_USER
+        state.reply = (
+            f"Action requires taxpayer authorization: {state.pending_action.description}. "
+            "Please confirm to proceed."
+        )
+        return NodeResult(next_node="act", outcome=GraphOutcome.WAITING_USER, note="awaiting taxpayer approval")
     return NodeResult(next_node="act")
 
 
@@ -257,7 +280,42 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
         except Exception:
             logger.debug("graph: plan_rate_lookup binding failed", exc_info=True)
 
-    # 4. Authenticated taxpayer account parameter binding
+    # 4. Heuristic parameter recovery for calculation tools
+    if tool_name in (
+        "calculate_vat",
+        "calculate_paye",
+        "calculate_withholding_tax",
+        "calculate_rental_tax",
+        "calculate_presumptive_tax",
+    ):
+        try:
+            import re
+            from ...tax.money import parse_money_amount
+
+            match = re.search(
+                r"\b(\d[\d,]*(?:\.\d+)?\s*(?:m|k|bn|million|billion|thousand|bukadde|mitwalo)?)\b",
+                query,
+                re.I,
+            )
+            if match:
+                parsed = parse_money_amount(match.group(1))
+                if parsed is not None and parsed > 0:
+                    params: dict[str, Any] = {}
+                    for p in required:
+                        if p in ("amount", "net_amount", "gross_amount", "value", "payment"):
+                            params[p] = parsed
+                        elif p in ("monthly_salary", "salary", "gross_salary"):
+                            params[p] = parsed
+                        elif p in ("gross_turnover", "turnover", "annual_turnover"):
+                            params[p] = parsed
+                        elif p in ("gross_rent", "rent", "rental_income"):
+                            params[p] = parsed
+                    if params and all(p in params for p in required):
+                        return params
+        except Exception:
+            logger.debug("graph: heuristic parameter extraction failed for %s", tool_name, exc_info=True)
+
+    # 5. Authenticated taxpayer account parameter binding
     if set(required) == {"taxpayer_id"} and state.user_id:
         return {"taxpayer_id": state.user_id}
 
@@ -310,6 +368,7 @@ def node_act(state: AgentGraphState) -> NodeResult:
                 "name": tool_name,
                 "ok": result.ok,
                 "duration_ms": result.duration_ms,
+                "result": result.result,
             }
         )
         state.observations.append(result.result)
@@ -325,13 +384,108 @@ def _usable_observations(state: AgentGraphState) -> list:
     ]
 
 
+_SPECIALIST_DEFAULT_TOOLS: dict[str, tuple[str, ...]] = {
+    "customs_specialist": ("calculate_customs_duty", "lookup_rate"),
+    "tax_specialist": (
+        "calculate_vat",
+        "calculate_paye",
+        "calculate_withholding_tax",
+        "calculate_rental_tax",
+        "lookup_rate",
+    ),
+    "tools": ("lookup_rate", "get_filing_deadlines", "get_current_date"),
+}
+
+
+def _build_aligned_tool_receipts(state: AgentGraphState) -> list[Any]:
+    """Build ToolExecutionReceipt list aligned strictly with each successful tool_call."""
+    from ...memory.handoff import ToolExecutionReceipt
+
+    receipts: list[ToolExecutionReceipt] = []
+    for idx, tc in enumerate(state.tool_calls):
+        if not isinstance(tc, dict) or not tc.get("ok"):
+            continue
+        obs = tc.get("result")
+        if obs is None and idx < len(state.observations):
+            obs = state.observations[idx]
+        if isinstance(obs, dict) and obs.get("ok", True):
+            receipts.append(
+                ToolExecutionReceipt(
+                    tool_name=str(tc.get("name", "tool")),
+                    inputs_summary=state.rewritten_query or state.query,
+                    deterministic_output=obs,
+                )
+            )
+    return receipts
+
+
 def node_observe(state: AgentGraphState) -> NodeResult:
     """ReAct observe: keep, retrieve once, or synthesise an empty plan.
 
     Industry 2026 practice caps this at one hop (``max_handoffs``). Failed
     or unfillable tools are not evidence — they hand off to retrieve.
+    When ``multi_agent_dag`` is active and multiple specialist sub_routes
+    were planned, records a structured inter-specialist ``HandoffEnvelope``,
+    advances the route cursor, and dispatches the next specialist's tools
+    (or statutory retrieval) before final synthesis.
     """
-    if _usable_observations(state) or state.hits:
+    usable = _usable_observations(state)
+    from ...flags import flags
+
+    if (
+        len(state.sub_routes) >= 2
+        and not state.hits
+        and state.handoff_count < max(2, state.max_handoffs + 1)
+        and flags.is_enabled("multi_agent_dag", subject=state.user_id or None)
+    ):
+        state.handoff_count += 1
+        state.handoff_from = state.sub_routes[0]
+        target_spec = state.sub_routes[1]
+        state.sub_routes = list(state.sub_routes[1:])
+        state.agent_role = target_spec
+        state.handoff_reason = f"multi_agent_dag_chain:{state.handoff_from}->{target_spec}"
+        try:
+            from ...memory.handoff import HandoffEnvelope, HandoffGoal
+
+            receipts = _build_aligned_tool_receipts(state)
+            env = HandoffEnvelope(
+                thread_id=state.current_goal_id or "dag-turn",
+                tenant_id=state.tenant_id,
+                source_agent=state.handoff_from,
+                target_channel=target_spec,
+                goal=HandoffGoal(
+                    primary_objective=state.rewritten_query or state.query,
+                    target_resolution=f"Combine {state.handoff_from} tool outputs with {target_spec} statutory rules",
+                ),
+                taxpayer_locale=state.locale,
+                tool_receipts=receipts,
+            )
+            state.specialist_handoffs.append(env.to_dict())
+        except Exception:
+            logger.debug("graph: specialist handoff envelope creation skipped", exc_info=True)
+
+        # Dispatch target_spec's bindable specialist tools before retrieval when available
+        if flags.is_enabled("tool_use") and state.iterations < state.max_iterations:
+            already_called = {str(tc.get("name", "")) for tc in state.tool_calls if isinstance(tc, dict)}
+            already_skipped = {str(sk.get("name", "")) for sk in state.skipped_tools if isinstance(sk, dict)}
+            candidate_tools = _SPECIALIST_DEFAULT_TOOLS.get(target_spec, ())
+            next_tools = [
+                t
+                for t in candidate_tools
+                if t not in already_called
+                and t not in already_skipped
+                and bind_arguments(t, state) is not None
+            ]
+            if next_tools:
+                state.plan = next_tools
+                return NodeResult(
+                    next_node="tool_rag_select",
+                    note=f"multi_agent_dag dispatch to {target_spec}",
+                )
+
+        return NodeResult(next_node="retrieve", note=f"multi_agent_dag specialist handoff to {target_spec} retrieve")
+
+    if usable or state.hits:
         return NodeResult(next_node="synthesize")
     if state.handoff_count < state.max_handoffs:
         state.handoff_count += 1
@@ -398,6 +552,10 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
         if not state.reply:
             best = state.hits[0]
             state.reply = best.get("answer") or best.get("text", "")
+        if usable and state.specialist_handoffs:
+            tool_parts = [p for p in (_format_observation_prose(obs) for obs in usable[:2]) if p]
+            if tool_parts:
+                state.reply = "\n\n".join([*tool_parts, state.reply]).strip()
     elif usable:
         parts = []
         for obs in usable[:3]:
@@ -456,6 +614,15 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
         state.reflections.append(f"{why}; re-retrieving once")
         return NodeResult(next_node="retrieve", note="reflexion re-retrieval")
 
+    if state.hits and weak_grounding:
+        # Grounding safety net: reconcile against top verified passage text
+        best = state.hits[0]
+        verified_text = best.get("answer") or best.get("text", "")
+        if verified_text:
+            state.reply = verified_text.strip()
+            state.reflections.append("grounded revision: aligned synthesis with verified statutory passage")
+            state.faithfulness = 1.0
+
     return NodeResult(next_node="respond")
 
 
@@ -492,16 +659,16 @@ def node_respond(state: AgentGraphState) -> NodeResult:
 # ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
-def build_main_graph() -> GraphRuntime:
-    """Construct the bounded main agent graph.
+def build_main_graph(checkpointer: Any = None) -> GraphRuntime:
+    """Construct the bounded main agent graph with optional durable checkpointer."""
+    from .runtime import DurableCheckpointStore
 
-    Upstream LangGraph adoption needs an explicit state adapter, conditional
-    edge mapping, checkpointer configuration, and idempotent side effects; the
-    current mutable-state nodes are not directly replay-safe.
-    """
+    actual_checkpointer = DurableCheckpointStore() if checkpointer is None else checkpointer
     nodes: dict[str, GraphNode] = {
+        "compactor": node_context_compactor,
         "route": node_route,
         "tool_rag_select": node_tool_rag_select,
+        "human_gate": node_human_gate,
         "act": node_act,
         "observe": node_observe,
         "retrieve": node_retrieve,
@@ -509,4 +676,4 @@ def build_main_graph() -> GraphRuntime:
         "reflect": node_reflect,
         "respond": node_respond,
     }
-    return GraphRuntime(nodes=nodes, entry="route", max_steps=12)
+    return GraphRuntime(nodes=nodes, entry="compactor", max_steps=14, checkpointer=actual_checkpointer)

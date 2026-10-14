@@ -337,7 +337,7 @@ class DtsDatabase:
             return None
 
         cat = GazettedCategory(row["product_category"]) if row["product_category"] in GazettedCategory._value2member_map_ else GazettedCategory.BEER
-        status = StampStatus(row["status"]) if row["status"] in StampStatus._value2member_map_ else StampStatus.COUNTERFEIT
+        status = StampStatus(row["status"]) if row["status"] in StampStatus._value2member_map_ else StampStatus.UNKNOWN
 
         return StampRecord(
             stamp_code=row["stamp_code"],

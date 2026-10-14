@@ -286,7 +286,7 @@ class EfrisDatabase:
                 (
                     seed_fdn,
                     "A9F23B",
-                    f"https://efris.ura.go.ug/verify?fdn={seed_fdn}&code=A9F23B",
+                    "",
                     "1000000005",
                     "Kampala City Supermarket Ltd",
                     "1000000001",

@@ -1,9 +1,9 @@
 id: tin_registration
-name: TIN Registration
-version: "1"
+name: TIN Registration Guide
+version: "2"
 description: >
-  Guide a taxpayer through the steps to register for a Taxpayer
-  Identification Number (TIN) with URA.
+  Give privacy-preserving guidance for preparing a TIN application. This
+  workflow does not collect identity details or submit a registration.
 requires_auth: false
 
 trigger_phrases:
@@ -17,82 +17,32 @@ trigger_phrases:
 
 steps:
   - id: collect_type
-    title: "Taxpayer type"
+    title: "Applicant type"
     question: >
-      Are you registering as an **individual**, a **company**, or an **NGO**?
+      Which application are you preparing for: an **individual**, a **company**,
+      or an **NGO**? Please do not share your NIN, passport number, date of birth,
+      phone number, or company documents in this chat.
     slot: taxpayer_type
     validator: "enum[individual,company,ngo]"
 
-  - id: collect_name
-    title: "Legal name"
+  - id: collect_documents_ready
+    title: "Documents"
     question: >
-      What is your full legal name (as it appears on your national ID or
-      certificate of incorporation)?
-    slot: legal_name
-    validator: text
-
-  - id: collect_nin
-    title: "National ID (NIN)"
-    question: >
-      Please provide your National Identification Number (NIN).
-      Format: CM or CF followed by 2 digits, 5 letters, 5 digits, and 1 letter
-      (e.g. CM84ABN8400J).
-    slot: nin
-    validator: "regex[^C[MF]\\d{2}[A-Z]{5}\\d{4}[A-Z0-9]$]"
-    when: "taxpayer_type == individual"
-
-  - id: collect_company_reg
-    title: "Company registration"
-    question: >
-      Please provide your company registration number from URSB
-      (Uganda Registration Services Bureau).
-    slot: company_reg
-    validator: text
-    when: "taxpayer_type == company"
-
-  - id: collect_ngo_reg
-    title: "NGO registration"
-    question: >
-      Please provide your NGO registration number from the
-      National Bureau for NGOs.
-    slot: ngo_reg
-    validator: text
-    when: "taxpayer_type == ngo"
-
-  - id: collect_phone
-    title: "Phone number"
-    question: >
-      What is your phone number? (e.g. 0771234567 or +256771234567)
-    slot: phone
-    validator: "regex[^\\+?\\d{10,13}$]"
-
-  - id: collect_email
-    title: "Email address"
-    question: >
-      What is your email address?
-    slot: email
-    validator: "regex[^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$]"
-
-  - id: confirm
-    title: "Confirm"
-    question: >
-      Thank you. I have collected your details. Would you like to proceed
-      with the TIN application? (yes/no)
-    slot: confirmed
+      Do you have the original identification or organization registration
+      documents ready to use in the secure URA portal? (yes/no)
+    slot: documents_ready
     validator: boolean
 
   - id: summary
-    title: "Next steps"
+    title: "Continue securely"
     question: >
-      Your TIN registration request has been recorded. To complete the
-      process, please visit the URA web portal at https://ura.go.ug and
-      follow the online registration steps, or visit your nearest URA
-      office with your original identification documents.
-
-      Reference information has been saved to this conversation.
+      This chat has not created or submitted a TIN application. Continue at the
+      official URA portal: https://ura.go.ug → eServices → TIN Registration.
+      Use the individual route for a personal TIN, or the non-individual route
+      for a company or NGO. Keep your original documents ready. Do not share
+      passwords, one-time codes, or payment details in chat.
     slot: ""
     validator: text
-    # Ids in app/verified_resources.py — every link there was checked live.
     portal_action: tin_application
     resources:
       - tin_individual

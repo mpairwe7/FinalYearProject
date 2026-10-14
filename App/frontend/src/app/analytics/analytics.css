@@ -39,6 +39,10 @@
   background: var(--ops-row-hover);
 }
 
+.an-queue-link.is-static:hover {
+  background: none;
+}
+
 .an-queue-link:focus-visible {
   outline: var(--ops-focus-ring) solid var(--ops-focus);
   outline-offset: -1px;

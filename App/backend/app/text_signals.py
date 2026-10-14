@@ -56,7 +56,7 @@ _CHANNEL_TOKEN_RE = re.compile(
 # whether anything contentful remains.
 _CHANNEL_STRIP_RE = re.compile(
     r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|https?://\S+|www\.\S+"
-    r"|[a-z0-9._%+-]+@ura(?:\.go)?(?:\.ug)?|\bemail\b|\bservices\b|\binfo\b"
+    r"|(?:services|info|support)@ura(?:\.go)?(?:\.ug)?|\bemail\b|\bservices\b|\binfo\b"
     r"|ura\.go\.ug|\bura\b|\bgo\b|\bug\b|whatsapp|toll[- ]?free"
     r"|contact cent(?:re|er)|\bcall\b|\bvisit\b|\bportal\b|\bweb\b"
 )
@@ -360,13 +360,19 @@ _FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 )
 
 _UGANDA_RE = re.compile(
-    r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b",
+    r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b"
+    r"|\bmukono\b|\bwakiso\b|\bkasese\b|\bfort\s+portal\b|\bkabale\b|\bhoima\b|\blira\b|\barua\b|\btororo\b|\bmasindi\b|\bsoroti\b"
+    r"|\befris\b|\bdts\b|\bkakasa\b|\btin\b|\bprn\b|\bpaye\b|\bursb\b|\bbwims\b|\bugx\b|\bshillings?\b",
     re.IGNORECASE,
 )
 
 
 _EXPORT_TO_FOREIGN_RE = re.compile(
     r"\b(?:\w*export\w*|\w*import\w*|\w*agiza\w*|\w*safirisha\w*|\w*ingiza\w*|\w*fulumya\w*)\b.*?\b(?:to|from|kutoka|okuva(?:\s+mu)?)\s+(?:kenya|rwanda|tanzania|burundi|drc|congo|south\s+sudan|sudan|china|japan|uae|dubai|india|uk|usa|us)\b",
+    re.IGNORECASE,
+)
+_REMITTANCE_OR_SOURCE_RE = re.compile(
+    r"\b(?:sent\s+by|money\s+(?:from|sent)|sister\s+in|brother\s+in|family\s+in|relative\s+in|mother\s+in|father\s+in|parents?\s+in|remittance|gift\s+from|freelanc\w*\s+for|remote\w*\s+for|contract\w*\s+for|client\w*\s+in|customer\w*\s+in|company\s+in|employer\s+in)\b",
     re.IGNORECASE,
 )
 _PURE_FOREIGN_TAX_RE = re.compile(
@@ -386,9 +392,9 @@ def detect_foreign_jurisdiction(message: str) -> str:
     text = message or ""
     if not text.strip() or _UGANDA_RE.search(text):
         return ""
-    # Cross-border export/import trade operations (e.g. "When we export goods to Kenya, what VAT applies?")
-    # are governed by URA's export/customs tax rules (zero-rated export) rather than foreign domestic tax law.
-    if _EXPORT_TO_FOREIGN_RE.search(text) and not _PURE_FOREIGN_TAX_RE.search(text):
+    # Cross-border export/import trade operations or foreign remittances/clients in stories
+    # are governed by URA domestic/customs tax rules rather than foreign domestic tax law.
+    if (_EXPORT_TO_FOREIGN_RE.search(text) or _REMITTANCE_OR_SOURCE_RE.search(text)) and not _PURE_FOREIGN_TAX_RE.search(text):
         return ""
     for name, pattern in _FOREIGN_JURISDICTION_RES:
         if pattern.search(text):
@@ -461,7 +467,11 @@ def out_of_jurisdiction_reply(country: str) -> str:
 
 
 _LOCAL_GOVERNMENT_TAX_RE = re.compile(
-    r"\b(local\s+service\s+tax|lst\b|local\s+hotel\s+tax|municipal\s+(?:tax|taxes|levy|levies|authorit\w+|policy)|city\s+council\s+(?:tax|taxes|dues|rates)|local\s+government\s+(?:tax|taxes|rates))\b",
+    r"\b(local\s+service\s+tax|lst\b|local\s+hotel\s+tax"
+    r"|property\s+(?:tax|taxes|rates?)\s*(?:in\s+kampala|kcca|local\s+government)?"
+    r"|omusolo\s+gw['’]?\s*amayumba\s*(?:mu\s+kampala|kcca)?"
+    r"|kodi\s+ya\s+majengo\s*(?:kampala)?"
+    r"|municipal\s+(?:tax|taxes|levy|levies|authorit\w+|policy)|city\s+council\s+(?:tax|taxes|dues|rates)|local\s+government\s+(?:tax|taxes|rates))\b",
     re.IGNORECASE,
 )
 
@@ -472,8 +482,21 @@ def detect_local_government_tax(message: str) -> bool:
     return bool(_LOCAL_GOVERNMENT_TAX_RE.search(text))
 
 
-def local_government_tax_reply() -> str:
-    """Authoritative answer for Local Service Tax and municipal levies not administered by URA."""
+def local_government_tax_reply(query: str = "") -> str:
+    """Authoritative answer for Local Service Tax, Property Rates, and municipal levies not administered by URA."""
+    q_lower = (query or "").lower()
+    if re.search(r"\b(property\s+(?:tax|rates?)|amayumba|majengo)\b", q_lower):
+        return (
+            "**Property Rates (Property Tax)** on physical buildings are assessed and collected directly "
+            "by local government municipal authorities — specifically **Kampala Capital City Authority (KCCA)** in Kampala — "
+            "under the *Local Governments (Rating) Act, 2005*, rather than the Uganda Revenue Authority (URA).\n\n"
+            "• **URA's Mandate (Rental Income Tax)**: If your property is rented out to tenants and earns rental income, "
+            "that income is subject to **Rental Income Tax** administered by URA under the *Income Tax Act* (12% of gross rental income "
+            "above the annual threshold of UGX 2,820,000 for individuals; 30% on chargeable rental income for companies).\n\n"
+            "• **Expense Deductibility**: Ground rent and municipal property rates paid to KCCA are allowable deductible expenses when calculating "
+            "corporate rental income tax with URA.\n\n"
+            "For property valuations, rating registers, and property tax payments in Kampala, please consult KCCA City Hall or visit https://kcca.go.ug."
+        )
     return (
         "**Local Service Tax (LST)** is a local government tax administered and collected "
         "directly by local government authorities (such as City Councils including KCCA, "
@@ -880,6 +903,13 @@ ABSTENTION_REPLY = (
     "knowledge base, and I'd rather connect you with the right people than "
     "guess. Please contact URA at https://ura.go.ug or call the toll-free "
     "Contact Centre on 0800 117 000 / 0800 217 000."
+)
+
+CONNECTOR_UNAVAILABLE_REPLY = (
+    "I couldn't reach the service you selected just now, so I haven't looked "
+    "that up and I won't guess at the result. Please try again in a moment, or "
+    "contact URA at https://ura.go.ug or on the toll-free Contact Centre "
+    "0800 117 000 / 0800 217 000."
 )
 
 NO_HITS_REPLY = (

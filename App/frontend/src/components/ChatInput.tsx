@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from '../lib/i18n';
-import { useConnectorStore } from '../store/useConnectorStore';
 import { CameraCapture } from './CameraCapture';
+import { ModalDialog } from './ModalDialog';
 import {
   MicIcon,
   SendIcon,
@@ -13,15 +13,9 @@ import {
   StopIcon,
   DownloadIcon,
   EyeIcon,
-  PlugIcon,
   CameraIcon,
+  PlugIcon,
   PlusIcon,
-  EfrisLogo,
-  DtsLogo,
-  UrsbLogo,
-  BwimsLogo,
-  TinLogo,
-  PaymentLogo,
 } from './Icons';
 import {
   ATTACHMENT_ACCEPT,
@@ -30,6 +24,7 @@ import {
   formatDocType,
   formatFileSize,
 } from '../lib/attachments';
+import { connectorMonogram, type ChatConnector } from '../lib/connectors';
 
 interface ChatInputProps {
   message: string;
@@ -45,7 +40,8 @@ interface ChatInputProps {
   onCancelRecording?: () => void;
   onFocus?: () => void;
   attachments?: PendingAttachment[];
-  onAttachFiles?: (files: FileList) => void;
+  /** Attach files and return the subset accepted for upload. */
+  onAttachFiles?: (files: FileList) => File[];
   onRemoveAttachment?: (clientId: string) => void;
   onInspectAttachment?: (attachment: PendingAttachment) => void;
   /* Voice mode is the composer's only conversation-level control. It renders
@@ -70,6 +66,15 @@ interface ChatInputProps {
   audioLevels?: number[];
   /** Voice mode sends the turn by itself when the speaker pauses (Settings → Voice). */
   autoSend?: boolean;
+  chatConnectors?: ChatConnector[];
+  connectorsEnabled?: boolean;
+  connectorsLoading?: boolean;
+  connectorsError?: boolean;
+  selectedConnectorNamespaces?: string[];
+  onOpenConnectors?: () => void;
+  onToggleConnector?: (namespace: string) => void;
+  /** Overrides the default placeholder (a live chat with an officer: "Message the officer…"). */
+  placeholder?: string;
 }
 
 /** Inline waveform — 5 bars responsive to live microphone levels when available */
@@ -98,25 +103,6 @@ function InlineWaveform({ levels }: { levels?: number[] }) {
   );
 }
 
-function getSystemLogo(id: string, size = 18) {
-  switch (id) {
-    case 'efris':
-      return <EfrisLogo size={size} />;
-    case 'digital_tax_stamps':
-      return <DtsLogo size={size} />;
-    case 'ursb':
-      return <UrsbLogo size={size} />;
-    case 'bwims':
-      return <BwimsLogo size={size} />;
-    case 'tin_registration':
-      return <TinLogo size={size} />;
-    case 'payment_system':
-      return <PaymentLogo size={size} />;
-    default:
-      return <PlugIcon size={size} />;
-  }
-}
-
 function ChatInputInner({
   message,
   isLoading,
@@ -140,20 +126,19 @@ function ChatInputInner({
   onStop,
   audioLevels,
   autoSend = false,
+  chatConnectors = [],
+  connectorsEnabled = false,
+  placeholder,
+  connectorsLoading = false,
+  connectorsError = false,
+  selectedConnectorNamespaces = [],
+  onOpenConnectors,
+  onToggleConnector,
 }: ChatInputProps) {
   const t = useTranslation();
-  const {
-    connectors,
-    activeConnectorIds,
-    connectedAccounts,
-    isConnecting,
-    connectViaPopup,
-    disconnectConnector,
-    openModal,
-  } = useConnectorStore();
   const [isDragging, setIsDragging] = useState(false);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
-  const [addMenuView, setAddMenuView] = useState<'main' | 'connectors'>('main');
+  const [showConnectorsDialog, setShowConnectorsDialog] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const attachMenuRef = useRef<HTMLDivElement>(null);
   const dragCounterRef = useRef(0);
@@ -161,6 +146,19 @@ function ChatInputInner({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
+  const attachmentLimitReached = (attachments?.length ?? 0) >= MAX_ATTACHMENTS;
+  const selectedConnectors = chatConnectors.filter((connector) =>
+    selectedConnectorNamespaces.includes(connector.namespace),
+  );
+
+  const handleAttachFiles = useCallback((files: FileList) => {
+    if (!onAttachFiles || files.length === 0) return;
+    const acceptedFiles = onAttachFiles(files);
+    const includesAcceptedImage = acceptedFiles.some((file) => file.type.startsWith('image/'));
+    if (includesAcceptedImage && !message.trim()) {
+      onMessageChange(t('composer.imagePrompt'));
+    }
+  }, [message, onAttachFiles, onMessageChange, t]);
 
   const handleCameraCapture = (imageBase64: string) => {
     setIsCameraActive(false);
@@ -183,10 +181,10 @@ function ChatInputInner({
       if (typeof DataTransfer !== 'undefined') {
         const dt = new DataTransfer();
         dt.items.add(file);
-        onAttachFiles(dt.files);
+        handleAttachFiles(dt.files);
       }
-    } catch (err) {
-      console.error('Failed to process camera capture', err);
+    } catch {
+      console.error('Failed to process camera capture');
     }
   };
 
@@ -195,12 +193,16 @@ function ChatInputInner({
   const addMenuPanelRef = useRef<HTMLDivElement>(null);
   const addMenuOptionRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
+  const closeConnectorsDialog = () => {
+    setShowConnectorsDialog(false);
+    window.requestAnimationFrame(() => addBtnRef.current?.focus());
+  };
+
   const closeAddMenu = useCallback(() => {
     setAddMenuFocusIdx(null);
     setShowAttachMenu(false);
-    setAddMenuView('main');
     addBtnRef.current?.focus();
-  }, []);
+  }, [setAddMenuFocusIdx, setShowAttachMenu]);
 
   const handleTakePhotoClick = () => {
     closeAddMenu();
@@ -211,62 +213,42 @@ function ChatInputInner({
     }
   };
 
-  const addMenuRovingIdx = addMenuFocusIdx ?? 0;
+  const addMenuOptionIndices = [0, 1, 2].filter(
+    (idx) => !attachmentLimitReached || idx === 2,
+  );
+  const addMenuRovingIdx =
+    addMenuFocusIdx !== null && addMenuOptionIndices.includes(addMenuFocusIdx)
+      ? addMenuFocusIdx
+      : addMenuOptionIndices[0];
 
-  // Focus active option on open; lock body scroll; trap Tab and Escape
+  // The menu is a native modal <dialog> (ModalDialog), which owns Escape, the
+  // Tab trap, inertness behind it and returning focus. What it cannot know is
+  // which row is the roving one, so that row is focused as the menu opens.
   useEffect(() => {
     if (!showAttachMenu) return;
     addMenuOptionRefs.current[addMenuRovingIdx]?.focus();
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        closeAddMenu();
-        return;
-      }
-      if (e.key !== 'Tab') return;
-      const focusables = addMenuPanelRef.current?.querySelectorAll<HTMLElement>(
-        'button:not([disabled])'
-      );
-      if (!focusables || focusables.length === 0) return;
-      const first = focusables[0];
-      const last = focusables[focusables.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
-  }, [showAttachMenu, closeAddMenu, addMenuRovingIdx]);
+  }, [showAttachMenu, addMenuRovingIdx]);
 
   const onAddMenuOptionKey = (e: React.KeyboardEvent, idx: number) => {
-    const totalOptions = 3;
-    const move = (next: number) => {
-      const clamped = (next + totalOptions) % totalOptions;
-      setAddMenuFocusIdx(clamped);
-      addMenuOptionRefs.current[clamped]?.focus();
+    const move = (position: number) => {
+      const clampedPosition = (position + addMenuOptionIndices.length) % addMenuOptionIndices.length;
+      const nextIdx = addMenuOptionIndices[clampedPosition];
+      setAddMenuFocusIdx(nextIdx);
+      addMenuOptionRefs.current[nextIdx]?.focus();
     };
+    const position = addMenuOptionIndices.indexOf(idx);
     if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
       e.preventDefault();
-      move(idx + 1);
+      move(position + 1);
     } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
       e.preventDefault();
-      move(idx - 1);
+      move(position - 1);
     } else if (e.key === 'Home') {
       e.preventDefault();
       move(0);
     } else if (e.key === 'End') {
       e.preventDefault();
-      move(totalOptions - 1);
+      move(addMenuOptionIndices.length - 1);
     }
   };
   // Drives the morph in the primary slot: nothing typed yet -> offer voice
@@ -305,7 +287,7 @@ function ChatInputInner({
     setIsDragging(false);
     dragCounterRef.current = 0;
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      onAttachFiles?.(e.dataTransfer.files);
+      handleAttachFiles(e.dataTransfer.files);
     }
   };
 
@@ -329,10 +311,7 @@ function ChatInputInner({
         e.preventDefault();
         const dt = new DataTransfer();
         fileList.forEach((f) => dt.items.add(f));
-        onAttachFiles?.(dt.files);
-        if (!message.trim()) {
-          onMessageChange('Please inspect this URA portal screenshot and guide me on how to resolve the issue.');
-        }
+        handleAttachFiles(dt.files);
       }
     }
   };
@@ -406,55 +385,90 @@ function ChatInputInner({
       >
         {isDragging && (
           <div className="composer-drop-overlay" aria-hidden="true">
-            <span>Drop documents here to analyze and attach (PDF, Word, Excel, CSV, or Image)</span>
+            <span>{t('composer.dropFiles')}</span>
           </div>
         )}
         {showAttachments && attachments && attachments.length > 0 && (
-          <div className="composer-attachments" aria-label="Attached documents">
-            {attachments.map((a) => (
-              <div
-                key={a.clientId}
-                className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
-              >
-                <FileIcon />
-                <span className="attachment-name" title={a.name}>{a.name}</span>
-                <span className="attachment-meta">
-                  {a.status === 'uploading' && <LoadingDots />}
-                  {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
-                  {a.status === 'error' && (a.error || 'Failed')}
-                </span>
-                {a.status === 'ready' && (
+          <>
+            <div className="composer-attachments" aria-label={t('composer.attachmentsLabel')}>
+              {attachments.map((a) => (
+                <div
+                  key={a.clientId}
+                  className={`attachment-chip ${a.status === 'error' ? 'attachment-chip-error' : ''}`}
+                >
+                  {a.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- a local blob: preview, not a remote asset
+                    <img className="attachment-thumb" src={a.previewUrl} alt="" />
+                  ) : (
+                    <FileIcon />
+                  )}
+                  <span className="attachment-name" title={a.name}>{a.name}</span>
+                  <span className="attachment-meta">
+                    {a.status === 'uploading' && <LoadingDots />}
+                    {a.status === 'ready' && `${formatDocType(a.docType)} · ${formatFileSize(a.sizeBytes)}`}
+                    {a.status === 'error' && (a.error || 'Failed')}
+                  </span>
+                  {a.status === 'ready' && (
+                    <button
+                      type="button"
+                      className="attachment-report-link"
+                      onClick={() => onInspectAttachment?.(a)}
+                      title={t('documents.inspect')}
+                      aria-label={t('composer.inspectAttachment', { name: a.name })}
+                    >
+                      <EyeIcon />
+                    </button>
+                  )}
+                  {a.status === 'ready' && a.documentId && (
+                    <a
+                      href={`/api/v1/documents/${a.documentId}/report`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="attachment-report-link"
+                      title={t('documents.downloadReport')}
+                      aria-label={t('composer.downloadAttachmentReport', { name: a.name })}
+                    >
+                      <DownloadIcon />
+                    </a>
+                  )}
                   <button
                     type="button"
-                    className="attachment-report-link"
-                    onClick={() => onInspectAttachment?.(a)}
-                    title="Inspect extracted fields & tax audit"
-                    aria-label={`Inspect ${a.name}`}
+                    className="attachment-remove"
+                    onClick={() => onRemoveAttachment?.(a.clientId)}
+                    aria-label={t('composer.removeAttachmentNamed', { name: a.name })}
                   >
-                    <EyeIcon />
+                    <CloseIcon />
                   </button>
-                )}
-                {a.status === 'ready' && a.documentId && (
-                  <a
-                    href={`/api/v1/documents/${a.documentId}/report`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="attachment-report-link"
-                    title="Download analysis report"
-                    aria-label={`Download analysis report for ${a.name}`}
-                  >
-                    <DownloadIcon />
-                  </a>
+                </div>
+              ))}
+            </div>
+            <p className="composer-attachment-privacy" role="note">
+              {t('composer.attachPrivacyNotice')}
+            </p>
+          </>
+        )}
+
+        {selectedConnectors.length > 0 && (
+          <div className="composer-connectors" role="group" aria-label={t('composer.selectedConnectors')}>
+            {selectedConnectors.map((connector) => (
+              <span key={connector.namespace} className="composer-connector-chip">
+                <PlugIcon />
+                <span>{connector.label}</span>
+                {connector.mode === 'simulation' && (
+                  <span className="composer-connector-demo" title={t('composer.connectorDemo')}>
+                    {t('composer.connectorDemoShort')}
+                  </span>
                 )}
                 <button
                   type="button"
-                  className="attachment-remove"
-                  onClick={() => onRemoveAttachment?.(a.clientId)}
-                  aria-label={`Remove ${a.name}`}
+                  className="composer-connector-remove"
+                  onClick={() => onToggleConnector?.(connector.namespace)}
+                  aria-label={t('composer.removeConnector', { name: connector.label })}
+                  disabled={isLoading}
                 >
                   <CloseIcon />
                 </button>
-              </div>
+              </span>
             ))}
           </div>
         )}
@@ -465,7 +479,7 @@ function ChatInputInner({
           id="composer-input"
           aria-label={t('composer.label')}
           aria-multiline="true"
-          placeholder={voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder')}
+          placeholder={placeholder ?? (voiceMode ? t('composer.placeholderVoice') : t('composer.placeholder'))}
           value={message}
           rows={1}
           enterKeyHint="send"
@@ -493,7 +507,7 @@ function ChatInputInner({
                 aria-hidden="true"
                 tabIndex={-1}
                 onChange={(e) => {
-                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  if (e.target.files?.length) handleAttachFiles(e.target.files);
                   e.target.value = '';
                 }}
               />
@@ -506,262 +520,146 @@ function ChatInputInner({
                 aria-hidden="true"
                 tabIndex={-1}
                 onChange={(e) => {
-                  if (e.target.files?.length) onAttachFiles?.(e.target.files);
+                  if (e.target.files?.length) handleAttachFiles(e.target.files);
                   e.target.value = '';
                 }}
               />
-              <div className="relative" ref={attachMenuRef}>
+              <div className="addmenu-anchor" ref={attachMenuRef}>
                 <button
                   ref={addBtnRef}
                   type="button"
-                  className={`composer-circle-btn add-circle-btn transition-all duration-200 ${
-                    showAttachMenu
-                      ? 'is-active bg-neutral-800 text-white border border-neutral-700 shadow-sm'
-                      : 'text-neutral-400 hover:text-white hover:bg-neutral-800/80'
-                  }`}
-                  onClick={() => setShowAttachMenu((prev) => !prev)}
-                  disabled={isLoading || (attachments?.length ?? 0) >= MAX_ATTACHMENTS}
-                  aria-label="Attach a document (PDF, Word, Excel, CSV, or image), take a photo, or add connector"
+                  className={`composer-circle-btn add-circle-btn${showAttachMenu ? ' is-active' : ''}`}
+                  onClick={() => {
+                    setAddMenuFocusIdx(0);
+                    setShowAttachMenu((prev) => !prev);
+                  }}
+                  disabled={isLoading}
+                  aria-label={t('composer.addToConversation')}
                   aria-haspopup="dialog"
                   aria-expanded={showAttachMenu}
-                  title="Add to conversation"
-                  data-tip="Add to conversation"
+                  title={t('composer.addTitle')}
+                  data-tip={t('composer.addTitle')}
                   data-testid="composer-add-btn"
                 >
-                  <PlusIcon
-                    size={18}
-                    className={`transition-transform duration-200 ease-out ${
-                      showAttachMenu ? 'rotate-45 text-white' : ''
-                    }`}
-                  />
+                  <PlusIcon size={18} />
                 </button>
 
                 {showAttachMenu && (
-                  <div
-                    className="lmv2-overlay addmenu-overlay"
-                    onMouseDown={(e) => {
-                      if (e.target === e.currentTarget) closeAddMenu();
-                    }}
+                  // A native modal <dialog>, in the browser's top layer. The
+                  // earlier overlay lived inside the composer's stacking
+                  // context, and once a conversation had messages their text
+                  // and buttons painted over the panel.
+                  <ModalDialog
+                    labelledBy="composer-attach-title"
+                    className="addmenu-dialog"
+                    onClose={closeAddMenu}
                   >
-                    <div
-                      ref={addMenuPanelRef}
-                      className="lmv2 addmenu-dialog"
-                      role="dialog"
-                      aria-modal="true"
-                      aria-label={addMenuView === 'connectors' ? "Connect extra systems & apps" : "Add to conversation"}
-                    >
-                      {addMenuView === 'connectors' ? (
-                        <>
-                          <div className="lmv2-head addmenu-head">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setAddMenuView('main')}
-                                className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300 hover:text-white hover:bg-neutral-700 transition"
-                                aria-label="Back to add menu"
-                                title="Back"
-                              >
-                                ←
-                              </button>
-                              <h2>Connect extra systems</h2>
-                            </div>
-                            <button
-                              type="button"
-                              className="dlgv2-x lmv2-x"
-                              onClick={closeAddMenu}
-                              aria-label="Close add menu"
-                            >
-                              <CloseIcon />
-                            </button>
-                          </div>
+                    <div ref={addMenuPanelRef} className="addmenu-panel">
+                      <div className="lmv2-head addmenu-head">
+                        <div className="addmenu-head-title">
+                          <span className="addmenu-head-icon" aria-hidden="true">
+                            <PlusIcon size={14} />
+                          </span>
+                          <h2 id="composer-attach-title">{t('composer.addTitle')}</h2>
+                        </div>
+                        <button
+                          type="button"
+                          className="dlgv2-x lmv2-x"
+                          onClick={closeAddMenu}
+                          aria-label={t('common.close')}
+                        >
+                          <CloseIcon />
+                        </button>
+                      </div>
 
-                          <div className="lmv2-list addmenu-list max-h-[360px] overflow-y-auto p-2 space-y-2" role="menu" aria-label="System connectors">
-                            {connectors.map((c) => {
-                              const isConnected = activeConnectorIds.includes(c.id);
-                              const isConn = isConnecting[c.id];
-                              const accountName = connectedAccounts[c.id];
-                              return (
-                                <div
-                                  key={c.id}
-                                  className="flex items-center justify-between p-2.5 rounded-xl border border-neutral-800 bg-neutral-900/60 hover:border-neutral-700 transition"
-                                >
-                                  <div className="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
-                                    <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-neutral-800/80 border border-neutral-700/60">
-                                      {getSystemLogo(c.id, 20)}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className="font-semibold text-xs text-white truncate flex items-center gap-1.5">
-                                        <span>{c.name}</span>
-                                        {isConnected && (
-                                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                        )}
-                                      </div>
-                                      <div className="text-[11px] text-neutral-400 truncate">
-                                        {isConnected ? (
-                                          <span className="text-emerald-400">Connected · {accountName || 'Active'}</span>
-                                        ) : (
-                                          c.description
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div className="shrink-0">
-                                    {isConnected ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => disconnectConnector(c.id)}
-                                        className="px-2.5 py-1 text-xs rounded-lg font-medium text-neutral-300 hover:text-red-400 hover:bg-red-500/10 border border-neutral-700 hover:border-red-500/30 transition"
-                                        aria-label={`Disconnect ${c.name}`}
-                                      >
-                                        Disconnect
-                                      </button>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        disabled={isConn}
-                                        onClick={() => connectViaPopup(c.id)}
-                                        className="px-3 py-1 text-xs rounded-lg font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 transition flex items-center gap-1 shadow-sm"
-                                        aria-label={`Connect ${c.name}`}
-                                      >
-                                        <span>{isConn ? 'Opening...' : 'Connect'}</span>
-                                        <span className="text-[10px] opacity-75">↗</span>
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
+                      <div className="lmv2-list addmenu-list" role="menu" aria-label={t('composer.attachmentOptions')}>
+                        {/* Upload a file or screenshot */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[0] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
+                          className="addmenu-opt"
+                          disabled={attachmentLimitReached}
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
+                          onClick={() => {
+                            closeAddMenu();
+                            fileInputRef.current?.click();
+                          }}
+                        >
+                          <span className="addmenu-opt-icon is-file" aria-hidden="true">
+                            <FileIcon size={18} />
+                          </span>
+                          <span className="addmenu-opt-copy">
+                            <span className="addmenu-opt-title">{t('composer.uploadFile')}</span>
+                            <span className="addmenu-opt-desc">{t('composer.uploadFileDescription')}</span>
+                          </span>
+                          <span className="addmenu-opt-tag">{t('composer.fileTag')}</span>
+                        </button>
 
-                          <div className="lmv2-foot addmenu-foot flex items-center justify-between text-[11px] text-neutral-400">
-                            <span>OAuth popup with CAPTCHA verification</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                closeAddMenu();
-                                openModal();
-                              }}
-                              className="text-blue-400 hover:text-blue-300 underline font-medium"
-                            >
-                              Manage DBs ↗
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="lmv2-head addmenu-head">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-md bg-neutral-800 border border-neutral-700 flex items-center justify-center text-neutral-300">
-                                <PlusIcon size={14} />
-                              </div>
-                              <h2>Add to conversation</h2>
-                            </div>
-                            <button
-                              type="button"
-                              className="dlgv2-x lmv2-x"
-                              onClick={closeAddMenu}
-                              aria-label="Close add menu"
-                            >
-                              <CloseIcon />
-                            </button>
-                          </div>
+                        {/* Take a photo */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[1] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
+                          className="addmenu-opt"
+                          disabled={attachmentLimitReached}
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
+                          onClick={handleTakePhotoClick}
+                        >
+                          <span className="addmenu-opt-icon is-camera" aria-hidden="true">
+                            <CameraIcon />
+                          </span>
+                          <span className="addmenu-opt-copy">
+                            <span className="addmenu-opt-title">{t('composer.takePhoto')}</span>
+                            <span className="addmenu-opt-desc">{t('composer.takePhotoDescription')}</span>
+                          </span>
+                          <span className="addmenu-opt-tag">{t('composer.cameraTag')}</span>
+                        </button>
 
-                          <div className="lmv2-list addmenu-list" role="menu" aria-label="Attachment and tool options">
-                            {/* Option 1: Upload a file */}
-                            <button
-                              ref={(el) => {
-                                addMenuOptionRefs.current[0] = el;
-                              }}
-                              type="button"
-                              role="menuitem"
-                              tabIndex={addMenuRovingIdx === 0 ? 0 : -1}
-                              className="addmenu-opt group"
-                              onKeyDown={(e) => onAddMenuOptionKey(e, 0)}
-                              onClick={() => {
-                                closeAddMenu();
-                                fileInputRef.current?.click();
-                              }}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-400 border border-blue-500/20 group-hover:bg-blue-500/20 transition">
-                                  <FileIcon size={18} />
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">Upload a file</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">PDF, Word, Excel, CSV, or high-res image</div>
-                                </div>
-                              </div>
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                File
-                              </span>
-                            </button>
-
-                            {/* Option 2: Take a photo */}
-                            <button
-                              ref={(el) => {
-                                addMenuOptionRefs.current[1] = el;
-                              }}
-                              type="button"
-                              role="menuitem"
-                              tabIndex={addMenuRovingIdx === 1 ? 0 : -1}
-                              className="addmenu-opt group"
-                              onKeyDown={(e) => onAddMenuOptionKey(e, 1)}
-                              onClick={handleTakePhotoClick}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-amber-500/10 text-amber-400 border border-amber-500/20 group-hover:bg-amber-500/20 transition">
-                                  <CameraIcon />
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">Take a photo</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">Snap National ID, receipt, or physical doc</div>
-                                </div>
-                              </div>
-                              <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-400 border border-neutral-700/80 shrink-0">
-                                Camera
-                              </span>
-                            </button>
-
-                            {/* Option 3: Add connector */}
-                            <button
-                              ref={(el) => {
-                                addMenuOptionRefs.current[2] = el;
-                              }}
-                              type="button"
-                              role="menuitem"
-                              tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
-                              className="addmenu-opt group"
-                              onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
-                              onClick={() => {
-                                setAddMenuView('connectors');
-                              }}
-                            >
-                              <div className="flex items-center gap-3 min-w-0">
-                                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition">
-                                  <PlugIcon size={18} />
-                                </div>
-                                <div className="min-w-0 text-left">
-                                  <div className="font-semibold text-sm text-[var(--text-0)]">Add connector</div>
-                                  <div className="text-xs text-[var(--text-2)] truncate">EFRIS, DTS, URSB, BWIMS, TIN &amp; Payments</div>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  {activeConnectorIds.length}/{connectors.length} Connected
-                                </span>
-                                <span className="text-neutral-500 group-hover:text-neutral-300 text-xs">→</span>
-                              </div>
-                            </button>
-                          </div>
-
-                          <div className="lmv2-foot addmenu-foot">
-                            Snap a Ugandan National ID card for autonomous instant TIN issuance, or attach receipts for tax calculation.
-                          </div>
-                        </>
-                      )}
+                        {/* URA services are discoverable here, but only
+                            reviewed taxpayer integrations may be offered. */}
+                        <button
+                          ref={(el) => {
+                            addMenuOptionRefs.current[2] = el;
+                          }}
+                          type="button"
+                          role="menuitem"
+                          tabIndex={addMenuRovingIdx === 2 ? 0 : -1}
+                          className="addmenu-opt"
+                          onKeyDown={(e) => onAddMenuOptionKey(e, 2)}
+                          onClick={() => {
+                            closeAddMenu();
+                            setShowConnectorsDialog(true);
+                            onOpenConnectors?.();
+                          }}
+                        >
+                          <span className="addmenu-opt-icon is-service" aria-hidden="true">
+                            <PlugIcon />
+                          </span>
+                          <span className="addmenu-opt-copy">
+                            <span className="addmenu-opt-title">{t('composer.addConnector')}</span>
+                            <span className="addmenu-opt-desc">{t('composer.connectorDescription')}</span>
+                          </span>
+                          <span className="addmenu-opt-tag">
+                            {selectedConnectors.length > 0
+                              ? t('composer.connectorsSelectedCount', { count: selectedConnectors.length })
+                              : t('composer.uraManagedTag')}
+                          </span>
+                        </button>
+                      </div>
+                      <div className="lmv2-foot addmenu-foot">
+                        {attachmentLimitReached
+                          ? t('composer.attachLimitReached')
+                          : t('composer.attachPrivacyNotice')}
+                      </div>
                     </div>
-                  </div>
+                  </ModalDialog>
                 )}
               </div>
             </>
@@ -869,6 +767,167 @@ function ChatInputInner({
             ? t('composer.voiceHint')
             : t('composer.disclaimer')}
       </p>
+
+      {showConnectorsDialog && (
+        <ModalDialog
+          labelledBy="composer-connectors-title"
+          className="connectors-dialog"
+          onClose={closeConnectorsDialog}
+        >
+          <div className="connectors-dialog-content">
+            <header className="lmv2-head addmenu-head connectors-head">
+              <div className="addmenu-head-title">
+                <span className="connectors-heading-icon" aria-hidden="true">
+                  <PlugIcon />
+                </span>
+                <h2 id="composer-connectors-title">{t('composer.connectorsTitle')}</h2>
+                {selectedConnectors.length > 0 && (
+                  <span className="connectors-count" aria-live="polite">
+                    {t('composer.connectorsSelectedCount', { count: selectedConnectors.length })}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="dlgv2-x lmv2-x"
+                onClick={closeConnectorsDialog}
+                aria-label={t('common.close')}
+              >
+                <CloseIcon />
+              </button>
+            </header>
+
+            <div className="connectors-dialog-body">
+              <p className="connectors-intro">{t('composer.connectorsIntro')}</p>
+
+              <div
+                className="connectors-status-card"
+                data-state={
+                  connectorsLoading
+                    ? 'loading'
+                    : connectorsError
+                      ? 'error'
+                      : !connectorsEnabled || chatConnectors.length === 0
+                        ? 'empty'
+                        : 'ready'
+                }
+                role={connectorsError ? 'alert' : 'status'}
+              >
+                <span className="connectors-status-dot" aria-hidden="true" />
+                <span id="composer-connectors-description">
+                  {connectorsLoading
+                    ? t('composer.connectorsLoading')
+                    : connectorsError
+                      ? t('composer.connectorsLoadFailed')
+                      : !connectorsEnabled
+                        ? t('composer.connectorsDisabled')
+                        : chatConnectors.length
+                          ? t('composer.connectorsAvailable', { count: chatConnectors.length })
+                          : t('composer.connectorUnavailable')}
+                </span>
+                {connectorsError && onOpenConnectors && (
+                  <button
+                    type="button"
+                    className="connectors-retry"
+                    onClick={() => onOpenConnectors()}
+                    disabled={connectorsLoading}
+                  >
+                    {t('composer.connectorsRetry')}
+                  </button>
+                )}
+              </div>
+
+              {chatConnectors.length > 0 && (
+                <div className="connectors-options" role="group" aria-label={t('composer.connectorsTitle')}>
+                  {chatConnectors.map((connector) => {
+                    const selected = selectedConnectorNamespaces.includes(connector.namespace);
+                    const unavailable = connector.status === 'unavailable';
+                    const operations = connector.operations ?? [];
+                    const shown = operations.slice(0, 3).map((operation) => operation.title);
+                    const more = operations.length - shown.length;
+                    const summary = connector.summary || connector.description;
+                    return (
+                      <button
+                        key={connector.namespace}
+                        type="button"
+                        className={`connectors-option${selected ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}
+                        aria-pressed={selected}
+                        disabled={unavailable && !selected}
+                        onClick={() => onToggleConnector?.(connector.namespace)}
+                      >
+                        <span className="connectors-option-icon" aria-hidden="true">
+                          {connectorMonogram(connector.label)}
+                        </span>
+                        <span className="connectors-option-copy">
+                          <span className="connectors-option-top">
+                            <span className="connectors-option-name">{connector.label}</span>
+                            {connector.mode === 'simulation' && (
+                              <span className="connectors-badge is-demo">{t('composer.connectorDemo')}</span>
+                            )}
+                            {connector.mode === 'live' && (
+                              <span className="connectors-badge is-live">{t('composer.connectorLive')}</span>
+                            )}
+                            {unavailable && (
+                              <span className="connectors-badge is-down">{t('composer.connectorUnavailableTag')}</span>
+                            )}
+                          </span>
+                          {summary && <span className="connectors-option-description">{summary}</span>}
+                          {shown.length > 0 ? (
+                            <span className="connectors-option-meta">
+                              {t('composer.connectorOperations')}: {shown.join(' · ')}
+                              {more > 0 ? ` · ${t('composer.connectorsMore', { count: more })}` : ''}
+                            </span>
+                          ) : (
+                            <span className="connectors-option-meta">
+                              {t('composer.connectorReadOnly')} ·{' '}
+                              {t('composer.connectorOperationCount', { count: connector.operation_count })}
+                            </span>
+                          )}
+                          {unavailable && (
+                            <span className="connectors-option-meta is-warn">
+                              {t('composer.connectorUnavailableHint')}
+                            </span>
+                          )}
+                        </span>
+                        <span className="connectors-option-action">
+                          {selected ? <CheckIcon /> : <PlusIcon size={14} />}
+                          <span>{selected ? t('composer.connectorSelected') : t('composer.connectorAdd')}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <details className="connectors-details">
+                <summary>{t('composer.connectorsDetails')}</summary>
+                <p>{t('composer.connectorUseDescription')}</p>
+                <p>
+                  <strong>{t('composer.connectorSafetyTitle')}.</strong> {t('composer.connectorSafetyDescription')}
+                </p>
+              </details>
+            </div>
+
+            <footer className="connectors-dialog-footer">
+              <p>{t('composer.connectorManagedDescription')}</p>
+              <div className="connectors-footer-actions">
+                {selectedConnectors.length > 0 && (
+                  <button
+                    type="button"
+                    className="connectors-clear"
+                    onClick={() => selectedConnectors.forEach((c) => onToggleConnector?.(c.namespace))}
+                  >
+                    {t('composer.connectorsClear')}
+                  </button>
+                )}
+                <button type="button" className="connectors-close-button" onClick={closeConnectorsDialog}>
+                  {t('composer.connectorsDone')}
+                </button>
+              </div>
+            </footer>
+          </div>
+        </ModalDialog>
+      )}
 
       {isCameraActive && (
         <CameraCapture

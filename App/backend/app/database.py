@@ -14,6 +14,7 @@ All write operations are wrapped in try/except to prevent data loss.
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 import sqlite3
 import threading
@@ -50,6 +51,98 @@ _WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "
 def conversation_ttl_seconds() -> float:
     """How long a conversation (and what a journey collected in it) is kept."""
     return _CONVERSATION_TTL_DAYS * 86400.0
+
+
+def conversation_state_key(
+    conversation_id: str | None,
+    *,
+    session_id: str | None = None,
+    user_id: str | None = None,
+    tenant_id: str = "default",
+) -> str:
+    """Build an opaque tenant/owner scoped key for topic and workflow state."""
+    subject = user_id or ""
+    anonymous_session = "" if subject else (session_id or "")
+    scope = conversation_id or session_id or str(uuid.uuid4())
+    parts = [tenant_id or "default", subject, anonymous_session, scope]
+    material = json.dumps(parts, ensure_ascii=True, separators=(",", ":"))
+    return "state_" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def migrate_legacy_conversation_state_keys() -> dict[str, int]:
+    """Re-key unambiguous legacy topic/workflow rows without guessing owners."""
+    migrated = {"conversation_topics": 0, "workflow_sessions": 0}
+
+    for row in query_all(
+        "SELECT conversation_id FROM conversation_topics WHERE conversation_id NOT LIKE 'state_%'"
+    ):
+        conversation_id = str(row.get("conversation_id") or "")
+        if not conversation_id:
+            continue
+        owners = query_all(
+            """SELECT DISTINCT tenant_id, user_id, session_id FROM conversations
+               WHERE conversation_id = ?""",
+            (conversation_id,),
+        )
+        if len(owners) != 1:
+            continue
+        owner = owners[0]
+        user_id = str(owner.get("user_id") or "")
+        session_id = str(owner.get("session_id") or "")
+        if not user_id and not session_id:
+            continue
+        state_id = conversation_state_key(
+            conversation_id,
+            session_id=session_id,
+            user_id=user_id or None,
+            tenant_id=str(owner.get("tenant_id") or "default"),
+        )
+        try:
+            migrated["conversation_topics"] += execute(
+                "UPDATE conversation_topics SET conversation_id = ? WHERE conversation_id = ?",
+                (state_id, conversation_id),
+            )
+        except Exception:
+            logger.debug("legacy topic scope migration skipped", exc_info=True)
+
+    for row in query_all(
+        """SELECT conversation_id, tenant_id, user_id FROM workflow_sessions
+           WHERE conversation_id NOT LIKE 'state_%'"""
+    ):
+        conversation_id = str(row.get("conversation_id") or "")
+        user_id = str(row.get("user_id") or "")
+        if not conversation_id:
+            continue
+        owners = query_all(
+            """SELECT DISTINCT tenant_id, user_id, session_id FROM conversations
+               WHERE conversation_id = ?""",
+            (conversation_id,),
+        )
+        if user_id:
+            owners = [owner for owner in owners if str(owner.get("user_id") or "") == user_id]
+        if len(owners) != 1:
+            continue
+        owner = owners[0]
+        effective_user = str(owner.get("user_id") or "")
+        session_id = str(owner.get("session_id") or "")
+        if not effective_user and not session_id:
+            continue
+        tenant = str(owner.get("tenant_id") or "default")
+        state_id = conversation_state_key(
+            conversation_id,
+            session_id=session_id,
+            user_id=effective_user or None,
+            tenant_id=tenant,
+        )
+        try:
+            migrated["workflow_sessions"] += execute(
+                """UPDATE workflow_sessions SET conversation_id = ?, tenant_id = ?
+                   WHERE conversation_id = ?""",
+                (state_id, tenant, conversation_id),
+            )
+        except Exception:
+            logger.debug("legacy workflow scope migration skipped", exc_info=True)
+    return migrated
 
 
 def workflow_session_ttl_days() -> int:
@@ -173,6 +266,99 @@ def execute_script(sql: str) -> None:
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
+
+
+def get_working_memory(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
+    """Return unexpired short-term state for one tenant-scoped subject."""
+    if not user_id:
+        return None
+    row = query_one(
+        "SELECT payload_json, expires_at FROM working_memory WHERE tenant_id = ? AND user_id = ?",
+        (tenant_id or "default", user_id),
+    )
+    if not row:
+        return None
+    now = time.time()
+    if float(row.get("expires_at") or 0) <= now:
+        execute(
+            "DELETE FROM working_memory WHERE tenant_id = ? AND user_id = ? AND expires_at <= ?",
+            (tenant_id or "default", user_id, now),
+        )
+        return None
+    raw_payload = row.get("payload_json")
+    payload = raw_payload if isinstance(raw_payload, dict) else _json_loads(raw_payload, {})
+    return payload if isinstance(payload, dict) else None
+
+
+def upsert_working_memory(
+    user_id: str,
+    tenant_id: str,
+    fields: dict[str, Any],
+    *,
+    ttl_seconds: int = 1800,
+) -> bool:
+    """Atomically merge short-term state and refresh its expiry."""
+    if not user_id or not fields:
+        return False
+    pg = _pg_module()
+    if pg is not None:
+        return pg.upsert_working_memory(
+            user_id, tenant_id or "default", fields, ttl_seconds=ttl_seconds
+        )
+
+    conn = _get_connection()
+    now = time.time()
+    tenant = tenant_id or "default"
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT payload_json, expires_at FROM working_memory WHERE tenant_id = ? AND user_id = ?",
+            (tenant, user_id),
+        ).fetchone()
+        payload = (
+            _json_loads(row["payload_json"], {})
+            if row and float(row["expires_at"] or 0) > now
+            else {}
+        )
+        if not isinstance(payload, dict):
+            payload = {}
+        payload.update(fields)
+        conn.execute(
+            """INSERT INTO working_memory
+               (tenant_id, user_id, payload_json, expires_at, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(tenant_id, user_id) DO UPDATE SET
+                 payload_json = excluded.payload_json,
+                 expires_at = excluded.expires_at,
+                 updated_at = excluded.updated_at""",
+            (
+                tenant,
+                user_id,
+                json.dumps(payload, ensure_ascii=True),
+                now + max(1, ttl_seconds),
+                now,
+            ),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def clear_working_memory(user_id: str, tenant_id: str = "default") -> int:
+    """Erase short-term state within one tenant."""
+    if not user_id:
+        return 0
+    return execute(
+        "DELETE FROM working_memory WHERE tenant_id = ? AND user_id = ?",
+        (tenant_id or "default", user_id),
+    )
+
+
+def cleanup_expired_working_memory() -> int:
+    """Delete expired short-term state from the selected shared backend."""
+    return execute("DELETE FROM working_memory WHERE expires_at < ?", (time.time(),))
 
 
 def _ensure_column(
@@ -304,6 +490,7 @@ def init_db() -> None:
             id              TEXT PRIMARY KEY,
             conversation_id TEXT,
             session_id      TEXT,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
             user_message    TEXT NOT NULL,
             bot_reply       TEXT NOT NULL,
             sources         TEXT DEFAULT '[]',
@@ -312,6 +499,25 @@ def init_db() -> None:
             topic_tag       TEXT DEFAULT '',
             created_at      REAL NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS conversation_responses (
+            response_id     TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            user_id         TEXT NOT NULL,
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            created_at      REAL NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS working_memory (
+            tenant_id       TEXT NOT NULL DEFAULT 'default',
+            user_id         TEXT NOT NULL,
+            payload_json    TEXT NOT NULL DEFAULT '{}',
+            expires_at      REAL NOT NULL,
+            updated_at      REAL NOT NULL,
+            PRIMARY KEY (tenant_id, user_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_working_memory_expiry
+            ON working_memory(expires_at);
 
         CREATE TABLE IF NOT EXISTS conversation_topics (
             conversation_id TEXT PRIMARY KEY,
@@ -324,6 +530,7 @@ def init_db() -> None:
 
         CREATE TABLE IF NOT EXISTS workflow_sessions (
             conversation_id TEXT PRIMARY KEY,
+            tenant_id        TEXT NOT NULL DEFAULT 'default',
             workflow_id     TEXT NOT NULL,
             status          TEXT NOT NULL
                             CHECK(status IN ('active','completed','cancelled'))
@@ -491,6 +698,50 @@ def init_db() -> None:
             updated_at   REAL NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS knowledge_discrepancies (
+            id                   TEXT PRIMARY KEY,
+            conversation_id      TEXT DEFAULT '',
+            session_id           TEXT DEFAULT '',
+            user_id              TEXT DEFAULT '',
+            status               TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'dismissed', 'resolved')) DEFAULT 'pending',
+            priority             TEXT NOT NULL CHECK(priority IN ('low', 'normal', 'high', 'urgent')) DEFAULT 'normal',
+            discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general')) DEFAULT 'outdated_law',
+            bot_statement        TEXT NOT NULL,
+            user_correction      TEXT NOT NULL,
+            cited_sources_json   TEXT DEFAULT '[]',
+            frequency_count      INTEGER NOT NULL DEFAULT 1,
+            dedup_key            TEXT DEFAULT '',
+            admin_note           TEXT DEFAULT '',
+            verified_override_id TEXT DEFAULT '',
+            created_at           REAL NOT NULL,
+            updated_at           REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_discrepancies_status ON knowledge_discrepancies(status);
+        CREATE INDEX IF NOT EXISTS idx_discrepancies_dedup ON knowledge_discrepancies(dedup_key);
+
+        CREATE TABLE IF NOT EXISTS corpus_tombstones (
+            id            TEXT PRIMARY KEY,
+            source_uri    TEXT NOT NULL,
+            chunk_id      TEXT DEFAULT '',
+            reason        TEXT DEFAULT '',
+            superseded_by TEXT DEFAULT '',
+            created_at    REAL NOT NULL,
+            created_by    TEXT DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_tombstones_source ON corpus_tombstones(source_uri);
+        CREATE INDEX IF NOT EXISTS idx_tombstones_chunk ON corpus_tombstones(chunk_id);
+
+        CREATE TABLE IF NOT EXISTS statutory_precedences (
+            id                TEXT PRIMARY KEY,
+            topic             TEXT NOT NULL,
+            rule_statement    TEXT NOT NULL,
+            statute_reference TEXT DEFAULT '',
+            enabled           INTEGER NOT NULL DEFAULT 1,
+            created_at        REAL NOT NULL,
+            updated_at        REAL NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_statutory_precedences_enabled ON statutory_precedences(enabled);
+
         -- Memory + audit tables (memory/semantic.py, memory/episodic.py,
         -- audit/ledger.py). Part of the shared analytics schema: those
         -- stores are process-wide singletons that only create their tables
@@ -573,6 +824,17 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_mcp_tasks_status
             ON mcp_tasks(tenant_id, status, created_at);
 
+        CREATE TABLE IF NOT EXISTS agent_checkpoints (
+            thread_id    TEXT NOT NULL,
+            step         INTEGER NOT NULL,
+            node_name    TEXT NOT NULL,
+            state_json   TEXT NOT NULL,
+            created_at   REAL NOT NULL,
+            PRIMARY KEY (thread_id, step)
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_thread
+            ON agent_checkpoints(thread_id, created_at DESC);
+
         CREATE TABLE IF NOT EXISTS audit_events (
             event_id     TEXT PRIMARY KEY,
             event_type   TEXT NOT NULL,
@@ -599,7 +861,8 @@ def init_db() -> None:
             last_seq     INTEGER NOT NULL,
             merkle_root  TEXT NOT NULL,
             created_at   REAL NOT NULL,
-            head_hash    TEXT NOT NULL DEFAULT ''
+            head_hash    TEXT NOT NULL DEFAULT '',
+            tsa_token    TEXT DEFAULT ''
         );
         -- The unique (tenant_id, seq) and (tenant_id, first_seq) indexes are
         -- created by audit/ledger.py, guarded: an older ledger may already
@@ -616,6 +879,8 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_sessions_active ON sessions(last_active_at);
         CREATE INDEX IF NOT EXISTS idx_conversations_session ON conversations(session_id);
         CREATE INDEX IF NOT EXISTS idx_conversations_created ON conversations(created_at);
+        CREATE INDEX IF NOT EXISTS idx_response_owner
+            ON conversation_responses(tenant_id, user_id, conversation_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_workflow_status ON workflow_sessions(status);
         CREATE INDEX IF NOT EXISTS idx_workflow_updated ON workflow_sessions(updated_at);
         CREATE INDEX IF NOT EXISTS idx_tickets_status    ON tickets(status);
@@ -630,10 +895,12 @@ def init_db() -> None:
     # Forward-compatible schema migrations for existing DBs.
     _refresh_consent_purpose_check(conn)
     _ensure_column(conn, "conversations", "conversation_id", "TEXT")
+    _ensure_column(conn, "conversations", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
     conn.execute(
         "UPDATE conversations SET conversation_id = id WHERE conversation_id IS NULL OR conversation_id = ''"
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_thread ON conversations(conversation_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_tenant_thread ON conversations(tenant_id, conversation_id)")
     _ensure_column(conn, "tickets", "handoff_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "response_judge_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "tickets", "transcript_json", "TEXT DEFAULT '[]'")
@@ -648,10 +915,30 @@ def init_db() -> None:
     _ensure_column(conn, "tickets", "modality", "TEXT DEFAULT 'text'")
     _ensure_column(conn, "tickets", "user_query_en", "TEXT DEFAULT ''")
     _ensure_column(conn, "tickets", "officer_reply_localized", "TEXT DEFAULT ''")
+    _ensure_column(conn, "tickets", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "feedback", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "analytics_events", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "sessions", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    _ensure_column(conn, "audit_anchors", "tsa_token", "TEXT DEFAULT ''")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_tickets_tenant ON tickets(tenant_id, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_events_tenant ON analytics_events(tenant_id, created_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, last_active_at)")
     # Which route / journey step produced a rated reply (journey analytics).
     _ensure_column(conn, "feedback", "retrieval_mode", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "workflow_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "step_id", "TEXT DEFAULT ''")
+    # Which answer of which conversation a rating is on, and what the answer
+    # was built from, copied while the conversation log still keeps it — the
+    # service-quality audit reads a conversation's ratings in order.
+    _ensure_column(conn, "feedback", "conversation_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "turn_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "turn_index", "INTEGER")
+    _ensure_column(conn, "feedback", "locale", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "topic_tag", "TEXT DEFAULT ''")
+    _ensure_column(conn, "feedback", "sources_json", "TEXT DEFAULT '[]'")
+    _ensure_column(conn, "feedback", "confidence", "REAL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_conversation ON feedback(conversation_id, turn_index)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
     # P0-2: persist the top-k retrieved passage texts per turn so the eval
     # harness scores faithfulness against the real context, not the answer.
@@ -672,14 +959,30 @@ def init_db() -> None:
                WHERE user_id = ''"""
         )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
+    _ensure_column(conn, "workflow_sessions", "tenant_id", "TEXT NOT NULL DEFAULT 'default'")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_workflow_tenant_user ON workflow_sessions(tenant_id, user_id)"
+    )
     _ensure_column(conn, "conversations", "flag_variants", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "conversations", "locale", "TEXT DEFAULT ''")
+    # The turn in English beside what the taxpayer typed and was shown, for a
+    # Luganda or Swahili turn (G119): later turns replay English history to
+    # the English generator. Empty for English turns.
+    _ensure_column(conn, "conversations", "user_message_en", "TEXT DEFAULT ''")
+    _ensure_column(conn, "conversations", "bot_reply_en", "TEXT DEFAULT ''")
     _ensure_column(conn, "feedback", "user_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "analytics_events", "user_id", "TEXT DEFAULT ''")
     _ensure_column(conn, "sessions", "user_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "notification_outbox", "sent_at", "REAL")
+    _ensure_column(conn, "notification_outbox", "delivered_at", "REAL")
+    _ensure_column(conn, "notification_outbox", "error", "TEXT DEFAULT ''")
+    _ensure_column(conn, "notification_outbox", "provider_msg_id", "TEXT DEFAULT ''")
+    _ensure_column(conn, "notification_outbox", "retries", "INTEGER DEFAULT 0")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_feedback_user ON feedback(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_events_user ON analytics_events(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_outbox_status ON notification_outbox(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_outbox_created ON notification_outbox(created_at)")
 
     # Seed the default tenant if missing
     conn.execute(
@@ -687,10 +990,57 @@ def init_db() -> None:
         ("default", "URA Default Tenant", time.time()),
     )
     conn.commit()
+    migrate_legacy_conversation_state_keys()
+
+    # Ensure call desk / receptionist tables exist (officer_presence, voice_calls, etc.)
+    try:
+        from .receptionist.store import init_receptionist_schema
+
+        init_receptionist_schema()
+    except Exception:
+        logger.debug("receptionist schema init skipped or deferred", exc_info=True)
+    init_module_schemas()
+
     logger.info("Analytics database initialised at %s", _DB_PATH)
 
     # Run cleanup on startup
     cleanup_expired_data()
+
+
+def init_module_schemas() -> None:
+    """Tables owned by their own modules (officer chat threads, service ratings, audit reviews).
+
+    Portable DDL through :func:`execute_script`, so both backends call this
+    from their ``init_db``.
+    """
+    try:
+        from . import audit_reviews, officer_chat, service_ratings
+
+        officer_chat.init_schema()
+        service_ratings.init_schema()
+        audit_reviews.init_schema()
+    except Exception:
+        logger.exception("officer chat / service rating / audit review schema init failed")
+
+
+def module_retention(now: float | None = None) -> dict[str, int]:
+    """Retention for module-owned tables, after the ticket purge has run."""
+    deleted: dict[str, int] = {}
+    try:
+        from . import officer_chat, service_ratings
+
+        deleted["ticket_messages"] = officer_chat.purge_orphans()
+        deleted["service_ratings"] = service_ratings.purge_expired(_FEEDBACK_TTL_DAYS, now=now)
+    except Exception:
+        logger.exception("TTL cleanup failed for officer chat threads / service ratings")
+    try:
+        from . import audit_reviews
+
+        # After the ratings and feedback purges: a decision outlives no item.
+        deleted["audit_reviews"] = audit_reviews.purge(now=now)
+    except Exception:
+        logger.exception("TTL cleanup failed for audit reviews")
+    return deleted
 
 
 # ---------------------------------------------------------------------------
@@ -704,6 +1054,7 @@ def cleanup_expired_data() -> dict[str, int]:
 
     ttls = [
         ("conversations", _CONVERSATION_TTL_DAYS),
+        ("conversation_responses", _CONVERSATION_TTL_DAYS),
         ("analytics_events", _ANALYTICS_TTL_DAYS),
         ("feedback", _FEEDBACK_TTL_DAYS),
         ("sessions", _SESSION_TTL_DAYS),
@@ -714,6 +1065,7 @@ def cleanup_expired_data() -> dict[str, int]:
     ]
     ts_col = {
         "conversations": "created_at",
+        "conversation_responses": "created_at",
         "analytics_events": "created_at",
         "feedback": "created_at",
         "sessions": "last_active_at",
@@ -787,6 +1139,7 @@ def cleanup_expired_data() -> dict[str, int]:
     except Exception:
         conn.rollback()
 
+    deleted.update(module_retention(now))
     return deleted
 
 
@@ -804,12 +1157,26 @@ def save_feedback(
     retrieval_mode: str = "",
     workflow_id: str = "",
     step_id: str = "",
+    tenant_id: str = "default",
+    conversation_id: str = "",
+    turn_id: str = "",
+    turn_index: int | None = None,
+    locale: str = "",
+    topic_tag: str = "",
+    sources_json: str = "[]",
+    confidence: float | None = None,
 ) -> dict[str, Any]:
     """Persist a feedback entry and return it.
 
     *retrieval_mode*, *workflow_id* and *step_id* say which route or journey
     step produced the rated reply; they are identifiers validated at the API
     boundary (``FeedbackRequest``), never free text.
+
+    *conversation_id*, *turn_id* and *turn_index* say which answer of which
+    conversation is rated; *locale*, *topic_tag*, *sources_json* and
+    *confidence* are copied from that answer's log row so the audit can read
+    them after the conversation itself has expired. An empty *user_id* is an
+    anonymous rating: nothing ties it to a person.
     """
     from .guardrails import redact_pii_text
 
@@ -822,16 +1189,20 @@ def save_feedback(
     try:
         conn.execute(
             """INSERT INTO feedback (id, message_id, session_id, user_id, rating, comment,
-               user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id,
+               tenant_id, conversation_id, turn_id, turn_index, locale, topic_tag, sources_json, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
                 retrieval_mode or "", workflow_id or "", step_id or "",
+                tenant_id or "default", conversation_id or "", turn_id or "", turn_index,
+                locale or "", topic_tag or "", sources_json or "[]", confidence,
             ),
         )
         conn.commit()
     except Exception:
-        logger.exception("Failed to save feedback for message_id=%s", message_id)
+        safe_msg_id = str(message_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to save feedback for message_id=%s", safe_msg_id)
         conn.rollback()
         raise
     return {"id": fb_id, "message_id": message_id, "rating": rating, "created_at": now}
@@ -855,7 +1226,8 @@ def update_feedback_comment(message_id: str, comment: str, user_id: str = "") ->
         conn.commit()
         return cursor.rowcount > 0
     except Exception:
-        logger.exception("Failed to update feedback comment for message_id=%s", message_id)
+        safe_msg_id = str(message_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to update feedback comment for message_id=%s", safe_msg_id)
         conn.rollback()
         return False
 
@@ -957,7 +1329,8 @@ def track_event(
         )
         conn.commit()
     except Exception:
-        logger.exception("Failed to track event type=%s", event_type)
+        safe_evt = str(event_type).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to track event type=%s", safe_evt)
         conn.rollback()
 
 
@@ -998,7 +1371,8 @@ def upsert_session(
         )
         conn.commit()
     except Exception:
-        logger.exception("Failed to upsert session id=%s", session_id)
+        safe_sid = str(session_id).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to upsert session id=%s", safe_sid)
         conn.rollback()
 
 
@@ -1060,30 +1434,48 @@ def log_conversation(
     user_id: str = "",
     flag_variants: str = "{}",
     locale: str = "",
+    tenant_id: str = "default",
+    user_message_en: str = "",
+    bot_reply_en: str = "",
+    row_id: str | None = None,
 ) -> str:
     """Log a conversation turn and return the stable thread id.
 
     ``user_id`` is the authenticated OIDC ``sub`` (empty for anonymous turns) —
     it links the turn to the user for /v1/me export + erasure.
+
+    ``user_message_en`` / ``bot_reply_en`` are the turn in English when it was
+    in Luganda or Swahili: the question as routed and the answer before
+    translation. Model-facing history reads them (G119); transcripts, exports
+    and the audit trail keep the original.
+
+    ``row_id`` is the turn's id when the transport chose it (the ``turn_id`` it
+    returned with the answer, so a 👍/👎 can name the row it rates); a fresh
+    one otherwise.
     """
     conn = _get_connection()
     from .guardrails import redact_pii_text
 
     user_message = redact_pii_text(user_message)
     bot_reply = redact_pii_text(bot_reply)
-    row_id = str(uuid.uuid4())
+    user_message_en = redact_pii_text(user_message_en or "")
+    bot_reply_en = redact_pii_text(bot_reply_en or "")
+    # The transport mints the turn id before generating, so it can hand it to
+    # the client with the answer and a rating can name the row it rates.
+    row_id = row_id or str(uuid.uuid4())
     thread_id = conversation_id or row_id
     try:
         conn.execute(
             """INSERT INTO conversations
-               (id, conversation_id, session_id, user_message, bot_reply, sources,
+               (id, conversation_id, session_id, tenant_id, user_message, bot_reply, sources,
                 contexts, response_time_ms, confidence, topic_tag, created_at, user_id,
-                flag_variants, locale)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                flag_variants, locale, user_message_en, bot_reply_en)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 row_id,
                 thread_id,
                 session_id,
+                tenant_id or "default",
                 user_message,
                 bot_reply,
                 sources,
@@ -1095,6 +1487,8 @@ def log_conversation(
                 user_id,
                 flag_variants or "{}",
                 locale or "",
+                user_message_en,
+                bot_reply_en,
             ),
         )
         conn.commit()
@@ -1110,34 +1504,35 @@ def get_recent_turns(
     conversation_id: str | None = None,
     limit: int = 5,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, str]]:
     """Retrieve the most recent conversation turns for a session (multi-turn memory).
 
-    Returns a list of dicts with ``user_message`` and ``bot_reply`` keys,
-    ordered oldest-first (chronological) for prompt injection.
+    Returns a list of dicts with ``user_message`` and ``bot_reply`` keys, the
+    turn's ``locale`` and, for a Luganda or Swahili turn, its English
+    ``user_message_en`` / ``bot_reply_en``; ordered oldest-first
+    (chronological) for prompt injection.
     """
-    if conversation_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE conversation_id = ? AND user_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args: tuple[Any, ...] = (conversation_id, user_id, limit)
-        else:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE conversation_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args = (conversation_id, limit)
-    elif session_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE session_id = ? AND user_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args = (session_id, user_id, limit)
-        else:
-            sql = """SELECT user_message, bot_reply, locale FROM conversations
-                     WHERE session_id = ?
-                     ORDER BY created_at DESC LIMIT ?"""
-            args = (session_id, limit)
+    tenant_id = tenant_id or "default"
+    if user_id and conversation_id:
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                 WHERE tenant_id = ? AND conversation_id = ? AND user_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args: tuple[Any, ...] = (tenant_id, conversation_id, user_id, limit)
+    elif user_id and session_id:
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                 WHERE tenant_id = ? AND session_id = ? AND user_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args = (tenant_id, session_id, user_id, limit)
+    elif not user_id and session_id:
+        # Anonymous history is session-bound. A client-supplied conversation id
+        # alone is not an authorization credential.
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                 WHERE tenant_id = ? AND session_id = ? AND conversation_id = ?
+                 ORDER BY created_at DESC LIMIT ?""" if conversation_id else """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                 WHERE tenant_id = ? AND session_id = ?
+                 ORDER BY created_at DESC LIMIT ?"""
+        args = (tenant_id, session_id, conversation_id, limit) if conversation_id else (tenant_id, session_id, limit)
     else:
         return []
 
@@ -1149,6 +1544,8 @@ def get_recent_turns(
             "user_message": r["user_message"],
             "bot_reply": r["bot_reply"],
             "locale": r["locale"] if "locale" in r.keys() else "",
+            "user_message_en": r["user_message_en"] or "",
+            "bot_reply_en": r["bot_reply_en"] or "",
         }
         for r in reversed(rows)
     ]
@@ -1160,6 +1557,7 @@ def get_conversation_context(
     recent_limit: int = 6,
     max_history: int = 25,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Retrieve multi-turn conversation history and build rolling context & summary."""
     from .context_manager import RollingContextManager, context_manager
@@ -1169,6 +1567,7 @@ def get_conversation_context(
         conversation_id=conversation_id,
         limit=max_history,
         user_id=user_id,
+        tenant_id=tenant_id,
     )
     mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
     ctx = mgr.build_context(
@@ -1247,6 +1646,8 @@ def get_conversation_transcript(
     conversation_id: str | None = None,
     session_id: str | None = None,
     limit: int = 200,
+    user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, Any]]:
     """Return the whole conversation, both sides, oldest first.
 
@@ -1257,19 +1658,33 @@ def get_conversation_transcript(
     again.  Timestamps are included so the officer can see where the
     conversation stalled.
     """
-    if conversation_id:
-        where, key = "conversation_id = ?", conversation_id
-    elif session_id:
-        where, key = "session_id = ?", session_id
-    else:
+    if not conversation_id and not session_id:
         return []
     limit = max(1, min(int(limit), 1000))
     conn = _get_connection()
+    clauses = ["tenant_id = ?"]
+    args: list[Any] = [tenant_id or "default"]
+    if user_id:
+        clauses.append("user_id = ?")
+        args.append(user_id)
+    elif session_id:
+        clauses.extend(("session_id = ?", "COALESCE(user_id, '') = ''"))
+        args.append(session_id)
+    else:
+        return []
+    if conversation_id:
+        clauses.append("conversation_id = ?")
+        args.append(conversation_id)
+    elif session_id and user_id:
+        clauses.append("session_id = ?")
+        args.append(session_id)
+    where = " AND ".join(clauses)
+    args.append(limit)
     rows = conn.execute(
         f"""SELECT user_message, bot_reply, created_at, sources, topic_tag
             FROM conversations WHERE {where}
-            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 # noqa: S608 - `where` is a fixed literal
-        (key, limit),
+            ORDER BY created_at DESC LIMIT ?""",  # nosec B608 # noqa: S608 - predicates are fixed literals
+        tuple(args),
     ).fetchall()
     return [
         {
@@ -1283,16 +1698,18 @@ def get_conversation_transcript(
     ]
 
 
-def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
+def get_workflow_session(
+    conversation_id: str, tenant_id: str = "default"
+) -> dict[str, Any] | None:
     """Return the persisted workflow session for a conversation, if any."""
     if not conversation_id:
         return None
     conn = _get_connection()
     row = conn.execute(
-        """SELECT conversation_id, workflow_id, status, current_step_idx, user_id,
+        """SELECT conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id,
                   slots_json, last_prompt, created_at, updated_at
-           FROM workflow_sessions WHERE conversation_id = ?""",
-        (conversation_id,),
+           FROM workflow_sessions WHERE conversation_id = ? AND tenant_id = ?""",
+        (conversation_id, tenant_id or "default"),
     ).fetchone()
     if not row:
         return None
@@ -1304,6 +1721,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
         slots = {}
     return {
         "conversation_id": row["conversation_id"],
+        "tenant_id": row["tenant_id"] or "default",
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
@@ -1324,6 +1742,7 @@ def upsert_workflow_session(
     status: str = "active",
     last_prompt: str = "",
     user_id: str = "",
+    tenant_id: str = "default",
 ) -> None:
     """Create or update a durable workflow session."""
     if not conversation_id or not workflow_id:
@@ -1336,9 +1755,9 @@ def upsert_workflow_session(
     try:
         conn.execute(
             """INSERT INTO workflow_sessions
-               (conversation_id, workflow_id, status, current_step_idx, user_id,
+               (conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id,
                 slots_json, last_prompt, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(conversation_id) DO UPDATE SET
                  workflow_id = excluded.workflow_id,
                  status = excluded.status,
@@ -1346,9 +1765,11 @@ def upsert_workflow_session(
                  user_id = CASE WHEN excluded.user_id != '' THEN excluded.user_id ELSE workflow_sessions.user_id END,
                  slots_json = excluded.slots_json,
                  last_prompt = excluded.last_prompt,
-                 updated_at = excluded.updated_at""",
+                 updated_at = excluded.updated_at
+               WHERE workflow_sessions.tenant_id = excluded.tenant_id""",
             (
                 conversation_id,
+                tenant_id or "default",
                 workflow_id,
                 status,
                 max(0, int(current_step_idx)),
@@ -1370,6 +1791,7 @@ def complete_workflow_session(
     conversation_id: str,
     *,
     status: str = "completed",
+    tenant_id: str = "default",
 ) -> bool:
     """Mark a workflow session as completed or cancelled."""
     if not conversation_id:
@@ -1379,8 +1801,8 @@ def complete_workflow_session(
     conn = _get_connection()
     try:
         cursor = conn.execute(
-            "UPDATE workflow_sessions SET status = ?, updated_at = ? WHERE conversation_id = ?",
-            (status, time.time(), conversation_id),
+            "UPDATE workflow_sessions SET status = ?, updated_at = ? WHERE conversation_id = ? AND tenant_id = ?",
+            (status, time.time(), conversation_id, tenant_id or "default"),
         )
         conn.commit()
         return cursor.rowcount > 0
@@ -1539,6 +1961,7 @@ def create_ticket(
     modality: str = "text",
     user_query_en: str = "",
     officer_reply_localized: str = "",
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Create a new escalation ticket and return it.
 
@@ -1568,8 +1991,8 @@ def create_ticket(
                                     handoff_json, response_judge_json, transcript_json,
                                     user_id, team, assignee, staff_note,
                                     locale, modality, user_query_en, officer_reply_localized,
-                                    created_at, updated_at)
-               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?)""",
+                                    created_at, updated_at, tenant_id)
+               VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 ticket_id,
                 conversation_id,
@@ -1589,10 +2012,13 @@ def create_ticket(
                 officer_reply_localized or "",
                 now,
                 now,
+                tenant_id or "default",
             ),
         )
         conn.commit()
-        logger.info("ticket %s created (priority=%s reason_length=%d)", ticket_id, priority, len(reason))
+        safe_tid = str(ticket_id).replace("\r", "\\r").replace("\n", "\\n")
+        safe_prio = str(priority).replace("\r", "\\r").replace("\n", "\\n")
+        logger.info("ticket %s created (priority=%s reason_length=%d)", safe_tid, safe_prio, len(reason))
     except Exception:
         logger.exception("Failed to create ticket")
         conn.rollback()
@@ -1611,6 +2037,7 @@ def create_ticket(
         "user_query_en": user_query_en or "",
         "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
+        "tenant_id": tenant_id or "default",
     }
 
 
@@ -1624,6 +2051,7 @@ def list_tickets(
     modality: str | None = None,
     q: str | None = None,
     user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """List tickets, urgent first then oldest within a priority.
 
@@ -1646,18 +2074,21 @@ def list_tickets(
         "       assignee, staff_note, created_at, updated_at, user_id, team, "
         "       officer_reply, reply_at, reply_delivered_at, "
         "       first_response_at, resolved_at, "
-        "       locale, modality, user_query_en, officer_reply_localized "
+        "       locale, modality, user_query_en, officer_reply_localized, tenant_id "
         "FROM tickets"
     )
     params: list[Any] = []
+    if tenant_id:
+        sql += " WHERE tenant_id = ?"
+        params.append(tenant_id)
     if status:
-        sql += " WHERE status = ?"
+        sql += " AND status = ?" if (" WHERE " in sql) else " WHERE status = ?"
         params.append(status)
     if priority:
-        sql += " AND priority = ?" if (status or params) else " WHERE priority = ?"
+        sql += " AND priority = ?" if (" WHERE " in sql) else " WHERE priority = ?"
         params.append(priority)
     if team:
-        sql += " AND team = ?" if (status or params) else " WHERE team = ?"
+        sql += " AND team = ?" if (" WHERE " in sql) else " WHERE team = ?"
         params.append(team)
     if locale:
         sql += " AND locale = ?" if (status or params) else " WHERE locale = ?"
@@ -2033,6 +2464,9 @@ def enqueue_notification(
     payload: dict[str, Any],
     *,
     provider: str = "mock",
+    status: str = "queued",
+    provider_msg_id: str = "",
+    error: str = "",
 ) -> dict[str, Any]:
     uid = (user_id or "").strip()
     ch = (channel or "").strip().lower()
@@ -2041,39 +2475,129 @@ def enqueue_notification(
     conn = _get_connection()
     nid = str(uuid.uuid4())
     now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
     body = json.dumps(payload or {}, ensure_ascii=True)
     conn.execute(
         """INSERT INTO notification_outbox
-           (id, user_id, channel, provider, payload, status, created_at)
-           VALUES (?, ?, ?, ?, ?, 'queued', ?)""",
-        (nid, uid, ch, provider, body, now),
+           (id, user_id, channel, provider, payload, status, created_at, sent_at, delivered_at, error, provider_msg_id, retries)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (nid, uid, ch, provider, body, status, now, sent_at, delivered_at, error, provider_msg_id, 0),
     )
     conn.commit()
+    is_live = provider != "mock"
     return {
         "id": nid,
         "user_id": uid,
         "channel": ch,
         "provider": provider,
-        "status": "queued",
-        "live": False,
+        "status": status,
+        "live": is_live,
+        "sent_at": sent_at,
+        "delivered_at": delivered_at,
+        "error": error,
+        "provider_msg_id": provider_msg_id,
+        "retries": 0,
+        "created_at": now,
     }
 
 
-def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+def update_notification_status(
+    nid: str,
+    status: str,
+    *,
+    provider: str = "",
+    provider_msg_id: str = "",
+    error: str = "",
+) -> bool:
+    """Update outbox item delivery state, timestamps, and retry counts."""
     conn = _get_connection()
+    now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
+    try:
+        conn.execute(
+            """UPDATE notification_outbox
+               SET status = ?,
+                   provider = CASE WHEN ? != '' THEN ? ELSE provider END,
+                   provider_msg_id = CASE WHEN ? != '' THEN ? ELSE provider_msg_id END,
+                   error = ?,
+                   sent_at = COALESCE(sent_at, ?),
+                   delivered_at = COALESCE(delivered_at, ?),
+                   retries = retries + 1
+               WHERE id = ?""",
+            (status, provider, provider, provider_msg_id, provider_msg_id, error, sent_at, delivered_at, nid),
+        )
+        conn.commit()
+        return True
+    except Exception:
+        safe_nid = str(nid).replace("\r", "\\r").replace("\n", "\\n")
+        logger.exception("Failed to update notification status for id=%s", safe_nid)
+        conn.rollback()
+        return False
+
+
+def get_notification_by_id(nid: str) -> dict[str, Any] | None:
+    """Fetch single notification outbox item by UUID."""
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT id, user_id, channel, provider, payload, status, created_at, sent_at, delivered_at, error, provider_msg_id, retries
+           FROM notification_outbox WHERE id = ?""",
+        (nid,),
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    raw = item.get("payload")
+    if isinstance(raw, str):
+        try:
+            item["payload"] = json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+    return item
+
+
+def get_outbox_stats() -> dict[str, int]:
+    """Retrieve aggregate delivery statistics from the notification outbox."""
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT status, COUNT(*) as cnt FROM notification_outbox GROUP BY status"""
+    ).fetchall()
+    stats = {"queued": 0, "sent": 0, "delivered": 0, "failed": 0, "total": 0}
+    for r in rows:
+        st = str(r["status"]).lower()
+        c = int(r["cnt"])
+        stats[st] = c
+        stats["total"] += c
+    return stats
+
+
+def list_notification_outbox(
+    user_id: str = "",
+    limit: int = 50,
+    status: str = "",
+) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    cap = max(1, min(limit, 200))
+    query = """SELECT id, user_id, channel, provider, payload, status, created_at,
+                      sent_at, delivered_at, error, provider_msg_id, retries
+               FROM notification_outbox"""
+    params: list[Any] = []
+    clauses: list[str] = []
+
     if user_id:
-        rows = conn.execute(
-            """SELECT id, user_id, channel, provider, payload, status, created_at
-               FROM notification_outbox WHERE user_id = ?
-               ORDER BY created_at DESC LIMIT ?""",
-            (user_id, max(1, min(limit, 200))),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT id, user_id, channel, provider, payload, status, created_at
-               FROM notification_outbox ORDER BY created_at DESC LIMIT ?""",
-            (max(1, min(limit, 200)),),
-        ).fetchall()
+        clauses.append("user_id = ?")
+        params.append(user_id)
+    if status:
+        clauses.append("status = ?")
+        params.append(status.lower().strip())
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(cap)
+
+    rows = conn.execute(query, tuple(params)).fetchall()
     out = []
     for row in rows:
         item = dict(row) if isinstance(row, dict) else {
@@ -2084,7 +2608,13 @@ def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[st
             "payload": row[4],
             "status": row[5],
             "created_at": row[6],
+            "sent_at": row[7] if len(row) > 7 else None,
+            "delivered_at": row[8] if len(row) > 8 else None,
+            "error": row[9] if len(row) > 9 else "",
+            "provider_msg_id": row[10] if len(row) > 10 else "",
+            "retries": row[11] if len(row) > 11 else 0,
         }
+        item["live"] = item.get("provider", "") != "mock"
         raw = item.get("payload")
         if isinstance(raw, str):
             try:
@@ -2189,6 +2719,424 @@ def delete_answer_override(override_id: str) -> bool:
     cur = conn.execute("DELETE FROM answer_overrides WHERE id = ?", (oid,))
     conn.commit()
     return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Discrepancies & Reporting
+# ---------------------------------------------------------------------------
+def _compute_discrepancy_dedup_key(bot_statement: str, user_correction: str) -> str:
+    from .cms import normalize_query
+    b = normalize_query(bot_statement)[:80]
+    u = normalize_query(user_correction)[:80]
+    return hashlib.sha256(f"{b}|{u}".encode("utf-8")).hexdigest()[:16]
+
+
+def create_or_increment_discrepancy(
+    bot_statement: str,
+    user_correction: str,
+    *,
+    conversation_id: str = "",
+    session_id: str = "",
+    user_id: str = "",
+    discrepancy_type: str = "outdated_law",
+    cited_sources: list[str] | None = None,
+    priority: str = "normal",
+) -> dict[str, Any]:
+    from .guardrails import redact_pii_text
+
+    bot_statement = redact_pii_text(str(bot_statement or "").strip())
+    user_correction = redact_pii_text(str(user_correction or "").strip())
+    if not bot_statement or not user_correction:
+        raise ValueError("bot_statement and user_correction are required")
+
+    dedup_key = _compute_discrepancy_dedup_key(bot_statement, user_correction)
+    conn = _get_connection()
+    now = time.time()
+
+    existing = conn.execute(
+        """SELECT id, frequency_count, priority FROM knowledge_discrepancies
+           WHERE dedup_key = ? AND status = 'pending'
+           ORDER BY created_at DESC LIMIT 1""",
+        (dedup_key,),
+    ).fetchone()
+
+    if existing:
+        rep_id = str(existing[0])
+        freq = int(existing[1]) + 1
+        new_priority = "high" if freq >= 3 else existing[2]
+        conn.execute(
+            """UPDATE knowledge_discrepancies
+               SET frequency_count = ?, priority = ?, updated_at = ?
+               WHERE id = ?""",
+            (freq, new_priority, now, rep_id),
+        )
+        conn.commit()
+        return {
+            "id": rep_id,
+            "status": "pending",
+            "frequency_count": freq,
+            "priority": new_priority,
+            "dedup_key": dedup_key,
+            "reused_existing": True,
+        }
+
+    rep_id = f"kb_{uuid.uuid4().hex[:12]}"
+    sources_json = json.dumps(cited_sources or [], ensure_ascii=False)
+    conn.execute(
+        """INSERT INTO knowledge_discrepancies (
+            id, conversation_id, session_id, user_id, status, priority,
+            discrepancy_type, bot_statement, user_correction, cited_sources_json,
+            frequency_count, dedup_key, admin_note, verified_override_id,
+            created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, 1, ?, '', '', ?, ?)""",
+        (
+            rep_id,
+            conversation_id or "",
+            session_id or "",
+            user_id or "",
+            priority,
+            discrepancy_type,
+            bot_statement,
+            user_correction,
+            sources_json,
+            dedup_key,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return {
+        "id": rep_id,
+        "status": "pending",
+        "frequency_count": 1,
+        "priority": priority,
+        "dedup_key": dedup_key,
+        "reused_existing": False,
+    }
+
+
+def get_discrepancy(report_id: str) -> dict[str, Any] | None:
+    rid = (report_id or "").strip()
+    if not rid:
+        return None
+    conn = _get_connection()
+    row = conn.execute(
+        """SELECT id, conversation_id, session_id, user_id, status, priority,
+                  discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                  frequency_count, dedup_key, admin_note, verified_override_id,
+                  created_at, updated_at
+           FROM knowledge_discrepancies WHERE id = ?""",
+        (rid,),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        sources = json.loads(row[9])
+    except Exception:
+        sources = []
+    return {
+        "id": row[0],
+        "conversation_id": row[1],
+        "session_id": row[2],
+        "user_id": row[3],
+        "status": row[4],
+        "priority": row[5],
+        "discrepancy_type": row[6],
+        "bot_statement": row[7],
+        "user_correction": row[8],
+        "cited_sources": sources,
+        "frequency_count": row[10],
+        "dedup_key": row[11],
+        "admin_note": row[12],
+        "verified_override_id": row[13],
+        "created_at": row[14],
+        "updated_at": row[15],
+    }
+
+
+def list_discrepancies(
+    status: str | None = None,
+    priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    query = """SELECT id, conversation_id, session_id, user_id, status, priority,
+                      discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                      frequency_count, dedup_key, admin_note, verified_override_id,
+                      created_at, updated_at
+               FROM knowledge_discrepancies"""
+    clauses = []
+    params: list[Any] = []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if priority:
+        clauses.append("priority = ?")
+        params.append(priority)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY frequency_count DESC, updated_at DESC LIMIT ? OFFSET ?"
+    params.extend([max(1, min(limit, 200)), max(0, offset)])
+    rows = conn.execute(query, tuple(params)).fetchall()
+    out = []
+    for row in rows:
+        try:
+            sources = json.loads(row[9])
+        except Exception:
+            sources = []
+        out.append(
+            {
+                "id": row[0],
+                "conversation_id": row[1],
+                "session_id": row[2],
+                "user_id": row[3],
+                "status": row[4],
+                "priority": row[5],
+                "discrepancy_type": row[6],
+                "bot_statement": row[7],
+                "user_correction": row[8],
+                "cited_sources": sources,
+                "frequency_count": row[10],
+                "dedup_key": row[11],
+                "admin_note": row[12],
+                "verified_override_id": row[13],
+                "created_at": row[14],
+                "updated_at": row[15],
+            }
+        )
+    return out
+
+
+def update_discrepancy_status(
+    report_id: str,
+    status: str,
+    *,
+    admin_note: str = "",
+    verified_override_id: str = "",
+) -> bool:
+    rid = (report_id or "").strip()
+    if not rid or status not in ("pending", "verified", "dismissed", "resolved"):
+        return False
+    conn = _get_connection()
+    now = time.time()
+    cur = conn.execute(
+        """UPDATE knowledge_discrepancies
+           SET status = ?, admin_note = COALESCE(NULLIF(?, ''), admin_note),
+               verified_override_id = COALESCE(NULLIF(?, ''), verified_override_id),
+               updated_at = ?
+           WHERE id = ?""",
+        (status, admin_note, verified_override_id, now, rid),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_discrepancy_stats() -> dict[str, Any]:
+    conn = _get_connection()
+    total = conn.execute("SELECT COUNT(*) FROM knowledge_discrepancies").fetchone()[0]
+    pending = conn.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'pending'").fetchone()[0]
+    verified = conn.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'verified'").fetchone()[0]
+    dismissed = conn.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'dismissed'").fetchone()[0]
+    return {
+        "total": total,
+        "pending": pending,
+        "verified": verified,
+        "dismissed": dismissed,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Corpus Tombstones (Solution B)
+# ---------------------------------------------------------------------------
+def add_corpus_tombstone(
+    source_uri: str,
+    chunk_id: str = "",
+    *,
+    reason: str = "",
+    superseded_by: str = "",
+    created_by: str = "",
+) -> dict[str, Any]:
+    uri = str(source_uri or "").strip()
+    if not uri and not chunk_id:
+        raise ValueError("source_uri or chunk_id is required")
+    conn = _get_connection()
+    tid = f"tomb_{uuid.uuid4().hex[:12]}"
+    now = time.time()
+    conn.execute(
+        """INSERT INTO corpus_tombstones (id, source_uri, chunk_id, reason, superseded_by, created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (tid, uri, str(chunk_id or "").strip(), reason, superseded_by, now, created_by),
+    )
+    conn.commit()
+    return {
+        "id": tid,
+        "source_uri": uri,
+        "chunk_id": chunk_id,
+        "reason": reason,
+        "superseded_by": superseded_by,
+        "created_at": now,
+        "created_by": created_by,
+    }
+
+
+def list_corpus_tombstones(limit: int = 200) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT id, source_uri, chunk_id, reason, superseded_by, created_at, created_by
+           FROM corpus_tombstones ORDER BY created_at DESC LIMIT ?""",
+        (max(1, min(limit, 500)),),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "source_uri": r[1],
+            "chunk_id": r[2],
+            "reason": r[3],
+            "superseded_by": r[4],
+            "created_at": r[5],
+            "created_by": r[6],
+        }
+        for r in rows
+    ]
+
+
+def delete_corpus_tombstone(tombstone_id: str) -> bool:
+    tid = (tombstone_id or "").strip()
+    if not tid:
+        return False
+    conn = _get_connection()
+    cur = conn.execute("DELETE FROM corpus_tombstones WHERE id = ?", (tid,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_active_corpus_tombstones() -> list[dict[str, Any]]:
+    conn = _get_connection()
+    rows = conn.execute("SELECT id, source_uri, chunk_id, reason, superseded_by FROM corpus_tombstones").fetchall()
+    return [
+        {
+            "id": r[0],
+            "source_uri": r[1],
+            "chunk_id": r[2],
+            "reason": r[3],
+            "superseded_by": r[4],
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Statutory Precedences (Solution C)
+# ---------------------------------------------------------------------------
+def add_statutory_precedence(
+    topic: str,
+    rule_statement: str,
+    *,
+    statute_reference: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    topic = str(topic or "").strip()
+    rule = str(rule_statement or "").strip()
+    if not topic or not rule:
+        raise ValueError("topic and rule_statement are required")
+    conn = _get_connection()
+    pid = f"prec_{uuid.uuid4().hex[:12]}"
+    now = time.time()
+    conn.execute(
+        """INSERT INTO statutory_precedences (id, topic, rule_statement, statute_reference, enabled, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (pid, topic, rule, statute_reference, 1 if enabled else 0, now, now),
+    )
+    conn.commit()
+    return {
+        "id": pid,
+        "topic": topic,
+        "rule_statement": rule,
+        "statute_reference": statute_reference,
+        "enabled": enabled,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def list_statutory_precedences(enabled_only: bool = False) -> list[dict[str, Any]]:
+    conn = _get_connection()
+    query = """SELECT id, topic, rule_statement, statute_reference, enabled, created_at, updated_at
+               FROM statutory_precedences"""
+    if enabled_only:
+        query += " WHERE enabled = 1"
+    query += " ORDER BY updated_at DESC"
+    rows = conn.execute(query).fetchall()
+    return [
+        {
+            "id": r[0],
+            "topic": r[1],
+            "rule_statement": r[2],
+            "statute_reference": r[3],
+            "enabled": bool(r[4]),
+            "created_at": r[5],
+            "updated_at": r[6],
+        }
+        for r in rows
+    ]
+
+
+def update_statutory_precedence(
+    precedence_id: str,
+    *,
+    enabled: bool | None = None,
+    rule_statement: str | None = None,
+    statute_reference: str | None = None,
+) -> bool:
+    pid = (precedence_id or "").strip()
+    if not pid:
+        return False
+    conn = _get_connection()
+    now = time.time()
+    clauses = ["updated_at = ?"]
+    params: list[Any] = [now]
+    if enabled is not None:
+        clauses.append("enabled = ?")
+        params.append(1 if enabled else 0)
+    if rule_statement is not None:
+        clauses.append("rule_statement = ?")
+        params.append(rule_statement.strip())
+    if statute_reference is not None:
+        clauses.append("statute_reference = ?")
+        params.append(statute_reference.strip())
+    params.append(pid)
+    cur = conn.execute(f"UPDATE statutory_precedences SET {', '.join(clauses)} WHERE id = ?", tuple(params))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def delete_statutory_precedence(precedence_id: str) -> bool:
+    pid = (precedence_id or "").strip()
+    if not pid:
+        return False
+    conn = _get_connection()
+    cur = conn.execute("DELETE FROM statutory_precedences WHERE id = ?", (pid,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def get_active_statutory_precedences() -> list[dict[str, Any]]:
+    conn = _get_connection()
+    rows = conn.execute(
+        """SELECT id, topic, rule_statement, statute_reference
+           FROM statutory_precedences WHERE enabled = 1
+           ORDER BY updated_at DESC"""
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "topic": r[1],
+            "rule_statement": r[2],
+            "statute_reference": r[3],
+        }
+        for r in rows
+    ]
 
 
 def find_open_ticket(conversation_id: str) -> dict[str, Any] | None:
@@ -2389,6 +3337,57 @@ def _task_row(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
+# ---------------------------------------------------------------------------
+def save_agent_checkpoint(
+    thread_id: str,
+    step: int,
+    node_name: str,
+    state_data: dict[str, Any],
+) -> None:
+    """Save an agent graph execution step snapshot."""
+    if not thread_id:
+        return
+    now = time.time()
+    state_json = json.dumps(state_data, default=str)
+    execute(
+        """INSERT OR REPLACE INTO agent_checkpoints
+           (thread_id, step, node_name, state_json, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (thread_id, step, node_name, state_json, now),
+    )
+
+
+def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
+    """Load the latest checkpoint state for a thread."""
+    if not thread_id:
+        return None
+    row = query_one(
+        """SELECT state_json FROM agent_checkpoints
+           WHERE thread_id = ?
+           ORDER BY step DESC LIMIT 1""",
+        (thread_id,),
+    )
+    if not row or not row.get("state_json"):
+        return None
+    try:
+        return json.loads(row["state_json"])
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:
+    """List execution history checkpoints for a thread."""
+    if not thread_id:
+        return []
+    rows = query_all(
+        """SELECT step, node_name, created_at FROM agent_checkpoints
+           WHERE thread_id = ? ORDER BY step ASC""",
+        (thread_id,),
+    )
+    return rows or []
+
 
 def get_ticket(ticket_id: str) -> dict[str, Any] | None:
     conn = _get_connection()
@@ -2555,12 +3554,18 @@ def get_user(user_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def get_user_profile(user_id: str) -> dict[str, Any] | None:
+def get_user_profile(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
     conn = _get_connection()
     row = conn.execute(
         "SELECT * FROM user_profiles WHERE user_id = ?",
         (user_id,),
     ).fetchone()
+    if row is None:
+        internal_id = _resolve_internal_user_id(user_id, tenant_id or "default")
+        if internal_id and internal_id != user_id:
+            row = conn.execute(
+                "SELECT * FROM user_profiles WHERE user_id = ?", (internal_id,)
+            ).fetchone()
     if row is None:
         return None
     d = dict(row)
@@ -2772,7 +3777,11 @@ def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -
     return False
 
 
-def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
+def export_user_data(
+    user_id: str,
+    external_id: str = "",
+    tenant_id: str = "default",
+) -> dict[str, Any]:
     """GET /v1/me/export — subject right to data portability (UDPA 2019).
 
     ``user_id`` is the internal UUID (users/profiles/consents); ``external_id`` is
@@ -2786,18 +3795,33 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
     sessions: list[dict[str, Any]] = []
     feedback: list[dict[str, Any]] = []
     workflow_sessions: list[dict[str, Any]] = []
+    conversation_responses: list[dict[str, Any]] = []
     if external_id:
         conversations = query_all(
-            "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
-            (external_id,),
+            """SELECT * FROM conversations WHERE tenant_id = ? AND user_id = ?
+               ORDER BY created_at DESC LIMIT 1000""",
+            (tenant_id or "default", external_id),
         )
         conv_ids = [c["conversation_id"] for c in conversations if c.get("conversation_id")]
-        if conv_ids:
-            ph = ",".join("?" * len(conv_ids))
-            tickets = query_all(
-                f"SELECT * FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
-                tuple(conv_ids),
+        state_ids = [
+            conversation_state_key(
+                c.get("conversation_id"),
+                session_id=c.get("session_id"),
+                user_id=external_id,
+                tenant_id=tenant_id,
             )
+            for c in conversations
+        ]
+        if conv_ids:
+            tickets = query_all(
+                "SELECT * FROM tickets WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
+                (external_id,),
+            )
+        conversation_responses = query_all(
+            """SELECT * FROM conversation_responses
+               WHERE tenant_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1000""",
+            (tenant_id or "default", external_id),
+        )
         analytics_events = query_all(
             "SELECT * FROM analytics_events WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
             (external_id,),
@@ -2810,16 +3834,30 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
             "SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT 1000",
             (external_id,),
         )
-        workflow_where = "user_id = ?"
-        workflow_params: tuple[Any, ...] = (external_id,)
-        if conv_ids:
-            placeholders = ",".join("?" * len(conv_ids))
-            workflow_where += f" OR conversation_id IN ({placeholders})"
-            workflow_params += tuple(conv_ids)
+        workflow_where = "tenant_id = ? AND user_id = ?"
+        workflow_params: tuple[Any, ...] = (tenant_id or "default", external_id)
+        if state_ids:
+            placeholders = ",".join("?" * len(state_ids))
+            workflow_where += f" OR (tenant_id = ? AND conversation_id IN ({placeholders}))"
+            workflow_params += (tenant_id or "default", *state_ids)
         workflow_sessions = query_all(
-            f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608 — identifiers are fixed; values are bound parameters
+            f"SELECT * FROM workflow_sessions WHERE {workflow_where} ORDER BY created_at DESC LIMIT 1000",  # nosec B608 # noqa: S608
             workflow_params,
         )
+    # The officer chats on the subject's tickets, and the ratings of their cases.
+    ticket_messages: list[dict[str, Any]] = []
+    service_ratings_rows: list[dict[str, Any]] = []
+    if external_id:
+        try:
+            from . import officer_chat, service_ratings
+
+            # By the subject's id, not the ``tickets`` above: those are read
+            # only while the subject still has logged conversations.
+            ticket_ids = [str(r["id"]) for r in query_all("SELECT id FROM tickets WHERE user_id = ?", (external_id,))]
+            ticket_messages = officer_chat.export_for_tickets(ticket_ids)
+            service_ratings_rows = service_ratings.export_for_user(external_id)
+        except Exception:
+            logger.exception("export_user_data: officer chat / service ratings")
     return {
         "user": get_user(user_id),
         "profile": get_user_profile(user_id),
@@ -2830,11 +3868,18 @@ def export_user_data(user_id: str, external_id: str = "") -> dict[str, Any]:
         "sessions": sessions,
         "feedback": feedback,
         "workflow_sessions": workflow_sessions,
+        "conversation_responses": conversation_responses,
+        "ticket_messages": ticket_messages,
+        "service_ratings": service_ratings_rows,
         "facts": [],  # filled by the caller from the memory service (export_user)
     }
 
 
-def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
+def delete_user_cascade(
+    user_id: str,
+    external_id: str = "",
+    tenant_id: str = "default",
+) -> dict[str, int]:
     """DELETE /v1/me — right to erasure.
 
     Cascades through every table that holds user data.  The audit ledger is
@@ -2852,47 +3897,67 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
     if external_id:
         for store, count in delete_user_analytics(external_id).items():
             counts[store] = count
-        conv_ids = [
-            r["conversation_id"]
-            for r in query_all(
-                "SELECT conversation_id FROM conversations "
-                "WHERE user_id = ? AND conversation_id IS NOT NULL",
-                (external_id,),
+        try:
+            counts["conversation_responses"] = execute(
+                "DELETE FROM conversation_responses WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", external_id),
             )
+        except Exception:
+            logger.exception("delete_user_cascade: conversation_responses")
+            counts["conversation_responses"] = -1
+        conversation_rows = query_all(
+            "SELECT conversation_id, session_id FROM conversations "
+            "WHERE tenant_id = ? AND user_id = ? AND conversation_id IS NOT NULL",
+            (tenant_id or "default", external_id),
+        )
+        conv_ids = [r["conversation_id"] for r in conversation_rows]
+        state_ids = [
+            conversation_state_key(
+                r.get("conversation_id"),
+                session_id=r.get("session_id"),
+                user_id=external_id,
+                tenant_id=tenant_id,
+            )
+            for r in conversation_rows
         ]
         # Delete by user_id AND by conversation_id: the first reaches
         # tickets whose conversation has already been purged, the second
         # reaches tickets raised before user_id was stamped on the row.
         try:
+            from . import officer_chat, service_ratings
+
+            ticket_ids = [r["id"] for r in query_all("SELECT id FROM tickets WHERE user_id = ?", (external_id,))]
+            counts["ticket_messages"] = officer_chat.delete_for_tickets(ticket_ids)
+            counts["service_ratings"] = service_ratings.delete_for_user(external_id)
+        except Exception:
+            logger.exception("delete_user_cascade: officer chat threads / service ratings")
+            counts["ticket_messages"] = -1
+        try:
             deleted = execute("DELETE FROM tickets WHERE user_id = ?", (external_id,))
-            if conv_ids:
-                ph = ",".join("?" * len(conv_ids))
-                deleted += execute(
-                    f"DELETE FROM tickets WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608 — ?-placeholders
-                    tuple(conv_ids),
-                )
             counts["tickets"] = deleted
         except Exception:
             logger.exception("delete_user_cascade: tickets")
             counts["tickets"] = -1
         try:
-            if conv_ids:
-                ph = ",".join("?" * len(conv_ids))
+            delete_topic_ids = list(dict.fromkeys([*conv_ids, *state_ids]))
+            if delete_topic_ids:
+                ph = ",".join("?" * len(delete_topic_ids))
                 execute(
                     f"DELETE FROM conversation_topics WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
-                    tuple(conv_ids),
+                    tuple(delete_topic_ids),
                 )
         except Exception:
             logger.exception("delete_user_cascade: conversation_topics")
         try:
             workflow_deleted = execute(
-                "DELETE FROM workflow_sessions WHERE user_id = ?", (external_id,)
+                "DELETE FROM workflow_sessions WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", external_id),
             )
-            if conv_ids:
-                ph = ",".join("?" * len(conv_ids))
+            if state_ids:
+                ph = ",".join("?" * len(state_ids))
                 workflow_deleted += execute(
-                    f"DELETE FROM workflow_sessions WHERE conversation_id IN ({ph})",  # nosec B608 # noqa: S608
-                    tuple(conv_ids),
+                    f"DELETE FROM workflow_sessions WHERE tenant_id = ? AND conversation_id IN ({ph})",  # nosec B608 # noqa: S608
+                    (tenant_id or "default", *state_ids),
                 )
             counts["workflow_sessions"] = workflow_deleted
         except Exception:
@@ -2900,7 +3965,8 @@ def delete_user_cascade(user_id: str, external_id: str = "") -> dict[str, int]:
             counts["workflow_sessions"] = -1
         try:
             counts["conversations"] = execute(
-                "DELETE FROM conversations WHERE user_id = ?", (external_id,)
+                "DELETE FROM conversations WHERE tenant_id = ? AND user_id = ?",
+                (tenant_id or "default", external_id),
             )
         except Exception:
             logger.exception("delete_user_cascade: conversations")
@@ -3002,11 +4068,28 @@ if ANALYTICS_BACKEND == "postgres":
         upsert_reminder_inbox = _pg.upsert_reminder_inbox  # type: ignore
         list_reminder_inbox = _pg.list_reminder_inbox  # type: ignore
         enqueue_notification = _pg.enqueue_notification  # type: ignore
+        update_notification_status = _pg.update_notification_status  # type: ignore
+        get_notification_by_id = _pg.get_notification_by_id  # type: ignore
+        get_outbox_stats = _pg.get_outbox_stats  # type: ignore
         list_notification_outbox = _pg.list_notification_outbox  # type: ignore
         get_answer_override = _pg.get_answer_override  # type: ignore
         upsert_answer_override = _pg.upsert_answer_override  # type: ignore
         list_answer_overrides = _pg.list_answer_overrides  # type: ignore
         delete_answer_override = _pg.delete_answer_override  # type: ignore
+        create_or_increment_discrepancy = _pg.create_or_increment_discrepancy  # type: ignore
+        get_discrepancy = _pg.get_discrepancy  # type: ignore
+        list_discrepancies = _pg.list_discrepancies  # type: ignore
+        update_discrepancy_status = _pg.update_discrepancy_status  # type: ignore
+        get_discrepancy_stats = _pg.get_discrepancy_stats  # type: ignore
+        add_corpus_tombstone = _pg.add_corpus_tombstone  # type: ignore
+        list_corpus_tombstones = _pg.list_corpus_tombstones  # type: ignore
+        delete_corpus_tombstone = _pg.delete_corpus_tombstone  # type: ignore
+        get_active_corpus_tombstones = _pg.get_active_corpus_tombstones  # type: ignore
+        add_statutory_precedence = _pg.add_statutory_precedence  # type: ignore
+        list_statutory_precedences = _pg.list_statutory_precedences  # type: ignore
+        update_statutory_precedence = _pg.update_statutory_precedence  # type: ignore
+        delete_statutory_precedence = _pg.delete_statutory_precedence  # type: ignore
+        get_active_statutory_precedences = _pg.get_active_statutory_precedences  # type: ignore
         # Identity, consent and workflow state.  Left on SQLite these
         # are per-replica: a consent withdrawal reaches one pod while
         # every other keeps processing the taxpayer as consenting.

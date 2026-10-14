@@ -32,6 +32,7 @@ import {
 import { useVoiceStore } from "@/store/useVoiceStore";
 import { useChatStore } from "@/store/useChatStore";
 import { authHeaders } from "@/lib/authSession";
+import { getChatSessionId } from "@/lib/chatSession";
 import { audioSignifiers } from "@/lib/audioSignifiers";
 import { LOCALE_OPTIONS, localeLabel } from "@/lib/locales";
 
@@ -325,7 +326,9 @@ function VoiceFirstChatInner({ onClose, onOpenVision, locale = "en" }: VoiceFirs
           method: "POST",
           headers: authHeaders({
             "Content-Type": "application/octet-stream",
-            "X-Session-ID": activeConversationId ?? "",
+            // The chat session, not the conversation id: an id alone must
+            // never unlock a conversation's history.
+            "X-Session-ID": getChatSessionId(),
             "X-Voice-Consent": "true",
           }),
           body: audioBody,

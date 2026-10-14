@@ -22,12 +22,18 @@ Install the optional dependency when enabling this backend::
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import time
 import uuid
 from typing import Any
+
+_hashlib = hashlib
+_time = time
+_uuid = uuid
+_json = json
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +123,7 @@ def init_db() -> None:
         id               TEXT PRIMARY KEY,
         conversation_id  TEXT,
         session_id       TEXT,
+        tenant_id        TEXT NOT NULL DEFAULT 'default',
         user_message     TEXT NOT NULL,
         bot_reply        TEXT NOT NULL,
         sources          TEXT DEFAULT '[]',
@@ -127,6 +134,27 @@ def init_db() -> None:
         user_id          TEXT DEFAULT '',
         created_at       DOUBLE PRECISION NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS conversation_responses (
+        response_id     TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL,
+        user_id         TEXT NOT NULL,
+        tenant_id       TEXT NOT NULL DEFAULT 'default',
+        created_at      DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_response_owner
+        ON conversation_responses(tenant_id, user_id, conversation_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS working_memory (
+        tenant_id       TEXT NOT NULL DEFAULT 'default',
+        user_id         TEXT NOT NULL,
+        payload_json    JSONB NOT NULL DEFAULT '{}'::jsonb,
+        expires_at      DOUBLE PRECISION NOT NULL,
+        updated_at      DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (tenant_id, user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_working_memory_expiry
+        ON working_memory(expires_at);
 
     -- Escalation tickets.  These MUST live in the same store as
     -- `conversations`: a ticket references a conversation_id, and the
@@ -242,8 +270,19 @@ def init_db() -> None:
         provider   TEXT NOT NULL DEFAULT 'mock',
         payload    TEXT NOT NULL,
         status     TEXT NOT NULL DEFAULT 'queued',
-        created_at DOUBLE PRECISION NOT NULL
+        created_at DOUBLE PRECISION NOT NULL,
+        sent_at    DOUBLE PRECISION,
+        delivered_at DOUBLE PRECISION,
+        error      TEXT DEFAULT '',
+        provider_msg_id TEXT DEFAULT '',
+        retries    INTEGER DEFAULT 0
     );
+
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS sent_at DOUBLE PRECISION;
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS delivered_at DOUBLE PRECISION;
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS error TEXT DEFAULT '';
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS provider_msg_id TEXT DEFAULT '';
+    ALTER TABLE notification_outbox ADD COLUMN IF NOT EXISTS retries INTEGER DEFAULT 0;
 
     CREATE TABLE IF NOT EXISTS answer_overrides (
         id           TEXT PRIMARY KEY,
@@ -254,6 +293,50 @@ def init_db() -> None:
         enabled      BOOLEAN NOT NULL DEFAULT TRUE,
         updated_at   DOUBLE PRECISION NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS knowledge_discrepancies (
+        id                   TEXT PRIMARY KEY,
+        conversation_id      TEXT DEFAULT '',
+        session_id           TEXT DEFAULT '',
+        user_id              TEXT DEFAULT '',
+        status               TEXT NOT NULL CHECK(status IN ('pending', 'verified', 'dismissed', 'resolved')) DEFAULT 'pending',
+        priority             TEXT NOT NULL CHECK(priority IN ('low', 'normal', 'high', 'urgent')) DEFAULT 'normal',
+        discrepancy_type     TEXT NOT NULL CHECK(discrepancy_type IN ('outdated_law', 'incorrect_rate', 'hallucination', 'procedure_changed', 'citation_mismatch', 'general')) DEFAULT 'outdated_law',
+        bot_statement        TEXT NOT NULL,
+        user_correction      TEXT NOT NULL,
+        cited_sources_json   TEXT DEFAULT '[]',
+        frequency_count      INTEGER NOT NULL DEFAULT 1,
+        dedup_key            TEXT DEFAULT '',
+        admin_note           TEXT DEFAULT '',
+        verified_override_id TEXT DEFAULT '',
+        created_at           DOUBLE PRECISION NOT NULL,
+        updated_at           DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_discrepancies_status ON knowledge_discrepancies(status);
+    CREATE INDEX IF NOT EXISTS idx_discrepancies_dedup ON knowledge_discrepancies(dedup_key);
+
+    CREATE TABLE IF NOT EXISTS corpus_tombstones (
+        id            TEXT PRIMARY KEY,
+        source_uri    TEXT NOT NULL,
+        chunk_id      TEXT DEFAULT '',
+        reason        TEXT DEFAULT '',
+        superseded_by TEXT DEFAULT '',
+        created_at    DOUBLE PRECISION NOT NULL,
+        created_by    TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_tombstones_source ON corpus_tombstones(source_uri);
+    CREATE INDEX IF NOT EXISTS idx_tombstones_chunk ON corpus_tombstones(chunk_id);
+
+    CREATE TABLE IF NOT EXISTS statutory_precedences (
+        id                TEXT PRIMARY KEY,
+        topic             TEXT NOT NULL,
+        rule_statement    TEXT NOT NULL,
+        statute_reference TEXT DEFAULT '',
+        enabled           BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at        DOUBLE PRECISION NOT NULL,
+        updated_at        DOUBLE PRECISION NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_statutory_precedences_enabled ON statutory_precedences(enabled);
 
     CREATE TABLE IF NOT EXISTS conversation_topics (
         conversation_id TEXT PRIMARY KEY,
@@ -266,6 +349,7 @@ def init_db() -> None:
 
     CREATE TABLE IF NOT EXISTS workflow_sessions (
         conversation_id  TEXT PRIMARY KEY,
+        tenant_id        TEXT NOT NULL DEFAULT 'default',
         workflow_id      TEXT NOT NULL,
         status           TEXT NOT NULL DEFAULT 'active'
                          CHECK(status IN ('active','completed','cancelled')),
@@ -276,6 +360,17 @@ def init_db() -> None:
         created_at       DOUBLE PRECISION NOT NULL,
         updated_at       DOUBLE PRECISION NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS agent_checkpoints (
+        thread_id    TEXT NOT NULL,
+        step         INTEGER NOT NULL,
+        node_name    TEXT NOT NULL,
+        state_json   TEXT NOT NULL,
+        created_at   DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (thread_id, step)
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_checkpoints_thread
+        ON agent_checkpoints(thread_id, created_at DESC);
 
     CREATE INDEX IF NOT EXISTS idx_feedback_message      ON feedback(message_id);
     CREATE INDEX IF NOT EXISTS idx_feedback_created      ON feedback(created_at);
@@ -298,6 +393,7 @@ def init_db() -> None:
         with conn.cursor() as cur:
             cur.execute(ddl)
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS conversation_id TEXT")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS contexts TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
             # Sessions from before the column existed take their owner from
@@ -308,6 +404,7 @@ def init_db() -> None:
             )
             workflow_owner_missing = cur.fetchone() is None
             cur.execute("ALTER TABLE workflow_sessions ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE workflow_sessions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             if workflow_owner_missing:
                 cur.execute(
                     """UPDATE workflow_sessions AS ws SET user_id = c.user_id
@@ -319,17 +416,40 @@ def init_db() -> None:
                        WHERE ws.conversation_id = c.conversation_id AND ws.user_id = ''"""
                 )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_user ON workflow_sessions(user_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_tenant_user ON workflow_sessions(tenant_id, user_id)")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS flag_variants TEXT DEFAULT '{}'")
             cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS locale TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS user_message_en TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS bot_reply_en TEXT DEFAULT ''")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_conversations_tenant_thread ON conversations(tenant_id, conversation_id)")
             cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE feedback ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             # Which route / journey step produced a rated reply (journey analytics).
             for _col in ("retrieval_mode", "workflow_id", "step_id"):
                 cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} TEXT DEFAULT ''")
+            # Which answer of which conversation a rating is on (service-quality
+            # audit); mirrors database.init_db.
+            for _col, _ddl in (
+                ("conversation_id", "TEXT DEFAULT ''"),
+                ("turn_id", "TEXT DEFAULT ''"),
+                ("turn_index", "INTEGER"),
+                ("locale", "TEXT DEFAULT ''"),
+                ("topic_tag", "TEXT DEFAULT ''"),
+                ("sources_json", "TEXT DEFAULT '[]'"),
+                ("confidence", "DOUBLE PRECISION"),
+            ):
+                cur.execute(f"ALTER TABLE feedback ADD COLUMN IF NOT EXISTS {_col} {_ddl}")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_conversation ON feedback(conversation_id, turn_index)"
+            )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_workflow_created ON workflow_sessions(created_at)")
             cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE analytics_events ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS transcript_json TEXT DEFAULT '[]'")
             cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS user_id TEXT DEFAULT ''")
+            cur.execute("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS tenant_id TEXT NOT NULL DEFAULT 'default'")
             for _col, _ddl in (
                 ("officer_reply", "TEXT DEFAULT ''"),
                 ("reply_at", "DOUBLE PRECISION DEFAULT 0"),
@@ -354,6 +474,10 @@ def init_db() -> None:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)")
         conn.commit()
     logger.info("Postgres analytics schema ready")
+    from . import database as _database
+
+    _database.init_module_schemas()
+    _database.migrate_legacy_conversation_state_keys()
     cleanup_expired_data()
 
 
@@ -364,6 +488,7 @@ def cleanup_expired_data() -> dict[str, int]:
     now = time.time()
     ttls = [
         ("conversations", _CONVERSATION_TTL_DAYS, "created_at"),
+        ("conversation_responses", _CONVERSATION_TTL_DAYS, "created_at"),
         ("analytics_events", _ANALYTICS_TTL_DAYS, "created_at"),
         ("feedback", _FEEDBACK_TTL_DAYS, "created_at"),
         ("sessions", _SESSION_TTL_DAYS, "last_active_at"),
@@ -434,6 +559,9 @@ def cleanup_expired_data() -> dict[str, int]:
             conn.rollback()
             logger.exception("TTL cleanup failed for tickets and voice calls")
             deleted["tickets"] = 0
+    from .database import module_retention
+
+    deleted.update(module_retention())
     return deleted
 
 
@@ -451,7 +579,16 @@ def save_feedback(
     retrieval_mode: str = "",
     workflow_id: str = "",
     step_id: str = "",
+    tenant_id: str = "default",
+    conversation_id: str = "",
+    turn_id: str = "",
+    turn_index: int | None = None,
+    locale: str = "",
+    topic_tag: str = "",
+    sources_json: str = "[]",
+    confidence: float | None = None,
 ) -> dict[str, Any]:
+    """Mirrors :func:`database.save_feedback`."""
     pool = _get_pool()
     if pool is None:
         raise RuntimeError("postgres unavailable")
@@ -466,11 +603,14 @@ def save_feedback(
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO feedback (id, message_id, session_id, user_id, rating,
-                    comment, user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    comment, user_query, bot_reply, created_at, retrieval_mode, workflow_id, step_id,
+                    tenant_id, conversation_id, turn_id, turn_index, locale, topic_tag, sources_json, confidence)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     fb_id, message_id, session_id, user_id or "", rating, comment, user_query, bot_reply, now,
                     retrieval_mode or "", workflow_id or "", step_id or "",
+                    tenant_id or "default", conversation_id or "", turn_id or "", turn_index,
+                    locale or "", topic_tag or "", sources_json or "[]", confidence,
                 ),
             )
         conn.commit()
@@ -701,6 +841,10 @@ def log_conversation(
     user_id: str = "",
     flag_variants: str = "{}",
     locale: str = "",
+    tenant_id: str = "default",
+    user_message_en: str = "",
+    bot_reply_en: str = "",
+    row_id: str | None = None,
 ) -> str:
     """Mirrors :func:`database.log_conversation` exactly.
 
@@ -718,19 +862,24 @@ def log_conversation(
 
     user_message = redact_pii_text(user_message)
     bot_reply = redact_pii_text(bot_reply)
-    row_id = str(uuid.uuid4())
+    user_message_en = redact_pii_text(user_message_en or "")
+    bot_reply_en = redact_pii_text(bot_reply_en or "")
+    # The transport mints the turn id before generating, so it can hand it to
+    # the client with the answer and a rating can name the row it rates.
+    row_id = row_id or str(uuid.uuid4())
     thread_id = conversation_id or row_id
     with pool.connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO conversations (id, conversation_id, session_id, user_message, bot_reply,
+                """INSERT INTO conversations (id, conversation_id, session_id, tenant_id, user_message, bot_reply,
                        sources, contexts, response_time_ms, confidence, topic_tag,
-                       user_id, flag_variants, locale, created_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                       user_id, flag_variants, locale, created_at, user_message_en, bot_reply_en)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     row_id,
                     thread_id,
                     session_id,
+                    tenant_id or "default",
                     user_message,
                     bot_reply,
                     sources,
@@ -742,6 +891,8 @@ def log_conversation(
                     flag_variants or "{}",
                     locale or "",
                     time.time(),
+                    user_message_en,
+                    bot_reply_en,
                 ),
             )
         conn.commit()
@@ -753,38 +904,48 @@ def get_recent_turns(
     conversation_id: str | None = None,
     limit: int = 5,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, str]]:
     pool = _get_pool()
     if pool is None:
         return []
-    if conversation_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE conversation_id = %s AND user_id = %s
+    tenant_id = tenant_id or "default"
+    if user_id and conversation_id:
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                   WHERE tenant_id = %s AND conversation_id = %s AND user_id = %s
+                   ORDER BY created_at DESC LIMIT %s"""
+        args: tuple[Any, ...] = (tenant_id, conversation_id, user_id, limit)
+    elif user_id and session_id:
+        sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                   WHERE tenant_id = %s AND session_id = %s AND user_id = %s
+                   ORDER BY created_at DESC LIMIT %s"""
+        args = (tenant_id, session_id, user_id, limit)
+    elif not user_id and session_id:
+        if conversation_id:
+            sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                       WHERE tenant_id = %s AND session_id = %s AND conversation_id = %s
                        ORDER BY created_at DESC LIMIT %s"""
-            args: tuple[Any, ...] = (conversation_id, user_id, limit)
+            args = (tenant_id, session_id, conversation_id, limit)
         else:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE conversation_id = %s
+            sql = """SELECT user_message, bot_reply, locale, user_message_en, bot_reply_en FROM conversations
+                       WHERE tenant_id = %s AND session_id = %s
                        ORDER BY created_at DESC LIMIT %s"""
-            args = (conversation_id, limit)
-    elif session_id:
-        if user_id:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE session_id = %s AND user_id = %s
-                       ORDER BY created_at DESC LIMIT %s"""
-            args = (session_id, user_id, limit)
-        else:
-            sql = """SELECT user_message, bot_reply FROM conversations
-                       WHERE session_id = %s
-                       ORDER BY created_at DESC LIMIT %s"""
-            args = (session_id, limit)
+            args = (tenant_id, session_id, limit)
     else:
         return []
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(sql, args)
         rows = cur.fetchall()
-    return [{"user_message": r[0], "bot_reply": r[1]} for r in reversed(rows)]
+    return [
+        {
+            "user_message": r[0],
+            "bot_reply": r[1],
+            "locale": r[2] or "",
+            "user_message_en": r[3] or "",
+            "bot_reply_en": r[4] or "",
+        }
+        for r in reversed(rows)
+    ]
 
 
 def get_conversation_context(
@@ -793,6 +954,7 @@ def get_conversation_context(
     recent_limit: int = 6,
     max_history: int = 25,
     user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Retrieve multi-turn conversation history and build rolling context & summary."""
     from .context_manager import RollingContextManager, context_manager
@@ -802,6 +964,7 @@ def get_conversation_context(
         conversation_id=conversation_id,
         limit=max_history,
         user_id=user_id,
+        tenant_id=tenant_id,
     )
     mgr = RollingContextManager(recent_limit=recent_limit) if recent_limit != context_manager.recent_limit else context_manager
     ctx = mgr.build_context(
@@ -815,6 +978,43 @@ def get_conversation_context(
         "total_turns": ctx.total_turns,
         "all_turns": ctx.all_turns,
     }
+
+
+def upsert_working_memory(
+    user_id: str,
+    tenant_id: str,
+    fields: dict[str, Any],
+    *,
+    ttl_seconds: int = 1800,
+) -> bool:
+    """Atomically merge a tenant-scoped short-term state update."""
+    pool = _get_pool()
+    if pool is None or not user_id or not fields:
+        return False
+    now = time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO working_memory
+               (tenant_id, user_id, payload_json, expires_at, updated_at)
+               VALUES (%s, %s, %s::jsonb, %s, %s)
+               ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+                 payload_json = CASE
+                   WHEN working_memory.expires_at <= EXCLUDED.updated_at
+                     THEN EXCLUDED.payload_json
+                   ELSE working_memory.payload_json || EXCLUDED.payload_json
+                 END,
+                 expires_at = EXCLUDED.expires_at,
+                 updated_at = EXCLUDED.updated_at""",
+            (
+                tenant_id or "default",
+                user_id,
+                json.dumps(fields, ensure_ascii=True),
+                now + max(1, ttl_seconds),
+                now,
+            ),
+        )
+        conn.commit()
+    return True
 
 
 def get_conversation_topic(conversation_id: str) -> dict[str, Any] | None:
@@ -985,7 +1185,7 @@ _TICKET_COLUMNS = (
     "user_query, bot_reply, handoff_json, response_judge_json, "
     "assignee, staff_note, created_at, updated_at, user_id, team, "
     "officer_reply, reply_at, reply_delivered_at, first_response_at, resolved_at, "
-    "locale, modality, user_query_en, officer_reply_localized"
+    "locale, modality, user_query_en, officer_reply_localized, tenant_id"
 )
 #: Detail view — the transcript is the point of the ticket.
 _TICKET_COLUMNS_FULL = _TICKET_COLUMNS + ", transcript_json"
@@ -1032,6 +1232,7 @@ def create_ticket(
     modality: str = "text",
     user_query_en: str = "",
     officer_reply_localized: str = "",
+    tenant_id: str = "default",
 ) -> dict[str, Any]:
     if priority not in ("low", "normal", "high", "urgent"):
         logger.warning("create_ticket: invalid priority %r -> 'normal'", priority)
@@ -1059,8 +1260,8 @@ def create_ticket(
                                         handoff_json, response_judge_json, transcript_json,
                                         user_id, team, assignee, staff_note,
                                         locale, modality, user_query_en, officer_reply_localized,
-                                        created_at, updated_at)
-                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s,%s,%s,%s,%s)""",
+                                        created_at, updated_at, tenant_id)
+                   VALUES (%s,%s,%s,'open',%s,%s,%s,%s,%s,%s,%s,%s,%s,'','',%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     ticket_id,
                     conversation_id,
@@ -1080,6 +1281,7 @@ def create_ticket(
                     officer_reply_localized or "",
                     now,
                     now,
+                    tenant_id or "default",
                 ),
             )
         conn.commit()
@@ -1098,6 +1300,7 @@ def create_ticket(
         "user_query_en": user_query_en or "",
         "officer_reply_localized": officer_reply_localized or "",
         "created_at": now,
+        "tenant_id": tenant_id or "default",
     }
 
 
@@ -1111,6 +1314,7 @@ def list_tickets(
     modality: str | None = None,
     q: str | None = None,
     user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     pool = _get_pool()
     if pool is None:
@@ -1119,14 +1323,17 @@ def list_tickets(
     offset = max(0, int(offset))
     sql = f"SELECT {_TICKET_COLUMNS} FROM tickets"  # nosec B608 # noqa: S608
     params: list[Any] = []
+    if tenant_id:
+        sql += " WHERE tenant_id = %s"
+        params.append(tenant_id)
     if status:
-        sql += " WHERE status = %s"
+        sql += " AND status = %s" if (" WHERE " in sql) else " WHERE status = %s"
         params.append(status)
     if priority:
-        sql += " AND priority = %s" if (status or params) else " WHERE priority = %s"
+        sql += " AND priority = %s" if (" WHERE " in sql) else " WHERE priority = %s"
         params.append(priority)
     if team:
-        sql += " AND team = %s" if (status or params) else " WHERE team = %s"
+        sql += " AND team = %s" if (" WHERE " in sql) else " WHERE team = %s"
         params.append(team)
     if locale:
         sql += " AND locale = %s" if (status or params) else " WHERE locale = %s"
@@ -1322,24 +1529,40 @@ def get_conversation_transcript(
     conversation_id: str | None = None,
     session_id: str | None = None,
     limit: int = 200,
+    user_id: str | None = None,
+    tenant_id: str = "default",
 ) -> list[dict[str, Any]]:
     """Postgres mirror of :func:`database.get_conversation_transcript`."""
     pool = _get_pool()
     if pool is None:
         return []
-    if conversation_id:
-        where, key = "conversation_id = %s", conversation_id
-    elif session_id:
-        where, key = "session_id = %s", session_id
-    else:
+    if not conversation_id and not session_id:
         return []
     limit = max(1, min(int(limit), 1000))
+    clauses = ["tenant_id = %s"]
+    args: list[Any] = [tenant_id or "default"]
+    if user_id:
+        clauses.append("user_id = %s")
+        args.append(user_id)
+    elif session_id:
+        clauses.extend(("session_id = %s", "COALESCE(user_id, '') = ''"))
+        args.append(session_id)
+    else:
+        return []
+    if conversation_id:
+        clauses.append("conversation_id = %s")
+        args.append(conversation_id)
+    elif session_id and user_id:
+        clauses.append("session_id = %s")
+        args.append(session_id)
+    args.append(limit)
     sql = (
         "SELECT user_message, bot_reply, created_at, sources, topic_tag "
-        f"FROM conversations WHERE {where} ORDER BY created_at DESC LIMIT %s"  # nosec B608 # noqa: S608
+        f"FROM conversations WHERE {' AND '.join(clauses)} "
+        "ORDER BY created_at DESC LIMIT %s"  # nosec B608 # noqa: S608
     )
     with pool.connection() as conn, conn.cursor() as cur:
-        cur.execute(sql, (key, limit))
+        cur.execute(sql, tuple(args))
         rows = cur.fetchall()
     return [
         {
@@ -1578,6 +1801,9 @@ def enqueue_notification(
     payload: dict[str, Any],
     *,
     provider: str = "mock",
+    status: str = "queued",
+    provider_msg_id: str = "",
+    error: str = "",
 ) -> dict[str, Any]:
     import json as _json
     import uuid as _uuid
@@ -1589,46 +1815,154 @@ def enqueue_notification(
         return {}
     nid = str(_uuid.uuid4())
     now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """INSERT INTO notification_outbox
-               (id, user_id, channel, provider, payload, status, created_at)
-               VALUES (%s, %s, %s, %s, %s, 'queued', %s)""",
-            (nid, uid, ch, provider, _json.dumps(payload or {}), now),
+               (id, user_id, channel, provider, payload, status, created_at, sent_at, delivered_at, error, provider_msg_id, retries)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0)""",
+            (nid, uid, ch, provider, _json.dumps(payload or {}), status, now, sent_at, delivered_at, error, provider_msg_id),
         )
         conn.commit()
+    is_live = provider != "mock"
     return {
         "id": nid,
         "user_id": uid,
         "channel": ch,
         "provider": provider,
-        "status": "queued",
-        "live": False,
+        "status": status,
+        "live": is_live,
+        "sent_at": sent_at,
+        "delivered_at": delivered_at,
+        "error": error,
+        "provider_msg_id": provider_msg_id,
+        "retries": 0,
+        "created_at": now,
     }
 
 
-def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
+def update_notification_status(
+    nid: str,
+    status: str,
+    *,
+    provider: str = "",
+    provider_msg_id: str = "",
+    error: str = "",
+) -> bool:
+    pool = _get_pool()
+    if pool is None:
+        return False
+    now = time.time()
+    sent_at = now if status in ("sent", "delivered") else None
+    delivered_at = now if status == "delivered" else None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """UPDATE notification_outbox
+               SET status = %s,
+                   provider = CASE WHEN %s != '' THEN %s ELSE provider END,
+                   provider_msg_id = CASE WHEN %s != '' THEN %s ELSE provider_msg_id END,
+                   error = %s,
+                   sent_at = COALESCE(sent_at, %s),
+                   delivered_at = COALESCE(delivered_at, %s),
+                   retries = retries + 1
+               WHERE id = %s""",
+            (status, provider, provider, provider_msg_id, provider_msg_id, error, sent_at, delivered_at, nid),
+        )
+        conn.commit()
+    return True
+
+
+def get_notification_by_id(nid: str) -> dict[str, Any] | None:
+    import json as _json
+
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, user_id, channel, provider, payload, status, created_at,
+                      sent_at, delivered_at, error, provider_msg_id, retries
+               FROM notification_outbox WHERE id = %s""",
+            (nid,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    raw = row[4]
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except _json.JSONDecodeError:
+            pass
+    return {
+        "id": row[0],
+        "user_id": row[1],
+        "channel": row[2],
+        "provider": row[3],
+        "payload": raw,
+        "status": row[5],
+        "created_at": row[6],
+        "sent_at": row[7],
+        "delivered_at": row[8],
+        "error": row[9] or "",
+        "provider_msg_id": row[10] or "",
+        "retries": row[11] or 0,
+        "live": row[3] != "mock",
+    }
+
+
+def get_outbox_stats() -> dict[str, int]:
+    pool = _get_pool()
+    if pool is None:
+        return {"queued": 0, "sent": 0, "delivered": 0, "failed": 0, "total": 0}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT status, COUNT(*) as cnt FROM notification_outbox GROUP BY status"""
+        )
+        rows = cur.fetchall()
+    stats = {"queued": 0, "sent": 0, "delivered": 0, "failed": 0, "total": 0}
+    for r in rows:
+        st = str(r[0]).lower()
+        c = int(r[1])
+        stats[st] = c
+        stats["total"] += c
+    return stats
+
+
+def list_notification_outbox(
+    user_id: str = "",
+    limit: int = 50,
+    status: str = "",
+) -> list[dict[str, Any]]:
     import json as _json
 
     pool = _get_pool()
     if pool is None:
         return []
     cap = max(1, min(limit, 200))
+    query = """SELECT id, user_id, channel, provider, payload, status, created_at,
+                      sent_at, delivered_at, error, provider_msg_id, retries
+               FROM notification_outbox"""
+    params: list[Any] = []
+    clauses: list[str] = []
+
+    if user_id:
+        clauses.append("user_id = %s")
+        params.append(user_id)
+    if status:
+        clauses.append("status = %s")
+        params.append(status.lower().strip())
+
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at DESC LIMIT %s"
+    params.append(cap)
+
     with pool.connection() as conn, conn.cursor() as cur:
-        if user_id:
-            cur.execute(
-                """SELECT id, user_id, channel, provider, payload, status, created_at
-                   FROM notification_outbox WHERE user_id = %s
-                   ORDER BY created_at DESC LIMIT %s""",
-                (user_id, cap),
-            )
-        else:
-            cur.execute(
-                """SELECT id, user_id, channel, provider, payload, status, created_at
-                   FROM notification_outbox ORDER BY created_at DESC LIMIT %s""",
-                (cap,),
-            )
+        cur.execute(query, tuple(params))
         rows = cur.fetchall()
+
     out = []
     for r in rows:
         raw = r[4]
@@ -1646,6 +1980,12 @@ def list_notification_outbox(user_id: str = "", limit: int = 50) -> list[dict[st
                 "payload": raw,
                 "status": r[5],
                 "created_at": r[6],
+                "sent_at": r[7] if len(r) > 7 else None,
+                "delivered_at": r[8] if len(r) > 8 else None,
+                "error": r[9] if len(r) > 9 else "",
+                "provider_msg_id": r[10] if len(r) > 10 else "",
+                "retries": r[11] if len(r) > 11 else 0,
+                "live": r[3] != "mock",
             }
         )
     return out
@@ -1760,6 +2100,460 @@ def delete_answer_override(override_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Knowledge Discrepancies & Reporting
+# ---------------------------------------------------------------------------
+def _compute_discrepancy_dedup_key(bot_statement: str, user_correction: str) -> str:
+    from .cms import normalize_query
+    b = normalize_query(bot_statement)[:80]
+    u = normalize_query(user_correction)[:80]
+    return _hashlib.sha256(f"{b}|{u}".encode("utf-8")).hexdigest()[:16]
+
+
+def create_or_increment_discrepancy(
+    bot_statement: str,
+    user_correction: str,
+    *,
+    conversation_id: str = "",
+    session_id: str = "",
+    user_id: str = "",
+    discrepancy_type: str = "outdated_law",
+    cited_sources: list[str] | None = None,
+    priority: str = "normal",
+) -> dict[str, Any]:
+    from .guardrails import redact_pii_text
+
+    bot_statement = redact_pii_text(str(bot_statement or "").strip())
+    user_correction = redact_pii_text(str(user_correction or "").strip())
+    if not bot_statement or not user_correction:
+        raise ValueError("bot_statement and user_correction are required")
+
+    dedup_key = _compute_discrepancy_dedup_key(bot_statement, user_correction)
+    pool = _get_pool()
+    if pool is None:
+        return {"id": "", "status": "failed", "dedup_key": dedup_key}
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, frequency_count, priority FROM knowledge_discrepancies
+               WHERE dedup_key = %s AND status = 'pending'
+               ORDER BY created_at DESC LIMIT 1""",
+            (dedup_key,),
+        )
+        existing = cur.fetchone()
+        if existing:
+            rep_id = str(existing[0])
+            freq = int(existing[1]) + 1
+            new_priority = "high" if freq >= 3 else existing[2]
+            cur.execute(
+                """UPDATE knowledge_discrepancies
+                   SET frequency_count = %s, priority = %s, updated_at = %s
+                   WHERE id = %s""",
+                (freq, new_priority, now, rep_id),
+            )
+            conn.commit()
+            return {
+                "id": rep_id,
+                "status": "pending",
+                "frequency_count": freq,
+                "priority": new_priority,
+                "dedup_key": dedup_key,
+                "reused_existing": True,
+            }
+
+        rep_id = f"kb_{_uuid.uuid4().hex[:12]}"
+        sources_json = _json.dumps(cited_sources or [], ensure_ascii=False)
+        cur.execute(
+            """INSERT INTO knowledge_discrepancies (
+                id, conversation_id, session_id, user_id, status, priority,
+                discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                frequency_count, dedup_key, admin_note, verified_override_id,
+                created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, 1, %s, '', '', %s, %s)""",
+            (
+                rep_id,
+                conversation_id or "",
+                session_id or "",
+                user_id or "",
+                priority,
+                discrepancy_type,
+                bot_statement,
+                user_correction,
+                sources_json,
+                dedup_key,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+        return {
+            "id": rep_id,
+            "status": "pending",
+            "frequency_count": 1,
+            "priority": priority,
+            "dedup_key": dedup_key,
+            "reused_existing": False,
+        }
+
+
+def get_discrepancy(report_id: str) -> dict[str, Any] | None:
+    rid = (report_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not rid:
+        return None
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, conversation_id, session_id, user_id, status, priority,
+                      discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                      frequency_count, dedup_key, admin_note, verified_override_id,
+                      created_at, updated_at
+               FROM knowledge_discrepancies WHERE id = %s""",
+            (rid,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            sources = _json.loads(row[9])
+        except Exception:
+            sources = []
+        return {
+            "id": row[0],
+            "conversation_id": row[1],
+            "session_id": row[2],
+            "user_id": row[3],
+            "status": row[4],
+            "priority": row[5],
+            "discrepancy_type": row[6],
+            "bot_statement": row[7],
+            "user_correction": row[8],
+            "cited_sources": sources,
+            "frequency_count": row[10],
+            "dedup_key": row[11],
+            "admin_note": row[12],
+            "verified_override_id": row[13],
+            "created_at": row[14],
+            "updated_at": row[15],
+        }
+
+
+def list_discrepancies(
+    status: str | None = None,
+    priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        query = """SELECT id, conversation_id, session_id, user_id, status, priority,
+                          discrepancy_type, bot_statement, user_correction, cited_sources_json,
+                          frequency_count, dedup_key, admin_note, verified_override_id,
+                          created_at, updated_at
+                   FROM knowledge_discrepancies"""
+        clauses = []
+        params: list[Any] = []
+        if status:
+            clauses.append("status = %s")
+            params.append(status)
+        if priority:
+            clauses.append("priority = %s")
+            params.append(priority)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY frequency_count DESC, updated_at DESC LIMIT %s OFFSET %s"
+        params.extend([max(1, min(limit, 200)), max(0, offset)])
+        cur.execute(query, tuple(params))
+        out = []
+        for row in cur.fetchall():
+            try:
+                sources = _json.loads(row[9])
+            except Exception:
+                sources = []
+            out.append(
+                {
+                    "id": row[0],
+                    "conversation_id": row[1],
+                    "session_id": row[2],
+                    "user_id": row[3],
+                    "status": row[4],
+                    "priority": row[5],
+                    "discrepancy_type": row[6],
+                    "bot_statement": row[7],
+                    "user_correction": row[8],
+                    "cited_sources": sources,
+                    "frequency_count": row[10],
+                    "dedup_key": row[11],
+                    "admin_note": row[12],
+                    "verified_override_id": row[13],
+                    "created_at": row[14],
+                    "updated_at": row[15],
+                }
+            )
+        return out
+
+
+def update_discrepancy_status(
+    report_id: str,
+    status: str,
+    *,
+    admin_note: str = "",
+    verified_override_id: str = "",
+) -> bool:
+    rid = (report_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not rid or status not in ("pending", "verified", "dismissed", "resolved"):
+        return False
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """UPDATE knowledge_discrepancies
+               SET status = %s, admin_note = COALESCE(NULLIF(%s, ''), admin_note),
+                   verified_override_id = COALESCE(NULLIF(%s, ''), verified_override_id),
+                   updated_at = %s
+               WHERE id = %s""",
+            (status, admin_note, verified_override_id, now, rid),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_discrepancy_stats() -> dict[str, Any]:
+    pool = _get_pool()
+    if pool is None:
+        return {"total": 0, "pending": 0, "verified": 0, "dismissed": 0}
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'pending'")
+        pending = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'verified'")
+        verified = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM knowledge_discrepancies WHERE status = 'dismissed'")
+        dismissed = cur.fetchone()[0]
+        return {
+            "total": total,
+            "pending": pending,
+            "verified": verified,
+            "dismissed": dismissed,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Corpus Tombstones (Solution B)
+# ---------------------------------------------------------------------------
+def add_corpus_tombstone(
+    source_uri: str,
+    chunk_id: str = "",
+    *,
+    reason: str = "",
+    superseded_by: str = "",
+    created_by: str = "",
+) -> dict[str, Any]:
+    uri = str(source_uri or "").strip()
+    if not uri and not chunk_id:
+        raise ValueError("source_uri or chunk_id is required")
+    pool = _get_pool()
+    if pool is None:
+        return {}
+    tid = f"tomb_{_uuid.uuid4().hex[:12]}"
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO corpus_tombstones (id, source_uri, chunk_id, reason, superseded_by, created_at, created_by)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (tid, uri, str(chunk_id or "").strip(), reason, superseded_by, now, created_by),
+        )
+        conn.commit()
+    return {
+        "id": tid,
+        "source_uri": uri,
+        "chunk_id": chunk_id,
+        "reason": reason,
+        "superseded_by": superseded_by,
+        "created_at": now,
+        "created_by": created_by,
+    }
+
+
+def list_corpus_tombstones(limit: int = 200) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, source_uri, chunk_id, reason, superseded_by, created_at, created_by
+               FROM corpus_tombstones ORDER BY created_at DESC LIMIT %s""",
+            (max(1, min(limit, 500)),),
+        )
+        return [
+            {
+                "id": r[0],
+                "source_uri": r[1],
+                "chunk_id": r[2],
+                "reason": r[3],
+                "superseded_by": r[4],
+                "created_at": r[5],
+                "created_by": r[6],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+def delete_corpus_tombstone(tombstone_id: str) -> bool:
+    tid = (tombstone_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not tid:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM corpus_tombstones WHERE id = %s", (tid,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_active_corpus_tombstones() -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, source_uri, chunk_id, reason, superseded_by FROM corpus_tombstones")
+        return [
+            {
+                "id": r[0],
+                "source_uri": r[1],
+                "chunk_id": r[2],
+                "reason": r[3],
+                "superseded_by": r[4],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Statutory Precedences (Solution C)
+# ---------------------------------------------------------------------------
+def add_statutory_precedence(
+    topic: str,
+    rule_statement: str,
+    *,
+    statute_reference: str = "",
+    enabled: bool = True,
+) -> dict[str, Any]:
+    topic = str(topic or "").strip()
+    rule = str(rule_statement or "").strip()
+    if not topic or not rule:
+        raise ValueError("topic and rule_statement are required")
+    pool = _get_pool()
+    if pool is None:
+        return {}
+    pid = f"prec_{_uuid.uuid4().hex[:12]}"
+    now = _time.time()
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO statutory_precedences (id, topic, rule_statement, statute_reference, enabled, created_at, updated_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (pid, topic, rule, statute_reference, enabled, now, now),
+        )
+        conn.commit()
+    return {
+        "id": pid,
+        "topic": topic,
+        "rule_statement": rule,
+        "statute_reference": statute_reference,
+        "enabled": enabled,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def list_statutory_precedences(enabled_only: bool = False) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        query = """SELECT id, topic, rule_statement, statute_reference, enabled, created_at, updated_at
+                   FROM statutory_precedences"""
+        if enabled_only:
+            query += " WHERE enabled IS TRUE"
+        query += " ORDER BY updated_at DESC"
+        cur.execute(query)
+        return [
+            {
+                "id": r[0],
+                "topic": r[1],
+                "rule_statement": r[2],
+                "statute_reference": r[3],
+                "enabled": bool(r[4]),
+                "created_at": r[5],
+                "updated_at": r[6],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+def update_statutory_precedence(
+    precedence_id: str,
+    *,
+    enabled: bool | None = None,
+    rule_statement: str | None = None,
+    statute_reference: str | None = None,
+) -> bool:
+    pid = (precedence_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not pid:
+        return False
+    now = _time.time()
+    clauses = ["updated_at = %s"]
+    params: list[Any] = [now]
+    if enabled is not None:
+        clauses.append("enabled = %s")
+        params.append(enabled)
+    if rule_statement is not None:
+        clauses.append("rule_statement = %s")
+        params.append(rule_statement.strip())
+    if statute_reference is not None:
+        clauses.append("statute_reference = %s")
+        params.append(statute_reference.strip())
+    params.append(pid)
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(f"UPDATE statutory_precedences SET {', '.join(clauses)} WHERE id = %s", tuple(params))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_statutory_precedence(precedence_id: str) -> bool:
+    pid = (precedence_id or "").strip()
+    pool = _get_pool()
+    if pool is None or not pid:
+        return False
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM statutory_precedences WHERE id = %s", (pid,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def get_active_statutory_precedences() -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, topic, rule_statement, statute_reference
+               FROM statutory_precedences WHERE enabled IS TRUE
+               ORDER BY updated_at DESC"""
+        )
+        return [
+            {
+                "id": r[0],
+                "topic": r[1],
+                "rule_statement": r[2],
+                "statute_reference": r[3],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+# ---------------------------------------------------------------------------
 # Identity, profiles and consent
 #
 # Absent from this module entirely until now, so the dispatch block left
@@ -1778,7 +2572,7 @@ _CONSENT_COLUMNS = (
     "receipt_id, user_id, purpose, version, granted_at, withdrawn_at, legal_basis"
 )
 _WORKFLOW_COLUMNS = (
-    "conversation_id, workflow_id, status, current_step_idx, user_id, slots_json, "
+    "conversation_id, tenant_id, workflow_id, status, current_step_idx, user_id, slots_json, "
     "last_prompt, created_at, updated_at"
 )
 
@@ -1845,7 +2639,7 @@ def get_user(user_id: str) -> dict[str, Any] | None:
         return _as_dict(_USER_COLUMNS, cur.fetchone())
 
 
-def get_user_profile(user_id: str) -> dict[str, Any] | None:
+def get_user_profile(user_id: str, tenant_id: str = "default") -> dict[str, Any] | None:
     pool = _get_pool()
     if pool is None:
         return None
@@ -1855,6 +2649,18 @@ def get_user_profile(user_id: str) -> dict[str, Any] | None:
             (user_id,),
         )
         profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
+        if profile is None:
+            cur.execute(
+                "SELECT id FROM users WHERE tenant_id = %s AND external_id = %s",
+                (tenant_id or "default", user_id),
+            )
+            owner = cur.fetchone()
+            if owner:
+                cur.execute(
+                    f"SELECT {_PROFILE_COLUMNS} FROM user_profiles WHERE user_id = %s",  # nosec B608 # noqa: S608
+                    (owner[0],),
+                )
+                profile = _as_dict(_PROFILE_COLUMNS, cur.fetchone())
     if profile is None:
         return None
     profile["registered_tax_types"] = _loads(profile.get("registered_tax_types"), [])
@@ -2036,14 +2842,16 @@ def has_active_consent(user_id: str, purpose: str, tenant_id: str = "default") -
 # conversation.  On a per-replica store a taxpayer half-way through a
 # registration hits a different pod and the flow restarts from nothing.
 # ---------------------------------------------------------------------------
-def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
+def get_workflow_session(
+    conversation_id: str, tenant_id: str = "default"
+) -> dict[str, Any] | None:
     pool = _get_pool()
     if pool is None or not conversation_id:
         return None
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
-            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s",  # nosec B608 # noqa: S608
-            (conversation_id,),
+            f"SELECT {_WORKFLOW_COLUMNS} FROM workflow_sessions WHERE conversation_id = %s AND tenant_id = %s",  # nosec B608 # noqa: S608
+            (conversation_id, tenant_id or "default"),
         )
         row = _as_dict(_WORKFLOW_COLUMNS, cur.fetchone())
     if row is None:
@@ -2051,6 +2859,7 @@ def get_workflow_session(conversation_id: str) -> dict[str, Any] | None:
     slots = _loads(row.pop("slots_json", "{}"), {})
     return {
         "conversation_id": row["conversation_id"],
+        "tenant_id": row["tenant_id"] or "default",
         "workflow_id": row["workflow_id"],
         "status": row["status"],
         "current_step_idx": int(row["current_step_idx"] or 0),
@@ -2071,6 +2880,7 @@ def upsert_workflow_session(
     status: str = "active",
     last_prompt: str = "",
     user_id: str = "",
+    tenant_id: str = "default",
 ) -> None:
     pool = _get_pool()
     if pool is None or not conversation_id or not workflow_id:
@@ -2082,7 +2892,7 @@ def upsert_workflow_session(
         with conn.cursor() as cur:
             cur.execute(
                 f"""INSERT INTO workflow_sessions ({_WORKFLOW_COLUMNS})
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (conversation_id) DO UPDATE SET
                       workflow_id = EXCLUDED.workflow_id,
                       status = EXCLUDED.status,
@@ -2090,9 +2900,11 @@ def upsert_workflow_session(
                       user_id = CASE WHEN EXCLUDED.user_id != '' THEN EXCLUDED.user_id ELSE workflow_sessions.user_id END,
                       slots_json = EXCLUDED.slots_json,
                       last_prompt = EXCLUDED.last_prompt,
-                      updated_at = EXCLUDED.updated_at""",  # nosec B608 # noqa: S608
+                      updated_at = EXCLUDED.updated_at
+                    WHERE workflow_sessions.tenant_id = EXCLUDED.tenant_id""",  # nosec B608 # noqa: S608
                 (
                     conversation_id,
+                    tenant_id or "default",
                     workflow_id,
                     status,
                     max(0, int(current_step_idx)),
@@ -2106,7 +2918,12 @@ def upsert_workflow_session(
         conn.commit()
 
 
-def complete_workflow_session(conversation_id: str, *, status: str = "completed") -> bool:
+def complete_workflow_session(
+    conversation_id: str,
+    *,
+    status: str = "completed",
+    tenant_id: str = "default",
+) -> bool:
     pool = _get_pool()
     if pool is None or not conversation_id:
         return False
@@ -2116,9 +2933,80 @@ def complete_workflow_session(conversation_id: str, *, status: str = "completed"
         with conn.cursor() as cur:
             cur.execute(
                 "UPDATE workflow_sessions SET status = %s, updated_at = %s "
-                "WHERE conversation_id = %s",
-                (status, time.time(), conversation_id),
+                "WHERE conversation_id = %s AND tenant_id = %s",
+                (status, time.time(), conversation_id, tenant_id or "default"),
             )
             touched = cur.rowcount > 0
         conn.commit()
     return touched
+
+
+# ---------------------------------------------------------------------------
+# Agent Graph Checkpoint Persistence (LangGraph 2026 Durable Execution)
+# ---------------------------------------------------------------------------
+def save_agent_checkpoint(
+    thread_id: str,
+    step: int,
+    node_name: str,
+    state_data: dict[str, Any],
+) -> None:
+    if not thread_id:
+        return
+    now = time.time()
+    state_json = json.dumps(state_data, default=str)
+    pool = _get_pool()
+    if pool is None:
+        return
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO agent_checkpoints
+                   (thread_id, step, node_name, state_json, created_at)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (thread_id, step) DO UPDATE
+                   SET node_name = EXCLUDED.node_name,
+                       state_json = EXCLUDED.state_json,
+                       created_at = EXCLUDED.created_at""",
+                (thread_id, step, node_name, state_json, now),
+            )
+        conn.commit()
+
+
+def get_agent_checkpoint(thread_id: str) -> dict[str, Any] | None:
+    if not thread_id:
+        return None
+    pool = _get_pool()
+    if pool is None:
+        return None
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT state_json FROM agent_checkpoints
+                   WHERE thread_id = %s
+                   ORDER BY step DESC LIMIT 1""",
+                (thread_id,),
+            )
+            row = cur.fetchone()
+            if not row or not row[0]:
+                return None
+            try:
+                return json.loads(row[0])
+            except (json.JSONDecodeError, TypeError):
+                return None
+
+
+def list_agent_checkpoints(thread_id: str) -> list[dict[str, Any]]:
+    if not thread_id:
+        return []
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT step, node_name, created_at FROM agent_checkpoints
+                   WHERE thread_id = %s ORDER BY step ASC""",
+                (thread_id,),
+            )
+            rows = cur.fetchall()
+            return [{"step": r[0], "node_name": r[1], "created_at": r[2]} for r in rows]

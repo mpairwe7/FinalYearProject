@@ -133,7 +133,7 @@ class TestEpisodicMemory:
         )
         sid = mem.write(summary)
         assert sid
-        rows = mem.list_for_user("alice")
+        rows = mem.list_for_user("alice", tenant_id="t1")
         assert len(rows) == 1
         assert rows[0]["topic_tag"] == "vat"
 
@@ -147,7 +147,7 @@ class TestEpisodicMemory:
             summary_id="", user_id="alice", tenant_id="t1",
             conversation_id="c2", summary="paye q", topic_tag="paye",
         ))
-        vats = mem.list_for_user("alice", topic_tag="vat")
+        vats = mem.list_for_user("alice", tenant_id="t1", topic_tag="vat")
         assert len(vats) == 1
         assert vats[0]["topic_tag"] == "vat"
 
@@ -157,9 +157,9 @@ class TestEpisodicMemory:
             summary_id="", user_id="alice", tenant_id="t1",
             conversation_id="c1", summary="x",
         ))
-        count = mem.delete_for_user("alice")
+        count = mem.delete_for_user("alice", tenant_id="t1")
         assert count == 1
-        assert mem.list_for_user("alice") == []
+        assert mem.list_for_user("alice", tenant_id="t1") == []
 
     def test_user_isolation(self, tmp_db):
         mem = EpisodicMemory()
@@ -171,8 +171,8 @@ class TestEpisodicMemory:
             summary_id="", user_id="bob", tenant_id="t1",
             conversation_id="c2", summary="bob's",
         ))
-        assert len(mem.list_for_user("alice")) == 1
-        assert len(mem.list_for_user("bob")) == 1
+        assert len(mem.list_for_user("alice", tenant_id="t1")) == 1
+        assert len(mem.list_for_user("bob", tenant_id="t1")) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ class TestSemanticMemory:
         )
         fact_id = mem.write(fact)
         assert fact_id
-        facts = mem.read("alice")
+        facts = mem.read("alice", tenant_id="t1")
         assert len(facts) == 1
         assert facts[0].object_value == "sole_trader"
 
@@ -207,7 +207,7 @@ class TestSemanticMemory:
             extracted_at=time.time(),
         ))
         # Original confidence 0.3 → excluded from min_confidence=0.5
-        assert mem.read("alice", min_confidence=0.5) == []
+        assert mem.read("alice", tenant_id="t1", min_confidence=0.5) == []
 
     def test_decay_floor_filter(self, tmp_db):
         mem = SemanticMemory()
@@ -220,7 +220,7 @@ class TestSemanticMemory:
             extracted_at=long_ago,
         ))
         # After 60 days with a 14d half-life, decay ≈ 0.85 * 0.053 ≈ 0.045
-        assert mem.read("alice", decay_floor=0.3) == []
+        assert mem.read("alice", tenant_id="t1", decay_floor=0.3) == []
 
     def test_supersede_marks_old_fact(self, tmp_db):
         mem = SemanticMemory()
@@ -240,8 +240,27 @@ class TestSemanticMemory:
         f2_id = mem.write(f2)
         assert mem.supersede(f1_id, f2_id) is True
         # Default read excludes superseded
-        facts = mem.read("alice")
+        facts = mem.read("alice", tenant_id="t1")
         assert all(f.fact_id != f1_id for f in facts)
+
+    def test_changed_taxpayer_type_supersedes_stale_value(self, tmp_db):
+        mem = SemanticMemory()
+        now = time.time()
+        old = UserFact(
+            fact_id="", user_id="alice", tenant_id="t1", category="taxpayer_type",
+            subject="user", predicate="is_a", object_value="sole_trader",
+            confidence=0.85, extracted_at=now,
+        )
+        old_id = mem.write(old)
+        current = UserFact(
+            fact_id="", user_id="alice", tenant_id="t1", category="taxpayer_type",
+            subject="user", predicate="is_a", object_value="company",
+            confidence=0.85, extracted_at=now + 1,
+        )
+        current_id = mem.write(current)
+        facts = mem.read("alice", tenant_id="t1")
+        assert [fact.fact_id for fact in facts] == [current_id]
+        assert mem.read("alice", tenant_id="t1", include_superseded=True)[-1].fact_id == old_id
 
     def test_forget_user_cascades(self, tmp_db):
         mem = SemanticMemory()
@@ -252,9 +271,9 @@ class TestSemanticMemory:
                 object_value="v", confidence=0.8,
                 extracted_at=time.time(),
             ))
-        count = mem.forget_user("alice")
+        count = mem.forget_user("alice", tenant_id="t1")
         assert count == 3
-        assert mem.read("alice") == []
+        assert mem.read("alice", tenant_id="t1") == []
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +321,20 @@ class TestFactExtractor:
     def test_empty_input(self):
         assert FactExtractor().extract([]) == []
 
+    def test_local_language_code_switched_facts(self):
+        candidates = FactExtractor().extract([
+            {"role": "user", "content": "Nze ndi sole trader."},
+            {"role": "user", "content": "Nimesajiliwa kwa VAT."},
+        ])
+        assert any(c.category == "taxpayer_type" and c.object_value == "sole_trader" for c in candidates)
+        assert any(c.category == "registered_vat" and c.object_value == "vat" for c in candidates)
+
+    def test_language_mention_is_not_a_language_preference(self):
+        candidates = FactExtractor().extract([
+            {"role": "user", "content": "Please explain this in Luganda."},
+        ])
+        assert not any(c.category == "primary_language" for c in candidates)
+
 
 # ---------------------------------------------------------------------------
 # MemoryService — integration
@@ -319,6 +352,7 @@ class TestMemoryService:
         outcome = mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c1",
+            tenant_id="t1",
             turns=[
                 {"role": "user", "content": "I'm a sole trader in retail"},
             ],
@@ -338,13 +372,14 @@ class TestMemoryService:
         outcome = mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c2",
+            tenant_id="t1",
             turns=[
                 {"user_message": "I am a sole trader in transport", "bot_reply": "Noted."},
             ],
         )
         assert outcome["facts_written"] >= 2
         assert outcome["episodic_written"]
-        facts = mem.read_facts(u["id"])
+        facts = mem.read_facts(u["id"], tenant_id="t1")
         assert any(f.category == "taxpayer_type" and f.object_value == "sole_trader" for f in facts)
         assert any(f.category == "industry" and f.object_value == "transport" for f in facts)
 
@@ -355,13 +390,14 @@ class TestMemoryService:
 
         from app.memory import get_memory_service
         mem = get_memory_service()
-        # Write goes through (audit trail) but read is empty
-        mem.absorb_conversation(
+        outcome = mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c1",
+            tenant_id="t1",
             turns=[{"role": "user", "content": "I'm a sole trader"}],
         )
-        assert mem.read_facts(u["id"]) == []
+        assert outcome.get("skipped") == "consent_required"
+        assert mem.read_facts(u["id"], tenant_id="t1") == []
 
     def test_consent_granted_allows_reads(self, tmp_db):
         reset_memory_service()
@@ -373,10 +409,78 @@ class TestMemoryService:
         mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c1",
+            tenant_id="t1",
             turns=[{"role": "user", "content": "I'm a sole trader in retail"}],
         )
-        facts = mem.read_facts(u["id"])
+        facts = mem.read_facts(u["id"], tenant_id="t1")
         assert len(facts) >= 2
+
+    def test_memory_is_tenant_scoped_and_erasure_is_local(self, tmp_db):
+        reset_memory_service()
+        for tenant in ("t1", "t2"):
+            owner = tmp_db.upsert_user(external_id="shared-subject", tenant_id=tenant)
+            tmp_db.grant_consent(owner["id"], "personalization", "2026-04")
+
+        from app.memory import get_memory_service
+        mem = get_memory_service()
+        for tenant in ("t1", "t2"):
+            mem.absorb_conversation(
+                user_id="shared-subject",
+                conversation_id="shared-conversation",
+                tenant_id=tenant,
+                turns=[{"role": "user", "content": "I'm a sole trader"}],
+            )
+
+        assert len(mem.read_facts("shared-subject", tenant_id="t1")) == 1
+        assert len(mem.read_facts("shared-subject", tenant_id="t2")) == 1
+        mem.forget_user("shared-subject", tenant_id="t1")
+        assert mem.read_facts("shared-subject", tenant_id="t1") == []
+        assert len(mem.read_facts("shared-subject", tenant_id="t2")) == 1
+
+    def test_working_state_is_shared_tenant_scoped_and_consent_gated(self, tmp_db):
+        reset_memory_service()
+        for tenant in ("t1", "t2"):
+            owner = tmp_db.upsert_user(external_id="shared-subject", tenant_id=tenant)
+            tmp_db.grant_consent(owner["id"], "personalization", "2026-04")
+        no_consent = tmp_db.upsert_user(external_id="no-consent", tenant_id="t1")
+
+        from app.memory.service import MemoryService
+        from app.memory import get_memory_service
+
+        first_process = get_memory_service()
+        first_process.update_working("shared-subject", tenant_id="t1", last_topic="vat")
+        first_process.update_working(no_consent["id"], tenant_id="t1", last_topic="paye")
+
+        second_process = MemoryService()
+        assert second_process.read_all("shared-subject", tenant_id="t1").working == {
+            "last_topic": "vat"
+        }
+        assert second_process.read_all("shared-subject", tenant_id="t2").working is None
+        assert second_process.export_user(no_consent["id"], tenant_id="t1")["working"] is None
+
+    def test_repeated_memory_write_is_deduplicated_and_export_is_complete(self, tmp_db):
+        reset_memory_service()
+        owner = tmp_db.upsert_user(external_id="alice", tenant_id="t1")
+        tmp_db.grant_consent(owner["id"], "personalization", "2026-04")
+
+        from app.memory import get_memory_service
+        mem = get_memory_service()
+        turn = [{"role": "user", "content": "My TIN is 1234567890 and I am a sole trader"}]
+        for _ in range(2):
+            mem.absorb_conversation(
+                user_id=owner["id"],
+                conversation_id="stable-conversation",
+                tenant_id="t1",
+                turns=turn,
+            )
+
+        assert len(mem.read_facts(owner["id"], tenant_id="t1")) == 1
+        episodes = mem.read_episodic(owner["id"], tenant_id="t1")
+        assert len(episodes) == 1
+        assert "1234567890" not in episodes[0]["summary"]
+        exported = mem.export_user(owner["id"], tenant_id="t1")
+        assert len(exported["facts"]) == 1
+        assert len(exported["episodic"]) == 1
 
     def test_absorb_conversation_handles_empty_user_messages_before_content(self, tmp_db):
         reset_memory_service()
@@ -388,6 +492,7 @@ class TestMemoryService:
         mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c_empty_first",
+            tenant_id="t1",
             turns=[
                 {"role": "user", "content": "   "},
                 {"role": "assistant", "content": "Hello!"},
@@ -395,11 +500,11 @@ class TestMemoryService:
                 {"role": "assistant", "content": "Got it."},
             ],
         )
-        facts = mem.read_facts(u["id"])
+        facts = mem.read_facts(u["id"], tenant_id="t1")
         assert len(facts) >= 2
-        episodic = mem.read_episodic(u["id"])
+        episodic = mem.read_episodic(u["id"], tenant_id="t1")
         assert len(episodic) >= 1
-        assert "I'm a sole trader in retail" in episodic[0]["summary"]
+        assert "sole trader in retail" not in episodic[0]["summary"]
 
     def test_consent_withdrawal_hides_future_reads(self, tmp_db):
         reset_memory_service()
@@ -411,12 +516,13 @@ class TestMemoryService:
         mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c1",
+            tenant_id="t1",
             turns=[{"role": "user", "content": "I'm a sole trader"}],
         )
-        assert len(mem.read_facts(u["id"])) > 0
+        assert len(mem.read_facts(u["id"], tenant_id="t1")) > 0
 
         tmp_db.withdraw_consent(u["id"], "personalization")
-        assert mem.read_facts(u["id"]) == []
+        assert mem.read_facts(u["id"], tenant_id="t1") == []
 
     def test_forget_user_cascade(self, tmp_db):
         reset_memory_service()
@@ -425,13 +531,14 @@ class TestMemoryService:
 
         from app.memory import get_memory_service
         mem = get_memory_service()
-        mem.update_working(u["id"], current_topic="vat")
+        mem.update_working(u["id"], tenant_id="t1", current_topic="vat")
         mem.absorb_conversation(
             user_id=u["id"],
             conversation_id="c1",
+            tenant_id="t1",
             turns=[{"role": "user", "content": "I'm a sole trader in retail"}],
         )
-        counts = mem.forget_user(u["id"])
+        counts = mem.forget_user(u["id"], tenant_id="t1")
         assert counts["working"] == 1
         assert counts["episodic"] >= 1
         assert counts["semantic"] >= 2

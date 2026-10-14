@@ -23,6 +23,7 @@ unchanged from Phase 1-13.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -30,10 +31,36 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_SIMULATED_CONNECTOR_NAMESPACES = frozenset(
+    {"efris", "payment_system", "bwims", "tin_registration", "digital_tax_stamps", "ursb"}
+)
+_SIMULATION_NOTICE = (
+    "Local simulator result only. No live URA, NIRA, URSB, EFRIS, BWIMS, bank, or payment service was contacted or updated."
+)
+
 
 # ---------------------------------------------------------------------------
 # Tool schema
 # ---------------------------------------------------------------------------
+def readable_title(name: str, namespace: str = "") -> str:
+    """A function name as a person reads it, without its service's prefix.
+
+    ``bwims_consignment_status`` in the ``bwims`` namespace is "Consignment
+    status": the connector picker shows it under the service's own name, and
+    "Bwims consignment status" read as a typo. A name that is nothing but the
+    prefix is kept whole. ``plugins.base.readable_title`` is the same rule for
+    the plugin package's own schema type (a test keeps them in step).
+    """
+    words = [word for word in name.split("_") if word]
+    prefixes = {word for word in namespace.split("_") if word}
+    if namespace:
+        prefixes.add(namespace)
+        prefixes.add("".join(word[0] for word in namespace.split("_") if word))
+    if len(words) > 1 and words[0] in prefixes:
+        words = words[1:]
+    return " ".join(words).capitalize()
+
+
 @dataclass(frozen=True)
 class ToolSchema:
     """Structural description of a tool, exported to the LLM and to MCP.
@@ -94,10 +121,20 @@ class ToolSchema:
     idempotent: bool = True
     open_world: bool = False
 
+    def __post_init__(self) -> None:
+        if self.output_schema and isinstance(self.output_schema, dict):
+            if "properties" in self.output_schema and "ok" in self.output_schema["properties"]:
+                req = list(self.output_schema.get("required", []))
+                if "ok" not in req:
+                    req.append("ok")
+                    schema_copy = dict(self.output_schema)
+                    schema_copy["required"] = req
+                    object.__setattr__(self, "output_schema", schema_copy)
+
     def annotations(self) -> dict[str, Any]:
         """MCP ``annotations`` object for this tool."""
         return {
-            "title": self.title or self.name.replace("_", " ").capitalize(),
+            "title": self.title or readable_title(self.name, self.namespace),
             "readOnlyHint": self.read_only,
             "destructiveHint": self.destructive,
             "idempotentHint": self.idempotent,
@@ -276,6 +313,17 @@ class ToolRegistry:
                 "error": f"Unknown tool: {name}",
             }
 
+        if (
+            tool.schema.namespace in _SIMULATED_CONNECTOR_NAMESPACES
+            and os.getenv("APP_ENV", "development").lower() == "production"
+        ):
+            return {
+                "ok": False,
+                "error": "Local simulator connector tools are never enabled in production.",
+                "mode": "simulation",
+                "live": False,
+            }
+
         try:
             result = tool.execute(**(arguments or {}))
             if not isinstance(result, dict):
@@ -303,6 +351,10 @@ class ToolRegistry:
             elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.debug("Tool %s executed in %.1fms", name, elapsed_ms)
 
+        if tool.schema.namespace in _SIMULATED_CONNECTOR_NAMESPACES:
+            result.setdefault("mode", "simulation")
+            result.setdefault("live", False)
+            result.setdefault("simulation_notice", _SIMULATION_NOTICE)
         return result
 
 
@@ -324,5 +376,6 @@ from . import portal_navigator as _portal_navigator  # noqa: E402, F401
 from . import ura_account as _ura_account  # noqa: E402, F401
 from . import ura_actions as _ura_actions  # noqa: E402, F401
 from . import plugins as _plugins  # noqa: E402, F401
+from . import memory_tools as _memory_tools  # noqa: E402, F401
 
 __all__ = ["Tool", "ToolSchema", "ToolRegistry"]

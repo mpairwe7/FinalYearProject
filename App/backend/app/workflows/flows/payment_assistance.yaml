@@ -3,7 +3,8 @@ name: Payment Assistance
 version: "1"
 description: >
   Guide a taxpayer through the details needed to make a URA payment or
-  generate a PRN-linked payment plan.
+  generate a PRN-linked payment plan. This guide does not generate a PRN or
+  process a payment.
 requires_auth: false
 
 trigger_phrases:
@@ -66,9 +67,11 @@ steps:
   - id: summary
     title: "Pay and keep proof"
     question: >
-      Next step: confirm the liability in the URA portal, generate or review the PRN,
-      pay through your chosen channel, and keep the payment confirmation so it can be
-      matched back to the tax obligation.
+      This chat has not generated a PRN or processed a payment. Sign in to the
+      official URA portal, confirm the tax head, period, and amount, then generate
+      or review the PRN before paying through a listed channel. Keep the receipt
+      and check that the payment is reflected against the correct obligation.
+      Never share your password, PIN, one-time code, or full card details in chat.
     slot: ""
     validator: text
     # Ids in app/verified_resources.py — every link there was checked live.

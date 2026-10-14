@@ -92,6 +92,22 @@ class GraphResolveRateTool(Tool):
             read_only=True,
             idempotent=True,
             open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "found": {"type": "boolean"},
+                    "rate_key": {"type": "string"},
+                    "display_name": {"type": "string"},
+                    "value": {"type": "number"},
+                    "unit": {"type": "string"},
+                    "fiscal_year": {"type": "string"},
+                    "act": {"type": "string"},
+                    "section": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(self, question: str, fiscal_year: str = "") -> dict[str, Any]:
@@ -136,6 +152,17 @@ class GraphRateHistoryTool(Tool):
             read_only=True,
             idempotent=True,
             open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "rate_key": {"type": "string"},
+                    "display_name": {"type": "string"},
+                    "versions": {"type": "array", "items": {"type": "object"}},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(self, rate_key: str) -> dict[str, Any]:
@@ -180,6 +207,18 @@ class GraphEffectiveOnTool(Tool):
             read_only=True,
             idempotent=True,
             open_world=False,
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "ok": {"type": "boolean"},
+                    "error": {"type": "string"},
+                    "rate_key": {"type": "string"},
+                    "date": {"type": "string"},
+                    "value": {"type": "number"},
+                    "fiscal_year": {"type": "string"},
+                },
+                "required": ["ok"],
+            },
         )
 
     def execute(self, rate_key: str, date: str) -> dict[str, Any]:

@@ -86,6 +86,14 @@ class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turns[1]["speaker"], "assistant")
         self.assertTrue(any(term in turns[1]["text"] for term in ("TIN", "T-I-N", "portal")))
 
+    async def test_an_answered_call_turn_is_counted_once_on_the_call_channel(self):
+        from app.analytics import metrics
+
+        key = 'chat_turns_total{channel="call",outcome="answered"}'
+        before = metrics.snapshot()["counters"].get(key, 0)
+        await self.brain.process_frame(LLMContextFrame(context="How do I register for a TIN?"))
+        self.assertEqual(metrics.snapshot()["counters"].get(key, 0) - before, 1)
+
     async def test_explicit_human_request_triggers_transfer(self):
         with patch.object(flags, "is_enabled", side_effect=lambda name, **_kw: True if name == "ticket_queue" else False):
             frame = LLMContextFrame(context="I want to talk to an officer please")

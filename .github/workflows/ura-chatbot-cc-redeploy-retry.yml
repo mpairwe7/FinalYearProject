@@ -42,9 +42,7 @@ on:
         default: "sha-ae4df29"
 
 permissions:
-  actions: write   # dispatch the deploy workflow + disable this one
   contents: read
-  issues: write    # success notification
 
 concurrency:
   group: cc-redeploy-retry
@@ -60,6 +58,10 @@ jobs:
   retry:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      actions: write   # dispatch the deploy workflow + disable this one
+      contents: read
+      issues: write    # success notification
     steps:
       - name: Probe whether Crane Cloud already serves the target build
         id: probe

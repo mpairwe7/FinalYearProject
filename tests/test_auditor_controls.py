@@ -96,6 +96,22 @@ def test_an_auditor_cannot_change_a_ticket_but_an_officer_can(client, tenant):
     assert accepted.status_code == 200
 
 
+def test_an_administrator_audits_a_ticket_but_does_not_work_it(client, tenant):
+    """Officers handle taxpayers live; an administrator audits the service and works no case."""
+    ticket_id = _ticket()
+    admin = _headers("adm-2", "ura_admin", tenant)
+    refused = client.patch(
+        f"/v1/admin/tickets/{ticket_id}",
+        headers=admin,
+        json={"status": "assigned", "assignee": "adm-2", "officer_reply": "We are looking into it."},
+    )
+    assert refused.status_code == 403
+    ticket = db.get_ticket(ticket_id)
+    assert (ticket["status"], ticket["assignee"], ticket["officer_reply"]) == ("open", "", "")
+    assert client.post(f"/v1/admin/tickets/{ticket_id}/presence", headers=admin).status_code == 403
+    assert client.get(f"/v1/admin/tickets/{ticket_id}", headers=admin).status_code == 200
+
+
 def test_staff_actions_and_transcript_reads_are_recorded_without_content(client, tenant, ledger_on):
     ticket_id = _ticket()
     officer = _headers("off-2", "ura_staff", tenant)
@@ -296,8 +312,13 @@ def test_one_tenant_failing_to_seal_does_not_leave_the_others_unsealed(tenant, m
 # ---------------------------------------------------------------------------
 # QA pass after #515 (call desk): completeness, not just the routes we know of
 # ---------------------------------------------------------------------------
-#: Writes an auditor may make: adding a seal changes no row.
-_AUDITOR_MAY_WRITE = {("POST", "/v1/admin/audit/seal")}
+#: Writes an auditor may make: adding a seal changes no row, and nor does a
+#: decision in the quality audit's Needs review queue — an audit note about
+#: an item, not a change to the case it is about.
+_AUDITOR_MAY_WRITE = {
+    ("POST", "/v1/admin/audit/seal"),
+    ("PUT", "/v1/admin/quality/reviews/{item_type}/{item_id}"),
+}
 _WRITE_BODIES = {
     "/v1/admin/overrides": {"query": "What is VAT?", "reply": "18%."},
     "/v1/admin/calls/{call_id}/review": {"rating": 4, "note": "fine"},
@@ -307,6 +328,8 @@ _WRITE_BODIES = {
     "/v1/admin/calls/{call_id}/callback-done": {"note": "called back"},
     "/v1/admin/officers/me/presence": {"status": "available"},
     "/v1/admin/tickets/{ticket_id}": {"status": "resolved"},
+    # A valid body, so the request reaches the role check rather than a 422.
+    "/v1/admin/outbox/test": {"channel": "email", "recipient": "qa@example.org", "message": "matrix"},
 }
 _WRITE_PARAMS = {"/v1/admin/flags/{name}": {"enabled": "true"}}
 
@@ -322,29 +345,54 @@ def _receptionist_call(tenant: str) -> str:
     return call_id
 
 
+def _all_routes(routes, prefix: str = ""):
+    """``(full path, route)`` for every route, descending into included routers.
+
+    FastAPI 0.141 includes routers lazily: a flat walk of ``app.routes`` sees
+    one ``_IncludedRouter`` per router, so the quality, connector and offline
+    routes were never checked here.
+    """
+    for route in routes:
+        original = getattr(route, "original_router", None)
+        if original is not None:
+            context = getattr(route, "include_context", None)
+            yield from _all_routes(original.routes, prefix + (getattr(context, "prefix", "") or ""))
+            continue
+        yield prefix + getattr(route, "path", ""), route
+
+
 def test_every_admin_write_route_refuses_an_auditor(client, tenant):
     """Enumerates the live routes, so a new staff write that forgets its role check fails here."""
     from fastapi.routing import APIRoute
 
-    ids = {"ticket_id": _ticket(), "call_id": _receptionist_call(tenant), "override_id": "ovr-qa", "name": "hyde"}
+    ids = {
+        "ticket_id": _ticket(),
+        "call_id": _receptionist_call(tenant),
+        "override_id": "ovr-qa",
+        "name": "hyde",
+        "report_id": "kb_test123",
+        "tombstone_id": "tomb_test123",
+        "precedence_id": "prec_test123",
+        "notification_id": "ntf_test123",
+    }
     auditor = _headers("aud-matrix", "ura_auditor", tenant)
     checked, leaks = [], []
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/v1/admin"):
+    for path, route in _all_routes(app.routes):
+        if not isinstance(route, APIRoute) or not path.startswith("/v1/admin"):
             continue
         for method in sorted(route.methods & {"POST", "PUT", "PATCH", "DELETE"}):
-            if (method, route.path) in _AUDITOR_MAY_WRITE:
+            if (method, path) in _AUDITOR_MAY_WRITE:
                 continue
             response = client.request(
                 method,
-                route.path.format(**ids),
+                path.format(**ids),
                 headers=auditor,
-                json=_WRITE_BODIES.get(route.path, {}),
-                params=_WRITE_PARAMS.get(route.path),
+                json=_WRITE_BODIES.get(path, {}),
+                params=_WRITE_PARAMS.get(path),
             )
-            checked.append(f"{method} {route.path}")
+            checked.append(f"{method} {path}")
             if response.status_code != 403:
-                leaks.append(f"{method} {route.path} -> {response.status_code}")
+                leaks.append(f"{method} {path} -> {response.status_code}")
     assert leaks == []
     assert len(checked) >= 15, checked  # 15 on 2026-09-29; the matrix grows with the API
 
@@ -352,9 +400,12 @@ def test_every_admin_write_route_refuses_an_auditor(client, tenant):
 def test_call_reads_and_reviews_are_recorded_with_actor_and_role(client, tenant, ledger_on):
     call_id = _receptionist_call(tenant)
     auditor = _headers("aud-calls", "ura_auditor", tenant)
+    admin = _headers("adm-calls", "ura_admin", tenant)
     officer = _headers("off-calls", "ura_staff", tenant)
     assert client.get(f"/v1/admin/calls/{call_id}", headers=auditor).status_code == 200
     assert client.post(f"/v1/admin/calls/{call_id}/review", headers=auditor, json={"rating": 1}).status_code == 403
+    # Only officers rate a call: an administrator audits the service, as on every other call-desk write.
+    assert client.post(f"/v1/admin/calls/{call_id}/review", headers=admin, json={"rating": 2}).status_code == 403
     note = "Clear and polite, confirmed the TIN."
     reviewed = client.post(f"/v1/admin/calls/{call_id}/review", headers=officer, json={"rating": 4, "note": note})
     assert reviewed.status_code == 200
@@ -366,6 +417,7 @@ def test_call_reads_and_reviews_are_recorded_with_actor_and_role(client, tenant,
     assert viewed["payload"]["session_id"] == call_id
     review = by_type["staff.call_reviewed"]
     assert review["actor"] == "off-calls"
+    assert [e["actor"] for e in events if e["event_type"] == "staff.call_reviewed"] == ["off-calls"]
     assert review["payload"] == {"actor_role": "ura_staff", "call_id": call_id, "rating": 4, "note_chars": len(note)}
 
 

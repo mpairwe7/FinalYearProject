@@ -71,14 +71,14 @@ class BuildBriefTests(unittest.TestCase):
     def reply(self, calls: list[str], raw: str = json.dumps(MODEL_BRIEF)):
         def generate(prompt: str):
             calls.append(prompt)
-            return {"raw": raw}, "gemini-2.5-flash-lite"
+            return {"raw": raw}, "sunflower"
         return generate
 
     def test_a_full_brief_is_built_and_stored(self):
         prompts: list[str] = []
         with patch.object(call_brief, "_generate", self.reply(prompts)):
             brief = call_brief.build_brief(self.call_id)
-        self.assertEqual((brief["turns_covered"], brief["fallback"], brief["model"]), (3, False, "gemini-2.5-flash-lite"))
+        self.assertEqual((brief["turns_covered"], brief["fallback"], brief["model"]), (3, False, "sunflower"))
         self.assertIn("Transcript of the call so far", prompts[0])
         self.assertEqual(get_call(self.call_id)["brief"]["caller_goal"]["text"], "Check an August VAT refund")
 
@@ -114,7 +114,7 @@ class BuildBriefTests(unittest.TestCase):
         self.assertEqual(brief["why_officer"]["turn_seqs"], [3])
         self.assertEqual((brief["topic"], brief["priority"]), ("General tax support", "high"))
 
-    def test_every_language_goes_to_sunflower_first(self):
+    def test_every_language_goes_to_sunflower(self):
         order: list[str] = []
 
         def gemini(*_a, **_kw):
@@ -128,18 +128,29 @@ class BuildBriefTests(unittest.TestCase):
 
         with patch("app.providers.gateway.gemini_generate", gemini), patch("app.llm._vllm_generate", sunflower):
             _, model = call_brief._generate("prompt")
-        # Every language: the local model first, and only that when it answers.
         self.assertEqual((order, model), (["sunflower"], "sunflower"))
 
-    def test_gemini_is_only_the_fallback_when_sunflower_is_down(self):
+    def test_sunflower_down_means_no_model_never_a_cloud_one(self):
+        """The call path is local only (G122): the transcript never leaves the deployment."""
         def sunflower(*_a, **_kw):
             raise RuntimeError("vLLM down")
 
-        with patch("app.providers.gateway.gemini_generate", return_value=json.dumps(MODEL_BRIEF)), \
+        with patch("app.providers.gateway.gemini_generate", side_effect=AssertionError("Gemini called")) as gemini, \
                 patch("app.llm._vllm_generate", sunflower):
             reply, model = call_brief._generate("prompt")
-        self.assertEqual(model, "gemini-2.5-flash-lite")
-        self.assertIn("caller_goal", reply["raw"])
+        self.assertEqual((reply, model), (None, ""))
+        gemini.assert_not_called()
+
+    def test_the_chat_the_caller_came_from_is_context_not_a_turn(self):
+        update_call(self.call_id, chat_context="Tax domains discussed: VAT. Current task: VAT registration.")
+        prompts: list[str] = []
+        with patch.object(call_brief, "_generate", self.reply(prompts)):
+            call_brief.build_brief(self.call_id)
+        self.assertIn(
+            "Before the call, the caller was using the chat (not a turn; context only): "
+            "Tax domains discussed: VAT. Current task: VAT registration.",
+            prompts[0],
+        )
 
 
 class RollingBriefTests(unittest.IsolatedAsyncioTestCase):

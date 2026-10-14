@@ -89,10 +89,12 @@ class ReceptionistLexicon:
             from ..speech_normalization import _ACRONYMS
 
             for pattern, spoken in _ACRONYMS:
-                raw = pattern.pattern.replace(r"\b", "").strip()
-                if raw.isalnum():
-                    self.single_terms.add(raw.lower())
-                    self.acronyms.add(raw.lower())
+                pat = pattern.pattern.replace(r"\b", "").replace(r"\B", "")
+                for alt in pat.split("|"):
+                    cleaned = re.sub(r"[^A-Za-z]", "", alt)
+                    if len(cleaned) >= 2:
+                        self.single_terms.add(cleaned.lower())
+                        self.acronyms.add(cleaned.lower())
                 spoken_clean = spoken.replace("-", "").lower().strip()
                 if " " in spoken_clean:
                     self.multi_terms.add(spoken_clean)
@@ -471,6 +473,40 @@ def normalize_swahili_tax_query(text: str) -> str:
     for pattern, replacement in _SWAHILI_TERM_PATTERNS:
         normalized = pattern.sub(replacement, normalized)
     return normalized.strip()
+
+
+_PURE_ENGLISH_LUGANDA_KEYS: Final[frozenset[str]] = frozenset({
+    "rental tax",
+    "withholding tax",
+    "corporate tax",
+    "tax clearance",
+})
+
+
+def normalize_codeswitched_query(text: str, language: str = "en") -> str:
+    """Normalize intra-utterance Uganda code-switching (Enganda / Swanglish) for retrieval.
+
+    Preserves English numbers, TINs, PRNs, and pure-English phrases while mapping
+    embedded Luganda or Swahili tax idioms into canonical English retrieval terms.
+    """
+    if not text:
+        return ""
+    repaired = repair_asr_entities(text)
+    if language == "lg":
+        return normalize_luganda_tax_query(repaired)
+    if language == "sw":
+        return normalize_swahili_tax_query(repaired)
+    normalized = repaired
+    sorted_terms = sorted(
+        (k for k in LUGANDA_ENGLISH_TAX_TERMS if k not in _PURE_ENGLISH_LUGANDA_KEYS),
+        key=len,
+        reverse=True,
+    )
+    for term in sorted_terms:
+        pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+        if pattern.search(normalized):
+            normalized = pattern.sub(LUGANDA_ENGLISH_TAX_TERMS[term], normalized)
+    return normalize_swahili_tax_query(normalized)
 
 
 def normalize_call_query(text: str, language: str) -> str:

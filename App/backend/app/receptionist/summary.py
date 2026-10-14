@@ -98,23 +98,6 @@ def _fallback_summary(turns: list[dict[str, Any]], call: dict[str, Any]) -> dict
     }
 
 
-def _summarise_gemini(prompt: str) -> dict[str, Any] | None:
-    try:
-        from ..providers.gateway import gemini_generate
-        raw_reply = gemini_generate(
-            prompt,
-            system=SUMMARY_SYSTEM,
-            model="gemini-2.5-flash",
-            max_tokens=1500,
-            temperature=0.0,
-            locale="en",
-        )
-        return _parse_summary_json(raw_reply)
-    except Exception:
-        logger.debug("Gemini summary generation failed", exc_info=True)
-        return None
-
-
 def _summarise_local(prompt: str) -> dict[str, Any] | None:
     try:
         from ..llm import _vllm_generate
@@ -183,11 +166,9 @@ def generate_call_summary(call_id: str) -> dict[str, Any]:
 
     parsed_summary: dict[str, Any] | None = None
 
-    # Local Sunflower first for every call; Gemini only if vLLM is down.
-    for generate in (_summarise_local, _summarise_gemini):
-        parsed_summary = generate(prompt)
-        if parsed_summary:
-            break
+    # Local Sunflower only (decided 2026-09-30): the transcript stays in the
+    # deployment, and with vLLM down the deterministic summary below is used.
+    parsed_summary = _summarise_local(prompt)
 
     # 3. Fallback deterministic summary
     if not parsed_summary:

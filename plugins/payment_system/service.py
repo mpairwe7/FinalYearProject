@@ -1,7 +1,7 @@
 """Sample system implementation for URA Payment System (e-Services > Make a Payment suite).
 
 Simulates PRN payment slip generation, expired PRN reactivation, card and mobile money checkout,
-real-time payment status verification, and advance motor vehicle tax compliance backed by an independent database.
+sample payment status verification, and advance motor vehicle tax scenarios backed by a local database.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class PaymentService:
         return self._db
 
     def _generate_prn_number(self) -> str:
-        """Generate official 12-digit URA Payment Registration Number starting with 2."""
+        """Generate a simulator-only 12-digit sample PRN starting with 2."""
         now = datetime.datetime.now(_UTC)
         prefix = f"2{now.strftime('%y%m')}"  # 5 digits: 2 + YYMM
         seq = f"{1000000 + secrets.randbelow(9000000)}"  # 7 digits
@@ -78,7 +78,8 @@ class PaymentService:
             now_iso = now.isoformat()
             expiry_date = (now + datetime.timedelta(days=21)).strftime("%Y-%m-%d")
             barcode = f"*URA-PRN-{prn}*"
-            slip_url = f"https://portal.ura.go.ug/payment/slip?prn={prn}"
+            # Sample references must not link to the live URA payment portal.
+            slip_url = ""
 
             record = PaymentPrnRecord(
                 prn=prn,
@@ -141,7 +142,7 @@ class PaymentService:
                     new_expiry_date=record.expiry_date,
                     status="ALREADY_CLEARED",
                     message="PRN already settled",
-                    error=f"PRN {prn_clean} has already been paid and cleared by the bank on {record.cleared_at}.",
+                    error=f"Sample PRN {prn_clean} is already marked cleared in the local simulator on {record.cleared_at}.",
                 )
 
             now = datetime.datetime.now(_UTC)
@@ -160,7 +161,7 @@ class PaymentService:
             )
 
     def view_payment_status(self, request: PaymentStatusRequest) -> PaymentStatusResponse:
-        """Verify real-time clearance and bank posting status for a PRN."""
+        """Read sample clearance status from the local simulator database."""
         prn_clean = request.prn.strip()
         record = self._db.get_prn(prn_clean)
         if not record:
@@ -171,18 +172,18 @@ class PaymentService:
                 amount_ugx=0.0,
                 status="NOT_FOUND",
                 is_cleared=False,
-                message=f"PRN '{prn_clean}' not found on URA e-Payment gateway.",
+                message=f"PRN '{prn_clean}' was not found in the local payment simulator.",
                 error="PRN not found",
             )
 
         is_cleared = record.status == PrnStatus.CLEARED
-        receipt_url = f"https://portal.ura.go.ug/receipt/{prn_clean}" if is_cleared else None
+        receipt_url = None
 
-        msg = f"PRN {prn_clean} for {record.taxpayer_name} is {record.status.value}."
+        msg = f"Sample PRN {prn_clean} for {record.taxpayer_name} is {record.status.value} in the local simulator."
         if is_cleared:
-            msg += f" Cleared on {record.cleared_at} (Bank Ref: {record.bank_reference})."
+            msg += f" Simulated status date: {record.cleared_at}; no bank settlement was checked."
         else:
-            msg += f" Awaiting settlement before {record.expiry_date}."
+            msg += f" Sample expiry date: {record.expiry_date}."
 
         return PaymentStatusResponse(
             ok=True,
@@ -254,8 +255,8 @@ class PaymentService:
                 status="CLEARED",
                 cleared_at=now_iso,
                 message=(
-                    f"Payment of UGX {request.amount_paid_ugx:,.2f} successfully processed via {request.payment_method.upper()}. "
-                    f"Transaction ID: {tx_id}. Receipt Reference: {receipt_num}."
+                    f"Simulation recorded UGX {request.amount_paid_ugx:,.2f} for {request.payment_method.upper()}; "
+                    f"no settlement occurred. Sample transaction: {tx_id}. Sample receipt reference: {receipt_num}."
                 ),
             )
 

@@ -31,13 +31,25 @@ Feature flag: ``FLAG_LANGGRAPH`` default false.
 
 from __future__ import annotations
 
+from .compactor import (
+    analyze_context_window,
+    compact_prompt_context,
+    compact_tool_observation,
+    node_context_compactor,
+)
 from .runtime import GraphNode, GraphRuntime, NodeResult
-from .state import AgentGraphState, GraphOutcome
+from .state import AgentGraphState, GoalSpec, GraphOutcome, TaxpayerActionRequest
 
 __all__ = [
     "AgentGraphState",
+    "GoalSpec",
     "GraphNode",
     "GraphOutcome",
     "GraphRuntime",
     "NodeResult",
+    "TaxpayerActionRequest",
+    "analyze_context_window",
+    "compact_prompt_context",
+    "compact_tool_observation",
+    "node_context_compactor",
 ]

@@ -393,8 +393,10 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
 }
 
 export default function StaffTicketQueuePage() {
+  // Officers work the queue and auditors read it; administrators audit the
+  // service from /admin instead of handling cases.
   return (
-    <StaffGuard current="/admin/tickets">
+    <StaffGuard current="/admin/tickets" requireRoles={["ura_staff", "ura_auditor"]}>
       {(who) => <StaffTicketQueue who={who} />}
     </StaffGuard>
   );

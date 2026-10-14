@@ -11,6 +11,13 @@ export interface CallStartPayload {
   preferred_locale?: string;
   voice_consent_accepted: boolean;
   sample_rate?: number;
+  /**
+   * The chat this call was started from. The server carries that chat's task
+   * and a coarse English account of it into the call (G122) when the caller
+   * owns the chat: their account, or `chat_session` for a signed-out caller.
+   */
+  parent_conversation_id?: string;
+  chat_session?: string;
 }
 
 export interface CallSocketCallbacks {
@@ -50,6 +57,12 @@ export class CallSocket {
             preferred_locale: startPayload.preferred_locale ?? startPayload.locale,
             voice_consent_accepted: startPayload.voice_consent_accepted,
             sample_rate: startPayload.sample_rate || 16000,
+            ...(startPayload.parent_conversation_id
+              ? {
+                  parent_conversation_id: startPayload.parent_conversation_id,
+                  chat_session: startPayload.chat_session ?? '',
+                }
+              : {}),
           };
           this.ws.send(JSON.stringify(initMsg));
         }

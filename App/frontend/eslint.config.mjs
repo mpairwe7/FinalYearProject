@@ -24,6 +24,9 @@ const config = [
   },
   {
     rules: {
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/immutability": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
         {

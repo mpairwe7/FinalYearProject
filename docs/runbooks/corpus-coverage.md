@@ -133,12 +133,12 @@ devices, which matters on a shared box. Pick idle GPUs first
 
 ```bash
 cd App
-QWEN_GPU_ID=3 API_GPU_ID=4 docker compose \
-  -f docker-compose.yml -f docker-compose.local-qwen.yml -f docker-compose.coverage-gpu.yml \
+SUNFLOWER_GPU_ID=4 API_GPU_ID=2 docker compose \
+  -f docker-compose.yml -f docker-compose.local-sunflower.yml -f docker-compose.coverage-gpu.yml \
   up -d qdrant redis vllm api
 ```
 
-vLLM takes ~5 minutes to load Qwen3-8B and compile; the API is ready when
+vLLM serves Sunflower-14B-FP8 with YaRN long-context (131K); the API is ready when
 `curl -s localhost:8083/ready` reports `"status": "ready"`. Check
 `curl -s localhost:8083/v1/speech/health` before a voice run — `asr_backend`
 and `tts_backend` are the *configured* values, so confirm real ones with a
@@ -147,7 +147,7 @@ single probe (`POST /v1/tts` should report `backend: edge_tts` or
 you are finished** — this is a shared machine:
 
 ```bash
-cd App && docker compose -f docker-compose.yml -f docker-compose.local-qwen.yml \
+cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml \
   -f docker-compose.coverage-gpu.yml down
 ```
 

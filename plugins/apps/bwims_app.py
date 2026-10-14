@@ -1,13 +1,11 @@
-"""Standalone FastAPI Application for URA BWIMS (Bonded Warehouse Information Management System).
+"""Development-only dashboard for the local BWIMS simulator.
 
 Features:
 - Dedicated SQLite database (data_store/bwims_system.db)
-- Mandatory Auth Gate with URA Security CAPTCHA verification
-- 1-click Demo Account presets (Uganda ICD Nakawa, Nile Grain Silos, Entebbe Aviation Shed)
-- Customs IM7 bonded cargo tracking and warehousing duration audit
-- EACCMA Section 67 statutory 9-month (270-day) overstay alert & customs auction risk detection
-- Ex-warehouse clearances (IM4 home consumption and transit re-export)
-- MCP 2026 tools gateway (/mcp/manifest, /mcp/call)
+- Demo login screen and sample accounts (not production authentication)
+- Fixture cargo, warehouse, and clearance examples
+- Illustrative duration calculations, not legal deadlines or customs decisions
+- No connection to URA or standards-compliant MCP transport
 """
 
 from __future__ import annotations
@@ -29,7 +27,12 @@ from fastapi.responses import HTMLResponse  # noqa: E402
 
 os.environ.setdefault("BWIMS_DB_PATH", str(_root / "data_store" / "bwims_system.db"))
 
-from plugins.apps.common_ui import COMMON_AUTH_JS, COMMON_CSS, render_logo  # noqa: E402
+from plugins.apps.common_ui import (  # noqa: E402
+    COMMON_AUTH_JS,
+    COMMON_CSS,
+    install_simulator_safety_boundary,
+    render_logo,
+)
 from plugins.bwims import BwimsClient, BwimsConnector, BwimsService  # noqa: E402
 
 service = BwimsService()
@@ -37,7 +40,8 @@ client = BwimsClient(service=service)
 connector = BwimsConnector(service=service)
 connector.initialize()
 
-app = FastAPI(title="URA BWIMS Customs Bonded Cargo System", version="1.0.0")
+app = FastAPI(title="BWIMS Simulator Demo", version="1.0.0")
+install_simulator_safety_boundary(app)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -243,7 +247,6 @@ def index() -> str:  # noqa: S608
       <div>URA BWIMS Standalone Node v1.0.0 · Database: <code>bwims_system.db</code></div>
       <div>
         <a href="/docs">Swagger API Docs</a> |
-        <a href="/mcp/manifest">MCP Tool Manifest</a> |
         <a href="/health">Health Probe</a>
       </div>
     </div>
@@ -301,7 +304,6 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('bwims_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
-      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('bwims', res.body.user.facility_name, res.body.user.warehouse_code)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';
@@ -448,7 +450,7 @@ def clear_con(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     return client.clear_ex_warehouse(**payload)
 
 
-@app.get("/mcp/manifest")
+@app.get("/mcp/manifest", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_manifest() -> dict[str, Any]:
     return {
         "schema_version": "2026-07-28",
@@ -457,7 +459,7 @@ def mcp_manifest() -> dict[str, Any]:
     }
 
 
-@app.post("/mcp/call")
+@app.post("/mcp/call", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_call(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     name = body.get("name")
     args = body.get("arguments", {})

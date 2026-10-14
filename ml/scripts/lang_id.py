@@ -84,14 +84,18 @@ class LanguageDetector:
             "nsaba", "olina", "okukola", "kola", "ki", "ani", "lwaki", "ddi", "bangi",
             "buli", "wa", "ku", "mu", "nga", "naye", "singa", "oba", "nze", "ffe", "gwe",
             "ntya", "nkola", "gwa", "gya", "bbeeyi",
+            "weeraba", "tunaalabagana", "edda", "bambi", "ŋŋamba", "ngamba", "nkulamusizza",
+            "owange", "mwattu", "mubalire", "nnyamba", "banja", "musolo", "satifikeeti", "ebisanyizo",
         }
         sw_stops = {
             "ninaweza", "ninawezaje", "nifanye", "nini", "kwa", "kupata", "biashara",
             "kodi", "jinsi", "vipi", "ushuru", "kujisajili", "asilimia", "thamani",
             "marejesho", "huduma", "wafanyakazi", "mapato", "nchini", "binafsi",
             "habari", "asante", "shukrani", "kiasi", "gani", "kulipa", "zaidi",
+            "shikamoo", "afisa", "hujambo", "sijambo", "bwana", "kwaheri", "tutaonana", "baadaye",
+            "ningependa", "kujua", "samahani", "nijuze", "heshima", "kutoka", "mpakani", "mno", "eleza",
         }
-        words = set(re.findall(r"[a-z']+", text.lower()))
+        words = set(re.findall(r"[a-z'’ŋ]+", text.lower()))
         en_score = len(words & en_stops)
         sw_score = len(words & sw_stops)
         lg_score = len(words & lg_words)

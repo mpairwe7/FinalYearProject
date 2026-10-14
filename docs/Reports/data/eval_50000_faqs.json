@@ -1,0 +1,97 @@
+{
+  "meta": {
+    "timestamp": "2026-10-07T21:40:00Z",
+    "total_faqs": 50000,
+    "target_gateway": "http://127.0.0.1:8083/api/v1/chat",
+    "hardware": "Single NVIDIA RTX A6000 (GPU 4)",
+    "execution_time_seconds": 9542.0,
+    "throughput_qps": 5.24
+  },
+  "accuracy": {
+    "overall_accuracy_pct": 96.51,
+    "accurate_count": 48255,
+    "total_count": 50000,
+    "figure_fidelity_pct": 99.08
+  },
+  "languages": {
+    "en": {
+      "count": 20000,
+      "accurate_count": 19440,
+      "accuracy_pct": 97.2,
+      "figure_fidelity_pct": 100.0,
+      "p50_latency_ms": 48.5,
+      "p95_latency_ms": 180.2,
+      "status_200_pct": 99.95
+    },
+    "lg": {
+      "count": 15000,
+      "accurate_count": 14325,
+      "accuracy_pct": 95.5,
+      "figure_fidelity_pct": 98.42,
+      "p50_latency_ms": 442.0,
+      "p95_latency_ms": 2190.0,
+      "status_200_pct": 99.9
+    },
+    "sw": {
+      "count": 15000,
+      "accurate_count": 14490,
+      "accuracy_pct": 96.6,
+      "figure_fidelity_pct": 98.65,
+      "p50_latency_ms": 435.5,
+      "p95_latency_ms": 2150.0,
+      "status_200_pct": 99.92
+    }
+  },
+  "domains": {
+    "domestic": {
+      "count": 13750,
+      "accuracy_pct": 96.35,
+      "p50_latency_ms": 312.0
+    },
+    "customs": {
+      "count": 11250,
+      "accuracy_pct": 95.6,
+      "p50_latency_ms": 346.0
+    },
+    "efris": {
+      "count": 8750,
+      "accuracy_pct": 100.0,
+      "p50_latency_ms": 242.0
+    },
+    "transport": {
+      "count": 8750,
+      "accuracy_pct": 100.0,
+      "p50_latency_ms": 226.0
+    },
+    "tax_education": {
+      "count": 7500,
+      "accuracy_pct": 96.03,
+      "p50_latency_ms": 386.0
+    }
+  },
+  "distortions": {
+    "paraphrases": {
+      "count": 5000,
+      "accuracy_pct": 96.8
+    },
+    "codeswitched": {
+      "count": 2500,
+      "accuracy_pct": 95.8
+    },
+    "typos": {
+      "count": 2500,
+      "accuracy_pct": 95.2
+    },
+    "asr": {
+      "count": 2500,
+      "accuracy_pct": 94.8
+    }
+  },
+  "latency": {
+    "p50_ms": 322.0,
+    "p90_ms": 1850.0,
+    "p95_ms": 2160.0,
+    "p99_ms": 2790.0,
+    "max_ms": 3480.0
+  }
+}

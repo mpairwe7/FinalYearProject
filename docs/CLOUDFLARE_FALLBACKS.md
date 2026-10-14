@@ -185,7 +185,7 @@ carries 60+ provider/retriever/LLM/STT/translation/breaker unit tests
 `tests/test_reindex_vectorize.py`) plus four endpoint-level integration tests at the
 repo root (`tests/test_fallback_integration.py`, run by CI) that assert the cloud
 answer reaches the `/v1/chat` + `/v1/chat/stream` surfaces when the primary LLM is
-down — see `docs/TEST_REPORT_2026-06-10.md`. Full `App/backend` suite green; blocking
+down — see `docs/EVALUATION_REPORT.md`. Full `App/backend` suite green; blocking
 ruff clean. NB: the local LLM being *unavailable* (not just failing) now also routes
 to the cloud tier (`service._cloud_llm_ready` widens the availability gates).
 

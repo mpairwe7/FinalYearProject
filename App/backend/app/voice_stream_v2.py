@@ -333,6 +333,26 @@ class VoiceSessionV2:
             )
             voice_path = path_decision.path.value
 
+        try:
+            from .receptionist.hybrid_s2s import classify_hybrid_speech_mode
+
+            hybrid_decision = classify_hybrid_speech_mode(
+                query_text,
+                locale=detected_lang,
+                subject=self.user_id or "",
+            )
+            s2s_renderer_active = (
+                self._streaming_tts is not None and flags.is_enabled("streaming_tts_v2")
+            )
+            if (
+                hybrid_decision.mode == "s2s_fast"
+                and not hybrid_decision.contains_numeric_or_statutory
+                and s2s_renderer_active
+            ):
+                voice_path = "s2s_fast"
+        except Exception:
+            logger.debug("voice_stream_v2: hybrid speech gate skipped", exc_info=True)
+
         # ── Stage 4: LLM Generation ───────────────────────────────
         t0 = time.perf_counter()
 
@@ -357,6 +377,8 @@ class VoiceSessionV2:
                     conversation_id=self.conversation_id,
                     top_k=self.top_k,
                     locale="en",
+                    # English on purpose: this pipeline translates the reply itself.
+                    locale_explicit=True,
                     user_id=self.user_id or None,
                     tenant_id=self.tenant_id,
                 ),
@@ -392,6 +414,24 @@ class VoiceSessionV2:
 
         if self._cancelled.is_set():
             return
+
+        try:
+            from .receptionist.spoken_figure_guard import verify_spoken_figures
+
+            ver = verify_spoken_figures(
+                reply_text,
+                reply_for_tts,
+                locale=detected_lang,
+                subject=self.user_id or "",
+            )
+            if not ver.ok:
+                logger.warning(
+                    "voice_stream_v2: spoken figure verification failed for locale=%s; reverting to verified English text",
+                    detected_lang,
+                )
+                reply_for_tts = reply_text
+        except Exception:
+            logger.debug("voice_stream_v2: spoken figure guard skipped", exc_info=True)
 
         # ── Stage 6: TTS (streaming V2 or sentence-chunked V1) ────
         tts_first_chunk_ms: float | None = None

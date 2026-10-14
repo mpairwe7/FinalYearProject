@@ -155,7 +155,9 @@ class TestLiveBackendRoundTrip:
             contexts="[]",
             user_id="sub-1",
         )
-        transcript = pg.get_conversation_transcript(conversation_id=conversation)
+        transcript = pg.get_conversation_transcript(
+            conversation_id=conversation, user_id="sub-1"
+        )
         assert len(transcript) == 1
 
         created = pg.create_ticket(

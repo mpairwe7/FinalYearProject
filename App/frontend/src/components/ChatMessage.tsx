@@ -1,11 +1,11 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
-import { formatDocType } from '../lib/attachments';
+import { formatDocType, stripStepPrefix } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
 import { useTranslation } from '../lib/i18n';
-import { getAnalyticsSessionId } from '../store/useAnalyticsStore';
+import { getChatSessionId } from '../lib/chatSession';
 import { authHeaders } from '../lib/authSession';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
@@ -47,7 +47,7 @@ function ReportDownloadButton({ attachment }: { attachment: ChatAttachment }) {
     setState('busy');
     try {
       const res = await fetch(`/api/v1/documents/${attachment.id}/report`, {
-        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
       });
       if (!res.ok) throw new Error(`report ${res.status}`);
       const blob = await res.blob();
@@ -94,6 +94,9 @@ interface ChatMessageProps {
   onListen: (turnId: string, text: string) => void;
   /** Where an officer's reply comes back to. Null before the first turn. */
   conversationId: string | null;
+  /** This AI answer's position in the conversation (1 = first), sent with a
+   *  rating so the audit can see where a conversation went wrong. */
+  answerNumber?: number;
   /** Set only on the turn currently being answered — see page.tsx. */
   phaseLabel?: string;
   phaseVariant?: string;
@@ -133,6 +136,7 @@ function ChatMessageInner({
   isTransitioning,
   onListen,
   conversationId,
+  answerNumber,
   phaseLabel,
   phaseVariant,
   phaseStartedAt,
@@ -141,6 +145,9 @@ function ChatMessageInner({
 }: ChatMessageProps) {
   const isAssistant = turn.role === 'assistant';
   const isGreeting = turn.id === 'greeting-0';
+  // An officer's reply relayed into the chat is not the AI's answer: officers
+  // are rated on their own service, not with the answer thumbs.
+  const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const t = useTranslation();
   const deadlineEvent = useMemo(
     () => (isAssistant && !isGreeting ? detectDeadlineInMessage(turn.content) : null),
@@ -148,12 +155,25 @@ function ChatMessageInner({
   );
 
   return (
-    <article className={`message-row message-row-${turn.role}`}>
-      <div className={`avatar ${turn.role}`} aria-hidden="true">
-        {turn.role === 'user' ? <UserIcon /> : <BotIcon />}
+    <article className={`message-row message-row-${turn.role}${isOfficerReply ? ' message-row-officer' : ''}`}>
+      <div className={`avatar ${turn.role}${isOfficerReply ? ' officer' : ''}`} aria-hidden="true">
+        {turn.role === 'user' || isOfficerReply ? <UserIcon /> : <BotIcon />}
       </div>
-      <div className={`bubble ${turn.role}`}>
-        <span className="sr-only">{turn.role === 'user' ? 'You said' : 'Assistant replied'}</span>
+      <div className={`bubble ${turn.role}${isOfficerReply ? ' officer' : ''}`}>
+        <span className="sr-only">
+          {turn.role === 'user'
+            ? 'You said'
+            : isOfficerReply
+              ? t('officerChat.officerReplied', { name: turn.officerName || t('officerChat.officerLabel') })
+              : 'Assistant replied'}
+        </span>
+        {/* A person wrote this, not the assistant: say who, in words. */}
+        {isOfficerReply && (
+          <p className="officer-label" aria-hidden="true">
+            {t('officerChat.officerLabel')}
+            {turn.officerName ? ` · ${turn.officerName}` : ''}
+          </p>
+        )}
         {/* What the working indicator leaves behind. Above the answer, where
             the indicator itself was, so the turn ends where it was running. */}
         {isAssistant && phaseLabel && phaseStartedAt != null && (
@@ -204,32 +224,42 @@ function ChatMessageInner({
             ))}
             {turn.attachments.map((a) =>
               a.analysis?.screenshot_guidance?.is_screenshot ? (
-                <div className="portal-guidance-card" key={`guidance-${a.id}`} role="region" aria-label="URA Portal Guidance">
+                <section
+                  className="portal-guidance-card"
+                  key={`guidance-${a.id}`}
+                  aria-labelledby={`portal-guidance-title-${a.id}`}
+                >
                   <div className="portal-guidance-badge-row">
-                    <span className="portal-guidance-badge">
-                      🌐 {a.analysis.screenshot_guidance.detected_portal}
-                    </span>
+                    <div className="portal-guidance-heading">
+                      <span className="portal-guidance-eyebrow">{t('documents.portalGuidance')}</span>
+                      <h3 id={`portal-guidance-title-${a.id}`}>
+                        {a.analysis.screenshot_guidance.detected_portal || t('documents.unknownPortal')}
+                      </h3>
+                    </div>
                     {a.analysis.screenshot_guidance.detected_state ? (
-                      <span className="portal-guidance-state">
-                        {a.analysis.screenshot_guidance.detected_state}
-                      </span>
+                      <div className="portal-guidance-state">
+                        <span>{t('documents.screenState')}</span>
+                        <strong>{a.analysis.screenshot_guidance.detected_state}</strong>
+                      </div>
                     ) : null}
                   </div>
                   {a.analysis.screenshot_guidance.issues_detected && a.analysis.screenshot_guidance.issues_detected.length > 0 ? (
-                    <p className="portal-guidance-issue">
-                      ⚠️ <strong>Identified:</strong> {a.analysis.screenshot_guidance.issues_detected.join(' ')}
-                    </p>
+                    <div className="portal-guidance-issue">
+                      <strong>{t('documents.possibleIssue')}</strong>
+                      <p>{a.analysis.screenshot_guidance.issues_detected.join(' ')}</p>
+                    </div>
                   ) : null}
                   {a.analysis.screenshot_guidance.steps && a.analysis.screenshot_guidance.steps.length > 0 ? (
                     <div className="portal-guidance-steps-wrap">
-                      <span className="portal-guidance-steps-title">Recommended Resolution Steps:</span>
+                      <h4 className="portal-guidance-steps-title">{t('documents.recommendedSteps')}</h4>
                       <ol className="portal-guidance-steps-list">
                         {a.analysis.screenshot_guidance.steps.map((step, idx) => (
-                          <li key={idx}>{step}</li>
+                          <li key={idx}>{stripStepPrefix(step)}</li>
                         ))}
                       </ol>
                     </div>
                   ) : null}
+                  <p className="portal-guidance-caution">{t('documents.screenshotCaution')}</p>
                   <div className="portal-guidance-actions">
                     {a.analysis.screenshot_guidance.portal_url ? (
                       <a
@@ -238,7 +268,7 @@ function ChatMessageInner({
                         rel="noopener noreferrer"
                         className="portal-action-btn is-primary"
                       >
-                        {a.analysis.screenshot_guidance.direct_action?.label || 'Open URA Portal ↗'}
+                        {a.analysis.screenshot_guidance.direct_action?.label || t('documents.openOfficialPortal')}
                       </a>
                     ) : null}
                     {onInspectAttachment ? (
@@ -247,11 +277,11 @@ function ChatMessageInner({
                         className="portal-action-btn is-ghost"
                         onClick={() => onInspectAttachment(a)}
                       >
-                        <EyeIcon /> Inspect Click Guidance
+                        <EyeIcon /> {t('documents.inspectScreenAreas')}
                       </button>
                     ) : null}
                   </div>
-                </div>
+                </section>
               ) : null,
             )}
           </div>
@@ -415,6 +445,31 @@ function ChatMessageInner({
           </div>
         )}
 
+        {isAssistant && turn.discrepancyReport && (
+          <div
+            className="discrepancy-badge"
+            role="status"
+            aria-label="Knowledge review report submitted"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.4rem",
+              fontSize: "0.75rem",
+              padding: "0.3rem 0.6rem",
+              marginTop: "0.5rem",
+              borderRadius: "6px",
+              background: "rgba(234, 179, 8, 0.12)",
+              border: "1px solid rgba(234, 179, 8, 0.3)",
+              color: "var(--text-1, #1e293b)",
+            }}
+          >
+            <span aria-hidden="true">📋</span>
+            <span>
+              Knowledge review report <strong>#{turn.discrepancyReport.id.slice(-8)}</strong> logged for URA verification
+            </span>
+          </div>
+        )}
+
         {isAssistant && !isGreeting && !phaseLabel && turn.content && (
           <div className="bubble-actions">
             {/* Live while loading: a tap then cancels the read-aloud, rather
@@ -432,19 +487,19 @@ function ChatMessageInner({
               {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
             </button>
             <CopyButton text={stripCitationMarkers(turn.content)} />
-            <FeedbackButtons
-              messageId={turn.id}
-              userQuery={userQuery}
-              botReply={turn.content}
-              retrievalMode={turn.retrievalMode}
-              workflowId={turn.workflow?.id}
-              stepId={turn.workflow?.step_id}
-            />
-          </div>
-        )}
-        {isAssistant && isGreeting && (
-          <div className="bubble-actions">
-            <FeedbackButtons messageId={turn.id} userQuery="" botReply={turn.content} />
+            {!isOfficerReply && (
+              <FeedbackButtons
+                messageId={turn.id}
+                userQuery={userQuery}
+                botReply={turn.content}
+                retrievalMode={turn.retrievalMode}
+                workflowId={turn.workflow?.id}
+                stepId={turn.workflow?.step_id}
+                conversationId={conversationId}
+                turnId={turn.serverTurnId}
+                answerNumber={answerNumber}
+              />
+            )}
           </div>
         )}
       </div>
@@ -475,6 +530,9 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.phaseVariant === next.phaseVariant &&
     prev.phaseStartedAt === next.phaseStartedAt &&
     prev.conversationId === next.conversationId &&
+    prev.answerNumber === next.answerNumber &&
+    prev.turn.serverTurnId === next.turn.serverTurnId &&
+    prev.turn.officerName === next.turn.officerName &&
     prev.turn.faithfulnessScore === next.turn.faithfulnessScore &&
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&
@@ -486,6 +544,8 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
     citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&
     prev.userQuery === next.userQuery &&
+    prev.turn.discrepancyReport?.id === next.turn.discrepancyReport?.id &&
+    prev.turn.discrepancyReport?.status === next.turn.discrepancyReport?.status &&
     prev.playingTurnId === next.playingTurnId &&
     prev.ttsLoading === next.ttsLoading &&
     prev.locale === next.locale &&

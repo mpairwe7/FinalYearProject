@@ -104,7 +104,7 @@ class WsSessionStateIntegrationTest(unittest.TestCase):
                 _send(ws, {"type": "session_start", "conversation_id": "conv-X"})
                 ready = _recv(ws)
                 self.assertEqual(ready["type"], "session_ready")
-                self.assertTrue(ready["capabilities"]["session_resume"])
+                self.assertFalse(ready["capabilities"]["session_resume"])
 
                 _send(ws, {"type": "response.create", "input": "first"})
                 # Drain frames until done
@@ -139,7 +139,7 @@ class WsSessionStateIntegrationTest(unittest.TestCase):
                 _send(ws, {"type": "session_start"})
                 ready = _recv(ws)
                 self.assertTrue(ready["capabilities"]["agentic_events"])
-                self.assertTrue(ready["capabilities"]["session_resume"])
+                self.assertFalse(ready["capabilities"]["session_resume"])
                 _send(ws, {"type": "session_end"})
         finally:
             flags.clear("tool_use")

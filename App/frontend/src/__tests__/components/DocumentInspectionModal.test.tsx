@@ -179,7 +179,11 @@ describe('DocumentInspectionModal', () => {
     expect(screen.getAllByText(/URA e-Services PRN & Payments Portal/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/PRN Generation Failure/i)).toBeDefined();
     expect(screen.getByText(/Missing mandatory payment mode selection/i)).toBeDefined();
-    expect(screen.getByText(/Step 1: Select your bank from the Payment Mode dropdown./i)).toBeDefined();
+    // The steps are an ordered list; "Step 1:" in the text printed "1. Step 1: …".
+    expect(screen.getByText("Select your bank from the Payment Mode dropdown.")).toBeDefined();
+    expect(screen.queryByText(/Step 1:/i)).toBeNull();
+    // Areas are the screen's usual layout, not something found in the image.
+    expect(screen.getByText(/not detected from your image/i)).toBeDefined();
     expect(screen.getByText(/Open Official Portal ↗/i)).toBeDefined();
   });
 });

@@ -24,9 +24,8 @@ class DtsVerifyStampTool(Tool):
         return ToolSchema(
             name="dts_verify_stamp",
             description=(
-                "Verify whether a physical or digital tax stamp affixed to excisable goods "
-                "(beers, spirits, wines, bottled water, soda, tobacco, cement, sugar, cooking oil, juices) "
-                "is authentic and tax-compliant via the URA Kakasa verification protocol."
+                "Look up a sample stamp code in the local digital tax stamp simulator. It does not authenticate a physical "
+                "stamp or verify URA/Kakasa status."
             ),
             parameters={
                 "type": "object",
@@ -44,7 +43,10 @@ class DtsVerifyStampTool(Tool):
                 "properties": {
                     "ok": {"type": "boolean"},
                     "stamp_code": {"type": "string"},
-                    "is_authentic": {"type": "boolean"},
+                    "is_authentic": {
+                        "type": ["boolean", "null"],
+                        "description": "Local fixture value only; null means there is no matching simulator record. This does not authenticate a physical stamp.",
+                    },
                     "status": {"type": "string"},
                     "product_category": {"type": "string"},
                     "brand_name": {"type": "string"},
@@ -75,8 +77,8 @@ class DtsOrderStampsTool(Tool):
         return ToolSchema(
             name="dts_order_stamps",
             description=(
-                "Order digital tax stamps for gazetted products and generate a Payment Registration Number (PRN). "
-                "Calculates official statutory stamp tariffs and designates pickup at SICPA Uganda (Ntinda)."
+                "Create a sample order and reference in the local digital tax stamp simulator. No physical stamp order, "
+                "URA tariff calculation, or pickup is arranged."
             ),
             parameters={
                 "type": "object",
@@ -130,6 +132,7 @@ class DtsOrderStampsTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="digital_tax_stamps",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -219,6 +222,7 @@ class DtsActivateStampsTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="digital_tax_stamps",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),

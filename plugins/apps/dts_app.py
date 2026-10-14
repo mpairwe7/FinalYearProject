@@ -1,14 +1,12 @@
-"""Standalone FastAPI Application for URA Digital Tax Stamps (DTS / Kakasa platform).
+"""Development-only dashboard for the local digital tax stamp simulator.
 
 Features:
 - Dedicated SQLite database (data_store/dts_system.db)
-- Mandatory Auth Gate with URA Security CAPTCHA verification
-- 1-click Demo Account presets (Nile Breweries, Kakira Sugar, Rwenzori Bottling, Tororo Cement)
-- Kakasa mobile stamp authentication with interactive QR / barcode testing
-- 9 Gazetted excisable commodities ordering with PRN fee generation
-- Line controller activation batching and spoiled stamp reconciliation
-- Local Excise Duty (LED) return auto-reconciliation
-- MCP 2026 tools gateway (/mcp/manifest, /mcp/call)
+- Demo login screen and sample accounts (not production authentication)
+- Local sample stamp lookups and order references
+- Example activation state and damaged-stamp records
+- Sample excise-duty reconciliation using fixtures
+- No connection to URA or standards-compliant MCP transport
 """
 
 from __future__ import annotations
@@ -32,7 +30,12 @@ from fastapi.responses import HTMLResponse  # noqa: E402
 
 os.environ.setdefault("DTS_DB_PATH", str(_root / "data_store" / "dts_system.db"))
 
-from plugins.apps.common_ui import COMMON_AUTH_JS, COMMON_CSS, render_logo  # noqa: E402
+from plugins.apps.common_ui import (  # noqa: E402
+    COMMON_AUTH_JS,
+    COMMON_CSS,
+    install_simulator_safety_boundary,
+    render_logo,
+)
 from plugins.digital_tax_stamps import (  # noqa: E402
     DigitalTaxStampsClient,
     DigitalTaxStampsConnector,
@@ -44,7 +47,8 @@ client = DigitalTaxStampsClient(service=service)
 connector = DigitalTaxStampsConnector(service=service)
 connector.initialize()
 
-app = FastAPI(title="URA Digital Tax Stamps (DTS / Kakasa) System", version="1.0.0")
+app = FastAPI(title="Digital Tax Stamps Simulator Demo", version="1.0.0")
+install_simulator_safety_boundary(app)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
@@ -204,7 +208,7 @@ def index() -> str:  # noqa: S608
           <button class="quick-login-btn" onclick="testStamp('DTS-UG-BEV-990182746')">✅ <strong>Nile Special Lager 500ml</strong> (DTS-UG-BEV-990182746)</button>
           <button class="quick-login-btn" onclick="testStamp('DTS-UG-WTR-554433221')">✅ <strong>Rwenzori Mineral Water 500ml</strong> (DTS-UG-WTR-554433221)</button>
           <button class="quick-login-btn" onclick="testStamp('DTS-UG-BEV-EXPIRED-001')">⚠️ <strong>Club Pilsener (Expired)</strong> (DTS-UG-BEV-EXPIRED-001)</button>
-          <button class="quick-login-btn" onclick="testStamp('DTS-FAKE-COUNTERFEIT-999')">❌ <strong>Counterfeit Code</strong> (DTS-FAKE-COUNTERFEIT-999)</button>
+          <button class="quick-login-btn" onclick="testStamp('DTS-UNKNOWN-SAMPLE-999')">❔ <strong>Unknown sample code</strong> (DTS-UNKNOWN-SAMPLE-999)</button>
         </div>
       </div>
     </div>
@@ -254,7 +258,6 @@ def index() -> str:  # noqa: S608
       <div>URA DTS Standalone Node v1.0.0 · Database: <code>dts_system.db</code></div>
       <div>
         <a href="/docs">Swagger API Docs</a> |
-        <a href="/mcp/manifest">MCP Tool Manifest</a> |
         <a href="/health">Health Probe</a>
       </div>
     </div>
@@ -312,7 +315,6 @@ function handleLogin(e) {{
     if (res.status === 200 && res.body.ok) {{
       localStorage.setItem('dts_user', JSON.stringify(res.body.user));
       document.getElementById('authAlert').innerHTML = '';
-      if (typeof notifyParentOAuthSuccess === 'function' && notifyParentOAuthSuccess('digital_tax_stamps', res.body.user.manufacturer_name, res.body.user.tin)) return;
       checkAuth();
     }} else {{
       document.getElementById('authAlert').innerHTML = '<div class="alert alert-danger">' + (res.body.detail || 'Login failed') + '</div>';
@@ -378,11 +380,16 @@ function handleVerifyStamp(e) {{
 function testStamp(code) {{
   document.getElementById('scanCode').value = code;
   fetch('/api/v1/stamps/verify/' + code).then(r => r.json()).then(data => {{
+    const alertBox = document.createElement('div');
+    alertBox.setAttribute('role', 'alert');
     if (data.ok && data.is_authentic) {{
-      document.getElementById('scanAlert').innerHTML = '<div class="alert alert-success"><strong>✓ KAKASA GENUINE TAX STAMP</strong><br>Brand: ' + data.brand_name + '<br>Manufacturer: ' + data.manufacturer_name + '<br>Batch: ' + data.batch_number + '<br>Status: ' + data.status + '</div>';
+      alertBox.className = 'alert alert-success';
+      alertBox.textContent = 'Simulation match only — no physical stamp was authenticated. Brand: ' + data.brand_name + '. Manufacturer: ' + data.manufacturer_name + '. Batch: ' + data.batch_number + '. Sample status: ' + data.status + '.';
     }} else {{
-      document.getElementById('scanAlert').innerHTML = '<div class="alert alert-danger">❌ ' + (data.error || 'UNVERIFIED / COUNTERFEIT STAMP') + '</div>';
+      alertBox.className = 'alert alert-warning';
+      alertBox.textContent = data.error || 'Not verified by this local simulator. Check the official URA service; absence from sample data does not establish counterfeit status.';
     }}
+    document.getElementById('scanAlert').replaceChildren(alertBox);
   }});
 }}
 
@@ -461,7 +468,7 @@ def signup(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if existing:
         raise HTTPException(status_code=409, detail="Manufacturer TIN is already registered on DTS.")
 
-    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_utc = datetime.datetime.now(datetime.UTC)
     conn = service.database._get_connection()
     with conn:
         conn.execute(
@@ -502,7 +509,7 @@ def tariffs() -> dict[str, Any]:
     return client.list_tariffs()
 
 
-@app.get("/mcp/manifest")
+@app.get("/mcp/manifest", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_manifest() -> dict[str, Any]:
     return {
         "schema_version": "2026-07-28",
@@ -511,7 +518,7 @@ def mcp_manifest() -> dict[str, Any]:
     }
 
 
-@app.post("/mcp/call")
+@app.post("/mcp/call", deprecated=True, summary="Retired legacy route (not MCP JSON-RPC)")
 def mcp_call(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
     name = body.get("name")
     args = body.get("arguments", {})

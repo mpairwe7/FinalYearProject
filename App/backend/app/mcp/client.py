@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..resilience import CircuitBreaker
+from ..tracing import trace_tool_call
 from .mrtr import parse_input_required, unwrap_request_state
 from .policy import authorize_tool_call
 from .transport import (
@@ -137,9 +138,23 @@ class MCPCallResult:
         }
 
 
+@dataclass(frozen=True)
+class RemoteNamespace:
+    """What discovery learned about one deployment-bound remote server."""
+
+    namespace: str
+    reachable: bool
+    tools: tuple[dict[str, Any], ...] = ()
+    #: Self-reported by the server (name, version, instructions).  For
+    #: display and logs only — never an input to an authorization decision.
+    server: dict[str, Any] = field(default_factory=dict)
+
+
 def _meta_of(descriptor: dict[str, Any], key: str, default: Any) -> Any:
     """Read one of our ``_meta`` fields off an MCP tool descriptor."""
-    meta = descriptor.get("_meta") or {}
+    meta = descriptor.get("_meta")
+    if not isinstance(meta, dict):
+        return default
     return meta.get(f"ug.go.ura.chatbot/{key}", default)
 
 
@@ -188,14 +203,37 @@ class MCPClient:
         bound to a remote server — the remote wins.
         """
         for transport in self._unique_transports():
-            descriptor = transport.describe(name)
-            if descriptor is None:
+            try:
+                raw_descriptor = transport.describe(name)
+            except TransportError:
+                # A server that is down does not own this lookup; the tool
+                # may belong to another transport.
                 continue
+            if raw_descriptor is None:
+                continue
+            descriptor = self._with_transport_namespace(
+                raw_descriptor,
+                str(getattr(transport, "namespace", "")),
+            )
             bound = self._transports.get(str(_meta_of(descriptor, "namespace", "core")))
             if bound is not None and bound is not transport:
+                # Not caught: if the server this namespace is bound to
+                # cannot be asked, the call fails.  Falling back to the
+                # copy still registered in this process would run the
+                # tool somewhere the deployment said it must not run.
                 remote_descriptor = bound.describe(name)
                 if remote_descriptor is not None:
-                    return remote_descriptor, bound
+                    return (
+                        self._with_transport_namespace(
+                            remote_descriptor,
+                            str(getattr(bound, "namespace", "")),
+                        ),
+                        bound,
+                    )
+                # The server answered and does not serve this tool (a release
+                # that left it out, or a header annotation that made it
+                # invalid). It is not ours to run here either.
+                return None, None
             return descriptor, transport
         return None, None
 
@@ -210,7 +248,18 @@ class MCPClient:
         """Return MCP ``Tool`` descriptors across every bound transport."""
         seen: dict[str, dict[str, Any]] = {}
         for transport in self._unique_transports():
-            for descriptor in transport.list_tools():
+            namespace = str(getattr(transport, "namespace", ""))
+            try:
+                descriptors = transport.list_tools()
+            except Exception as exc:  # noqa: BLE001 — one connector must not hide the others
+                logger.warning(
+                    "MCP tool discovery failed namespace=%s (%s)",
+                    namespace or "local",
+                    type(exc).__name__,
+                )
+                continue
+            for raw_descriptor in descriptors:
+                descriptor = self._with_transport_namespace(raw_descriptor, namespace)
                 name = str(descriptor.get("name", ""))
                 if not name:
                     continue
@@ -219,11 +268,144 @@ class MCPClient:
                     seen[name] = descriptor
         return [seen[name] for name in sorted(seen)]
 
+    @staticmethod
+    def _with_transport_namespace(
+        descriptor: dict[str, Any], namespace: str,
+    ) -> dict[str, Any]:
+        """Bind a remote descriptor to the namespace configured by URA.
+
+        The deployment binding is authoritative. This also lets ordinary MCP
+        servers omit URA's private ``_meta`` namespace field while preserving
+        the standard tool descriptor sent to the model.
+        """
+        normalized = dict(descriptor)
+        if namespace:
+            raw_meta = normalized.get("_meta")
+            meta = dict(raw_meta) if isinstance(raw_meta, dict) else {}
+            meta["ug.go.ura.chatbot/namespace"] = namespace
+            normalized["_meta"] = meta
+        return normalized
+
+    def _probe_remote(self, namespace: str, transport: ToolTransport) -> RemoteNamespace:
+        try:
+            descriptors = transport.list_tools()
+        except Exception as exc:  # noqa: BLE001 — fail closed per server
+            logger.warning(
+                "MCP tool discovery failed namespace=%s (%s)",
+                namespace,
+                type(exc).__name__,
+            )
+            return RemoteNamespace(namespace, reachable=False)
+        tools = tuple(
+            self._with_transport_namespace(descriptor, namespace)
+            for descriptor in descriptors
+            if isinstance(descriptor, dict) and descriptor.get("name")
+        )
+        server: dict[str, Any] = {}
+        discover = getattr(transport, "discover", None)
+        if callable(discover):
+            try:
+                discovered = discover()
+            except Exception:  # noqa: BLE001 — identity is optional; the tools are not
+                discovered = {}
+            info = (discovered.get("_meta") or {}).get("io.modelcontextprotocol/serverInfo")
+            if isinstance(info, dict):
+                server = {"name": str(info.get("name", "")), "version": str(info.get("version", ""))}
+            if isinstance(discovered.get("instructions"), str):
+                server["instructions"] = discovered["instructions"]
+        return RemoteNamespace(namespace, reachable=True, tools=tools, server=server)
+
+    def remote_namespaces(self) -> list[RemoteNamespace]:
+        """Every deployment-bound remote server, reachable or not.
+
+        Servers are asked side by side: with several connectors bound, a
+        catalog request must cost one slow server's deadline, not the
+        sum of all of them.
+        """
+        remotes = [
+            (namespace, transport)
+            for namespace, transport in sorted(self._transports.items())
+            if not isinstance(transport, InProcessTransport)
+        ]
+        if len(remotes) <= 1:
+            return [self._probe_remote(namespace, transport) for namespace, transport in remotes]
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(len(remotes), 8), thread_name_prefix="mcp-discovery") as pool:
+            return list(pool.map(lambda remote: self._probe_remote(*remote), remotes))
+
+    def remote_tool_descriptors(self) -> list[tuple[str, dict[str, Any]]]:
+        """List tools from deployment-bound remote MCP servers only.
+
+        A failed server is omitted from discovery without preventing other
+        configured connectors from appearing.
+        """
+        return [
+            (remote.namespace, descriptor)
+            for remote in self.remote_namespaces()
+            for descriptor in remote.tools
+        ]
+
     def describe_tool(self, name: str) -> dict[str, Any] | None:
         from ..tools import ToolRegistry
 
         tool = ToolRegistry.get(name)
         return tool.to_openai_spec() if tool is not None else None
+
+    # -- Resources & Prompts (MCP 2026-07-28 Primitives) ---------------
+    def list_resources(self, namespace: str | None = None) -> list[dict[str, Any]]:
+        """List all read-only data resources exposed across MCP transports."""
+        resources: list[dict[str, Any]] = []
+        seen_uris: set[str] = set()
+        transports = (
+            [self._transports[namespace]]
+            if namespace and namespace in self._transports
+            else list(self._transports.values())
+        )
+        for transport in transports:
+            if hasattr(transport, "list_resources"):
+                for r in transport.list_resources():
+                    uri = r.get("uri")
+                    if uri and uri not in seen_uris:
+                        seen_uris.add(uri)
+                        resources.append(r)
+        return resources
+
+    def read_resource(self, uri: str, *, tenant_id: str = "default", user_id: str = "") -> dict[str, Any]:
+        """Read the contents of a URI-addressable MCP resource."""
+        scheme = uri.split("://")[0].lower() if "://" in uri else ""
+        transport = self._transports.get(scheme, self._transports.get("core", next(iter(self._transports.values()))))
+        if hasattr(transport, "read_resource"):
+            return transport.read_resource(uri)
+        raise LookupError(f"No transport supports reading resource URI '{uri}'")
+
+    def list_prompts(self, namespace: str | None = None) -> list[dict[str, Any]]:
+        """List all prompt templates exposed across MCP transports."""
+        prompts: list[dict[str, Any]] = []
+        seen_names: set[str] = set()
+        transports = (
+            [self._transports[namespace]]
+            if namespace and namespace in self._transports
+            else list(self._transports.values())
+        )
+        for transport in transports:
+            if hasattr(transport, "list_prompts"):
+                for p in transport.list_prompts():
+                    p_name = p.get("name")
+                    if p_name and p_name not in seen_names:
+                        seen_names.add(p_name)
+                        prompts.append(p)
+        return prompts
+
+    def get_prompt(self, name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Fetch and instantiate a prompt template by name."""
+        for transport in self._transports.values():
+            if hasattr(transport, "get_prompt"):
+                try:
+                    return transport.get_prompt(name, arguments)
+                except LookupError:
+                    continue
+        raise LookupError(f"Prompt template '{name}' not found")
 
     def available_for(
         self,
@@ -284,12 +466,47 @@ class MCPClient:
 
         Never raises: every failure mode — unknown tool, denied policy,
         invalid arguments, open circuit, transport error — comes back as
-        a result the model can read and react to.
+        a result the model can read and react to. Every call is one
+        ``execute_tool {name}`` span and one ``ura_tool_calls_total`` sample.
         """
+        with trace_tool_call(name) as outcome:
+            result = self._call_tool(
+                name,
+                arguments,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                confirmed=confirmed,
+                idempotency_key=idempotency_key,
+                iteration=iteration,
+                timeout_s=timeout_s,
+                input_responses=input_responses,
+                request_state=request_state,
+            )
+            outcome["ok"] = bool(result.ok)
+            return result
+
+    def _call_tool(  # noqa: PLR0913 - a call's full security context
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        tenant_id: str,
+        user_id: str,
+        user_role: str,
+        granted_purposes: list[str] | None,
+        confirmed: bool,
+        idempotency_key: str,
+        iteration: int,
+        timeout_s: float,
+        input_responses: list[Any] | None,
+        request_state: Any,
+    ) -> MCPCallResult:
         t0 = time.perf_counter()
         call_id = str(uuid.uuid4())
         args = dict(arguments or {})
-        descriptor, transport = self._descriptor(name)
+        transport: ToolTransport | None = None
 
         def finish(
             result: dict[str, Any],
@@ -318,6 +535,17 @@ class MCPClient:
                 deadline_exceeded=elapsed_ms > timeout_s * 1000,
             )
 
+        try:
+            descriptor, transport = self._descriptor(name)
+        except TransportError:
+            return finish(
+                {
+                    "ok": False,
+                    "error": f"The service that provides '{name}' is temporarily unavailable.",
+                    "retryable": True,
+                },
+                ok=False,
+            )
         if descriptor is None or transport is None:
             return finish(
                 {"ok": False, "error": f"Unknown tool: {name}"},
@@ -327,6 +555,13 @@ class MCPClient:
         risk = str(_meta_of(descriptor, "risk", "low"))
         namespace = str(_meta_of(descriptor, "namespace", "core"))
 
+        requires_confirmation = bool(
+            _meta_of(descriptor, "requiresConfirmation", False)
+        )
+        # A write proposal must pass role and consent checks before it is
+        # shown to the user, but the proposal itself is not a write. The
+        # approval replay below is the only call that satisfies the
+        # confirmation and idempotency requirements.
         policy = authorize_tool_call(
             name=name,
             risk=risk,
@@ -339,7 +574,8 @@ class MCPClient:
             required_scopes=tuple(_meta_of(descriptor, "requiredScopes", ()) or ()),
             allowed_roles=tuple(_meta_of(descriptor, "allowedRoles", ()) or ()),
             scope_exempt_roles=tuple(_meta_of(descriptor, "scopeExemptRoles", ()) or ()),
-            requires_confirmation=_meta_of(descriptor, "requiresConfirmation", None),
+            requires_confirmation=requires_confirmation and confirmed,
+            arguments=args,
         )
         if not policy["allowed"]:
             return finish(
@@ -349,17 +585,45 @@ class MCPClient:
                 namespace=namespace,
             )
 
-        errors = validate_arguments(descriptor.get("inputSchema"), args)
+        input_schema = descriptor.get("inputSchema") or {}
+        declared_properties = set((input_schema.get("properties") or {}).keys())
+        validation_args = dict(args)
+        # These are MCP dispatch controls, not tool inputs. Older tools do
+        # not declare them in their schemas; strip them only in that case so
+        # strict additionalProperties validation remains useful.
+        for control in ("submit", "idempotency_key"):
+            if control not in declared_properties:
+                validation_args.pop(control, None)
+        errors = validate_arguments(input_schema, validation_args)
         if errors:
             return finish(
                 {
                     "ok": False,
                     "error": f"Invalid arguments for {name}: " + "; ".join(errors),
                     "validation_errors": errors,
-                    "expected": descriptor.get("inputSchema"),
+                    "expected": input_schema,
                     "policy": policy,
                 },
                 ok=False,
+                risk=risk,
+                namespace=namespace,
+            )
+
+        if requires_confirmation and not confirmed:
+            proposal = dict(validation_args)
+            proposal["idempotency_key"] = idempotency_key or uuid.uuid4().hex
+            proposal_policy = dict(policy)
+            proposal_policy["requires_confirmation"] = True
+            return finish(
+                {
+                    "ok": True,
+                    "submitted": False,
+                    "requires_confirmation": True,
+                    "proposal": proposal,
+                    "message": "No connector action has run. Review and confirm this proposal to continue.",
+                    "policy": proposal_policy,
+                },
+                ok=True,
                 risk=risk,
                 namespace=namespace,
             )
@@ -407,9 +671,15 @@ class MCPClient:
             )
 
         try:
+            declared_args = set((input_schema.get("properties") or {}).keys())
+            dispatch_args = dict(validation_args)
+            if "submit" in declared_args and "submit" in args:
+                dispatch_args["submit"] = args["submit"]
+            if "idempotency_key" in declared_args and "idempotency_key" in args:
+                dispatch_args["idempotency_key"] = args["idempotency_key"]
             raw = transport.call(
                 name,
-                args,
+                dispatch_args,
                 meta=meta,
                 timeout_s=timeout_s,
                 input_responses=input_responses,
@@ -525,15 +795,19 @@ class MCPClient:
         }
 
     def ping(self, namespace: str = "tax_calculator", timeout_s: float = 5.0) -> bool:
-        """Diagnostic reachability probe for an MCP namespace."""
+        """Diagnostic reachability probe for an MCP namespace.
+
+        A remote server is probed with ``server/discover``; the protocol's
+        own ``ping`` was removed in 2026-07-28.
+        """
         transport = self._transport_for(namespace)
         if isinstance(transport, InProcessTransport):
             return True
-        if hasattr(transport, "ping"):
-            return transport.ping(timeout_s=timeout_s)
+        probe = getattr(transport, "ping", None)
+        if not callable(probe):
+            return False
         try:
-            res = transport._request("ping", {}, timeout_s=timeout_s)
-            return isinstance(res, dict)
+            return bool(probe(timeout_s=timeout_s))
         except Exception:
             return False
 

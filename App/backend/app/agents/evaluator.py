@@ -305,11 +305,22 @@ def _note(numeric_ok: bool, year_ok: bool, grounded: bool, detail: dict[str, Any
         money = detail.get("money", {})
         expected = money.get("expected", {})
         if expected:
-            figure = next(iter(expected.items()))
-            notes.append(
-                f"State the calculated figure. {money.get('tool', 'The calculator')} "
-                f"returned {figure[0]}={figure[1]:,.0f}; use that number, not one of your own."
-            )
+            if len(expected) == 1:
+                figure = next(iter(expected.items()))
+                val_str = f"{figure[1]:,.0f}" if isinstance(figure[1], (int, float)) else str(figure[1])
+                notes.append(
+                    f"State the calculated figure. {money.get('tool', 'The calculator')} "
+                    f"returned {figure[0]}={val_str}; use that number, not one of your own."
+                )
+            else:
+                items_str = ", ".join(
+                    f"{k}={v:,.0f}" if isinstance(v, (int, float)) else f"{k}={v}"
+                    for k, v in expected.items()
+                )
+                notes.append(
+                    f"State the calculated figures. {money.get('tool', 'The calculator')} "
+                    f"returned {items_str}; use these numbers, not ones of your own."
+                )
         else:
             notes.append("Call the calculator and state the figure it returns.")
     if not year_ok:

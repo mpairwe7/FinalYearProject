@@ -33,6 +33,7 @@ markers = [
     "integration: Integration tests",
     "slow: Slow running tests",
     "ml: Machine learning tests",
+    "asyncio: mark test as asyncio",
 ]
 
 [tool.coverage.run]

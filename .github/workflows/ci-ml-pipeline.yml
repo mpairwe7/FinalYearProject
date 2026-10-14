@@ -31,8 +31,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
-  security-events: write
 
 concurrency:
   group: ml-pipeline-${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
@@ -277,6 +275,7 @@ jobs:
 
       - name: Upload coverage report
         if: always()
+        continue-on-error: true
         uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4.6.0
         with:
           file: ./coverage.xml
@@ -617,8 +616,10 @@ jobs:
   # Stage 5d: Production Gates
   # ============================================
   # Runs the combined production quality gate against the RAG evaluation
-  # results. Uses --soft-fail so CI stays green while the gate is scored
-  # on RAG metrics alone; safety/calibration/tokenizer/benchmark/model-card
+  # results. Blocking: every absolute threshold must hold AND no metric may
+  # drop more than 0.03 below ml/configs/quality_baseline.json (the scores
+  # dev last measured). The gate is scored on RAG metrics alone;
+  # safety/calibration/tokenizer/benchmark/model-card
   # inputs are omitted (their producing scripts were training-pipeline
   # tooling, removed with the rest of ml/) — quality_gates.py treats each
   # as optional and skips the corresponding check when absent.
@@ -657,7 +658,8 @@ jobs:
             --family production \
             --config ml/configs/training_config.yaml \
             --rag-eval Results/rag_evaluation_results.json \
-            --soft-fail
+            --baseline ml/configs/quality_baseline.json \
+            --max-regression 0.03
 
       - name: Step summary
         if: always()
@@ -665,7 +667,7 @@ jobs:
           {
             echo "## Production Gates"
             echo ""
-            echo "Quality gates scored against \`Results/rag_evaluation_results.json\`, run with \`--soft-fail\`."
+            echo "Quality gates scored against \`Results/rag_evaluation_results.json\` and the \`ml/configs/quality_baseline.json\` regression baseline (blocking)."
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ============================================
@@ -783,6 +785,11 @@ jobs:
   build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+      actions: read
     timeout-minutes: 30
     needs: [lint-and-test]
     if: github.event_name != 'pull_request'
@@ -816,6 +823,8 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           push: ${{ github.event_name != 'pull_request' }}
           load: ${{ github.event_name == 'pull_request' }}
           tags: |

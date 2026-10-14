@@ -51,7 +51,7 @@ class BwimsService:
                 consignment=None,
                 days_in_storage=0,
                 is_overstayed=False,
-                message=f"Consignment entry '{request.entry_number}' was not found in BWIMS registry.",
+                message=f"Sample consignment '{request.entry_number}' was not found in the local BWIMS simulator.",
                 error=f"Entry {request.entry_number} not found",
             )
 

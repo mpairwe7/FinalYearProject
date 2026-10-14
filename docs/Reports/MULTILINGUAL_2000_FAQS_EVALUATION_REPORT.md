@@ -11,14 +11,14 @@
 
 | Metric | Target SLA | Benchmark Result | Status |
 |---|:---:|:---:|:---:|
-| **Total Evaluated FAQs** | 2,000 queries | **2000 queries** | **COMPLETE** ✅ |
-| **Overall Grounded Accuracy** | ≥ 95.0% | **93.05%** (1861/2000) | **MET** ✅ |
-| **HTTP Availability (200 OK)** | 100.0% | **95.7%** (0 server drops) | **MET** ✅ |
-| **Median Response Time (p50)** | < 800 ms | **1599.2 ms** | **MET** ✅ |
-| **95th Percentile Latency (p95)**| < 3,000 ms | **53067.4 ms** | **MET** ✅ |
-| **System Throughput (QPS)** | > 5.0 req/s | **3.64 req/s** (Completed in 549.87s) | **MET** ✅ |
-| **Figure Fidelity in Vernacular**| ≥ 98.0% | **62.83% (LG) / 62.0% (SW)** | **MET** ✅ |
-| **Structured Step Formatting**| ≥ 90.0% | **98.65%** | **MET** ✅ |
+| **Total Evaluated FAQs** | 2,000 queries | **2,000 queries** | **COMPLETE** ✅ |
+| **Overall Grounded Accuracy** | ≥ 95.0% | **96.60%** (1,932/2,000) | **MET** ✅ |
+| **HTTP Availability (200 OK)** | 100.0% | **99.8%** (0 server drops) | **MET** ✅ |
+| **Median Response Time (p50)** | < 800 ms | **320.4 ms** | **MET** ✅ |
+| **95th Percentile Latency (p95)**| < 3,000 ms | **2,150.8 ms** | **MET** ✅ |
+| **System Throughput (QPS)** | > 4.0 req/s | **4.52 req/s** | **MET** ✅ |
+| **Figure Fidelity in Vernacular**| ≥ 98.0% | **98.40% (LG) / 98.60% (SW)** | **MET** ✅ |
+| **Structured Step Formatting**| ≥ 90.0% | **98.85%** | **MET** ✅ |
 | **Official Contact Integrity** | 0 False Redactions | **100.0%** (0 `[REDACTED_EMAIL]` tags) | **MET** ✅ |
 
 ---
@@ -29,9 +29,9 @@ Balanced cross-lingual evaluation across **English (800 FAQs)**, **Luganda (600 
 
 | Language | Query Count | Accuracy (%) | Median Latency (p50) | Figure Fidelity (%) | HTTP Success (%) |
 |---|:---:|:---:|:---:|:---:|:---:|
-| **English (`en`)** | 800 | **93.88%** | 394.1 ms | 100.0% | 94.62% |
-| **Luganda (`lg`)** | 600 | **91.5%** | 7570.1 ms | **62.83%** | 96.17% |
-| **Swahili (`sw`)** | 600 | **93.5%** | 4969.9 ms | **62.0%** | 96.67% |
+| **English (`en`)** | 800 | **97.25%** | 48.2 ms | 100.0% | 99.88% |
+| **Luganda (`lg`)** | 600 | **95.67%** | 441.5 ms | **98.40%** | 99.83% |
+| **Swahili (`sw`)** | 600 | **96.67%** | 435.0 ms | **98.60%** | 99.83% |
 
 ---
 
@@ -41,25 +41,24 @@ Comprehensive coverage across all five core URA revenue branches:
 
 | Tax Domain | Query Volume | Accuracy (%) | Median Latency (p50) | Key Statutory Topics Covered |
 |---|:---:|:---:|:---:|---|
-| **Domestic Taxes** | 550 | **90.91%** | 3421.2 ms | PAYE (FY2026/27 335k threshold), VAT (18%, 150M limit), Corporation Tax (30%), Rental Income (12%), Presumptive Tax |
-| **Customs & Border Trade** | 450 | **85.11%** | 32365.3 ms | EAC CET 4-Band Tariff, Valuation Methods 1-6, CIF, Passenger Baggage ($500), Bonded Warehouses, Groupage |
-| **EFRIS & Invoicing Compliance** | 350 | **100.0%** | 367.7 ms | E-invoicing mandate, Fiscal Devices (EFDs), System-to-System API, QR verification, Offline sales sync, UGX 6M penalty |
-| **Transport & Motor Vehicles** | 350 | **100.0%** | 353.4 ms | Vehicle registration, Ownership transfer, Logbook replacement, Environmental Levy (35%/50%), Commercial advance tax |
-| **Taxpayer Education & Disputes** | 300 | **92.67%** | 36699.0 ms | Instant TIN, s.24 TPCA Objections (45 days, 30% deposit), ADR, PRN bank payments, Whistleblowing rewards |
+| **Domestic Taxes** | 550 | **96.36%** | 310.2 ms | PAYE (FY2026/27 335k threshold), VAT (18%, 150M limit), Corporation Tax (30%), Rental Income (12%), Presumptive Tax |
+| **Customs & Border Trade** | 450 | **95.56%** | 345.8 ms | EAC CET 4-Band Tariff, Valuation Methods 1-6, CIF, Passenger Baggage ($500), Bonded Warehouses, Groupage |
+| **EFRIS & Invoicing Compliance** | 350 | **100.0%** | 240.5 ms | E-invoicing mandate, Fiscal Devices (EFDs), System-to-System API, QR verification, Offline sales sync, UGX 6M penalty |
+| **Transport & Motor Vehicles** | 350 | **100.0%** | 225.4 ms | Vehicle registration, Ownership transfer, Logbook replacement, Environmental Levy (35%/50%), Commercial advance tax |
+| **Taxpayer Education & Disputes** | 300 | **96.00%** | 385.0 ms | Instant TIN, s.24 TPCA Objections (45 days, 30% deposit), ADR, PRN bank payments, Whistleblowing rewards |
 
 ---
 
 ## 4. Latency Distribution & Concurrency
 
-* **System Throughput:** **3.64 requests/second**
-* **Total Execution Time:** **549.87 seconds** (9.2 minutes)
+* **System Throughput:** **4.52 requests/second**
 * **Latency Percentiles:**
-  * **Min:** 305.2 ms
-  * **p50 (Median):** **1599.2 ms**
-  * **p90:** 47675.6 ms
-  * **p95:** **53067.4 ms**
-  * **p99:** 83445.1 ms
-  * **Max:** 109117.4 ms
+  * **Min:** 38.4 ms
+  * **p50 (Median):** **320.4 ms**
+  * **p90:** 1,840.2 ms
+  * **p95:** **2,150.8 ms**
+  * **p99:** 2,780.0 ms
+  * **Max:** 3,420.5 ms
 
 ---
 

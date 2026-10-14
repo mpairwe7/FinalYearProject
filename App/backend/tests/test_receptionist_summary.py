@@ -89,12 +89,12 @@ class TestSummaryLanguages(unittest.TestCase):
         turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
         self.assertEqual(_call_languages({"locale": "en"}, turns), ("en", ["en"]))
 
-    def _summarise(self, call, turns, local, gemini):
+    def _summarise(self, call, turns, local):
         with patch.object(summary_mod, "get_call", return_value=call), \
                 patch.object(summary_mod, "list_turns", return_value=turns), \
                 patch.object(summary_mod, "update_call"), \
                 patch.object(summary_mod, "_summarise_local", side_effect=local) as loc, \
-                patch.object(summary_mod, "_summarise_gemini", side_effect=gemini) as gem:
+                patch("app.providers.gateway.gemini_generate", side_effect=AssertionError("Gemini called")) as gem:
             result = summary_mod.generate_call_summary("c1")
         return result, loc, gem
 
@@ -102,7 +102,7 @@ class TestSummaryLanguages(unittest.TestCase):
         parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
         call = {"locale": "lg", "metrics": {"language": {"final": "lg", "used": ["en", "lg"]}}}
         turns = [{"speaker": "caller", "text": "Nsaba okumanya ku TIN"}]
-        result, loc, gem = self._summarise(call, turns, [dict(parsed)], [None])
+        result, loc, gem = self._summarise(call, turns, [dict(parsed)])
         loc.assert_called_once()
         gem.assert_not_called()
         self.assertEqual((result["language"], result["languages_used"]), ("lg", ["en", "lg"]))
@@ -111,18 +111,18 @@ class TestSummaryLanguages(unittest.TestCase):
     def test_english_calls_try_sunflower_first_too(self):
         parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
         turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
-        result, loc, gem = self._summarise({"locale": "en"}, turns, [dict(parsed)], [None])
+        result, loc, gem = self._summarise({"locale": "en"}, turns, [dict(parsed)])
         loc.assert_called_once()
         gem.assert_not_called()
         self.assertEqual(result["language"], "en")
 
-    def test_gemini_summarises_only_when_sunflower_cannot(self):
-        parsed = {"subject": "TIN", "summary": "Caller asked about TIN registration."}
+    def test_without_sunflower_the_template_summary_is_used(self):
+        """Local only (G122): no cloud model writes a summary when vLLM is down."""
         turns = [{"speaker": "caller", "text": "How do I register for a TIN?"}]
-        result, loc, gem = self._summarise({"locale": "sw"}, turns, [None], [dict(parsed)])
+        result, loc, gem = self._summarise({"locale": "sw"}, turns, [None])
         loc.assert_called_once()
-        gem.assert_called_once()
-        self.assertEqual(result["summary"], parsed["summary"])
+        gem.assert_not_called()
+        self.assertIn("Fallback template summary", result["ai_handling_notes"])
 
     def test_the_prompt_demands_english(self):
         self.assertIn("write every field in English", summary_mod.SUMMARY_SYSTEM)

@@ -549,6 +549,48 @@ def check_production_gates(
     return results
 
 
+def check_regressions(rag_eval: dict | None, baseline: dict | None, tolerance: float) -> list[dict]:
+    """Blocking checks: no RAG metric may fall more than *tolerance* below *baseline*.
+
+    The absolute thresholds above are floors; a change can lose a third of a
+    metric and still clear them. The baseline (``ml/configs/quality_baseline.json``)
+    records the scores ``dev`` last measured, so a drop shows up in the pull
+    request that caused it. Raise a baseline value deliberately, in the same
+    change that earns it.
+
+    A baseline that is missing, unreadable or names no metrics is itself a
+    blocking failure: otherwise the gate would pass with no comparison made.
+    """
+    if not isinstance(baseline, dict) or not baseline.get("metrics"):
+        return [
+            {
+                "name": "regression.baseline",
+                "value": "missing",
+                "threshold": "a baseline with metrics",
+                "passed": False,
+                "severity": "blocking",
+                "comparator": "present",
+            }
+        ]
+    checks: list[dict] = []
+    for name, base in sorted(baseline["metrics"].items()):
+        entry = (rag_eval or {}).get(name)
+        current = entry.get("mean") if isinstance(entry, dict) else entry
+        floor = round(float(base) - tolerance, 4)
+        passed = isinstance(current, (int, float)) and float(current) >= floor
+        checks.append(
+            {
+                "name": f"regression.{name}",
+                "value": round(float(current), 4) if isinstance(current, (int, float)) else "missing",
+                "threshold": floor,
+                "passed": passed,
+                "severity": "blocking",
+                "comparator": ">=",
+            }
+        )
+    return checks
+
+
 # ---------------------------------------------------------------------------
 # Dispatcher
 # ---------------------------------------------------------------------------
@@ -631,6 +673,18 @@ def main():
         "--mobile-manifest", type=Path, default=None, help="Path to mobile_manifest.json"
     )
     prod.add_argument("--model-card", type=Path, default=None, help="Path to MODEL_CARD.md")
+    prod.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help="RAG metric baseline (ml/configs/quality_baseline.json); a drop past --max-regression fails",
+    )
+    prod.add_argument(
+        "--max-regression",
+        type=float,
+        default=0.03,
+        help="Largest allowed drop below the baseline for any metric (default 0.03)",
+    )
 
     args = parser.parse_args()
 
@@ -660,6 +714,19 @@ def main():
             rag_gates=config.get("rag_quality_gates", {}),
             prod_gates=config.get("production_gates", {}),
         )
+        if args.baseline is not None:
+            baseline = _load_json(_abs(args.baseline))
+            regressions = check_regressions(
+                _load_json(_abs(args.rag_eval)), baseline, args.max_regression
+            )
+            results["checks"].extend(regressions)
+            failed = [c for c in regressions if not c["passed"]]
+            if failed:
+                results["passed"] = False
+            summary = results.get("summary")
+            if summary:
+                summary["blocking_total"] += len(regressions)
+                summary["blocking_failed"] += len(failed)
         _print_results("production", results)
         if results["passed"]:
             print("ALL PRODUCTION GATES PASSED")

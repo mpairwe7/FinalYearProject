@@ -18,6 +18,7 @@ import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from .state import AgentGraphState, GraphOutcome
 
@@ -42,6 +43,62 @@ class NodeResult:
     note: str = ""
 
 
+class CheckpointStore:
+    """Base class for durable graph state checkpointers."""
+
+    def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        raise NotImplementedError
+
+    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+
+class InMemoryCheckpointStore(CheckpointStore):
+    """Process-local checkpoint store for tests and lightweight executions."""
+
+    def __init__(self) -> None:
+        self._checkpoints: dict[str, list[dict[str, Any]]] = {}
+
+    def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        entry = {"thread_id": thread_id, "step": step, "node": node_name, "state": dict(state_dict), "ts": time.time()}
+        self._checkpoints.setdefault(thread_id, []).append(entry)
+
+    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        entries = self._checkpoints.get(thread_id)
+        return entries[-1]["state"] if entries else None
+
+
+class DurableCheckpointStore(CheckpointStore):
+    """Database-backed durable checkpointer for agent graph execution states."""
+
+    def save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        try:
+            from ...database import save_agent_checkpoint
+
+            save_agent_checkpoint(thread_id, step, node_name, state_dict)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("DurableCheckpointStore save error: %s", exc)
+
+    async def async_save_checkpoint(self, thread_id: str, step: int, node_name: str, state_dict: dict[str, Any]) -> None:
+        import asyncio
+
+        await asyncio.to_thread(self.save_checkpoint, thread_id, step, node_name, state_dict)
+
+    def load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        try:
+            from ...database import get_agent_checkpoint
+
+            return get_agent_checkpoint(thread_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("DurableCheckpointStore load error: %s", exc)
+            return None
+
+    async def async_load_checkpoint(self, thread_id: str) -> dict[str, Any] | None:
+        import asyncio
+
+        return await asyncio.to_thread(self.load_checkpoint, thread_id)
+
+
 class GraphRuntime:
     """Dispatch loop for a list of named nodes.
 
@@ -50,6 +107,7 @@ class GraphRuntime:
     - Per-node duration tracking into state.trace
     - Structured exception capture — a failing node terminates
       with ``outcome=ERRORED`` rather than unwinding
+    - Optional durable checkpointing after each node transition
     """
 
     def __init__(
@@ -57,6 +115,7 @@ class GraphRuntime:
         nodes: Mapping[str, GraphNode],
         entry: str,
         max_steps: int = 12,
+        checkpointer: CheckpointStore | None = None,
     ) -> None:
         if not isinstance(nodes, Mapping) or not nodes:
             raise ValueError("nodes must be a non-empty mapping")
@@ -71,9 +130,10 @@ class GraphRuntime:
         self._nodes = dict(nodes)
         self._entry = entry
         self._max_steps = max_steps
+        self._checkpointer = checkpointer
 
-    def run(self, state: AgentGraphState) -> AgentGraphState:
-        current = self._entry
+    def run(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+        current = entry or self._entry
         steps = 0
         while current != END:
             if steps >= self._max_steps:
@@ -123,11 +183,172 @@ class GraphRuntime:
 
             state.record(current, elapsed_ms, status="ok")
 
+            if self._checkpointer and thread_id:
+                try:
+                    self._checkpointer.save_checkpoint(thread_id, steps, current, state.to_dict())
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("GraphRuntime: checkpoint save skipped: %s", exc)
+
             if result.outcome is not None:
                 state.outcome = result.outcome
+            if result.outcome == GraphOutcome.WAITING_USER:
+                break
             if result.next_node == END:
                 break
             current = result.next_node
             steps += 1
 
         return state
+
+    async def arun(self, state: AgentGraphState, thread_id: str = "", entry: str | None = None) -> AgentGraphState:
+        """Asynchronously dispatch nodes without blocking the asyncio event loop."""
+        import asyncio
+        import inspect
+
+        current = entry or self._entry
+        steps = 0
+        while current != END:
+            if steps >= self._max_steps:
+                logger.warning("GraphRuntime: max_steps=%d reached", self._max_steps)
+                state.outcome = GraphOutcome.TRUNCATED
+                break
+
+            node = self._nodes.get(current)
+            if node is None:
+                logger.error("GraphRuntime: unknown node %r", current)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"unknown node: {current}"
+                break
+
+            t0 = time.perf_counter()
+            try:
+                if inspect.iscoroutinefunction(node):
+                    result = await node(state)
+                else:
+                    outcome = node(state)
+                    if inspect.isawaitable(outcome):
+                        result = await outcome
+                    else:
+                        result = outcome
+            except Exception as e:  # noqa: BLE001
+                elapsed_ms = (time.perf_counter() - t0) * 1000
+                state.record(current, elapsed_ms, status="error", error_type=type(e).__name__)
+                logger.exception("GraphRuntime: node %s raised", current)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: {type(e).__name__}: {e}"
+                break
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+
+            if not isinstance(result, NodeResult):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidNodeResult")
+                logger.error("GraphRuntime: node %s returned %s, expected NodeResult", current, type(result).__name__)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: node returned {type(result).__name__}, expected NodeResult"
+                break
+            if not isinstance(result.next_node, str) or (
+                result.next_node != END and result.next_node not in self._nodes
+            ):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidTransition")
+                logger.error("GraphRuntime: node %s selected unknown node %r", current, result.next_node)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"unknown node: {result.next_node}"
+                break
+            if result.outcome is not None and not isinstance(result.outcome, GraphOutcome):
+                state.record(current, elapsed_ms, status="error", error_type="InvalidOutcome")
+                logger.error("GraphRuntime: node %s returned invalid outcome %r", current, result.outcome)
+                state.outcome = GraphOutcome.ERRORED
+                state.error = f"{current}: invalid graph outcome"
+                break
+
+            state.record(current, elapsed_ms, status="ok")
+
+            if self._checkpointer and thread_id:
+                try:
+                    await asyncio.to_thread(
+                        self._checkpointer.save_checkpoint, thread_id, steps, current, state.to_dict()
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("GraphRuntime: checkpoint save skipped: %s", exc)
+
+            if result.outcome is not None:
+                state.outcome = result.outcome
+            if result.outcome == GraphOutcome.WAITING_USER:
+                break
+            if result.next_node == END:
+                break
+            current = result.next_node
+            steps += 1
+
+        return state
+
+    def resume(
+        self,
+        thread_id: str,
+        resume_payload: dict[str, Any] | None = None,
+        start_node: str | None = None,
+    ) -> AgentGraphState:
+        """Resume a suspended or interrupted graph execution from its saved checkpoint."""
+        if not self._checkpointer:
+            raise RuntimeError("Cannot resume execution without a configured checkpointer")
+        data = self._checkpointer.load_checkpoint(thread_id)
+        if not data:
+            raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+
+        state = AgentGraphState.from_dict(data)
+        if state.outcome != GraphOutcome.WAITING_USER:
+            raise ValueError(f"Thread {thread_id!r} is not waiting for user consent (current outcome: {state.outcome})")
+
+        if resume_payload and resume_payload.get("approved"):
+            if state.pending_action:
+                state.pending_action.authorized = True
+            state.outcome = GraphOutcome.ANSWERED
+        elif resume_payload:
+            if state.pending_action:
+                state.pending_action.authorized = False
+            state.outcome = GraphOutcome.ESCALATED
+            state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+        else:
+            state.outcome = GraphOutcome.ANSWERED
+
+        entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
+        if entry not in self._nodes:
+            entry = self._entry
+
+        return self.run(state, thread_id=thread_id, entry=entry)
+
+    async def aresume(
+        self,
+        thread_id: str,
+        resume_payload: dict[str, Any] | None = None,
+        start_node: str | None = None,
+    ) -> AgentGraphState:
+        """Asynchronously resume an interrupted graph execution from its checkpoint."""
+        if not self._checkpointer:
+            raise RuntimeError("Cannot resume execution without a configured checkpointer")
+        import asyncio
+
+        data = await asyncio.to_thread(self._checkpointer.load_checkpoint, thread_id)
+        if not data:
+            raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+
+        state = AgentGraphState.from_dict(data)
+        if state.outcome != GraphOutcome.WAITING_USER:
+            raise ValueError(f"Thread {thread_id!r} is not waiting for user consent (current outcome: {state.outcome})")
+
+        if resume_payload and resume_payload.get("approved"):
+            if state.pending_action:
+                state.pending_action.authorized = True
+            state.outcome = GraphOutcome.ANSWERED
+        elif resume_payload:
+            if state.pending_action:
+                state.pending_action.authorized = False
+            state.outcome = GraphOutcome.ESCALATED
+            state.escalation_reason = str(resume_payload.get("reason", "Action declined by taxpayer"))
+        else:
+            state.outcome = GraphOutcome.ANSWERED
+
+        entry = start_node or ("act" if state.pending_action and state.pending_action.authorized else "respond")
+        if entry not in self._nodes:
+            entry = self._entry
+
+        return await self.arun(state, thread_id=thread_id, entry=entry)

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -136,6 +137,43 @@ class AuditEvent:
         )
 
 
+def _timestamp_seal(anchor: dict[str, Any]) -> str:
+    """RFC 3161 token for a seal from ``AUDIT_TSA_URL``, or ``""``.
+
+    A seal is still written when the TSA cannot be reached — the chain and
+    Merkle root stand on their own — but the miss is counted
+    (``ura_audit_tsa_failures_total``) and logged, so a deployment that relies
+    on timestamps notices it is not getting them.
+    """
+    tsa_url = os.getenv("AUDIT_TSA_URL", "").strip()
+    if not tsa_url:
+        return ""
+    from ..analytics import metrics
+    from .tsa import request_timestamp, seal_statement
+
+    statement = seal_statement(
+        tenant_id=anchor["tenant_id"],
+        first_seq=anchor["first_seq"],
+        last_seq=anchor["last_seq"],
+        merkle_root=anchor["merkle_root"],
+        head_hash=anchor["head_hash"],
+    )
+    try:
+        token = request_timestamp(statement, tsa_url)
+    except Exception as exc:
+        metrics.inc("audit_tsa_failures_total", labels={"reason": type(exc).__name__})
+        logger.warning(
+            "RFC 3161 timestamp for seal %s seq=%d..%d failed: %s",
+            anchor["tenant_id"],
+            anchor["first_seq"],
+            anchor["last_seq"],
+            exc,
+        )
+        return ""
+    metrics.inc("audit_tsa_tokens_total")
+    return token
+
+
 class AuditLedger:
     """SQLite-backed append-only hash-chained audit log.
 
@@ -187,6 +225,7 @@ class AuditLedger:
         )
         self._add_column("audit_events", "hash_version", "INTEGER NOT NULL DEFAULT 1")
         self._add_column("audit_anchors", "head_hash", "TEXT NOT NULL DEFAULT ''")
+        self._add_column("audit_anchors", "tsa_token", "TEXT DEFAULT ''")
         # Created separately: a ledger written before these existed may
         # already hold a forked chain (two rows with one seq). That must not
         # stop the service; the verifier reports the fork instead.
@@ -359,7 +398,7 @@ class AuditLedger:
         from .. import database as db
 
         return db.query_one(
-            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token
                FROM audit_anchors WHERE tenant_id = ?
                ORDER BY last_seq DESC LIMIT 1""",
             (tenant_id,),
@@ -370,7 +409,7 @@ class AuditLedger:
         from .. import database as db
 
         return db.query_all(
-            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at
+            """SELECT anchor_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token
                FROM audit_anchors WHERE tenant_id = ?
                ORDER BY first_seq ASC""",
             (tenant_id,),
@@ -455,20 +494,22 @@ class AuditLedger:
             (tenant_id, first_seq, last_seq),
         )
         head = rows[-1] if rows and int(rows[-1]["seq"]) == last_seq else None
+        merkle = compute_merkle_root(r["payload_hash"] for r in rows)
         anchor = {
             "anchor_id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "first_seq": first_seq,
             "last_seq": last_seq,
-            "merkle_root": compute_merkle_root(r["payload_hash"] for r in rows),
+            "merkle_root": merkle,
             "head_hash": str(head["row_hash"]) if head else "",
             "created_at": time.time(),
         }
+        anchor["tsa_token"] = _timestamp_seal(anchor)
         try:
             db.execute(
                 """INSERT INTO audit_anchors
-                   (anchor_id, tenant_id, first_seq, last_seq, merkle_root, head_hash, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (anchor_id, tenant_id, first_seq, last_seq, merkle_root, head_hash, created_at, tsa_token)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     anchor["anchor_id"],
                     anchor["tenant_id"],
@@ -477,6 +518,7 @@ class AuditLedger:
                     anchor["merkle_root"],
                     anchor["head_hash"],
                     anchor["created_at"],
+                    anchor.get("tsa_token", ""),
                 ),
             )
         except Exception as exc:
@@ -493,6 +535,15 @@ class AuditLedger:
             last_seq,
             anchor["merkle_root"],
             anchor["head_hash"],
+            extra={
+                "event": "audit.seal",
+                "tenant_id": tenant_id,
+                "first_seq": first_seq,
+                "last_seq": last_seq,
+                "merkle_root": anchor["merkle_root"],
+                "head_hash": anchor["head_hash"],
+                "timestamped": bool(anchor["tsa_token"]),
+            },
         )
         return anchor
 

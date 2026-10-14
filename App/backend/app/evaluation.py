@@ -452,6 +452,25 @@ def _compute_by_segment(
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+def record_eval_report(report: EvalReport) -> None:
+    """Publish a report on ``/metrics`` so the eval-regression alert can see it.
+
+    ``ura_eval_metric{name,backend}`` carries each value,
+    ``ura_eval_metric_passed{name}`` 1/0 against its threshold (the
+    ``UraEvalRegression`` alert fires on 0), and
+    ``ura_eval_last_run_timestamp_seconds`` lets a stale evaluation alert too.
+    A run with no samples sets ``ura_eval_samples`` to 0 and leaves the last
+    verdicts in place rather than reporting a pass.
+    """
+    from .analytics import metrics
+
+    metrics.set_gauge("eval_samples", report.sample_size)
+    metrics.set_gauge("eval_last_run_timestamp_seconds", report.started_at)
+    for metric in report.metrics:
+        metrics.set_gauge("eval_metric", metric.value, labels={"name": metric.name, "backend": report.backend})
+        metrics.set_gauge("eval_metric_passed", 1 if metric.passed else 0, labels={"name": metric.name})
+
+
 def main() -> int:
     """CLI entry point for the nightly CI evaluation job."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

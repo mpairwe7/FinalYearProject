@@ -64,7 +64,7 @@ _MULTIPLIERS = {
     "bn": 1e9,
     "billion": 1e9,
 }
-_PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:%|percent)\b", re.IGNORECASE)
+_PERCENT_RE = re.compile(r"\b(\d{1,6}(?:\.\d{1,4})?)\s*(?:%|percent\b)", re.IGNORECASE)
 _YEAR_RE = re.compile(r"^(19|20)\d{2}$")
 
 
@@ -180,6 +180,18 @@ _CALC_VERB_RE = re.compile(
 #: with a calculator wizard asking for an amount instead of an explanation.
 _DEFINITIONAL_OPENER_RE = re.compile(
     r"\bwhat\s+(?:is|'s|are|does|do)\b",
+    re.IGNORECASE,
+)
+
+#: Terse "<tax> on/for/ku/kwa <amount>" phrasings ("VAT on 1.5m",
+#: "VAT ku UGX 2,000,000", "VAT kwa UGX 2,000,000", "PAYE kwa mshahara wa UGX 2,000,000")
+#: that carry a named tax and a money amount without an explicit verb.
+_TERSE_TAX_ON_AMOUNT_RE = re.compile(
+    r"^(?:(?:omusolo\s{1,4}gwa|kodi\s{1,4}ya|ushuru\s{1,4}wa)\s{1,4})?"
+    r"(?:v\.?a\.?t\.?|vati|value\s{1,4}added\s{1,4}tax|paye|pay\s{1,4}as\s{1,4}you\s{1,4}earn|"
+    r"withholding(?:\s{1,4}tax)?|wht|rental(?:\s{1,4}(?:income\s{1,4})?tax)?|"
+    r"corporation(?:\s{1,4}tax)?|corporate(?:\s{1,4}tax)?|customs(?:\s{1,4}duty)?|import\s{1,4}duty)"
+    r"\s{1,4}(?:on|for|ku|kwa)\s",
     re.IGNORECASE,
 )
 # A question about what a published figure IS must never open a calculator that
@@ -365,8 +377,8 @@ _WHT_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
         "foreign_interest",
         re.compile(r"\binterest\b.*\b(non[-\s]?resident|foreign|offshore)\b|\b(non[-\s]?resident|foreign|offshore)\b.*\binterest\b", re.IGNORECASE),
     ),
-    ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*|supplier\w*|vendor\w*|freelanc\w*|individual)\b", re.IGNORECASE)),
-    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock)\b", re.IGNORECASE)),
+    ("services", re.compile(r"\b(services?|consultan\w+|professional|contract\w*|supplier\w*|vendor\w*|freelanc\w*|individual|e?mpeereza|buweereza|huduma)\b", re.IGNORECASE)),
+    ("goods", re.compile(r"\b(goods|supplies|supply|merchandise|products?|stock|ebyamaguzi|bidhaa)\b", re.IGNORECASE)),
 ]
 
 _EXCISE_TYPE_RES: list[tuple[str, re.Pattern[str]]] = [
@@ -657,7 +669,8 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         return None
 
     if not _CALC_VERB_RE.search(text) and not (
-        has_money_amount(text) and _DEFINITIONAL_OPENER_RE.search(text)
+        has_money_amount(text)
+        and (_DEFINITIONAL_OPENER_RE.search(text) or _TERSE_TAX_ON_AMOUNT_RE.search(text))
     ):
         return None
 
@@ -748,7 +761,7 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         assumptions = []
         duty_pcts = [
             float(m.group(1))
-            for m in _PERCENT_RE.finditer(text)
+            for m in _PERCENT_RE.finditer(text[:2000] if text else "")
             if _DUTY_KW_RE.search(text[max(0, m.start() - 32) : m.end() + 16])
         ]
         if duty_pcts:

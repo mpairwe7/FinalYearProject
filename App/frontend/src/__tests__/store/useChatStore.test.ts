@@ -75,6 +75,80 @@ describe("useChatStore", () => {
     expect(store().locale).toBe("lg");
   });
 
+  /* The answer language: auto-detected until the taxpayer picks one. The
+     backend took the picker's default "en" as a choice and answered Luganda
+     and Swahili in English (PR #529); `locale_explicit` is how it can tell. */
+  it("starts in auto-detect, and a picked language becomes explicit", () => {
+    expect(store().localeExplicit).toBe(false);
+    store().setLocale("sw");
+    expect(store().locale).toBe("sw");
+    expect(store().localeExplicit).toBe(true);
+  });
+
+  it("setAutoDetectLocale returns to auto-detect without changing the hint", () => {
+    store().setLocale("lg");
+    store().setAutoDetectLocale();
+    expect(store().localeExplicit).toBe(false);
+    expect(store().locale).toBe("lg");
+  });
+
+  it("a detected or continued response language stays a hint", () => {
+    store().adoptResponseLocale("lg", "detected");
+    expect(store().locale).toBe("lg");
+    expect(store().localeExplicit).toBe(false);
+    store().adoptResponseLocale("en", "switched");
+    expect(store().locale).toBe("en");
+    expect(store().localeExplicit).toBe(false);
+  });
+
+  it("a language the taxpayer typed a request for becomes their choice", () => {
+    store().adoptResponseLocale("sw", "explicit_request");
+    expect(store().locale).toBe("sw");
+    expect(store().localeExplicit).toBe(true);
+  });
+
+  it("a picked language survives a reload; auto-detect is the default for old state", () => {
+    store().setLocale("lg");
+    useChatStore.setState({ locale: "en", localeExplicit: false });
+    store().hydratePersisted();
+    expect(store().locale).toBe("lg");
+    expect(store().localeExplicit).toBe(true);
+
+    const raw = JSON.parse(localStorage.getItem("ura-chat-store") || "{}");
+    delete raw.state.localeExplicit;
+    localStorage.setItem("ura-chat-store", JSON.stringify(raw));
+    store().hydratePersisted();
+    expect(store().localeExplicit).toBe(false);
+  });
+
+  it("a reload mid-case resumes the case, its live chat and the answer ids it rated", () => {
+    store().ensureActiveConversationId();
+    store().addTurns([
+      createTurn("user", "Why was I assessed twice?"),
+      createTurn("assistant", "Let me check.", { serverTurnId: "turn-1" }),
+      { ...createTurn("assistant", "Officer Nakato has joined."), notice: "officer_joined", officerName: "Officer Nakato" },
+    ]);
+    store().setActiveTicketId("ticket-1");
+    store().setOfficerChat({ ticketId: "ticket-1", lastSeq: 4, state: "officer", officerName: "Officer Nakato" });
+    useChatStore.setState({ activeTicketId: null, officerChat: null, chat: [] });
+
+    store().hydratePersisted();
+    expect(store().activeTicketId).toBe("ticket-1");
+    expect(store().officerChat).toEqual({ ticketId: "ticket-1", lastSeq: 4, state: "officer", officerName: "Officer Nakato" });
+    expect(store().chat.find((t) => t.content === "Let me check.")?.serverTurnId).toBe("turn-1");
+    expect(store().chat.find((t) => t.notice)).toMatchObject({ notice: "officer_joined", officerName: "Officer Nakato" });
+  });
+
+  it("a new conversation starts with no case and no live chat", () => {
+    store().ensureActiveConversationId();
+    store().addTurns([createTurn("user", "Hello")]);
+    store().setActiveTicketId("ticket-2");
+    store().setOfficerChat({ ticketId: "ticket-2", lastSeq: 1, state: "waiting" });
+    store().createNewSession();
+    expect(store().activeTicketId).toBeNull();
+    expect(store().officerChat).toBeNull();
+  });
+
   it("setSpeechState transitions correctly", () => {
     expect(store().speechState).toBe("idle");
     store().setSpeechState("listening");
@@ -92,6 +166,7 @@ describe("useChatStore", () => {
     expect(store().message).toBe("");
     expect(store().chat).toHaveLength(1);
     expect(store().locale).toBe("en");
+    expect(store().localeExplicit).toBe(false);
     expect(store().speechState).toBe("idle");
   });
 });

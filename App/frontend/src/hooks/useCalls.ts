@@ -49,6 +49,17 @@ export function useCallMetrics(days = 7) {
   });
 }
 
+/** Who is on duty: every officer's presence, re-read every 10 s. Read-only. */
+export function useOfficerPresence() {
+  return useQuery({
+    queryKey: queryKeys.calls.presence(),
+    queryFn: () => callsApi.getPresence(),
+    staleTime: 5000,
+    refetchInterval: 10000,
+    retry: 1,
+  });
+}
+
 export function useReviewCall() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { analyticsApi, type EscalationCaseDetail } from "../services/analyticsApi";
 import { CloseIcon, LoadingDots, CheckCircleIcon } from "./Icons";
+import { useTranslation } from "../lib/i18n";
 import "./supportCaseModal.css";
 
 interface SupportCaseModalProps {
@@ -10,6 +11,10 @@ interface SupportCaseModalProps {
   onClose: () => void;
   ticketId: string | null;
   conversationId?: string | null;
+  /** An officer is chatting with the taxpayer in the main conversation (or
+   *  just ended it there), so this room is the case's details, not a second
+   *  place to write to them. */
+  liveChat?: boolean;
 }
 
 export function SupportCaseModal({
@@ -17,7 +22,9 @@ export function SupportCaseModal({
   onClose,
   ticketId,
   conversationId: _conversationId,
+  liveChat = false,
 }: SupportCaseModalProps) {
+  const t = useTranslation();
   const [caseData, setCaseData] = useState<EscalationCaseDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -261,7 +268,11 @@ export function SupportCaseModal({
           )}
 
           {/* Two-Way Taxpayer Follow-up Composer */}
-          {caseData?.can_reply !== false && (
+          {liveChat ? (
+            <p className="scm-composer-label" role="note">
+              {t("officerChat.inMainChat")}
+            </p>
+          ) : caseData?.can_reply !== false && (
             <div className="scm-composer-section">
               <label className="scm-composer-label" htmlFor="scm-reply-input">
                 Reply to the Officer / Add Information

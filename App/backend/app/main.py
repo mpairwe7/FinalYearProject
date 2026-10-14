@@ -41,9 +41,13 @@ try:
 except ImportError:  # pragma: no cover – uvicorn always present at runtime
     _HAS_PROXY_MIDDLEWARE = False
 
+from pydantic import BaseModel, Field
+
 from . import database as db
 from . import documents
-from .analytics import AnalyticsMiddleware, metrics
+from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
+from .security_events import record_http_security_event
+from .tracing import current_traceresponse
 from .auth import AuthContext, current_user, optional_user, require_role, require_user
 from .auth.models import (
     ConsentGrantRequest,
@@ -70,12 +74,14 @@ from .models import (
     CFRelayChatRequest,
     CFRelayEmbedRequest,
     CFRelayVectorizeQueryRequest,
+    ChatRatingRequest,
     ChatRequest,
     ChatResponse,
     Citation,
     ClassifyRequest,
     ClassifyResponse,
     DocumentAnalysisResponse,
+    EndChatRequest,
     EscalationDetailResponse,
     EscalationRequest,
     EscalationResponse,
@@ -88,6 +94,7 @@ from .models import (
     FeedbackSummary,
     HealthResponse,
     JourneyFunnelResponse,
+    OfficerChatThreadResponse,
     OfflineAdminStats,
     OfflineStatusResponse,
     OfflineSyncRequest,
@@ -119,17 +126,12 @@ from .speech_service import (
 )
 from .workflows.registry import WorkflowRegistry
 
+from .logging_config import REQUEST_ID, install_logging
+
 logger = logging.getLogger(__name__)
-_APP_LOG_LEVEL = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
-_APP_LOGGER = logging.getLogger("app")
-_APP_LOGGER.setLevel(_APP_LOG_LEVEL)
-if not _APP_LOGGER.handlers:
-    _APP_HANDLER = logging.StreamHandler()
-    _APP_HANDLER.setFormatter(
-        logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-    )
-    _APP_LOGGER.addHandler(_APP_HANDLER)
-_APP_LOGGER.propagate = False
+# One structured handler on the root logger: the API's, uvicorn's and every
+# library's records share the format, the request id and the PII scrubbing.
+install_logging()
 
 # ---------------------------------------------------------------------------
 # Production environment validation (NIST SSDF PO.1.1)
@@ -146,6 +148,10 @@ _RETENTION_CLEANUP_INTERVAL_SECONDS = max(
 # How often the audit ledger's new rows are sealed (Merkle root + chain head).
 # 0 turns the schedule off; sealing on demand from /admin/audit still works.
 _AUDIT_SEAL_INTERVAL_SECONDS = max(0, int(os.getenv("AUDIT_SEAL_INTERVAL_SECONDS", "3600")))
+# How often recent conversations are re-scored by the evaluation harness so
+# ``ura_eval_metric_passed`` (and the UraEvalRegression alert) stays current.
+# 0 turns the schedule off; ``POST /v1/evaluate`` still runs one on demand.
+_ONLINE_EVAL_INTERVAL_SECONDS = max(0, int(os.getenv("ONLINE_EVAL_INTERVAL_SECONDS", "21600")))
 # Above this many rows the auditor's integrity check re-checks the newest seal
 # and the rows after it instead of the whole chain; the full walk runs offline.
 _AUDIT_VERIFY_FULL_MAX_ROWS = max(1, int(os.getenv("AUDIT_VERIFY_FULL_MAX_ROWS", "200000")))
@@ -161,6 +167,16 @@ def _production_flag_enabled(name: str) -> bool:
     if val is None:
         return True
     return val.lower() in ("1", "true", "yes", "on")
+
+
+def _is_world_writable(path: str) -> bool:
+    """True when *path* exists and any local user may write to it."""
+    import stat
+
+    try:
+        return bool(os.stat(path).st_mode & stat.S_IWOTH)
+    except OSError:
+        return False
 
 
 def _validate_production_env() -> None:
@@ -335,6 +351,25 @@ def _validate_production_env() -> None:
             "ANALYTICS_DB_DIR must be an absolute path on a persistent volume in production "
             f"(got {data_dir!r}; ephemeral or relative paths are not durable)."
         )
+    if data_dir and _is_world_writable(data_dir):
+        errors.append(
+            "ANALYTICS_DB_DIR is world-writable; it holds the audit ledger and transcripts, "
+            "so any local user could rewrite them. Restrict it to the service account (e.g. 0750)."
+        )
+
+    # A timestamp the seal cannot verify later is not evidence. The trust
+    # anchors make tokens checkable offline (audit/tsa.py).
+    if os.getenv("AUDIT_TSA_URL", "").strip():
+        ca_bundle = os.getenv("AUDIT_TSA_CA_CERT", "").strip()
+        if not ca_bundle or not os.path.isfile(ca_bundle):
+            errors.append(
+                "AUDIT_TSA_URL is set but AUDIT_TSA_CA_CERT does not name a readable PEM bundle "
+                "of the TSA's trust anchors; timestamp tokens could not be verified."
+            )
+
+    metrics_token = os.getenv("METRICS_TOKEN", "")
+    if metrics_token and len(metrics_token) < 32:
+        errors.append("METRICS_TOKEN must be at least 32 characters (it guards /metrics).")
 
     for redis_env in ("REDIS_URL", "SLOWAPI_STORAGE_URI"):
         redis_url = os.getenv(redis_env, "")
@@ -430,6 +465,17 @@ def _initialize_analytics_database() -> None:
     try:
         db.init_db()
         logger.info("Analytics database ready")
+        data_dir = os.getenv("ANALYTICS_DB_DIR", "")
+        world_writable = bool(data_dir) and _is_world_writable(data_dir)
+        metrics.set_gauge("storage_world_writable", int(world_writable))
+        if world_writable:
+            # Production refuses to start like this (_validate_production_env);
+            # elsewhere it is a loud warning and a gauge the alerts watch.
+            logger.warning(
+                "ANALYTICS_DB_DIR is world-writable; the audit ledger and transcripts can be "
+                "rewritten by any local user",
+                extra={"event": "storage.world_writable", "path": data_dir},
+            )
 
         if _should_seed():
             try:
@@ -555,13 +601,17 @@ async def lifespan(app: FastAPI):
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 
-    # OpenTelemetry GenAI tracing (opt-in via OTEL_ENABLED=true)
-    try:
-        from .tracing import init_tracing
-
-        init_tracing()
-    except Exception:
-        logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
+    # Which build is answering: exported as ``ura_build_info`` so a dashboard
+    # can line a regression up with a deploy (APP_VERSION is set at import).
+    metrics.set_gauge(
+        "build_info",
+        1,
+        labels={
+            "version": app.version,
+            "revision": os.getenv("APP_BUILD_SHA", "") or "unknown",
+            "environment": os.getenv("APP_ENV", "development"),
+        },
+    )
 
     # Initialise analytics database. Development can still offer degraded text
     # chat, while production must not run without its persistence controls.
@@ -570,6 +620,12 @@ async def lifespan(app: FastAPI):
     try:
         app.state.model = ChatModel()
         logger.info("ChatModel ready – %d tags loaded", len(app.state.model._faq_index))
+        if app.state.model and getattr(app.state.model, "_retriever", None):
+            dense = getattr(app.state.model._retriever, "_dense_model", None)
+            if dense is not None:
+                from .mcp.tool_rag import inject_dense_model
+
+                inject_dense_model(dense)
     except Exception:
         logger.exception("ChatModel initialisation failed")
         app.state.model = None
@@ -703,7 +759,11 @@ async def lifespan(app: FastAPI):
         try:
             run_retention_cleanup()
         except Exception:
+            metrics.inc("retention_runs_total", labels={"status": "failed"})
             logger.error("Retention cleanup failed; continuing without it", exc_info=True)
+            return
+        metrics.inc("retention_runs_total", labels={"status": "ok"})
+        metrics.set_gauge("retention_last_success_timestamp_seconds", time.time())
 
     _run_retention_cleanup_guarded()
     retention_stop = asyncio.Event()
@@ -738,11 +798,28 @@ async def lifespan(app: FastAPI):
         if _AUDIT_SEAL_INTERVAL_SECONDS > 0
         else None
     )
+
+    async def _online_eval_loop() -> None:
+        """Re-score recent conversations on a schedule (every replica may run it)."""
+        while True:
+            try:
+                await asyncio.wait_for(retention_stop.wait(), timeout=_ONLINE_EVAL_INTERVAL_SECONDS)
+                return
+            except TimeoutError:
+                await asyncio.to_thread(_run_online_evaluation)
+            except asyncio.CancelledError:
+                return
+
+    eval_task = (
+        asyncio.create_task(_online_eval_loop(), name="online-eval")
+        if _ONLINE_EVAL_INTERVAL_SECONDS > 0
+        else None
+    )
     try:
         yield
     finally:
         retention_stop.set()
-        for task in (retention_task, seal_task):
+        for task in (retention_task, seal_task, eval_task):
             if task is None:
                 continue
             task.cancel()
@@ -795,6 +872,9 @@ _RATE_LIMIT = os.getenv("RATE_LIMIT", "30/minute")
 _JOURNEY_ABANDON_AFTER_HOURS = max(1, int(os.getenv("JOURNEY_ABANDON_AFTER_HOURS", "24")))
 _EXPORT_RATE_LIMIT = os.getenv("EXPORT_RATE_LIMIT", "10/minute")
 _DOCUMENT_RATE_LIMIT = os.getenv("DOCUMENT_RATE_LIMIT", "10/minute")
+#: The taxpayer's chat polls its officer thread every few seconds (more often
+#: than a person types), so the poll has its own, higher ceiling.
+_CHAT_POLL_RATE_LIMIT = os.getenv("CHAT_POLL_RATE_LIMIT", "120/minute")
 _SLOWAPI_STORAGE_URI = os.getenv("SLOWAPI_STORAGE_URI", "")
 _DOCUMENT_MULTIPART_OVERHEAD_BYTES = int(
     os.getenv("DOCUMENT_MULTIPART_OVERHEAD_BYTES", str(512 * 1024))
@@ -815,6 +895,19 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.limiter = limiter
+
+# OpenTelemetry (opt-in via OTEL_ENABLED=true) is set up here, at import, not
+# in the lifespan: the lifespan is itself the first ASGI call, so Starlette has
+# already built the middleware stack by then and the FastAPI instrumentation
+# would never wrap a request. Each uvicorn worker imports this module, so each
+# gets its own providers. APP_VERSION feeds service.version and the audit rows.
+os.environ.setdefault("APP_VERSION", app.version)
+try:
+    from .tracing import init_tracing
+
+    init_tracing(app)
+except Exception:
+    logger.warning("OpenTelemetry tracing init skipped", exc_info=True)
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
@@ -889,7 +982,9 @@ app.add_middleware(
     allow_origins=_allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID"],
+    allow_headers=["Content-Type", "Authorization", "X-Session-ID", "X-Request-ID", "traceparent", "tracestate"],
+    # So a cross-origin client can quote the request and trace in a bug report.
+    expose_headers=["X-Request-ID", "traceresponse"],
 )
 
 # GZip compression middleware (low-bandwidth & mobile 2G/3G optimization)
@@ -927,19 +1022,31 @@ async def security_headers(request: Request, call_next):
     request_id = raw_id if _REQUEST_ID_RE.match(raw_id) else str(uuid.uuid4())
     # Stash on request.state so handlers can read it without re-parsing headers
     request.state.request_id = request_id
-    logger.info(
-        "request  request_id=%s method=%s path=%s",
-        request_id,
-        request.method,
-        request.url.path,
-    )
-    response: Response = await call_next(request)
+    # Every log record written while serving this request carries the id
+    # (logging_config.RequestContextFilter). Inbound W3C traceparent is
+    # handled by the OpenTelemetry FastAPI instrumentation when tracing is on.
+    request_id_token = REQUEST_ID.set(request_id)
+    try:
+        response: Response = await call_next(request)
+        traceresponse = current_traceresponse()
+        # The route template, not request.url.path: the decoded path can carry
+        # CR/LF (log injection) and the ids a template folds away.
+        route = route_label(request)
+        logger.info("request method=%s route=%s status=%s", request.method, route, response.status_code)
+        # 401 / 403 / 429 become OWASP-vocabulary security events (logged and counted).
+        record_http_security_event(request, response.status_code, route)
+    finally:
+        REQUEST_ID.reset(request_id_token)
+
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Request-ID"] = request_id
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+    if traceresponse:
+        # W3C Trace Context Level 2: lets a client quote the trace of this request.
+        response.headers["traceresponse"] = traceresponse
     return response
 
 
@@ -986,18 +1093,27 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # heuristic, translation drops to serving English — and both degradations
     # shipped unnoticed. An operator should not have to ask the assistant a
     # Luganda question to find out.
-    from . import sunbird
+    from . import llm, sunbird
     from .query import language_detection_backend
+
+    if sunbird.is_available():
+        trans_cap = "sunbird"
+    elif llm.is_available():
+        trans_cap = "prompted_local"
+    else:
+        trans_cap = "unavailable"
+
+    has_reranker = bool(getattr(getattr(model, "_retriever", None), "_reranker", None))
+    dense_dev = str(getattr(getattr(model, "_retriever", None), "_dense_device", "cpu"))
 
     capabilities = {
         "language_detection": language_detection_backend(),
-        "translation": "sunbird" if sunbird.is_available() else "unavailable",
-        # Not the same question as "translation": Sunbird's per-account retry
-        # falls over to a second account, and with only one configured there
-        # is nowhere to fall over to. "fallback" alone means the primary token
-        # is missing, not that the fallback is doing its job.
+        "translation": trans_cap,
         "sunbird_accounts": sunbird.account_summary(),
         "retrieval": retrieval_mode,
+        "reranker": "active" if has_reranker else "disabled",
+        "dense_device": dense_dev,
+        "procedural_memory": "active",
     }
     return HealthResponse(
         status="ready" if qdrant_healthy else "degraded",
@@ -1035,6 +1151,29 @@ def index_freshness() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Chat endpoint (with conversation logging)
 # ---------------------------------------------------------------------------
+def _validate_chat_connector_selection(body: ChatRequest, ctx: AuthContext) -> None:
+    """Fail closed when a request selects an unconfigured or unauthorized service."""
+    if not body.connector_namespaces:
+        return
+    from .flags import flags
+
+    if not flags.is_enabled("enterprise_connectors"):
+        raise HTTPException(status_code=409, detail="Chat connectors are not enabled.")
+    from .mcp import get_client
+    from .mcp.chat_connectors import validate_chat_connector_selection
+
+    if not validate_chat_connector_selection(
+        get_client(),
+        body.connector_namespaces,
+        user_role=ctx.role,
+        granted_purposes=ctx.user.granted_purposes if ctx.user else [],
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="One or more selected services are unavailable for this account.",
+        )
+
+
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
 @limiter.limit(_RATE_LIMIT)
 def chat(
@@ -1043,8 +1182,12 @@ def chat(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> ChatResponse:
-    session_id = request.headers.get("X-Session-ID", "")
+    _validate_chat_connector_selection(body, ctx)
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
+    # The answer's id in the conversation log, returned with it so a rating
+    # names the row it rates (see FeedbackRequest.turn_id).
+    turn_id = uuid.uuid4().hex
     t0 = time.perf_counter()
 
     attachments = documents.resolve_attachments(
@@ -1054,7 +1197,8 @@ def chat(
         message=body.message,
         conversation_id=body.conversation_id,
         top_k=body.top_k,
-        locale=body.locale,
+        locale=body.locale or "",
+        locale_explicit=body.locale_explicit,
         session_id=session_id or None,
         request_id=request_id,
         user_id=ctx.user_id or None,
@@ -1062,9 +1206,12 @@ def chat(
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
         attachments=attachments or None,
+        connector_namespaces=body.connector_namespaces,
+        channel="rest",
     )
 
     elapsed_ms = (time.perf_counter() - t0) * 1000
+    record_chat_turn(result, elapsed_ms=elapsed_ms, channel="rest")
 
     # Classify to get topic tag for analytics
     topic_tag = ""
@@ -1093,14 +1240,16 @@ def chat(
             response_time_ms=round(elapsed_ms, 2),
             confidence=confidence,
             topic_tag=topic_tag,
-            **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or ""),
+            tenant_id=ctx.tenant_id or "default",
+            row_id=turn_id,
+            **_experiment_log_fields(ctx.user_id or "", result.get("locale") or body.locale or "en"),
+            **_CM.english_forms(result, served_reply=str(result.get("reply") or "")),
         )
     except Exception:
         logger.warning("Conversation logging failed", exc_info=True)
 
-    # Track escalation events
+    # Durable escalation event for consented users (the counter is in record_chat_turn)
     if result.get("escalation_required"):
-        metrics.inc("escalation_total")
         if ctx.authenticated and db.has_active_consent(ctx.user_id, "analytics"):
             try:
                 db.track_event(
@@ -1117,7 +1266,7 @@ def chat(
             except Exception:
                 logger.debug("Escalation event tracking failed", exc_info=True)
 
-    return ChatResponse(**result)
+    return ChatResponse(**{**result, "turn_id": turn_id})
 
 
 # ---------------------------------------------------------------------------
@@ -1138,32 +1287,43 @@ async def chat_stream(
     """
     from . import service as service_module
 
-    session_id = request.headers.get("X-Session-ID", "")
+    _validate_chat_connector_selection(body, ctx)
+
+    session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     attachments = documents.resolve_attachments(
         body.attachment_ids, session_id=session_id, user_id=ctx.user_id
     )
+    # Minted before generation: it goes out in the ``metadata`` frame, long
+    # before the turn is logged, so a rating can name the row it rates.
+    turn_id = uuid.uuid4().hex
 
     async def event_generator():
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
         # summary emitted just before ``grounding``.  Live tool-call frames
         # are exclusive to the WS path.
+        from .guardrails import OutputGuard, StreamingDLPFilter
+
         agent_trace: list[dict[str, Any]] = []
+        dlp_filter = StreamingDLPFilter()
         async for event_type, payload in service_module.run_chat_turn(
             model,
             message=body.message,
             conversation_id=body.conversation_id,
             top_k=body.top_k,
-            locale=body.locale,
+            locale=body.locale or "",
+            locale_explicit=body.locale_explicit,
             session_id=session_id or None,
             request_id=request_id,
             user_id=ctx.user_id or None,
             tenant_id=ctx.tenant_id,
+            channel="sse",
             should_continue=lambda: _sse_not_disconnected(request),
             sentence_batching=True,  # SSE keeps historical behaviour
             user_role=getattr(ctx, "role", "public"),
-            granted_purposes=getattr(ctx, "granted_purposes", []) or [],
+            granted_purposes=ctx.user.granted_purposes if ctx.user else [],
             attachments=attachments or None,
+            connector_namespaces=body.connector_namespaces,
         ):
             if event_type == "_keepalive":
                 yield {
@@ -1171,7 +1331,15 @@ async def chat_stream(
                 }
                 continue
             if event_type == "_log":
-                _log_stream_conversation(body, session_id, payload, user_id=ctx.user_id or "")
+                await asyncio.to_thread(
+                    _log_stream_conversation,
+                    body,
+                    session_id,
+                    payload,
+                    user_id=ctx.user_id or "",
+                    tenant_id=ctx.tenant_id,
+                    turn_id=turn_id,
+                )
                 continue
             if event_type.startswith("translation."):
                 # Reply localization is the slow leg of a non-English turn and
@@ -1190,16 +1358,56 @@ async def chat_stream(
                     yield {"event": "phase", "data": event_type}
                 # Buffer for the agent_trace summary; do not forward live.
                 event_dict = payload if isinstance(payload, dict) else {"value": payload}
-                agent_trace.append({"type": event_type, **{k: v for k, v in event_dict.items() if k != "type"}})
+                safe_trace_fields = {
+                    "name",
+                    "call_id",
+                    "iteration",
+                    "iterations",
+                    "truncated",
+                    "tool_call_count",
+                    "admission",
+                    "ok",
+                    "elapsed_ms",
+                    # Which connector a tool call went to and whether it
+                    # is a simulator: a namespace and an enum, no payload.
+                    "connector",
+                    "connector_mode",
+                }
+                agent_trace.append(
+                    {
+                        "type": event_type,
+                        **{
+                            key: value
+                            for key, value in event_dict.items()
+                            if key in safe_trace_fields
+                        },
+                    }
+                )
                 continue
             if event_type == "grounding" and agent_trace:
                 yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
                 agent_trace = []
-            if event_type == "metadata" or event_type == "grounding":
+            if event_type == "metadata":
+                yield {"event": event_type, "data": json.dumps({**payload, "turn_id": turn_id})}
+            elif event_type == "grounding":
                 yield {"event": event_type, "data": json.dumps(payload)}
             elif event_type == "error":
                 yield {"event": "error", "data": payload.get("message", "Internal server error")}
-            else:  # token / revision / done
+            elif event_type == "token":
+                chunk = payload if isinstance(payload, str) else ""
+                sanitized_chunk = dlp_filter.process_chunk(chunk)
+                if sanitized_chunk:
+                    yield {"event": "token", "data": sanitized_chunk}
+            elif event_type == "done":
+                trailing = dlp_filter.flush()
+                if trailing:
+                    yield {"event": "token", "data": trailing}
+                yield {"event": "done", "data": payload if isinstance(payload, str) else ""}
+            elif event_type == "revision":
+                dlp_filter.flush()
+                sanitized_rev = OutputGuard.redact_pii(payload if isinstance(payload, str) else "")
+                yield {"event": "revision", "data": sanitized_rev}
+            else:
                 yield {"event": event_type, "data": payload if isinstance(payload, str) else ""}
 
         # Flush trailing trace (e.g. if grounding was skipped).
@@ -1232,13 +1440,20 @@ def _log_stream_conversation(
     session_id: str,
     log_payload: dict[str, Any],
     user_id: str = "",
+    tenant_id: str = "default",
+    turn_id: str | None = None,
 ) -> None:
-    """Mirror the old SSE ``finally`` block — log to analytics DB."""
+    """Mirror the old SSE ``finally`` block — log to analytics DB.
+
+    Turn metrics and the audit row are recorded by ``service.run_chat_turn``
+    itself, for every streaming transport alike.
+    """
     from .service import ChatModel as _CM
 
     result = log_payload.get("result") or {}
     full_reply = log_payload.get("full_reply", "")
     elapsed_ms = log_payload.get("elapsed_ms", 0.0)
+
     try:
         db.log_conversation(
             session_id=session_id or None,
@@ -1249,7 +1464,14 @@ def _log_stream_conversation(
             contexts=_CM.contexts_json(result),
             response_time_ms=round(elapsed_ms, 2),
             user_id=user_id,
-            **_experiment_log_fields(user_id, result.get("locale") or body.locale or ""),
+            tenant_id=tenant_id or "default",
+            row_id=turn_id,
+            **_experiment_log_fields(user_id, result.get("locale") or body.locale or "en"),
+            **_CM.english_forms(
+                result,
+                served_reply=full_reply,
+                english_reply=str(log_payload.get("english_reply") or ""),
+            ),
         )
     except Exception:
         logger.warning("Stream conversation logging failed", exc_info=True)
@@ -1942,10 +2164,13 @@ async def voice_chat(
         conversation_id=conversation_id,
         top_k=top_k,
         locale=detected_lang,
+        # The speech recognizer heard this language; answer in it.
+        locale_explicit=True,
         session_id=session_id,
         request_id=getattr(request.state, "request_id", None),
         user_id=ctx.user_id or None,
         tenant_id=ctx.tenant_id,
+        channel="voice",
     )
     llm_latency = time.perf_counter() - t_llm
     reply_text = chat_result.get("reply", "")
@@ -1998,6 +2223,8 @@ async def voice_chat(
     total_latency = time.perf_counter() - t_start
     metrics.observe("speech_voice_chat_latency_s", total_latency)
 
+    record_chat_turn(chat_result, elapsed_ms=total_latency * 1000, channel="voice")
+
     # Safe citation parsing — malformed dicts must not crash the response
     safe_citations = []
     for c in chat_result.get("citations", []):
@@ -2010,7 +2237,8 @@ async def voice_chat(
     try:
         from .service import ChatModel as _CM
 
-        db.log_conversation(
+        await asyncio.to_thread(
+            db.log_conversation,
             session_id=session_id,
             conversation_id=chat_result.get("conversation_id") or conversation_id,
             user_id=ctx.user_id or "",
@@ -2019,7 +2247,9 @@ async def voice_chat(
             sources=json.dumps(chat_result.get("sources", [])),
             contexts=_CM.contexts_json(chat_result),
             response_time_ms=round(total_latency * 1000, 2),
+            tenant_id=ctx.tenant_id or "default",
             **_experiment_log_fields(ctx.user_id or "", chat_result.get("locale") or ""),
+            **_CM.english_forms(chat_result, served_reply=reply_text),
         )
     except Exception:
         logger.warning("Voice conversation logging failed", exc_info=True)
@@ -2247,6 +2477,30 @@ def _require_staff_writer(ctx: AuthContext) -> None:
         raise HTTPException(status_code=403, detail="read-only role")
 
 
+def _require_live_officer(ctx: AuthContext) -> None:
+    """Only officers handle taxpayers live; administrators audit, auditors read.
+
+    Claiming a case, replying to the taxpayer and holding a case's collision
+    lock are an officer's work (``ura_staff``). An administrator audits the
+    service officers give and has no live tools, so the API refuses the write
+    rather than relying on the console hiding a button. The operator key (no
+    user) keeps its break-glass path, as in :func:`_require_staff_writer`.
+    """
+    if ctx.user and ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="only officers handle cases live")
+
+
+def _run_online_evaluation() -> None:
+    """One scheduled evaluation run; failures are counted, never raised."""
+    try:
+        from .evaluation import record_eval_report, run_evaluation
+
+        record_eval_report(run_evaluation())
+    except Exception:
+        metrics.inc("eval_runs_failed_total")
+        logger.exception("Scheduled online evaluation failed; will retry next interval")
+
+
 def _seal_audit_ledgers() -> int:
     """Seal every tenant's unsealed audit rows; returns how many seals were made.
 
@@ -2272,6 +2526,7 @@ def _seal_audit_ledgers() -> int:
             if ledger.seal_pending(tenant) is not None:
                 made += 1
                 metrics.inc("audit_seals_total", labels={"trigger": "schedule"})
+                metrics.set_gauge("audit_last_seal_timestamp_seconds", time.time())
         except Exception:
             metrics.inc("audit_seal_failed_total")
             logger.exception("Scheduled audit seal failed for tenant %s; will retry next interval", tenant)
@@ -2437,28 +2692,57 @@ def cf_relay_workers_ai_chat(request: Request, body: CFRelayChatRequest) -> dict
 # ---------------------------------------------------------------------------
 # Feedback endpoints
 # ---------------------------------------------------------------------------
+def _feedback_rater(ctx: AuthContext) -> str:
+    """Whose rating this is: the user only with analytics consent, else nobody.
+
+    A 👍/👎 is accepted from anyone, signed in or not; it is tied to a person
+    only when they consented to analytics. Without that it is stored
+    anonymously — the answer is rated, the rater is not recorded.
+    """
+    if ctx.authenticated and ctx.user_id and db.has_active_consent(ctx.user_id, "analytics"):
+        return ctx.user_id
+    return ""
+
+
 @app.post("/v1/feedback", response_model=FeedbackResponse, tags=["feedback"])
+@limiter.limit(_RATE_LIMIT)
 def submit_feedback(
+    request: Request,
     body: FeedbackRequest,
     ctx: AuthContext = Depends(current_user),
 ) -> FeedbackResponse:
-    """Submit thumbs-up/down feedback on a chatbot response."""
+    """Submit thumbs-up/down feedback on a chatbot response.
+
+    With ``turn_id`` (from the chat response) the rating is linked to the
+    answer it rates: its conversation, its position and what it was built
+    from are copied from the conversation log, and the logged question and
+    reply are kept rather than the client's copy.
+    """
+    from . import quality_audit
     from .service import ChatModel as _CM
 
-    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
-        raise HTTPException(status_code=403, detail="analytics consent is required for feedback")
+    tenant_id = ctx.tenant_id or "default"
+    turn = quality_audit.rated_turn(body.turn_id, body.conversation_id, tenant_id=tenant_id)
     metrics.inc("feedback_total", labels={"rating": body.rating})
     result = db.save_feedback(
         message_id=body.message_id,
         rating=body.rating,
         comment=body.comment,
         session_id=body.session_id,
-        user_id=ctx.user_id,
-        user_query=_CM.redact_for_storage(body.user_query),
-        bot_reply=_CM.redact_for_storage(body.bot_reply),
+        user_id=_feedback_rater(ctx),
+        user_query=turn.get("user_query") or _CM.redact_for_storage(body.user_query),
+        bot_reply=turn.get("bot_reply") or _CM.redact_for_storage(body.bot_reply),
         retrieval_mode=body.retrieval_mode,
         workflow_id=body.workflow_id,
         step_id=body.step_id,
+        tenant_id=tenant_id,
+        conversation_id=turn.get("conversation_id") or body.conversation_id,
+        turn_id=body.turn_id if turn else "",
+        turn_index=turn.get("turn_index") or body.turn_index,
+        locale=turn.get("locale", ""),
+        topic_tag=turn.get("topic_tag", ""),
+        sources_json=turn.get("sources_json", "[]"),
+        confidence=turn.get("confidence"),
     )
     return FeedbackResponse(**result)
 
@@ -2681,9 +2965,22 @@ def reply_to_escalation(
         raise HTTPException(status_code=404, detail="Support case not found")
 
     tid = str(ticket.get("id") or clean_id)
+    from . import officer_chat
+
+    chat = officer_chat.get_chat(tid)
+    if officer_chat.chat_state(ticket, chat) == "ended" and officer_chat.ended_by_officer(chat):
+        # An officer ended this chat and the taxpayer has been handed back to
+        # the assistant; a message here would reopen a closed case unseen.
+        raise HTTPException(status_code=409, detail="This chat with the officer has ended")
     updated = db.append_taxpayer_reply(tid, body.message)
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to record taxpayer reply")
+    seq = 0
+    if officer_chat.is_text(ticket):
+        try:
+            seq = int(officer_chat.append_message(ticket, "taxpayer", body.message)["seq"])
+        except Exception:
+            logger.warning("taxpayer message not added to the chat thread of %s", tid, exc_info=True)
 
     try:
         from .ticket_events import build_event, publish
@@ -2696,23 +2993,108 @@ def reply_to_escalation(
         "ok": True,
         "ticket_id": tid,
         "status": updated.get("status", "open"),
+        "seq": seq,
         "message": "Your reply was received by the URA officer.",
     }
 
 
+@app.get("/v1/escalate/{ticket_id}/messages", response_model=OfficerChatThreadResponse, tags=["chat"])
+@limiter.limit(_CHAT_POLL_RATE_LIMIT)
+def escalation_messages(
+    request: Request,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{8,64}$"),
+    after_seq: int = Query(0, ge=0),
+) -> OfficerChatThreadResponse:
+    """The taxpayer's live chat with the officer: new messages, its state, the rating.
+
+    The chat polls this while a case is waiting or with an officer. It answers
+    to the **exact** ticket id only — the id is the capability the taxpayer
+    holds, so unlike the status lookup there is no search fallback that could
+    answer for someone else's case. An officer's message is returned in the
+    taxpayer's language when it was translated. Reading the officer's latest
+    message here counts as delivering it, so the next AI turn does not repeat it.
+    """
+    from . import officer_chat
+
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+    chat = officer_chat.get_chat(ticket_id)
+    rows = officer_chat.list_messages(ticket_id, after_seq=after_seq)
+    last_seq = int(rows[-1]["seq"]) if rows else after_seq
+    if ticket.get("officer_reply") and not ticket.get("reply_delivered_at"):
+        latest_officer = officer_chat.last_seq(ticket_id, sender="officer")
+        if latest_officer and latest_officer <= last_seq:
+            with contextlib.suppress(Exception):
+                db.mark_reply_delivered(ticket_id)
+    return OfficerChatThreadResponse(
+        ticket_id=ticket_id,
+        chat_state=officer_chat.chat_state(ticket, chat),
+        officer_name=officer_chat.officer_name_for(ticket, chat),
+        messages=[
+            {
+                "seq": int(r["seq"]),
+                "sender": r["sender"],
+                "text": (r.get("text_localized") or r.get("text") or "") if r["sender"] == "officer" else (r.get("text") or ""),
+                "officer_name": r.get("officer_name") or "",
+                "created_at": float(r.get("created_at") or 0.0),
+            }
+            for r in rows
+        ],
+        last_seq=last_seq,
+        csat=officer_chat.csat_state(ticket, chat),
+    )
+
+
+@app.post("/v1/escalate/{ticket_id}/csat", tags=["chat"])
+@limiter.limit(_RATE_LIMIT)
+def rate_officer_chat(
+    request: Request,
+    body: ChatRatingRequest,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{8,64}$"),
+) -> dict:
+    """The taxpayer rates the chat an officer just ended (1–5), or skips (``score: null``).
+
+    Once per chat, and only after the officer ended it — that is when the
+    chat asks. Exact ticket id only, as for the thread. The rating is the
+    officer's service quality, read by administrators on ``/admin/quality``.
+    """
+    from . import officer_chat, service_ratings
+
+    ticket = db.get_ticket(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Support case not found")
+    state = officer_chat.csat_state(ticket, officer_chat.get_chat(ticket_id))
+    if not state["requested"]:
+        raise HTTPException(status_code=409, detail="This chat has not ended, so it cannot be rated yet")
+    if state["submitted"]:
+        raise HTTPException(status_code=409, detail="This chat has already been rated")
+    officer_chat.submit_csat(ticket, score=body.score, comment=body.comment)
+    outcome = "answered" if body.score is not None else "skipped"
+    metrics.inc(
+        "service_rating_total",
+        labels={"source": "chat_officer_csat", "sentiment": service_ratings.sentiment_for_score(body.score) or "skipped"},
+    )
+    return {"ok": True, "ticket_id": ticket_id, "status": outcome}
+
+
 @app.patch("/v1/feedback/{message_id}/comment", tags=["feedback"])
+@limiter.limit(_RATE_LIMIT)
 def update_feedback_comment(
+    request: Request,
     message_id: str,
     body: FeedbackCommentRequest,
     ctx: AuthContext = Depends(current_user),
 ) -> dict:
-    """Add a follow-up comment to existing feedback (avoids duplicate entries)."""
+    """Add a follow-up comment to existing feedback (avoids duplicate entries).
+
+    The rating it comments on must be the same rater's (the same user, or —
+    for an anonymous rating — anonymous), and gets one comment.
+    """
     from .service import ChatModel as _CM
 
-    if not ctx.authenticated or not db.has_active_consent(ctx.user_id, "analytics"):
-        raise HTTPException(status_code=403, detail="analytics consent is required for feedback")
     updated = db.update_feedback_comment(
-        message_id, _CM.redact_for_storage(body.comment), user_id=ctx.user_id
+        message_id, _CM.redact_for_storage(body.comment), user_id=_feedback_rater(ctx)
     )
     if not updated:
         raise HTTPException(
@@ -2840,17 +3222,95 @@ def analytics_comparison(
     return {"dimension": dimension, "period_days": days, "segments": []}
 
 
+def _has_valid_metrics_token(request: Request) -> bool:
+    """True when the request presents ``METRICS_TOKEN`` (the scrape credential).
+
+    A dedicated, read-only secret: Prometheus needs to read ``/metrics`` and
+    nothing else, so it should not hold a staff login or the break-glass
+    ``INDEX_API_KEY``. Compared in constant time and never logged.
+    """
+    token = os.getenv("METRICS_TOKEN", "")
+    if not token:
+        return False
+    return hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {token}")
+
+
+def require_metrics_reader(request: Request) -> AuthContext:
+    """``/metrics`` access: the scrape token, else the usual staff/operator check."""
+    if _has_valid_metrics_token(request):
+        return AuthContext()
+    return require_admin_access(request)
+
+
 @app.get("/metrics", tags=["system"])
 @limiter.limit("30/minute")
 def prometheus_metrics(
     request: Request,
-    _ctx: AuthContext = Depends(require_admin_access),
+    _ctx: AuthContext = Depends(require_metrics_reader),
 ) -> PlainTextResponse:
-    """Prometheus-compatible metrics endpoint."""
-    return PlainTextResponse(
-        content=metrics.to_prometheus(),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
+    """Prometheus metrics, aggregated across every API worker process."""
+    return PlainTextResponse(content=metrics.to_prometheus(), media_type=METRICS_CONTENT_TYPE)
+
+
+# ---------------------------------------------------------------------------
+# Real-user monitoring from the web client (app.client_telemetry)
+# ---------------------------------------------------------------------------
+async def _telemetry_body(request: Request) -> bytes:
+    """The raw body, refused as soon as it is oversized.
+
+    Read raw rather than as a JSON body parameter: ``navigator.sendBeacon``
+    with a string posts ``text/plain``, which FastAPI's JSON binding rejects.
+    Read as a stream with a running count: a chunked request carries no
+    ``content-length``, and ``request.body()`` would buffer all of it first.
+    """
+    from .client_telemetry import MAX_BODY_BYTES
+
+    too_large = HTTPException(status_code=413, detail="telemetry payload too large")
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise too_large
+    chunks: list[bytes] = []
+    received = 0
+    async for chunk in request.stream():
+        received += len(chunk)
+        if received > MAX_BODY_BYTES:
+            raise too_large
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@app.post("/v1/telemetry/vitals", status_code=204, tags=["telemetry"])
+@limiter.limit("60/minute")
+async def telemetry_vitals(request: Request) -> Response:
+    """Core Web Vitals measured in the browser (anonymous; aggregated on /metrics)."""
+    from pydantic import ValidationError
+
+    from .client_telemetry import WebVitalsBatch, record_web_vitals
+
+    body = await _telemetry_body(request)
+    try:
+        batch = WebVitalsBatch.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid vitals payload") from exc
+    record_web_vitals(batch)
+    return Response(status_code=204)
+
+
+@app.post("/v1/telemetry/errors", status_code=204, tags=["telemetry"])
+@limiter.limit("30/minute")
+async def telemetry_errors(request: Request) -> Response:
+    """An uncaught client error or error-boundary render failure (anonymous, scrubbed)."""
+    from pydantic import ValidationError
+
+    from .client_telemetry import ClientError, record_client_error
+
+    body = await _telemetry_body(request)
+    try:
+        report = ClientError.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail="invalid error report") from exc
+    record_client_error(report)
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -2872,15 +3332,10 @@ def run_eval(request: Request, sample_size: int = 50, days: int = 30) -> dict:
     if days < 1 or days > 365:
         raise HTTPException(status_code=400, detail="days must be 1..365")
 
-    from .evaluation import run_evaluation
+    from .evaluation import record_eval_report, run_evaluation
 
     report = run_evaluation(sample_size=sample_size, days=days)
-    for m in report.metrics:
-        metrics.observe(
-            "ura_eval_metric",
-            m.value,
-            labels={"name": m.name, "backend": report.backend},
-        )
+    record_eval_report(report)
     return report.to_dict()
 
 
@@ -2974,10 +3429,11 @@ def ticket_presence_endpoint(
 ) -> dict:
     """Heartbeat: this officer has the case open (collision lock).
 
-    Officers and admins only: an auditor reads a case without claiming it, so
-    the console sends no heartbeat for them and the API refuses one.
+    Officers only: an auditor reads a case without claiming it and an
+    administrator does not work cases, so the console sends no heartbeat for
+    either and the API refuses one.
     """
-    _require_staff_writer(ctx)
+    _require_live_officer(ctx)
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
@@ -3128,13 +3584,341 @@ def delete_override_endpoint(
     return {"ok": True, "id": override_id}
 
 
+# ---------------------------------------------------------------------------
+# Knowledge Discrepancies & Reporting (Automated Bug Reporting)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/discrepancies", tags=["admin"])
+def list_discrepancies_endpoint(
+    status: str | None = None,
+    priority: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {
+        "discrepancies": db.list_discrepancies(
+            status=status, priority=priority, limit=limit, offset=offset
+        ),
+        "stats": db.get_discrepancy_stats(),
+    }
+
+
+@app.get("/v1/admin/discrepancies/stats", tags=["admin"])
+def get_discrepancy_stats_endpoint(
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return db.get_discrepancy_stats()
+
+
+@app.get("/v1/admin/discrepancies/{report_id}", tags=["admin"])
+def get_discrepancy_endpoint(
+    report_id: str,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    report = db.get_discrepancy(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="discrepancy report not found")
+    return report
+
+
+@app.post("/v1/admin/discrepancies/{report_id}/verify", tags=["admin"])
+def verify_discrepancy_endpoint(
+    report_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may verify discrepancies")
+    report = db.get_discrepancy(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="discrepancy report not found")
+
+    admin_note = str(body.get("admin_note") or "").strip()
+    override_id = ""
+
+    # Optional 1-Click Answer Override
+    if body.get("create_override"):
+        from . import cms
+
+        override_query = str(body.get("override_query") or report.get("user_correction") or "").strip()
+        override_reply = str(body.get("override_reply") or "").strip()
+        source_url = str(body.get("source_url") or "staff-verified-discrepancy").strip()
+        if override_query and override_reply:
+            row = cms.upsert(
+                override_query,
+                override_reply,
+                source_url=source_url,
+                created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                enabled=True,
+            )
+            override_id = str((row or {}).get("id") or "")
+
+    # Optional Solution C: Active Statutory Precedence
+    precedence_topic = str(body.get("precedence_topic") or "").strip()
+    precedence_rule = str(body.get("precedence_rule") or "").strip()
+    statute_ref = str(body.get("statute_reference") or "").strip()
+    if precedence_topic and precedence_rule:
+        db.add_statutory_precedence(
+            precedence_topic,
+            precedence_rule,
+            statute_reference=statute_ref,
+            enabled=True,
+        )
+
+    # Optional Solution B: Tombstone cited sources or chunks
+    tomb_sources = body.get("tombstone_sources") or []
+    if isinstance(tomb_sources, list):
+        for src in tomb_sources:
+            if src and str(src).strip():
+                db.add_corpus_tombstone(
+                    str(src).strip(),
+                    reason=f"Superseded via report {report_id}",
+                    superseded_by=override_id,
+                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                )
+
+    tomb_chunks = body.get("tombstone_chunk_ids") or []
+    if isinstance(tomb_chunks, list):
+        for cid in tomb_chunks:
+            if cid and str(cid).strip():
+                db.add_corpus_tombstone(
+                    "",
+                    chunk_id=str(cid).strip(),
+                    reason=f"Superseded via report {report_id}",
+                    superseded_by=override_id,
+                    created_by=ctx.user.user_id if ctx.user else "ura_admin",
+                )
+
+    db.update_discrepancy_status(
+        report_id,
+        "verified",
+        admin_note=admin_note,
+        verified_override_id=override_id,
+    )
+    _audit_staff_action(
+        ctx,
+        "staff.discrepancy_verified",
+        {"report_id": report_id, "override_id": override_id},
+    )
+    return {"ok": True, "report_id": report_id, "status": "verified", "override_id": override_id}
+
+
+@app.post("/v1/admin/discrepancies/{report_id}/dismiss", tags=["admin"])
+def dismiss_discrepancy_endpoint(
+    report_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may dismiss discrepancies")
+    report = db.get_discrepancy(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="discrepancy report not found")
+    admin_note = str(body.get("admin_note") or body.get("reason") or "does_not_apply").strip()
+    db.update_discrepancy_status(report_id, "dismissed", admin_note=admin_note)
+    _audit_staff_action(
+        ctx,
+        "staff.discrepancy_dismissed",
+        {"report_id": report_id, "reason": admin_note},
+    )
+    return {"ok": True, "report_id": report_id, "status": "dismissed"}
+
+
+# ---------------------------------------------------------------------------
+# Corpus Tombstones (Solution B)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/tombstones", tags=["admin"])
+def list_tombstones_endpoint(
+    limit: int = 100,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {"tombstones": db.list_corpus_tombstones(limit=limit)}
+
+
+@app.post("/v1/admin/tombstones", tags=["admin"])
+def create_tombstone_endpoint(
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may add tombstones")
+    src = str(body.get("source_uri") or "").strip()
+    cid = str(body.get("chunk_id") or "").strip()
+    reason = str(body.get("reason") or "").strip()
+    superseded = str(body.get("superseded_by") or "").strip()
+    try:
+        tomb = db.add_corpus_tombstone(
+            src,
+            chunk_id=cid,
+            reason=reason,
+            superseded_by=superseded,
+            created_by=ctx.user.user_id if ctx.user else "ura_admin",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(ctx, "staff.tombstone_created", {"tombstone_id": tomb.get("id")})
+    return tomb
+
+
+@app.delete("/v1/admin/tombstones/{tombstone_id}", tags=["admin"])
+def delete_tombstone_endpoint(
+    tombstone_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may delete tombstones")
+    ok = db.delete_corpus_tombstone(tombstone_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="tombstone not found")
+    _audit_staff_action(ctx, "staff.tombstone_deleted", {"tombstone_id": tombstone_id})
+    return {"ok": True, "id": tombstone_id}
+
+
+# ---------------------------------------------------------------------------
+# Statutory Precedences (Solution C)
+# ---------------------------------------------------------------------------
+@app.get("/v1/admin/precedences", tags=["admin"])
+def list_precedences_endpoint(
+    enabled_only: bool = False,
+    _ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    return {"precedences": db.list_statutory_precedences(enabled_only=enabled_only)}
+
+
+@app.post("/v1/admin/precedences", tags=["admin"])
+def create_precedence_endpoint(
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may add precedences")
+    topic = str(body.get("topic") or "").strip()
+    rule = str(body.get("rule_statement") or "").strip()
+    statute_ref = str(body.get("statute_reference") or "").strip()
+    enabled = bool(body.get("enabled", True))
+    try:
+        prec = db.add_statutory_precedence(
+            topic, rule, statute_reference=statute_ref, enabled=enabled
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _audit_staff_action(ctx, "staff.precedence_created", {"precedence_id": prec.get("id")})
+    return prec
+
+
+@app.patch("/v1/admin/precedences/{precedence_id}", tags=["admin"])
+def update_precedence_endpoint(
+    precedence_id: str,
+    body: dict,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may edit precedences")
+    enabled = body.get("enabled")
+    if enabled is not None:
+        enabled = bool(enabled)
+    rule = body.get("rule_statement")
+    statute_ref = body.get("statute_reference")
+    ok = db.update_statutory_precedence(
+        precedence_id,
+        enabled=enabled,
+        rule_statement=str(rule) if rule is not None else None,
+        statute_reference=str(statute_ref) if statute_ref is not None else None,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="precedence not found")
+    _audit_staff_action(ctx, "staff.precedence_updated", {"precedence_id": precedence_id})
+    return {"ok": True, "id": precedence_id}
+
+
+@app.delete("/v1/admin/precedences/{precedence_id}", tags=["admin"])
+def delete_precedence_endpoint(
+    precedence_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    if ctx.user and ctx.role != "ura_admin":
+        raise HTTPException(status_code=403, detail="only ura_admin may delete precedences")
+    ok = db.delete_statutory_precedence(precedence_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="precedence not found")
+    _audit_staff_action(ctx, "staff.precedence_deleted", {"precedence_id": precedence_id})
+    return {"ok": True, "id": precedence_id}
+
+
+class TestNotificationRequest(BaseModel):
+    channel: str = Field(..., description="Channel to test: email, sms, or webhook")
+    recipient: str = Field(..., description="Email address, phone number (+256...), or webhook URL")
+    message: str = Field(..., description="Notification message body")
+    subject: str = Field("URA Assistant Notification", description="Notification subject line")
+
+
 @app.get("/v1/admin/outbox", tags=["admin"])
 def list_outbox_endpoint(
+    status: str = Query("", description="Optional status filter: queued, sent, delivered, failed"),
+    limit: int = Query(50, ge=1, le=200),
     _ctx: AuthContext = Depends(require_admin_access),
-    limit: int = 50,
 ) -> dict:
-    """Mock email/SMS queue. provider=mock; nothing is sent."""
-    return {"items": db.list_notification_outbox(limit=limit), "live": False}
+    """Notification outbox with live provider metrics, status counts, and real-time state."""
+    from .notify import is_live, configured_providers
+
+    items = db.list_notification_outbox(limit=limit, status=status)
+    stats = db.get_outbox_stats()
+    return {
+        "items": items,
+        "live": is_live(),
+        "providers": configured_providers(),
+        "stats": stats,
+    }
+
+
+@app.post("/v1/admin/outbox/dispatch", tags=["admin"])
+def dispatch_outbox_endpoint(
+    limit: int = Query(50, ge=1, le=200),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Trigger live drain and delivery of queued notification outbox messages."""
+    _require_staff_writer(ctx)
+    from .notify import drain_outbox
+
+    res = drain_outbox(limit=limit)
+    _audit_staff_action(ctx, "staff.outbox_dispatched", {"processed": res.get("processed", 0), "sent": res.get("sent", 0)})
+    return res
+
+
+@app.post("/v1/admin/outbox/{notification_id}/retry", tags=["admin"])
+def retry_outbox_endpoint(
+    notification_id: str,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Retry sending a specific queued or failed outbox notification."""
+    _require_staff_writer(ctx)
+    from .notify import retry_notification
+
+    res = retry_notification(notification_id)
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Retry failed"))
+    _audit_staff_action(ctx, "staff.outbox_retried", {"notification_id": notification_id, "status": res.get("status")})
+    return res
+
+
+@app.post("/v1/admin/outbox/test", tags=["admin"])
+def test_outbox_endpoint(
+    req: TestNotificationRequest,
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict[str, Any]:
+    """Send an immediate test notification across a live communication channel."""
+    _require_staff_writer(ctx)
+    from .notify import test_notification
+
+    res = test_notification(
+        channel=req.channel,
+        recipient=req.recipient,
+        message=req.message,
+        subject=req.subject,
+        user_id=ctx.user_id or "staff-test",
+    )
+    _audit_staff_action(ctx, "staff.outbox_test_sent", {"channel": req.channel, "status": res.get("status")})
+    return res
 
 
 @app.get("/v1/admin/audit/events", response_model=AuditEventsResponse, tags=["admin"])
@@ -3302,6 +4086,7 @@ def audit_seal_endpoint(
     if anchor is None:
         return AuditSealResponse(sealed=False, anchor=None)
     metrics.inc("audit_seals_total", labels={"trigger": "manual"})
+    metrics.set_gauge("audit_last_seal_timestamp_seconds", time.time())
     _audit_staff_action(
         ctx,
         "audit.sealed",
@@ -3328,10 +4113,28 @@ def get_ticket_endpoint(
     who read it is part of the audit trail (the call desk already logs its
     caller-history views the same way).
     """
+    from . import officer_chat, service_ratings
+
     ticket = db.get_ticket(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="ticket not found")
     ticket["viewers"] = db.list_ticket_viewers(ticket_id)
+    # The live chat with the taxpayer, in order, and how it ended and was rated.
+    chat = officer_chat.get_chat(ticket_id)
+    ticket["messages"] = officer_chat.thread_for_staff(ticket_id)
+    rating = service_ratings.find("chat_officer_csat", ticket_id=ticket_id) if officer_chat.is_text(ticket) else None
+    ticket["chat"] = {
+        "state": officer_chat.chat_state(ticket, chat),
+        "officer_name": officer_chat.officer_name_for(ticket, chat),
+        "ended_at": (chat or {}).get("ended_at"),
+        "ended_by_name": (chat or {}).get("ended_by_name") or "",
+        "outcome": (chat or {}).get("outcome") or "",
+        "rating": (
+            {"status": rating.get("status"), "score": rating.get("score"), "comment": rating.get("comment") or ""}
+            if rating
+            else None
+        ),
+    }
     _audit_staff_action(ctx, "staff.ticket_viewed", {"ticket_id": ticket_id})
     return ticket
 
@@ -3356,10 +4159,11 @@ async def update_ticket_endpoint(
     fields on purpose — an officer's candid note is not something the
     taxpayer should ever read.
 
-    Officers and admins only; every accepted change is recorded as
-    ``staff.ticket_updated`` with the fields changed (a reply as its length).
+    Officers only (administrators audit, auditors read); every accepted change
+    is recorded as ``staff.ticket_updated`` with the fields changed (a reply as
+    its length).
     """
-    _require_staff_writer(ctx)
+    _require_live_officer(ctx)
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             body = await request.json()
@@ -3381,27 +4185,56 @@ async def update_ticket_endpoint(
         except Exception:
             pass
 
-    if officer_reply and not officer_reply_localized:
-        ticket = db.get_ticket(ticket_id)
-        if ticket:
-            t_loc = (locale or ticket.get("locale") or "en").lower().strip()
-            if t_loc not in ("", "en"):
-                try:
-                    from .service import localize_reply
-                    officer_reply_localized = localize_reply(officer_reply, t_loc)
-                except Exception:
-                    logger.debug("auto-localizing officer reply failed", exc_info=True)
+    from . import officer_chat
 
-    ok = db.update_ticket(
-        ticket_id,
-        status=status,
-        assignee=assignee,
-        staff_note=staff_note,
-        priority=priority,
-        officer_reply=officer_reply,
-        officer_reply_localized=officer_reply_localized,
-        locale=locale,
+    before = await asyncio.to_thread(db.get_ticket, ticket_id)
+    if officer_reply and not officer_reply_localized:
+        officer_reply_localized = await asyncio.to_thread(
+            _localize_for_ticket, officer_reply, locale or (before or {}).get("locale") or "en"
+        )
+
+    # Resolving or closing a live text chat *is* ending it: the taxpayer is
+    # told, asked to rate it, and handed back to the assistant — the same as
+    # the End chat button, so the status stepper and "Send & end chat" agree.
+    ends_chat = bool(
+        before
+        and status in officer_chat.OUTCOMES
+        and officer_chat.is_text(before)
+        and officer_chat.chat_state(before) != "ended"
     )
+    if ends_chat:
+        ok = True
+        if any(v is not None for v in (assignee, staff_note, priority, locale)):
+            ok = await asyncio.to_thread(
+                db.update_ticket, ticket_id, assignee=assignee, staff_note=staff_note, priority=priority, locale=locale
+            )
+        if ok:
+            refreshed = await asyncio.to_thread(db.get_ticket, ticket_id) or before
+            await asyncio.to_thread(
+                officer_chat.end_chat,
+                refreshed,
+                officer_id=ctx.user_id or "",
+                officer_name=_desk_officer_name(ctx),
+                outcome=str(status),
+                closing_message=officer_reply or "",
+                closing_localized=officer_reply_localized or "",
+            )
+    else:
+        ok = await asyncio.to_thread(
+            db.update_ticket,
+            ticket_id,
+            status=status,
+            assignee=assignee,
+            staff_note=staff_note,
+            priority=priority,
+            officer_reply=officer_reply,
+            officer_reply_localized=officer_reply_localized,
+            locale=locale,
+        )
+        if ok and before and officer_chat.is_text(before):
+            await asyncio.to_thread(
+                _note_officer_chat_turn, before, ctx, officer_reply, officer_reply_localized, assignee, status
+            )
     if not ok:
         raise HTTPException(status_code=400, detail="no-op or invalid update")
     changed = {
@@ -3414,7 +4247,97 @@ async def update_ticket_endpoint(
     if officer_reply is not None:
         changed["officer_reply_chars"] = len(officer_reply)
     _audit_staff_action(ctx, "staff.ticket_updated", {"ticket_id": ticket_id, **changed})
+    if ends_chat:
+        _audit_staff_action(ctx, "staff.chat_ended", {"ticket_id": ticket_id, "outcome": status, "via": "status"})
+        return {"status": "ok", "ticket_id": ticket_id, "chat_state": "ended"}
     return {"status": "ok", "ticket_id": ticket_id}
+
+
+def _localize_for_ticket(text: str, ticket_locale: str) -> str | None:
+    """An officer's English message in the taxpayer's language (None for English or on failure)."""
+    t_loc = (ticket_locale or "en").lower().strip()
+    if t_loc in ("", "en"):
+        return None
+    try:
+        from .service import localize_reply
+
+        return localize_reply(text, t_loc)
+    except Exception:
+        logger.debug("auto-localizing officer reply failed", exc_info=True)
+        return None
+
+
+def _note_officer_chat_turn(
+    ticket: dict[str, Any],
+    ctx: AuthContext,
+    officer_reply: str | None,
+    officer_reply_localized: str | None,
+    assignee: str | None,
+    status: str | None,
+) -> None:
+    """Keep the chat thread in step with a ticket change: the reply, and who has the case."""
+    from . import officer_chat
+
+    name = _desk_officer_name(ctx)
+    took_case = bool(assignee)
+    if officer_reply or took_case or status == "assigned":
+        officer_chat.note_officer(ticket, ctx.user_id or "", name, took_case=took_case)
+    if officer_reply:
+        officer_chat.append_message(
+            ticket,
+            "officer",
+            officer_reply,
+            text_localized=officer_reply_localized or "",
+            officer_id=ctx.user_id or "",
+            officer_name=name,
+        )
+
+
+@app.post("/v1/admin/tickets/{ticket_id}/end-chat", tags=["admin"])
+async def end_ticket_chat(
+    request: Request,
+    body: EndChatRequest,
+    ticket_id: str = Path(..., pattern=r"^[a-f0-9-]{1,64}$"),
+    ctx: AuthContext = Depends(require_admin_access),
+) -> dict:
+    """An officer ends a live chat with a taxpayer.
+
+    Writes the optional closing message (translated for a non-English case,
+    as a reply is), marks the end in the thread, resolves or closes the ticket
+    (``outcome``), asks the taxpayer to rate the chat and tells the staff
+    console (``escalation.chat_ended``). The taxpayer's chat then shows the
+    rating and hands them back to the assistant. Officers only; recorded as
+    ``staff.chat_ended``. 409 for a call's ticket or a chat that has ended.
+    """
+    _require_live_officer(ctx)
+    from . import officer_chat
+
+    ticket = await asyncio.to_thread(db.get_ticket, ticket_id)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="ticket not found")
+    if not officer_chat.is_text(ticket):
+        raise HTTPException(status_code=409, detail="This case is a call, not a chat")
+    if officer_chat.chat_state(ticket) == "ended":
+        raise HTTPException(status_code=409, detail="This chat has already ended")
+    closing = body.closing_message.strip()
+    closing_localized = body.closing_message_localized.strip()
+    if closing and not closing_localized:
+        closing_localized = await asyncio.to_thread(_localize_for_ticket, closing, ticket.get("locale") or "en") or ""
+    result = await asyncio.to_thread(
+        officer_chat.end_chat,
+        ticket,
+        officer_id=ctx.user_id or "",
+        officer_name=_desk_officer_name(ctx),
+        outcome=body.outcome,
+        closing_message=closing,
+        closing_localized=closing_localized,
+    )
+    _audit_staff_action(
+        ctx,
+        "staff.chat_ended",
+        {"ticket_id": ticket_id, "outcome": body.outcome, "via": "end_chat", "closing_message_chars": len(closing)},
+    )
+    return {"status": "ok", **result}
 
 
 @app.get("/v1/admin/voice_audit", tags=["admin"])
@@ -3539,13 +4462,17 @@ def review_call_endpoint(
     body: dict = Body(...),
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Submit an officer rating (1-5) and note for a call."""
+    """Submit an officer's rating (1-5) and note for a call.
+
+    Officers only, like every other call-desk write: an administrator audits
+    the service officers give (`/admin/quality`) and an auditor reads it.
+    """
     import re
     from .receptionist.store import get_call, save_call_review
     from .tenancy import tenant_enabled
 
-    if ctx.role not in ("ura_staff", "ura_admin"):
-        raise HTTPException(status_code=403, detail="Only staff and admins can submit reviews")
+    if ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="Only officers rate calls")
 
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")
@@ -3618,18 +4545,26 @@ def _require_receptionist_call(call_id: str, ctx: AuthContext) -> dict[str, Any]
 
 
 def _desk_writer(ctx: AuthContext) -> None:
-    """Auditors see every call but take, hold and end none."""
-    if ctx.role not in ("ura_staff", "ura_admin"):
-        raise HTTPException(status_code=403, detail="Read-only role")
+    """Officers take, hold and end calls; auditors watch and administrators audit."""
+    if ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="Only officers take, hold and end calls")
 
 
 def _desk_officer_name(ctx: AuthContext) -> str:
-    """The claimant as a caller will hear them: name, username or email — never a bare ``sub``."""
+    """The claimant as a caller will hear them: name, username or email — never a bare ``sub``.
+
+    The fields come from the token, or from the provider's profile when the
+    token has none (``auth/userinfo.py``). ``name`` is skipped when it is only
+    the email again, as Auth0 sets it for a database user.
+    """
     from .receptionist.desk import officer_display_name
     claims = ctx.claims or {}
+    name = str(claims.get("name") or "").strip()
     handle = (
         str(claims.get("given_name") or "").strip()
+        or ("" if "@" in name else name)
         or str(claims.get("preferred_username") or "").strip()
+        or str(claims.get("nickname") or "").strip()
         or (ctx.user.email if ctx.user else "")
         or ctx.user_id
     )
@@ -3667,14 +4602,13 @@ async def get_call_brief_endpoint(
 
 @app.post("/v1/admin/calls/{call_id}/claim", tags=["admin"])
 async def claim_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_admin_access)) -> Any:
-    """Take a call the AI handed over (a supervisor may step into one it is handling): first wins, the rest get 409."""
+    """Take a call the AI handed over: first wins, the rest get 409. A call the AI is still handling is not taken."""
     from .receptionist import desk
     _desk_call_id(call_id)
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
-        result = await desk.claim(call_id, ctx.user_id, chat_model=getattr(app.state, "model", None),
-                                  officer_name=_desk_officer_name(ctx), is_supervisor=ctx.role == "ura_admin")
+        result = await desk.claim(call_id, ctx.user_id, officer_name=_desk_officer_name(ctx))
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_claimed")
@@ -3689,7 +4623,7 @@ async def release_call_endpoint(call_id: str, ctx: AuthContext = Depends(require
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
-        result = await desk.release(call_id, ctx.user_id, is_admin=ctx.role == "ura_admin")
+        result = await desk.release(call_id, ctx.user_id)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_released")
@@ -3704,8 +4638,7 @@ async def end_call_endpoint(call_id: str, ctx: AuthContext = Depends(require_adm
     _require_receptionist_call(call_id, ctx)
     _desk_writer(ctx)
     try:
-        result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None),
-                                is_admin=ctx.role == "ura_admin")
+        result = await desk.end(call_id, ctx.user_id, getattr(app.state, "speech", None))
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_ended_call")
@@ -3725,7 +4658,7 @@ async def hold_call_endpoint(
     _desk_writer(ctx)
     on = bool(body.get("on", True))
     try:
-        result = await desk.hold(call_id, ctx.user_id, on=on, is_admin=ctx.role == "ura_admin")
+        result = await desk.hold(call_id, ctx.user_id, on=on)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_hold_on" if on else "officer_hold_off")
@@ -3748,7 +4681,7 @@ async def transfer_call_endpoint(
     note = str(body.get("note") or "").strip()
     try:
         result = await desk.transfer(call_id, ctx.user_id, team=team, target_officer_id=target_officer_id,
-                                     note=note, is_admin=ctx.role == "ura_admin")
+                                     note=note)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_transferred")
@@ -3780,11 +4713,23 @@ async def wrapup_call_endpoint(
             ticket_action=ticket_action,
             rating=rating,
             rating_note=rating_note,
-            is_admin=ctx.role == "ura_admin",
+            # What the caller said when the officer asked how satisfied they
+            # were: the officer's service, audited on /admin/quality.
+            caller_satisfaction=body.get("caller_satisfaction"),
+            caller_satisfaction_status=body.get("caller_satisfaction_status"),
+            officer_name=_desk_officer_name(ctx),
         )
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_wrapup_saved")
+    recorded = result.get("caller_satisfaction") or {}
+    if recorded.get("recorded"):
+        from .service_ratings import sentiment_for_score
+
+        metrics.inc(
+            "service_rating_total",
+            labels={"source": "call_officer_csat", "sentiment": sentiment_for_score(recorded.get("score")) or "no_answer"},
+        )
     return result
 
 
@@ -3801,7 +4746,7 @@ async def callback_done_endpoint(
     _desk_writer(ctx)
     note = str(body.get("note") or "").strip()
     try:
-        result = await desk.callback_done(call_id, ctx.user_id, note=note, is_admin=ctx.role == "ura_admin")
+        result = await desk.callback_done(call_id, ctx.user_id, note=note)
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_callback_done")
@@ -4083,7 +5028,7 @@ def me_withdraw_consent(
     if "personalization" in body.purposes:
         from .memory.service import get_memory_service
 
-        get_memory_service().forget_user(ctx.user.user_id)
+        get_memory_service().forget_user(ctx.user.user_id, tenant_id=ctx.tenant_id or "default")
     if "analytics" in body.purposes:
         withdrawn["analytics_data"] = db.delete_user_analytics(ctx.user.user_id)
     return {"user_id": row["id"], "withdrawn": withdrawn}
@@ -4101,8 +5046,15 @@ def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
-    data = db.export_user_data(row["id"], external_id=ctx.user.user_id)
-    data["facts"] = get_memory_service().export_user(ctx.user.user_id)["facts"]
+    data = db.export_user_data(
+        row["id"], external_id=ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
+    memory_export = get_memory_service().export_user(
+        ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
+    data["facts"] = memory_export["facts"]
+    data["episodic_memory"] = memory_export["episodic"]
+    data["working_memory"] = memory_export["working"]
     data["documents"] = documents.export_user_documents(ctx.user.user_id)
     return data
 
@@ -4123,8 +5075,14 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
     )
     from .memory.service import get_memory_service
 
-    counts = db.delete_user_cascade(row["id"], external_id=ctx.user.user_id)
-    counts["memory"] = sum(get_memory_service().forget_user(ctx.user.user_id).values())
+    counts = db.delete_user_cascade(
+        row["id"], external_id=ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
+    counts["memory"] = sum(
+        get_memory_service().forget_user(
+            ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+        ).values()
+    )
     counts["documents"] = sum(documents.forget_user_documents(ctx.user.user_id).values())
     return {"deleted": counts, "external_id": ctx.user.user_id}
 
@@ -4250,215 +5208,15 @@ def list_quantized_models(
 
 
 # ---------------------------------------------------------------------------
-# Offline RAG (Phase 25)
+# Modular domain route handlers (2026 clean architecture)
 # ---------------------------------------------------------------------------
+from .routes.connectors import router as connectors_router
+from .routes.offline import router as offline_router
+from .routes.quality import router as quality_router
 
-
-@app.get("/v1/offline/status", response_model=OfflineStatusResponse, tags=["offline"])
-@limiter.limit("60/minute")
-def offline_status(
-    request: Request,
-    _ctx: AuthContext = Depends(current_user),
-) -> OfflineStatusResponse:
-    """Get offline bundle availability and sync status.
-
-    Feature-flagged behind ``FLAG_OFFLINE_RAG``.
-    """
-    from .flags import flags
-    from .models import OfflineBundleInfo
-
-    if not flags.is_enabled("offline_rag"):
-        return OfflineStatusResponse(available=False)
-
-    from .offline_bundle import BundleManager
-
-    manager = BundleManager()
-    info = manager.get_info()
-
-    bundle_info = None
-    if info.available:
-        bundle_info = OfflineBundleInfo(
-            version=info.version,
-            size_bytes=info.size_bytes,
-            size_mb=info.size_mb,
-            passage_count=info.passage_count,
-            index_dim=info.index_dim,
-            sha256=info.sha256,
-            created_at=info.created_at,
-            min_app_version=info.min_app_version,
-        )
-
-    return OfflineStatusResponse(
-        available=info.available,
-        bundle=bundle_info,
-        sync_enabled=flags.is_enabled("offline_sync"),
-    )
-
-
-@app.post("/v1/offline/sync", response_model=OfflineSyncResponse, tags=["offline"])
-@limiter.limit("10/minute")
-def offline_sync(
-    body: OfflineSyncRequest,
-    request: Request,
-    _ctx: AuthContext = Depends(current_user),
-) -> OfflineSyncResponse:
-    """Compute delta sync for a client's offline bundle.
-
-    Client sends its current version + chunk hashes; server returns
-    only the changed chunks.  Feature-flagged behind ``FLAG_OFFLINE_SYNC``.
-    """
-    from .flags import flags
-
-    if not flags.is_enabled("offline_sync"):
-        raise HTTPException(
-            status_code=404,
-            detail="Offline sync is disabled (FLAG_OFFLINE_SYNC=false)",
-        )
-
-    from .offline_sync import OfflineSyncEngine, SyncEvent
-
-    engine = OfflineSyncEngine()
-    if not engine.initialize():
-        raise HTTPException(status_code=503, detail="Sync engine not available")
-
-    t0 = time.perf_counter()
-    delta = engine.compute_delta(
-        client_version=body.client_version,
-        client_chunk_hashes=body.client_chunk_hashes,
-        max_download_bytes=body.max_download_bytes,
-    )
-    duration = time.perf_counter() - t0
-
-    # Record sync event
-    engine.record_sync(SyncEvent(
-        device_id=body.device_id,
-        client_version=body.client_version,
-        server_version=delta.server_version,
-        sync_type="full" if delta.needs_full_sync else "delta",
-        chunks_sent=len(delta.changed_chunks),
-        bytes_sent=delta.total_download_bytes,
-        duration_s=round(duration, 3),
-        timestamp=time.time(),
-    ))
-
-    return OfflineSyncResponse(
-        server_version=delta.server_version,
-        needs_full_sync=delta.needs_full_sync,
-        changed_chunks=delta.changed_chunks,
-        deleted_chunk_ids=delta.deleted_chunk_ids,
-        total_download_bytes=delta.total_download_bytes,
-        estimated_sync_seconds=delta.estimated_sync_seconds,
-    )
-
-
-@app.get("/v1/offline/bundle", tags=["offline"])
-@limiter.limit("5/minute")
-def download_offline_bundle(
-    request: Request,
-    _ctx: AuthContext = Depends(current_user),
-):
-    """Download the latest offline RAG bundle.
-
-    Returns the compressed bundle archive for offline use.
-    Feature-flagged behind ``FLAG_OFFLINE_BUNDLE_API``.
-    """
-    from .flags import flags
-
-    if not flags.is_enabled("offline_bundle_api"):
-        raise HTTPException(
-            status_code=404,
-            detail="Offline bundle API is disabled (FLAG_OFFLINE_BUNDLE_API=false)",
-        )
-
-    from .offline_bundle import BundleManager
-
-    manager = BundleManager()
-    bundle_path = manager.get_bundle_path()
-
-    if bundle_path is None or not bundle_path.exists():
-        raise HTTPException(status_code=404, detail="No offline bundle available")
-
-    from fastapi.responses import FileResponse
-
-    size = bundle_path.stat().st_size
-    manager.record_download(size)
-    metrics.inc("offline_bundle_downloads_total")
-
-    return FileResponse(
-        path=str(bundle_path),
-        media_type="application/gzip",
-        filename=bundle_path.name,
-        headers={
-            "Content-Length": str(size),
-            "X-Bundle-Version": manager.get_info().version,
-        },
-    )
-
-
-# ---------------------------------------------------------------------------
-# Connectors (EFRIS, Digital Tax Stamps)
-# ---------------------------------------------------------------------------
-
-
-@app.get("/v1/connectors", tags=["connectors"])
-def list_system_connectors() -> dict[str, Any]:
-    """List system connectors (EFRIS, DTS) with health and independent database metrics."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    return {
-        "ok": True,
-        "connectors": orchestrator.get_connectors_summary(),
-        "health": orchestrator.health_check(),
-    }
-
-
-@app.post("/v1/connectors/{name}/toggle", tags=["connectors"])
-def toggle_system_connector(
-    name: str,
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    """Connect or disconnect an enterprise system connector."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    enable = bool(payload.get("enable", True))
-    return orchestrator.toggle_connector(name, enable)
-
-
-@app.get("/v1/connectors/{name}/records", tags=["connectors"])
-def inspect_connector_database(
-    name: str,
-    limit: int = Query(5, ge=1, le=50),
-) -> dict[str, Any]:
-    """Retrieve recent records from the connector's independent SQLite database."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    return orchestrator.get_connector_records(name, limit=limit)
-
-
-@app.post("/v1/connectors/register", tags=["connectors"])
-def register_external_connector(
-    payload: dict[str, Any] = Body(...),
-) -> dict[str, Any]:
-    """Register an external API/MCP system connector (e.g. Stripe, GitHub, or standalone enterprise server)."""
-    from .plugins import get_orchestrator
-
-    orchestrator = get_orchestrator()
-    name = str(payload.get("name", "")).strip()
-    endpoint_url = str(payload.get("endpoint_url", "")).strip()
-    if not name or not endpoint_url:
-        raise HTTPException(status_code=400, detail="name and endpoint_url are required")
-
-    return orchestrator.register_remote_connector(
-        name=name,
-        endpoint_url=endpoint_url,
-        api_key=str(payload.get("api_key", "")),
-        system_type=str(payload.get("system_type", "external_mcp")),
-        display_name=str(payload.get("display_name", "")),
-        description=str(payload.get("description", "")),
-    )
+app.include_router(offline_router)
+app.include_router(connectors_router)
+app.include_router(quality_router)
 
 
 # ---------------------------------------------------------------------------
@@ -4576,8 +5334,10 @@ async def voice_vision_chat(
         conversation_id=conversation_id or None,
         top_k=top_k,
         locale=language,
+        locale_explicit=True,
         user_id=ctx.user_id or None,
         tenant_id=ctx.tenant_id,
+        channel="multimodal",
     )
     llm_latency = time.perf_counter() - t_llm
 
@@ -4603,6 +5363,7 @@ async def voice_vision_chat(
             duration_s = tts_result.duration_s
 
     total_latency = time.perf_counter() - t0
+    record_chat_turn(result, elapsed_ms=total_latency * 1000, channel="multimodal")
 
     return VoiceVisionChatResponse(
         transcript=transcript,

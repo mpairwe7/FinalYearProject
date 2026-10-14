@@ -32,12 +32,14 @@ FastAPI (one worker and one replica; process-local call actor)
                               is quiet, 2 transcribed words barge in while it talks; the turn closes
                               RECEPTIONIST_TURN_TIMEOUT_S after VAD's 0.5 s stop — Smart Turn v3
                               covers neither Luganda nor Swahili)
-     → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer)
+     → UraReceptionistBrain  (custom LLM service: intents → ClarifyGate → ChatModel.generate → transfer;
+                              integrates GPU dense BGE-M3 + DBSF fusion + GPU mxbai-rerank with clean
+                              single-sigmoid probabilities, G126–G132)
      → UraSpeechTTS          (TTSService → SpeechModel.synthesize → PCM16 16k; streams from the
                               local Orpheus sidecar for the languages in ORPHEUS_TTS_LANGUAGES)
      → LiveKit audio/data output
    Observers: CallMetricsObserver (turn latency, barge-ins)
-   On end: summary.py (always English; local Sunflower first, Gemini only if vLLM is down)
+   On end: summary.py (always English; local Sunflower, or a deterministic summary if vLLM is down)
            + metrics.py → store.py (voice_calls / voice_call_turns)
 ```
 
@@ -90,8 +92,12 @@ Sunflower on vLLM against Qdrant, and the Orpheus voice, all from locally cached
 Hugging Face weights on the GPU stack. `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` adds a
 language sentinel that moves a call between English, Luganda and Swahili on this same
 engine — see **§6 Multilingual calls**. The Gemini Live speech-to-speech engine was
-removed on 2026-09-30; Gemini is now only a text fallback when the local vLLM is down
-(the officer brief, the call summary, the Luganda query bridge).
+removed on 2026-09-30. Since G122 (2026-10) **no hosted model is used anywhere on a
+call**. The officer brief, the call summary, the Luganda query bridge and the Luganda
+answer run on Sunflower only, with deterministic fallbacks when vLLM is down. A call
+turn's English or Swahili answer comes from the chat service, which is held to local
+models for that turn whatever chat is configured to use: no Gemini, Workers AI or
+Sunbird API, and no FAQ judge (`app/providers/scope.py`).
 
 ---
 
@@ -116,10 +122,10 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
 | `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer; `0` turns them off |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
-| `RECEPTIONIST_BRIEF_MODEL` | `gemini-2.5-flash-lite` | Fallback model for the officer brief; local Sunflower writes it first for every call |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
 | `RECEPTIONIST_FILLER_AFTER_MS` | `450` | Latency threshold before playing filler token (pool of short tokens) |
+| `RECEPTIONIST_MEMORY_MIN_ASR_CONF` | `0.6` | A call turn heard below this mean word probability is answered but not written to long-term memory (a mishearing must not become a fact about the caller; needs `FLAG_MEMORY_ENABLED` and personalization consent to matter) |
 | `RECEPTIONIST_MAX_SPOKEN_SENTENCES` | `3` | Spoken truncation limit before prompting *"Would you like more detail?"* (yes reads on; an officer offer takes its place, one question a turn) |
 | `RECEPTIONIST_TTS_VOICE` | `en-KE-AsiliaNeural` | edge-tts speaker for English when Orpheus does not voice it (a fallback) |
 | `ORPHEUS_TTS_URL` | unset (`http://orpheus-tts:8100` in compose) | The local Orpheus voice sidecar |
@@ -134,10 +140,21 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_SLOW_PAUSE_MS` | `600` | Silence after each sentence once the caller has asked the assistant to slow down (the local voices have no speed control) |
 | `RECEPTIONIST_IDLE_REPROMPT_S` | `12` | Caller silence, counted from the end of the assistant's speech, before it asks "Are you still there?"; `0` turns silence handling off |
 | `RECEPTIONIST_IDLE_REPROMPTS` | `1` | How many such checks before a still-silent call is ended (end reason `caller_idle`) and its call slot freed |
+| `RECEPTIONIST_CALL_REVIEW` | `true` | The AI asks "was this call helpful?" — once a call, only after it answered something — at goodbye, or while a caller who asked for an officer is transferred. Audited on `/admin/quality` (AI on calls) |
+| `RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S` | `10` | How long the AI waits for the answer to its goodbye review question before saying goodbye (recorded as no answer) |
 | `RECEPTIONIST_CLARIFY_THRESHOLD_<LANG>` | global value | Per-language word-probability threshold (e.g. `_LG`) |
 | `RECEPTIONIST_CLARIFY_REPEAT_<LANG>` | `false` for `LG`, else `true` | Whether "please repeat that word" is asked in that language |
 | `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
 | `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
+| `FLAG_HYBRID_SPEECH_S2S` | `false` | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`) |
+| `FLAG_VOICE_AGENTIC_WORKFLOWS` | `false` | Spoken confirmation token binding & guided workflows on live calls |
+| `FLAG_EMOTION_AWARE_PROSODY` | `false` | Acoustic prosody & caller affect conditioning (`receptionist/prosody.py`) |
+| `FLAG_SPOKEN_FIGURE_GUARD` | `false` | Dictation pauses & spoken figure verification (`receptionist/spoken_figure_guard.py`) |
+| `FLAG_OFFICER_VOICE_COPILOT` | `false` | Live ASR + English router view assist on the officer console during bridged calls |
+| `FLAG_CONTINUOUS_RELATIONSHIP_MEMORY` | `false` | Longitudinal `ResolutionCase` checkpointing & bidirectional `Voice <-> Web` carryover |
+| `ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS` | unset (`55` when set) | Tighter character cap on the opening clause to reduce Orpheus first-audio TTFB |
+| `VOICE_SEMANTIC_ENDPOINT_MIN_SILENCE_MS` | `320` | Minimum semantic endpointing silence for syntactically complete turns |
+| `VOICE_SEMANTIC_ENDPOINT_NUMERIC_SILENCE_MS` | `1100` | Extended silence tolerance when caller is mid-number (TIN/PRN) or mid-conjunction |
 
 Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
 provider session window any more. See Pipecat's
@@ -258,6 +275,28 @@ Expose using ngrok:
 # https://struttingly-nongeological-briella.ngrok-free.dev
 ```
 
+### Tearing the stack down — leave no VRAM behind
+
+```bash
+python3 scripts/cleanup_gpu_processes.py --dry-run   # list what would be released
+python3 scripts/cleanup_gpu_processes.py             # release it, then verify
+```
+
+The script frees everything this project holds on the GPUs and then re-queries
+`nvidia-smi`; it exits non-zero (`STILL_ON_GPU`) if anything of this project is
+still resident, and also when Docker cannot be queried, so a failed lookup is
+never reported as clean. It covers what a plain `docker compose down` misses:
+
+- profile-gated services (`orpheus-tts` needs `--profile multilingual`);
+- orphan containers from other compose chains (`ura-app-connectors`, the dev2 stack);
+- host processes started from agent scratchpad worktrees.
+
+Containers are matched by their compose working-dir label (`~/Mpairwe7`), not by
+the process's path: a container process reports a container-side cwd such as
+`/app`, which a path match would skip as external. Other projects' containers and
+processes on the shared box are never touched. Stopping the stack ends the ngrok
+upstream (`502`) until it is brought up again.
+
 ---
 
 ## 5. End-to-End Demo Script
@@ -308,7 +347,7 @@ of these words is answered, not obeyed — in English, Luganda or Swahili:
 |---|---|
 | "Could you repeat that?", "Kiddemu", "Rudia tena" | repeats its last answer |
 | "Speak slower", "Yogera mpola", "Ongea polepole" | says it will slow down; every later sentence is followed by `RECEPTIONIST_SLOW_PAUSE_MS` of silence |
-| "Goodbye", "End the call", "Weeraba", "Kwaheri" | says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`) |
+| "Goodbye", "End the call", "Bye", "That's all, thank you", "Weeraba", "Kwaheri" | if the AI has answered something on this call, first asks *"Before you go, was this call helpful to you?"*, stores the answer (helped / partly / didn't help / unclear, with what was said), says *"Thank you for your feedback. Goodbye."* and ends the call; otherwise says the closing line, waits until it has played, then ends the call (`end_reason=caller_voice_hangup`). Silence after the review question for `RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S` is recorded as no answer and the call ends with the usual goodbye; a new question instead is answered, and the review is not asked again |
 | nothing, for `RECEPTIONIST_IDLE_REPROMPT_S` | asks "Are you still there?"; after `RECEPTIONIST_IDLE_REPROMPTS` such checks, says goodbye and ends the call (`caller_idle`) |
 | "Yes", "Tell me more", "Weeyongere", "Endelea" after *"Would you like more detail?"* | reads the rest of the answer, three sentences at a time |
 | "No", "That's all" after either question | *"No problem. What else can I help you with?"* |
@@ -329,9 +368,10 @@ caller hears the AI first.
 | An uncertain answer (confidence 0.35–0.50), a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
 | The caller speaks of ending their life (English, *okwetta*, *kujiua*) | Before anything else, and never read as a goodbye: the crisis lines in full, with the emergency numbers in words, the counselling line on screen (0800 21 21 21), then *"Would you like me to connect you to a URA officer as well?"*. On yes, or at once if they also asked for a person, an **urgent** transfer; on no, the numbers stay on screen and the AI stays with them. The ticket carries no crisis text | `safety_concern` |
 
-Officers (`ura_staff`) cannot take a call the AI is still handling: the claim
-API answers 403 and the console hides **Take over**. A supervisor
-(`ura_admin`) can step in (`officer_takeover`). Every AI question is the only
+Nobody takes a call the AI is still handling: the claim API answers 403 and
+the console offers no **Take over**. Only officers (`ura_staff`) work calls at
+all; administrators audit the service and are refused every call-desk action
+(since 2026-10-13, `docs/plans/admin-service-quality-audit-plan.md`). Every AI question is the only
 question in its turn, so "yes" can only mean one thing. A "yes" or "okay" said
 over an answer, before its question was heard, is a backchannel: the question
 is asked again, and nothing is acted on. An at-risk caller who talked over the
@@ -339,7 +379,12 @@ officer offer and moved on is offered again with the next answer.
 
 ### Step 4: Transfer to Human Officer
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
-2. AI announces: *"I'm connecting you to a URA officer, please hold."*
+2. AI announces: *"I'm connecting you to a URA officer, please hold."* If it has answered
+   something on this call, it asks instead: *"I'm connecting you to a URA officer now. While
+   you wait, were my answers helpful so far?"* — the transfer is already under way. An answer
+   before the officer joins is stored (`call_ai_review_transfer`) and thanked (*"Thank you.
+   Please stay on the line; an officer will be with you shortly."*); the officer joining first,
+   or the caller hanging up, records no answer. Never asked on a crisis, safety or failure transfer.
 3. Status changes to **Transferring**, with the reference (`TIC-` and the ticket's first 8 characters) on the caller's screen.
 4. Staff on `/calls` receives an incoming transfer banner with a pulsing alert pill: the
    topic and priority come from the handoff packet ("My account balance" → *Account
@@ -372,9 +417,8 @@ officer offer and moved on is offered again with the next answer.
 3. **Take call** (or `A`) claims it — first officer wins; a second gets *"Taken by Officer
    …"*. The claim holds the caller for `RECEPTIONIST_CLAIM_TIMEOUT_S`, the microphone is
    asked for, then the audio joins: the caller's player is cleared and they hear *"You're
-   now connected to Officer {Name}."* in the call's language. **Take over** does the same
-   for a call the AI is still handling; it is a supervisor's (`ura_admin`) action only —
-   officers take the calls the AI hands over.
+   now connected to Officer {Name}."* in the call's language. Officers take the calls the
+   AI hands over; a call the AI is still handling cannot be taken.
 4. The AI goes silent: caller audio goes to the officer only, and anything the AI was
    still saying is dropped. Officer audio streams directly to the caller socket.
 5. `EnergyVAD` segments officer speech, transcribes turns, and records them in the live transcript.
@@ -384,12 +428,18 @@ officer offer and moved on is offered again with the next answer.
 
 ### Step 6: Hang-up & Performance Evaluation
 1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
-   Goodbye."* and then hangs the caller up; the caller can hang up at any time.
+   Goodbye."* and then hangs the caller up; the caller can hang up at any time. Before
+   ending, the officer asks *"Were you satisfied with the help I gave you today?"* (the
+   End-call confirm reminds them).
 2. Background task runs `summary.py`:
    Generates a redacted structured JSON summary with subject, key facts, and resolution.
 3. Performance metrics are recorded in `voice_calls`:
    AI-only routing share (not confirmed resolution), turn latencies (p50/p95), ASR word confidence, barge-ins, and officer rating.
-4. Officer submits a 1-5 star review and note.
+4. The officer's wrap-up records **how satisfied the caller said they were** (required:
+   one of five faces, or "The caller didn't say"), stored as `call_officer_csat` and
+   audited on `/admin/quality` (Officer calls). Rating the AI's handling before the
+   transfer (1-5 stars and a note) is optional and offered only when the AI answered
+   something.
 5. The **Performance Overview** tab updates SLO gauge cards and KPI aggregates.
 
 ---
@@ -477,9 +527,22 @@ local way: "Vati" and "tiini" are VAT and TIN.
 | Direction | Message | Meaning |
 |---|---|---|
 | client → server | `call_start.preferred_locale` | the chat's language — a hint for staff and metrics only |
+| client → server | `call_start.parent_conversation_id`, `call_start.chat_session` | the chat the call was started from, and (signed out) the chat session that owns it — see *Calls started from the chat* below |
 | server → client | `call_ready.language_detection`, `.languages`, `.language` | show the language chip; the opening language |
 | server → client | `{"type":"language","language":"lg","source":"auto"\|"explicit"\|"override","confidence":0.93}` | the call's language is now … |
 | client → server | `{"type":"set_language","language":"sw"}` | pin the call to a language |
+
+**Calls started from the chat (G122).** A call started from the chat sends the chat's
+conversation id. The server carries that chat's task and a short English account of it
+into the call only when the caller owns the chat: their account when signed in, or the
+browser's chat session when signed out. A conversation id alone carries nothing. The
+account is coarse, never the taxpayer's own words: the tax topics named, the taxpayer
+type, the figures mentioned, and the current task. The call starts on the chat's task,
+so a short follow-up keeps it. The account is stored on the call
+(`voice_calls.parent_conversation_id`, `chat_context`) and given to the officer's brief
+as context, never as a turn. A Luganda question is turned into its English search query
+together with the call's last two exchanges (in English) and that account, so
+"kiki ekyetaagisa?" ("what is needed?") is read as a follow-up.
 
 Staff see a language badge on the queue row and the case header, "Luganda caller" on
 the handoff brief, the switch as a `Language: Luganda (detected, 93%)` note in the
@@ -545,3 +608,4 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
 | Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
+| Stale or unjoined call stuck in queue | In `/calls`, staff or administrators can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`), which cleans up the unbridged or stale room, releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`), and refreshes the live lobby board |

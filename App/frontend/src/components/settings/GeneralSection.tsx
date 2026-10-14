@@ -22,15 +22,22 @@ const THEME_OPTIONS: readonly SegmentedOption<ThemePref>[] = [
   { value: "dark", label: "Dark" },
 ];
 
-const LOCALE_SELECT_OPTIONS = LOCALE_OPTIONS.map((o) => ({
-  value: o.value,
-  label: o.native === o.label ? o.label : `${o.label} — ${o.native}`,
-}));
+const AUTO_DETECT = "auto";
+
+const LOCALE_SELECT_OPTIONS = [
+  { value: AUTO_DETECT, label: "Auto-detect — follow the language I type" },
+  ...LOCALE_OPTIONS.map((o) => ({
+    value: o.value,
+    label: o.native === o.label ? o.label : `${o.label} — ${o.native}`,
+  })),
+];
 
 export default function GeneralSection() {
   const { pref } = useTheme();
   const locale = useChatStore((s) => s.locale);
+  const localeExplicit = useChatStore((s) => s.localeExplicit);
   const setLocale = useChatStore((s) => s.setLocale);
+  const setAutoDetectLocale = useChatStore((s) => s.setAutoDetectLocale);
 
   return (
     <>
@@ -62,9 +69,9 @@ export default function GeneralSection() {
         >
           <SelectControl
             id="setv2-locale"
-            value={locale}
+            value={localeExplicit ? locale : AUTO_DETECT}
             options={LOCALE_SELECT_OPTIONS}
-            onChange={setLocale}
+            onChange={(next) => (next === AUTO_DETECT ? setAutoDetectLocale() : setLocale(next))}
           />
         </SettingsRow>
       </SettingsSection>

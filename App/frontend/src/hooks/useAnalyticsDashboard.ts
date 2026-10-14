@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { analyticsApi } from "../services/analyticsApi";
-import type { TicketPatch } from "../services/analyticsApi";
+import type { EndChatBody, TicketPatch } from "../services/analyticsApi";
 import { queryKeys } from "../lib/queryKeys";
 
 export function useDashboard(days = 30) {
@@ -104,6 +104,23 @@ export function useTicketSla(days = 30) {
  * `officer_reply` reaches the taxpayer on their next turn; `staff_note`
  * stays internal. The form keeps them apart for that reason.
  */
+/**
+ * An officer ends a live chat: the taxpayer is asked to rate it and handed
+ * back to the assistant. Refreshes the queue and the open case.
+ */
+export function useEndChat() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: EndChatBody }) => analyticsApi.endChat(id, body),
+    onSuccess: (_data, variables) => {
+      client.invalidateQueries({ queryKey: queryKeys.tickets.all() });
+      if (variables?.id) {
+        client.invalidateQueries({ queryKey: queryKeys.tickets.detail(variables.id) });
+      }
+    },
+  });
+}
+
 export function useUpdateTicket() {
   const client = useQueryClient();
   return useMutation({

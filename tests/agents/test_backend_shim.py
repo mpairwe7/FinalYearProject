@@ -292,7 +292,9 @@ class TestAuditOnPostgres:
             contexts='["ctx"]',
             user_id=sub,
         )
-        transcript = db.get_conversation_transcript(conversation_id=conversation)
+        transcript = db.get_conversation_transcript(
+            conversation_id=conversation, user_id=sub
+        )
         db.create_ticket(
             reason="human requested",
             conversation_id=conversation,

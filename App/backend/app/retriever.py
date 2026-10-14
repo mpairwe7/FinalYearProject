@@ -139,6 +139,8 @@ _RERANK_CHARS = int(os.getenv("RETRIEVER_RERANK_CHARS", "1200"))
 _DEDUPE_THRESHOLD = float(os.getenv("RETRIEVER_DEDUPE_THRESHOLD", "0.9"))
 #: RRF constant shared by Qdrant, the Vectorize client, and the graph leg.
 RRF_K = int(os.getenv("RRF_K", "60"))
+#: Hybrid fusion strategy for prefetch legs: "dbsf" (Distribution-Based Score Fusion, G127) or "rrf".
+HYBRID_FUSION = os.getenv("HYBRID_FUSION", "dbsf").lower()
 
 
 def _shingles(text: str) -> frozenset[str]:
@@ -235,6 +237,47 @@ def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
         if incoming is not None and existing is not None and incoming > existing:
             kept[duplicate_of] = candidate
     return kept
+
+
+def _filter_tombstoned_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop any candidate chunk matching an active corpus tombstone (Solution B)."""
+    if not candidates:
+        return candidates
+    try:
+        from . import database as db
+        from .flags import flags
+
+        if not flags.is_enabled("knowledge_discrepancy_reporting"):
+            return candidates
+
+        tombstones = db.get_active_corpus_tombstones()
+    except Exception:
+        return candidates
+
+    if not tombstones:
+        return candidates
+
+    bad_uris = {str(t.get("source_uri") or "").strip().lower() for t in tombstones if t.get("source_uri")}
+    bad_chunks = {str(t.get("chunk_id") or "").strip() for t in tombstones if t.get("chunk_id")}
+
+    survived = []
+    for c in candidates:
+        src = str(c.get("source") or "").strip().lower()
+        chunk = str(c.get("chunk_id") or c.get("id") or "").strip()
+        if chunk and chunk in bad_chunks:
+            logger.debug("Corpus tombstone dropped chunk: %s", chunk)
+            continue
+        if src and any(bad_uri in src or src in bad_uri for bad_uri in bad_uris if bad_uri):
+            matching_source = [
+                t for t in tombstones
+                if str(t.get("source_uri") or "").strip().lower() in src
+                or src in str(t.get("source_uri") or "").strip().lower()
+            ]
+            if any(not str(t.get("chunk_id") or "").strip() for t in matching_source):
+                logger.debug("Corpus tombstone dropped source: %s", src)
+                continue
+        survived.append(c)
+    return survived
 
 
 def hit_relevance(hit: dict[str, Any]) -> float | None:
@@ -1107,7 +1150,11 @@ class HybridRetriever:
         from .providers import breakers, budget, routing
         from .providers import gateway as _gw
         from .providers import vectorize as _vz
+        from .providers.scope import cloud_models_allowed
 
+        if not cloud_models_allowed():
+            # A call turn stays on local models (providers.scope).
+            return []
         if not breakers.VECTORIZE_BREAKER.allow_request():
             logger.warning("Vectorize circuit OPEN — skipping dense fallback")
             return []
@@ -1368,6 +1415,11 @@ class HybridRetriever:
         passage anyway. When an English translation is supplied, dual-scores
         and preserves the higher relevance across both representations.
         """
+        from .flags import flags
+
+        if not flags.is_enabled("reranker"):
+            return
+
         pairs = [
             (query, (c.get("text") or c.get("answer") or c.get("question", ""))[:_RERANK_CHARS])
             for c in candidates
@@ -1383,7 +1435,9 @@ class HybridRetriever:
 
         for i, s in enumerate(scores):
             candidates[i]["score_rerank"] = float(s)
-            candidates[i]["score_norm"] = normalize_rerank_score(float(s))
+            # CrossEncoder (mxbai-rerank-base-v2) output is already sigmoid-activated
+            # into [0, 1]. Do not apply a second logistic squash (G129).
+            candidates[i]["score_norm"] = float(max(0.0, min(1.0, s)))
 
         # Stale-year penalty for rate/duty tables: if a chunk explicitly cites superseded
         # years (e.g. 2020, 2021, 2022) and the query is not asking for that historical year,
@@ -1418,6 +1472,7 @@ class HybridRetriever:
         """
         if self._vectorize_mode:
             hits = self._search_vectorize(query, top_k, prefetch_limit, filters, subject=subject)
+            hits = _filter_tombstoned_candidates(hits)
             if hits or self._client is None:
                 return hits
             # Vectorize produced nothing: an open circuit, an exhausted neuron
@@ -1520,10 +1575,15 @@ class HybridRetriever:
                 )
 
             query_started = time.perf_counter()
+            fusion_mode = (
+                models.Fusion.DBSF
+                if HYBRID_FUSION == "dbsf" and hasattr(models.Fusion, "DBSF")
+                else models.Fusion.RRF
+            )
             results = self._client.query_points(
                 collection_name=QDRANT_COLLECTION,
                 prefetch=prefetch,
-                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                query=models.FusionQuery(fusion=fusion_mode),
                 query_filter=query_filter,
                 limit=prefetch_limit,
             )
@@ -1570,6 +1630,7 @@ class HybridRetriever:
                     }
                 )
 
+            candidates = _filter_tombstoned_candidates(candidates)
             # Drop near-duplicate chunks before the expensive step.  The
             # corpus carries the same guidance across editions, so a
             # prefetch of 20 routinely contains several copies of one
@@ -1705,7 +1766,14 @@ class HybridRetriever:
                 locale, (query or "")[:60], english[:60], len(hits),
             )
             return hits
-        merged = merge_retrieval_hits([hits, en_hits], top_k=top_k)
+        # G128: When reranker is disabled or ties, en_hits (translated leg) must
+        # rank ahead of hits (untranslated pass). In Luganda especially, bge-m3 cross-lingual
+        # dense + BM25 against English text yields 0% relevant top hits; using en_hits directly
+        # prevents context contamination. For Swahili and other languages, merge both legs.
+        if loc == "lg" and en_hits:
+            merged = en_hits[:top_k]
+        else:
+            merged = merge_retrieval_hits([en_hits, hits], top_k=top_k)
         merged = apply_preference_boost(merged, prefer)
 
         def _best(rows: list[dict[str, Any]]) -> float:

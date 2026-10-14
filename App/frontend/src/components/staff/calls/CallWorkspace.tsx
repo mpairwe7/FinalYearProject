@@ -8,7 +8,8 @@ import { useCall, useCallBrief, useCallLive, useReviewCall } from '@/hooks/useCa
 import { formatClock, useNow } from '@/hooks/useNow';
 import { callLanguageName } from '@/lib/callLanguage';
 import { callTopicLabel, isRaisedPriority } from '@/lib/callTopic';
-import { ClaimConflictError } from '@/services/callsApi';
+import { isLiveOfficer } from '@/lib/roles';
+import { ClaimConflictError, callsApi } from '@/services/callsApi';
 import { takeCall } from '@/services/officerCallSession';
 import { useCallConsoleStore } from '@/store/useCallConsoleStore';
 import { CallBriefCard } from './CallBriefCard';
@@ -28,10 +29,9 @@ export type WorkspaceState = 'mine' | 'wrap_up' | 'waiting' | 'claimed' | 'ai' |
 const FLASH_MS = 1200;
 
 export function CallWorkspace({ callId, role }: { callId: string; role: string }) {
-  const canTake = role === 'ura_staff' || role === 'ura_admin';
-  // Officers take the calls the AI hands over. Stepping into a call the AI is
-  // still handling is a supervisor's call; the API refuses anyone else.
-  const canStepIn = role === 'ura_admin';
+  // Officers take the calls the AI hands over; nobody steps into a call the AI
+  // is still handling, and auditors only watch. The API enforces both.
+  const canTake = isLiveOfficer(role);
   const now = useNow();
   const { data: detail, isLoading, error, refetch } = useCall(callId);
   const live = useCallLive(callId);
@@ -50,8 +50,24 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [terminating, setTerminating] = useState(false);
   const [takeError, setTakeError] = useState<string | null>(null);
   const muteRef = useRef<HTMLButtonElement>(null);
+
+  const terminateWaiting = async () => {
+    if (!callId) return;
+    setTerminating(true);
+    setTakeError(null);
+    try {
+      await callsApi.endCall(callId);
+      useCallConsoleStore.getState().applyLobbyEvent({ type: 'call.ended', data: { call_id: callId } });
+      await refetch();
+    } catch (err) {
+      setTakeError((err as Error).message || 'Could not terminate the call');
+    } finally {
+      setTerminating(false);
+    }
+  };
 
   // The dock stays out of the way while the Desk shows this call.
   useEffect(() => {
@@ -215,8 +231,24 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
           />
           <div className="cw-actions">
             {canTake && (
-              <button type="button" className="cc-btn cc-btn--primary" data-action="take" onClick={take} disabled={busy}>
+              <button type="button" className="cc-btn cc-btn--primary" data-action="take" onClick={take} disabled={busy || terminating}>
                 {busy ? 'Connecting…' : 'Take call'} <kbd>A</kbd>
+              </button>
+            )}
+            {canTake && (
+              <button
+                type="button"
+                className="cc-btn cc-btn--danger"
+                style={{
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  color: '#ef4444',
+                  borderColor: 'rgba(239, 68, 68, 0.3)',
+                }}
+                data-action="terminate-waiting"
+                onClick={terminateWaiting}
+                disabled={busy || terminating}
+              >
+                {terminating ? 'Terminating…' : 'Terminate call'}
               </button>
             )}
             {takeError && <span className="cw-error" role="alert">{takeError}</span>}
@@ -243,12 +275,9 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
             onEvidence={showEvidence}
             compact
           />
-          {state === 'ai' && canStepIn && (
+          {takeError && (
             <div className="cw-actions">
-              <button type="button" className="cc-btn cc-btn--primary" data-action="take" onClick={take} disabled={busy}>
-                {busy ? 'Connecting…' : 'Take over'} <kbd>A</kbd>
-              </button>
-              {takeError && <span className="cw-error" role="alert">{takeError}</span>}
+              <span className="cw-error" role="alert">{takeError}</span>
             </div>
           )}
           <div className="cw-transcript">{transcript}</div>
@@ -288,6 +317,7 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
             callId={callId}
             initialNote={call.wrapup_note || ''}
             ticketId={call.ticket_id}
+            aiAnswered={turns.some((t) => t.speaker === 'assistant' && t.kind === 'answer')}
             onFinished={() => {
               void refetch();
             }}

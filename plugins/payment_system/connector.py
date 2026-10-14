@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
-from plugins.base import SystemConnector, Tool, ToolSchema
+from plugins.base import MCPResource, SystemConnector, Tool, ToolSchema
 
 from .client import PaymentClient
 from .service import PaymentService
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class PaymentGeneratePrnTool(Tool):
-    """Tool for generating official 12-digit URA Payment Registration Numbers (PRNs)."""
+    """Tool for generating a sample PRN-shaped reference in the local simulator."""
 
     def __init__(self, client: PaymentClient) -> None:
         self._client = client
@@ -24,9 +25,8 @@ class PaymentGeneratePrnTool(Tool):
         return ToolSchema(
             name="payment_generate_prn",
             description=(
-                "Generate an official 12-digit URA Payment Registration Number (PRN) payment slip. "
-                "Generates bank barcode vouchers and 21-day validity for tax liabilities (VAT, PAYE, CIT, WHT) "
-                "or Non-Tax Revenue (NTR/MDA fees like passport or traffic fines)."
+                "Generate a sample PRN-shaped reference in the local payment simulator. It is not a valid URA PRN "
+                "and cannot be used to pay tax, fees, a bank, or a mobile-money provider."
             ),
             parameters={
                 "type": "object",
@@ -71,6 +71,7 @@ class PaymentGeneratePrnTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="payment_system",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -99,7 +100,7 @@ class PaymentGeneratePrnTool(Tool):
 
 
 class PaymentViewStatusTool(Tool):
-    """Tool for checking real-time PRN clearance and bank transaction status."""
+    """Tool for reading a sample payment status from the local simulator."""
 
     def __init__(self, client: PaymentClient) -> None:
         self._client = client
@@ -109,9 +110,8 @@ class PaymentViewStatusTool(Tool):
         return ToolSchema(
             name="payment_view_status",
             description=(
-                "Query real-time clearance status for a Payment Registration Number (PRN). "
-                "Confirms whether funds have posted to the URA tax ledger, bank transaction reference, "
-                "and electronic receipt availability."
+                "Read status stored for a sample reference in the local payment simulator. This does not check "
+                "bank settlement, a payment network, or the URA tax ledger."
             ),
             parameters={
                 "type": "object",
@@ -161,8 +161,8 @@ class PaymentReactivatePrnTool(Tool):
         return ToolSchema(
             name="payment_reactivate_prn",
             description=(
-                "Reactivate an expired PRN on the URA portal. Extends payment validity by another 21 days "
-                "without having to re-declare tax returns or re-assess fees."
+                "Change expiry data for a sample reference in the local payment simulator. This does not reactivate "
+                "a real URA PRN."
             ),
             parameters={
                 "type": "object",
@@ -187,6 +187,7 @@ class PaymentReactivatePrnTool(Tool):
                 },
             },
             risk="medium",
+            requires_confirmation=True,
             namespace="payment_system",
             required_scopes=("ura_account_access",),
             allowed_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
@@ -211,8 +212,8 @@ class PaymentCheckoutSettleTool(Tool):
         return ToolSchema(
             name="payment_checkout_settle",
             description=(
-                "Execute electronic settlement for a PRN via VISA, MasterCard, or Mobile Money (MTN MoMo/Airtel Money). "
-                "Marks the PRN as cleared and generates an official cleared tax receipt."
+                "Simulate a payment outcome in the local database. No card, bank, or mobile-money provider is contacted, "
+                "no money moves, and no official receipt is issued."
             ),
             parameters={
                 "type": "object",
@@ -375,6 +376,53 @@ class PaymentConnector(SystemConnector):
             "tools": [t.schema.name for t in self._tools],
             "database": self._service.get_stats(),
         }
+
+    def get_resources(self) -> list[MCPResource]:
+        return [
+            MCPResource(
+                uri="payments://prn/status",
+                name="Payment Registration Number (PRN) Status",
+                description="Read-only bank settlement and clearance status for a PRN slip.",
+            ),
+        ]
+
+    def read_resource(self, uri: str) -> dict[str, Any]:
+        if uri == "payments://prn/status":
+            stats = self._service.get_stats()
+            return {
+                "contents": [
+                    {
+                        "uri": uri,
+                        "mimeType": "application/json",
+                        "text": json.dumps({"description": "Payment Registration Number Status Specification", "stats": stats}),
+                    }
+                ]
+            }
+        raise KeyError(f"Payment resource not found: '{uri}'")
+
+    def compensate_action(self, action_type: str, action_payload: dict[str, Any]) -> dict[str, Any]:
+        """Cancel or void a previously generated PRN or payment transaction."""
+        supported = ("payment_generate_prn", "payment_checkout_settle", "generate_prn", "checkout", "prn_cancel")
+        if action_type not in supported:
+            return {"ok": False, "supported": False, "message": f"Cannot compensate '{action_type}'"}
+
+        prn = str(action_payload.get("prn") or "").strip()
+        if not prn:
+            return {"ok": False, "error": "prn is required in action_payload"}
+
+        # Verify PRN existence in database
+        rec = self._service.database.get_prn(prn)
+        if rec is None:
+            return {"ok": False, "error": f"PRN '{prn}' not found"}
+
+        # Cancel PRN in database
+        try:
+            conn = self._service.database._get_connection()
+            with conn:
+                conn.execute("UPDATE payment_prns SET status = 'CANCELLED' WHERE prn = ?", (prn,))
+            return {"ok": True, "action": "prn_cancelled", "prn": prn, "message": f"PRN {prn} successfully cancelled"}
+        except Exception as exc:
+            return {"ok": False, "error": f"Failed to cancel PRN {prn}: {exc}"}
 
     def shutdown(self) -> None:
         self._healthy = False

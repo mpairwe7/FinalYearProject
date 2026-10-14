@@ -1,6 +1,9 @@
 /**
  * Staff operations UI on Chromium — /signin, /admin, /agent.
  *
+ * Roles: officers (`ura_staff`) work the queue on /agent, /admin/tickets and
+ * /calls; administrators audit from /admin and are refused the live pages.
+ *
  * These pages were built and verified in Firefox (the only engine that paints in
  * the dev sandbox), so this spec exists to confirm the layout in Blink. It
  * asserts computed styles and geometry rather than comparing screenshots,
@@ -105,6 +108,21 @@ async function signedInAs(page: Page, role: string) {
       },
     }),
   );
+  await stubQualityAudit(page);
+  await page.route("**/api/v1/admin/officers/presence", (route) => {
+    const now = Math.floor(Date.now() / 1000);
+    return route.fulfill({
+      json: {
+        teams: ["general", "domestic_taxes"],
+        officers: [
+          { user_id: "u-nakato", display_name: "Officer Nakato", status: "on_call", languages: ["en", "lg"],
+            teams: ["domestic_taxes"], current_call_id: "call_abc123", last_seen: now - 30, updated_at: now - 30 },
+          { user_id: "u-okello", display_name: "Officer Okello", status: "available", languages: ["en"],
+            teams: ["general"], current_call_id: "", last_seen: now - 60, updated_at: now - 60 },
+        ],
+      },
+    });
+  });
   // Generic detail route first — see the note above.
   await page.route("**/api/v1/admin/tickets/*", (route) =>
     route.fulfill({ json: ticket() }),
@@ -159,6 +177,164 @@ async function signedInAs(page: Page, role: string) {
       },
     }),
   );
+}
+
+/** A conversation that went wrong at its third answer, as GET /v1/admin/quality/ai-chat returns it. */
+function qualityFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const summary = {
+    period_days: 30, truncated: false, rated_answers: 12, helpful: 8, unhelpful: 4, helpful_pct: 66.7,
+    comments: 2, conversations: 5, unlinked_answers: 0,
+    patterns: { went_wrong: 2, never_helpful: 1, recovered: 0, all_helpful: 2 },
+    median_break_answer: 3,
+    by_position: [
+      { position: "1", rated: 5, helpful: 5, helpful_pct: 100 },
+      { position: "2", rated: 4, helpful: 2, helpful_pct: 50 },
+      { position: "3", rated: 3, helpful: 1, helpful_pct: 33.3 },
+      { position: "4", rated: 0, helpful: 0, helpful_pct: null },
+      { position: "5+", rated: 0, helpful: 0, helpful_pct: null },
+    ],
+    by_topic: [{ key: "vat_registration", rated: 6, helpful: 3, unhelpful: 3, helpful_pct: 50 }],
+    by_route: [{ key: "hybrid", rated: 10, helpful: 7, unhelpful: 3, helpful_pct: 70 }],
+    by_language: [{ key: "en", rated: 12, helpful: 8, unhelpful: 4, helpful_pct: 66.7 }],
+    by_day: [],
+    previous: { rated_answers: 10, helpful_pct: 70, truncated: false },
+  };
+  const page = {
+    period_days: 30, truncated: false, total: 1, limit: 25, offset: 0,
+    conversations: [{
+      conversation_id: "conv-went-wrong", key: "conv-went-wrong", linked: true, pattern: "went_wrong",
+      ratings: [{ answer: 1, rating: "up" }, { answer: 2, rating: "up" }, { answer: 3, rating: "down" }],
+      rated_answers: 3, unhelpful: 1, break_answer: 3, break_question: "What if I am a sole proprietor?",
+      helpful_before_break: true, comments: 1, topic: "vat_registration", locale: "lg",
+      first_rated_at: now - 600, last_rated_at: now - 60,
+    }],
+  };
+  const answer = (n: number, rating: string, question: string, reply: string, isBreak = false) => ({
+    answer: n, turn_id: `t${n}`, question, reply, created_at: now - 900 + n * 100, sources: ["vat-act.pdf"],
+    confidence: 0.7, topic: "vat_registration", rating, comment: isBreak ? "That is wrong." : "",
+    retrieval_mode: "hybrid", is_break: isBreak,
+  });
+  const timeline = {
+    conversation_id: "conv-went-wrong", pattern: "went_wrong", break_answer: 3, transcript_complete: true,
+    transcript_kept_days: 7,
+    answers: [
+      answer(1, "up", "How do I register for VAT?", "Apply on the eTax portal."),
+      answer(2, "up", "What documents do I need?", "Your TIN and certificate of incorporation."),
+      answer(3, "down", "What if I am a sole proprietor?", "Sole proprietors cannot register.", true),
+    ],
+  };
+  return { summary, page, timeline };
+}
+
+/**
+ * Ratings, as GET /v1/admin/quality/ratings returns them for *source*: one low,
+ * one high. Officer chats name a ticket, officer calls a call; the caller's
+ * spoken review of the AI is rated in words (no score).
+ */
+function ratingsFixture(source = "chat_officer_csat") {
+  const now = Math.floor(Date.now() / 1000);
+  const spoken = source.startsWith("call_ai");
+  const onCall = source.startsWith("call_");
+  const rating = (id: string, score: number, officer: [string, string], extra: Record<string, unknown> = {}) => ({
+    id, source, channel: onCall ? "call" : "chat", subject: spoken ? "ai" : "officer", status: "answered",
+    score: spoken ? null : score,
+    sentiment: score <= 2 ? "negative" : score === 3 ? "neutral" : "positive", comment: "",
+    ticket_id: onCall ? "" : `tkt-${id}`, call_id: onCall ? `call-${id}` : "", conversation_id: `conv-${id}`,
+    officer_id: spoken ? "" : officer[0], officer_name: spoken ? "" : officer[1], team: "domestic_taxes",
+    topic: "vat", locale: "en", created_at: now - 900, answered_at: now - 600, ...extra,
+  });
+  const period = { rated: 2, average: spoken ? null : 3.5, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 };
+  return {
+    source,
+    period_days: 30,
+    truncated: false,
+    summary: {
+      asked: 3, answered: 2, skipped: 1, no_answer: 0, pending: 0, response_rate: 66.7, average: 3.5, csat_pct: 50, low: 1,
+      distribution: { "1": 0, "2": 1, "3": 0, "4": 0, "5": 1 },
+      sentiment: { positive: 1, neutral: 0, negative: 1, unclear: 0 },
+      positive_pct: 50,
+      negative_pct: 50,
+      by_officer: spoken ? [] : [
+        { officer_id: "u-okello", officer_name: "Officer Okello", handled: 2, rated: 1, average: 2, csat_pct: 0, low: 1 },
+        { officer_id: "u-nakato", officer_name: "Officer Nakato", handled: 1, rated: 1, average: 5, csat_pct: 100, low: 0 },
+      ],
+      by_week: [{ week: "2026-W41", ...period }],
+      by_language: [{ locale: "lg", asked: 3, response_rate: 66.7, ...period }],
+    },
+    previous: { asked: 2, answered: 2, response_rate: 100, average: spoken ? null : 4, csat_pct: spoken ? null : 50, positive_pct: 50, negative_pct: 50 },
+    total: 2,
+    limit: 25,
+    offset: 0,
+    ratings: [
+      rating("low", 2, ["u-okello", "Officer Okello"], { comment: spoken ? "It didn't help me" : "Took too long to answer." }),
+      rating("high", 5, ["u-nakato", "Officer Nakato"]),
+    ],
+  };
+}
+
+/** One stream's headline, as GET /v1/admin/quality/summary carries it. */
+function headlineFixture(source: string) {
+  const r = ratingsFixture(source);
+  const { asked, answered, response_rate, average, csat_pct, low, distribution, sentiment, positive_pct, negative_pct } =
+    r.summary;
+  return {
+    truncated: false, asked, answered, response_rate, average: source.startsWith("call_ai") ? null : average,
+    csat_pct: source.startsWith("call_ai") ? null : csat_pct, low, distribution, sentiment, positive_pct, negative_pct,
+    previous: r.previous,
+  };
+}
+
+/** The Needs review queue: a chat that went wrong, a low officer chat, a caller the AI did not help. */
+function needsReviewFixture() {
+  const now = Math.floor(Date.now() / 1000);
+  const items = [
+    {
+      item_type: "ai_chat", item_id: "conv-went-wrong", stream: "ai_chat", title: "AI chat went wrong at answer 3",
+      quote: "What if I am a sole proprietor?", comment: "That is wrong.", topic: "vat_registration", locale: "lg",
+      officer_name: "", occurred_at: now - 60, link: { tab: "ai-chat", param: "conversation", value: "conv-went-wrong" },
+      review: null,
+    },
+    {
+      item_type: "rating", item_id: "low", stream: "officer_chat", title: "Officer chat rated 2/5 — Officer Okello",
+      quote: "", comment: "Took too long to answer.", topic: "vat", locale: "en", officer_name: "Officer Okello",
+      occurred_at: now - 600, link: { tab: "officer-chat", param: "ticket", value: "tkt-low" }, review: null,
+    },
+    {
+      item_type: "rating", item_id: "call-ai-low", stream: "ai_call",
+      title: "Caller said the AI didn't help (while being transferred)", quote: "", comment: "It didn't help me",
+      topic: "vat", locale: "en", officer_name: "", occurred_at: now - 900,
+      link: { tab: "ai-calls", param: "", value: "" }, review: null,
+    },
+  ];
+  return {
+    period_days: 30, truncated: false, counts: { open: 3, action_needed: 0, reviewed: 0, all: 3 },
+    total: items.length, limit: 25, offset: 0, items,
+  };
+}
+
+async function stubQualityAudit(page: Page) {
+  const q = qualityFixture();
+  await page.route("**/api/v1/admin/quality/ai-chat/*", (route) => route.fulfill({ json: q.timeline }));
+  await page.route("**/api/v1/admin/quality/ai-chat?**", (route) =>
+    route.fulfill({ json: { summary: q.summary, page: q.page } }),
+  );
+  await page.route("**/api/v1/admin/quality/ratings?**", (route) =>
+    route.fulfill({ json: ratingsFixture(new URL(route.request().url()).searchParams.get("source") || undefined) }),
+  );
+  await page.route("**/api/v1/admin/quality/summary**", (route) =>
+    route.fulfill({
+      json: {
+        period_days: 30,
+        needs_review: { open: 3, action_needed: 0 },
+        ai_chat: q.summary,
+        officer_chat: headlineFixture("chat_officer_csat"),
+        ai_calls: { end: headlineFixture("call_ai_review_end"), transfer: headlineFixture("call_ai_review_transfer") },
+        officer_calls: headlineFixture("call_officer_csat"),
+      },
+    }),
+  );
+  await page.route("**/api/v1/admin/quality/needs-review**", (route) => route.fulfill({ json: needsReviewFixture() }));
 }
 
 /**
@@ -217,6 +393,25 @@ test.describe("Staff UI on Chromium", () => {
       await page.goto("/agent");
       await expect(page.getByRole("heading", { name: "My queue" })).toBeVisible();
     });
+
+    test("ura_admin audits from the overview and is refused every live page", async ({ page }) => {
+      // Officers handle taxpayers live; an administrator has no queue, no case
+      // and no call desk — not hidden behind a menu, refused by the page.
+      await signedInAs(page, "ura_admin");
+      await page.goto("/agent");
+      await expect(page.getByText(/limited to ura_staff\./)).toBeVisible();
+      for (const path of ["/admin/tickets", "/calls"]) {
+        await page.goto(path);
+        await expect(page.getByText(/limited to ura_staff, ura_auditor/)).toBeVisible();
+      }
+
+      await page.goto("/admin");
+      const nav = page.locator("nav.staff-rail");
+      await expect(nav.getByRole("link", { name: "Overview" })).toBeAttached();
+      for (const name of ["My queue", "All tickets", "Calls"]) {
+        await expect(nav.getByRole("link", { name })).toHaveCount(0);
+      }
+    });
   });
 
   test.describe("shared nav", () => {
@@ -264,95 +459,102 @@ test.describe("Staff UI on Chromium", () => {
     test.beforeEach(async ({ page }) => {
       await signedInAs(page, "ura_admin");
       await page.goto("/admin");
-      await expect(page.getByRole("heading", { name: "Operations overview" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Service quality overview" })).toBeVisible();
     });
 
-    test("renders every metric from the API, humanised", async ({ page }) => {
-      // Six since the SLA/assignment board landed: open, awaiting first reply,
-      // past the 24h SLA, unassigned, then the two medians. The tiles are the
-      // console's shared `.ops-stat` since the redesign; the numbers and their
-      // order are unchanged.
-      const metrics = page.locator(".ops-stat-grid .ops-stat");
-      await expect(metrics).toHaveCount(6);
-      // 11_820s → 3.3h and 7_200s → 2.0h: the formatDuration() contract, which
-      // reports medians in decimal hours (h+m is kept for per-ticket waits,
-      // where the minutes are what an officer is actually watching).
-      await expect(metrics.nth(4)).toContainText("3.3h");
-      await expect(metrics.nth(5)).toContainText("2.0h");
-      await expect(metrics.nth(0)).toContainText("4");
-      await expect(metrics.nth(1)).toContainText("3");
-      // The last two come from the SLA payload's live counts. `unassigned` used
-      // to be counted from the queue rows this page had loaded — three of them,
-      // all unclaimed — so the tile agreed with the stub by accident and was
-      // capped at the page size against a real backend.
-      await expect(metrics.nth(2)).toContainText("2");
-      await expect(metrics.nth(3)).toContainText("42");
+    test("leads with the four streams' ratings, each opening its tab", async ({ page }) => {
+      const tiles = page.locator(".ov-stats .ops-stat");
+      await expect(tiles).toHaveCount(4);
+      await expect(tiles.nth(0)).toContainText("AI answers found helpful");
+      await expect(tiles.nth(0)).toContainText("66.7%");
+      await expect(tiles.nth(0)).toContainText("down 3.3 points from 70% in the period before");
+      // Both moments together: 2 of the 4 callers who answered said it helped.
+      await expect(tiles.nth(1)).toContainText("Callers said the AI helped");
+      await expect(tiles.nth(1)).toContainText("50%");
+      await expect(tiles.nth(2)).toContainText("3.5/5");
+      await expect(tiles.nth(3)).toContainText("Officer call satisfaction");
+      const hrefs = await tiles.evaluateAll((els) => els.map((el) => el.getAttribute("href")));
+      expect(hrefs).toEqual([
+        "/admin/quality",
+        "/admin/quality?tab=ai-calls",
+        "/admin/quality?tab=officer-chat",
+        "/admin/quality?tab=officer-calls",
+      ]);
+      // The escalation board it replaced is gone.
+      await expect(page.getByLabel("Escalation summary")).toHaveCount(0);
+      await expect(page.getByLabel("Escalation volume")).toHaveCount(0);
     });
 
     test("attention is carried by the figures, not by tinting the tiles", async ({ page }) => {
-      // The tiles used to take a `tone` and paint a 3px inset accent edge for
-      // it. The console rebuild dropped both: a coloured bar down the side of a
-      // card is decoration this console does not use, and what a tile means is
-      // in its label, value and hint. So the two tiles that would once have been
-      // tinted — awaiting_first_response = 3 and 3 unassigned — have to read
-      // just as clearly with nothing colouring them.
-      const metrics = page.locator(".ops-stat-grid .ops-stat");
-      await expect(metrics.nth(1)).toContainText("Awaiting first response");
-      await expect(metrics.nth(1)).toContainText("3");
-      await expect(metrics.nth(1)).toContainText("nobody has replied yet");
-      await expect(metrics.nth(3)).toContainText("Unassigned");
-      // 42 from the SLA payload, not 3 — the number of rows the queue mock
-      // returns. Deriving this from the loaded page capped it at the page
-      // size, so a queue of thousands reported the page length.
-      await expect(metrics.nth(3)).toContainText("42");
-      await expect(metrics.nth(3)).toContainText("waiting to be claimed");
-
-      // No tile carries a status class, and every tile shares one surface —
-      // the guard against the accent edge or a colour wash coming back.
-      await expect(page.locator(".ops-stat.is-warn, .ops-stat.is-danger, .ops-stat.is-good")).toHaveCount(
-        0,
-      );
+      // A coloured bar down the side of a card is decoration this console does
+      // not use; what a tile means is in its label, value and hint.
+      const tiles = page.locator(".ov-stats .ops-stat");
+      await expect(tiles).toHaveCount(4);
+      await expect(page.locator(".ops-stat.is-warn, .ops-stat.is-danger, .ops-stat.is-good")).toHaveCount(0);
       const backgrounds = new Set(
-        await metrics.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor)),
+        await tiles.evaluateAll((els) => els.map((el) => getComputedStyle(el).backgroundColor)),
       );
       expect(backgrounds.size).toBe(1);
     });
 
-    test("queue is ordered urgent-first with real waits", async ({ page }) => {
-      const rows = page.locator(".ov-queue li");
-      await expect(rows).toHaveCount(3);
-      await expect(rows.nth(0).locator(".ov-pri")).toHaveText("urgent");
-      await expect(rows.nth(2).locator(".ov-pri")).toHaveText("low");
-      await expect(page.locator(".ov-queue-panel .ops-chip.is-danger")).toContainText("1 urgent");
-      // 5h of waiting, formatted by waitingFor().
-      await expect(rows.nth(0).locator(".ov-q-wait")).toContainText("5h");
+    test("lists what is waiting for a review, each opening where it is read", async ({ page }) => {
+      const list = page.getByRole("list", { name: "Needs review, newest first" });
+      await expect(list.getByRole("listitem")).toHaveCount(3);
+      await expect(list.getByRole("link", { name: "AI chat went wrong at answer 3" })).toHaveAttribute(
+        "href",
+        "/admin/quality?conversation=conv-went-wrong",
+      );
+      await expect(list.getByRole("link", { name: /Officer chat rated 2\/5/ })).toHaveAttribute(
+        "href",
+        "/admin/quality?tab=officer-chat&ticket=tkt-low",
+      );
+      await expect(page.getByText("3 open", { exact: true })).toBeVisible();
+      await expect(page.getByRole("link", { name: /Open the Needs review queue/ })).toHaveAttribute(
+        "href",
+        "/admin/quality?tab=needs-review",
+      );
+    });
+
+    test("lists the officers on duty, available first, with nothing to take", async ({ page }) => {
+      const roster = page.locator(".ov-duty-panel table");
+      const rows = roster.locator("tbody tr");
+      await expect(rows).toHaveCount(2);
+      await expect(rows.nth(0)).toContainText("Officer Okello");
+      await expect(rows.nth(0)).toContainText("Available");
+      await expect(rows.nth(1)).toContainText("On a call");
+      // The officer's call is theirs: the board names none and offers no action.
+      await expect(page.locator(".ov-duty-panel")).not.toContainText("call_abc");
+      await expect(page.locator(".ov-duty-panel").getByRole("button")).toHaveCount(0);
     });
 
     test("answer-authority panel reports the manifest state", async ({ page }) => {
       await expect(page.getByRole("heading", { name: "Answer authority" })).toBeVisible();
       await expect(page.locator(".ov-chip.good")).toHaveText("Fresh");
-      const kv = page.locator(".ov-kv dd");
+      const kv = page.locator('section[aria-labelledby="a-h"] .ov-kv dd');
       await expect(kv.nth(1)).toHaveText("2026-07");
       await expect(kv.nth(2)).toHaveText("12 of 120 days");
       // sources_checked, the key the endpoint actually emits.
       await expect(kv.nth(3)).toHaveText("2 checked");
     });
 
-    test("live tiles link to the population they count", async ({ page }) => {
-      // Awaiting-first-response and past-SLA count open AND in-progress cases,
-      // so a link filtered to open lands on fewer rows than the tile promised.
-      for (const label of ["Awaiting first response", "Past 24-hour SLA", "Unassigned"]) {
-        const tile = page.locator(".ops-stat", { hasText: label });
-        await expect(tile).toHaveAttribute("href", "/admin/tickets?status=any");
-      }
+    test("service levels are figures, not links into the officers' queue", async ({ page }) => {
+      const levels = page.locator('section[aria-labelledby="s-h"]');
+      const kv = levels.locator(".ov-kv dd");
+      await expect(kv.nth(0)).toHaveText("4");
+      await expect(kv.nth(1)).toHaveText("2");
+      // 11_820s → 3.3h and 7_200s → 2.0h: the formatDuration() contract, which
+      // reports medians in decimal hours.
+      await expect(kv.nth(2)).toHaveText("3.3h");
+      await expect(kv.nth(3)).toHaveText("2.0h");
+      await expect(levels.getByRole("link")).toHaveCount(0);
+      await expect(page.locator('main a[href^="/admin/tickets"], main a[href^="/agent"], main a[href^="/calls"]')).toHaveCount(0);
     });
 
     test("two-column at desktop, single column below 900px", async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 900 });
       expect(await columnCount(page, ".ov-cols")).toBe(2);
-      // The 1.45fr/1fr split must actually favour the queue. The right column
-      // is now a stack of two panels (authority + workload), so measure the
-      // columns rather than assuming each is a single section.
+      // The 1.45fr/1fr split must favour the Needs review list over the side
+      // column's stack of panels.
       const [q, a] = await page.locator(".ov-cols > *").evaluateAll((els) =>
         els.map((e) => e.getBoundingClientRect().width),
       );
@@ -373,9 +575,100 @@ test.describe("Staff UI on Chromium", () => {
     });
   });
 
+  test.describe("/admin/quality audit", () => {
+    test("opens a conversation at the answer where it went wrong", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      await page.goto("/admin/quality");
+      await expect(page.getByRole("heading", { name: "Service quality audit" })).toBeVisible();
+      const row = page.getByRole("button", { name: /Went wrong at answer 3, after a helpful one/ });
+      await expect(row).toBeVisible();
+      await row.click();
+      const timeline = page.getByRole("article", { name: "Conversation timeline" });
+      await expect(timeline.getByText("Things went wrong here")).toBeVisible();
+      await expect(timeline.getByText("Last helpful answer before it")).toBeVisible();
+      await expect(page).toHaveURL(/conversation=conv-went-wrong/);
+    });
+
+    test("audits officer chats: lowest rating first, opened read-only", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      await page.goto("/admin/quality?tab=officer-chat");
+      await expect(page.getByRole("tab", { name: "Officer chats" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByLabel("Officer chat satisfaction summary")).toContainText("3.5/5");
+      const first = page.locator(".qa-convs > li").first();
+      await expect(first).toContainText("2/5 · Dissatisfied");
+      await expect(first).toContainText("Officer Okello");
+      await first.getByRole("button").click();
+      const chat = page.getByRole("article", { name: "Officer chat" });
+      await expect(chat.getByRole("region", { name: "Chat with the taxpayer" })).toBeVisible();
+      await expect(chat.getByRole("textbox")).toHaveCount(0);
+      await expect(page).toHaveURL(/tab=officer-chat.*ticket=tkt-low|ticket=tkt-low.*tab=officer-chat/);
+    });
+
+    test("audits what callers said about the AI, as a whole", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      await page.goto("/admin/quality?tab=ai-calls");
+      await expect(page.getByRole("tab", { name: "AI on calls" })).toHaveAttribute("aria-selected", "true");
+      await expect(page.getByLabel("Callers' review of the AI summary")).toContainText("Said the AI helped");
+      await expect(page.getByRole("list", { name: "What callers said, by when they were asked" })).toContainText(
+        "While being transferred to an officer",
+      );
+      const said = page.locator(".qa-said");
+      await expect(said.first()).toContainText("It didn't help me");
+      // The general opinion: no call to open from here.
+      await expect(said.first().getByRole("button")).toHaveCount(0);
+    });
+
+    test("audits officer calls: opens the call read-only with the caller's satisfaction", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      const now = Math.floor(Date.now() / 1000);
+      await page.route("**/api/v1/admin/calls/call-low", (route) =>
+        route.fulfill({
+          json: {
+            call_id: "call-low", conversation_id: "conv-low", locale: "en", status: "ended", started_at: now - 900,
+            outcome: "resolved", wrapup_note: "Explained the refund timeline.", transferred: true,
+            turns: [
+              { id: "t1", call_id: "call-low", seq: 1, speaker: "caller", kind: "utterance", text: "Where is my refund?",
+                low_conf_words: [], mean_word_prob: 0.9, faithfulness: null, latencies: {}, created_at: now - 880 },
+            ],
+          },
+        }),
+      );
+      await page.goto("/admin/quality?tab=officer-calls");
+      await expect(page.getByLabel("Officer call satisfaction summary")).toContainText("Caller gave an answer");
+      await page.locator(".qa-convs > li").first().getByRole("button").click();
+      const call = page.getByRole("article", { name: "Officer call" });
+      await expect(call).toContainText("Caller satisfaction: 2/5 · Dissatisfied");
+      await expect(call).toContainText("Explained the refund timeline.");
+      await expect(call).toContainText("Where is my refund?");
+      await expect(page).toHaveURL(/call=call-low/);
+    });
+
+    test("records a decision on a Needs review item, on the audit's own route", async ({ page }) => {
+      await signedInAs(page, "ura_admin");
+      const puts: Array<{ url: string; body: unknown }> = [];
+      await page.route("**/api/v1/admin/quality/reviews/**", (route) => {
+        puts.push({ url: route.request().url(), body: route.request().postDataJSON() });
+        return route.fulfill({ json: { item_type: "ai_chat", item_id: "conv-went-wrong", review: null } });
+      });
+      await page.goto("/admin/quality?tab=needs-review");
+      await expect(page.getByRole("tab", { name: "Needs review" })).toHaveAttribute("aria-selected", "true");
+      const list = page.getByRole("list", { name: "Needs review" });
+      await expect(list.getByRole("listitem")).toHaveCount(3);
+      await expect(list.getByRole("listitem").first()).toContainText("Asked: What if I am a sole proprietor?");
+      const decision = page.getByRole("group", { name: "Decision on: AI chat went wrong at answer 3" });
+      await decision.getByRole("button", { name: "Add a note" }).click();
+      await decision.getByLabel("Note").fill("Sole proprietors can register");
+      await decision.getByRole("button", { name: "Action needed" }).click();
+      await expect.poll(() => puts.length).toBe(1);
+      expect(puts[0].url).toMatch(/\/v1\/admin\/quality\/reviews\/ai_chat\/conv-went-wrong$/);
+      expect(puts[0].body).toEqual({ status: "action_needed", note: "Sole proprietors can register" });
+      await expect(page.getByRole("button", { name: "Export 3 as CSV" })).toBeEnabled();
+    });
+  });
+
   test.describe("/agent queue", () => {
     test.beforeEach(async ({ page }) => {
-      await signedInAs(page, "ura_admin");
+      await signedInAs(page, "ura_staff");
       await page.goto("/agent");
       await expect(page.getByRole("heading", { name: "My queue" })).toBeVisible();
     });
@@ -475,32 +768,42 @@ test.describe("Staff UI on Chromium", () => {
    * per-page checks above covered that route, so nothing caught it.
    */
   test.describe("layout at every width", () => {
-    const ROUTES = [
-      "/admin",
-      "/agent",
-      "/admin/tickets",
-      "/admin/flags",
-      "/admin/overrides",
-      "/admin/outbox",
-      "/analytics",
-      "/analytics/evaluation",
-    ];
+    // Each route under the role that opens it: administrators the audit and
+    // configuration pages, officers the queue.
+    const ROUTES: Record<string, string[]> = {
+      ura_admin: [
+        "/admin",
+        "/admin/quality",
+        "/admin/quality?tab=officer-chat",
+        "/admin/quality?tab=ai-calls",
+        "/admin/quality?tab=officer-calls",
+        "/admin/quality?tab=needs-review",
+        "/admin/flags",
+        "/admin/overrides",
+        "/admin/outbox",
+        "/analytics",
+        "/analytics/evaluation",
+      ],
+      ura_staff: ["/agent", "/admin/tickets"],
+    };
 
-    test("no console route scrolls the page sideways", async ({ page }) => {
-      test.slow();
-      await signedInAs(page, "ura_admin");
-      for (const width of [1440, 1024, 900, 720, 560, 412, 360]) {
-        await page.setViewportSize({ width, height: 900 });
-        for (const route of ROUTES) {
-          await page.goto(route);
-          await expect(page.locator("nav.staff-rail")).toBeVisible();
-          const overflow = await page.evaluate(
-            () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-          );
-          expect(overflow, `${route} overflows at ${width}px`).toBeLessThanOrEqual(1);
+    for (const [role, routes] of Object.entries(ROUTES)) {
+      test(`no ${role} console route scrolls the page sideways`, async ({ page }) => {
+        test.slow();
+        await signedInAs(page, role);
+        for (const width of [1440, 1024, 900, 720, 560, 412, 360]) {
+          await page.setViewportSize({ width, height: 900 });
+          for (const route of routes) {
+            await page.goto(route);
+            await expect(page.locator("nav.staff-rail")).toBeVisible();
+            const overflow = await page.evaluate(
+              () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            );
+            expect(overflow, `${route} overflows at ${width}px`).toBeLessThanOrEqual(1);
+          }
         }
-      }
-    });
+      });
+    }
   });
 
   test.describe("/signin", () => {

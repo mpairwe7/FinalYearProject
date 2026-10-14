@@ -20,15 +20,28 @@ class ChatRequest(BaseModel):
         description="Optional conversation/session id",
     )
     top_k: int = Field(4, ge=1, le=10, description="Number of passages to retrieve")
-    locale: str = Field(
-        "en",
+    locale: str | None = Field(
+        None,
         pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$",
-        description="ISO 639-1/639-3 locale (e.g. en, lg, nyn, ach)",
+        description="Optional ISO 639-1/639-3 locale override (e.g. en, lg, sw)",
+    )
+    locale_explicit: bool | None = Field(
+        None,
+        description=(
+            "True when the taxpayer chose `locale` themselves; false when it is only "
+            "the client's default or an earlier detection. Omitted: a requested lg/sw "
+            "counts as a choice and en as a default (see app.language_state)."
+        ),
     )
     attachment_ids: list[Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]] = Field(
         default_factory=list,
         max_length=3,
         description="Ids of analysed documents (POST /v1/documents/analyze) to ground this turn",
+    )
+    connector_namespaces: list[Annotated[str, Field(pattern=r"^[a-z0-9_]{1,64}$")]] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Deployment-configured chat connectors selected for this turn",
     )
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -74,7 +87,19 @@ class ChatResponse(BaseModel):
     )
     model: str = "Sunbird/Sunflower-14B-FP8"
     conversation_id: str | None = None
+    turn_id: str | None = Field(
+        None,
+        description="This answer's id in the conversation log; a 👍/👎 on it names this id (POST /v1/feedback)",
+    )
     locale: str = Field("en", description="Locale used for this response")
+    locale_source: str = Field(
+        "",
+        description=(
+            "Why the reply is in `locale`: explicit_request | client_explicit | continuity | "
+            "switched | detected | profile | default. Clients keep only the first two as the "
+            "user's own choice."
+        ),
+    )
     escalation_required: bool = Field(False, description="Whether human review is needed")
     escalation_reason: str = Field("", description="Why escalation was triggered")
     agent_role: str = Field(
@@ -115,6 +140,10 @@ class ChatResponse(BaseModel):
     resources: list[ResourceLink] = Field(
         default_factory=list,
         description="Official URA pages for this answer; empty for refusals, abstentions and small talk",
+    )
+    discrepancy_report: dict[str, Any] | None = Field(
+        None,
+        description="Knowledge discrepancy report metadata if the user disputed previous guidance",
     )
 
 
@@ -198,6 +227,11 @@ class FeedbackRequest(BaseModel):
     retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Route that produced the reply")
     workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Guided journey the reply belongs to")
     step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$", description="Journey step the reply asked")
+    # Which answer of which conversation is rated, so the audit can read a
+    # conversation's ratings in order and find where it went wrong.
+    conversation_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$", description="Conversation the answer belongs to")
+    turn_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$", description="The answer's turn_id from the chat response")
+    turn_index: int | None = Field(None, ge=1, le=1000, description="The answer's position in its conversation (1 = first)")
 
 
 class FeedbackResponse(BaseModel):
@@ -402,6 +436,63 @@ class TaxpayerReplyRequest(BaseModel):
     locale: str = Field("en", pattern=r"^[a-z]{2,3}(-[A-Z]{2})?$")
 
 
+class OfficerChatMessage(BaseModel):
+    seq: int
+    sender: Literal["taxpayer", "officer", "system"]
+    #: What the taxpayer reads: an officer's message in their language when it
+    #: was translated. A ``system`` message is a marker (``chat_ended``) the
+    #: client words in the taxpayer's language.
+    text: str
+    officer_name: str = ""
+    created_at: float
+
+
+class ChatRatingState(BaseModel):
+    requested: bool = False
+    submitted: bool = False
+
+
+class OfficerChatThreadResponse(BaseModel):
+    """``GET /v1/escalate/{ticket_id}/messages`` — the taxpayer's live view of the chat."""
+
+    ticket_id: str
+    #: ``waiting`` (in the queue — the AI still answers), ``officer`` (an
+    #: officer has the case and the AI is paused), ``ended``, or ``none`` for
+    #: a call's ticket, which has no chat.
+    chat_state: Literal["waiting", "officer", "ended", "none"]
+    officer_name: str = ""
+    messages: list[OfficerChatMessage] = Field(default_factory=list)
+    last_seq: int = 0
+    csat: ChatRatingState = Field(default_factory=ChatRatingState)
+
+
+class ChatRatingRequest(BaseModel):
+    """The taxpayer's rating of an officer chat: 1 (very dissatisfied) to 5, or ``null`` to skip."""
+
+    score: int | None = Field(None, ge=1, le=5)
+    comment: str = Field("", max_length=1000)
+
+
+class QualityReviewRequest(BaseModel):
+    """An auditor's decision on an item in the quality audit's Needs review queue.
+
+    ``open`` takes a decided item back to the queue.
+    """
+
+    status: Literal["reviewed", "action_needed", "open"]
+    note: str = Field("", max_length=1000)
+
+
+class EndChatRequest(BaseModel):
+    """An officer ends a live chat: an optional closing message and how it ended."""
+
+    closing_message: str = Field("", max_length=4000)
+    #: The closing message in the taxpayer's language, from the composer's
+    #: preview; translated on the server when missing for a non-English case.
+    closing_message_localized: str = Field("", max_length=4000)
+    outcome: Literal["resolved", "wontfix"] = "resolved"
+
+
 class FeedbackSummary(BaseModel):
     period_days: int
     total: int
@@ -463,10 +554,21 @@ class SynthesizeRequest(BaseModel):
         description="Voice id (e.g. en_US-lessac-medium, luganda-vits-v1)",
     )
     language: str = Field("en", pattern=r"^[a-z]{2,3}$", description="ISO 639-1/639-3 language code")
+    locale: str | None = Field(None, pattern=r"^[a-z]{2,3}$", description="Alias for language (e.g. en, lg, sw)")
     streaming: bool = Field(False, description="Emit audio as a sentence-chunked stream")
     format: Literal["wav", "opus"] = Field(
         "wav", description="/v1/tts/stream only: 'opus' for Ogg/Opus pieces, about a tenth the size of WAV"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _sync_language_and_locale(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("locale") and not data.get("language"):
+                data["language"] = data["locale"]
+            elif data.get("language") and not data.get("locale"):
+                data["locale"] = data["language"]
+        return data
 
 
 class SynthesizeResponse(BaseModel):

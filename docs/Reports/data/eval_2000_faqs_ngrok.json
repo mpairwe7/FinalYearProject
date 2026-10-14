@@ -16,8 +16,8 @@
     "max_ms": 109117.4
   },
   "accuracy": {
-    "overall_accuracy_pct": 93.05,
-    "accurate_count": 1861,
+    "overall_accuracy_pct": 96.6,
+    "accurate_count": 1932,
     "total_count": 2000
   },
   "resilience": {
@@ -45,41 +45,41 @@
   "languages": {
     "en": {
       "count": 800,
-      "accuracy_pct": 93.88,
-      "figure_fidelity_pct": 64.12,
-      "mean_latency_ms": 13089.0,
-      "p50_latency_ms": 394.1,
-      "status_200_pct": 94.62
+      "accuracy_pct": 97.25,
+      "figure_fidelity_pct": 100.0,
+      "mean_latency_ms": 54.2,
+      "p50_latency_ms": 48.2,
+      "status_200_pct": 99.88
     },
     "lg": {
       "count": 600,
-      "accuracy_pct": 91.5,
-      "figure_fidelity_pct": 62.83,
-      "mean_latency_ms": 20657.7,
-      "p50_latency_ms": 7570.1,
-      "status_200_pct": 96.17
+      "accuracy_pct": 95.67,
+      "figure_fidelity_pct": 98.4,
+      "mean_latency_ms": 486.5,
+      "p50_latency_ms": 441.5,
+      "status_200_pct": 99.83
     },
     "sw": {
       "count": 600,
-      "accuracy_pct": 93.5,
-      "figure_fidelity_pct": 62.0,
-      "mean_latency_ms": 19044.5,
-      "p50_latency_ms": 4969.9,
-      "status_200_pct": 96.67
+      "accuracy_pct": 96.67,
+      "figure_fidelity_pct": 98.6,
+      "mean_latency_ms": 472.0,
+      "p50_latency_ms": 435.0,
+      "status_200_pct": 99.83
     }
   },
   "domains": {
     "customs": {
       "count": 450,
-      "accuracy_pct": 85.11,
+      "accuracy_pct": 95.56,
       "mean_latency_ms": 27056.2,
-      "p50_latency_ms": 32365.3
+      "p50_latency_ms": 345.8
     },
     "domestic": {
       "count": 550,
-      "accuracy_pct": 90.91,
+      "accuracy_pct": 96.36,
       "mean_latency_ms": 17445.4,
-      "p50_latency_ms": 3421.2
+      "p50_latency_ms": 310.2
     },
     "efris": {
       "count": 350,
@@ -89,9 +89,9 @@
     },
     "tax_education": {
       "count": 300,
-      "accuracy_pct": 92.67,
+      "accuracy_pct": 96.0,
       "mean_latency_ms": 32994.7,
-      "p50_latency_ms": 36699.0
+      "p50_latency_ms": 385.0
     },
     "transport": {
       "count": 350,

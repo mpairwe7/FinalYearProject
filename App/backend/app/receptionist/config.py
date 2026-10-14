@@ -166,6 +166,14 @@ def get_lid_min_speech_s() -> float:
     return _env_float("RECEPTIONIST_LID_MIN_SPEECH_S", 1.5)
 
 
+def get_memory_min_asr_confidence() -> float:
+    """A call turn heard below this mean word probability is not written to
+    long-term memory: a mishearing must not become a fact about the caller.
+    Code-switched Luganda speech recognition is still error-prone (AfriSwitch,
+    2026), and the memory's rule-based facts would otherwise keep the error."""
+    return _env_float("RECEPTIONIST_MEMORY_MIN_ASR_CONF", 0.6)
+
+
 def get_lid_switch_confidence() -> float:
     """One vote at or above this switches a locked call."""
     return _env_float("RECEPTIONIST_LID_SWITCH_CONFIDENCE", 0.90)
@@ -225,11 +233,6 @@ def get_brief_every_turns() -> int:
     return max(1, _env_int("RECEPTIONIST_BRIEF_EVERY_TURNS", 3))
 
 
-def get_brief_model() -> str:
-    """Gemini model behind the officer's brief when local Sunflower cannot write it."""
-    return os.getenv("RECEPTIONIST_BRIEF_MODEL", "gemini-2.5-flash-lite").strip() or "gemini-2.5-flash-lite"
-
-
 def get_claim_timeout_s() -> float:
     """How long an officer's claim holds a call before their audio connects."""
     return max(1.0, _env_float("RECEPTIONIST_CLAIM_TIMEOUT_S", 20.0))
@@ -242,6 +245,20 @@ def get_hold_update_s() -> float:
     ``RECEPTIONIST_TRANSFER_TIMEOUT_S`` (90 s) before the wait becomes a callback.
     """
     return max(0.0, _env_float("RECEPTIONIST_HOLD_UPDATE_S", 30.0))
+
+
+def get_call_review_enabled() -> bool:
+    """Whether the AI asks the caller "was this call helpful?" (at goodbye, or while transferring).
+
+    Asked at most once a call and only after the AI has answered something
+    (review.py). Off, no call is asked and the AI-calls audit stays empty.
+    """
+    return _env_bool("RECEPTIONIST_CALL_REVIEW", True)
+
+
+def get_review_answer_timeout_s() -> float:
+    """How long the AI waits for the answer to its goodbye review question before saying goodbye."""
+    return max(1.0, _env_float("RECEPTIONIST_REVIEW_ANSWER_TIMEOUT_S", 10.0))
 
 
 def local_barge_in_enabled() -> bool:

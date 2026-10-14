@@ -37,6 +37,7 @@ paths are enabled by default.
 from __future__ import annotations
 
 import concurrent.futures
+import contextvars
 import hashlib
 import logging
 import math
@@ -56,6 +57,7 @@ _PROJECT_ROOT = str(_PROJECT_ROOT_P)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from .providers.scope import cloud_models_allowed
 from .resilience import CircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -1732,6 +1734,29 @@ class SpeechModel:
         voice: str | None = None,
         language: str = "en",
     ) -> SynthesizeResult:
+        """Synthesize speech; WAV output is marked as AI-generated (``app.ai_disclosure``).
+
+        Every backend's WAV leaves here with an IPTC ``trainedAlgorithmicMedia``
+        INFO chunk, whichever endpoint returns it. Non-WAV audio — the MP3
+        from edge-tts and some cloud backends — is returned unmarked
+        (``mark_wav`` leaves it untouched); see G109.
+        """
+        result = self._synthesize_unmarked(text, voice=voice, language=language)
+        if result.audio:
+            from .ai_disclosure import mark_wav
+
+            # A cache hit reports "<backend>+cache"; the generator is the backend
+            # that made the audio, so the same phrase carries the same marker.
+            generator = result.backend.removesuffix("+cache")
+            result = replace(result, audio=mark_wav(result.audio, generator=generator))
+        return result
+
+    def _synthesize_unmarked(
+        self,
+        text: str,
+        voice: str | None = None,
+        language: str = "en",
+    ) -> SynthesizeResult:
         """Synthesize text to WAV bytes.
 
         Fallback chain (local-first for production):
@@ -2030,7 +2055,10 @@ class SpeechModel:
 
                 import numpy as np
 
-                samples, sr = self._spark_tts.synthesize(text, language=language)
+                spark_lang = language if language in spark_tts_salt.SPARK_TTS_SPEAKER_IDS else (
+                    "en" if "en" in spark_tts_salt.SPARK_TTS_SPEAKER_IDS else "lg"
+                )
+                samples, sr = self._spark_tts.synthesize(text, language=spark_lang)
                 pcm16 = (
                     np.asarray(samples, dtype="float32") * 32768
                 ).clip(-32768, 32767).astype("int16")
@@ -2137,12 +2165,14 @@ class SpeechModel:
         except Exception:
             logger.debug("edge-tts failed", exc_info=True)
 
-        # ③ Sunbird cloud TTS — English only by this point; every other locale
-        #    already tried it (and Spark-TTS-SALT before it) at ⓪ or ①.75, and
-        #    the gates are mutually exclusive so Sunbird is still attempted at
-        #    most once per request.
+        # ③ Sunbird cloud TTS or local neural fallback — English only by this point;
+        #    every other locale already tried it (and Spark-TTS-SALT before it)
+        #    at ⓪ or ①.75.
         if not prefer_native_voice and (language or "en") == "en":
             result = _try_sunbird()
+            if result:
+                return result
+            result = _try_spark_salt()
             if result:
                 return result
 
@@ -2309,7 +2339,11 @@ class SpeechModel:
                 backend="circuit_open",
                 error="MT circuit open",
             )
-        future = self._executor.submit(self._do_translate, text, source_lang, target_lang)
+        # copy_context: a call turn's local-only scope (providers.scope) must
+        # reach _do_translate, which decides the tiers.
+        future = self._executor.submit(
+            contextvars.copy_context().run, self._do_translate, text, source_lang, target_lang
+        )
         try:
             result = future.result(timeout=SPEECH_DEADLINE_S)
             self._breakers["mt"].record_success()
@@ -2703,6 +2737,10 @@ class SpeechModel:
                 ("gemini_flash", _gemini), ("cf_workers_ai", _cf),
                 ("sunbird_cloud", _sunbird), ("local_mt", _local), ("prompted_qwen3", _prompted),
             ]
+        if not cloud_models_allowed():
+            # A call turn (providers.scope). Removed here, in the caller's
+            # context: _cloud_call's pool does not carry the scope.
+            tiers = [tier for tier in tiers if tier[0] in ("local_mt", "prompted_qwen3")]
 
         prev: str | None = None
         for name, tier in tiers:
@@ -2732,7 +2770,7 @@ class SpeechModel:
         """
         from .flags import flags
 
-        if not flags.is_enabled("cloudflare_fallback"):
+        if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
         if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() != "gemini":
             return ""
@@ -2778,7 +2816,7 @@ class SpeechModel:
         or unavailable so the Sunbird tier still runs."""
         from .flags import flags
 
-        if not flags.is_enabled("cloudflare_fallback"):
+        if not flags.is_enabled("cloudflare_fallback") or not cloud_models_allowed():
             return ""
         if os.getenv("TRANSLATE_FALLBACK_BACKEND", "").strip().lower() not in ("gemini", "workers_ai"):
             return ""

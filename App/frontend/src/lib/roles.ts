@@ -65,6 +65,27 @@ export function roleLabel(role: string | undefined | null): string {
   return ROLE_LABEL[role] ?? role;
 }
 
+/**
+ * Who handles taxpayers live: claims a case, replies to it, takes a call.
+ *
+ * Officers only. An administrator audits the service officers give and an
+ * auditor reads it; neither works a case. The API enforces the same split
+ * (`_require_live_officer` and `_desk_writer` in main.py) — this only decides
+ * which controls the console draws.
+ */
+export function isLiveOfficer(role: string | undefined | null): boolean {
+  return role === "ura_staff";
+}
+
+/**
+ * Who sees the live queue as it moves: the call bar, transfer alerts and the
+ * new-escalation banner. Officers work it and auditors watch it; an
+ * administrator has no live tools, so none of it is drawn for them.
+ */
+export function watchesLiveQueue(role: string | undefined | null): boolean {
+  return role === "ura_staff" || role === "ura_auditor";
+}
+
 /** What a staff sign-in should land on: agents work the queue, auditors inspect analytics, admins oversee ops. */
 export function staffLandingPath(role: string | undefined | null): string {
   if (role === "ura_staff") return "/agent";
@@ -92,10 +113,11 @@ export function landingPathForRole(role: string | undefined | null): string {
  * sees three sections rather than a flat row, which is the difference between
  * scanning and reading.
  */
-export type StaffSection = "work" | "configure" | "observe";
+export type StaffSection = "work" | "audit" | "configure" | "observe";
 
 export const SECTION_LABEL: Record<StaffSection, string> = {
   work: "Work",
+  audit: "Audit",
   configure: "Configure",
   observe: "Observe",
 };
@@ -118,7 +140,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     label: "Operations overview",
     navLabel: "Overview",
     group: "work",
-    blurb: "SLA, escalations waiting longest, answer authority",
+    blurb: "Service levels, officers on duty, answer authority",
     roles: ["ura_admin", "ura_auditor"],
   },
   {
@@ -127,7 +149,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     navLabel: "My queue",
     group: "work",
     blurb: "Claim a case and reply, one at a time",
-    roles: ["ura_staff", "ura_admin"],
+    roles: ["ura_staff"],
   },
   {
     href: "/admin/tickets",
@@ -135,7 +157,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     navLabel: "All tickets",
     group: "work",
     blurb: "Every escalation, every status, every team",
-    roles: STAFF_ROLES,
+    roles: ["ura_staff", "ura_auditor"],
   },
   {
     href: "/calls",
@@ -143,7 +165,15 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     navLabel: "Calls",
     group: "work",
     blurb: "Simulated AI phone receptionist: live calls, transfers, and audio takeover",
-    roles: ["ura_staff", "ura_admin", "ura_auditor"],
+    roles: ["ura_staff", "ura_auditor"],
+  },
+  {
+    href: "/admin/quality",
+    label: "Service quality audit",
+    navLabel: "Quality audit",
+    group: "audit",
+    blurb: "Where answers went wrong, from taxpayers' ratings",
+    roles: ["ura_admin", "ura_auditor"],
   },
   {
     href: "/admin/flags",
@@ -152,6 +182,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     group: "configure",
     blurb: "What this replica is serving right now",
     roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/admin/discrepancies",
+    label: "Knowledge & Bug Reports",
+    navLabel: "Bug Reports",
+    group: "configure",
+    blurb: "Taxpayer-reported inaccuracies and knowledge discrepancies",
+    roles: ["ura_staff", "ura_admin", "ura_auditor"],
   },
   {
     href: "/admin/overrides",
@@ -168,6 +206,14 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     group: "configure",
     blurb: "Queued email and SMS rows",
     roles: ["ura_admin", "ura_auditor"],
+  },
+  {
+    href: "/admin/connectors",
+    label: "System connectors",
+    navLabel: "Connectors",
+    group: "configure",
+    blurb: "Health and enablement for reviewed connector simulators",
+    roles: ["ura_staff", "ura_admin"],
   },
   {
     href: "/analytics",
@@ -189,7 +235,7 @@ export const STAFF_DESTINATIONS: readonly StaffDestination[] = [
     href: "/admin/audit",
     label: "Audit trail",
     navLabel: "Audit trail",
-    group: "observe",
+    group: "audit",
     blurb: "Who changed or read what, and proof the record is intact",
     roles: ["ura_admin", "ura_auditor"],
   },
@@ -205,7 +251,7 @@ export function staffSectionsFor(
   role: string | undefined | null,
 ): { group: StaffSection; label: string; items: StaffDestination[] }[] {
   const allowed = staffDestinationsFor(role);
-  return (["work", "configure", "observe"] as StaffSection[])
+  return (["work", "audit", "configure", "observe"] as StaffSection[])
     .map((group) => ({
       group,
       label: SECTION_LABEL[group],

@@ -267,6 +267,13 @@ class RegistryIntegrityTests(unittest.TestCase):
             "graph_fusion",
             "mcp_tasks",
             "hyde",
+            "hybrid_speech_s2s",
+            "voice_agentic_workflows",
+            "multi_agent_dag",
+            "continuous_relationship_memory",
+            "emotion_aware_prosody",
+            "spoken_figure_guard",
+            "officer_voice_copilot",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

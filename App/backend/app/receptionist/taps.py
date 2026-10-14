@@ -101,6 +101,8 @@ class CallerAudioTap(FrameProcessor):
         if getattr(room.state, "livekit_room", ""):
             from ..voice_stream import EnergyVAD
             self._officer_vad = EnergyVAD()
+        self._caller_copilot_vad: Any = None
+        self._utterance_buffer = bytearray()
         self._transcriptions: set[asyncio.Task[Any]] = set()
 
     async def process_frame(self, frame: Frame, direction: FrameDirection = FrameDirection.DOWNSTREAM) -> None:
@@ -128,9 +130,69 @@ class CallerAudioTap(FrameProcessor):
                 self.room.officer.send_caller_audio(frame.audio)
             if hasattr(self.room, "broadcast_audio"):
                 self.room.broadcast_audio(frame.audio)
+            self._capture_caller_for_copilot(frame.audio)
             return
 
+        if isinstance(frame, InputAudioRawFrame):
+            self._utterance_buffer.extend(frame.audio)
+            max_utt_bytes = _BYTES_PER_SECOND * 12
+            if len(self._utterance_buffer) > max_utt_bytes:
+                del self._utterance_buffer[: len(self._utterance_buffer) - max_utt_bytes]
+        elif isinstance(frame, VADUserStoppedSpeakingFrame | UserStoppedSpeakingFrame):
+            if self._utterance_buffer:
+                self.room.state.last_utterance_pcm = bytes(self._utterance_buffer)
+                self._utterance_buffer.clear()
+
         await self.push_frame(frame, direction)
+
+    def _capture_caller_for_copilot(self, pcm: bytes) -> None:
+        """When bridged to an officer and officer_voice_copilot is enabled, stream live caller assist."""
+        from ..flags import flags
+
+        if not flags.is_enabled("officer_voice_copilot", cohorts={"ura_staff"}) or self.speech_model is None:
+            return
+        if self._caller_copilot_vad is None:
+            from ..voice_stream import EnergyVAD
+
+            self._caller_copilot_vad = EnergyVAD()
+        _, complete = self._caller_copilot_vad.detect(pcm)
+        if not complete or not self._caller_copilot_vad.audio_buffer:
+            return
+        audio = bytes(self._caller_copilot_vad.audio_buffer)
+        self._caller_copilot_vad.reset()
+        task = asyncio.create_task(self._transcribe_caller_copilot(audio))
+        self._transcriptions.add(task)
+        task.add_done_callback(self._transcriptions.discard)
+
+    async def _transcribe_caller_copilot(self, pcm: bytes) -> None:
+        try:
+            locale = getattr(self.room.state, "locale", "en") or "en"
+            result = await asyncio.to_thread(
+                self.speech_model.transcribe,
+                pcm16_to_wav(pcm, 16000),
+                16000,
+                locale,
+                with_words=False,
+            )
+            text = (getattr(result, "text", "") or "").strip()
+            if not text:
+                return
+            from .lexicon import normalize_call_query
+
+            english_hint = normalize_call_query(text, locale)
+            hub.publish_call(
+                self.room.call_id,
+                "copilot_assist",
+                {
+                    "call_id": self.room.call_id,
+                    "speaker": "caller",
+                    "locale": locale,
+                    "transcript": text,
+                    "english_router_view": english_hint,
+                },
+            )
+        except Exception:
+            logger.debug("Officer voice copilot transcription failed on %s", self.room.call_id, exc_info=True)
 
     def _capture_officer_audio(self, pcm: bytes) -> None:
         if self._officer_vad is None or self.speech_model is None:
@@ -357,6 +419,20 @@ class LivePartialTranscriptTap(FrameProcessor):
         if text == self._last_text:
             return
         self._last_text = text
+
+        # Adaptive semantic endpointing & speculative prefetch on partial hypothesis
+        try:
+            from ..flags import flags
+            from .hybrid_s2s import compute_semantic_endpoint_silence_ms
+
+            self.room.state.semantic_endpoint_silence_ms = compute_semantic_endpoint_silence_ms(
+                text, locale=self.language
+            )
+            uid = getattr(self.room.state, "user_id", "") or None
+            if flags.is_enabled("speculative_prefetch", subject=uid) and len(text.split()) >= 4:
+                self.room.state.prefetched_query = text
+        except Exception:
+            logger.debug("Partial semantic endpoint / prefetch update skipped", exc_info=True)
 
         caption_data = {
             "type": "caption",

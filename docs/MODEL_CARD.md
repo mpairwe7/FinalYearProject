@@ -21,7 +21,7 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Sunbird/Sunflower-14B-FP8 (via vLLM) | 14.8B (FP8 quantized) | Answer generation + tool-calling (Apache-2.0, Qwen3-14B arch, 8K context configured, natively multilingual across 31 Ugandan languages + English, min-p=0.08 and presence_penalty=0.05 dynamic sampling, repetition_penalty=1.1, gated on HF); Qwen/Qwen3-8B is the simple local-Transformers fallback (see docs/MODEL_SWAP_GUIDE.md) |
+| **LLM (server)** | Sunbird/Sunflower-14B-FP8 (via vLLM) | 14.8B (FP8 quantized) | Answer generation + tool-calling (Apache-2.0, Qwen3-14B arch, 131K YaRN context window configured [32K native → 131K with YaRN], natively multilingual across 31 Ugandan languages + English, min-p=0.08 and presence_penalty=0.05 dynamic sampling, repetition_penalty=1.1, prefix caching + chunked prefill enabled, gated on HF); Qwen/Qwen3-8B is the simple local-Transformers fallback (see docs/MODEL_SWAP_GUIDE.md) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
@@ -33,7 +33,8 @@
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |
 | **Supervisor** | Rule-based + LLM fallback | N/A | Query routing (7 routes) |
-| **Tool Registry** | 6 tool modules | N/A | Tax calculators, rates, deadlines, KB search |
+| **Tool Registry** | 27 tools across 9 namespaces | N/A | Tax calculators, rates, deadlines, KB search, memory operations, DMZ system connectors |
+| **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session), Episodic, Semantic (fact triplets), Procedural (statutory SOP exemplars) |
 | **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
 | **Offline Retriever** | FAISS + ONNX bge-m3 | ~80M bundle | Offline RAG when Qdrant is unavailable |

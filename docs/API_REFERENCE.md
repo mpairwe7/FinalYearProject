@@ -16,7 +16,13 @@ The API is open for chat and classification endpoints. The indexing endpoint req
 Authorization: Bearer <INDEX_API_KEY>
 ```
 
-Session tracking uses the `X-Session-ID` header (optional, client-provided).
+Session tracking uses the `X-Session-ID` header (optional, client-provided). For a
+signed-out taxpayer it is also what binds a conversation's history, attachments and
+escalation transcript to them: a conversation id alone never unlocks history. The web
+client sends a browser-wide chat session id here (localStorage, replaced after
+`NEXT_PUBLIC_CONVERSATION_TTL_DAYS` without use or when history is cleared), so a
+conversation reopened in a new tab keeps its history. Analytics events keep their own
+per-tab id.
 
 ## Endpoints
 
@@ -127,7 +133,8 @@ POST /v1/chat
   "message": "What is the VAT rate in Uganda?",
   "conversation_id": "conv_123",
   "top_k": 4,
-  "locale": "en"
+  "locale": "en",
+  "locale_explicit": false
 }
 ```
 
@@ -136,7 +143,15 @@ POST /v1/chat
 | `message` | string | Yes | User's question (max 2000 chars) |
 | `conversation_id` | string | No | For conversation continuity |
 | `top_k` | integer | No | Number of passages to retrieve (1–10, default 4) |
-| `locale` | string | No | ISO 639-1 locale, e.g. `en`, `lg-UG` (default `en`) |
+| `locale` | string | No | ISO 639-1/639-3 or BCP 47 tag, e.g. `en`, `lg`, `sw-UG` (the region is dropped) |
+| `locale_explicit` | boolean | No | `true` when the taxpayer picked `locale`; `false` when it is only the client's default or an earlier detection. Omitted: a requested `lg`/`sw` counts as a choice and `en` as a default |
+
+**Which language the reply is in** (`app/language_state.py`), highest first:
+a request typed into the message ("answer in Luganda"); a language the
+taxpayer picked (`locale_explicit: true`); the language the conversation was
+last answered in, until a substantive message clearly switches; detection of
+this message; the profile's saved language for an ambiguous first message
+("TIN?", personalization consent only); English.
 
 **Response**
 ```json
@@ -157,6 +172,7 @@ POST /v1/chat
   "model": "ura-qwen2.5-3b-instruct",
   "conversation_id": "conv_123",
   "locale": "en",
+  "locale_source": "detected",
   "escalation_required": false,
   "escalation_reason": ""
 }
@@ -170,6 +186,7 @@ POST /v1/chat
 | `faithfulness_score` | float\|null | 0–1 grounding score (null if blocked/abstained) |
 | `retrieval_mode` | string | `hybrid`, `keyword`, `blocked`, or `abstained` |
 | `locale` | string | Locale used for response |
+| `locale_source` | string | Why: `explicit_request`, `client_explicit`, `continuity`, `switched`, `detected`, `profile` or `default`. A client should keep only the first two as the taxpayer's choice and treat the rest as a hint |
 | `escalation_required` | boolean | Whether human review is recommended |
 | `escalation_reason` | string | Reason(s) for escalation (e.g. `low_faithfulness=0.12; no_retrieval_results`) |
 
@@ -206,7 +223,7 @@ POST /v1/chat/stream
 | Event | Data | Description |
 |-------|------|-------------|
 | `phase` | string | What the server is doing right now — see the table below |
-| `metadata` | JSON | Sources, citations, retrieval mode, locale (sent first) |
+| `metadata` | JSON | Sources, citations, retrieval mode, locale, and `turn_id` — the answer's id in the conversation log, which a rating sends back (sent first) |
 | `token` | string | Generated text chunk (sanitized, XSS-safe) |
 | `revision` | string | The **whole** reply, replacing what was streamed so far |
 | `agent_trace` | JSON | Buffered retrieval/tool trace, emitted just before `grounding` |
@@ -229,9 +246,11 @@ generated in English and translated on the way out (see
 which a complete English answer is already on screen — without a phase frame
 that reads as the assistant having answered in the wrong language.
 
-The locale those phases carry is the **effective** one. A caller that sends no
-`locale` gets `en`, and the server detects the real language from the message;
-`retrieval.completed` reports what it resolved.
+The locale those phases carry is the **effective** one, decided as described
+under `POST /v1/chat`: a caller that sends no locale, or `en` without
+`locale_explicit: true`, gets the language detected from the message or
+continued from the conversation. `retrieval.completed` and `metadata` report it
+with its `locale_source`.
 
 **cURL Example**
 ```bash
@@ -336,7 +355,7 @@ as `/v1/chat`.
 | Field | Required | Description |
 |-------|----------|-------------|
 | `conversation_id` | No | Attaches the transcript, and is where the officer's reply is delivered back |
-| `session_id` | No | Analytics session |
+| `session_id` | No | The chat session (`X-Session-ID`) the conversation's history is bound to; the transcript is read with it |
 | `reason` | No | The taxpayer's own words, max 1000 chars. Defaults to a generic request |
 | `locale` | No | Language to acknowledge in; the message is translated on the way out |
 
@@ -367,7 +386,79 @@ never arrive.
 
 The officer's reply is delivered back into the same conversation on the
 taxpayer's next turn (`_deliver_officer_reply` in `service.py`), which is why
-`conversation_id` matters more than anything else in the body.
+`conversation_id` matters more than anything else in the body. Once an officer
+takes the case the chat follows it live (below).
+
+---
+
+### Live Chat with the Officer: the Thread
+
+The taxpayer's chat polls this while its case waits or is with an officer
+(every 3 s, 10 s with the tab hidden). An officer taking the case switches the
+chat to them and pauses the assistant; the officer ending it asks for a rating
+and hands the taxpayer back.
+
+```http
+GET /v1/escalate/{ticket_id}/messages?after_seq=0
+```
+
+Open to unauthenticated callers, like the case itself — the ticket id is the
+capability the taxpayer holds — but **exact id only**: unlike
+`GET /v1/escalate/{ticket_id}` there is no search fallback that could answer for
+someone else's case (`TIC-…` references are 422). Rate-limited by
+`CHAT_POLL_RATE_LIMIT` (default `120/minute`). Reading the officer's latest
+message here counts as delivering it, so the next assistant turn does not
+repeat it.
+
+**Response**
+```json
+{
+  "ticket_id": "6f1c…",
+  "chat_state": "officer",
+  "officer_name": "Officer Nakato",
+  "messages": [
+    {"seq": 1, "sender": "officer", "text": "Which period?", "officer_name": "Officer Nakato", "created_at": 1790000000.0},
+    {"seq": 2, "sender": "taxpayer", "text": "March 2026.", "officer_name": "", "created_at": 1790000060.0}
+  ],
+  "last_seq": 2,
+  "csat": {"requested": false, "submitted": false}
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `chat_state` | `waiting` (in the queue; the assistant still answers) · `officer` (an officer has the case: the taxpayer's messages go to them) · `ended` · `none` (a call's ticket: no chat) |
+| `messages` | The thread after `after_seq`, oldest first. An officer's message is in the taxpayer's language when it was translated. `sender: "system"` with text `chat_ended` marks the end |
+| `csat` | Whether the taxpayer has been asked to rate the chat, and has |
+
+`POST /v1/escalate/{ticket_id}/reply` adds the taxpayer's message to the same
+thread (its response carries the message's `seq`) and answers **409** once an
+officer has ended the chat: an ended chat is not reopened by a message nobody
+is reading. A new problem is a new escalation.
+
+---
+
+### Live Chat with the Officer: Rate It
+
+```http
+POST /v1/escalate/{ticket_id}/csat
+```
+
+The taxpayer's 5-level rating of a chat an officer ended — very dissatisfied
+(1) to very satisfied (5) — or `score: null` to skip. Once per chat and only
+after it ended (409 otherwise); exact id only; rate-limited with `RATE_LIMIT`.
+The comment is redacted and kept only with a rating. Administrators read
+these on `/admin/quality` (`GET /v1/admin/quality/ratings`).
+
+**Request Body**
+```json
+{"score": 2, "comment": "Took too long to answer."}
+```
+
+**Response**
+```json
+{"ok": true, "ticket_id": "6f1c…", "status": "answered"}
+```
 
 ---
 
@@ -378,6 +469,15 @@ Submit thumbs-up/down feedback on a chatbot response.
 ```http
 POST /v1/feedback
 ```
+
+Open to anyone, signed in or not (rate-limited like `/v1/chat`). A rating is
+tied to its user only when they have analytics consent; otherwise it is stored
+with no user id — the answer is rated, the rater is not recorded. With
+`turn_id` (from the chat response) the rating is linked to the answer it rates:
+its conversation, its position (`turn_index`, 1 = first answer) and its
+sources, topic and language are copied from the conversation log, and the
+logged question and reply are kept instead of the client's copy. The
+service-quality audit (`GET /v1/admin/quality/ai-chat`) reads these links.
 
 **Request Body**
 ```json
@@ -402,10 +502,15 @@ POST /v1/feedback
 | `retrieval_mode` | string | No | Route that produced the reply (e.g. `workflow`, `hybrid`) |
 | `workflow_id` | string | No | Guided journey the reply belongs to (e.g. `tax_clearance`) |
 | `step_id` | string | No | Journey step the reply asked (e.g. `collect_returns_filed`) |
+| `conversation_id` | string | No | Conversation the answer belongs to |
+| `turn_id` | string | No | The answer's `turn_id` from the chat response |
+| `turn_index` | integer | No | The answer's position in its conversation, 1 for the first (used only when `turn_id` is unknown) |
 
 The three context fields are identifiers only: lowercase letters, digits and
 `_`, at most 64 characters. Anything else is refused with 422. They let
 `GET /v1/analytics/journeys` attribute ratings to journey steps.
+`conversation_id` and `turn_id` take `[A-Za-z0-9_-]`, at most 64 characters. A
+`turn_id` that is not in the named conversation is not linked.
 
 **Response**
 ```json
@@ -421,7 +526,9 @@ The three context fields are identifiers only: lowercase letters, digits and
 
 ### Update Feedback Comment
 
-Add a follow-up comment to existing feedback (avoids duplicate entries).
+Add a follow-up comment to existing feedback (avoids duplicate entries). The
+rating must be the same rater's — the same user, or for an anonymous rating,
+anonymous — and takes one comment; 404 otherwise.
 
 ```http
 PATCH /v1/feedback/{message_id}/comment
@@ -488,7 +595,7 @@ what `/analytics` renders under "Taxpayer question".
 How far taxpayers get through each guided journey in the period. Staff only
 (OIDC staff role or the operator key). Built from the stored journey sessions
 and feedback, so it is the same on every replica and survives restarts; the
-`journey_events_total` counter on `/metrics` is per replica and resets.
+`ura_journey_events_total` counter on `/metrics` is per replica and resets on restart.
 
 ```http
 GET /v1/analytics/journeys?days=30
@@ -649,6 +756,256 @@ another replica sealed the same rows first.
 
 ---
 
+### Service-Quality Audit: Summary
+
+Headline figures for the administrator's audit (`/admin/quality`), one block
+per stream audited. Administrators and auditors only — officers (`ura_staff`)
+get 403: auditing the service is not the job of the people giving it.
+
+```http
+GET /v1/admin/quality/summary?days=30
+```
+
+**Response**
+```json
+{
+  "period_days": 30,
+  "needs_review": {"open": 3, "action_needed": 1},
+  "ai_chat": { "rated_answers": 12, "helpful_pct": 66.7, "patterns": {"went_wrong": 2, "…": 0},
+               "previous": {"rated_answers": 10, "helpful_pct": 70.0, "truncated": false}, "…": "…" }
+}
+```
+
+`needs_review` counts what the Needs review queue (below) holds in the period:
+items nobody has decided yet (`open`), and those marked `action_needed`.
+
+`ai_chat` is the same block as `summary` below. `officer_chat`,
+`officer_calls` and `ai_calls.end` / `ai_calls.transfer` are the satisfaction
+headlines of those streams: `asked`, `answered`, `response_rate`, `average`
+(of 5), `csat_pct` (share of 4–5), `low` (ratings of 1–2), `distribution`,
+`sentiment` with `positive_pct` / `negative_pct` (the words view — the only
+one for the caller's spoken review of the AI, which has no score), and
+`previous` (the same figures for the period before).
+
+---
+
+### Service-Quality Audit: AI Answers in Chat
+
+How taxpayers rated the AI's chat answers, and one page of rated
+conversations, worst first. Each conversation's ratings are read in answer
+order and given a pattern: `went_wrong` (a helpful answer, then it ends
+unhelpful), `never_helpful`, `recovered` (ends helpful after an unhelpful one)
+or `all_helpful`. `break_answer` is where it went wrong: the first unhelpful
+answer after a helpful one (else the first unhelpful one). An answer rated
+twice counts once, the latest. Officer replies relayed into the chat are left
+out. One period reads at most 5,000 ratings; beyond that `truncated` is true.
+
+```http
+GET /v1/admin/quality/ai-chat?days=30&pattern=&topic=&locale=&with_comment=false&limit=25&offset=0
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `days` | 1–90 |
+| `pattern` | `went_wrong`, `never_helpful`, `recovered` or `all_helpful`; empty for all (anything else 422) |
+| `topic`, `locale` | Exact topic tag / language code; `unclassified` / `unknown` for none |
+| `with_comment` | Only conversations with a comment |
+| `limit`, `offset` | Page of conversations (limit ≤ 100) |
+
+**Response**
+```json
+{
+  "summary": {
+    "rated_answers": 12, "helpful": 8, "unhelpful": 4, "helpful_pct": 66.7, "comments": 2,
+    "conversations": 5, "unlinked_answers": 0,
+    "patterns": {"went_wrong": 2, "never_helpful": 1, "recovered": 0, "all_helpful": 2},
+    "median_break_answer": 3,
+    "by_position": [{"position": "1", "rated": 5, "helpful": 5, "helpful_pct": 100.0}, "…"],
+    "by_topic": [{"key": "vat_registration", "rated": 6, "helpful": 3, "unhelpful": 3, "helpful_pct": 50.0}],
+    "by_route": ["…"], "by_language": ["…"], "by_day": ["…"],
+    "previous": {"rated_answers": 10, "helpful_pct": 70.0, "truncated": false},
+    "truncated": false
+  },
+  "page": {
+    "total": 1, "limit": 25, "offset": 0, "truncated": false,
+    "conversations": [{
+      "conversation_id": "conv-…", "pattern": "went_wrong",
+      "ratings": [{"answer": 1, "rating": "up"}, {"answer": 2, "rating": "up"}, {"answer": 3, "rating": "down"}],
+      "break_answer": 3, "break_question": "What if I am a sole proprietor?", "helpful_before_break": true,
+      "comments": 1, "topic": "vat_registration", "locale": "lg", "last_rated_at": 1790000000.0
+    }]
+  }
+}
+```
+
+Ratings given before answers were linked have no conversation; each is listed
+as its own answer with `linked: false`.
+
+---
+
+### Service-Quality Audit: One Conversation
+
+One conversation answer by answer, with its ratings and where it went wrong
+(`is_break`). The conversation log is kept `CONVERSATION_TTL_DAYS` and ratings
+90 days: once the log has expired, `transcript_complete` is false and only
+the rated answers remain, from the copy each rating kept. Opening one is
+recorded in the audit trail as `staff.conversation_viewed`. 404 for an
+unknown conversation.
+
+```http
+GET /v1/admin/quality/ai-chat/{conversation_id}
+```
+
+**Response**
+```json
+{
+  "conversation_id": "conv-…", "pattern": "went_wrong", "break_answer": 3,
+  "transcript_complete": true, "transcript_kept_days": 7,
+  "answers": [{"answer": 3, "turn_id": "…", "question": "…", "reply": "…", "sources": ["vat-act.pdf"],
+               "confidence": 0.4, "rating": "down", "comment": "That is wrong.",
+               "retrieval_mode": "hybrid", "is_break": true}]
+}
+```
+
+---
+
+### Service-Quality Audit: Satisfaction Ratings
+
+How taxpayers rated the service they got from officers, one stream at a time.
+A rating is recorded when it is **asked for**, so the response rate is a count:
+`asked` is every chat ended, `answered` those rated.
+
+```http
+GET /v1/admin/quality/ratings?source=chat_officer_csat&days=30&score=&officer=&status=&limit=25&offset=0
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `source` | `chat_officer_csat` (taxpayer rates an officer chat), `call_officer_csat` (the officer records how satisfied the caller said they were, at wrap-up), `call_ai_review_end` / `call_ai_review_transfer` (the caller's spoken answer to the AI's "was this call helpful?", at goodbye or while transferring) |
+| `days` | Period, 1–90 (default 30) |
+| `score` | Only ratings of this level (1–5) |
+| `officer` | Only this officer's ratings (`officer_id` from `summary.by_officer`) |
+| `status` | `answered` · `skipped` · `no_answer` |
+| `sentiment` | `positive` · `neutral` · `negative` · `unclear` — for the spoken review |
+| `limit`, `offset` | Page of ratings (limit ≤ 100) |
+
+**Response**
+```json
+{
+  "source": "chat_officer_csat", "period_days": 30, "truncated": false,
+  "summary": {
+    "asked": 6, "answered": 4, "skipped": 1, "no_answer": 0, "pending": 1,
+    "response_rate": 66.7, "average": 3.25, "csat_pct": 50.0, "low": 1,
+    "distribution": {"1": 0, "2": 1, "3": 1, "4": 1, "5": 1},
+    "by_officer": [{"officer_id": "…", "officer_name": "Officer Okello", "handled": 3, "rated": 2,
+                    "average": 2.5, "csat_pct": 0.0, "low": 1}],
+    "by_week": [{"week": "2026-W41", "rated": 4, "average": 3.25, "csat_pct": 50.0, "positive_pct": 50.0, "negative_pct": 25.0}],
+    "by_language": [{"locale": "lg", "asked": 3, "response_rate": 66.7, "rated": 2, "average": 3.5, "csat_pct": 50.0,
+                     "positive_pct": 50.0, "negative_pct": 50.0}]
+  },
+  "previous": {"asked": 4, "average": 4.0, "csat_pct": 75.0},
+  "total": 4, "limit": 25, "offset": 0,
+  "ratings": [{"id": "…", "status": "answered", "score": 2, "sentiment": "negative",
+               "comment": "Took too long to answer.", "ticket_id": "…", "officer_name": "Officer Okello",
+               "team": "domestic_taxes", "topic": "vat", "created_at": 1790000000.0}]
+}
+```
+
+The list leads with the lowest score (a spoken review sorts negative, unclear,
+neutral, positive), then the newest, and never names the taxpayer. For a
+spoken review, `comment` is the transcript of what the caller said (redacted). Administrators and auditors only; officers get 403. A rating opens
+its case through `GET /v1/admin/tickets/{ticket_id}` (recorded as
+`staff.ticket_viewed`).
+
+---
+
+### Service-Quality Audit: Needs Review
+
+One queue across the four streams, holding only what calls for a person to
+look: an AI chat that went wrong or was never found helpful, or a 👎 with a
+comment; an officer chat or call rated 1 or 2; a caller whose spoken review
+said the AI did not help. Newest first. The queue is computed from the
+ratings when it is read; only the decisions on it are stored.
+Administrators and auditors only; officers get 403.
+
+```http
+GET /v1/admin/quality/needs-review?days=30&status=open&stream=&limit=25&offset=0
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `days` | 1–90 |
+| `status` | `open` (nothing decided yet, the default) · `action_needed` · `reviewed` · `all` |
+| `stream` | `ai_chat` · `officer_chat` · `officer_call` · `ai_call`; empty for all |
+| `limit`, `offset` | Page of items (limit ≤ 100) |
+
+Anything else in `status` or `stream` is 422.
+
+**Response**
+```json
+{
+  "period_days": 30, "truncated": false,
+  "counts": {"open": 3, "action_needed": 1, "reviewed": 2, "all": 6},
+  "total": 3, "limit": 25, "offset": 0,
+  "items": [{
+    "item_type": "ai_chat", "item_id": "conv-…", "stream": "ai_chat",
+    "title": "AI chat went wrong at answer 3",
+    "quote": "What if I am a sole proprietor?", "comment": "That is wrong.",
+    "topic": "vat_registration", "locale": "lg", "officer_name": "", "occurred_at": 1790000000.0,
+    "link": {"tab": "ai-chat", "param": "conversation", "value": "conv-…"},
+    "review": null
+  }, {
+    "item_type": "rating", "item_id": "…", "stream": "officer_chat",
+    "title": "Officer chat rated 2/5 — Officer Okello", "quote": "", "comment": "Took too long to answer.",
+    "link": {"tab": "officer-chat", "param": "ticket", "value": "…"},
+    "review": {"status": "action_needed", "note": "Coach on response times",
+               "reviewer_name": "auditor@ura.go.ug", "updated_at": 1790000100.0}
+  }]
+}
+```
+
+`item_type` is `ai_chat` (keyed by the conversation, or `msg:<message id>`
+for a rating from before answers were linked) or `rating` (a
+`service_ratings` id). `link` says where the item is read in full on
+`/admin/quality` — the tab and the parameter that opens it. `truncated` is the
+AI-chat sample flag, as above. No item names the taxpayer.
+
+---
+
+### Service-Quality Audit: Record a Decision
+
+Mark a Needs review item Reviewed or Action needed, with a note, or reopen
+it. Like sealing the audit trail, this adds an audit note and changes no case,
+so auditors may make it as well as administrators; officers get 403. The note
+is redacted before it is stored (≤ 1,000 characters). Each call is recorded in
+the audit trail as `staff.quality_reviewed` with the item, the status and the
+note's length — not its text. 404 for an item the audit cannot see; 422 for an
+unknown `item_type` or `status`.
+
+```http
+PUT /v1/admin/quality/reviews/{item_type}/{item_id}
+```
+
+**Request Body**
+```json
+{"status": "action_needed", "note": "Sole proprietors can register — fix the override."}
+```
+
+`status` is `reviewed`, `action_needed` or `open` (reopen: the decision is
+removed and the item is open again).
+
+**Response**
+```json
+{"item_type": "ai_chat", "item_id": "conv-…",
+ "review": {"status": "action_needed", "note": "Sole proprietors can register — fix the override.",
+            "reviewer_name": "auditor@ura.go.ug", "updated_at": 1790000100.0}}
+```
+
+`review` is `null` after a reopen. Decisions are kept 90 days, and dropped
+with the rating or conversation they are about.
+
+---
+
 ### Track Analytics Event
 
 Track a client-side analytics event (e.g., page views, button clicks).
@@ -708,19 +1065,63 @@ GET /v1/analytics/dashboard?days=30
 
 ### Prometheus Metrics
 
-Prometheus-compatible metrics endpoint for scraping by monitoring systems.
+Prometheus metrics for every API worker process, aggregated. Requires
+`Authorization: Bearer <METRICS_TOKEN>` (the scrape credential), a staff
+login, or the operator key; otherwise 401/403. Rate-limited to 30/minute.
+Metric catalogue: [MONITORING.md §3](MONITORING.md#3-metrics).
 
 ```http
 GET /metrics
+Authorization: Bearer <METRICS_TOKEN>
 ```
 
 **Response** (`text/plain; version=0.0.4`)
 ```
-# HELP requests_total Total HTTP requests
-# TYPE requests_total counter
-requests_total{method="POST",path="/v1/chat"} 1234
+# HELP ura_http_requests_total URA chatbot metric ura_http_requests_total
+# TYPE ura_http_requests_total counter
+ura_http_requests_total{method="POST",path="/v1/chat",status="200"} 1234.0
+ura_chat_turns_total{channel="sse",outcome="answered"} 980.0
 ...
 ```
+
+---
+
+### Report Web Vitals (real-user monitoring)
+
+Core Web Vitals measured in the browser by the `web-vitals` library. Public
+and anonymous; the web client sends batches only with analytics consent.
+Accepts `application/json` or `text/plain` (what `navigator.sendBeacon`
+sends). Unknown fields are rejected; bodies over 16 KB get 413. 60/minute.
+
+```http
+POST /v1/telemetry/vitals
+Content-Type: application/json
+
+{"metrics": [{"name": "INP", "value": 184, "rating": "good",
+              "route": "/staff/tickets/7d1c0e2a", "navigation_type": "navigate"}]}
+```
+
+`name` is `LCP`, `INP`, `CLS`, `FCP` or `TTFB`; `rating` is `good`,
+`needs-improvement` or `poor`. Ids in `route` are folded to `:id`.
+**Response:** `204 No Content`.
+
+---
+
+### Report a Client Error
+
+An uncaught browser error, unhandled rejection or error-boundary render.
+There is deliberately **no message field** (it could quote user input).
+30/minute.
+
+```http
+POST /v1/telemetry/errors
+Content-Type: application/json
+
+{"kind": "boundary", "name": "TypeError", "digest": "2771883407", "source": "", "route": "/"}
+```
+
+`kind` is `error`, `unhandledrejection`, `boundary` or `global-boundary`.
+**Response:** `204 No Content`.
 
 ---
 
@@ -1324,7 +1725,12 @@ GET /v1/admin/tickets/{ticket_id}
 |-----------|------|----------|-------------|
 | `ticket_id` | string | Yes | Ticket identifier |
 
-**Response**: Full ticket object with conversation context, assignee, status, priority, and staff notes.
+**Response**: Full ticket object with conversation context, assignee, status, priority, and staff notes, plus:
+
+| Field | Description |
+|-------|-------------|
+| `messages` | The live chat with the taxpayer in order: `seq`, `sender` (`taxpayer` · `officer` · `system`), `text` (English), `text_localized` (as delivered), `officer_name`, `created_at` |
+| `chat` | `state` (`waiting` · `officer` · `ended` · `none`), `officer_name`, `ended_at`, `ended_by_name`, `outcome`, and `rating` (`status`, `score`, `comment`) once the taxpayer was asked |
 
 ---
 
@@ -1352,6 +1758,31 @@ PATCH /v1/admin/tickets/{ticket_id}
 | `priority` | string | No | `low`, `medium`, `high`, `critical` |
 
 **Response**: Updated ticket object.
+
+Officers (`ura_staff`) only. On a text case, `officer_reply` is also a message
+in the live chat, and an officer assigning the case to themselves takes the
+chat. Setting `status` to `resolved` or `wontfix` on a live text chat **ends
+it** exactly as End chat does (below), with `officer_reply` as the closing
+message; the response then carries `"chat_state": "ended"`.
+
+---
+
+#### End a Live Chat
+
+```http
+POST /v1/admin/tickets/{ticket_id}/end-chat
+```
+
+```json
+{"closing_message": "I have cancelled the duplicate. Goodbye.", "closing_message_localized": "", "outcome": "resolved"}
+```
+
+The officer ends the chat: the optional closing message is sent (translated
+for a non-English case, as a reply is), the thread is marked ended, the ticket
+is resolved or closed (`outcome`: `resolved` · `wontfix`), the taxpayer is
+asked to rate the chat, and `escalation.chat_ended` goes to the staff stream.
+Officers only (administrators and auditors 403); recorded as
+`staff.chat_ended`. 409 for a call's ticket or a chat that has already ended.
 
 ---
 
@@ -1393,7 +1824,34 @@ WS /v1/admin/tickets/stream
 ```
 
 Staff-only, read-only. Pushes `escalation.created` triage metadata
-(no transcript). The staff UI invalidates the queue on each event.
+(no transcript), and `escalation.taxpayer_reply` / `escalation.chat_ended`
+for live chats. The staff UI invalidates the queue on each event, and the open
+case on the chat events.
+
+---
+
+#### Call wrap-up: the caller's satisfaction
+
+```http
+POST /v1/admin/calls/{call_id}/wrapup
+```
+
+```json
+{"outcome": "resolved", "note": "Explained the refund timeline.", "ticket_action": "resolve",
+ "caller_satisfaction": 4, "caller_satisfaction_status": "answered",
+ "rating": 3, "rating_note": "Missed the PRN question"}
+```
+
+Officers only. `caller_satisfaction` is what the caller told the officer when
+asked before the call ended, 1 (very dissatisfied) to 5 (very satisfied);
+`caller_satisfaction_status: "not_said"` (with no score) records that they did
+not say. Stored as `call_officer_csat` under the officer and the call's team,
+topic and language; a wrap-up posted again keeps the first one; 400 for a
+score outside 1–5 or a score with `not_said`. The console requires one of the
+two; a request without either records nothing, as before. `rating` /
+`rating_note` are separate and optional: the officer's own rating of how the AI
+handled the call before the transfer. The response's `caller_satisfaction`
+says what was recorded.
 
 ---
 
@@ -1542,7 +2000,7 @@ PUT /v1/me/profile
 |-------|------|----------|-------------|
 | `taxpayer_type` | string | No | `individual`, `business`, `ngo` |
 | `industry` | string | No | Industry sector |
-| `primary_language` | string | No | ISO 639-1 locale |
+| `primary_language` | string | No | `en`, `lg` or `sw`. With personalization consent, a saved `lg`/`sw` answers a new conversation whose first message gives no language of its own |
 | `detail_level` | string | No | `brief`, `standard`, `detailed` |
 
 **Response**: Updated profile object.
@@ -1705,6 +2163,9 @@ answers on it, and download a branded PDF analysis report. Documents are
 held in ephemeral container storage shared across the app's worker
 processes (TTL ~2 h, dies with the container) and are bound to the
 uploading `X-Session-ID`; they are never written to the analytics DB.
+The composer suggests a general image question only when at least one image
+is accepted within the remaining attachment and file-size limits; rejected
+images do not leave a question in the draft without an attachment.
 
 ---
 
@@ -1719,7 +2180,13 @@ XLSX/XLSM, CSV, TXT, and images (PNG/JPEG/WebP/BMP/TIFF, OCR best-effort).
 Max 10 MB. Extracts text and tables, classifies the document against the
 URA taxonomy (receipt, tin_card, assessment, customs_declaration,
 filing_form, invoice, statutory_act, portal_screenshot, generic), and pulls TINs, UGX amounts, dates, and
-reference numbers. For portal screenshots, returns interactive diagnostic troubleshooting steps, UI click hotspots, and portal links.
+reference numbers. For portal screenshots, returns diagnostic guidance with
+suggested resolution steps, the areas of the screen it usually concerns, and
+portal links. The areas are the *typical layout* of the identified screen
+(`bbox_basis: "typical_layout"`), not regions located in the image, and the UI
+says so beside them. Steps may arrive as "Step 1: …"; the UI renders them in a
+numbered list and drops that prefix. The UI also includes a reminder to verify
+the portal address and important tax actions.
 
 **Response** `200`
 ```json
@@ -1893,6 +2360,7 @@ class ChatResponse(BaseModel):
     retrieval_mode: str = "keyword"  # hybrid | keyword | blocked | abstained
     model: str = "ura-qwen2.5-3b-instruct"
     conversation_id: str | None = None
+    turn_id: str | None = None  # this answer's id in the conversation log; a rating sends it back
     locale: str = "en"
     escalation_required: bool = False
     escalation_reason: str = ""
@@ -1912,6 +2380,10 @@ class FeedbackRequest(BaseModel):
     retrieval_mode: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
     workflow_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
     step_id: str = Field("", max_length=64, pattern=r"^[a-z0-9_]*$")
+    # Which answer of which conversation is rated (service-quality audit).
+    conversation_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$")
+    turn_id: str = Field("", max_length=64, pattern=r"^[a-zA-Z0-9_-]*$")
+    turn_index: int | None = Field(None, ge=1, le=1000)
 ```
 
 ### FeedbackResponse

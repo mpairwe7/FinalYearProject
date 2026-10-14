@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from .models import (
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class EfrisClient:
-    """Client for EFRIS operations, supporting local simulated engine or remote REST API."""
+    """Client for the local EFRIS simulator; live URA calls are not implemented."""
 
     def __init__(
         self,
@@ -29,17 +28,15 @@ class EfrisClient:
         api_base: str | None = None,
         api_key: str | None = None,
     ) -> None:
+        del api_base, api_key  # retained for compatibility; remote calls are not implemented
         self._service = service or EfrisService()
-        self._api_base = api_base or os.getenv("EFRIS_API_BASE", "")
-        self._api_key = api_key or os.getenv("EFRIS_API_KEY", "")
-        self._is_live = bool(self._api_base and self._api_key.startswith("efris_live_"))
 
     @property
     def is_live(self) -> bool:
-        return self._is_live
+        return False
 
     def ping(self) -> bool:
-        """Health check for EFRIS connectivity."""
+        """Report local simulator readiness, not external EFRIS connectivity."""
         return True
 
     def get_taxpayer_profile(self, tin: str) -> dict[str, Any]:
@@ -75,7 +72,7 @@ class EfrisClient:
         cashier_id: str = "CASHIER_01",
         offline_reference: str | None = None,
     ) -> dict[str, Any]:
-        """Issue and fiscalize an invoice with real-time FDN generation."""
+        """Create a sample invoice with an FDN-shaped reference in the local simulator."""
         seller_tin = str(seller_tin or "").strip()
         if not seller_tin:
             return {"ok": False, "error": "seller_tin is required"}
@@ -104,8 +101,8 @@ class EfrisClient:
                         tax_category=tax_cat,
                     )
                 )
-            except Exception as exc:  # noqa: BLE001
-                return {"ok": False, "error": f"Invalid item format at index {idx}: {exc}"}
+            except Exception:  # noqa: BLE001
+                return {"ok": False, "error": f"Invalid item format at index {idx}"}
 
         inv_type = InvoiceType.B2B
         if invoice_type.upper() in ("B2C", "RETAIL"):

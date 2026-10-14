@@ -688,6 +688,11 @@ def resources_for_turn(
     """
     if str(result.get("retrieval_mode") or "") in _NO_RESOURCE_MODES:
         return []
+    # A record read from a service the taxpayer chose is not a statement about
+    # a form. "Official forms and sources" under it read as where the record
+    # came from, when it came from the service.
+    if result.get("_connector_forced") or result.get("connector_lookup"):
+        return []
     workflow = result.get("workflow")
     if isinstance(workflow, Mapping):
         declared = workflow.get("resources") or []

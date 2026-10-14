@@ -85,7 +85,7 @@ class UserProfile(BaseModel):
     user_id: str
     taxpayer_type: TaxpayerType = "unknown"
     industry: str = Field("", max_length=100, description="Free-text industry or sector")
-    primary_language: Literal["en", "lg"] = "en"
+    primary_language: Literal["en", "lg", "sw"] = "en"
     detail_level: Literal["beginner", "intermediate", "expert"] = "intermediate"
     registered_tax_types: list[str] = Field(
         default_factory=list,
@@ -101,7 +101,7 @@ class ProfileUpdateRequest(BaseModel):
 
     taxpayer_type: TaxpayerType | None = None
     industry: str | None = Field(None, max_length=100)
-    primary_language: Literal["en", "lg"] | None = None
+    primary_language: Literal["en", "lg", "sw"] | None = None
     detail_level: Literal["beginner", "intermediate", "expert"] | None = None
     registered_tax_types: list[str] | None = None
     display_name: str | None = Field(None, max_length=128)

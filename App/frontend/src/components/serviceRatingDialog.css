@@ -1,0 +1,104 @@
+/* The officer-chat rating dialog, on the taxpayer's chat (chatv2 tokens). */
+.service-rating-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(90dvh, 640px);
+  padding: 0;
+  background: var(--bg-0, #fff);
+  color: var(--text-0, #111);
+  border: 1px solid var(--border-0, #e0e0e0);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  overflow: auto;
+}
+
+.service-rating-dialog:not([open]) {
+  display: none;
+}
+
+.service-rating-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.service-rating-body {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+}
+
+.service-rating-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.service-rating-intro {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-1, #444);
+}
+
+.service-rating-comment {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.service-rating-comment textarea {
+  width: 100%;
+  resize: vertical;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-1, #cfd6e0);
+  background: var(--surface-1, transparent);
+  color: inherit;
+}
+
+.service-rating-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--danger, #b42318);
+}
+
+.service-rating-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.service-rating-actions button {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.service-rating-skip {
+  border: 1px solid var(--border-1, #cfd6e0);
+  background: transparent;
+  color: inherit;
+}
+
+.service-rating-submit {
+  border: 1px solid transparent;
+  background: var(--cv2-accent, #1a3a6b);
+  color: var(--cv2-accent-contrast, #fff);
+}
+
+.service-rating-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.service-rating-actions button:focus-visible,
+.service-rating-comment textarea:focus-visible {
+  outline: 3px solid var(--cv2-focus, #2563eb);
+  outline-offset: 2px;
+}

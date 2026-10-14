@@ -105,6 +105,8 @@
  * ------------------------------------------------------------------------- */
 .chatv2 .message-list {
   padding-top: var(--cv2-top-h);
+  scroll-padding-top: calc(var(--cv2-top-h) + 12px);
+  scroll-padding-bottom: calc(var(--chat-dock-height, 92px) + 24px);
   -webkit-mask-image: linear-gradient(
     180deg,
     transparent 0,
@@ -201,6 +203,15 @@
 .chatv2 .langsel-btn:hover {
   background: var(--surface-2);
   color: var(--text-0);
+}
+/* "auto": the code beside it is the detected language, not a choice. */
+.chatv2 .langsel-auto {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  /* Same colour as the code: a muted tone fails AA contrast at this size. */
+  color: var(--text-1);
 }
 
 /* Sitting next to the 3-dot, the pill needs room on both sides or the globe,

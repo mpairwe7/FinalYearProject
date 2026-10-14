@@ -11,7 +11,7 @@ high-risk processing; it is not a substitute for PDPO/DPO review.
 | Controller / DPO | URA — name, contact, appointment reference: `________________` |
 | System / release | URA Chatbot, issue #306, release/commit: `________________` |
 | Assessment date / review date | `________________` / `________________` |
-| Processing scope | Chat, identity/consent, uploads, memory, analytics, feedback, voice metadata, escalation tickets. |
+| Processing scope | Chat, identity/consent, uploads, memory, analytics, feedback, voice metadata, escalation tickets, live chats with officers, and satisfaction ratings of chats and calls (including the caller's spoken answer to the AI's review question). |
 | Subjects | Taxpayers, prospective taxpayers, staff/officers, upload/document subjects. |
 | Sensitive/high-risk data | TINs, contact details, tax/document data, voice/transcript content, free-text tickets. |
 | Necessity / proportionality | Confirm purpose limitation, data minimisation, alternatives, and final lawful basis per ROPA activity. |
@@ -24,7 +24,7 @@ high-risk processing; it is not a substitute for PDPO/DPO review.
 | --- | --- | --- |
 | PII in chat, ticket, feedback, analytics or logs | PII redaction at ticket/event boundaries; production blocks raw prompts; logs retain IDs/lengths, not free text. | Confirm pattern coverage, log platform retention, and incident response. |
 | Data remains after its purpose | TTLs plus scheduled deletion across DB, documents/spool, memory, and voice audit stores; self-service erasure. | Confirm statutory preservation exceptions and backup/deletion process. |
-| Secondary analytics use | Durable analytics requires explicit consent; withdrawal/erasure removes linked analytics, sessions, feedback. | Approve purpose statement and consent wording/version. |
+| Secondary analytics use | Durable analytics requires explicit consent; withdrawal/erasure removes linked analytics, sessions, feedback. Answer ratings without consent are kept anonymously (no subject id, no session id) for the service-quality audit. | Approve purpose statement and consent wording/version. |
 | Unauthorised access to uploads/tickets | Authenticated owner/session binding for uploads; role-gated officer routes; redacted ticket payloads. | Review access roles and suppliers. |
 | External LLM/translation/voice processing | Production identifies enabled external providers and fails closed until transfer approval ID exists. | Complete country, adequacy/safeguard, DPA and vendor due diligence per provider. |
 | Subject request not met | Export and erasure cover application-owned stores; operational target and intake process documented. | Confirm identity verification, 30-day tracking and exception handling. |

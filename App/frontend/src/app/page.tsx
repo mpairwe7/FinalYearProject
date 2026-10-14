@@ -8,7 +8,6 @@ import { LOCALE_OPTIONS } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import {
   initAnalytics,
-  getAnalyticsSessionId,
   trackChatSent,
   trackChatReceived,
   trackVoiceUsed,
@@ -28,11 +27,14 @@ import {
 } from '../services/voiceService';
 import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
+import { getChatSessionId } from '../lib/chatSession';
+import type { ChatConnector } from '../lib/connectors';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
   MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
+  makeThumbnail,
   PendingAttachment,
   type DocumentAnalysisData,
 } from '../lib/attachments';
@@ -40,18 +42,23 @@ import { cleanMarkdownForSpeech } from '../lib/answerText';
 import { audioSignifiers } from '../lib/audioSignifiers';
 import ChatMessage from '../components/ChatMessage';
 import ChatInput from '../components/ChatInput';
+import dynamic from 'next/dynamic';
 import ConfirmDialog, { ConfirmRequest } from '../components/ConfirmDialog';
 import ConversationRail from '../components/ConversationRail';
-import ConversationSearch from '../components/ConversationSearch';
 import LoadingState from '../components/LoadingState';
-import SettingsDialog, { SettingsTab } from '../components/settings/SettingsDialog';
 import ChatHeader from '../components/ChatHeader';
-import { CallScreen } from '../components/call/CallScreen';
 import { useCallStore } from '../store/useCallStore';
-import { DocumentInspectionModal } from '../components/DocumentInspectionModal';
-import { SupportCaseModal } from '../components/SupportCaseModal';
-import { ConnectorsModal } from '../components/ConnectorsModal';
 import { useIdentity } from '../hooks/useIdentity';
+import { useOfficerChat } from '../hooks/useOfficerChat';
+import { ChatNotice } from '../components/ChatNotice';
+import type { SettingsTab } from '../components/settings/SettingsDialog';
+
+const ConversationSearch = dynamic(() => import('../components/ConversationSearch'), { ssr: false });
+const SettingsDialog = dynamic(() => import('../components/settings/SettingsDialog'), { ssr: false });
+const CallScreen = dynamic(() => import('../components/call/CallScreen').then((m) => m.CallScreen), { ssr: false });
+const DocumentInspectionModal = dynamic(() => import('../components/DocumentInspectionModal').then((m) => m.DocumentInspectionModal), { ssr: false });
+const SupportCaseModal = dynamic(() => import('../components/SupportCaseModal').then((m) => m.SupportCaseModal), { ssr: false });
+const ServiceRatingDialog = dynamic(() => import('../components/ServiceRatingDialog').then((m) => m.ServiceRatingDialog), { ssr: false });
 
 // ---------------------------------------------------------------------------
 // Browser Speech Recognition types
@@ -178,8 +185,10 @@ export default function Page() {
   const speechState = useChatStore((s) => s.speechState);
   const setSpeechState = useChatStore((s) => s.setSpeechState);
   const locale = useChatStore((s) => s.locale);
+  const localeExplicit = useChatStore((s) => s.localeExplicit);
   const t = useTranslation();
   const setLocale = useChatStore((s) => s.setLocale);
+  const setAutoDetectLocale = useChatStore((s) => s.setAutoDetectLocale);
   const addTurns = useChatStore((s) => s.addTurns);
   const updateLastTurn = useChatStore((s) => s.updateLastTurn);
   const reset = useChatStore((s) => s.reset);
@@ -260,6 +269,10 @@ export default function Page() {
   );
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // The live chat with an officer once one takes the case. It holds while an
+  // answer streams, because the stream writes into the last turn.
+  const officerChat = useOfficerChat({ hold: isLoading });
+  const { withOfficer, sendToOfficer } = officerChat;
   const [turnPhase, setTurnPhase] = useState<TurnPhase | null>(null);
   /** Stamped once per turn and held across every phase change, so the timer
    *  runs continuously and the closing "Thought for …" is the real duration. */
@@ -322,6 +335,11 @@ export default function Page() {
 
   // Document attachments awaiting the next chat turn
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [chatConnectors, setChatConnectors] = useState<ChatConnector[]>([]);
+  const [connectorsEnabled, setConnectorsEnabled] = useState(false);
+  const [connectorsLoading, setConnectorsLoading] = useState(false);
+  const [connectorsError, setConnectorsError] = useState(false);
+  const [selectedConnectorNamespaces, setSelectedConnectorNamespaces] = useState<string[]>([]);
   const [inspectingDoc, setInspectingDoc] = useState<{
     id: string;
     name: string;
@@ -513,6 +531,21 @@ export default function Page() {
       window.visualViewport?.removeEventListener('scroll', updateMobileViewportVars);
     };
   }, [hasStartedChat, isLoading, isRecording]);
+
+  // Persist session state and typed drafts immediately when switching apps or tab backgrounding
+  useEffect(() => {
+    const onVisibilityOrPageHide = () => {
+      if (document.visibilityState === 'hidden') {
+        saveCurrentSession();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityOrPageHide);
+    window.addEventListener('pagehide', onVisibilityOrPageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityOrPageHide);
+      window.removeEventListener('pagehide', onVisibilityOrPageHide);
+    };
+  }, [saveCurrentSession]);
 
   // Restore the stored collapse preference after mount — see the state comment.
   useEffect(() => {
@@ -863,7 +896,7 @@ export default function Page() {
       // No Content-Type header — the browser sets the multipart boundary.
       const res = await fetch(`${API_URL}/v1/documents/analyze`, {
         method: 'POST',
-        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
         body: form,
       });
       if (!res.ok) {
@@ -889,6 +922,7 @@ export default function Page() {
         truncated: analysis.truncated,
         summary: analysis.summary,
         taxReconciliation: analysis.tax_reconciliation,
+        screenshot_guidance: analysis.screenshot_guidance,
         warnings: analysis.warnings,
         expiresInSeconds: analysis.expires_in_seconds,
       };
@@ -913,11 +947,12 @@ export default function Page() {
     }
   }, []);
 
-  const attachFiles = useCallback((files: FileList) => {
+  const attachFiles = useCallback((files: FileList): File[] => {
     const room = MAX_ATTACHMENTS - pendingAttachments.length;
-    if (room <= 0) return;
+    if (room <= 0) return [];
+    const acceptedFiles = Array.from(files).slice(0, room);
     const chips: PendingAttachment[] = [];
-    for (const file of Array.from(files).slice(0, room)) {
+    for (const file of acceptedFiles) {
       const clientId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const oversize = file.size > MAX_ATTACHMENT_BYTES;
       chips.push({
@@ -927,9 +962,22 @@ export default function Page() {
         status: oversize ? 'error' : 'uploading',
         error: oversize ? 'Over the 40 MB limit' : undefined,
       });
-      if (!oversize) void uploadAttachment(file, clientId);
+      if (!oversize) {
+        void uploadAttachment(file, clientId);
+        // A screenshot or photo shows as itself on its chip, so a person can
+        // tell which of several images is which. Arrives when it is drawn.
+        if (file.type.startsWith('image/')) {
+          void makeThumbnail(file).then((previewUrl) => {
+            if (!previewUrl) return;
+            setPendingAttachments((prev) => prev.map((a) => (
+              a.clientId === clientId ? { ...a, previewUrl } : a
+            )));
+          });
+        }
+      }
     }
     if (chips.length) setPendingAttachments((prev) => [...prev, ...chips]);
+    return acceptedFiles.filter((file) => file.size <= MAX_ATTACHMENT_BYTES);
   }, [pendingAttachments.length, uploadAttachment]);
 
   const removeAttachment = useCallback((clientId: string) => {
@@ -937,6 +985,49 @@ export default function Page() {
   }, []);
 
   // ---- Text chat (SSE) ----
+
+  const loadChatConnectors = useCallback(async () => {
+    setConnectorsLoading(true);
+    setConnectorsError(false);
+    try {
+      const response = await fetch(`${API_URL}/v1/connectors?view=chat`, {
+        method: 'GET',
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
+        cache: 'no-store',
+      });
+      if (!response.ok) throw new Error('Connector catalog unavailable');
+      const payload = await response.json();
+      const available = Array.isArray(payload?.connectors)
+        ? payload.connectors.filter((connector: Partial<ChatConnector>): connector is ChatConnector =>
+            typeof connector.namespace === 'string' &&
+            typeof connector.label === 'string' &&
+            typeof connector.description === 'string' &&
+            typeof connector.operation_count === 'number' &&
+            connector.read_only === true,
+          )
+        : [];
+      setChatConnectors(available);
+      setConnectorsEnabled(payload?.enabled === true);
+      setSelectedConnectorNamespaces((current) =>
+        current.filter((namespace) => available.some((connector: ChatConnector) => connector.namespace === namespace)),
+      );
+    } catch {
+      setConnectorsError(true);
+      setChatConnectors([]);
+      setConnectorsEnabled(false);
+      setSelectedConnectorNamespaces([]);
+    } finally {
+      setConnectorsLoading(false);
+    }
+  }, []);
+
+  const toggleChatConnector = useCallback((namespace: string) => {
+    setSelectedConnectorNamespaces((current) => {
+      if (current.includes(namespace)) return current.filter((item) => item !== namespace);
+      if (current.length >= 8) return current;
+      return [...current, namespace];
+    });
+  }, []);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? message).trim();
@@ -952,6 +1043,18 @@ export default function Page() {
       dictationBaseRef.current = '';
       dictationFinalRef.current = '';
       recognitionRef.current?.stop();
+    }
+    // An officer has the case: the message is theirs, and the assistant waits
+    // until they end the chat.
+    if (withOfficer) {
+      setMessage('');
+      shouldStickToBottomRef.current = true;
+      const delivered = await sendToOfficer(text);
+      if (!delivered) {
+        setMessage(text);
+        setChatLiveStatus(t('officerChat.sendFailed'));
+      }
+      return;
     }
     const sentAttachments = pendingAttachments
       .filter((a) => a.status === 'ready' && a.documentId)
@@ -1003,11 +1106,17 @@ export default function Page() {
       conversation_id: conversationId,
       top_k: 4,
       locale,
+      // Until the taxpayer picks a language, `locale` is only a hint and the
+      // backend detects the language from what they type.
+      locale_explicit: localeExplicit,
       ...(sentAttachments.length ? { attachment_ids: sentAttachments.map((a) => a.id) } : {}),
+      ...(selectedConnectorNamespaces.length
+        ? { connector_namespaces: selectedConnectorNamespaces }
+        : {}),
     });
     const requestHeaders = authHeaders({
       'Content-Type': 'application/json',
-      'X-Session-ID': getAnalyticsSessionId(),
+      'X-Session-ID': getChatSessionId(),
       'ngrok-skip-browser-warning': 'true',
     });
 
@@ -1032,11 +1141,13 @@ export default function Page() {
       if (!sync.ok) throw new Error(`API ${sync.status}`);
       const d = await sync.json();
       if (d.conversation_id) sessionIdRef.current = d.conversation_id;
-      if (d.locale && d.locale !== useChatStore.getState().locale) {
-        useChatStore.getState().setLocale(d.locale);
+      if (d.locale) {
+        useChatStore.getState().adoptResponseLocale(d.locale, d.locale_source);
       }
       const content = cleanResponse(d.reply ?? '');
+      const disc = d.discrepancy_report ?? d.discrepancyReport;
       const meta = {
+        serverTurnId: typeof d.turn_id === 'string' ? d.turn_id : undefined,
         citations: d.citations ?? [],
         faithfulnessScore: d.faithfulness_score ?? null,
         retrievalMode: d.retrieval_mode ?? 'keyword',
@@ -1045,6 +1156,12 @@ export default function Page() {
         nextActions: d.next_actions ?? [],
         workflow: d.workflow ?? undefined,
         resources: d.resources ?? (d.workflow?.resources ?? []),
+        discrepancyReport: disc && typeof disc === 'object' ? {
+          id: String(disc.id || ''),
+          status: String(disc.status || 'pending'),
+          frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+          discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+        } : undefined,
       };
       const cur = useChatStore.getState().chat;
       const last = cur[cur.length - 1];
@@ -1131,14 +1248,16 @@ export default function Page() {
               if (p && typeof p === 'object' && !Array.isArray(p)) {
                 meta = { ...meta, ...p };
                 if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-                if (p.locale && p.locale !== useChatStore.getState().locale) {
-                  useChatStore.getState().setLocale(p.locale);
+                if (p.locale) {
+                  useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
                 }
                 if (typeof p.reply === 'string' && p.reply.trim()) {
                   reveal.set(cleanResponse(p.reply));
                 }
+                const disc = p.discrepancy_report ?? p.discrepancyReport;
                 updateLastTurn((t) => ({
                   ...t,
+                  serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
                   citations: p.citations ?? t.citations,
                   faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
                   retrievalMode: p.retrieval_mode ?? t.retrievalMode,
@@ -1146,6 +1265,12 @@ export default function Page() {
                   escalationReason: p.escalation_reason ?? t.escalationReason,
                   workflow: p.workflow ?? t.workflow,
                   resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+                  discrepancyReport: disc && typeof disc === 'object' ? {
+                    id: String(disc.id || ''),
+                    status: String(disc.status || 'pending'),
+                    frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+                    discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+                  } : t.discrepancyReport,
                 }));
               }
             } catch {}
@@ -1168,14 +1293,16 @@ export default function Page() {
               const p = JSON.parse(trimmedData);
               meta = { ...meta, ...p };
               if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-              if (p.locale && p.locale !== useChatStore.getState().locale) {
-                useChatStore.getState().setLocale(p.locale);
+              if (p.locale) {
+                useChatStore.getState().adoptResponseLocale(p.locale, p.locale_source);
               }
               if (typeof p.reply === 'string' && p.reply.trim()) {
                 reveal.set(cleanResponse(p.reply));
               }
+              const disc = p.discrepancy_report ?? p.discrepancyReport;
               updateLastTurn((t) => ({
                 ...t,
+                serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
                 citations: p.citations ?? t.citations,
                 faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
                 retrievalMode: p.retrieval_mode ?? t.retrievalMode,
@@ -1184,6 +1311,12 @@ export default function Page() {
                 nextActions: p.next_actions ?? t.nextActions,
                 workflow: p.workflow ?? t.workflow,
                 resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+                discrepancyReport: disc && typeof disc === 'object' ? {
+                  id: String(disc.id || ''),
+                  status: String(disc.status || 'pending'),
+                  frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+                  discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+                } : t.discrepancyReport,
               }));
             } catch {}
           }
@@ -1199,17 +1332,25 @@ export default function Page() {
             const p = JSON.parse(data);
             meta = { ...meta, ...p };
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-              updateLastTurn((t) => ({
-                ...t,
-                citations: p.citations ?? t.citations,
-                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-                escalationRequired: p.escalation_required ?? t.escalationRequired,
-                escalationReason: p.escalation_reason ?? t.escalationReason,
-                nextActions: p.next_actions ?? t.nextActions,
-                workflow: p.workflow ?? t.workflow,
-                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
-              }));
+            const disc = p.discrepancy_report ?? p.discrepancyReport;
+            updateLastTurn((t) => ({
+              ...t,
+              serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
+              citations: p.citations ?? t.citations,
+              faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
+              retrievalMode: p.retrieval_mode ?? t.retrievalMode,
+              escalationRequired: p.escalation_required ?? t.escalationRequired,
+              escalationReason: p.escalation_reason ?? t.escalationReason,
+              nextActions: p.next_actions ?? t.nextActions,
+              workflow: p.workflow ?? t.workflow,
+              resources: p.resources ?? (p.workflow?.resources ?? t.resources),
+              discrepancyReport: disc && typeof disc === 'object' ? {
+                id: String(disc.id || ''),
+                status: String(disc.status || 'pending'),
+                frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
+                discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
+              } : t.discrepancyReport,
+            }));
           } catch {}
           return;
         }
@@ -1346,7 +1487,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, activeConversationId, pendingAttachments, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession]);
+  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession, withOfficer, sendToOfficer]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1397,7 +1538,7 @@ export default function Page() {
               conversationId,
               ttsEnabled: false,
               voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
-              sessionId: getAnalyticsSessionId(),
+              sessionId: getChatSessionId(),
             });
             if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
@@ -1701,10 +1842,23 @@ export default function Page() {
     return map;
   }, [chat]);
 
+  // Each AI answer's position in the conversation (1 = first), sent with a
+  // 👍/👎 so the audit can see where a conversation went wrong. The greeting
+  // and an officer's relayed reply are not AI answers and are not counted.
+  const answerNumbers = useMemo(() => {
+    const map: Record<string, number> = {};
+    let n = 0;
+    for (const turn of chat) {
+      if (turn.role !== 'assistant' || turn.id === 'greeting-0' || turn.retrievalMode === 'officer_reply' || turn.notice) continue;
+      map[turn.id] = ++n;
+    }
+    return map;
+  }, [chat]);
+
   const handleDownloadReport = useCallback(async (docId: string, docName: string) => {
     try {
       const res = await fetch(`/api/v1/documents/${docId}/report`, {
-        headers: authHeaders({ 'X-Session-ID': getAnalyticsSessionId() }),
+        headers: authHeaders({ 'X-Session-ID': getChatSessionId() }),
       });
       if (!res.ok) throw new Error(`report ${res.status}`);
       const blob = await res.blob();
@@ -1741,6 +1895,13 @@ export default function Page() {
       window.setTimeout(() => scrollToBottom('smooth'), 80);
     },
     attachments: pendingAttachments,
+    chatConnectors,
+    connectorsEnabled,
+    connectorsLoading,
+    connectorsError,
+    selectedConnectorNamespaces,
+    onOpenConnectors: loadChatConnectors,
+    onToggleConnector: toggleChatConnector,
     onAttachFiles: attachFiles,
     onRemoveAttachment: removeAttachment,
     onInspectAttachment: (att: PendingAttachment) =>
@@ -1762,7 +1923,24 @@ export default function Page() {
     voiceModeDisabled: !serverReady && !hasMediaRecorder,
     dictationNotice,
     onStop: stopGeneration,
+    // With an officer, the composer is a plain message box to them: files,
+    // connectors and voice mode are the assistant's tools.
+    ...(officerChat.withOfficer
+      ? { onAttachFiles: undefined, onVoiceModeChange: undefined, placeholder: t('officerChat.placeholder') }
+      : {}),
   };
+
+  // Say so when an officer joins or the chat hands back to the assistant.
+  const officerStateRef = useRef(officerChat.state);
+  useEffect(() => {
+    const before = officerStateRef.current;
+    officerStateRef.current = officerChat.state;
+    if (officerChat.state === 'officer' && before !== 'officer') {
+      setChatLiveStatus(t('officerChat.joined', { name: officerChat.officerName || t('officerChat.officerLabel') }));
+    } else if (officerChat.state === null && before && chat[chat.length - 1]?.notice === 'officer_left') {
+      setChatLiveStatus(t('officerChat.ended'));
+    }
+  }, [officerChat.state, officerChat.officerName, chat, t]);
 
   // ---- Render ----
 
@@ -1797,8 +1975,16 @@ export default function Page() {
           conversations={conversations}
           activeConversationId={activeConversationId}
           onClose={() => setSidebarOpen(false)}
-          onNewConversation={() => { createNewSession(); setSidebarOpen(false); }}
-          onSelectConversation={(id) => { switchSession(id); setSidebarOpen(false); }}
+          onNewConversation={() => {
+            setSelectedConnectorNamespaces([]);
+            createNewSession();
+            setSidebarOpen(false);
+          }}
+          onSelectConversation={(id) => {
+            setSelectedConnectorNamespaces([]);
+            switchSession(id);
+            setSidebarOpen(false);
+          }}
           onDeleteConversation={requestDeleteConversation}
           onRenameConversation={renameSession}
           onPinConversation={togglePinSession}
@@ -1842,11 +2028,13 @@ export default function Page() {
         locale={locale}
         localeOptions={LOCALE_OPTIONS}
         onLocaleChange={setLocale}
+        localeAutoDetect={!localeExplicit}
+        onLocaleAutoDetect={setAutoDetectLocale}
         onStartCall={openCall}
       />
 
       {activeTicketId && (
-        <div className="chat-case-banner">
+        <div className="chat-case-banner" data-officer-chat={officerChat.state ?? undefined}>
           <button
             type="button"
             className="chat-case-pill"
@@ -1857,6 +2045,17 @@ export default function Page() {
             <span className="chat-case-text">Support Case #TIC-{activeTicketId.slice(0, 8).toUpperCase()}</span>
             <span className="chat-case-action">Open Case Room ↗</span>
           </button>
+          {officerChat.state === 'officer' || officerChat.state === 'waiting' ? (
+            <p className={`chat-case-status${officerChat.sendFailed ? ' is-error' : ''}`}>
+              {officerChat.sendFailed
+                ? t('officerChat.sendFailed')
+                : officerChat.state === 'officer'
+                  ? t('officerChat.withOfficerBanner', {
+                      name: officerChat.officerName || t('officerChat.officerLabel'),
+                    })
+                  : t('officerChat.waitingBanner')}
+            </p>
+          ) : null}
         </div>
       )}
 
@@ -1924,6 +2123,7 @@ export default function Page() {
                    by "Thought for …" when the turn ends. */
                 const isPending =
                   isLoading && turnPhase !== null && i === chat.length - 1 && turn.role === 'assistant';
+                if (turn.notice) return <ChatNotice key={turn.id} turn={turn} />;
                 return (
                   <ChatMessage
                     key={turn.id}
@@ -1935,6 +2135,7 @@ export default function Page() {
                     isTransitioning={isTransitioning}
                     onListen={handleListenToReply}
                     conversationId={activeConversationId}
+                    answerNumber={answerNumbers[turn.id]}
                     phaseLabel={isPending ? t(PHASE_UI[turnPhase].label) : undefined}
                     phaseVariant={isPending ? PHASE_UI[turnPhase].variant : undefined}
                     phaseStartedAt={isPending ? turnStartedAt ?? undefined : undefined}
@@ -1992,6 +2193,7 @@ export default function Page() {
         conversations={conversations}
         onClose={() => setSearchOpen(false)}
         onSelect={(id) => {
+          setSelectedConnectorNamespaces([]);
           switchSession(id);
           setSidebarOpen(false);
         }}
@@ -2040,9 +2242,16 @@ export default function Page() {
         onClose={() => setSupportCaseOpen(false)}
         ticketId={activeTicketId}
         conversationId={activeConversationId}
+        liveChat={officerChat.state === 'officer' || officerChat.state === 'ended'}
       />
 
-      <ConnectorsModal />
+      {officerChat.ratingOpen && (
+        <ServiceRatingDialog
+          officerName={officerChat.officerName}
+          onSubmit={officerChat.submitRating}
+          onSkip={officerChat.skipRating}
+        />
+      )}
 
       <CallScreen />
 

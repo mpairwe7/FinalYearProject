@@ -317,5 +317,11 @@ ENV BM25_STATE_PATH=/app/Model/bm25_state.json \
 RUN /usr/local/bin/verify-embedded-stores.sh
 
 # tini reaps zombies cleanly under supervisord.
+# Which commit this image was built from: exported as ura_build_info and
+# recorded in every audit row's provenance. Declared last so a new commit does
+# not invalidate any cached layer above.
+ARG GIT_SHA=""
+ENV APP_BUILD_SHA=${GIT_SHA}
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

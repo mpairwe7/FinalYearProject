@@ -125,6 +125,9 @@ export interface TicketTranscriptTurn {
   created_at: number;
   sources?: string[];
   topic_tag?: string;
+  /** A follow-up the taxpayer sent after escalating (empty `bot_reply`). The
+   *  live chat itself is `messages` on the ticket. */
+  sender?: "taxpayer";
 }
 
 /**
@@ -147,6 +150,54 @@ export interface TicketDetail extends TicketQueueItem {
   first_response_at?: number;
   resolved_at?: number;
   reply_delivered_at?: number;
+  /** The live chat with the taxpayer, in order (taxpayer, officer, system). */
+  messages?: TicketChatMessage[];
+  /** Where that chat stands, who has it, and how the taxpayer rated it. */
+  chat?: TicketChatInfo;
+}
+
+/** One message of the live chat, as staff read it (English, and as delivered). */
+export interface TicketChatMessage {
+  seq: number;
+  sender: "taxpayer" | "officer" | "system";
+  text: string;
+  text_localized?: string;
+  officer_name?: string;
+  created_at: number;
+}
+
+export type OfficerChatState = "waiting" | "officer" | "ended" | "none";
+
+export interface TicketChatInfo {
+  state: OfficerChatState;
+  officer_name: string;
+  ended_at?: number | null;
+  ended_by_name?: string;
+  outcome?: "" | "resolved" | "wontfix";
+  rating?: { status: RatingStatus; score: number | null; comment: string } | null;
+}
+
+/** The taxpayer's poll of their live chat (`GET /v1/escalate/{id}/messages`). */
+export interface OfficerChatThread {
+  ticket_id: string;
+  chat_state: OfficerChatState;
+  officer_name: string;
+  messages: Array<{
+    seq: number;
+    sender: "taxpayer" | "officer" | "system";
+    /** An officer's message in the taxpayer's language when it was translated. */
+    text: string;
+    officer_name?: string;
+    created_at: number;
+  }>;
+  last_seq: number;
+  csat: { requested: boolean; submitted: boolean };
+}
+
+export interface EndChatBody {
+  closing_message?: string;
+  closing_message_localized?: string;
+  outcome: "resolved" | "wontfix";
 }
 
 export interface EscalationCaseDetail {
@@ -233,6 +284,94 @@ export interface FeedbackSummary {
     user_query: string;
     created_at: number;
   }[];
+}
+
+export interface DiscrepancyRecord {
+  id: string;
+  conversation_id: string;
+  session_id: string;
+  user_id: string;
+  status: 'pending' | 'verified' | 'dismissed' | 'resolved';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  discrepancy_type: string;
+  bot_statement: string;
+  user_correction: string;
+  cited_sources: string[];
+  frequency_count: number;
+  dedup_key: string;
+  admin_note: string;
+  verified_override_id: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface DiscrepancyStats {
+  total: number;
+  pending: number;
+  verified: number;
+  dismissed: number;
+}
+
+export interface VerifyDiscrepancyPayload {
+  admin_note?: string;
+  create_override?: boolean;
+  override_query?: string;
+  override_reply?: string;
+  source_url?: string;
+  precedence_topic?: string;
+  precedence_rule?: string;
+  statute_reference?: string;
+  tombstone_sources?: string[];
+  tombstone_chunk_ids?: string[];
+}
+
+export interface CorpusTombstone {
+  id: string;
+  source_uri: string;
+  chunk_id: string;
+  reason: string;
+  superseded_by: string;
+  created_at: number;
+  created_by: string;
+}
+
+export interface OutboxItem {
+  id: string;
+  user_id: string;
+  channel: string;
+  provider: string;
+  payload?: Record<string, unknown>;
+  status: string;
+  created_at: number;
+  sent_at?: number | null;
+  delivered_at?: number | null;
+  error?: string;
+  provider_msg_id?: string;
+  retries?: number;
+  live?: boolean;
+}
+
+export interface OutboxResponse {
+  items: OutboxItem[];
+  live: boolean;
+  providers?: Record<string, { configured: boolean; backend?: string; status: string; live?: boolean }>;
+  stats?: {
+    total: number;
+    queued: number;
+    sent: number;
+    delivered: number;
+    failed: number;
+  };
+}
+
+export interface StatutoryPrecedence {
+  id: string;
+  topic: string;
+  rule_statement: string;
+  statute_reference: string;
+  enabled: boolean;
+  created_at: number;
+  updated_at: number;
 }
 
 /** GET /v1/analytics/journeys — one row per guided journey. */
@@ -344,6 +483,276 @@ export interface AnswerOverride {
   enabled?: boolean;
 }
 
+/* ── Service-quality audit (GET /v1/admin/quality/*) ────────────────────── */
+
+/** How a rated conversation went, worst first. See app/quality_audit.py. */
+export type QualityPattern = "went_wrong" | "never_helpful" | "recovered" | "all_helpful";
+
+export interface QualityBreakdownRow {
+  key: string;
+  rated: number;
+  helpful: number;
+  unhelpful: number;
+  helpful_pct: number | null;
+}
+
+export interface AiChatSummary {
+  period_days: number;
+  /** More rated answers than one period reads; the figures are a sample. */
+  truncated: boolean;
+  rated_answers: number;
+  helpful: number;
+  unhelpful: number;
+  helpful_pct: number | null;
+  comments: number;
+  conversations: number;
+  /** Ratings from before they were linked to a conversation. */
+  unlinked_answers: number;
+  patterns: Record<QualityPattern, number>;
+  median_break_answer: number | null;
+  by_position: { position: string; rated: number; helpful: number; helpful_pct: number | null }[];
+  by_topic: QualityBreakdownRow[];
+  by_route: QualityBreakdownRow[];
+  by_language: QualityBreakdownRow[];
+  by_day: { day: string; rated: number; helpful: number; helpful_pct: number | null }[];
+  previous: { rated_answers: number; helpful_pct: number | null; truncated: boolean };
+}
+
+export interface RatedConversation {
+  conversation_id: string | null;
+  key: string;
+  linked: boolean;
+  pattern: QualityPattern;
+  ratings: { answer: number | null; rating: "up" | "down" }[];
+  rated_answers: number;
+  unhelpful: number;
+  break_answer: number | null;
+  break_question: string;
+  helpful_before_break: boolean;
+  comments: number;
+  topic: string;
+  locale: string;
+  first_rated_at: number;
+  last_rated_at: number;
+}
+
+export interface AiChatPage {
+  period_days: number;
+  truncated: boolean;
+  total: number;
+  limit: number;
+  offset: number;
+  conversations: RatedConversation[];
+}
+
+export interface AiChatTimelineAnswer {
+  answer: number | null;
+  turn_id: string;
+  question: string;
+  reply: string;
+  created_at: number | null;
+  sources: string[];
+  confidence: number | null;
+  topic: string;
+  rating: "up" | "down" | null;
+  comment: string;
+  retrieval_mode: string;
+  is_break: boolean;
+}
+
+export interface AiChatTimeline {
+  conversation_id: string;
+  pattern: QualityPattern;
+  break_answer: number | null;
+  /** False once the conversation log has expired: only rated answers remain. */
+  transcript_complete: boolean;
+  transcript_kept_days: number;
+  answers: AiChatTimelineAnswer[];
+}
+
+export interface QualitySummary {
+  period_days: number;
+  ai_chat: AiChatSummary;
+  officer_chat?: RatingsHeadline;
+  /** The caller's spoken review of the AI, at goodbye and while transferring. */
+  ai_calls?: { end: RatingsHeadline; transfer: RatingsHeadline };
+  officer_calls?: RatingsHeadline;
+  /** What the Needs review queue holds. */
+  needs_review?: { open: number; action_needed: number };
+}
+
+export type ReviewStatus = "reviewed" | "action_needed";
+export type NeedsReviewStream = "ai_chat" | "officer_chat" | "officer_call" | "ai_call";
+
+/** An auditor's decision on an item. */
+export interface QualityReview {
+  status: ReviewStatus;
+  note: string;
+  reviewer_name: string;
+  updated_at: number;
+}
+
+/** One item in the Needs review queue. */
+export interface NeedsReviewItem {
+  item_type: "ai_chat" | "rating";
+  item_id: string;
+  stream: NeedsReviewStream;
+  title: string;
+  /** The question at the point it went wrong (AI chats). */
+  quote: string;
+  /** What the taxpayer or caller wrote or said. */
+  comment: string;
+  topic: string;
+  locale: string;
+  officer_name: string;
+  occurred_at: number;
+  /** Where to read it on /admin/quality: `?tab=` and the parameter that opens it. */
+  link: { tab: string; param: string; value: string };
+  review: QualityReview | null;
+}
+
+export interface NeedsReviewPage {
+  period_days: number;
+  truncated: boolean;
+  counts: { open: number; action_needed: number; reviewed: number; all: number };
+  total: number;
+  limit: number;
+  offset: number;
+  items: NeedsReviewItem[];
+}
+
+export interface NeedsReviewQuery {
+  days?: number;
+  status?: "open" | "action_needed" | "reviewed" | "all";
+  stream?: "" | NeedsReviewStream;
+  limit?: number;
+}
+
+export type RatingSentiment = "positive" | "neutral" | "negative" | "unclear";
+
+export type RatingSource =
+  | "chat_officer_csat"
+  | "call_officer_csat"
+  | "call_ai_review_end"
+  | "call_ai_review_transfer";
+
+export type RatingStatus = "pending" | "answered" | "skipped" | "no_answer";
+
+/** The figures every satisfaction stream shares. */
+export interface RatingsFigures {
+  asked: number;
+  answered: number;
+  response_rate: number | null;
+  average: number | null;
+  /** Share of answered ratings that were 4 or 5. */
+  csat_pct: number | null;
+  /** Ratings of 1 or 2. */
+  low: number;
+  distribution: Record<"1" | "2" | "3" | "4" | "5", number>;
+  sentiment: Record<RatingSentiment, number>;
+  /** Share of answered ratings that were positive / negative (the words view). */
+  positive_pct: number | null;
+  negative_pct: number | null;
+}
+
+/** The period before, for the headline's comparison. */
+export interface RatingsPrevious {
+  asked: number;
+  answered: number;
+  response_rate: number | null;
+  average: number | null;
+  csat_pct: number | null;
+  positive_pct: number | null;
+  negative_pct: number | null;
+}
+
+/** One week, or one language: how many were rated and how they came out. */
+export interface RatingsPeriodFigures {
+  rated: number;
+  /** Of the 1–5 levels; null for a stream rated in words. */
+  average: number | null;
+  csat_pct: number | null;
+  /** Share of answered ratings that were positive / negative. */
+  positive_pct: number | null;
+  negative_pct: number | null;
+}
+
+export interface RatingsHeadline extends RatingsFigures {
+  truncated: boolean;
+  previous: RatingsPrevious;
+}
+
+export interface OfficerRatingRow {
+  officer_id: string;
+  officer_name: string;
+  handled: number;
+  rated: number;
+  average: number | null;
+  csat_pct: number | null;
+  low: number;
+}
+
+export interface ServiceRating {
+  id: string;
+  source: RatingSource;
+  channel: string;
+  subject: string;
+  status: RatingStatus;
+  score: number | null;
+  sentiment: string;
+  comment: string;
+  ticket_id: string;
+  call_id: string;
+  conversation_id: string;
+  officer_id: string;
+  officer_name: string;
+  team: string;
+  topic: string;
+  locale: string;
+  created_at: number;
+  answered_at: number | null;
+}
+
+export interface RatingsAudit {
+  source: RatingSource;
+  period_days: number;
+  truncated: boolean;
+  summary: RatingsFigures & {
+    skipped: number;
+    no_answer: number;
+    pending: number;
+    by_officer: OfficerRatingRow[];
+    by_week: Array<RatingsPeriodFigures & { week: string }>;
+    by_language: Array<RatingsPeriodFigures & { locale: string; asked: number; response_rate: number | null }>;
+  };
+  previous: RatingsPrevious;
+  total: number;
+  limit: number;
+  offset: number;
+  ratings: ServiceRating[];
+}
+
+export interface RatingsQuery {
+  source?: RatingSource;
+  days?: number;
+  score?: number | null;
+  officer?: string;
+  status?: "" | "answered" | "skipped" | "no_answer";
+  sentiment?: "" | RatingSentiment;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AiChatQuery {
+  days?: number;
+  pattern?: QualityPattern | "";
+  topic?: string;
+  locale?: string;
+  withComment?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
 const BASE = "/api";
 
 async function fetchJson<T>(url: string, init: RequestInit = {}): Promise<T> {
@@ -397,12 +806,37 @@ export const analyticsApi = {
   publicTicketStatus: (ticketId: string) =>
     fetchJson<EscalationCaseDetail>(`/v1/escalate/${encodeURIComponent(ticketId)}`),
   replyToPublicTicket: (ticketId: string, message: string, locale = "en") =>
-    fetchJson<{ ok: boolean; ticket_id: string; status: string; message: string }>(
+    fetchJson<{ ok: boolean; ticket_id: string; status: string; message: string; seq?: number }>(
       `/v1/escalate/${encodeURIComponent(ticketId)}/reply`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, locale }),
+      },
+    ),
+  /** The taxpayer's live chat with the officer: messages after *afterSeq*, its state, the rating. */
+  publicTicketMessages: (ticketId: string, afterSeq = 0) =>
+    fetchJson<OfficerChatThread>(
+      `/v1/escalate/${encodeURIComponent(ticketId)}/messages?after_seq=${Math.max(0, Math.floor(afterSeq))}`,
+    ),
+  /** The taxpayer rates the chat an officer ended: 1–5, or null to skip. */
+  submitTicketCsat: (ticketId: string, score: number | null, comment = "") =>
+    fetchJson<{ ok: boolean; ticket_id: string; status: "answered" | "skipped" }>(
+      `/v1/escalate/${encodeURIComponent(ticketId)}/csat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ score, comment }),
+      },
+    ),
+  /** An officer ends a live chat (officers only). */
+  endChat: (ticketId: string, body: EndChatBody) =>
+    fetchJson<{ status: string; ticket_id: string; chat_state: OfficerChatState }>(
+      `/v1/admin/tickets/${encodeURIComponent(ticketId)}/end-chat`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       },
     ),
   ticket: (id: string) => fetchJson<TicketDetail>(`/v1/admin/tickets/${encodeURIComponent(id)}`),
@@ -434,10 +868,60 @@ export const analyticsApi = {
     }),
   deleteOverride: (id: string) =>
     fetchJson<{ ok: boolean }>(`/v1/admin/overrides/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  outbox: () =>
-    fetchJson<{ items: { id: string; channel: string; provider: string; status: string }[]; live: boolean }>(
-      "/v1/admin/outbox",
+  discrepancies: (params?: { status?: string; priority?: string; limit?: number; offset?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set("status", params.status);
+    if (params?.priority) q.set("priority", params.priority);
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    const qs = q.toString();
+    return fetchJson<{ discrepancies: DiscrepancyRecord[]; stats: DiscrepancyStats }>(
+      `/v1/admin/discrepancies${qs ? `?${qs}` : ""}`,
+    );
+  },
+  verifyDiscrepancy: (id: string, payload: VerifyDiscrepancyPayload) =>
+    fetchJson<{ ok: boolean; report_id: string; status: string; override_id?: string }>(
+      `/v1/admin/discrepancies/${encodeURIComponent(id)}/verify`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
     ),
+  dismissDiscrepancy: (id: string, payload: { admin_note?: string; reason?: string }) =>
+    fetchJson<{ ok: boolean; report_id: string; status: string }>(
+      `/v1/admin/discrepancies/${encodeURIComponent(id)}/dismiss`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+    ),
+  tombstones: () => fetchJson<{ tombstones: CorpusTombstone[] }>("/v1/admin/tombstones"),
+  addTombstone: (payload: { source_uri: string; chunk_id?: string; reason?: string }) =>
+    fetchJson<CorpusTombstone>("/v1/admin/tombstones", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deleteTombstone: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/v1/admin/tombstones/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  precedences: () => fetchJson<{ precedences: StatutoryPrecedence[] }>("/v1/admin/precedences"),
+  addPrecedence: (payload: { topic: string; rule_statement: string; statute_reference?: string; enabled?: boolean }) =>
+    fetchJson<StatutoryPrecedence>("/v1/admin/precedences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  deletePrecedence: (id: string) =>
+    fetchJson<{ ok: boolean }>(`/v1/admin/precedences/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  outbox: () => fetchJson<OutboxResponse>("/v1/admin/outbox"),
+  dispatchOutbox: () =>
+    fetchJson<{ ok: boolean; processed: number; sent: number; failed: number }>("/v1/admin/outbox/dispatch", {
+      method: "POST",
+    }),
+  retryOutbox: (id: string) =>
+    fetchJson<{ ok: boolean; status: string; provider?: string }>(`/v1/admin/outbox/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    }),
+  testNotification: (payload: { channel: string; recipient: string; message: string; subject?: string }) =>
+    fetchJson<{ ok: boolean; provider: string; status: string; id: string; provider_msg_id?: string }>("/v1/admin/outbox/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
   auditEvents: ({ eventType = "", actor = "", since, beforeSeq, limit = 50 }: AuditQuery = {}) => {
     const params = new URLSearchParams({ limit: String(limit) });
     if (eventType) params.set("event_type", eventType);
@@ -447,6 +931,49 @@ export const analyticsApi = {
     return fetchJson<AuditEventsPage>(`/v1/admin/audit/events?${params.toString()}`);
   },
   auditVerify: () => fetchJson<AuditVerification>("/v1/admin/audit/verify"),
+  qualitySummary: (days = 30) => fetchJson<QualitySummary>(`/v1/admin/quality/summary?days=${days}`),
+  qualityAiChat: ({ days = 30, pattern = "", topic = "", locale = "", withComment = false, limit = 25, offset = 0 }: AiChatQuery = {}) => {
+    const params = new URLSearchParams({ days: String(days), limit: String(limit), offset: String(offset) });
+    if (pattern) params.set("pattern", pattern);
+    if (topic) params.set("topic", topic);
+    if (locale) params.set("locale", locale);
+    if (withComment) params.set("with_comment", "true");
+    return fetchJson<{ summary: AiChatSummary; page: AiChatPage }>(`/v1/admin/quality/ai-chat?${params.toString()}`);
+  },
+  qualityAiChatTimeline: (conversationId: string) =>
+    fetchJson<AiChatTimeline>(`/v1/admin/quality/ai-chat/${encodeURIComponent(conversationId)}`),
+  qualityRatings: ({
+    source = "chat_officer_csat",
+    days = 30,
+    score = null,
+    officer = "",
+    status = "",
+    sentiment = "",
+    limit = 25,
+    offset = 0,
+  }: RatingsQuery = {}) => {
+    const params = new URLSearchParams({ source, days: String(days), limit: String(limit), offset: String(offset) });
+    if (score != null) params.set("score", String(score));
+    if (officer) params.set("officer", officer);
+    if (status) params.set("status", status);
+    if (sentiment) params.set("sentiment", sentiment);
+    return fetchJson<RatingsAudit>(`/v1/admin/quality/ratings?${params.toString()}`);
+  },
+  qualityNeedsReview: ({ days = 30, status = "open", stream = "", limit = 25 }: NeedsReviewQuery = {}) => {
+    const params = new URLSearchParams({ days: String(days), status, limit: String(limit) });
+    if (stream) params.set("stream", stream);
+    return fetchJson<NeedsReviewPage>(`/v1/admin/quality/needs-review?${params.toString()}`);
+  },
+  /** Mark an item Reviewed or Action needed (with a note); `open` reopens it. */
+  setQualityReview: (itemType: NeedsReviewItem["item_type"], itemId: string, status: ReviewStatus | "open", note = "") =>
+    fetchJson<{ item_type: string; item_id: string; review: QualityReview | null }>(
+      `/v1/admin/quality/reviews/${encodeURIComponent(itemType)}/${encodeURIComponent(itemId)}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, note }),
+      },
+    ),
   auditSeal: () => fetchJson<AuditSealResult>("/v1/admin/audit/seal", { method: "POST" }),
   updateTicket: async (id: string, patch: TicketPatch): Promise<{ status: string }> => {
     const res = await fetch(

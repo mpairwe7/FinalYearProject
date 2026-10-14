@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from .models import (
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class PaymentClient:
-    """Client for URA Payment operations, supporting local simulated engine or remote REST API."""
+    """Client for the local payment simulator; live URA or bank calls are not implemented."""
 
     def __init__(
         self,
@@ -29,17 +28,15 @@ class PaymentClient:
         api_base: str | None = None,
         api_key: str | None = None,
     ) -> None:
+        del api_base, api_key  # retained for compatibility; remote calls are not implemented
         self._service = service or PaymentService()
-        self._api_base = api_base or os.getenv("PAYMENT_API_BASE", "")
-        self._api_key = api_key or os.getenv("PAYMENT_API_KEY", "")
-        self._is_live = bool(self._api_base and self._api_key.startswith("payment_live_"))
 
     @property
     def is_live(self) -> bool:
-        return self._is_live
+        return False
 
     def ping(self) -> bool:
-        """Health check for URA Payment platform connectivity."""
+        """Report local simulator readiness, not URA or bank connectivity."""
         return True
 
     def generate_prn(
@@ -86,7 +83,7 @@ class PaymentClient:
         return resp.to_dict()
 
     def view_status(self, prn: str) -> dict[str, Any]:
-        """Query real-time payment clearance and bank posting status."""
+        """Query payment status stored in the local simulator database."""
         prn = str(prn or "").strip()
         if not prn:
             return {"ok": False, "error": "prn is required"}
