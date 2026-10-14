@@ -4516,6 +4516,24 @@ class ChatModel:
         except Exception:
             return ""
 
+    @classmethod
+    def _build_effective_personalization_context(
+        cls,
+        personalization: dict[str, Any] | None,
+        conv_ctx: Any,
+        query: str,
+    ) -> str:
+        """Combine persistent user profile, working memory, and statutory guidance."""
+        p_ctx = (personalization or {}).get("prompt_context", "")
+        if not p_ctx and conv_ctx:
+            working_ctx = cls._synthesize_session_working_context(conv_ctx)
+            if working_ctx:
+                p_ctx = working_ctx.get("prompt_context", "")
+        proc_guide = cls._get_procedural_guidance_context(query)
+        if proc_guide:
+            p_ctx = f"{p_ctx}\n\n{proc_guide}".strip() if p_ctx else proc_guide
+        return p_ctx
+
     def _guard_both_forms(self, message: str, english_form: str) -> GuardResult:
         """Input guard on *message* and, when it differs, on its English form.
 
@@ -9083,22 +9101,6 @@ class ChatModel:
             #     guess (app.language_state). The profile's saved language is
             #     consent-gated personalization, so that loads first.
             personalization = self._load_personalization_state(user_id, tenant_id or "default")
-            if personalization is None:
-                personalization = self._synthesize_session_working_context(conv_ctx)
-            proc_guide = self._get_procedural_guidance_context(rewritten or message)
-            if proc_guide:
-                current_p_ctx = (personalization or {}).get("prompt_context", "")
-                combined_p_ctx = f"{current_p_ctx}\n\n{proc_guide}".strip() if current_p_ctx else proc_guide
-                if personalization is None:
-                    personalization = {
-                        "prompt_context": combined_p_ctx,
-                        "consent_granted": False,
-                        "profile": {},
-                        "prefill_slots": {},
-                        "preferred_locale": "",
-                    }
-                else:
-                    personalization = {**personalization, "prompt_context": combined_p_ctx}
             with trace_stage("lang_detect", timings=timings):
                 language = self._resolve_turn_language(
                     message,
@@ -10062,8 +10064,8 @@ class ChatModel:
                         conversation_history=conversation_history or None,
                         locale=locale,
                         tool_names=force_tool_whitelist,
-                        personalization_context=(
-                            (personalization or {}).get("prompt_context", "")
+                        personalization_context=self._build_effective_personalization_context(
+                            personalization, conv_ctx, router_rewritten or router_message
                         ),
                         tone_hint=tone_hint,
                         tenant_id=tenant_id or "default",
@@ -10186,8 +10188,8 @@ class ChatModel:
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
-                            personalization_context=(
-                                (personalization or {}).get("prompt_context", "")
+                            personalization_context=self._build_effective_personalization_context(
+                                personalization, conv_ctx, router_rewritten or router_message
                             ),
                             tone_hint=tone_hint,
                             context_summary=context_summary,
@@ -10277,8 +10279,8 @@ class ChatModel:
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
-                            personalization_context=(personalization or {}).get(
-                                "prompt_context", ""
+                            personalization_context=self._build_effective_personalization_context(
+                                personalization, conv_ctx, router_rewritten or router_message
                             ),
                             tone_hint=tone_hint,
                         )
@@ -10789,22 +10791,6 @@ class ChatModel:
         # (app.language_state); the profile's saved language is consented
         # personalization, so that loads first.
         personalization = self._load_personalization_state(user_id, tenant_id or "default")
-        if personalization is None:
-            personalization = self._synthesize_session_working_context(conv_ctx)
-        proc_guide = self._get_procedural_guidance_context(rewritten or message)
-        if proc_guide:
-            current_p_ctx = (personalization or {}).get("prompt_context", "")
-            combined_p_ctx = f"{current_p_ctx}\n\n{proc_guide}".strip() if current_p_ctx else proc_guide
-            if personalization is None:
-                personalization = {
-                    "prompt_context": combined_p_ctx,
-                    "consent_granted": False,
-                    "profile": {},
-                    "prefill_slots": {},
-                    "preferred_locale": "",
-                }
-            else:
-                personalization = {**personalization, "prompt_context": combined_p_ctx}
         language = self._resolve_turn_language(
             message,
             requested_locale,
@@ -11211,7 +11197,9 @@ class ChatModel:
                     "ticket_id": ticket_id,
                     "_hits": [],
                     "_history": [],
-                    "_personalization_context": (personalization or {}).get("prompt_context", ""),
+                "_personalization_context": self._build_effective_personalization_context(
+                    personalization, conv_ctx, rewritten or message
+                ),
                 }
             if route_decision.route == AgentRoute.TOOLS:
                 agent_role = "tool_specialist"
@@ -11673,7 +11661,9 @@ class ChatModel:
             "_history": conversation_history,
             "_context_summary": context_summary,
             "_rewritten": rewritten,
-            "_personalization_context": (personalization or {}).get("prompt_context", ""),
+            "_personalization_context": self._build_effective_personalization_context(
+                personalization, conv_ctx, rewritten or message
+            ),
             "_tone_hint": tone_hint,
             "_distress": distress,
             "_force_agentic": force_agentic,
