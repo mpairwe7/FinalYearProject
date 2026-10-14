@@ -1093,13 +1093,12 @@ def health_readiness(model: ChatModel = Depends(get_model)) -> HealthResponse:
     # heuristic, translation drops to serving English — and both degradations
     # shipped unnoticed. An operator should not have to ask the assistant a
     # Luganda question to find out.
-    from . import sunbird
+    from . import llm, sunbird
     from .query import language_detection_backend
 
-    retrieval_mt = os.getenv("RETRIEVAL_MT_BACKEND", "").lower()
     if sunbird.is_available():
         trans_cap = "sunbird"
-    elif retrieval_mt in ("local", "prompted") or os.getenv("LLM_ENABLED", "true").lower() == "true":
+    elif llm.is_available():
         trans_cap = "prompted_local"
     else:
         trans_cap = "unavailable"

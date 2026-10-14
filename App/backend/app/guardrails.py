@@ -455,19 +455,16 @@ def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> s
         elif pii_type == "ug_tin":
             def _replace_tin(m: re.Match[str]) -> str:
                 val = m.group(0)
-                if _is_currency_boundary(m, result) or val in allowed_set:
+                if _is_currency_boundary(m, result):
+                    return val
+                raw_digits = re.sub(r"\D", "", val)
+                if raw_digits in allowed_set or val in allowed_set:
                     return val
                 return "[REDACTED_UG_TIN]"
 
             result = pattern.sub(_replace_tin, result)
         else:
-            def _replace_general(m: re.Match[str]) -> str:
-                val = m.group(0)
-                if val in allowed_set:
-                    return val
-                return f"[REDACTED_{pii_type.upper()}]"
-
-            result = pattern.sub(_replace_general, result)
+            result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
     return result
 
 
@@ -656,6 +653,13 @@ class OutputGuard:
     @staticmethod
     def redact_pii(text: str, allowed_values: Iterable[str] | None = None) -> str:
         """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
+        if allowed_values is None:
+            try:
+                from .service import _ACTIVE_USER_STATED_IDS
+
+                allowed_values = _ACTIVE_USER_STATED_IDS.get()
+            except Exception:
+                allowed_values = ()
         return redact_pii_text(text, allowed_values=allowed_values)
 
     @staticmethod
