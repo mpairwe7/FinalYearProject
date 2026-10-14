@@ -22,6 +22,8 @@ from __future__ import annotations
 from .decay import compute_decayed_confidence, decay_factor
 from .episodic import EpisodicMemory, EpisodicSummary
 from .extractor import FactCandidate, FactExtractor
+from .handoff import EvidenceCard, HandoffEnvelope, HandoffGoal, RecommendedAction
+from .procedural import ProceduralMemory, ProceduralSkill, TrajectoryExemplar
 from .semantic import SemanticMemory, UserFact
 from .service import MemoryService, get_memory_service
 from .working import WorkingMemory
@@ -29,10 +31,17 @@ from .working import WorkingMemory
 __all__ = [
     "EpisodicMemory",
     "EpisodicSummary",
+    "EvidenceCard",
     "FactCandidate",
     "FactExtractor",
+    "HandoffEnvelope",
+    "HandoffGoal",
     "MemoryService",
+    "ProceduralMemory",
+    "ProceduralSkill",
+    "RecommendedAction",
     "SemanticMemory",
+    "TrajectoryExemplar",
     "UserFact",
     "WorkingMemory",
     "compute_decayed_confidence",

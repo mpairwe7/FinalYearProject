@@ -123,6 +123,45 @@ def compact_messages(
     return recent, " | ".join(summary_chunks)
 
 
+def analyze_context_window(state: AgentGraphState) -> dict[str, Any]:
+    """Analyze token footprint, context utilization, and attention rot risk."""
+    from ...llm import LLM_CONTEXT_WINDOW, _estimate_tokens, _served_context_window
+
+    query_tokens = _estimate_tokens(state.rewritten_query or state.query)
+    summary_tokens = _estimate_tokens(state.context_summary)
+    history_tokens = sum(
+        _estimate_tokens(str(m.get("content") or m.get("user_message") or m.get("bot_reply") or ""))
+        for m in state.conversation_history
+    )
+    obs_tokens = sum(_estimate_tokens(str(obs)) for obs in state.observations)
+    total_estimated = query_tokens + summary_tokens + history_tokens + obs_tokens
+
+    served = _served_context_window()
+    window = served if served > 0 else LLM_CONTEXT_WINDOW
+    utilization_pct = round((total_estimated / max(window, 1)) * 100, 2)
+
+    # Detect context rot / attention dilution risk
+    if utilization_pct > 75.0 or obs_tokens > 2000:
+        rot_risk = "high"
+    elif utilization_pct > 50.0 or obs_tokens > 1000:
+        rot_risk = "medium"
+    else:
+        rot_risk = "low"
+
+    return {
+        "estimated_tokens": total_estimated,
+        "context_window": window,
+        "utilization_pct": utilization_pct,
+        "rot_risk": rot_risk,
+        "token_breakdown": {
+            "query": query_tokens,
+            "summary": summary_tokens,
+            "history": history_tokens,
+            "observations": obs_tokens,
+        },
+    }
+
+
 def node_context_compactor(state: AgentGraphState) -> NodeResult:
     """LangGraph node: prunes messages and observations within budget."""
     # 1. Compact observations in place
@@ -138,6 +177,10 @@ def node_context_compactor(state: AgentGraphState) -> NodeResult:
                 state.context_summary = f"{state.context_summary} [Earlier: {summary}]"
             else:
                 state.context_summary = f"[Earlier: {summary}]"
+
+    # 3. Analyze token utilization & context rot risk
+    analytics = analyze_context_window(state)
+    state.record("compactor", 0.0, **analytics)
 
     # Default forward edge to route node
     return NodeResult(next_node="route")
