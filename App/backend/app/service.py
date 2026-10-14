@@ -4456,6 +4456,66 @@ class ChatModel:
             "preferred_locale": preferred_locale,
         }
 
+    @staticmethod
+    def _synthesize_session_working_context(
+        conv_ctx: Any,
+    ) -> dict[str, Any] | None:
+        """Synthesize in-dialogue working memory context for an active session."""
+        if not conv_ctx:
+            return None
+        ent = (
+            conv_ctx.get("active_entities")
+            if isinstance(conv_ctx, dict)
+            else getattr(conv_ctx, "active_entities", None)
+        )
+        if not ent:
+            return None
+        biz_names = getattr(ent, "business_names", []) or []
+        locs = getattr(ent, "locations", []) or []
+        types = getattr(ent, "taxpayer_types", []) or []
+        amts = getattr(ent, "amounts", []) or []
+        if not (biz_names or locs or types or amts):
+            return None
+        ctx_lines: list[str] = []
+        if biz_names:
+            ctx_lines.append(f"- Business/entity name: {', '.join(biz_names)}")
+        if locs:
+            ctx_lines.append(f"- Operating location/district: {', '.join(locs)}")
+        if types:
+            ctx_lines.append(f"- Taxpayer status/type: {', '.join(types)}")
+        if amts:
+            ctx_lines.append(f"- Stated financial amounts: {', '.join(amts[-3:])}")
+        return {
+            "consent_granted": False,
+            "profile": {},
+            "prefill_slots": {},
+            "prompt_context": "## Current Session Taxpayer Working Context\n" + "\n".join(ctx_lines),
+            "preferred_locale": "",
+        }
+
+    @staticmethod
+    def _get_procedural_guidance_context(query: str) -> str:
+        """Retrieve verified procedural workflow guidance for statutory operations."""
+        try:
+            from .memory import get_memory_service
+
+            exemplar = get_memory_service().procedural.find_exemplar(query)
+            if not exemplar or not exemplar.plan:
+                return ""
+            lines = [
+                f"## Statutory Procedural Checklist ({exemplar.intent.replace('_', ' ').title()})",
+                f"Standard Operating Sequence: {' -> '.join(exemplar.plan)}",
+            ]
+            if exemplar.demonstration_turn:
+                for k, v in exemplar.demonstration_turn.items():
+                    if isinstance(v, list):
+                        lines.append(f"- {k.replace('_', ' ').title()}: {', '.join(str(i) for i in v)}")
+                    else:
+                        lines.append(f"- {k.replace('_', ' ').title()}: {v}")
+            return "\n".join(lines)
+        except Exception:
+            return ""
+
     def _guard_both_forms(self, message: str, english_form: str) -> GuardResult:
         """Input guard on *message* and, when it differs, on its English form.
 
@@ -8802,6 +8862,7 @@ class ChatModel:
             # 0. Multi-turn memory — fetch rolling conversation context
             conversation_history: list[dict[str, str]] = []
             context_summary = ""
+            conv_ctx: Any = None
             history_session_id = session_id
             if conversation_id or history_session_id:
                 try:
@@ -9022,6 +9083,22 @@ class ChatModel:
             #     guess (app.language_state). The profile's saved language is
             #     consent-gated personalization, so that loads first.
             personalization = self._load_personalization_state(user_id, tenant_id or "default")
+            if personalization is None:
+                personalization = self._synthesize_session_working_context(conv_ctx)
+            proc_guide = self._get_procedural_guidance_context(rewritten or message)
+            if proc_guide:
+                current_p_ctx = (personalization or {}).get("prompt_context", "")
+                combined_p_ctx = f"{current_p_ctx}\n\n{proc_guide}".strip() if current_p_ctx else proc_guide
+                if personalization is None:
+                    personalization = {
+                        "prompt_context": combined_p_ctx,
+                        "consent_granted": False,
+                        "profile": {},
+                        "prefill_slots": {},
+                        "preferred_locale": "",
+                    }
+                else:
+                    personalization = {**personalization, "prompt_context": combined_p_ctx}
             with trace_stage("lang_detect", timings=timings):
                 language = self._resolve_turn_language(
                     message,
@@ -10675,6 +10752,7 @@ class ChatModel:
         # Multi-turn memory (Phase 4 -> overridable in Phase 29)
         conversation_history: list[dict[str, str]] = []
         context_summary = ""
+        conv_ctx: Any = None
         if conversation_history_override is not None:
             from .context_manager import context_manager
 
@@ -10711,6 +10789,22 @@ class ChatModel:
         # (app.language_state); the profile's saved language is consented
         # personalization, so that loads first.
         personalization = self._load_personalization_state(user_id, tenant_id or "default")
+        if personalization is None:
+            personalization = self._synthesize_session_working_context(conv_ctx)
+        proc_guide = self._get_procedural_guidance_context(rewritten or message)
+        if proc_guide:
+            current_p_ctx = (personalization or {}).get("prompt_context", "")
+            combined_p_ctx = f"{current_p_ctx}\n\n{proc_guide}".strip() if current_p_ctx else proc_guide
+            if personalization is None:
+                personalization = {
+                    "prompt_context": combined_p_ctx,
+                    "consent_granted": False,
+                    "profile": {},
+                    "prefill_slots": {},
+                    "preferred_locale": "",
+                }
+            else:
+                personalization = {**personalization, "prompt_context": combined_p_ctx}
         language = self._resolve_turn_language(
             message,
             requested_locale,
