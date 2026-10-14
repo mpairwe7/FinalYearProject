@@ -1300,13 +1300,13 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # already collapses whitespace runs to one space — independently removing
 # the long-run precondition these patterns would otherwise need.
 _DECOMPOSE_SPLIT_RE = re.compile(
-    r"\s+(?:and also|as well as|and then)\s+|"
-    r"\s*;\s+|"
-    r"\?\s+(?=(?:what|how|when|where|which|who)\b)",
+    r" (?:and also|as well as|and then) |"
+    r";\s*|"
+    r"\? (?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
-    r"\s+and\s+(?=(?:what|how|when|where|which|who)\b)",
+    r" and (?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
 
