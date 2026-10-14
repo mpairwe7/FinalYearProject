@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from typing import Any
 
 from .. import database as db
 
@@ -82,6 +83,83 @@ def chat_carryover(
         topic_label=str((topic or {}).get("label") or ""),
         tax_type=str((topic or {}).get("tax_type") or ""),
     )
+
+
+def call_to_web_carryover(
+    user_id: str,
+    *,
+    tenant_id: str = "default",
+    target_locale: str = "en",
+) -> str:
+    """Return a cross-channel resumption summary from an earlier voice call or session.
+
+    Gated on ``continuous_relationship_memory`` and personalization consent.
+    """
+    from ..flags import flags
+
+    if not user_id or not flags.is_enabled("continuous_relationship_memory", subject=user_id):
+        return ""
+    try:
+        from ..memory import build_resumption_prompt, get_memory_service
+
+        memsvc = get_memory_service()
+        case = memsvc.get_active_resolution_case(
+            user_id,
+            tenant_id=tenant_id or "default",
+            current_channel="web",
+        )
+        if case is None:
+            return ""
+        return build_resumption_prompt(case, target_locale=target_locale)[:MAX_CONTEXT_CHARS]
+    except Exception:
+        logger.debug("carryover: call-to-web resumption unavailable", exc_info=True)
+        return ""
+
+
+def checkpoint_call_resolution(
+    room: Any,
+    *,
+    objective: str = "",
+    status: str = "awaiting_user_action",
+    completed_steps: list[str] | None = None,
+    pending_steps: list[str] | None = None,
+    handoff_envelope: dict | None = None,
+    asr_confidence: float | None = None,
+) -> bool:
+    """Persist the call's resolution progress into the longitudinal ResolutionLedger."""
+    from ..flags import flags
+
+    state = getattr(room, "state", None)
+    user_id = getattr(state, "user_id", "") if state else ""
+    if not user_id or not flags.is_enabled("continuous_relationship_memory", subject=user_id):
+        return False
+    try:
+        from ..memory import ResolutionCase, get_memory_service
+
+        tenant_id = getattr(state, "tenant_id", "default") or "default"
+        locale = getattr(state, "locale", "en") or "en"
+        topic = objective or getattr(state, "topic", "") or "Taxpayer voice support"
+        case = ResolutionCase(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            thread_id=getattr(state, "conversation_id", "") or getattr(room, "call_id", ""),
+            source_channel="voice_call",
+            locale=locale,
+            primary_objective=topic,
+            status=status,
+            completed_steps=list(completed_steps or []),
+            pending_steps=list(pending_steps or []),
+            handoff_envelope=dict(handoff_envelope or {}),
+        )
+        return get_memory_service().checkpoint_resolution_case(
+            user_id,
+            case,
+            tenant_id=tenant_id,
+            asr_confidence=asr_confidence,
+        )
+    except Exception:
+        logger.debug("carryover: checkpoint_call_resolution failed", exc_info=True)
+        return False
 
 
 def _chat_topic(parent: str, *, session: str, user_id: str, tenant_id: str) -> dict | None:

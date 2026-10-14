@@ -119,6 +119,57 @@ def open_transfer(
     state.transfer_requested_at = waiting_since
     state.transfer_attempts += 1
 
+    # Build structured HandoffEnvelope v2 for the officer desk and peer agents
+    try:
+        from ..memory.handoff import EvidenceCard
+        from ..memory.service import get_memory_service
+        from .carryover import checkpoint_call_resolution
+
+        ref = case_reference(tid) if tid else f"CALL-{room.call_id[:8].upper()}"
+        summary_text = str((packet or {}).get("summary") or getattr(state, "last_caller_text", "") or reason)
+        macros = [
+            {"id": "ack_handoff", "label": "Acknowledge & Greet in Caller Locale", "action": f"greet_{state.locale}"},
+            {"id": "verify_tin", "label": "Verify TIN / Account Status", "action": "lookup_tin_status"},
+        ]
+        if "dispute" in reason or "objection" in topic:
+            macros.append({"id": "open_objection", "label": "Initiate Sec. 23 Objection Checklist", "action": "start_objection_flow"})
+        envelope = get_memory_service().create_handoff_envelope(
+            thread_id=state.conversation_id or room.call_id,
+            user_id=state.user_id or "",
+            objective=topic,
+            target_resolution=f"Resolve {topic} ({reason})",
+            tenant_id=state.tenant_id or "default",
+            evidence=[
+                EvidenceCard(
+                    source="voice_call_summary",
+                    fact=summary_text[:280],
+                    citation_index=0,
+                    confidence=0.9,
+                )
+            ],
+            blockers=[reason],
+            next_action_type="officer_live_takeover",
+            suggested_message=f"Review caller brief ({state.locale}) and address {topic}.",
+            locale=state.locale,
+            source_channel="voice_call",
+            caller_affect=getattr(state, "caller_affect", "calm"),
+            priority=priority,
+            officer_macros=macros,
+        )
+        envelope.case_reference = ref
+        env_dict = envelope.to_dict()
+        state.last_handoff_envelope = env_dict
+        hub.publish_call(room.call_id, "handoff_envelope", env_dict)
+        checkpoint_call_resolution(
+            room,
+            objective=topic,
+            status="escalated_officer",
+            pending_steps=[f"Officer review ({ref})"],
+            handoff_envelope=env_dict,
+        )
+    except Exception:
+        logger.debug("Failed building HandoffEnvelope v2 for call %s", room.call_id, exc_info=True)
+
     update_call(
         room.call_id,
         status="transferring",

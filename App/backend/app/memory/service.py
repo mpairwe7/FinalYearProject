@@ -30,8 +30,16 @@ from typing import Any
 
 from .episodic import EpisodicMemory, EpisodicSummary
 from .extractor import FactExtractor
-from .handoff import EvidenceCard, HandoffEnvelope, HandoffGoal, RecommendedAction
+from .handoff import (
+    EvidenceCard,
+    HandoffEnvelope,
+    HandoffGoal,
+    RecommendedAction,
+    SLAContext,
+    ToolExecutionReceipt,
+)
 from .procedural import ProceduralMemory
+from .resolution_ledger import ResolutionCase, ResolutionLedger
 from .semantic import SemanticMemory, UserFact
 from .working import WORKING_TTL_SECONDS
 
@@ -57,6 +65,7 @@ class MemoryService:
         self.semantic = SemanticMemory()
         self.extractor = FactExtractor()
         self.procedural = ProceduralMemory()
+        self.resolution_ledger = ResolutionLedger()
 
     # -- Consent-gated reads -------------------------------------------
     def _has_consent(
@@ -266,19 +275,85 @@ class MemoryService:
         blockers: list[str] | None = None,
         next_action_type: str = "assist_taxpayer",
         suggested_message: str = "",
+        *,
+        locale: str = "en",
+        source_channel: str = "web",
+        caller_affect: str = "calm",
+        priority: str = "normal",
+        tool_receipts: list[ToolExecutionReceipt] | None = None,
+        workflow_state_snapshot: dict[str, Any] | None = None,
+        officer_macros: list[dict[str, str]] | None = None,
     ) -> HandoffEnvelope:
         """Construct an immutable, structured handoff envelope for human or peer escalation."""
-        return HandoffEnvelope(
+        target_s = 30 if priority == "urgent" else 60 if priority == "high" else 120
+        now = time.time()
+        env = HandoffEnvelope(
             thread_id=thread_id,
             tenant_id=tenant_id,
             goal=HandoffGoal(primary_objective=objective, target_resolution=target_resolution),
             taxpayer_tin=user_id if user_id and user_id.isdigit() and len(user_id) == 10 else "",
+            taxpayer_locale=locale or "en",
             verified_evidence=evidence or [],
             blockers_and_risks=blockers or [],
             next_action=RecommendedAction(
                 action_type=next_action_type,
                 suggested_message=suggested_message,
             ),
+            source_channel=source_channel,
+            caller_affect=caller_affect,
+            workflow_state_snapshot=workflow_state_snapshot or {},
+            tool_receipts=tool_receipts or [],
+            sla=SLAContext(
+                priority=priority,
+                target_response_seconds=target_s,
+                deadline_utc=now + target_s,
+            ),
+            officer_macros=officer_macros or [],
+        )
+        try:
+            from ..analytics import metrics
+
+            metrics.observe(
+                "handoff_envelope_completeness_ratio",
+                env.completeness_ratio(),
+                labels={
+                    "target_channel": env.target_channel,
+                    "priority": priority or "normal",
+                },
+            )
+        except Exception:
+            logger.debug("handoff completeness metric skipped", exc_info=True)
+        return env
+
+    # -- Continuous Relationship Resolution Ledger --------------------
+    def checkpoint_resolution_case(
+        self,
+        user_id: str,
+        case: ResolutionCase,
+        *,
+        tenant_id: str = "default",
+        asr_confidence: float | None = None,
+    ) -> bool:
+        """Persist a longitudinal ResolutionCase across channels (Voice/Web/Desk)."""
+        return self.resolution_ledger.checkpoint(
+            user_id,
+            case,
+            tenant_id=tenant_id,
+            asr_confidence=asr_confidence,
+        )
+
+    def get_active_resolution_case(
+        self,
+        user_id: str,
+        *,
+        tenant_id: str = "default",
+        current_channel: str = "",
+    ) -> ResolutionCase | None:
+        """Read an active cross-channel ResolutionCase for *user_id*."""
+        return self.resolution_ledger.get_active_case(
+            user_id,
+            tenant_id=tenant_id,
+            current_channel=current_channel,
         )
 
     # -- Working memory -----------------------------------------------
