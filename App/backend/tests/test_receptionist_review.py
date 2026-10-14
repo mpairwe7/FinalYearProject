@@ -164,6 +164,18 @@ class GoodbyeReviewTests(_Call):
         await self.turn("That's all, thank you")
         self.assertEqual(self.said()[-1], phrase("review_ask_end", "en"))
 
+    async def test_goodbye_as_speech_to_text_writes_it_is_a_goodbye(self):
+        # Seen on the live system: the recogniser wrote "Thank you, good bye."
+        # and the AI answered the last question again instead of asking.
+        await self.answered()
+        await self.turn("Thank you, good bye.")
+        self.assertEqual(self.said()[-1], phrase("review_ask_end", "en"))
+
+    async def test_good_bye_ends_a_call_the_ai_has_not_answered(self):
+        await self.turn("Good-bye")
+        self.say.assert_awaited_once_with(self.room, phrase("officer_closing", "en"), self.brain.speech_model)
+        self.hang_up.assert_awaited_once_with(self.room, "caller_voice_hangup")
+
     async def test_a_caller_the_ai_has_not_answered_is_not_asked(self):
         await self.turn("Goodbye")
         self.say.assert_awaited_once_with(self.room, phrase("officer_closing", "en"), self.brain.speech_model)
