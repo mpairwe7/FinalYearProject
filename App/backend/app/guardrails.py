@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -430,33 +431,43 @@ def _is_currency_boundary(match: re.Match[str], text: str) -> bool:
     return bool(_CURRENCY_INDICATORS_BEFORE.search(before) or _CURRENCY_INDICATORS_AFTER.search(after))
 
 
-def redact_pii_text(text: str) -> str:
+def redact_pii_text(text: str, allowed_values: Iterable[str] | None = None) -> str:
     """Replace detected PII with redaction markers.
 
     Shared utility used by both OutputGuard (response side) and
     database writes (storage side) to prevent PII persistence.
     Public official URA/government contact addresses (e.g. services@ura.go.ug,
     info@ura.go.ug) are exempt so taxpayers receive valid contact channels.
+    Taxpayer-stated identifiers (in *allowed_values*) are exempted from
+    output redaction so the assistant does not redact the user's own input back to them (G143).
     """
+    allowed_set = {str(v).strip() for v in (allowed_values or []) if str(v).strip()}
     result = text
     for pii_type, pattern in _PII_PATTERNS:
         if pii_type == "email":
             def _replace_email(m: re.Match[str]) -> str:
                 addr = m.group(0)
-                if is_official_ura_email(addr):
+                if is_official_ura_email(addr) or addr in allowed_set:
                     return addr
                 return "[REDACTED_EMAIL]"
 
             result = pattern.sub(_replace_email, result)
         elif pii_type == "ug_tin":
             def _replace_tin(m: re.Match[str]) -> str:
-                if _is_currency_boundary(m, result):
-                    return m.group(0)
+                val = m.group(0)
+                if _is_currency_boundary(m, result) or val in allowed_set:
+                    return val
                 return "[REDACTED_UG_TIN]"
 
             result = pattern.sub(_replace_tin, result)
         else:
-            result = pattern.sub(f"[REDACTED_{pii_type.upper()}]", result)
+            def _replace_general(m: re.Match[str]) -> str:
+                val = m.group(0)
+                if val in allowed_set:
+                    return val
+                return f"[REDACTED_{pii_type.upper()}]"
+
+            result = pattern.sub(_replace_general, result)
     return result
 
 
@@ -643,9 +654,9 @@ class OutputGuard:
         return stripped
 
     @staticmethod
-    def redact_pii(text: str) -> str:
-        """Replace detected PII with redaction markers (LLM02)."""
-        return redact_pii_text(text)
+    def redact_pii(text: str, allowed_values: Iterable[str] | None = None) -> str:
+        """Replace detected PII with redaction markers (LLM02), preserving user-stated identifiers."""
+        return redact_pii_text(text, allowed_values=allowed_values)
 
     @staticmethod
     def sanitize(text: str) -> str:

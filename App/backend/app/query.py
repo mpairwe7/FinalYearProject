@@ -1138,10 +1138,17 @@ def detect_language(text: str, default_lang: str = "en") -> str:
 def rewrite(
     query: str,
     history: list[dict[str, str]] | None = None,
+    locale: str | None = None,
 ) -> str:
-    """Full query rewriting pipeline."""
+    """Full query rewriting pipeline.
+
+    Skips English dictionary spell correction on non-English locales
+    (lg, sw, nyn, ach) to prevent corruption of vernacular vocabulary (G135).
+    """
     q = normalize(query)
-    q = correct_spelling(q)
+    lang = (locale or detect_language(q) or "en").lower().split("-")[0]
+    if lang in ("en", ""):
+        q = correct_spelling(q)
     q = expand_abbreviations(q)
     if history:
         q = rewrite_with_history(q, history)
