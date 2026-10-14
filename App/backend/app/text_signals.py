@@ -56,7 +56,7 @@ _CHANNEL_TOKEN_RE = re.compile(
 # whether anything contentful remains.
 _CHANNEL_STRIP_RE = re.compile(
     r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|https?://\S+|www\.\S+"
-    r"|[a-zA-Z0-9._-]+@ura(?:\.go)?(?:\.ug)?|\bemail\b|\bservices\b|\binfo\b"
+    r"|(?:services|info|support)@ura(?:\.go)?(?:\.ug)?|\bemail\b|\bservices\b|\binfo\b"
     r"|ura\.go\.ug|\bura\b|\bgo\b|\bug\b|whatsapp|toll[- ]?free"
     r"|contact cent(?:re|er)|\bcall\b|\bvisit\b|\bportal\b|\bweb\b"
 )
