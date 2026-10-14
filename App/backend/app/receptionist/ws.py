@@ -950,9 +950,9 @@ def review_call_endpoint(
     body: ReviewCallRequest,
     ctx: AuthContext = Depends(require_admin_access),
 ) -> dict[str, Any]:
-    """Submit an officer rating (1-5) and note for a call."""
-    if ctx.role not in ("ura_staff", "ura_admin"):
-        raise HTTPException(status_code=403, detail="Only staff and admins can submit reviews")
+    """Submit an officer's rating (1-5) and note for a call (officers only, as in main.py)."""
+    if ctx.role != "ura_staff":
+        raise HTTPException(status_code=403, detail="Only officers rate calls")
 
     if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", call_id):
         raise HTTPException(status_code=400, detail="Invalid call_id format")

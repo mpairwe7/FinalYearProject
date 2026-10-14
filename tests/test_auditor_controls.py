@@ -400,9 +400,12 @@ def test_every_admin_write_route_refuses_an_auditor(client, tenant):
 def test_call_reads_and_reviews_are_recorded_with_actor_and_role(client, tenant, ledger_on):
     call_id = _receptionist_call(tenant)
     auditor = _headers("aud-calls", "ura_auditor", tenant)
+    admin = _headers("adm-calls", "ura_admin", tenant)
     officer = _headers("off-calls", "ura_staff", tenant)
     assert client.get(f"/v1/admin/calls/{call_id}", headers=auditor).status_code == 200
     assert client.post(f"/v1/admin/calls/{call_id}/review", headers=auditor, json={"rating": 1}).status_code == 403
+    # Only officers rate a call: an administrator audits the service, as on every other call-desk write.
+    assert client.post(f"/v1/admin/calls/{call_id}/review", headers=admin, json={"rating": 2}).status_code == 403
     note = "Clear and polite, confirmed the TIN."
     reviewed = client.post(f"/v1/admin/calls/{call_id}/review", headers=officer, json={"rating": 4, "note": note})
     assert reviewed.status_code == 200
@@ -414,6 +417,7 @@ def test_call_reads_and_reviews_are_recorded_with_actor_and_role(client, tenant,
     assert viewed["payload"]["session_id"] == call_id
     review = by_type["staff.call_reviewed"]
     assert review["actor"] == "off-calls"
+    assert [e["actor"] for e in events if e["event_type"] == "staff.call_reviewed"] == ["off-calls"]
     assert review["payload"] == {"actor_role": "ura_staff", "call_id": call_id, "rating": 4, "note_chars": len(note)}
 
 
