@@ -1104,6 +1104,10 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `OIDC_JWKS_URL` | JWKS endpoint (required for RS256) | _unset_ |
 | `OIDC_JWKS_CACHE_TTL_S` | JWKS cache TTL in seconds | `3600` |
 | `OIDC_JWKS_TIMEOUT_S` | JWKS fetch timeout | `5` |
+| `OIDC_USERINFO_URL` | Profile endpoint for names and email when the access token has none | `<OIDC_ISSUER>/userinfo` |
+| `OIDC_USERINFO_ENABLED` | Ask the profile endpoint (RS256 tokens without `email` only) | `true` |
+| `OIDC_USERINFO_CACHE_TTL_S` | How long a person's profile is kept | `3600` |
+| `OIDC_USERINFO_TIMEOUT_S` | Profile fetch timeout | `2` |
 | `APP_ENV` | `development` or `production` (gates startup validation) | `development` |
 | **LoRA Adapters** | | |
 | `LORA_ADAPTER_PATH` | Single-language LoRA adapter path (backward-compat) | _unset_ |

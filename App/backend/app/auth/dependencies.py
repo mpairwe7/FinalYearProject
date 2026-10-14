@@ -236,6 +236,13 @@ def _resolve_bearer_context(request: Request, authorization: str) -> AuthContext
     except JWTAuthError as e:
         logger.info("JWT rejected: %s", e)
         raise HTTPException(status_code=401, detail=f"invalid token: {e}") from e
+    else:
+        # A provider's access token often carries no name or email; fill them
+        # from its profile (cached) so nobody is shown a bare account id.
+        if _get_verifier().alg == "RS256":
+            from .userinfo import with_profile
+
+            claims = with_profile(token, claims)
 
     user = _claims_to_user(claims)
     ctx = AuthContext(authenticated=True, user=user, claims=claims)

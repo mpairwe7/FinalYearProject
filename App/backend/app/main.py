@@ -3993,12 +3993,20 @@ def _desk_writer(ctx: AuthContext) -> None:
 
 
 def _desk_officer_name(ctx: AuthContext) -> str:
-    """The claimant as a caller will hear them: name, username or email — never a bare ``sub``."""
+    """The claimant as a caller will hear them: name, username or email — never a bare ``sub``.
+
+    The fields come from the token, or from the provider's profile when the
+    token has none (``auth/userinfo.py``). ``name`` is skipped when it is only
+    the email again, as Auth0 sets it for a database user.
+    """
     from .receptionist.desk import officer_display_name
     claims = ctx.claims or {}
+    name = str(claims.get("name") or "").strip()
     handle = (
         str(claims.get("given_name") or "").strip()
+        or ("" if "@" in name else name)
         or str(claims.get("preferred_username") or "").strip()
+        or str(claims.get("nickname") or "").strip()
         or (ctx.user.email if ctx.user else "")
         or ctx.user_id
     )

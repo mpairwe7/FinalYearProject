@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -74,10 +75,24 @@ def officer_display_name(handle: str) -> str:
     """What a caller and other officers see: "Officer Nakato" for nakato@ura.go.ug.
 
     Give it a name, username or email — an identity provider's ``sub`` is
-    often a UUID, and a caller should not hear one.
+    often a UUID, and a caller should not hear one. Given only such an id
+    (``auth0|6a7d…``, a bare UUID or hex string), it says "URA officer"
+    rather than read the id out.
     """
-    name = (handle or "").split("@")[0].strip() or "on duty"
+    name = (handle or "").split("@")[0].strip()
+    if not name:
+        return "Officer on duty"
+    if _looks_like_account_id(name):
+        return "URA officer"
     return f"Officer {name[:1].upper()}{name[1:]}"
+
+
+_ACCOUNT_ID_RE = re.compile(r"^(?:[A-Za-z0-9_-]+\|.+|[0-9a-fA-F-]{16,})$")
+
+
+def _looks_like_account_id(text: str) -> bool:
+    """An identity provider's subject (``auth0|…``, ``google-oauth2|…``) or a bare UUID/hex id."""
+    return bool(_ACCOUNT_ID_RE.match(text))
 
 
 def _holder_name(room: CallRoom, holder: str) -> str:
