@@ -66,6 +66,45 @@ def inject_dictation_pauses(spoken_text: str) -> str:
     return " ".join(out)
 
 
+def _spoken_realizations_for(val: float, locale: str) -> tuple[str, ...]:
+    """Canonical spoken-word realizations produced by ``speech_normalization`` for *val*."""
+    from ..speech_normalization import (
+        _format_ugx_amount,
+        _spoken_number,
+        clean_text_for_speech,
+    )
+
+    num_str = str(int(val)) if val == int(val) else f"{val:g}"
+    candidates: list[str] = []
+    for loc in (locale, "en"):
+        try:
+            words = _spoken_number(num_str, loc, years=False).strip().lower()
+            if words:
+                candidates.append(words)
+        except Exception:
+            logger.debug("spoken_figure_guard: _spoken_number candidate skipped", exc_info=True)
+        try:
+            pct_words = clean_text_for_speech(f"{num_str}%", locale=loc).strip(" .").lower()
+            if pct_words:
+                candidates.append(pct_words)
+        except Exception:
+            logger.debug("spoken_figure_guard: pct candidate skipped", exc_info=True)
+        if val >= 1000 and val == int(val):
+            try:
+                ugx_words = _format_ugx_amount(f"{int(val):,}", loc).strip().lower()
+                if ugx_words:
+                    candidates.append(ugx_words)
+            except Exception:
+                logger.debug("spoken_figure_guard: _format_ugx_amount candidate skipped", exc_info=True)
+            try:
+                full_ugx = clean_text_for_speech(f"UGX {int(val):,}", locale=loc).strip(" .").lower()
+                if full_ugx:
+                    candidates.append(full_ugx)
+            except Exception:
+                logger.debug("spoken_figure_guard: full_ugx candidate skipped", exc_info=True)
+    return tuple(dict.fromkeys(candidates))
+
+
 def verify_spoken_figures(
     source_text: str,
     spoken_text: str,
@@ -99,6 +138,14 @@ def verify_spoken_figures(
         )
 
     detected = mt.figures(spoken_text, locale=loc) | mt.figures(spoken_text, locale="en")
+    if not expected.issubset(detected):
+        spoken_norm_low = " ".join((spoken_text or "").lower().replace(",", " ").split())
+        for missing_val in list(expected - detected):
+            for phrase in _spoken_realizations_for(missing_val, loc):
+                phrase_norm = " ".join(phrase.replace(",", " ").split())
+                if phrase_norm and phrase_norm in spoken_norm_low:
+                    detected.add(missing_val)
+                    break
     text_ok = expected.issubset(detected) or mt.figures_survived(source_text, spoken_text, locale=loc)
 
     # Optional fast acoustic round-trip verification when synthesized PCM16 and STT are supplied

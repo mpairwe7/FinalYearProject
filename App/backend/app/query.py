@@ -1336,7 +1336,7 @@ def extract_retrieval_filters(query: str) -> dict[str, Any]:
 
 
 def extract_retrieval_preferences(query: str) -> dict[str, Any]:
-    """Soft ranking hints: mentioned tax type and 'current' fiscal year."""
+    """Soft ranking hints: mentioned tax type, 'current' fiscal year, and EQ relief terms."""
     prefer: dict[str, Any] = {}
     text = query or ""
     if _CURRENT_FY_RE.search(text) and not extract_retrieval_filters(text):
@@ -1344,6 +1344,19 @@ def extract_retrieval_preferences(query: str) -> dict[str, Any]:
     types = [name for pattern, name in _TAX_TYPE_PATTERNS if pattern.search(text)]
     if len(types) == 1:
         prefer["tax_type"] = types[0]
+    if text:
+        try:
+            from .flags import flags
+
+            if flags.is_enabled("eq_adaptive_retrieval"):
+                from .tools.empathy import assess as _assess_eq
+
+                eq = _assess_eq(text)
+                if eq.get("retrieval_preference_terms"):
+                    prefer["eq_relief_terms"] = eq["retrieval_preference_terms"]
+                    prefer["eq_affect"] = eq.get("kind", "")
+        except Exception:
+            logger.debug("eq_adaptive_retrieval preference check skipped", exc_info=True)
     return prefer
 
 
@@ -1377,10 +1390,17 @@ def decompose_query(query: str) -> list[str]:
 
 def plan_retrieval(query: str) -> dict[str, Any]:
     """Bundle filters, preferences, and sub-queries for one retrieval turn."""
+    prefer = extract_retrieval_preferences(query)
+    subqueries = decompose_query(query)
+    eq_terms = str(prefer.get("eq_relief_terms") or "").strip()
+    if eq_terms and subqueries and len(subqueries) < 3:
+        relief_subq = f"{subqueries[0]} {eq_terms}".strip()
+        if relief_subq not in subqueries:
+            subqueries = [*subqueries, relief_subq][:3]
     return {
         "filters": extract_retrieval_filters(query),
-        "prefer": extract_retrieval_preferences(query),
-        "subqueries": decompose_query(query),
+        "prefer": prefer,
+        "subqueries": subqueries,
     }
 
 

@@ -283,9 +283,27 @@ class MemoryService:
         tool_receipts: list[ToolExecutionReceipt] | None = None,
         workflow_state_snapshot: dict[str, Any] | None = None,
         officer_macros: list[dict[str, str]] | None = None,
+        eq_guidance: dict[str, Any] | None = None,
     ) -> HandoffEnvelope:
         """Construct an immutable, structured handoff envelope for human or peer escalation."""
-        target_s = 30 if priority == "urgent" else 60 if priority == "high" else 120
+        import os
+
+        effective_priority = priority or "normal"
+        if caller_affect in ("frustrated", "urgent_distress", "hardship") and effective_priority == "normal":
+            effective_priority = "high"
+        try:
+            hardship_sla = max(15, int(os.getenv("EQ_HARDSHIP_SLA_TARGET_SECONDS", "45")))
+        except ValueError:
+            hardship_sla = 45
+        target_s = (
+            30
+            if effective_priority == "urgent"
+            else hardship_sla
+            if caller_affect in ("urgent_distress", "hardship")
+            else 60
+            if effective_priority == "high"
+            else 120
+        )
         now = time.time()
         env = HandoffEnvelope(
             thread_id=thread_id,
@@ -304,11 +322,12 @@ class MemoryService:
             workflow_state_snapshot=workflow_state_snapshot or {},
             tool_receipts=tool_receipts or [],
             sla=SLAContext(
-                priority=priority,
+                priority=effective_priority,
                 target_response_seconds=target_s,
                 deadline_utc=now + target_s,
             ),
             officer_macros=officer_macros or [],
+            eq_guidance=dict(eq_guidance or {}),
         )
         try:
             from ..analytics import metrics

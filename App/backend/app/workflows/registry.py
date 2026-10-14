@@ -198,6 +198,43 @@ def _normalise_for_triggers(text: str) -> str:
     return _RETURN_QUALIFIER_RE.sub(r"\1 return", q)
 
 
+def delegate_workflow_slot_calculation(
+    session: WorkflowSession,
+    user_input: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Delegate a mid-workflow calculation expression to the MCP calculator specialist bridge.
+
+    Gated by ``FLAG_WORKFLOW_SPECIALIST_BRIDGE``. When a pending workflow slot expects a
+    currency/amount and the user supplies a calculation ask ("Calculate VAT on UGX 5,000,000"),
+    executes the deterministic calculator tool and returns ``(amount_str, tool_receipt)``.
+    """
+    from ..flags import flags
+
+    if not flags.is_enabled("workflow_specialist_bridge"):
+        return None, None
+    try:
+        from ..calculator_router import extract_amounts, plan_calculation
+        from ..mcp import get_client
+
+        plan = plan_calculation(user_input)
+        if plan and not plan.missing:
+            call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
+            res = call.result if call and isinstance(call.result, dict) else {}
+            if res.get("ok"):
+                for key in ("tax", "vat", "paye", "withholding_tax", "total_taxes", "gross", "amount"):
+                    if res.get(key) is not None:
+                        val = float(res[key])
+                        session.slots[f"_bridge_{plan.tool}"] = val
+                        return str(int(val) if val == int(val) else val), res
+        amts = extract_amounts(user_input)
+        if len(amts) == 1:
+            val = amts[0][0]
+            return str(int(val) if val == int(val) else val), {"ok": True, "extracted_amount": val}
+    except Exception:
+        logger.debug("workflow_specialist_bridge delegation skipped", exc_info=True)
+    return None, None
+
+
 class WorkflowRegistry:
     """Global workflow registry (module-level singleton)."""
 
@@ -338,6 +375,10 @@ class WorkflowRegistry:
         # Validate slot input
         if step.slot and step.validator:
             is_valid, normalised, error = validate_slot(user_input, step.validator, resolver)
+            if not is_valid and step.validator in ("currency", "amount", "number"):
+                bridged_val, _receipt = delegate_workflow_slot_calculation(session, user_input)
+                if bridged_val is not None:
+                    is_valid, normalised, error = validate_slot(bridged_val, step.validator, resolver)
             if not is_valid:
                 return _make_turn(
                     wf,

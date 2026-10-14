@@ -59,6 +59,11 @@ def test_2026_flags_registered_and_logged_variants():
         "emotion_aware_prosody",
         "spoken_figure_guard",
         "officer_voice_copilot",
+        "eq_adaptive_retrieval",
+        "zero_effort_slot_prefill",
+        "workflow_specialist_bridge",
+        "proactive_resolution_continuation",
+        "officer_ai_co_execution",
     ):
         assert name in all_flags
         assert all_flags[name] is False
@@ -67,6 +72,8 @@ def test_2026_flags_registered_and_logged_variants():
     assert "hybrid_speech_s2s" in variants
     assert "multi_agent_dag" in variants
     assert "spoken_figure_guard" in variants
+    assert "eq_adaptive_retrieval" in variants
+    assert "workflow_specialist_bridge" in variants
 
 
 def test_hybrid_speech_s2s_router_and_semantic_endpointing():
@@ -154,6 +161,14 @@ def test_spoken_figure_guard_and_dictation_pauses():
         )
         assert bad_res.ok is False
         assert bad_res.status == "fallback_text_only"
+
+        # Vernacular spoken-word realization from clean_text_for_speech passes
+        from app.speech_normalization import clean_text_for_speech
+
+        lg_source = "VAT ku UGX 2,000,000 guli 18% (UGX 360,000)."
+        lg_spoken = clean_text_for_speech(lg_source, locale="lg")
+        lg_res = verify_spoken_figures(lg_source, lg_spoken, locale="lg")
+        assert lg_res.ok is True
     finally:
         flags.clear("spoken_figure_guard")
 
@@ -340,3 +355,150 @@ def test_spoken_confirmation_and_officer_voice_copilot(tmp_db):
         speech_mock.transcribe.assert_called_once()
     finally:
         flags.clear("officer_voice_copilot")
+
+
+def test_phase32_eq_adaptive_retrieval_and_sla_reprioritization():
+    from app.query import plan_retrieval
+    from app.tools.empathy import assess
+
+    flags.set("eq_adaptive_retrieval", True)
+    try:
+        msg = "I cannot afford this penalty and my shop is about to close down, what can I do?"
+        eq = assess(msg)
+        assert eq["kind"] == "hardship"
+        assert eq["priority_boost"] == "high"
+        assert any("Section 39" in s for s in eq["recommended_relief_statutes"])
+        assert "instalment" in eq["retrieval_preference_terms"]
+
+        plan = plan_retrieval(msg)
+        assert plan["prefer"].get("eq_affect") == "hardship"
+        assert any("section 39" in sq.lower() for sq in plan["subqueries"])
+
+        memsvc = get_memory_service()
+        env = memsvc.create_handoff_envelope(
+            thread_id="th-eq-32",
+            user_id="1000888111",
+            objective="Penalty remission & instalment plan",
+            target_resolution="Review hardship application under TPCA s.39",
+            caller_affect="hardship",
+            priority="normal",
+            eq_guidance={"avoid": eq["avoid"], "relief": eq["recommended_relief_statutes"]},
+        )
+        assert env.sla.priority == "high"
+        assert env.sla.target_response_seconds == 45
+        roundtrip = HandoffEnvelope.from_dict(env.to_dict())
+        assert "Section 39" in roundtrip.eq_guidance["relief"][0]
+    finally:
+        flags.clear("eq_adaptive_retrieval")
+
+
+def test_phase32_zero_effort_slot_prefill_and_workflow_specialist_bridge(tmp_db):
+    from pathlib import Path
+
+    from app.service import ChatModel
+    from app.workflows.registry import (
+        WorkflowSession,
+        auto_load_flows,
+        delegate_workflow_slot_calculation,
+    )
+
+    auto_load_flows(Path("App/backend/app/workflows/flows"))
+    memsvc = get_memory_service()
+    u = tmp_db.upsert_user(external_id="1000444333", tenant_id="default")
+    user_id = u["id"]
+    tmp_db.grant_consent(user_id, "personalization", "2026-04")
+
+    assert memsvc.resolution_ledger.store_verified_slots(
+        user_id,
+        {"tin": "1000444333", "annual_turnover": 180000000},
+        tenant_id="default",
+    ) is True
+    slots = memsvc.resolution_ledger.get_verified_slots(user_id, tenant_id="default")
+    assert slots["tin"] == "1000444333"
+
+    flags.set("zero_effort_slot_prefill", True)
+    flags.set("memory_enabled", True)
+    flags.set("workflow_specialist_bridge", True)
+    try:
+        model = ChatModel.__new__(ChatModel)
+        p_state = model._load_personalization_state(user_id, tenant_id="default")
+        assert p_state is not None
+        assert p_state["prefill_slots"]["tin"] == "1000444333"
+        assert p_state["prefill_slots"]["annual_turnover"] == 180000000
+
+        session = WorkflowSession(workflow_id="payment_assistance")
+        val_str, receipt = delegate_workflow_slot_calculation(
+            session,
+            "Calculate VAT on UGX 5,000,000",
+        )
+        assert val_str == "900000"
+        assert receipt is not None
+        assert receipt.get("ok") is True
+    finally:
+        flags.clear("zero_effort_slot_prefill")
+        flags.clear("memory_enabled")
+        flags.clear("workflow_specialist_bridge")
+
+
+def test_phase32_proactive_continuation_and_officer_ai_co_execution(tmp_db):
+    from pathlib import Path
+
+    from app import officer_chat
+    from app.workflows.registry import auto_load_flows
+
+    auto_load_flows(Path("App/backend/app/workflows/flows"))
+    memsvc = get_memory_service()
+    u = tmp_db.upsert_user(external_id="1000222111", tenant_id="default")
+    user_id = u["id"]
+    tmp_db.grant_consent(user_id, "personalization", "2026-04")
+
+    case = ResolutionCase(
+        user_id=user_id,
+        tenant_id="default",
+        thread_id="conv-p32",
+        source_channel="voice_call",
+        locale="en",
+        primary_objective="EFRIS Invoice Audit",
+        status="in_progress_background",
+        pending_steps=["Verify EFRIS fiscal receipt"],
+    )
+    assert memsvc.checkpoint_resolution_case(user_id, case, asr_confidence=0.95) is True
+
+    flags.set("proactive_resolution_continuation", True)
+    flags.set("officer_ai_co_execution", True)
+    try:
+        memsvc.resolution_ledger.attach_background_task(
+            user_id,
+            "task-efris-32",
+            completed_step="Verify EFRIS fiscal receipt",
+            evidence_note="Fiscal invoice FDN-8891 verified valid",
+        )
+        reminders = tmp_db.list_reminder_inbox(user_id)
+        assert any("EFRIS Invoice Audit" in r.get("deadline_name", "") for r in reminders)
+
+        ticket = tmp_db.create_ticket(
+            reason="dispute_resolved_followup",
+            conversation_id="conv-p32",
+            user_id=user_id,
+            locale="en",
+        )
+        draft = officer_chat.build_officer_copilot_draft(
+            ticket,
+            "Your VAT liability is 18% on UGX 2,000,000 (UGX 360,000).",
+        )
+        assert draft["figures_verified"] is True
+        assert "18%" in draft["draft_localized"]
+
+        delegated = officer_chat.delegate_ticket_to_ai(
+            ticket,
+            officer_id="staff-007",
+            officer_name="Officer Namuli",
+            workflow_id="tin_procedure_help",
+            prefill_slots={"taxpayer_kind": "individual"},
+        )
+        assert delegated["ok"] is True
+        assert delegated["delegated_workflow_id"] == "tin_procedure_help"
+        assert delegated["prefilled_slots"]["taxpayer_kind"] == "individual"
+    finally:
+        flags.clear("proactive_resolution_continuation")
+        flags.clear("officer_ai_co_execution")

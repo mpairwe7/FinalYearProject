@@ -85,6 +85,7 @@ class HandoffEnvelope:
     sla: SLAContext = field(default_factory=SLAContext)
     english_transcript_digest: list[dict[str, str]] = field(default_factory=list)
     officer_macros: list[dict[str, str]] = field(default_factory=list)
+    eq_guidance: dict[str, Any] = field(default_factory=dict)
 
     def completeness_ratio(self) -> float:
         """Compute structured handoff completeness score in [0.0, 1.0]."""
@@ -121,6 +122,7 @@ class HandoffEnvelope:
             "sla": asdict(self.sla),
             "english_transcript_digest": list(self.english_transcript_digest),
             "officer_macros": list(self.officer_macros),
+            "eq_guidance": dict(self.eq_guidance),
         }
 
     @classmethod
@@ -191,4 +193,5 @@ class HandoffEnvelope:
             sla=sla,
             english_transcript_digest=list(data.get("english_transcript_digest", [])),
             officer_macros=list(data.get("officer_macros", [])),
+            eq_guidance=dict(data.get("eq_guidance", {})),
         )

@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (58 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (63 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -659,6 +659,8 @@ Energy-based VAD with hysteresis (numpy only, no silero-vad dependency):
 | `ura_spoken_figure_verification_total` | counter | Spoken figure verification results (`verified`, `fallback_text_only`) |
 | `ura_handoff_envelope_completeness_ratio` | histogram | Completeness score `[0..1]` of `HandoffEnvelope` v2 packets |
 | `ura_relationship_resumption_total` | counter | Cross-channel `ResolutionCase` resumption and completion counts |
+| `ura_eq_interventions_total` | counter | Emotional intelligence (EQ) interventions (`de_escalated_autonomous`, `escalated_officer`) |
+| `ura_workforce_delegation_total` | counter | Coordinated Human <-> AI workforce delegations (`officer_to_ai`, `ai_to_officer`) |
 
 ## Feature Flags (`flags.py`)
 
@@ -699,9 +701,14 @@ All major subsystems are behind feature flags for progressive rollout:
 | `emotion_aware_prosody` | off | Acoustic prosody extraction (`receptionist/prosody.py`) in `CallerAudioTap` and dynamic empathy/pacing conditioning in TTS |
 | `spoken_figure_guard` | off | Acoustic & lexical digit verification (`receptionist/spoken_figure_guard.py`) and dictation pauses on synthesized TTS audio containing statutory figures, TINs, or PRNs |
 | `officer_voice_copilot` | off | Streams live ASR transcripts, English router views, and statutory rate cards to the officer desk while a voice call is bridged to `ura_staff` |
+| `eq_adaptive_retrieval` | off | Stage 0c/0b2 EQ assessment (`tools/empathy.py`, `query.py`) boosting statutory relief/instalment/waiver passages (`TPCA s.39, s.66`) on hardship/anxiety |
+| `zero_effort_slot_prefill` | off | Pre-fills `WorkflowSession` and calculator slots from consented `SemanticMemory`, `WorkingMemory.verified_slot_bank`, and scanned documents |
+| `workflow_specialist_bridge` | off | Allows active guided workflows (`workflows/registry.py`) to delegate mid-flow calculations to MCP calculator tools and bind results into pending slots |
+| `proactive_resolution_continuation` | off | Writes localized continuation cards to `reminder_inbox` when background `mcp_tasks` or officer reviews complete on an open `ResolutionCase` |
+| `officer_ai_co_execution` | off | Enables figure-protected bilingual draft replies (`officer_chat.py`) and `Officer -> AI` procedural workflow delegation |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**58** in total, including the per-phase switches for voice, offline and
+**63** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

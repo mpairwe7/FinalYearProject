@@ -274,6 +274,11 @@ class RegistryIntegrityTests(unittest.TestCase):
             "emotion_aware_prosody",
             "spoken_figure_guard",
             "officer_voice_copilot",
+            "eq_adaptive_retrieval",
+            "zero_effort_slot_prefill",
+            "workflow_specialist_bridge",
+            "proactive_resolution_continuation",
+            "officer_ai_co_execution",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

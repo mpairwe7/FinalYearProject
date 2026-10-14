@@ -343,6 +343,124 @@ def submit_csat(ticket: dict[str, Any], *, score: int | None, comment: str = "")
 
 
 # ---------------------------------------------------------------------------
+# Phase 32 (2026): Officer Co-Pilot Bilingual Drafts & Officer -> AI Delegation
+# ---------------------------------------------------------------------------
+def build_officer_copilot_draft(ticket: dict[str, Any], draft_en: str) -> dict[str, Any]:
+    """Prepare a figure-protected bilingual draft reply for the officer workbench.
+
+    Gated on ``FLAG_OFFICER_AI_CO_EXECUTION``. Uses ``service.localize_reply``
+    so every statutory rate, currency amount, and citation is protected by
+    ``mt.protect_figures`` and verified by ``mt.figures_survived``.
+    """
+    from . import mt
+    from .flags import flags
+
+    clean_en = _redact(draft_en)
+    locale = str(ticket.get("locale") or "en").strip().lower() or "en"
+    if not flags.is_enabled("officer_ai_co_execution", cohorts={"ura_staff"}) or locale == "en":
+        return {
+            "draft_en": clean_en,
+            "draft_localized": clean_en,
+            "locale": locale,
+            "figures_verified": True,
+        }
+    try:
+        from .service import localize_reply
+
+        localized = _redact(localize_reply(clean_en, locale))
+        figures_ok = mt.figures_survived(clean_en, localized, locale=locale)
+        if not figures_ok:
+            localized = clean_en
+        return {
+            "draft_en": clean_en,
+            "draft_localized": localized,
+            "locale": locale,
+            "figures_verified": figures_ok,
+        }
+    except Exception:
+        return {
+            "draft_en": clean_en,
+            "draft_localized": clean_en,
+            "locale": locale,
+            "figures_verified": True,
+        }
+
+
+def delegate_ticket_to_ai(
+    ticket: dict[str, Any],
+    *,
+    officer_id: str,
+    officer_name: str,
+    workflow_id: str,
+    prefill_slots: dict[str, Any] | None = None,
+    note: str = "",
+) -> dict[str, Any]:
+    """Hand a ticket's routine procedural follow-up from a live officer back to the AI workflow engine.
+
+    Enforces ``FLAG_OFFICER_AI_CO_EXECUTION``, seeds a pre-filled ``WorkflowSession``
+    on the ticket's conversation, logs a system transition message in ``ticket_messages``,
+    and records ``ura_workforce_delegation_total{direction="officer_to_ai"}``.
+    """
+    from .flags import flags
+    from .workflows.registry import WorkflowRegistry
+
+    if not flags.is_enabled("officer_ai_co_execution", cohorts={"ura_staff"}):
+        raise RuntimeError("officer_ai_co_execution flag is disabled")
+    wf = WorkflowRegistry.get(workflow_id)
+    if wf is None:
+        raise ValueError(f"unknown workflow_id {workflow_id!r}")
+
+    session = WorkflowRegistry.create_session(workflow_id)
+    if session is None:
+        raise ValueError(f"could not create workflow session for {workflow_id!r}")
+    for k, v in (prefill_slots or {}).items():
+        if k and v not in ("", None):
+            session.slots[str(k)] = v
+
+    conv_id = str(ticket.get("conversation_id") or ticket["id"])
+    tenant_id = str(ticket.get("tenant_id") or "default")
+    user_id = str(ticket.get("user_id") or "")
+    state_key = db.conversation_state_key(
+        conv_id,
+        session_id=str(ticket.get("session_id") or "") or None,
+        user_id=user_id or None,
+        tenant_id=tenant_id,
+    )
+    db.upsert_workflow_session(
+        state_key,
+        workflow_id=session.workflow_id,
+        current_step_idx=session.current_step_idx,
+        slots=session.slots,
+        status="active",
+        tenant_id=tenant_id,
+    )
+    transition_note = note.strip() or f"Officer {officer_name or officer_id} delegated procedural follow-up ({wf.name}) to URA AI Assistant."
+    append_message(
+        ticket,
+        "officer",
+        transition_note,
+        officer_id=officer_id,
+        officer_name=officer_name,
+    )
+    try:
+        from .analytics import metrics
+
+        metrics.inc(
+            "workforce_delegation_total",
+            labels={"direction": "officer_to_ai", "workflow": workflow_id},
+        )
+    except Exception as _exc:  # noqa: BLE001
+        _ = _exc
+    return {
+        "ok": True,
+        "ticket_id": str(ticket["id"]),
+        "conversation_id": conv_id,
+        "delegated_workflow_id": workflow_id,
+        "prefilled_slots": dict(session.slots),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Privacy: erasure, export and retention
 # ---------------------------------------------------------------------------
 def delete_for_tickets(ticket_ids: list[str]) -> int:

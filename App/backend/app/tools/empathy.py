@@ -104,6 +104,9 @@ def assess(message: str, history: list[str] | None = None) -> dict[str, Any]:
             "offer_human_handoff": True,
             "avoid": "Do not answer a tax question in this turn; give the crisis lines first.",
             "explanation": "The message expresses intent to self-harm; reply with crisis support.",
+            "recommended_relief_statutes": [],
+            "retrieval_preference_terms": "",
+            "priority_boost": "urgent",
         }
     kind = detect_user_distress(text)
     trajectory = distress_trajectory(kind, history or [])
@@ -130,6 +133,35 @@ def assess(message: str, history: list[str] | None = None) -> dict[str, Any]:
         or trajectory["sustained"]
     )
 
+    relief_statutes: list[str] = []
+    relief_terms = ""
+    if kind == "hardship" or (kind == "anxiety" and intensity in ("moderate", "high")):
+        relief_statutes = [
+            "TPCA Section 39 (remission of interest)",
+            "TPCA Section 40(4) (instalment agreement / agency notice relief)",
+            "TPCA Section 66 (Voluntary Disclosure penalty waiver)",
+        ]
+        relief_terms = "instalment payment penalty waiver remission voluntary disclosure section 39 section 66"
+
+    priority_boost = "high" if offer_human else "normal"
+
+    if kind:
+        try:
+            from ..flags import flags
+
+            if flags.is_enabled("eq_adaptive_retrieval"):
+                from ..analytics import metrics
+
+                metrics.inc(
+                    "eq_interventions_total",
+                    labels={
+                        "affect": kind,
+                        "outcome": "escalated_officer" if offer_human else "de_escalated_autonomous",
+                    },
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _ = _exc
+
     return {
         "kind": kind,
         "intensity": intensity,
@@ -146,6 +178,9 @@ def assess(message: str, history: list[str] | None = None) -> dict[str, Any]:
             if kind
             else "The message reads as neutral; answer directly without an empathy opener."
         ),
+        "recommended_relief_statutes": relief_statutes,
+        "retrieval_preference_terms": relief_terms,
+        "priority_boost": priority_boost,
     }
 
 

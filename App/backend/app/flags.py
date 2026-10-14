@@ -460,6 +460,40 @@ _REGISTRY: dict[str, Flag] = {
             "Stream live ASR transcripts, English translations, and statutory rate "
             "cards to the officer desk while a voice call is bridged to staff.",
         ),
+        # Phase 32 (2026) — Agentic CX, Emotional Intelligence (EQ) & Workforce Co-Execution
+        Flag(
+            "eq_adaptive_retrieval",
+            False,
+            "Run deterministic EQ assessment in Stage 0c to boost statutory "
+            "relief/instalment/waiver passages and adapt response structure on "
+            "hardship, anxiety, or frustration.",
+        ),
+        Flag(
+            "zero_effort_slot_prefill",
+            False,
+            "Pre-fill WorkflowSession and calculator slots from consented "
+            "SemanticMemory, WorkingMemory.verified_slot_bank, and scanned documents.",
+        ),
+        Flag(
+            "workflow_specialist_bridge",
+            False,
+            "Allow active guided workflows to invoke TAX_SPECIALIST, "
+            "CUSTOMS_SPECIALIST, or MCP calculators mid-flow to compute a slot "
+            "and resume without losing workflow state.",
+        ),
+        Flag(
+            "proactive_resolution_continuation",
+            False,
+            "Enable background post-interaction continuation when mcp_tasks or "
+            "officer reviews complete, writing localized continuation cards to "
+            "reminder_inbox.",
+        ),
+        Flag(
+            "officer_ai_co_execution",
+            False,
+            "Enable pre-verified bilingual draft replies on the officer workbench "
+            "and Officer -> AI procedural follow-up delegation.",
+        ),
     ]
 }
 
@@ -625,6 +659,8 @@ class FeatureFlags:
                 "hybrid_speech_s2s",
                 "multi_agent_dag",
                 "spoken_figure_guard",
+                "eq_adaptive_retrieval",
+                "workflow_specialist_bridge",
             )
         }
 
