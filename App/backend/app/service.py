@@ -8874,7 +8874,7 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
-        user_stated_ids = tuple(re.findall(r"\b\d{10}\b|\b[A-Z0-9]{10,18}\b", message))
+        user_stated_ids = tuple(re.findall(r"\b1\d{9}\b|\b2\d{11,13}\b", message))
         _ACTIVE_USER_STATED_IDS.set(user_stated_ids)
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
@@ -10757,7 +10757,7 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
-        user_stated_ids = tuple(re.findall(r"\b\d{10}\b|\b[A-Z0-9]{10,18}\b", message))
+        user_stated_ids = tuple(re.findall(r"\b1\d{9}\b|\b2\d{11,13}\b", message))
         _ACTIVE_USER_STATED_IDS.set(user_stated_ids)
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale

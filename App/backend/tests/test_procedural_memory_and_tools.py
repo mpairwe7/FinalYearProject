@@ -170,10 +170,13 @@ class TestScopedRedactionAndVernacularRewrite(unittest.TestCase):
         redacted = redact_pii_text(text)
         self.assertIn("[REDACTED_UG_TIN]", redacted)
 
-        # With user stated TIN allowed, TIN is preserved
-        preserved = redact_pii_text(text, allowed_values=["1000123456"])
+        # With user stated TIN allowed, TIN is preserved even when labelled
+        labelled_text = "Your registered TIN: 1000123456 has been confirmed, but card 4111 2222 3333 4444 is secret."
+        preserved = redact_pii_text(labelled_text, allowed_values=["1000123456", "4111222233334444"])
         self.assertIn("1000123456", preserved)
-        self.assertIn("[REDACTED_EMAIL]", preserved)
+        # Payment card must ALWAYS be redacted, even if present in allowed_values
+        self.assertIn("[REDACTED_CREDIT_CARD]", preserved)
+        self.assertNotIn("4111 2222 3333 4444", preserved)
 
     def test_vernacular_query_skips_english_spell_corrector(self) -> None:
         from app.query import rewrite
