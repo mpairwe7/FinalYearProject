@@ -97,7 +97,7 @@ def speaker_for(language: str) -> str | None:
     """The Orpheus speaker for *language*, or ``None`` if Orpheus does not voice it here."""
     if not is_configured():
         return None
-    enabled = {p.strip() for p in os.getenv("ORPHEUS_TTS_LANGUAGES", "lg").split(",") if p.strip()}
+    enabled = {p.strip() for p in os.getenv("ORPHEUS_TTS_LANGUAGES", "lg,sw,en").split(",") if p.strip()}
     if language not in enabled:
         return None
     return os.getenv(f"ORPHEUS_TTS_SPEAKER_{language.upper()}", "").strip() or _DEFAULT_SPEAKERS.get(language)

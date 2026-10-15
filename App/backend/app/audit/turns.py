@@ -168,7 +168,7 @@ def build_turn_payload(
 
     reply = str(result.get("reply", "") or "")
     sources = [str(source)[:200] for source in list(result.get("sources") or [])[:_MAX_LISTED]]
-    return {
+    payload = {
         "schema": TURN_PAYLOAD_SCHEMA,
         "channel": channel,
         "outcome": turn_outcome(result),
@@ -195,6 +195,31 @@ def build_turn_payload(
         "flag_variants_sha256": _sha256(flag_variants) if flag_variants else "",
         "provenance": provenance(),
     }
+    try:
+        from ..flags import flags
+
+        if flags.is_enabled("continuous_quality_scorecard"):
+            from .governance_v3 import evaluate_interaction_scorecard
+
+            sc = evaluate_interaction_scorecard(
+                session_id=str(result.get("conversation_id") or ""),
+                locale=str(result.get("reply_locale") or result.get("locale") or "en"),
+                channel=channel,
+                reply_text=reply,
+                sources=sources,
+                figure_fidelity_passed=True,
+                policy_adherence_passed=True,
+            )
+            payload["quality_scorecard"] = {
+                "scorecard_id": sc.scorecard_id,
+                "composite_quality_score": sc.composite_quality_score,
+                "figure_fidelity_score": sc.figure_fidelity_score,
+                "statutory_accuracy_score": sc.statutory_accuracy_score,
+                "flagged_for_human_review": sc.flagged_for_human_review,
+            }
+    except Exception:
+        logger.debug("Quality scorecard evaluation skipped in build_turn_payload", exc_info=True)
+    return payload
 
 
 def append_turn(

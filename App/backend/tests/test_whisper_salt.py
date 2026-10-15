@@ -34,11 +34,9 @@ class LanguageTokenMapTests(unittest.TestCase):
         self.assertEqual(ss.SALT_LANGUAGE_TOKEN_IDS["sw"], 50318)
 
     def test_lg_nyn_ach_are_the_model_cards_ids_despite_the_wrong_decode(self) -> None:
-        """Pins the ids an A/B test justified using, not the (misleading)
-        strings they decode to on this checkpoint's base Whisper vocabulary
-        — see docs/runbooks/salt-speech-backends.md for the measurement."""
-        self.assertEqual(ss.SALT_LANGUAGE_TOKEN_IDS["lg"], 50355)
-        self.assertEqual(ss.SALT_LANGUAGE_TOKEN_IDS["nyn"], 50354)
+        """Pins the Sunbird/SunflowerASR-51-african-languages model card token IDs."""
+        self.assertEqual(ss.SALT_LANGUAGE_TOKEN_IDS["lg"], 50332)
+        self.assertEqual(ss.SALT_LANGUAGE_TOKEN_IDS["nyn"], 50322)
         self.assertEqual(ss.SALT_LANGUAGE_TOKEN_IDS["ach"], 50357)
 
     def test_no_id_is_guessed_for_a_locale_outside_the_five(self) -> None:
@@ -73,14 +71,14 @@ class TranscribeWhisperSaltUnitTests(unittest.TestCase):
             ss.SpeechModel._transcribe_whisper_salt(model, b"\x00" * 3200, 16000, "en")
         self.assertEqual(fake_model.generate.call_args.kwargs["language"], "<|en|>")
 
-    def test_luganda_forces_id_50355s_string_despite_its_stale_label(self) -> None:
-        model, fake_model, fake_processor = self._model_with_salt({50355: "<|ba|>"})
+    def test_luganda_forces_id_50332s_string_despite_its_stale_label(self) -> None:
+        model, fake_model, fake_processor = self._model_with_salt({50332: "<|sd|>"})
         with patch("torch.no_grad"):
             ss.SpeechModel._transcribe_whisper_salt(model, b"\x00" * 3200, 16000, "lg")
-        # The call forces whatever id 50355 decodes to on THIS tokenizer,
+        # The call forces whatever id 50332 decodes to on THIS tokenizer,
         # not a hand-picked "<|lg|>" string that would not round-trip.
-        fake_processor.tokenizer.decode.assert_called_with([50355])
-        self.assertEqual(fake_model.generate.call_args.kwargs["language"], "<|ba|>")
+        fake_processor.tokenizer.decode.assert_called_with([50332])
+        self.assertEqual(fake_model.generate.call_args.kwargs["language"], "<|sd|>")
 
     def test_a_locale_outside_the_map_gets_no_forced_language(self) -> None:
         model, fake_model, fake_processor = self._model_with_salt({})
@@ -102,11 +100,11 @@ class TranscribeWhisperSaltUnitTests(unittest.TestCase):
         self.assertIsNone(result.language)
 
     def test_a_detected_language_is_forced_when_the_caller_sent_none(self) -> None:
-        model, fake_model, fake_processor = self._model_with_salt({50355: "<|ba|>"})
+        model, fake_model, fake_processor = self._model_with_salt({50332: "<|sd|>"})
         model._detect_salt_language = lambda *_a, **_kw: "lg"
         with patch("torch.no_grad"):
             result = ss.SpeechModel._transcribe_whisper_salt(model, b"\x00" * 3200, 16000, None)
-        self.assertEqual(fake_model.generate.call_args.kwargs["language"], "<|ba|>")
+        self.assertEqual(fake_model.generate.call_args.kwargs["language"], "<|sd|>")
         self.assertIn("omusolo", fake_processor.get_prompt_ids.call_args.args[0])
         self.assertEqual(result.language, "lg")
 

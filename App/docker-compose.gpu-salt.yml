@@ -53,7 +53,9 @@ services:
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.
+      - WHISPER_SALT_MODEL=${WHISPER_SALT_MODEL:-Sunbird/SunflowerASR-51-african-languages}
       - WHISPER_SALT_DEVICE=${SPEECH_DEVICE:-cuda:0}
+      - SPARK_TTS_ENABLED=${SPARK_TTS_ENABLED:-false}
       - SPARK_TTS_DEVICE=${SPEECH_DEVICE:-cuda:0}
       - SPARK_TTS_SPEAKER_EN=${SPARK_TTS_SPEAKER_EN:-248}
       # The base file pins the reranker to cpu to dodge a GPU-0 startup stall
@@ -152,7 +154,6 @@ services:
   #   ORPHEUS_GPU_ID=7 ORPHEUS_TTS_URL=http://orpheus-tts:8100 \
   #   FLAG_RECEPTIONIST_LANGUAGE_DETECTION=true docker compose ... --profile multilingual up -d
   orpheus-tts:
-    profiles: ["multilingual"]
     build:
       context: ./backend/orpheus_sidecar
     image: ${DOCKER_IMAGE_ORPHEUS:-app-orpheus-tts}:latest

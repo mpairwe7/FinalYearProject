@@ -79,7 +79,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SPARK_TTS_ENABLED = os.getenv("SPARK_TTS_ENABLED", "true").strip().lower() in (
+SPARK_TTS_ENABLED = os.getenv("SPARK_TTS_ENABLED", "false").strip().lower() in (
     "1", "true", "yes",
 )
 SPARK_TTS_MODEL = os.getenv("SPARK_TTS_MODEL", "Sunbird/spark-tts-salt")

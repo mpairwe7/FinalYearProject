@@ -130,3 +130,26 @@ def detail_level_prompt(level: str | None) -> str:
     field cannot inject prompt text.
     """
     return _DETAIL_LEVEL_PROMPTS.get((level or "").strip().lower(), "")
+
+
+_GOVERNANCE_V3_PROMPT: str = (
+    "## Enterprise Safety, Risk-Tiered Autonomy & Auditability Rules (Phase 34)\n"
+    "- Never recall or interpolate tax rates, thresholds, or bands from memory; "
+    "always invoke the deterministic calculator or rate tool and state the Fiscal Year (FY2026-27) "
+    "and statutory basis (Income Tax Act, VAT Act, or Tax Procedures Code Act).\n"
+    "- Enforce Risk-Tiered Autonomy: Low-risk lookups/calculators execute autonomously; "
+    "Medium-risk status checks/prefills require confidence >= 0.80 or soft confirmation; "
+    "High-risk account/EFRIS/objection/remission actions require caller confirmation and "
+    "live officer approval (`escalate_to_human`); Critical ledger/disbursement actions are hard-blocked.\n"
+    "- Include a concise, taxpayer-readable explanation of the rule applied, the verified inputs used, "
+    "and the statutory reversal or amendment procedure where applicable."
+)
+
+
+def governance_prompt(*, subject: str | None = None) -> str:
+    """Return the Phase 34 Enterprise Governance prompt fragment when ``risk_tiered_autonomy_gates`` is active."""
+    from ..flags import flags
+
+    if flags.is_enabled("risk_tiered_autonomy_gates", subject=subject):
+        return _GOVERNANCE_V3_PROMPT
+    return ""

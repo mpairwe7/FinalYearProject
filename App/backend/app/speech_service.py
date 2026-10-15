@@ -439,7 +439,7 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").strip().lower() or "cpu"
 WHISPER_SALT_ENABLED = os.getenv("WHISPER_SALT_ENABLED", "true").strip().lower() in (
     "1", "true", "yes",
 )
-WHISPER_SALT_MODEL = os.getenv("WHISPER_SALT_MODEL", "Sunbird/asr-whisper-large-v3-salt")
+WHISPER_SALT_MODEL = os.getenv("WHISPER_SALT_MODEL", "Sunbird/SunflowerASR-51-african-languages")
 WHISPER_SALT_DEVICE = os.getenv("WHISPER_SALT_DEVICE", "") or WHISPER_DEVICE
 
 # SALT special-token ids to force, keyed by this deployment's locale codes.
@@ -488,9 +488,9 @@ WHISPER_SALT_DEVICE = os.getenv("WHISPER_SALT_DEVICE", "") or WHISPER_DEVICE
 SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
     "en": 50259,   # <|en|> — Whisper's original table; decode-verified
     "sw": 50318,   # <|sw|> — Whisper's original table; decode-verified
-    "lg": 50355,   # decodes to <|ba|> (Bashkir); A/B-verified to help anyway
-    "nyn": 50354,  # decodes to <|ha|> (Hausa); NOT independently verified
-    "ach": 50357,  # decodes to <|su|> (Sundanese); NOT independently verified
+    "lg": 50332,   # lug — Sunbird/SunflowerASR-51-african-languages token table
+    "nyn": 50322,  # nyn — Sunbird/SunflowerASR-51-african-languages token table
+    "ach": 50357,  # ach — Sunbird/SunflowerASR-51-african-languages token table
 }
 
 # Domain prompts. An unset language used to take the English sentence, so a
@@ -1536,7 +1536,12 @@ class SpeechModel:
             except Exception:
                 prompt_ids = None
 
-        gen_kwargs: dict[str, Any] = {"max_new_tokens": 225, "language": forced_language}
+        gen_kwargs: dict[str, Any] = {
+            "max_new_tokens": 444,
+            "num_beams": 1,
+            "do_sample": False,
+            "language": forced_language,
+        }
         if prompt_ids is not None:
             gen_kwargs["prompt_ids"] = prompt_ids
 

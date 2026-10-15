@@ -355,6 +355,33 @@ class ToolRegistry:
             result.setdefault("mode", "simulation")
             result.setdefault("live", False)
             result.setdefault("simulation_notice", _SIMULATION_NOTICE)
+
+        try:
+            from ..flags import flags
+
+            if flags.is_enabled("action_level_audit_v3") or flags.is_enabled("verifiable_decision_receipts"):
+                from ..audit.governance_v3 import append_action_audit_v3
+
+                rec, receipt = append_action_audit_v3(
+                    session_id=str((arguments or {}).get("conversation_id") or "tool_dispatch"),
+                    tool_or_action_name=name,
+                    intent_detected=name,
+                    intent_confidence=1.0,
+                    parameters_redacted={
+                        k: ("***" if k.lower() in ("tin", "nin", "prn") else v)
+                        for k, v in (arguments or {}).items()
+                    },
+                    response_summary_redacted={"ok": bool(result.get("ok", True))},
+                    execution_status="success" if result.get("ok", True) else "error",
+                    execution_latency_ms=elapsed_ms,
+                )
+                if flags.is_enabled("verifiable_decision_receipts"):
+                    result["decision_receipt"] = receipt.model_dump()
+                elif rec.audit_event_id:
+                    result["audit_event_id"] = rec.audit_event_id
+        except Exception:
+            logger.debug("Phase 34 tool audit enrichment skipped for %s", name, exc_info=True)
+
         return result
 
 

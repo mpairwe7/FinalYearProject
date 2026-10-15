@@ -167,7 +167,7 @@ class TestChatResponse:
 
         assert response.reply == "Test response"
         assert response.sources == []
-        assert response.model == "Sunbird/Sunflower-14B-FP8"
+        assert response.model == "Sunbird/Sunflower-Qwen3.5-9B"
 
 
 class TestChatModel:
@@ -179,7 +179,7 @@ class TestChatModel:
 
         model = ChatModel()
 
-        assert model.name == "Sunbird/Sunflower-14B-FP8"
+        assert model.name == "Sunbird/Sunflower-Qwen3.5-9B"
     
     def test_generate_returns_dict(self, isolated_analytics_db):
         """Test generate returns proper dict."""
@@ -217,7 +217,7 @@ class TestChatModel:
         assert isinstance(result["reply"], str)
         assert len(result["reply"]) > 0
         assert isinstance(result["sources"], list)
-        assert result["model"] == "Sunbird/Sunflower-14B-FP8"
+        assert result["model"] == "Sunbird/Sunflower-Qwen3.5-9B"
         assert result["retrieval_mode"] in ("hybrid", "keyword", "abstained", "blocked", "education")
         assert isinstance(result["escalation_required"], bool)
 

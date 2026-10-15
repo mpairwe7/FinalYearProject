@@ -20,7 +20,7 @@ from app import tracing  # noqa: E402
 from app.analytics import metrics  # noqa: E402
 
 USAGE_PAYLOAD = {
-    "model": "Sunbird/Sunflower-14B-FP8",
+    "model": "Sunbird/Sunflower-Qwen3.5-9B",
     "choices": [{"message": {"content": "18%"}, "finish_reason": "stop"}],
     "usage": {"prompt_tokens": 1742, "completion_tokens": 58},
 }
