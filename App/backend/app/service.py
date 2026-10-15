@@ -10731,7 +10731,7 @@ class ChatModel:
         """
         from .audit.turns import append_turn
 
-        enriched = dict(result) if isinstance(result, Mapping) else {}
+        enriched = dict(result) if isinstance(result, dict) else {}
         enriched.setdefault("figure_fidelity_passed", not bool(enriched.get("figure_fidelity_rescued", False)))
         enriched.setdefault(
             "policy_adherence_passed",
