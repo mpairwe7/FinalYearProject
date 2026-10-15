@@ -2684,7 +2684,23 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         namespace = connector_by_tool.get(tool_name)
         if namespace is None:
             return {}
-        return {"connector": namespace, "connector_mode": connector_mode(namespace)}
+        return {
+            "connector": namespace,
+            "connector_mode": connector_mode(namespace),
+            "connector_label": connector_label(namespace),
+        }
+
+    def _connector_outcome(tool_name: str, result: Any) -> dict[str, str]:
+        """How a connector call ended (found / no_record / needs_input / unavailable).
+
+        An enum the client can show beside the answer ("EFRIS · no matching
+        record"); the record itself never travels in the trace.
+        """
+        fields = _connector_fields(tool_name)
+        if not fields:
+            return {}
+        outcomes = classify_all([{**fields, "name": tool_name, "result": result}], label_for=connector_label)
+        return {"connector_outcome": outcomes[0].kind} if outcomes else {}
     local_eligible = eligible_names - remote_names
     if connector_namespaces:
         local_eligible = set(_connector_chat_local_tool_names(sorted(local_eligible)))
@@ -3109,6 +3125,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     "elapsed_ms": round(elapsed_ms, 2),
                     "iteration": iteration,
                     **_connector_fields(pc["name"]),
+                    **_connector_outcome(pc["name"], result),
                 }
             )
             tool_calls_made.append(

@@ -275,6 +275,57 @@ describe("ChatInput attachments", () => {
 
       expect(screen.getByTitle("Demo data")).toHaveTextContent("Demo");
     });
+
+    it("says what a lookup sends before anything is chosen", async () => {
+      const dialog = await open({ chatConnectors: [efris] });
+
+      expect(
+        within(dialog).getByText(/Only what a lookup needs is sent to the service/),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText(/your account reference if you are signed in/)).toBeInTheDocument();
+    });
+
+    it("leaves Add a connector out of the menu where none are switched on", async () => {
+      render(<ChatInput {...defaults} onAttachFiles={vi.fn()} connectorsHidden />);
+      await userEvent.click(screen.getByTestId("composer-add-btn"));
+
+      const menu = screen.getByRole("menu");
+      expect(within(menu).queryByRole("menuitem", { name: /Add a connector/ })).not.toBeInTheDocument();
+      expect(within(menu).getByRole("menuitem", { name: /Upload a file/ })).toBeInTheDocument();
+      expect(within(menu).getAllByRole("menuitem")).toHaveLength(2);
+    });
+
+    it("shows every chosen service as a chip, even one the catalog has not described yet", () => {
+      render(
+        <ChatInput
+          {...defaults}
+          onAttachFiles={vi.fn()}
+          connectorsEnabled
+          chatConnectors={[]}
+          selectedConnectorNamespaces={["payment_system"]}
+        />,
+      );
+
+      const chips = screen.getByRole("group", { name: "Services selected for this chat" });
+      expect(within(chips).getByText("Payment System")).toBeInTheDocument();
+      expect(within(chips).getByRole("button", { name: "Remove Payment System from this chat" })).toBeEnabled();
+    });
+
+    it("marks a chosen service that is not answering on its chip", () => {
+      render(
+        <ChatInput
+          {...defaults}
+          onAttachFiles={vi.fn()}
+          connectorsEnabled
+          chatConnectors={[ursb]}
+          selectedConnectorNamespaces={["ursb"]}
+        />,
+      );
+
+      const chips = screen.getByRole("group", { name: "Services selected for this chat" });
+      expect(within(chips).getByTitle("This service is not responding right now.")).toHaveTextContent("Unavailable");
+      expect(chips.querySelector(".composer-connector-chip")).toHaveClass("is-unavailable");
+    });
   });
 
   it("shows an attached image as itself on its chip", () => {

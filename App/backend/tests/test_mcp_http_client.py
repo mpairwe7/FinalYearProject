@@ -12,13 +12,14 @@ from app.mcp.auth import ClientCredentialsToken, TokenError, client_credentials_
 from app.mcp.mrtr import parse_input_required
 from app.mcp.protocol import DEFAULT_CLIENT_CAPABILITIES, MCP_PROTOCOL_VERSION
 from app.mcp.transport import (
+    LIVENESS_TTL_S,
     HttpTransport,
     InProcessTransport,
     TransportError,
-    _remote_url_problem,
     build_transports,
     encode_header_value,
     header_parameters,
+    remote_url_problem,
 )
 
 SECRET = "s3cr3t-value-that-must-never-appear"  # noqa: S105  # pragma: allowlist secret - a marker the tests search for
@@ -428,18 +429,18 @@ class ClientCredentialsTests(unittest.TestCase):
 
 class BindingTests(unittest.TestCase):
     def test_a_url_must_be_plain_http_s_and_carry_no_credentials(self) -> None:
-        self.assertEqual(_remote_url_problem("https://mcp.example/efris"), "")
-        self.assertEqual(_remote_url_problem("http://connectors:8930/efris"), "")
-        self.assertIn("http(s)", _remote_url_problem("file:///etc/passwd"))
+        self.assertEqual(remote_url_problem("https://mcp.example/efris"), "")
+        self.assertEqual(remote_url_problem("http://connectors:8930/efris"), "")
+        self.assertIn("http(s)", remote_url_problem("file:///etc/passwd"))
         # A URL that carries a password is refused; this one is a fixture.
         self.assertIn(
             "MCP_SERVER_TOKEN",
-            _remote_url_problem("https://user:pw@mcp.example/efris"),  # pragma: allowlist secret
+            remote_url_problem("https://user:pw@mcp.example/efris"),  # pragma: allowlist secret
         )
 
     def test_production_refuses_a_link_tls_cannot_vouch_for(self) -> None:
         with patch.dict("os.environ", {"APP_ENV": "production"}):
-            self.assertIn("https", _remote_url_problem("http://connectors:8930/efris"))
+            self.assertIn("https", remote_url_problem("http://connectors:8930/efris"))
 
     def test_an_unusable_binding_leaves_the_namespace_in_process(self) -> None:
         env = {
@@ -473,3 +474,66 @@ class ClientCapabilityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LivenessTests(unittest.TestCase):
+    """A tool list cached for an hour must not make a silent server look available."""
+
+    _TOOLS = {"tools": [{"name": "efris_taxpayer_status", "inputSchema": {"type": "object"}}], "ttlMs": 3_600_000}
+    _DISCOVER = {"supportedVersions": [MCP_PROTOCOL_VERSION], "ttlMs": 3_600_000}
+
+    def _expire_window(self, transport: HttpTransport) -> None:
+        transport._live_checked_at -= LIVENESS_TTL_S + 1
+
+    def test_a_server_that_stops_answering_is_seen_within_the_liveness_window(self) -> None:
+        transport, recorder = _transport(_result(self._TOOLS))
+        self.assertEqual(len(transport.list_tools()), 1)
+        self.assertTrue(transport.is_live())  # tools/list just answered
+
+        recorder._responders = [ConnectionError("connection refused")]
+        # The list is still served from the cache the server allowed...
+        self.assertEqual(len(transport.list_tools()), 1)
+        self.assertTrue(transport.is_live())  # ...and liveness is believed for the window
+        self._expire_window(transport)
+        self.assertFalse(transport.is_live())  # then a probe finds it gone
+        self.assertEqual(recorder.requests[-1]["body"]["method"], "server/discover")
+
+    def test_a_failed_call_marks_the_server_down_at_once_and_a_probe_brings_it_back(self) -> None:
+        transport, recorder = _transport(_result(self._TOOLS))
+        transport.list_tools()
+        recorder._responders = [ConnectionError("connection refused")]
+        with self.assertRaises(TransportError):
+            transport.call("efris_taxpayer_status", {}, meta={}, timeout_s=1.0)
+        self.assertFalse(transport.is_live())  # no wait for the window
+
+        recorder._responders = [_result(self._DISCOVER)]
+        transport._retry_after = 0.0
+        self._expire_window(transport)
+        self.assertTrue(transport.is_live())
+
+    def test_a_gateway_error_counts_as_not_answering(self) -> None:
+        transport, recorder = _transport(_result(self._TOOLS))
+        transport.list_tools()
+        recorder._responders = [lambda _body: _Response(503, None, text="no upstream")]
+        with self.assertRaises(TransportError):
+            transport.call("efris_taxpayer_status", {}, meta={}, timeout_s=1.0)
+        self.assertFalse(transport.is_live())
+
+    def test_credential_kind_names_the_mechanism_never_the_value(self) -> None:
+        url = "https://mcp.example/efris"
+        self.assertEqual(HttpTransport("efris", url).credential_kind, "none")
+        self.assertEqual(HttpTransport("efris", url, token=SECRET + "x" * 32).credential_kind, "shared_token")
+        self.assertEqual(
+            HttpTransport("efris", url, token="short").credential_kind,  # noqa: S106 - a test value
+            "shared_token_too_short",
+        )
+        grant = ClientCredentialsToken(
+            token_url="https://idp.example/token",  # noqa: S106 - an endpoint, not a secret
+            client_id="chatbot",
+            client_secret=SECRET,
+            resource=url,
+        )
+        self.assertEqual(
+            HttpTransport("efris", url, token_source=grant).credential_kind, "oauth_client_credentials"
+        )
+

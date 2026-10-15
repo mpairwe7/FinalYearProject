@@ -145,6 +145,7 @@ POST /v1/chat
 | `top_k` | integer | No | Number of passages to retrieve (1–10, default 4) |
 | `locale` | string | No | ISO 639-1/639-3 or BCP 47 tag, e.g. `en`, `lg`, `sw-UG` (the region is dropped) |
 | `locale_explicit` | boolean | No | `true` when the taxpayer picked `locale`; `false` when it is only the client's default or an earlier detection. Omitted: a requested `lg`/`sw` counts as a choice and `en` as a default |
+| `connector_namespaces` | string[] | No | Chat connectors the taxpayer chose for this conversation (up to 8, from `GET /v1/connectors?view=chat`). Ones this turn cannot use are left out and reported in `connector_notices`; they never fail the request |
 
 **Which language the reply is in** (`app/language_state.py`), highest first:
 a request typed into the message ("answer in Luganda"); a language the
@@ -189,6 +190,7 @@ this message; the profile's saved language for an ambiguous first message
 | `locale_source` | string | Why: `explicit_request`, `client_explicit`, `continuity`, `switched`, `detected`, `profile` or `default`. A client should keep only the first two as the taxpayer's choice and treat the rest as a hint |
 | `escalation_required` | boolean | Whether human review is recommended |
 | `escalation_reason` | string | Reason(s) for escalation (e.g. `low_faithfulness=0.12; no_retrieval_results`) |
+| `connector_notices` | object[] | Chosen connectors this turn was answered without: `{"namespace", "label", "reason"}` with `reason` one of `unavailable` (not answering right now), `not_offered` (not available to this account), `disabled` (chat connectors switched off). Empty when every chosen service was usable, or none was chosen |
 
 **Retrieval Modes**
 | Mode | Meaning |
@@ -223,10 +225,10 @@ POST /v1/chat/stream
 | Event | Data | Description |
 |-------|------|-------------|
 | `phase` | string | What the server is doing right now — see the table below |
-| `metadata` | JSON | Sources, citations, retrieval mode, locale, and `turn_id` — the answer's id in the conversation log, which a rating sends back (sent first) |
+| `metadata` | JSON | Sources, citations, retrieval mode, locale, and `turn_id` — the answer's id in the conversation log, which a rating sends back (sent first). Carries `connector_notices` (as on `/v1/chat`) when a chosen connector was left out of the turn |
 | `token` | string | Generated text chunk (sanitized, XSS-safe) |
 | `revision` | string | The **whole** reply, replacing what was streamed so far |
-| `agent_trace` | JSON | Buffered retrieval/tool trace, emitted just before `grounding` |
+| `agent_trace` | JSON | Buffered retrieval/tool trace, emitted just before `grounding`. A `tool_call.completed` entry for a connector carries `connector`, `connector_mode` (`simulation`/`live`), `connector_label` and `connector_outcome` (`found`, `no_record`, `needs_input`, `unavailable`) — never arguments or the record |
 | `grounding` | JSON | `faithfulness_score`, `escalation_required`, `escalation_reason` |
 | `done` | empty | Stream complete |
 | `error` | string | Error message |

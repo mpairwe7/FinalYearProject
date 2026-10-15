@@ -484,6 +484,34 @@ def contains_pii(text: str) -> bool:
     return False
 
 
+#: A TIN (10 digits from 1) or a PRN (12-14 digits from 2) typed by the taxpayer.
+_USER_STATED_ID_RE = re.compile(r"\b1\d{9}\b|\b2\d{11,13}\b")
+#: The redactor's own TIN pattern, so every format it would hide — prefixed
+#: ("TIN: …"), hyphenated or spaced in groups of 3-3-4 — is also one a taxpayer
+#: can state.
+_UG_TIN_RE = next(pattern for kind, pattern in _PII_PATTERNS if kind == "ug_tin")
+
+
+def user_stated_identifiers(message: str) -> tuple[str, ...]:
+    """The TINs and PRNs the taxpayer wrote in *message*, as digits (G143).
+
+    Echoing these back is not a disclosure — the taxpayer just typed them — and
+    redacting them made a lookup they asked for unreadable ("EFRIS holds … for
+    TIN [REDACTED_UG_TIN]"). A spaced or hyphenated TIN is normalised to its
+    digits, which is how the redactor compares it. Everything else stays redacted.
+    """
+    text = message or ""
+    found: list[str] = []
+    for value in _USER_STATED_ID_RE.findall(text):
+        if value not in found:
+            found.append(value)
+    for match in _UG_TIN_RE.finditer(text):
+        digits = re.sub(r"\D", "", match.group(0))
+        if digits and digits not in found:
+            found.append(digits)
+    return tuple(found)
+
+
 class StreamingDLPFilter:
     """Zero-latency streaming Data Loss Prevention (DLP) filter.
 
@@ -491,11 +519,16 @@ class StreamingDLPFilter:
     tokens (14-char Ugandan NINs, 10-digit TINs, phone numbers, credit card sequences)
     that split across streaming token chunk boundaries are caught and sanitized
     without introducing user-perceptible latency.
+
+    *allowed_values* are the identifiers the taxpayer stated this turn
+    (:func:`user_stated_identifiers`); the stream used to redact them even
+    after the non-streamed paths stopped doing so (G143, G154).
     """
 
-    def __init__(self, buffer_size: int = 24) -> None:
+    def __init__(self, buffer_size: int = 24, allowed_values: Iterable[str] = ()) -> None:
         self._buffer_size = buffer_size
         self._buffer = ""
+        self._allowed = tuple(allowed_values)
 
     def process_chunk(self, chunk: str) -> str:
         """Feed a new chunk of streamed text; returns sanitized text ready to yield."""
@@ -506,12 +539,12 @@ class StreamingDLPFilter:
         last_boundary = max(self._buffer.rfind(" "), self._buffer.rfind("\n"), self._buffer.rfind("\t"))
         if last_boundary != -1:
             to_sanitize = self._buffer[:last_boundary + 1]
-            sanitized = redact_pii_text(to_sanitize)
+            sanitized = redact_pii_text(to_sanitize, self._allowed)
             self._buffer = self._buffer[last_boundary + 1:]
             return sanitized
         if len(self._buffer) > self._buffer_size:
             flushable_len = len(self._buffer) - self._buffer_size
-            sanitized_full = redact_pii_text(self._buffer)
+            sanitized_full = redact_pii_text(self._buffer, self._allowed)
             emit = sanitized_full[:flushable_len]
             self._buffer = sanitized_full[flushable_len:]
             return emit
@@ -521,7 +554,7 @@ class StreamingDLPFilter:
         """Flush any remaining buffered text at the end of the stream."""
         if not self._buffer:
             return ""
-        remaining = redact_pii_text(self._buffer)
+        remaining = redact_pii_text(self._buffer, self._allowed)
         self._buffer = ""
         return remaining
 

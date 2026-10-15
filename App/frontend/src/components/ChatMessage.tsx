@@ -4,17 +4,64 @@ import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraCo
 import { formatDocType, stripStepPrefix } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
 import { localeLabel } from '../lib/locales';
-import { useTranslation } from '../lib/i18n';
+import { useTranslation, type TranslationKey } from '../lib/i18n';
+import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
 import { getChatSessionId } from '../lib/chatSession';
 import { authHeaders } from '../lib/authSession';
 import { detectDeadlineInMessage, downloadCalendarEvent, getGoogleCalendarUrl } from '../lib/calendarEvents';
 import FeedbackButtons from './FeedbackButtons';
 import HumanHandoff from './HumanHandoff';
-import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon } from './Icons';
+import { SparklesIcon, SpeakerIcon, StopIcon, UserIcon, BotIcon, LoadingDots, CopyIcon, CheckIcon, FileIcon, DownloadIcon, EyeIcon, PlugIcon } from './Icons';
 import LoadingState from './LoadingState';
 import Markdown from './Markdown';
 import WorkflowStepper from './WorkflowStepper';
 import ResourceCards from './ResourceCards';
+
+const CONNECTOR_OUTCOME_KEY: Record<ConnectorOutcome, TranslationKey> = {
+  found: 'message.connectorOutcomeFound',
+  no_record: 'message.connectorOutcomeNoRecord',
+  needs_input: 'message.connectorOutcomeNeedsInput',
+  unavailable: 'message.connectorOutcomeUnavailable',
+};
+
+const CONNECTOR_SKIPPED_KEY: Record<ConnectorSkipReason, TranslationKey> = {
+  unavailable: 'message.connectorSkippedUnavailable',
+  not_offered: 'message.connectorSkippedNotOffered',
+  disabled: 'message.connectorSkippedDisabled',
+};
+
+/**
+ * Where an answer's lookups came from, and which chosen services it went without.
+ *
+ * The reply already says "Demo data" in its own words when a practice system
+ * answered; this is the same fact as structure, beside the answer, so a reader
+ * can tell at a glance which service — if any — the answer rests on.
+ */
+function ConnectorAttribution({ used, notices }: { used?: ConnectorUse[]; notices?: ConnectorNotice[] }) {
+  const t = useTranslation();
+  if (!used?.length && !notices?.length) return null;
+  return (
+    <div className="connector-attribution">
+      {used?.length ? (
+        <ul className="connector-uses" aria-label={t('message.connectorsUsed')}>
+          {used.map((use) => (
+            <li key={use.namespace} className={`connector-use${use.outcome ? ` is-${use.outcome.replace('_', '-')}` : ''}`}>
+              <PlugIcon />
+              <span className="connector-use-name">{use.label}</span>
+              {use.mode === 'simulation' && <span className="connector-use-demo">{t('composer.connectorDemo')}</span>}
+              {use.outcome && <span className="connector-use-outcome">{t(CONNECTOR_OUTCOME_KEY[use.outcome])}</span>}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {notices?.map((notice) => (
+        <p key={notice.namespace} className="connector-skipped" role="note">
+          {t(CONNECTOR_SKIPPED_KEY[notice.reason], { name: notice.label })}
+        </p>
+      ))}
+    </div>
+  );
+}
 
 /** Copy an assistant reply to the clipboard with a brief confirmation. */
 function CopyButton({ text, noun = 'reply' }: { text: string; noun?: string }) {
@@ -352,6 +399,10 @@ function ChatMessageInner({
           </div>
         )}
 
+        {isAssistant && !isGreeting && !phaseLabel && turn.content && (
+          <ConnectorAttribution used={turn.connectorsUsed} notices={turn.connectorNotices} />
+        )}
+
         {isAssistant && turn.citations && turn.citations.length > 0 && (
           <details className="citations">
             <summary>
@@ -521,6 +572,12 @@ function actionsSignature(actions: string[] | undefined): string {
   return (actions ?? []).join('|');
 }
 
+function connectorSignature(turn: ChatTurn): string {
+  const used = (turn.connectorsUsed ?? []).map((use) => `${use.namespace}:${use.mode ?? ''}:${use.outcome ?? ''}`);
+  const notices = (turn.connectorNotices ?? []).map((notice) => `${notice.namespace}:${notice.reason}`);
+  return `${used.join('|')}#${notices.join('|')}`;
+}
+
 const ChatMessage = memo(ChatMessageInner, (prev, next) => {
   return (
     prev.turn.id === next.turn.id &&
@@ -540,6 +597,7 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.workflow?.status === next.turn.workflow?.status &&
     prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
     actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&
+    connectorSignature(prev.turn) === connectorSignature(next.turn) &&
     prev.onActionClick === next.onActionClick &&
     attachmentSignature(prev.turn.attachments) === attachmentSignature(next.turn.attachments) &&
     citationSignature(prev.turn.citations) === citationSignature(next.turn.citations) &&

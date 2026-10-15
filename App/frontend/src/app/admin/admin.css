@@ -397,6 +397,49 @@
   font-weight: var(--ops-weight-bold);
 }
 
+.connector-setup-steps code,
+.connector-diagnostic-tools code {
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+}
+
+/* What the deployment shows for a setup step right now. */
+.connector-step-detail {
+  display: block;
+  margin-top: var(--ops-space-1);
+  color: var(--text-2);
+  font-size: 0.92em;
+}
+
+.connector-setup-steps .ops-chip {
+  margin-inline-start: var(--ops-space-1);
+  vertical-align: middle;
+}
+
+/* Per-operation verdicts in Onboarding diagnostics: the row's own scale. */
+.connector-diagnostic-tools {
+  margin-top: var(--ops-space-2);
+  color: var(--text-1);
+  font-size: var(--ops-text-xs);
+}
+
+.connector-diagnostic-tools summary {
+  cursor: pointer;
+  font-weight: var(--ops-weight-bold);
+}
+
+.connector-diagnostic-tools ul {
+  display: grid;
+  gap: var(--ops-space-1);
+  margin: var(--ops-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connector-diagnostic-tools li.is-excluded {
+  color: var(--text-2);
+}
+
 .connector-deployment-copy {
   margin: calc(-1 * var(--ops-space-3)) 0 0;
   color: var(--text-1);

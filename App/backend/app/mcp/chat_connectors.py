@@ -18,6 +18,13 @@ than believed from the server:
   read-only, non-destructive and confirmation-free are eligible, and
   the dispatch policy is run again for the caller before anything is
   offered.
+
+A taxpayer's selection is a standing choice for the conversation, so a
+selected service that stops answering — or that this account may no
+longer use — is left out of the turn with a notice
+(:func:`resolve_chat_connector_selection`) instead of failing it.
+:func:`connector_diagnostics` tells staff why a bound server is or is
+not offered, from the same gate the chat uses.
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from __future__ import annotations
 import os
 import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..flags import flags
@@ -101,33 +109,60 @@ def _operation_title(descriptor: dict[str, Any], namespace: str = "") -> str:
     return readable_title(str(descriptor.get("name", "")), namespace)
 
 
-def is_taxpayer_read_tool(descriptor: dict[str, Any]) -> bool:
-    """Require a declared, non-writing operation with the needed policy data.
+#: Why an operation is not offered in chat, as :func:`read_tool_problems`
+#: and :func:`connector_diagnostics` report it. Stable codes: the staff
+#: console words them, and tests pin them.
+PROBLEM_NO_ANNOTATIONS = "no_annotations"
+PROBLEM_NOT_READ_ONLY = "not_read_only"
+PROBLEM_DESTRUCTIVE_NOT_FALSE = "destructive_not_false"
+PROBLEM_NO_RISK_LEVEL = "no_risk_level"
+PROBLEM_UNKNOWN_RISK_LEVEL = "unknown_risk_level"
+PROBLEM_MALFORMED_SCOPES = "malformed_scopes"
+PROBLEM_NEEDS_CONFIRMATION = "needs_confirmation"
+PROBLEM_NO_SCOPES_FOR_RISK = "no_scopes_for_risk"
+PROBLEM_DUPLICATE_NAME = "duplicate_name"
 
-    MCP annotations are hints, and MCP defaults missing ``destructiveHint``
-    to true. The connector must therefore declare both safe behavior hints
+
+def read_tool_problems(descriptor: dict[str, Any]) -> list[str]:
+    """Everything that keeps *descriptor* out of the taxpayer chat surface.
+
+    MCP annotations are hints, and MCP defaults a missing ``destructiveHint``
+    to true. A connector must therefore declare both safe behaviour hints
     and URA's risk/confirmation metadata. These checks are combined with
     deployment review, the dispatch-time policy, and server authorization.
+    An empty list is the only passing answer; :func:`is_taxpayer_read_tool`
+    is this function's verdict, so the diagnostics cannot drift from the gate.
     """
     annotations = descriptor.get("annotations")
     if not isinstance(annotations, dict):
-        return False
+        return [PROBLEM_NO_ANNOTATIONS]
+    problems: list[str] = []
+    if annotations.get("readOnlyHint") is not True:
+        problems.append(PROBLEM_NOT_READ_ONLY)
+    if annotations.get("destructiveHint") is not False:
+        problems.append(PROBLEM_DESTRUCTIVE_NOT_FALSE)
     declared_risk = _meta_of(descriptor, "risk", None)
+    risk = declared_risk.lower() if isinstance(declared_risk, str) else ""
     if not isinstance(declared_risk, str):
-        return False
-    risk = declared_risk.lower()
+        problems.append(PROBLEM_NO_RISK_LEVEL)
+    elif risk not in {"low", "medium", "high"}:
+        problems.append(PROBLEM_UNKNOWN_RISK_LEVEL)
     scopes = _meta_of(descriptor, "requiredScopes", ())
-    if not isinstance(scopes, (list, tuple)) or any(
-        not isinstance(scope, str) or not scope.strip() for scope in scopes
-    ):
-        return False
-    return bool(
-        annotations.get("readOnlyHint") is True
-        and annotations.get("destructiveHint") is False
-        and risk in {"low", "medium", "high"}
-        and _meta_of(descriptor, "requiresConfirmation", None) is False
-        and (risk == "low" or bool(scopes))
+    scopes_ok = isinstance(scopes, list | tuple) and all(
+        isinstance(scope, str) and scope.strip() for scope in scopes
     )
+    if not scopes_ok:
+        problems.append(PROBLEM_MALFORMED_SCOPES)
+    if _meta_of(descriptor, "requiresConfirmation", None) is not False:
+        problems.append(PROBLEM_NEEDS_CONFIRMATION)
+    if scopes_ok and risk in {"medium", "high"} and not scopes:
+        problems.append(PROBLEM_NO_SCOPES_FOR_RISK)
+    return problems
+
+
+def is_taxpayer_read_tool(descriptor: dict[str, Any]) -> bool:
+    """Require a declared, non-writing operation with the needed policy data."""
+    return not read_tool_problems(descriptor)
 
 
 def _eligible_from(
@@ -270,6 +305,72 @@ def selected_chat_connector_tools(
     ]
 
 
+#: Why a selected connector was left out of a turn. Deliberately coarse: a
+#: caller learns nothing the catalog does not already show them.
+SKIPPED_DISABLED = "disabled"  # the deployment has chat connectors switched off
+SKIPPED_UNAVAILABLE = "unavailable"  # offered to this caller, not answering right now
+SKIPPED_NOT_OFFERED = "not_offered"  # not in this caller's catalog
+
+
+@dataclass(frozen=True)
+class ConnectorSelection:
+    """A turn's selected connectors: the ones it can use, and why the rest are left out."""
+
+    usable: list[str] = field(default_factory=list)
+    skipped: list[dict[str, str]] = field(default_factory=list)
+
+
+def resolve_chat_connector_selection(
+    client: MCPClient,
+    namespaces: list[str] | None,
+    *,
+    user_role: str,
+    granted_purposes: list[str] | None = None,
+) -> ConnectorSelection:
+    """Split a selection into the connectors this turn may use and notices for the rest.
+
+    Fail-closed is about dispatch, not about the turn: nothing outside the
+    caller's current catalog is ever offered to the model. What changed is
+    that a service which stops answering, or which this account may no
+    longer use (a sign-out, a withdrawn consent, a flag switched off), no
+    longer fails the whole turn. Before, the stream answered 403, the
+    client's retry on ``/v1/chat`` answered 403 too, and the taxpayer read
+    "could not reach the URA knowledge base" on every message until they
+    found the chip and removed it.
+    """
+    selected = list(dict.fromkeys(ns for ns in namespaces or [] if _NAMESPACE_RE.fullmatch(ns)))
+    if not selected:
+        return ConnectorSelection()
+
+    def notice(namespace: str, reason: str) -> dict[str, str]:
+        return {"namespace": namespace, "label": connector_label(namespace), "reason": reason}
+
+    if not flags.is_enabled("enterprise_connectors"):
+        return ConnectorSelection(skipped=[notice(ns, SKIPPED_DISABLED) for ns in selected])
+    remotes = client.remote_namespaces()
+    eligible = {
+        namespace
+        for namespace, _descriptor in _eligible_from(
+            client, remotes, user_role=user_role, granted_purposes=granted_purposes
+        )
+    }
+    down = {
+        remote.namespace
+        for remote in remotes
+        if not remote.reachable and _offered_in_this_environment(remote.namespace)
+    }
+    usable: list[str] = []
+    skipped: list[dict[str, str]] = []
+    for namespace in selected:
+        if namespace in eligible:
+            usable.append(namespace)
+        elif namespace in down:
+            skipped.append(notice(namespace, SKIPPED_UNAVAILABLE))
+        else:
+            skipped.append(notice(namespace, SKIPPED_NOT_OFFERED))
+    return ConnectorSelection(usable=usable, skipped=skipped)
+
+
 def validate_chat_connector_selection(
     client: MCPClient,
     namespaces: list[str] | None,
@@ -278,15 +379,140 @@ def validate_chat_connector_selection(
     granted_purposes: list[str] | None = None,
 ) -> bool:
     """Return whether every requested namespace has at least one eligible tool."""
-    selected = set(namespaces or [])
-    if not selected:
-        return True
-    eligible = {
-        namespace
-        for namespace, _descriptor in eligible_chat_connector_tools(
-            client,
-            user_role=user_role,
-            granted_purposes=granted_purposes,
+    selection = resolve_chat_connector_selection(
+        client, namespaces, user_role=user_role, granted_purposes=granted_purposes
+    )
+    return not selection.skipped
+
+
+# ---------------------------------------------------------------------------
+# Staff diagnostics: why a bound server is, or is not, offered in chat
+# ---------------------------------------------------------------------------
+
+#: Who a taxpayer-facing operation can be offered to. Signed-in taxpayers are
+#: evaluated as if they had granted every scope the servers declare: the
+#: question for an operator is whether the operation *can* reach them.
+_AUDIENCES = ("public", "verified_taxpayer")
+
+
+def _refused_bindings(client: MCPClient) -> list[dict[str, str]]:
+    """``MCP_SERVER_URL_*`` settings that were present but not bound, and why.
+
+    Names the variable and the rule it broke, never the address: the
+    refusal itself is the operator's next step.
+    """
+    from .transport import URL_ENV_PREFIX, remote_url_problem  # noqa: PLC0415
+
+    bound = client.remote_namespace_names()
+    refused: list[dict[str, str]] = []
+    for key, value in sorted(os.environ.items()):
+        if not key.startswith(URL_ENV_PREFIX) or not value.strip():
+            continue
+        namespace = key[len(URL_ENV_PREFIX) :].lower()
+        if namespace in bound:
+            continue
+        problem = remote_url_problem(value.strip()) or (
+            "it was set after this API process started; restart the API to bind it"
         )
+        refused.append({"namespace": namespace, "variable": key, "problem": problem})
+    return refused
+
+
+def connector_diagnostics(client: MCPClient) -> dict[str, Any]:
+    """Why each bound server is, or is not, offered in taxpayer chat.
+
+    Built from the same gate the chat uses (:func:`read_tool_problems`,
+    :func:`_offered_in_this_environment`, the dispatch policy), so the
+    answer here cannot disagree with what a taxpayer is shown. Browser-safe
+    for staff: no URL, credential or schema, only how the link
+    authenticates (a kind, never a value).
+    """
+    enabled = flags.is_enabled("enterprise_connectors")
+    remotes = client.remote_namespaces()
+    name_counts = Counter(
+        str(descriptor.get("name", "")) for remote in remotes for descriptor in remote.tools
+    )
+    all_scopes = sorted(
+        {
+            scope
+            for remote in remotes
+            for descriptor in remote.tools
+            for scope in (_meta_of(descriptor, "requiredScopes", ()) or ())
+            if isinstance(scope, str) and scope.strip()
+        }
+    )
+    visible = {
+        "public": set(client.available_for(user_role="public", granted_purposes=[])),
+        "verified_taxpayer": set(
+            client.available_for(user_role="verified_taxpayer", granted_purposes=all_scopes)
+        ),
     }
-    return selected <= eligible
+
+    servers: list[dict[str, Any]] = []
+    for remote in remotes:
+        namespace = remote.namespace
+        offered_here = _offered_in_this_environment(namespace)
+        tools: list[dict[str, Any]] = []
+        for descriptor in remote.tools:
+            name = str(descriptor.get("name", ""))
+            problems = read_tool_problems(descriptor)
+            if name_counts[name] > 1:
+                problems.append(PROBLEM_DUPLICATE_NAME)
+            offered_to = (
+                [audience for audience in _AUDIENCES if name in visible[audience]]
+                if not problems
+                else []
+            )
+            risk = _meta_of(descriptor, "risk", "")
+            scopes = _meta_of(descriptor, "requiredScopes", ())
+            tools.append(
+                {
+                    "name": name,
+                    "title": _operation_title(descriptor, namespace),
+                    "problems": problems,
+                    "risk": risk if isinstance(risk, str) else "",
+                    "required_scopes": [s for s in scopes if isinstance(s, str)]
+                    if isinstance(scopes, list | tuple)
+                    else [],
+                    "offered_to": offered_to,
+                }
+            )
+        offered = sum(1 for tool in tools if tool["offered_to"])
+        if not offered_here:
+            status = "not_offered_in_production"
+        elif not remote.reachable:
+            status = "not_answering"
+        elif not offered:
+            status = "no_eligible_operations"
+        elif not enabled:
+            status = "feature_off"
+        else:
+            status = "ready"
+        entry: dict[str, Any] = {
+            "namespace": namespace,
+            "label": connector_label(namespace),
+            "mode": connector_mode(namespace),
+            "status": status,
+            "reachable": remote.reachable,
+            "credential": remote.credential or "none",
+            "tools_listed": len(tools),
+            "tools_offered": offered,
+            "tools": tools,
+        }
+        if remote.server.get("name"):
+            entry["server"] = {
+                "name": _display_text(remote.server.get("name"), 80),
+                "version": _display_text(remote.server.get("version"), 40),
+            }
+        servers.append(entry)
+
+    return {
+        "ok": True,
+        "enabled": enabled,
+        "environment": "production"
+        if os.getenv("APP_ENV", "development").lower() == "production"
+        else "development",
+        "protocol_version": MCP_PROTOCOL_VERSION,
+        "servers": servers,
+        "refused_bindings": _refused_bindings(client),
+    }

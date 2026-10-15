@@ -262,3 +262,46 @@ describe("ChatMessage", () => {
     expect(screen.getByRole("link", { name: /Open in Google Calendar/i })).toBeInTheDocument();
   });
 });
+
+describe("ChatMessage — services an answer used", () => {
+  it("names each service, says when it is demo data, and how its lookup ended", () => {
+    renderMsg({
+      ...assistantTurn,
+      citations: [],
+      connectorsUsed: [
+        { namespace: "efris", label: "EFRIS", mode: "simulation", outcome: "found" },
+        { namespace: "ursb", label: "URSB", mode: "live", outcome: "no_record" },
+      ],
+    });
+
+    const list = screen.getByRole("list", { name: "Looked up in" });
+    expect(list).toHaveTextContent("EFRIS");
+    expect(list).toHaveTextContent("Demo data");
+    expect(list).toHaveTextContent("Record found");
+    expect(list).toHaveTextContent("URSB");
+    expect(list).toHaveTextContent("No matching record");
+  });
+
+  it("says which chosen services the answer went without, and why", () => {
+    renderMsg({
+      ...assistantTurn,
+      connectorNotices: [
+        { namespace: "payment_system", label: "Payments", reason: "unavailable" },
+        { namespace: "ursb", label: "URSB", reason: "not_offered" },
+      ],
+    });
+
+    expect(
+      screen.getByText("Payments is not answering right now, so this answer does not include a lookup there."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("URSB is no longer available to this account, so it was removed from this chat."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows nothing about services on an answer that used none", () => {
+    renderMsg(assistantTurn);
+    expect(screen.queryByRole("list", { name: "Looked up in" })).not.toBeInTheDocument();
+  });
+});
+

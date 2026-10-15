@@ -28,7 +28,14 @@ import {
 import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
-import type { ChatConnector } from '../lib/connectors';
+import {
+  MAX_SELECTED_CONNECTORS,
+  connectorsUsedFromTrace,
+  parseConnectorNotices,
+  type ChatConnector,
+  type ConnectorNotice,
+  type ConnectorUse,
+} from '../lib/connectors';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
@@ -337,9 +344,15 @@ export default function Page() {
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [chatConnectors, setChatConnectors] = useState<ChatConnector[]>([]);
   const [connectorsEnabled, setConnectorsEnabled] = useState(false);
+  // True once the catalog has answered — until then "not enabled" is unknown,
+  // and the composer must not hide the entry on a guess.
+  const [connectorsChecked, setConnectorsChecked] = useState(false);
   const [connectorsLoading, setConnectorsLoading] = useState(false);
   const [connectorsError, setConnectorsError] = useState(false);
-  const [selectedConnectorNamespaces, setSelectedConnectorNamespaces] = useState<string[]>([]);
+  // Kept with the conversation (the store persists it), so a choice made once
+  // survives a switch to another chat and back, and a reload.
+  const selectedConnectorNamespaces = useChatStore((s) => s.selectedConnectorNamespaces);
+  const setSelectedConnectorNamespaces = useChatStore((s) => s.setSelectedConnectorNamespaces);
   const [inspectingDoc, setInspectingDoc] = useState<{
     id: string;
     name: string;
@@ -1008,26 +1021,74 @@ export default function Page() {
         : [];
       setChatConnectors(available);
       setConnectorsEnabled(payload?.enabled === true);
-      setSelectedConnectorNamespaces((current) =>
-        current.filter((namespace) => available.some((connector: ChatConnector) => connector.namespace === namespace)),
+      setConnectorsChecked(true);
+      // A service the catalog no longer offers this account cannot come back
+      // by itself; one that is only not answering stays chosen (it is listed
+      // as unavailable) and the server leaves it out until it recovers.
+      const current = useChatStore.getState().selectedConnectorNamespaces;
+      const kept = current.filter((namespace) =>
+        available.some((connector: ChatConnector) => connector.namespace === namespace),
       );
+      if (kept.length !== current.length) setSelectedConnectorNamespaces(kept);
     } catch {
+      // A catalog that failed to load says nothing about the services: keep
+      // the taxpayer's choice. The server resolves it on every turn anyway.
       setConnectorsError(true);
       setChatConnectors([]);
       setConnectorsEnabled(false);
-      setSelectedConnectorNamespaces([]);
     } finally {
       setConnectorsLoading(false);
     }
-  }, []);
+  }, [setSelectedConnectorNamespaces]);
+
+  // Asked once on arrival, so the composer knows whether "Add a connector"
+  // leads anywhere on this deployment and restored chips have their names.
+  useEffect(() => {
+    void loadChatConnectors();
+  }, [loadChatConnectors]);
 
   const toggleChatConnector = useCallback((namespace: string) => {
-    setSelectedConnectorNamespaces((current) => {
-      if (current.includes(namespace)) return current.filter((item) => item !== namespace);
-      if (current.length >= 8) return current;
-      return [...current, namespace];
-    });
-  }, []);
+    const current = useChatStore.getState().selectedConnectorNamespaces;
+    if (current.includes(namespace)) {
+      setSelectedConnectorNamespaces(current.filter((item) => item !== namespace));
+    } else if (current.length < MAX_SELECTED_CONNECTORS) {
+      setSelectedConnectorNamespaces([...current, namespace]);
+    }
+  }, [setSelectedConnectorNamespaces]);
+
+  /**
+   * What the server said about the selected services on this turn: which were
+   * left out (and why) and which answered. A service this account can no longer
+   * use is removed from the conversation; one that is down, or that did not
+   * answer its lookup, is marked unavailable on its chip; one that answered is
+   * marked available again.
+   */
+  const applyConnectorTurnState = useCallback((notices: ConnectorNotice[], used: ConnectorUse[] = []) => {
+    if (!notices.length && !used.length) return;
+    const removed = new Set(
+      notices.filter((notice) => notice.reason !== 'unavailable').map((notice) => notice.namespace),
+    );
+    const down = new Set([
+      ...notices.filter((notice) => notice.reason === 'unavailable').map((notice) => notice.namespace),
+      ...used.filter((use) => use.outcome === 'unavailable').map((use) => use.namespace),
+    ]);
+    const answered = new Set(used.filter((use) => use.outcome && use.outcome !== 'unavailable').map((use) => use.namespace));
+    if (removed.size) {
+      const current = useChatStore.getState().selectedConnectorNamespaces;
+      setSelectedConnectorNamespaces(current.filter((namespace) => !removed.has(namespace)));
+    }
+    if (down.size || answered.size) {
+      setChatConnectors((connectors) =>
+        connectors.map((connector) =>
+          down.has(connector.namespace)
+            ? { ...connector, status: 'unavailable' }
+            : answered.has(connector.namespace)
+              ? { ...connector, status: 'available' }
+              : connector,
+        ),
+      );
+    }
+  }, [setSelectedConnectorNamespaces]);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? message).trim();
@@ -1146,8 +1207,11 @@ export default function Page() {
       }
       const content = cleanResponse(d.reply ?? '');
       const disc = d.discrepancy_report ?? d.discrepancyReport;
+      const connectorNotices = parseConnectorNotices(d.connector_notices);
+      if (connectorNotices.length) applyConnectorTurnState(connectorNotices);
       const meta = {
         serverTurnId: typeof d.turn_id === 'string' ? d.turn_id : undefined,
+        ...(connectorNotices.length ? { connectorNotices } : {}),
         citations: d.citations ?? [],
         faithfulnessScore: d.faithfulness_score ?? null,
         retrievalMode: d.retrieval_mode ?? 'keyword',
@@ -1219,6 +1283,24 @@ export default function Page() {
       const dispatchEvent = (eventName: string, dataLines: string[]) => {
         if (dataLines.length === 0) return;
 
+        // Which services the answer looked things up in. Read before the line
+        // filter below, which takes any `[{"type":` line for a stray metadata
+        // fragment and would drop it unread.
+        if (eventName === 'agent_trace') {
+          try {
+            const used = connectorsUsedFromTrace(JSON.parse(dataLines.join('\n')));
+            if (used.length) {
+              updateLastTurn((t) => {
+                const merged = new Map((t.connectorsUsed ?? []).map((use) => [use.namespace, use]));
+                for (const use of used) merged.set(use.namespace, { ...merged.get(use.namespace), ...use });
+                return { ...t, connectorsUsed: [...merged.values()] };
+              });
+              applyConnectorTurnState([], used);
+            }
+          } catch {}
+          return;
+        }
+
         // Separate phase / telemetry lines from prose lines so phase tags never leak into chat
         const cleanLines: string[] = [];
         for (const line of dataLines) {
@@ -1255,6 +1337,8 @@ export default function Page() {
                   reveal.set(cleanResponse(p.reply));
                 }
                 const disc = p.discrepancy_report ?? p.discrepancyReport;
+                const notices = parseConnectorNotices(p.connector_notices);
+                if (notices.length) applyConnectorTurnState(notices);
                 updateLastTurn((t) => ({
                   ...t,
                   serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
@@ -1263,6 +1347,7 @@ export default function Page() {
                   retrievalMode: p.retrieval_mode ?? t.retrievalMode,
                   escalationRequired: p.escalation_required ?? t.escalationRequired,
                   escalationReason: p.escalation_reason ?? t.escalationReason,
+                  connectorNotices: notices.length ? notices : t.connectorNotices,
                   workflow: p.workflow ?? t.workflow,
                   resources: p.resources ?? (p.workflow?.resources ?? t.resources),
                   discrepancyReport: disc && typeof disc === 'object' ? {
@@ -1333,9 +1418,12 @@ export default function Page() {
             meta = { ...meta, ...p };
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
             const disc = p.discrepancy_report ?? p.discrepancyReport;
+            const notices = parseConnectorNotices(p.connector_notices);
+            if (notices.length) applyConnectorTurnState(notices);
             updateLastTurn((t) => ({
               ...t,
               serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
+              connectorNotices: notices.length ? notices : t.connectorNotices,
               citations: p.citations ?? t.citations,
               faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
               retrievalMode: p.retrieval_mode ?? t.retrievalMode,
@@ -1487,7 +1575,7 @@ export default function Page() {
       }
       saveCurrentSession();
     }
-  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession, withOfficer, sendToOfficer]);
+  }, [message, isLoading, locale, localeExplicit, activeConversationId, pendingAttachments, selectedConnectorNamespaces, applyConnectorTurnState, isLowBandwidth, t, addTurns, ensureActiveConversationId, setMessage, updateLastTurn, saveCurrentSession, withOfficer, sendToOfficer]);
 
   const stopGeneration = useCallback(() => {
     userStoppedRef.current = true;
@@ -1897,6 +1985,10 @@ export default function Page() {
     attachments: pendingAttachments,
     chatConnectors,
     connectorsEnabled,
+    // "Add a connector" is offered only where it leads somewhere: hidden once
+    // the catalog has said this deployment has none switched on, and on any
+    // doubt (not yet asked, or the question failed) shown as before.
+    connectorsHidden: connectorsChecked && !connectorsError && !connectorsEnabled,
     connectorsLoading,
     connectorsError,
     selectedConnectorNamespaces,
@@ -1976,12 +2068,10 @@ export default function Page() {
           activeConversationId={activeConversationId}
           onClose={() => setSidebarOpen(false)}
           onNewConversation={() => {
-            setSelectedConnectorNamespaces([]);
             createNewSession();
             setSidebarOpen(false);
           }}
           onSelectConversation={(id) => {
-            setSelectedConnectorNamespaces([]);
             switchSession(id);
             setSidebarOpen(false);
           }}
@@ -2193,7 +2283,6 @@ export default function Page() {
         conversations={conversations}
         onClose={() => setSearchOpen(false)}
         onSelect={(id) => {
-          setSelectedConnectorNamespaces([]);
           switchSession(id);
           setSidebarOpen(false);
         }}

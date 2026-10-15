@@ -888,6 +888,35 @@ dialog.connectors-dialog::backdrop,
   outline-offset: 1px;
 }
 
+/* A chosen service that is not answering stays chosen (the server leaves it
+   out of each turn until it recovers), but says so. */
+.chatv2 .composer-connector-chip.is-unavailable {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--surface-1);
+}
+.chatv2 .composer-connector-chip.is-unavailable > svg {
+  color: var(--text-2);
+}
+.chatv2 .composer-connector-down {
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: var(--danger);
+  background: var(--cv2-danger-soft);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+/* What a lookup sends, stated before anything is chosen. */
+.chatv2 .connectors-data-shared {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border-0);
+  color: var(--text-1);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 /* A screenshot or photo shows as itself on its chip. */
 .chatv2 .attachment-thumb {
   flex: none;

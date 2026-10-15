@@ -24,7 +24,7 @@ import {
   formatDocType,
   formatFileSize,
 } from '../lib/attachments';
-import { connectorMonogram, type ChatConnector } from '../lib/connectors';
+import { connectorMonogram, fallbackConnectorLabel, type ChatConnector } from '../lib/connectors';
 
 interface ChatInputProps {
   message: string;
@@ -68,6 +68,8 @@ interface ChatInputProps {
   autoSend?: boolean;
   chatConnectors?: ChatConnector[];
   connectorsEnabled?: boolean;
+  /** The deployment has no chat connectors switched on: leave "Add a connector" out of the menu. */
+  connectorsHidden?: boolean;
   connectorsLoading?: boolean;
   connectorsError?: boolean;
   selectedConnectorNamespaces?: string[];
@@ -128,6 +130,7 @@ function ChatInputInner({
   autoSend = false,
   chatConnectors = [],
   connectorsEnabled = false,
+  connectorsHidden = false,
   placeholder,
   connectorsLoading = false,
   connectorsError = false,
@@ -147,9 +150,18 @@ function ChatInputInner({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const isUploading = attachments?.some((a) => a.status === 'uploading') ?? false;
   const attachmentLimitReached = (attachments?.length ?? 0) >= MAX_ATTACHMENTS;
-  const selectedConnectors = chatConnectors.filter((connector) =>
-    selectedConnectorNamespaces.includes(connector.namespace),
-  );
+  // One chip per chosen service, whether or not the catalog has described it
+  // yet: a choice restored from an earlier visit is still sent with every
+  // message, so it must never be invisible.
+  const selectedConnectors = selectedConnectorNamespaces.map((namespace) => {
+    const connector = chatConnectors.find((item) => item.namespace === namespace);
+    return {
+      namespace,
+      label: connector?.label ?? fallbackConnectorLabel(namespace),
+      mode: connector?.mode,
+      unavailable: connector?.status === 'unavailable',
+    };
+  });
 
   const handleAttachFiles = useCallback((files: FileList) => {
     if (!onAttachFiles || files.length === 0) return;
@@ -214,7 +226,7 @@ function ChatInputInner({
   };
 
   const addMenuOptionIndices = [0, 1, 2].filter(
-    (idx) => !attachmentLimitReached || idx === 2,
+    (idx) => (idx === 2 ? !connectorsHidden : !attachmentLimitReached),
   );
   const addMenuRovingIdx =
     addMenuFocusIdx !== null && addMenuOptionIndices.includes(addMenuFocusIdx)
@@ -451,12 +463,20 @@ function ChatInputInner({
         {selectedConnectors.length > 0 && (
           <div className="composer-connectors" role="group" aria-label={t('composer.selectedConnectors')}>
             {selectedConnectors.map((connector) => (
-              <span key={connector.namespace} className="composer-connector-chip">
+              <span
+                key={connector.namespace}
+                className={`composer-connector-chip${connector.unavailable ? ' is-unavailable' : ''}`}
+              >
                 <PlugIcon />
                 <span>{connector.label}</span>
                 {connector.mode === 'simulation' && (
                   <span className="composer-connector-demo" title={t('composer.connectorDemo')}>
                     {t('composer.connectorDemoShort')}
+                  </span>
+                )}
+                {connector.unavailable && (
+                  <span className="composer-connector-down" title={t('composer.connectorUnavailableHint')}>
+                    {t('composer.connectorUnavailableTag')}
                   </span>
                 )}
                 <button
@@ -623,7 +643,10 @@ function ChatInputInner({
                         </button>
 
                         {/* URA services are discoverable here, but only
-                            reviewed taxpayer integrations may be offered. */}
+                            reviewed taxpayer integrations may be offered —
+                            and not at all where none are switched on, so the
+                            menu has no entry that only leads to "not enabled". */}
+                        {!connectorsHidden && (
                         <button
                           ref={(el) => {
                             addMenuOptionRefs.current[2] = el;
@@ -652,6 +675,7 @@ function ChatInputInner({
                               : t('composer.uraManagedTag')}
                           </span>
                         </button>
+                        )}
                       </div>
                       <div className="lmv2-foot addmenu-foot">
                         {attachmentLimitReached
@@ -799,6 +823,10 @@ function ChatInputInner({
 
             <div className="connectors-dialog-body">
               <p className="connectors-intro">{t('composer.connectorsIntro')}</p>
+              {/* Said before anything is chosen, not after: who receives what is
+                  part of agreeing to a lookup (Data Protection and Privacy Act
+                  2019 — a person is told the recipients of their data). */}
+              <p className="connectors-data-shared">{t('composer.connectorDataShared')}</p>
 
               <div
                 className="connectors-status-card"
