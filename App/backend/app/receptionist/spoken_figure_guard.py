@@ -21,6 +21,8 @@ _DIGIT_WORDS: frozenset[str] = frozenset({
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
     "zeero", "emu", "bbiri", "ssatu", "nnya", "ttaano", "mukaaga", "musanvu", "munaana", "mwenda",
     "sufuri", "moja", "mbili", "tatu", "nne", "tano", "sita", "saba", "nane", "tisa",
+    "emwe", "ibiri", "ishatu", "ina", "itaano", "mushanju",
+    "acel", "aryo", "adek", "angwen", "abic", "abicel", "abiro", "aboro", "abongwen",
 })
 
 
@@ -79,6 +81,14 @@ _DIGIT_MAP_BY_LOCALE: dict[str, dict[str, str]] = {
         "0": "sufuri", "1": "moja", "2": "mbili", "3": "tatu", "4": "nne",
         "5": "tano", "6": "sita", "7": "saba", "8": "nane", "9": "tisa",
     },
+    "nyn": {
+        "0": "zeero", "1": "emwe", "2": "ibiri", "3": "ishatu", "4": "ina",
+        "5": "itaano", "6": "mukaaga", "7": "mushanju", "8": "munaana", "9": "mwenda",
+    },
+    "ach": {
+        "0": "zero", "1": "acel", "2": "aryo", "3": "adek", "4": "angwen",
+        "5": "abic", "6": "abicel", "7": "abiro", "8": "aboro", "9": "abongwen",
+    },
 }
 
 
@@ -131,7 +141,9 @@ _CONTINUATION_NUMBER_WORDS: frozenset[str] = frozenset({
     "hundred", "thousand", "million", "billion", "point",
     "kikumi", "bikumi", "lukumi", "nkumi", "enkumi", "mutwalo", "mitwalo", "emitwalo",
     "kakadde", "akakadde", "bukadde", "obukadde", "kawumbi", "akawumbi", "buwumbi", "obuwumbi",
-    "mia", "elfu", "laki", "milioni", "bilioni", "nukta",
+    "rukumi", "orukumi", "mutwaro", "omutwaro", "mitwaro", "emitwaro",
+    "kakaikuru", "akakaikuru", "bukaikuru", "obukaikuru",
+    "mia", "miya", "elfu", "laki", "milioni", "bilioni", "nukta", "tutemia",
 })
 
 

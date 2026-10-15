@@ -59,8 +59,14 @@ describe('uploads', () => {
 });
 
 describe('who transcribes dictation', () => {
-  it('keeps Luganda and Swahili on the local model; English on the browser engine', () => {
+  it('keeps Ugandan and East African locales on the local model; English on the browser engine', () => {
     const owner = Object.fromEntries(LOCALE_OPTIONS.map((o) => [o.value, o.dictation]));
-    expect(owner).toEqual({ en: 'browser', lg: 'server', sw: 'server' });
+    expect(owner).toEqual({
+      en: 'browser',
+      lg: 'server',
+      sw: 'server',
+      nyn: 'server',
+      ach: 'server',
+    });
   });
 });

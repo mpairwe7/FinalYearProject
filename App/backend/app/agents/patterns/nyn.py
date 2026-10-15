@@ -65,8 +65,17 @@ _ESCALATE = (
 )
 
 _RATE_CUE = (re.compile(_MUCH, re.IGNORECASE),)
+_AMOUNT_CUE = (re.compile(r"\b(akakaikuru|obukaikuru|orukumi|enkumi)\b", re.IGNORECASE),)
 _TEMPORAL_CUE = (re.compile(r"\b(erizooba|hati)\b", re.IGNORECASE),)
-_GRATITUDE_PHRASES = frozenset({"webare", "webare munonga", "webale munonga"})
+_LEARN_INTENT = (
+    re.compile(r"\b(niki|ekikora\s+kita|nshoboororera|amakuru\s+ga|manyisa)\b", re.IGNORECASE),
+)
+_LEARN_TOPIC = (re.compile(_TAX_NOUN, re.IGNORECASE),)
+_GREETING_WORDS = frozenset({"agandi"})
+_GREETING_PHRASES = frozenset({"oraire ota", "osiibire ota", "muraire muta", "musiibire muta"})
+_GRATITUDE_PHRASES = frozenset({"webare", "webare munonga", "webale munonga", "mwebare"})
+_FAREWELL_PHRASES = frozenset({"ogumeho", "mugumeho", "siiba gye", "raara gye"})
+_CLARIFY_STOP_WORDS = frozenset({"ota", "nta"})
 
 
 NYN_PATTERNS = LocalePatterns(
@@ -75,7 +84,14 @@ NYN_PATTERNS = LocalePatterns(
     rate=_RATE,
     temporal=_TEMPORAL,
     escalate=_ESCALATE,
+    learn_intent=_LEARN_INTENT,
+    learn_topic=_LEARN_TOPIC,
+    amount_cue=_AMOUNT_CUE,
     rate_cue=_RATE_CUE,
     temporal_cue=_TEMPORAL_CUE,
+    greeting_words=_GREETING_WORDS,
+    greeting_phrases=_GREETING_PHRASES,
     gratitude_phrases=_GRATITUDE_PHRASES,
+    farewell_phrases=_FAREWELL_PHRASES,
+    clarify_stop_words=_CLARIFY_STOP_WORDS,
 )

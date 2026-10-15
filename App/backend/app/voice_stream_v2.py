@@ -292,22 +292,22 @@ class VoiceSessionV2:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 2: MT (lg → en) ─────────────────────────────────
+        # ── Stage 2: MT (lg/sw/nyn/ach → en) ──────────────────────
         query_text = asr_result["text"]
         timings["mt_ms"] = 0.0
         mt_backend = ""
 
-        if detected_lang == "lg":
+        if detected_lang in ("lg", "sw", "nyn", "ach"):
             t0 = time.perf_counter()
             try:
                 mt_result = await _run_blocking(
-                    self._speech.translate, asr_result["text"], "lg", "en",
+                    self._speech.translate, asr_result["text"], detected_lang, "en",
                 )
                 if mt_result.text and not mt_result.error:
                     query_text = mt_result.text
                     mt_backend = mt_result.backend
             except Exception:
-                logger.warning("MT lg→en failed, using original text")
+                logger.warning("MT %s→en failed, using original text", detected_lang)
             timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if self._cancelled.is_set():
@@ -397,19 +397,19 @@ class VoiceSessionV2:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 5: MT (en → lg) ─────────────────────────────────
+        # ── Stage 5: MT (en → lg/sw/nyn/ach) ──────────────────────
         reply_for_tts = reply_text
-        if detected_lang == "lg":
+        if detected_lang in ("lg", "sw", "nyn", "ach"):
             t0 = time.perf_counter()
             try:
                 mt_back = await _run_blocking(
-                    self._speech.translate, reply_text, "en", "lg",
+                    self._speech.translate, reply_text, "en", detected_lang,
                 )
                 if mt_back.text and not mt_back.error:
                     reply_for_tts = mt_back.text
                     mt_backend = mt_back.backend
             except Exception:
-                logger.warning("MT en→lg failed, using English reply")
+                logger.warning("MT en→%s failed, using English reply", detected_lang)
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
 
         if self._cancelled.is_set():

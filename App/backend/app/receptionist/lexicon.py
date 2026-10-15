@@ -321,7 +321,10 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\bkwa ora\b", re.IGNORECASE), "kwa URA"),
     (re.compile(r"\bkutoka ora\b", re.IGNORECASE), "kutoka URA"),
     (re.compile(r"\bokuva ora\b", re.IGNORECASE), "okuva URA"),
-    (re.compile(r"\b(with|from|mu|ku|kwa|kutoka|okuva)\s+u\s+[ra]\b", re.IGNORECASE), r"\1 URA"),
+    (re.compile(r"\bomuri (?:era|ora)\b", re.IGNORECASE), "omuri URA"),
+    (re.compile(r"\bahari (?:era|ora)\b", re.IGNORECASE), "ahari URA"),
+    (re.compile(r"\bbot (?:era|ora)\b", re.IGNORECASE), "bot URA"),
+    (re.compile(r"\b(with|from|mu|ku|kwa|kutoka|okuva|omuri|ahari|bot)\s+u\s+[ra]\b", re.IGNORECASE), r"\1 URA"),
     # NIN (National Identification Number) acoustic variants & mishears
     (re.compile(r"\b(?:nnamba\s+ya\s+nin|namba\s+ya\s+nin)\b", re.IGNORECASE), "NIN number"),
     (re.compile(r"\b(?:neen|niini|ninete|n-i-n|n\.i\.n\.)\b", re.IGNORECASE), "NIN"),
@@ -335,8 +338,11 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     # English & telephony number mishears: "ten number" / "10 number" -> "TIN number"
     (re.compile(r"\b(?:ten\s+number|10\s+number|teen\s+number)\b", re.IGNORECASE), "TIN number"),
     (re.compile(r"\bteam\s+yange\b", re.IGNORECASE), "TIN yange"),
-    # VAT acoustic variants
-    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|veti|vaati|baati|bbaati)\b", re.IGNORECASE), "VAT"),
+    # VAT acoustic variants (including Acholi/Runyankole Whisper-SALT hearings: viati, veya ti)
+    (re.compile(r"\b(?:vee\s*ay\s*tee|v-a-t|v\s+a\s+t|v\.a\.t\.|vatt|vaat|veti|vaati|viati|veyati|veya\s+ti|baati|bbaati)\b", re.IGNORECASE), "VAT"),
+    # Acholi Whisper-SALT hearing of "mucoro" (tax) and "i Uganda"
+    (re.compile(r"\blucoro\b", re.IGNORECASE), "mucoro"),
+    (re.compile(r"\biuganda\b", re.IGNORECASE), "i Uganda"),
     # PAYE acoustic variants
     # Not "payee": that is an English word ("who is the payee on a PRN?").
     (re.compile(r"\b(?:peeyi|p-a-y-e|p\.a\.y\.e\.)\b", re.IGNORECASE), "PAYE"),
@@ -475,6 +481,97 @@ def normalize_swahili_tax_query(text: str) -> str:
     return normalized.strip()
 
 
+RUNYANKOLE_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
+    # TIN registration
+    "okwehandiikisa kutunga tin": "how to register for TIN",
+    "kwehandiikisa kutunga tin": "how to register for TIN",
+    "okwehandiikisa aha tin": "TIN registration",
+    "okwehandiikisa tin": "TIN registration",
+    "kwehandiikisa tin": "TIN registration",
+    "kutunga tin": "TIN registration",
+    "enamba ya tin": "TIN Taxpayer Identification Number",
+    # VAT
+    "omushoro gwa vat": "VAT Value Added Tax rate",
+    "mushoro gwa vat": "VAT Value Added Tax rate",
+    "ebicweka bingahi": "what percentage",
+    # PAYE & Rental & Corporate & WHT
+    "omushoro gwa paye": "PAYE Pay As You Earn tax",
+    "omushoro gw'omushaara": "PAYE salary tax",
+    "omushoro gw'amaju": "Rental Income Tax",
+    "omushoro gw'amakampuni": "Corporate Income Tax CIT",
+    "omushoro ogurikukwatirwaho": "Withholding Tax WHT",
+    # Filing & Payment & Penalties
+    "okuheereza ebihandiiko by'omushoro": "file tax return",
+    "ekihandiiko ky'omushoro": "tax return",
+    "okushashura omushoro": "pay tax PRN",
+    "enamba ya prn": "PRN payment registration number",
+    "ekibonerezo ky'omushoro": "tax penalty interest",
+    "okujurira aha mushoro": "tax assessment objection dispute",
+    "satifikeeti y'omushoro": "tax clearance certificate TCC",
+    "omushoro gw'emotoka": "motor vehicle transfer tax",
+    "omushoro gw'ensharo": "customs duty clearance",
+}
+
+_RUNYANKOLE_TERM_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
+    (re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE), RUNYANKOLE_ENGLISH_TAX_TERMS[term])
+    for term in sorted(RUNYANKOLE_ENGLISH_TAX_TERMS, key=len, reverse=True)
+)
+
+
+def normalize_runyankole_tax_query(text: str) -> str:
+    """Rewrite common Runyankole URA tax phrases as the English terms the corpus uses."""
+    if not text:
+        return ""
+    normalized = repair_asr_entities(text)
+    for pattern, replacement in _RUNYANKOLE_TERM_PATTERNS:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized.strip()
+
+
+ACHOLI_ENGLISH_TAX_TERMS: Final[dict[str, str]] = {
+    # TIN registration
+    "coyo nying me nongo tin": "how to register for TIN",
+    "coyo nyinga me nongo tin": "how to register for TIN",
+    "coyo nying pi tin": "TIN registration",
+    "nongo tin": "TIN registration",
+    "namba me tin": "TIN Taxpayer Identification Number",
+    # VAT
+    "wel mucoro me vat": "VAT Value Added Tax rate",
+    "mucoro me vat": "VAT Value Added Tax rate",
+    # PAYE & Rental & Corporate & WHT
+    "mucoro me paye": "PAYE Pay As You Earn tax",
+    "mucoro i kom mucara": "PAYE salary tax",
+    "mucoro me ot ma kipango": "Rental Income Tax",
+    "mucoro me kampuni": "Corporate Income Tax CIT",
+    "mucoro ma kigengo": "Withholding Tax WHT",
+    # Filing & Payment & Penalties
+    "cwalo waraga me mucoro": "file tax return",
+    "cwalo ripot me mucoro": "file tax return",
+    "culu mucoro": "pay tax PRN",
+    "namba me prn": "PRN payment registration number",
+    "pwod me mucoro": "tax penalty interest",
+    "kwero pimo mucoro": "tax assessment objection dispute",
+    "waraga me tcc": "tax clearance certificate TCC",
+    "mucoro me motoka": "motor vehicle transfer tax",
+    "mucoro me wang lobo": "customs duty clearance",
+}
+
+_ACHOLI_TERM_PATTERNS: Final[tuple[tuple[re.Pattern[str], str], ...]] = tuple(
+    (re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE), ACHOLI_ENGLISH_TAX_TERMS[term])
+    for term in sorted(ACHOLI_ENGLISH_TAX_TERMS, key=len, reverse=True)
+)
+
+
+def normalize_acholi_tax_query(text: str) -> str:
+    """Rewrite common Acholi URA tax phrases as the English terms the corpus uses."""
+    if not text:
+        return ""
+    normalized = repair_asr_entities(text)
+    for pattern, replacement in _ACHOLI_TERM_PATTERNS:
+        normalized = pattern.sub(replacement, normalized)
+    return normalized.strip()
+
+
 _PURE_ENGLISH_LUGANDA_KEYS: Final[frozenset[str]] = frozenset({
     "rental tax",
     "withholding tax",
@@ -484,10 +581,10 @@ _PURE_ENGLISH_LUGANDA_KEYS: Final[frozenset[str]] = frozenset({
 
 
 def normalize_codeswitched_query(text: str, language: str = "en") -> str:
-    """Normalize intra-utterance Uganda code-switching (Enganda / Swanglish) for retrieval.
+    """Normalize intra-utterance Uganda code-switching (Enganda / Swanglish / Runyankole / Acholi) for retrieval.
 
     Preserves English numbers, TINs, PRNs, and pure-English phrases while mapping
-    embedded Luganda or Swahili tax idioms into canonical English retrieval terms.
+    embedded vernacular tax idioms into canonical English retrieval terms.
     """
     if not text:
         return ""
@@ -496,6 +593,10 @@ def normalize_codeswitched_query(text: str, language: str = "en") -> str:
         return normalize_luganda_tax_query(repaired)
     if language == "sw":
         return normalize_swahili_tax_query(repaired)
+    if language in ("nyn", "nyk"):
+        return normalize_runyankole_tax_query(repaired)
+    if language == "ach":
+        return normalize_acholi_tax_query(repaired)
     normalized = repaired
     sorted_terms = sorted(
         (k for k in LUGANDA_ENGLISH_TAX_TERMS if k not in _PURE_ENGLISH_LUGANDA_KEYS),
@@ -506,15 +607,21 @@ def normalize_codeswitched_query(text: str, language: str = "en") -> str:
         pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
         if pattern.search(normalized):
             normalized = pattern.sub(LUGANDA_ENGLISH_TAX_TERMS[term], normalized)
-    return normalize_swahili_tax_query(normalized)
+    normalized = normalize_swahili_tax_query(normalized)
+    normalized = normalize_runyankole_tax_query(normalized)
+    return normalize_acholi_tax_query(normalized)
 
 
 def normalize_call_query(text: str, language: str) -> str:
     """The question a caller asked, as the knowledge base should be searched for it.
 
     Luganda has its own path (``normalize_luganda_tax_query`` inside the
-    cross-lingual bridge); English and Swahili questions come through here.
+    cross-lingual bridge); English, Swahili, Runyankole, and Acholi questions come through here.
     """
     if language == "sw":
         return normalize_swahili_tax_query(text)
+    if language in ("nyn", "nyk"):
+        return normalize_runyankole_tax_query(text)
+    if language == "ach":
+        return normalize_acholi_tax_query(text)
     return repair_asr_entities(text)

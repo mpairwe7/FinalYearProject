@@ -341,4 +341,6 @@ export const lg: Partial<Dictionary> = {
   'call.lang.en': 'Lungereza',
   'call.lang.lg': 'Luganda',
   'call.lang.sw': 'Kiswahili',
+  'call.lang.nyn': 'Runyankole',
+  'call.lang.ach': 'Acholi',
 };

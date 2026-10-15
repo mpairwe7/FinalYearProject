@@ -653,22 +653,24 @@ def _build_messages(
         parts.append("")
 
     loc = (locale or "en").strip().lower().split("-")[0]
-    few_shot = _FEW_SHOT_PROMPTS_BY_LOCALE.get(loc)
+    can_direct_loc = loc != "en" and can_generate_in_locale(locale)
+    few_shot_loc = loc if can_direct_loc else "en"
+    few_shot = _FEW_SHOT_PROMPTS_BY_LOCALE.get(few_shot_loc)
     if few_shot:
         parts.append(few_shot)
         parts.append("")
 
     # The answer language, stated every time rather than only when it is not
     # English.
-    if locale != "en" and can_generate_in_locale(locale):
+    if can_direct_loc:
         parts.append(f"## Answer language\nWrite the answer in {locale}.")
     else:
         parts.append(
             "## Answer language\n"
             "Write the answer in English, even if the user question is in another "
             "language. A separate translation module renders it into the reader's language "
-            "afterwards, so do not answer in Swahili or Luganda, do not translate it yourself, "
-            "and do not add a second copy in another language."
+            "afterwards, so do not answer in Swahili, Luganda, Runyankole, or Acholi, "
+            "do not translate it yourself, and do not add a second copy in another language."
         )
 
     messages.append({"role": "user", "content": "\n".join(parts)})
@@ -1748,6 +1750,8 @@ def classify_choice(reply: str, options: list[str]) -> str:
 _MT_ONESHOT: dict[str, tuple[str, str]] = {
     "lg": ("Ekitabo kino kya ani?", "Whose book is this?"),
     "sw": ("Kitabu hiki ni cha nani?", "Whose book is this?"),
+    "nyn": ("Ekitabo eki n'ekya oha?", "Whose book is this?"),
+    "ach": ("Buk man me anga?", "Whose book is this?"),
 }
 
 _MT_FEWSHOT: dict[tuple[str, str], list[tuple[str, str]]] = {
@@ -1756,6 +1760,12 @@ _MT_FEWSHOT: dict[tuple[str, str], list[tuple[str, str]]] = {
     ],
     ("sw", "en"): [
         ("Kitabu hiki ni cha nani?", "Whose book is this?"),
+    ],
+    ("nyn", "en"): [
+        ("Ekitabo eki n'ekya oha?", "Whose book is this?"),
+    ],
+    ("ach", "en"): [
+        ("Buk man me anga?", "Whose book is this?"),
     ],
 }
 
@@ -1793,6 +1803,7 @@ def translate_text(
         "sw": "Swahili",
         "swa": "Swahili",
         "nyn": "Runyankole",
+        "nyk": "Runyankole",
         "ach": "Acholi",
         "teo": "Ateso",
         "lgg": "Lugbara",
@@ -2353,8 +2364,6 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             parts.append(header)
             parts.append(f'<passage id="p{i}">{trimmed}</passage>')
             parts.append("")
-        if locale != "en":
-            parts.append(f"(Respond in locale: {locale})")
         parts.append(f"## User question\n{query}")
         if calc_ground_truth:
             parts.append(
@@ -2366,9 +2375,23 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
                 "3. Address every specific sub-question the taxpayer asked.\n"
                 "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
             )
+        if locale != "en" and can_generate_in_locale(locale):
+            parts.append(f"\n## Answer language\nWrite the answer in {locale}.")
+        else:
+            parts.append(
+                "\n## Answer language\n"
+                "Write the answer in English, even if the user question is in another "
+                "language. A separate translation module renders it into the reader's language "
+                "afterwards, so do not answer in Swahili, Luganda, Runyankole, or Acholi, "
+                "do not translate it yourself, and do not add a second copy in another language."
+            )
         messages.append({"role": "user", "content": "\n".join(parts)})
     else:
-        locale_hint = f"(Respond in locale: {locale})\n\n" if locale != "en" else ""
+        locale_hint = (
+            f"(Respond in locale: {locale})\n\n"
+            if (locale != "en" and can_generate_in_locale(locale))
+            else ""
+        )
         calc_note = (
             f"\n\n## Verified Scenario Ground Truth\n{calc_ground_truth}"
             if calc_ground_truth else ""

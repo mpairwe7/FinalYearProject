@@ -56,7 +56,7 @@ SWITCH_MIN_WORDS = 4
 #: ...and carry at least this many words of the language it moves to.
 SWITCH_MIN_HITS = 2
 
-_LOCAL = ("lg", "sw")
+_LOCAL = ("lg", "sw", "nyn", "ach")
 _WORD_RE = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)?", re.UNICODE)
 
 # ISO 639-2/3 codes and common aliases for the supported base languages.
@@ -65,6 +65,12 @@ _TAG_ALIASES: dict[str, str] = {
     "lug": "lg",
     "swa": "sw",
     "swh": "sw",
+    "nyn": "nyn",
+    "nyk": "nyn",
+    "runyankole": "nyn",
+    "runyankore": "nyn",
+    "ach": "ach",
+    "acholi": "ach",
 }
 
 
@@ -140,18 +146,20 @@ def _switch_target(message: str, established: str) -> str | None:
     if established in _LOCAL:
         if hits.get(established, 0) > 0:
             return None  # still using the established language's own words
-        other = "sw" if established == "lg" else "lg"
-        if hits.get(other, 0) >= SWITCH_MIN_HITS:
-            return other
+        other_locals = sorted(
+            ((hits.get(loc, 0), loc) for loc in _LOCAL if loc != established),
+            reverse=True,
+        )
+        if other_locals and other_locals[0][0] >= SWITCH_MIN_HITS:
+            return other_locals[0][1]
         if (
             len(words) >= SWITCH_MIN_WORDS
             and hits.get("en", 0) >= SWITCH_MIN_HITS
-            and hits.get("lg", 0) == 0
-            and hits.get("sw", 0) == 0
+            and all(hits.get(loc, 0) == 0 for loc in _LOCAL)
         ):
             return "en"
         return None
-    # Established English: a Luganda or Swahili message needs real evidence,
+    # Established English: a vernacular message needs real evidence,
     # which detect_language only reports when it has it.
     detected = detect_language(message, default_lang="en")
     return detected if detected in _LOCAL else None

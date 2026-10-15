@@ -112,8 +112,11 @@ class TranscribeWhisperSaltUnitTests(unittest.TestCase):
         self.assertIn("customs duty", ss.salt_domain_prompt("en"))
         self.assertIn("omusolo", ss.salt_domain_prompt("lg"))
         self.assertIn("kodi", ss.salt_domain_prompt("sw"))
+        self.assertIn("omushoro", ss.salt_domain_prompt("nyn"))
+        self.assertIn("mucoro", ss.salt_domain_prompt("ach"))
         self.assertNotIn("customs duty", ss.salt_domain_prompt(None))
         self.assertNotIn("customs duty", ss.salt_domain_prompt("nyn"))
+        self.assertNotIn("customs duty", ss.salt_domain_prompt("ach"))
 
     def test_no_loaded_model_returns_none_rather_than_raising(self) -> None:
         model = ss.SpeechModel.__new__(ss.SpeechModel)

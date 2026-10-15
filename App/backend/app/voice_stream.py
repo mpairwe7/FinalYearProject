@@ -340,7 +340,15 @@ class VoiceSession:
             return
 
         detected_lang = asr_result.language or self.language
-        from .receptionist.lexicon import normalize_luganda_tax_query, normalize_swahili_tax_query, repair_asr_entities
+        if detected_lang == "nyk":
+            detected_lang = "nyn"
+        from .receptionist.lexicon import (
+            normalize_acholi_tax_query,
+            normalize_luganda_tax_query,
+            normalize_runyankole_tax_query,
+            normalize_swahili_tax_query,
+            repair_asr_entities,
+        )
 
         clean_asr_text = repair_asr_entities(asr_result.text)
 
@@ -364,7 +372,7 @@ class VoiceSession:
         mt_backend = ""
         mt_degraded: list[str] = []
 
-        # ── Stage 2: MT (lg/sw -> en) ─────────────────────────────────
+        # ── Stage 2: MT (lg/sw/nyn/ach -> en) ─────────────────────────
         if detected_lang == "lg":
             query_text = normalize_luganda_tax_query(clean_asr_text)
             t0 = time.perf_counter()
@@ -390,6 +398,28 @@ class VoiceSession:
             else:
                 llm_locale = detected_lang
                 mt_degraded.append("sw-en")
+            timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang == "nyn":
+            query_text = normalize_runyankole_tax_query(clean_asr_text)
+            t0 = time.perf_counter()
+            mt_result = await _translate_with_retry(self._speech, query_text, "nyn", "en")
+            if mt_result is not None:
+                query_text = mt_result.text
+                mt_backend = mt_result.backend
+            else:
+                llm_locale = detected_lang
+                mt_degraded.append("nyn-en")
+            timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        elif detected_lang == "ach":
+            query_text = normalize_acholi_tax_query(clean_asr_text)
+            t0 = time.perf_counter()
+            mt_result = await _translate_with_retry(self._speech, query_text, "ach", "en")
+            if mt_result is not None:
+                query_text = mt_result.text
+                mt_backend = mt_result.backend
+            else:
+                llm_locale = detected_lang
+                mt_degraded.append("ach-en")
             timings["mt_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
         if self._cancelled.is_set():
@@ -438,7 +468,7 @@ class VoiceSession:
         if self._cancelled.is_set():
             return
 
-        # ── Stage 4: MT (en -> lg / sw) ───────────────────────────────
+        # ── Stage 4: MT (en -> lg / sw / nyn / ach) ───────────────────
         reply_for_tts = reply_text
         tts_lang = detected_lang
         if detected_lang == "lg" and "lg-en" not in mt_degraded:
@@ -455,17 +485,17 @@ class VoiceSession:
                     data={"direction": "en-lg", "detail": "translation unavailable"},
                 )
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
-        elif detected_lang == "sw" and "sw-en" not in mt_degraded:
+        elif detected_lang in ("sw", "nyn", "ach") and f"{detected_lang}-en" not in mt_degraded:
             t0 = time.perf_counter()
-            mt_back = await _translate_with_retry(self._speech, reply_text, "en", "sw")
+            mt_back = await _translate_with_retry(self._speech, reply_text, "en", detected_lang)
             if mt_back is not None:
                 reply_for_tts = mt_back.text
                 mt_backend = mt_back.backend
             else:
                 tts_lang = "en"
-                mt_degraded.append("en-sw")
+                mt_degraded.append(f"en-{detected_lang}")
             timings["mt_ms"] += round((time.perf_counter() - t0) * 1000, 1)
-        elif detected_lang in ("lg", "sw"):
+        elif detected_lang in ("lg", "sw", "nyn", "ach"):
             # generate() localised the reply itself; it is English if that failed.
             tts_lang = str(llm_result.get("reply_locale") or detected_lang)
 

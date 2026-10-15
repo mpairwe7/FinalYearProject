@@ -2,6 +2,7 @@
 
 import React, { memo, useCallback, useEffect, useRef, useState } from "react";
 import { MicIcon, CloseIcon } from "./Icons";
+import { localeLabel } from "../lib/locales";
 
 /**
  * Full-screen voice recording modal — Grok-inspired design.
@@ -165,7 +166,7 @@ function VoiceModalInner({
 
         {/* Language indicator */}
         <div className="voice-modal-lang">
-          {locale === "lg" ? "Luganda" : "English"}
+          {localeLabel(locale)}
         </div>
 
         {/* Live transcript */}

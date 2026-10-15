@@ -111,14 +111,15 @@ _HUMAN_WORD_RE: Final[re.Pattern[str]] = re.compile(
     r"^\W*(?:(?:yes|yeah|ok(?:ay)?|please)\W+)?"
     r"(?:(?:i\s+(?:want|need)|give\s+me|can\s+i\s+(?:have|get))\s+)?(?:(?:a|an|the)\s+)?(?:real\s+)?"
     r"(?:officer|agent|human|person|representative|operator|customer\s+(?:care|service)"
-    r"|omukozi|omuntu|afisa|mtu|binadamu|mhudumu)"
-    r"(?:\W+(?:please|now|nsaba|tafadhali))*\W*$",
+    r"|omukozi|omuntu|omuhwezi|afisa|mtu|binadamu|mhudumu|latic|dano|ngat)"
+    r"(?:\W+(?:please|now|nsaba|tafadhali|ninkushaba|tim\s+ber))*\W*$",
     re.IGNORECASE,
 )
 
 _DISPUTE_RE = re.compile(
     r"\b(dispute|object(?:ion)?|appeal|tribunal|tat|court|lawyer|advocate|illegal|fraud|"
-    r"okuwakanya|kuwakanya|nwakanya|okujulira|omusango|loya)\b",
+    r"okuwakanya|kuwakanya|nwakanya|okujulira|omusango|loya|"
+    r"okujurira|kujurira|orubanja|kwero\s+pimo|ngol\s+kop|lakwat\s+kop)\b",
     re.IGNORECASE,
 )
 
@@ -163,19 +164,21 @@ FILLER_TEXT = FILLER_POOL[-1]
 
 @lru_cache(maxsize=1)
 def _local_human_request_patterns() -> tuple[re.Pattern[str], ...]:
-    """The supervisor's own "I want a person" patterns for lg and sw.
+    """The supervisor's own "I want a person" patterns for lg, sw, nyn, and ach.
 
     Only the human-request rules — the tables also route legal disputes to
     escalation, which on a call is ChatModel.generate's decision, not a
     keyword's.
     """
+    from ..agents.patterns.ach import ACH_PATTERNS
     from ..agents.patterns.lg import LG_PATTERNS
+    from ..agents.patterns.nyn import NYN_PATTERNS
     from ..agents.patterns.sw import SW_PATTERNS
 
     # Read from the locale modules directly: the supervisor registers only
     # the Ugandan-language extensions (for_locale("sw") is English-only), and
     # widening that registry would change chat routing, not just calls.
-    tables = {"lg": LG_PATTERNS, "sw": SW_PATTERNS}
+    tables = {"lg": LG_PATTERNS, "sw": SW_PATTERNS, "nyn": NYN_PATTERNS, "ach": ACH_PATTERNS}
     found: list[re.Pattern[str]] = []
     for lang in KNOWN_LANGUAGES:
         table = tables.get(lang)
@@ -201,24 +204,26 @@ def is_human_request(text: str) -> bool:
 #: The caller's answer to the yes/no question the AI's last turn ended on
 #: ("Would you like to speak to an officer?", "Would you like more detail?"):
 #: the whole turn, never a word inside a new question ("Yes, and what is the
-#: VAT rate?" is a question). English, Luganda, Swahili.
+#: VAT rate?" is a question). English, Luganda, Swahili, Runyankole, Acholi.
 _OFFER_ACCEPT_RE: Final[re.Pattern[str]] = re.compile(
     r"^\W*(?:yes|yeah|yep|sure|ok(?:ay)?|alright|please|go\s+ahead|connect\s+me|please\s+do|confirm"
-    r"|yee|kale|weewaawo|nsaba|kakasa|ndiyo|ndio|sawa|naam|tafadhali|thibitisha)"
-    r"(?:\W+(?:yes|please|sure|thanks|thank\s+you|go\s+ahead|connect\s+me|do|confirm|nsaba|webale|kakasa|tafadhali|asante|thibitisha))*\W*$",
+    r"|yee|kale|weewaawo|nsaba|kakasa|ndiyo|ndio|sawa|naam|tafadhali|thibitisha"
+    r"|ego|eego|kare|kihikire|ninkushaba|eyo|eeyo|ber|kakare|ada|tim\s+ber)"
+    r"(?:\W+(?:yes|please|sure|thanks|thank\s+you|go\s+ahead|connect\s+me|do|confirm"
+    r"|nsaba|webale|kakasa|tafadhali|asante|thibitisha|ninkushaba|webare|tim\s+ber|apwoyo))*\W*$",
     re.IGNORECASE,
 )
 _OFFER_DECLINE_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\W*(?:no|nope|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)|nedda|hapana)"
+    r"^\W*(?:no|nope|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)|nedda|hapana|ngaaha|apana|pe|ku)"
     r"(?:\W+(?:thanks|thank\s+you|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)"
-    r"|webale|asante))*\W*$",
+    r"|webale|asante|webare|apwoyo))*\W*$",
     re.IGNORECASE,
 )
 #: "Tell me more" answers "Would you like more detail?" — and only that: said
-#: to an officer offer it is not a yes. Luganda weeyongere, Swahili endelea / zaidi.
+#: to an officer offer it is not a yes.
 _MORE_ACCEPT_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\W*(?:(?:yes|yeah|sure|ok(?:ay)?|please)\W+)?"
-    r"(?:tell\s+me\s+more|go\s+on|carry\s+on|continue|more(?:\s+detail)?|weeyongere|endelea|zaidi)"
+    r"^\W*(?:(?:yes|yeah|sure|ok(?:ay)?|please|ego|eyo)\W+)?"
+    r"(?:tell\s+me\s+more|go\s+on|carry\s+on|continue|more(?:\s+detail)?|weeyongere|endelea|zaidi|gumizamu|ebindi|mede|mukene)"
     r"(?:\W+please)?\W*$",
     re.IGNORECASE,
 )
@@ -237,14 +242,18 @@ _CONTROL_MAX_WORDS = 8
 _REPEAT_PATTERNS: Final[re.Pattern[str]] = re.compile(
     r"\b(?:repeat\s+that|say\s+that\s+again|could\s+you\s+repeat|pardon\s+me|what\s+did\s+you\s+say"
     r"|kiddemu|ddamu|nsaba\s+oddemu|kiddemu\s+katono"
-    r"|rudia\s+tena|rudia|sema\s+tena|rudia\s+uliyosema)\b",
+    r"|rudia\s+tena|rudia|sema\s+tena|rudia\s+uliyosema"
+    r"|garukamu|kigarukemu|ninkushaba\s+ogarukemu"
+    r"|nwo|nwoyo|tim\s+ber\s+inwo)\b",
     re.IGNORECASE,
 )
 
 _SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
     r"\b(?:speak\s+slower|more\s+slowly|talk\s+slower|slow\s+down"
     r"|yogera\s+mpola|kiddemu\s+mpola|oyogere\s+mpola"
-    r"|ongea\s+polepole|ongea\s+taratibu|sema\s+polepole)\b",
+    r"|ongea\s+polepole|ongea\s+taratibu|sema\s+polepole"
+    r"|gamba\s+mpora|ogambe\s+mpora"
+    r"|lok\s+mot|ilok\s+mot)\b",
     re.IGNORECASE,
 )
 
@@ -252,7 +261,9 @@ _SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
 _HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
     r"\b(?:hang\s+up|end\s+(?:the\s+)?call|disconnect|good[\s-]?bye"
     r"|komya\s+essimu|katikoma\s+wano|weeraba"
-    r"|kata\s+simu|maliza\s+simu|kwaheri)\b",
+    r"|kata\s+simu|maliza\s+simu|kwaheri"
+    r"|ita\s+esimu|kingaho\s+esimu|ogumeho"
+    r"|nek\s+cim|gik\s+cim|wabineno)\b",
     re.IGNORECASE,
 )
 

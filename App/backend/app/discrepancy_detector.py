@@ -244,6 +244,18 @@ def format_discrepancy_acknowledgement(
             f"kunaweza kuwa na mabadiliko ya kisheria au viwango. Nimewasilisha ripoti ya uhakiki "
             f"(#KB-{short_id}) kwa timu yetu ya kiufundi ili kuthibitisha.{assertion_note}"
         )
+    if locale in ("nyn", "nyk"):
+        return (
+            f"Webare munonga kworeka enshonga egi! Kurugiirira aha biragiro bya URA ebya hati, "
+            f"nihabaasa kubaho empinduka omu biragiro nari ebipimo. Ntareebaho alipoota y'okushwijuma "
+            f"(#KB-{short_id}) aha tiimu yaitu y'eby'ebiragiro kugihamya.{assertion_note}"
+        )
+    if locale == "ach":
+        return (
+            f"Apwoyo matek pi nyuto lok man! Malube ki cik me URA me kombedi, "
+            f"alokaloka romo bedo tye i cik onyo wel mucoro. Acwalo ripot me ngiyo "
+            f"(#KB-{short_id}) bot dulwa me cik me moko.{assertion_note}"
+        )
     return (
         f"Thank you for pointing this out! Based on our {baseline_topic}, "
         f"tax statutory provisions and rates are subject to periodic amendments. "

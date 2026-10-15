@@ -37,13 +37,9 @@ export const LOCALE_OPTIONS: readonly LocaleOption[] = [
   { value: 'en', label: 'English', native: 'English', speechLang: 'en-US', dictation: 'browser' },
   { value: 'lg', label: 'Luganda', native: 'Oluganda', speechLang: 'lg-UG', dictation: 'server' },
   { value: 'sw', label: 'Swahili', native: 'Kiswahili', speechLang: 'sw-KE', dictation: 'server' },
+  { value: 'nyn', label: 'Runyankole', native: 'Orunyankore', speechLang: 'nyn-UG', dictation: 'server' },
+  { value: 'ach', label: 'Acholi', native: 'Leb Acoli', speechLang: 'ach-UG', dictation: 'server' },
 ];
-
-/* Runyankole (nyn) and Acholi (ach) were here and were removed: the assistant
-   offers English, Luganda and Swahili. `normalizeLocale` below coerces a
-   persisted 'nyn'/'ach' back to English rather than leaving a stored value the
-   picker can no longer show. The backend still understands both codes, so
-   restoring them is a matter of adding the two lines back. */
 
 export const DEFAULT_LOCALE = 'en';
 
@@ -53,6 +49,7 @@ export function isSupportedLocale(value: unknown): value is string {
 
 /** Coerce a persisted or externally-supplied value to a known locale. */
 export function normalizeLocale(value: unknown): string {
+  if (typeof value === 'string' && value.toLowerCase() === 'nyk') return 'nyn';
   return isSupportedLocale(value) ? value : DEFAULT_LOCALE;
 }
 

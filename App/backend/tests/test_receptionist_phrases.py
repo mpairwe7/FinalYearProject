@@ -10,17 +10,19 @@ from app.receptionist.clarify import classify_yes_no
 
 class PhraseTableIsComplete(unittest.TestCase):
     def test_every_key_exists_in_every_language(self):
-        for lang in ("en", "lg", "sw"):
+        for lang in ("en", "lg", "sw", "nyn", "ach"):
             table = phrases._PHRASES[lang]
             with self.subTest(lang=lang):
                 self.assertEqual(set(table), set(phrases.KEYS))
                 self.assertTrue(all(text.strip() for text in table.values()))
 
     def test_every_language_has_its_own_fillers(self):
-        for lang in ("en", "lg", "sw"):
+        for lang in ("en", "lg", "sw", "nyn", "ach"):
             with self.subTest(lang=lang):
                 self.assertGreaterEqual(len(phrases.fillers(lang)), 6)
         self.assertNotEqual(set(phrases.fillers("lg")), set(phrases.fillers("en")))
+        self.assertNotEqual(set(phrases.fillers("nyn")), set(phrases.fillers("en")))
+        self.assertNotEqual(set(phrases.fillers("ach")), set(phrases.fillers("en")))
 
     def test_placeholders_match_across_languages(self):
         import string
@@ -28,14 +30,16 @@ class PhraseTableIsComplete(unittest.TestCase):
         for key in phrases.KEYS:
             fields = {
                 lang: {f for _, f, _, _ in string.Formatter().parse(phrases._PHRASES[lang][key]) if f}
-                for lang in ("en", "lg", "sw")
+                for lang in ("en", "lg", "sw", "nyn", "ach")
             }
             with self.subTest(key=key):
                 self.assertEqual(fields["lg"], fields["en"])
                 self.assertEqual(fields["sw"], fields["en"])
+                self.assertEqual(fields["nyn"], fields["en"])
+                self.assertEqual(fields["ach"], fields["en"])
 
     def test_lg_and_sw_are_marked_unreviewed_until_a_native_speaker_signs_off(self):
-        self.assertEqual(phrases.UNREVIEWED, frozenset({"lg", "sw"}))
+        self.assertEqual(phrases.UNREVIEWED, frozenset({"lg", "sw", "nyn", "ach"}))
 
 
 class Greeting(unittest.TestCase):
@@ -66,8 +70,8 @@ class Lookup(unittest.TestCase):
         self.assertIn("TIC-1458BC4D", phrases.phrase("reference_screen", "sw", ref="TIC-1458BC4D"))
 
     def test_an_unknown_language_falls_back_to_english(self):
-        self.assertEqual(phrases.phrase("transfer", "nyn"), phrases.phrase("transfer", "en"))
-        self.assertEqual(phrases.fillers("nyn"), phrases.fillers("en"))
+        self.assertEqual(phrases.phrase("transfer", "fr"), phrases.phrase("transfer", "en"))
+        self.assertEqual(phrases.fillers("fr"), phrases.fillers("en"))
 
     def test_pick_filler_never_repeats_and_stays_in_language(self):
         last = None
@@ -84,7 +88,7 @@ class Lookup(unittest.TestCase):
         self.assertTrue(set(phrases.fillers("lg")) <= set(lines))
 
     def test_screen_lines_are_never_synthesised(self):
-        for lang in ("en", "lg", "sw"):
+        for lang in ("en", "lg", "sw", "nyn", "ach"):
             lines = phrases.prewarm_phrases(lang)
             with self.subTest(lang=lang):
                 self.assertNotIn(phrases.phrase("crisis_screen", lang), lines)
@@ -97,7 +101,7 @@ class NumbersTheVoiceCannotSay(unittest.TestCase):
     def test_no_spoken_line_carries_a_number(self):
         import re
 
-        for lang in ("en", "lg", "sw"):
+        for lang in ("en", "lg", "sw", "nyn", "ach"):
             for key in phrases.KEYS:
                 if key in phrases.UNSPOKEN:
                     continue

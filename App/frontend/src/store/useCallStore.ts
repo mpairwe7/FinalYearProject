@@ -12,12 +12,12 @@ export type CallStatus =
   | 'ended';
 
 /** A language the receptionist can hold a call in. */
-export type CallLanguage = 'en' | 'lg' | 'sw';
+export type CallLanguage = 'en' | 'lg' | 'sw' | 'nyn' | 'ach';
 
 /** How the call came to be in its current language. */
 export type CallLanguageSource = 'default' | 'auto' | 'explicit' | 'override';
 
-export const CALL_LANGUAGES: readonly CallLanguage[] = ['en', 'lg', 'sw'];
+export const CALL_LANGUAGES: readonly CallLanguage[] = ['en', 'lg', 'sw', 'nyn', 'ach'];
 
 export function isCallLanguage(value: unknown): value is CallLanguage {
   return typeof value === 'string' && (CALL_LANGUAGES as readonly string[]).includes(value);

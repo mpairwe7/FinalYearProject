@@ -92,7 +92,7 @@ def _csv_rows(csv_path: Path) -> list[dict[str, Any]]:
                 "answer": answer,
                 "row_number": row_number,
             }
-            for lang in ("lg", "sw"):
+            for lang in ("lg", "sw", "nyn", "ach"):
                 q_lang = _clean(row.get(f"question_{lang}") or row.get(f"Question_{lang}"))
                 a_lang = _clean(row.get(f"answer_{lang}") or row.get(f"Answer_{lang}"))
                 if q_lang:
@@ -152,7 +152,7 @@ def _canonical_faq_records(
                 "tag": _faq_tag(csv_path),
                 "row_number": row_number,
             }
-            for lang in ("lg", "sw"):
+            for lang in ("lg", "sw", "nyn", "ach"):
                 if f"question_{lang}" in row:
                     candidate_record[f"question_{lang}"] = row[f"question_{lang}"]
                 if f"answer_{lang}" in row:
@@ -401,7 +401,7 @@ def ingest_faq_jsonls(csv_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
                 "corpus_file": jsonl_path.name,
                 "duplicate_question_count": record["duplicate_question_count"],
             }
-            for lang in ("lg", "sw"):
+            for lang in ("lg", "sw", "nyn", "ach"):
                 if f"question_{lang}" in record:
                     doc[f"question_{lang}"] = _clean(record[f"question_{lang}"])
                 if f"answer_{lang}" in record:

@@ -21,7 +21,7 @@ import re
 from functools import lru_cache
 
 #: Languages whose strings still need a native speaker's sign-off.
-UNREVIEWED: frozenset[str] = frozenset({"lg", "sw"})
+UNREVIEWED: frozenset[str] = frozenset({"lg", "sw", "nyn", "ach"})
 
 #: Lines shown on the caller's screen and never voiced: numbers a caller must
 #: keep, which Orpheus reads badly (it said "999 or 112" as "nine nine or one
@@ -226,6 +226,128 @@ _PHRASES: dict[str, dict[str, str]] = {
         "review_ask_transfer": "Ninakuunganisha na afisa wa URA sasa. Unaposubiri, je, majibu yangu yamekusaidia hadi sasa?",
         "review_thanks_transfer": "Asante. Tafadhali endelea kusubiri; afisa atakuhudumia hivi punde.",
     },
+    "nyn": {
+        "greeting": (
+            "Agandi, webare kuhikirira URA. Ndi omuhwezi waawe wa AI erizooba. Buuza ekibuuzo kyawe "
+            "omu rurimi oru orikukunda — Orungyereza, Oluganda, Kiswahili, Orunyankore nari Leb Acoli — "
+            "kandi niija kukugarukamu omu rurimi orwo. Noobaasa kushaba omukozi wa URA obwire bwona. "
+            "Nimbaasa kukuhwera nta erizooba?"
+        ),
+        "more_detail": "Nooyenda kumanya ebindi ebikukiraho?",
+        "timeout_transfer": (
+            "Nsaasira, okusherura nikitutwara obwire buraingwa okukira oku kyabaire kishemereire. "
+            "Ka nkukwatanise n'omukozi wa URA."
+        ),
+        "error_transfer": (
+            "Nsaasira, haabaho obuzibu omu kusherura amakuru g'omushoro ogwo. "
+            "Ka nkukwatanise n'omukozi wa URA."
+        ),
+        "transfer": "Ninkukwatanisa n'omukozi wa URA, ninkushaba orindeho.",
+        "queue_disabled": (
+            "Hati timbaasa kukukwatanisa n'omukozi. Ninkushaba oteere esimu ya URA ey'obusha "
+            "omu shaaha z'okukora; enamba eri aha screen yaawe."
+        ),
+        "tollfree_screen": "Esimu ya URA ey'obusha: 0800 117 000",
+        "still_holding": "Webare kurinda. Omukozi wa URA naija kukugambaho omu kaire kakye.",
+        "officers_busy": (
+            "Abakozi baitu boona baine emirimo, nahabwekyo omukozi naija kukuteerera esimu. "
+            "Omu bwire obu, nimbaasa kukuhwera aha bibuuzo ebindi."
+        ),
+        "reference_screen": "Enamba yaawe y'okujuriza: {ref}",
+        "clarify_term": "Nsaasira, waagamba {term}?",
+        "clarify_confirm": "Nahabwekyo, naaba nkyetegyereize gye, noobuuza ahari {highlight} — kihikire?",
+        "clarify_repeat_after": "Nsaasira, ekigambo ekirikukurata '{prev}' tinkihuriire — noobaasa kukigarukamu?",
+        "clarify_repeat": "Nsaasira, tinkuhuriire gye — noobaasa kugarukamu?",
+        "clarify_restart": "Nsaasira ahari ekyo — ninkushaba ogarukemu ekibuuzo kyawe.",
+        "switched": "Kare — tugumizemu omu Runyankole.",
+        "officer_offer": "Nooyenda kugamba n'omukozi ahari enshonga egi?",
+        "crisis_support": (
+            "Nsaasira munonga ahabw'oku orikwehurira. Amagara gaawe nigakira enshonga yoona "
+            "ey'omushoro. Waaba ori omu kabi hati, ninkushaba oteere mwenda mwenda mwenda, "
+            "nari emwe emwe ibiri. Enamba y'obuhabuzi bw'obusha eri aha screen yaawe."
+        ),
+        "crisis_offer": "Nooyenda kandi nkukwatanise n'omukozi wa URA?",
+        "crisis_declined": (
+            "Kare. Enamba ziri aha screen yaawe buri obu oraazetengye. Ndi aha waaba oine ekindi."
+        ),
+        "crisis_screen": (
+            "Obuhwezi bw'ahonaaho: 999 nari 112. Obuhabuzi bw'obusha, Mental Health "
+            "Uganda: 0800 21 21 21 (Orwokubanza kuhika Orwakataano, 8:30–17:00)."
+        ),
+        "officer_joining": "Hati nookwatanisibwa na {name}.",
+        "officer_reconnecting": "Ninkushaba orindeho, ninkyakukwatanisa n'omukozi.",
+        "on_hold": "Ninkushaba orindeho.",
+        "officer_closing": "Webare kuteera esimu ahari URA. Ogumeho.",
+        "idle_check": "Okyariho? Ndi aha, buuza ekibuuzo kyawe waaba oyeteekateekire.",
+        "slow_ack": "Kare. Niija kugamba mpora, ndikuhuumuraho ahagati y'enshonga. Ekibuuzo kyawe niki?",
+        "offer_declined": "Kare. Niki ekindi eki ndikubaasa kukuhweraho?",
+        "idle_goodbye": "Tihaine eki mpuriire, nahabwekyo niija kukingaho esimu hati. Webare kuteera esimu ahari URA. Ogumeho.",
+        "review_ask_end": "Otakaagiire, esimu egi ekuhwereire?",
+        "review_thanks_end": "Webare kutugambira. Ogumeho.",
+        "review_ask_transfer": "Hati ninkukwatanisa n'omukozi wa URA. Waaba otetegyereize, eby'okugarukamu byangye bikuhwereire?",
+        "review_thanks_transfer": "Webare. Guma aha simu; omukozi naija kukugambaho ahonaaho.",
+    },
+    "ach": {
+        "greeting": (
+            "Kopango, apwoyo kubo ki URA. An lakony ni me AI tin. Peny lapeny ni "
+            "i leb ma imito — Leb Munu, Luganda, Kiswahili, Runyankole onyo Leb Acoli — "
+            "dok abigamo i leb meno. Itwero penyo pi latic me URA cawa mo keken. "
+            "Atwero konyi nining tin?"
+        ),
+        "more_detail": "Imito ngec mukene?",
+        "timeout_transfer": (
+            "kica, yenyo ngec tye ka tero kare malac loyo kit ma myero obed. "
+            "Wek akubi ki latic me URA."
+        ),
+        "error_transfer": (
+            "Kica, peko obedo tye i yenyo ngec me mucoro meno. "
+            "Wek akubi ki latic me URA."
+        ),
+        "transfer": "Atye ka kubi ki latic me URA, tim ber ikur.",
+        "queue_disabled": (
+            "Kombedi pe atwero kubi ki latic. Tim ber igoyo cim me nono me URA "
+            "i cawa me tic; namba tye i screen ni."
+        ),
+        "tollfree_screen": "Cim me nono me URA: 0800 117 000",
+        "still_holding": "Apwoyo kuro. Latic me URA biloko kwedi i kare manok.",
+        "officers_busy": (
+            "Luticwa weng gitye ki tic, pi meno latic bigoyo cim boti. "
+            "Kombedi, pud atwero konyi ki lapeny mukene."
+        ),
+        "reference_screen": "Namba ni me ngec: {ref}",
+        "clarify_term": "Kica, iwaco {term}?",
+        "clarify_confirm": "Pi meno, ka aniang maber, itye ka penyo i kom {highlight} — tye kakare?",
+        "clarify_repeat_after": "Kica, pe awinyo lok ma lubo '{prev}' — itwero nwoyo?",
+        "clarify_repeat": "Kica, pe awinyo maber — itwero nwoyo?",
+        "clarify_restart": "Kica pi meno — tim ber inwo lapeny ni doki.",
+        "switched": "Ber — wamede i Leb Acoli.",
+        "officer_offer": "Imito loko ki latic me URA i kom lok man?",
+        "crisis_support": (
+            "Kica matek pi kit ma itye ka winyo kwede. Kwoni pire tek loyo lok mo keken "
+            "me mucoro. Ka itye i ayela kombedi, tim ber igoyo abongwen abongwen abongwen, "
+            "onyo acel acel aryo. Namba me miyo tam me nono tye i screen ni."
+        ),
+        "crisis_offer": "Imito bene akubi ki latic me URA?",
+        "crisis_declined": (
+            "Ber. Namba gitye i screen ni cawa mo keken ma imito. Atye kany ka tye gin mukene."
+        ),
+        "crisis_screen": (
+            "Kony me oyot: 999 onyo 112. Miyo tam me nono, Mental Health "
+            "Uganda: 0800 21 21 21 (Ceng Baraja naka Ceng Abic, 8:30–17:00)."
+        ),
+        "officer_joining": "Kombedi ikube ki {name}.",
+        "officer_reconnecting": "Tim ber ikur, pud atye ka kubi ki latic.",
+        "on_hold": "Tim ber ikur.",
+        "officer_closing": "Apwoyo goyo cim bot URA. Wabineno.",
+        "idle_check": "Pud itye? Atye kany, peny lapeny ni ka itye atera.",
+        "slow_ack": "Ber. Abiloko mot, kun ayweyo i kin lok. Lapeny ni obedo ngo?",
+        "offer_declined": "Ber. Gin ango mukene ma atwero konyi iye?",
+        "idle_goodbye": "Pe awinyo gin mo, pi meno abigiko cim kombedi. Apwoyo goyo cim bot URA. Wabineno.",
+        "review_ask_end": "Ma peya icit, cim man okonyi?",
+        "review_thanks_end": "Apwoyo pi tam ni. Wabineno.",
+        "review_ask_transfer": "Atye ka kubi ki latic me URA kombedi. Ka itye ka kuro, lagam na okonyi?",
+        "review_thanks_transfer": "Apwoyo. Bed i cim; latic biloko kwedi oyot.",
+    },
 }
 
 _FILLERS: dict[str, tuple[str, ...]] = {
@@ -255,6 +377,22 @@ _FILLERS: dict[str, tuple[str, ...]] = {
         "Hebu nione.",
         "Ngoja nikuangalie.",
     ),
+    "nyn": (
+        "Rindaho kakye.",
+        "Ka nshwijume.",
+        "Ninshwijuma hati.",
+        "Akaire kakye.",
+        "Ka ndeebe.",
+        "Ka nkushwijumire.",
+    ),
+    "ach": (
+        "Kur manok.",
+        "Wek angi.",
+        "Atye ka ngiyo kombedi.",
+        "Kare manok.",
+        "Wek anen.",
+        "Wek ayeny piri.",
+    ),
 }
 
 # Yes / no for the clarification loop, beyond the English words clarify.py
@@ -263,10 +401,14 @@ _FILLERS: dict[str, tuple[str, ...]] = {
 _YES_WORDS: dict[str, tuple[str, ...]] = {
     "lg": ("yee", "ye", "weewaawo", "kituufu", "bwe kiri", "kyekyo", "kye kyo"),
     "sw": ("ndiyo", "ndio", "sawa", "kweli", "sahihi", "hasa", "naam"),
+    "nyn": ("ego", "eego", "kihikire", "nikwo", "kare"),
+    "ach": ("eyo", "eeyo", "kakare", "ada", "ber"),
 }
 _NO_WORDS: dict[str, tuple[str, ...]] = {
     "lg": ("nedda", "si kyo", "si kituufu", "ssi"),
     "sw": ("hapana", "sio", "si sahihi"),
+    "nyn": ("ngaaha", "apana", "tikihikire", "tikyo"),
+    "ach": ("pe", "ku", "pe kakare"),
 }
 
 KEYS: tuple[str, ...] = tuple(_PHRASES["en"])
@@ -291,6 +433,14 @@ _EMPATHETIC_FILLERS: dict[str, tuple[str, ...]] = {
     "sw": (
         "Naelewa — ngoja niangalie njia bora ya kukusaidia sasa hivi.",
         "Nimekusikia — wacha niangalie mwongozo sahihi mara moja.",
+    ),
+    "nyn": (
+        "Nyetegyereza — ka nshwijume omuringo ogurikukirayo oburungi kukuhwera hati.",
+        "Mpuriire — ka nsherure obuhabuzi obuhikire ahonaaho.",
+    ),
+    "ach": (
+        "Aniang — wek angi yoo maber loyo me konyi kombedi.",
+        "Awinyo — wek ayeny tela ma kakare oyot-oyot.",
     ),
 }
 

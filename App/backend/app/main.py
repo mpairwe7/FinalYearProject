@@ -2007,10 +2007,11 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
 
     `default: true` marks the speaker used when a caller names none.
     """
-    from . import sunbird
+    from . import orpheus_tts, sunbird
     from .speech_service import en_edge_voice_choices
 
     sunbird_ready = sunbird.is_available()
+    orpheus_up = orpheus_tts.reachability() == "up"
     voices: dict[str, list[dict]] = {}
 
     for locale, tags in sunbird.TTS_VOICE_CATALOG.items():
@@ -2019,13 +2020,14 @@ def speech_voices(_ctx: AuthContext = Depends(optional_user)) -> dict:
         # edge-tts exists to avoid (see speech_service). Advertising it as a
         # native English speaker would recommend the worst option on offer.
         native = locale != "en"
+        local_orpheus_ready = orpheus_up and bool(orpheus_tts.speaker_for(locale))
         entries = [
             {
                 "id": tag,
                 "provider": "sunbird",
                 "native": native,
                 "default": False,  # decided once per locale, below
-                "available": sunbird_ready,
+                "available": bool(sunbird_ready or local_orpheus_ready),
             }
             for tag in tags
         ]
@@ -2166,6 +2168,14 @@ async def voice_chat(
         chat_text = normalize_luganda_tax_query(transcript)
     elif detected_lang == "sw":
         chat_text = normalize_swahili_tax_query(transcript)
+    elif detected_lang in ("nyn", "nyk"):
+        from .receptionist.lexicon import normalize_runyankole_tax_query
+
+        chat_text = normalize_runyankole_tax_query(transcript)
+    elif detected_lang == "ach":
+        from .receptionist.lexicon import normalize_acholi_tax_query
+
+        chat_text = normalize_acholi_tax_query(transcript)
 
     # --- 3. Local Model Generation & Localization -------------------------
     t_llm = time.perf_counter()

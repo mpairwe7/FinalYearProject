@@ -86,6 +86,7 @@ def assess(
     message: str,
     history: list[str] | None = None,
     *,
+    locale: str = "",
     record_metric: bool = True,
 ) -> dict[str, Any]:
     """Classify *message* and return handling guidance.
@@ -99,13 +100,26 @@ def assess(
     across turns — instead of being guessed from one message.
     """
     text = message or ""
+    eff_locale = "nyn" if (locale or "").strip().lower() == "nyk" else (locale or "").strip().lower()
+    if not eff_locale:
+        try:
+            from ..query import detect_language
+
+            eff_locale = detect_language(text, default_lang="en")
+        except Exception:
+            eff_locale = "en"
+    if eff_locale not in ("en", "lg", "sw", "nyn", "ach"):
+        eff_locale = "en"
+
     if detect_crisis(text):
         return {
             "kind": "hardship",
             "intensity": "high",
             "crisis": True,
             "sustained": False,
+            "locale": eff_locale,
             "acknowledgement": "",
+            "localized_acknowledgement": "",
             "tone_hint": "",
             "lead_with_acknowledgement": False,
             "offer_human_handoff": True,
@@ -128,7 +142,8 @@ def assess(
     else:
         intensity = "low"
 
-    acknowledgement = empathy_ack(kind)
+    acknowledgement = empathy_ack(kind, "en")
+    localized_ack = empathy_ack(kind, eff_locale)
     tone_hint = tone_hint_for(kind)
     guidance = _GUIDANCE.get(kind, _GUIDANCE[""])
 
@@ -188,7 +203,9 @@ def assess(
         "intensity": intensity,
         "crisis": False,
         "sustained": trajectory["sustained"],
+        "locale": eff_locale,
         "acknowledgement": acknowledgement,
+        "localized_acknowledgement": localized_ack,
         "tone_hint": tone_hint,
         "tone_register": tone_register,
         "lead_with_acknowledgement": bool(acknowledgement)
@@ -394,6 +411,10 @@ class EmotionalToneTool(Tool):
                         "maxItems": 10,
                         "description": "The taxpayer's earlier messages in this conversation, oldest first.",
                     },
+                    "locale": {
+                        "type": "string",
+                        "description": "Active or detected conversation locale (en, lg, sw, nyn, ach).",
+                    },
                 },
                 "required": ["message"],
                 "additionalProperties": False,
@@ -426,10 +447,22 @@ class EmotionalToneTool(Tool):
             title="Assess emotional tone",
         )
 
-    def execute(self, message: str = "", history: list[str] | None = None) -> dict[str, Any]:
+    def execute(
+        self,
+        message: str = "",
+        history: list[str] | None = None,
+        locale: str = "",
+    ) -> dict[str, Any]:
         if not str(message).strip():
             return {"ok": False, "error": "message is required"}
-        return {"ok": True, **assess(message, history=[str(h) for h in (history or [])][-10:])}
+        return {
+            "ok": True,
+            **assess(
+                message,
+                history=[str(h) for h in (history or [])][-10:],
+                locale=locale,
+            ),
+        }
 
 
 ToolRegistry.register(EmotionalToneTool())

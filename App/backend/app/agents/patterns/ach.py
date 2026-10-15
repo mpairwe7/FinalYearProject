@@ -72,8 +72,17 @@ _ESCALATE = (
 )
 
 _RATE_CUE = (re.compile(_MUCH, re.IGNORECASE),)
+_AMOUNT_CUE = (re.compile(r"\b(elfu|miya|tutemia)\b", re.IGNORECASE),)
 _TEMPORAL_CUE = (re.compile(r"\bkombedi\b", re.IGNORECASE),)
-_GRATITUDE_PHRASES = frozenset({"apwoyo", "apwoyo matek"})
+_LEARN_INTENT = (
+    re.compile(r"\b(obedo\s+ngo|tiyo\s+nining|tita|tit\s+bota|te\s+lok)\b", re.IGNORECASE),
+)
+_LEARN_TOPIC = (re.compile(_TAX_NOUN, re.IGNORECASE),)
+_GREETING_WORDS = frozenset({"kopango"})
+_GREETING_PHRASES = frozenset({"itye nining", "ibut nining", "iruu nining", "wutye nining"})
+_GRATITUDE_PHRASES = frozenset({"apwoyo", "apwoyo matek", "wapwoyo"})
+_FAREWELL_PHRASES = frozenset({"wabineno", "ibed maber", "wubed maber"})
+_CLARIFY_STOP_WORDS = frozenset({"ango", "ningo", "nining"})
 
 
 ACH_PATTERNS = LocalePatterns(
@@ -82,7 +91,14 @@ ACH_PATTERNS = LocalePatterns(
     rate=_RATE,
     temporal=_TEMPORAL,
     escalate=_ESCALATE,
+    learn_intent=_LEARN_INTENT,
+    learn_topic=_LEARN_TOPIC,
+    amount_cue=_AMOUNT_CUE,
     rate_cue=_RATE_CUE,
     temporal_cue=_TEMPORAL_CUE,
+    greeting_words=_GREETING_WORDS,
+    greeting_phrases=_GREETING_PHRASES,
     gratitude_phrases=_GRATITUDE_PHRASES,
+    farewell_phrases=_FAREWELL_PHRASES,
+    clarify_stop_words=_CLARIFY_STOP_WORDS,
 )

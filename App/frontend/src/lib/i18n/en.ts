@@ -357,6 +357,8 @@ export const en = {
   'call.lang.en': 'English',
   'call.lang.lg': 'Luganda',
   'call.lang.sw': 'Kiswahili',
+  'call.lang.nyn': 'Runyankole',
+  'call.lang.ach': 'Acholi',
 } as const;
 
 export type TranslationKey = keyof typeof en;

@@ -142,6 +142,16 @@ def build_resumption_prompt(case: ResolutionCase, target_locale: str = "en") -> 
             f"Katika kipindi kilichopita ({case.source_channel}), tulikuwa tukishughulikia: "
             f"{case.primary_objective}. Hatua inayofuata: {next_step}."
         )
+    if loc == "nyn":
+        return (
+            f"Omu kiganiro ekyahingwire ({case.source_channel}), tukaba nitukora ahari: "
+            f"{case.primary_objective}. Ekirikukurataho: {next_step}."
+        )
+    if loc == "ach":
+        return (
+            f"I lok mukato ({case.source_channel}), onongo watye ka tic i kom: "
+            f"{case.primary_objective}. Rwom ma lubo: {next_step}."
+        )
     return (
         f"Continuing active resolution case ({case.case_id} from {case.source_channel}): "
         f"Objective '{case.primary_objective}' [{case.status}]. Next pending step: {next_step}."

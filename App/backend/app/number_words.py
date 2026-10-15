@@ -134,6 +134,57 @@ def lg_words(n: int, agree: str = "") -> str | None:
     return f"kkumi na {unit}" if tens == 1 else f"{_LG_TENS[tens]} mu {unit}"
 
 
+# Runyankole counting forms (0-100); ebicweka (percent) and obukaikuru (millions)
+# agree in units 1-5.
+_NYN_UNITS = ["zeero", "emwe", "ibiri", "ishatu", "ina", "itaano", "mukaaga", "mushanju", "munaana", "mwenda"]
+_NYN_AGREEING = {
+    "bi": ["", "kimwe", "bibiri", "bishatu", "bina", "bitaano"],
+    "bu": ["", "kamwe", "bubiri", "bushatu", "buna", "butaano"],
+}
+_NYN_TENS = [
+    "", "ikumi", "makumi abiri", "makumi ashatu", "makumi ana", "makumi ataano",
+    "nkaaga", "nshanju", "kinaana", "kyenda",
+]
+
+
+def nyn_words(n: int, agree: str = "") -> str | None:
+    """Runyankole for 0-100: 18 -> "ikumi na munaana", 25 -> "makumi abiri na itaano"."""
+    if n == 100:
+        return "kikumi"
+    if not 0 <= n < 100:
+        return None
+    tens, units = divmod(n, 10)
+    unit = _NYN_AGREEING[agree][units] if agree and 1 <= units <= 5 else _NYN_UNITS[units]
+    if not tens:
+        return unit
+    if not units:
+        return _NYN_TENS[tens]
+    return f"{_NYN_TENS[tens]} na {unit}"
+
+
+# Acholi counting forms (0-100).
+_ACH_UNITS = ["zero", "acel", "aryo", "adek", "angwen", "abic", "abicel", "abiro", "aboro", "abongwen"]
+_ACH_TENS = [
+    "", "apar", "pyeraryo", "pyeradek", "pyerangwen", "pyerabic",
+    "pyerabicel", "pyerabiro", "pyeraboro", "pyerabongwen",
+]
+
+
+def ach_words(n: int) -> str | None:
+    """Acholi for 0-100: 18 -> "apar wiye aboro", 25 -> "pyeraryo wiye abic"."""
+    if n == 100:
+        return "miya acel"
+    if not 0 <= n < 100:
+        return None
+    tens, units = divmod(n, 10)
+    unit = _ACH_UNITS[units]
+    if not tens:
+        return unit
+    if not units:
+        return _ACH_TENS[tens]
+    return f"{_ACH_TENS[tens]} wiye {unit}"
+
+
 def decimal_words(number: str, locale: str) -> str:
     """"2.5" -> "mbili nukta tano" (sw) or "two point five": digits after the point one by one."""
     whole, _, fraction = number.partition(".")

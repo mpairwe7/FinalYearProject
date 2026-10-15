@@ -74,6 +74,8 @@ export function CallHistoryFilters({
           <option value="en">English</option>
           <option value="lg">Luganda</option>
           <option value="sw">Swahili</option>
+          <option value="nyn">Runyankole</option>
+          <option value="ach">Acholi</option>
         </select>
 
         <select

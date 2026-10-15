@@ -20,7 +20,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Literal
 
-from ..query import _COMMON_ENGLISH_WORDS, _LUGANDA_WORDS, _SW_MARKERS, _SWAHILI_WORDS
+from ..query import (
+    _ACHOLI_WORDS,
+    _COMMON_ENGLISH_WORDS,
+    _LUGANDA_WORDS,
+    _RUNYANKOLE_WORDS,
+    _SW_MARKERS,
+    _SWAHILI_WORDS,
+)
 from .config import (
     KNOWN_LANGUAGES,
     get_languages,
@@ -35,7 +42,13 @@ from .config import (
 
 SUPPORTED: tuple[str, ...] = KNOWN_LANGUAGES
 
-LANGUAGE_NAMES: dict[str, str] = {"en": "English", "sw": "Swahili", "lg": "Luganda"}
+LANGUAGE_NAMES: dict[str, str] = {
+    "en": "English",
+    "sw": "Swahili",
+    "lg": "Luganda",
+    "nyn": "Runyankole",
+    "ach": "Acholi",
+}
 
 # Function words and conversational glue that the tax-vocabulary lists in
 # query.py do not carry. A Luganda sentence about VAT may contain no Luganda
@@ -63,9 +76,32 @@ _SWAHILI_FUNCTION_WORDS: frozenset[str] = frozenset({
     "tuongee", "kiswahili", "hii", "hiyo", "kuna", "sijui", "sawa",
 })
 
+_RUNYANKOLE_FUNCTION_WORDS: frozenset[str] = frozenset({
+    "aha", "omu", "ahari", "omuri", "nari", "kandi", "kwonka", "nyowe", "iwe", "itwe",
+    "wangye", "yaawe", "yangye", "nimbaasa", "noobaasa", "naabaasa", "ninkushaba",
+    "nkuhwere", "kuhwera", "okushashura", "nshashura", "okwehandiikisa", "kwehandiikisa",
+    "shangahi", "bingahi", "nta", "ki", "oha", "nkahi", "ryari", "agandi", "webare",
+    "munonga", "kare", "tugambe", "orunyankore", "runyankole", "runyankore", "hati", "erizooba",
+})
+
+_ACHOLI_FUNCTION_WORDS: frozenset[str] = frozenset({
+    "ki", "kede", "onyo", "ento", "dok", "bene", "an", "in", "wan", "wun", "gin",
+    "mega", "megi", "atwero", "itwero", "watwero", "amito", "imito", "tim", "ber",
+    "konyi", "akonyi", "culu", "aculu", "coyo", "nying", "nyinga", "adi", "ango",
+    "ningo", "nining", "kwene", "awene", "kopango", "apwoyo", "matek", "walok",
+    "alok", "acoli", "kombedi", "tye", "pe", "eyo", "ku",
+})
+
 _LG_ALL = _LUGANDA_WORDS | _LUGANDA_FUNCTION_WORDS
 _SW_ALL = _SWAHILI_WORDS | _SWAHILI_FUNCTION_WORDS
-_NATIVE_WORDS: dict[str, frozenset[str]] = {"lg": frozenset(_LG_ALL), "sw": frozenset(_SW_ALL)}
+_NYN_ALL = _RUNYANKOLE_WORDS | _RUNYANKOLE_FUNCTION_WORDS
+_ACH_ALL = _ACHOLI_WORDS | _ACHOLI_FUNCTION_WORDS
+_NATIVE_WORDS: dict[str, frozenset[str]] = {
+    "lg": frozenset(_LG_ALL),
+    "sw": frozenset(_SW_ALL),
+    "nyn": frozenset(_NYN_ALL),
+    "ach": frozenset(_ACH_ALL),
+}
 _WORD_RE = re.compile(r"[a-z']+")
 
 
@@ -151,14 +187,16 @@ def lexical_hits(text: str) -> dict[str, int]:
     # query's marker regex also knows a few Swahili words the lists do not;
     # count those without counting a listed word twice.
     sw += sum(1 for m in _SW_MARKERS.findall(text or "") if m.lower() not in _SW_ALL)
+    nyn = sum(1 for w in words if w in _NYN_ALL)
+    ach = sum(1 for w in words if w in _ACH_ALL)
     en = sum(1 for w in words if w in _COMMON_ENGLISH_WORDS)
-    return {"en": en, "lg": lg, "sw": sw}
+    return {"en": en, "lg": lg, "sw": sw, "nyn": nyn, "ach": ach}
 
 
 # Ordered longest-first within a language so "twogere oluganda" is reported
 # as itself rather than as the bare "oluganda" it contains. Bare language
 # names are deliberately absent for English ("do you have the form in
-# English?" is not a request to switch) but present for the two local
+# English?" is not a request to switch) but present for the local
 # languages, whose names a caller says almost only when asking for them.
 _EXPLICIT_REQUESTS: dict[str, tuple[str, ...]] = {
     "lg": (
@@ -171,9 +209,19 @@ _EXPLICIT_REQUESTS: dict[str, tuple[str, ...]] = {
         "speak in swahili", "speak swahili", "switch to swahili", "in swahili",
         "kwa kiswahili", "kiswahili",
     ),
+    "nyn": (
+        "tugambe orunyankore", "tugambe runyankole", "ninkunda orunyankore",
+        "speak in runyankole", "speak runyankole", "switch to runyankole", "in runyankole",
+        "omu runyankole", "omu runyankore", "orunyankore", "runyankole", "runyankore",
+    ),
+    "ach": (
+        "walok leb acoli", "walok acoli", "amito leb acoli",
+        "speak in acholi", "speak acholi", "switch to acholi", "in acholi",
+        "i leb acoli", "leb acoli", "acholi", "acoli",
+    ),
     "en": (
         "speak in english", "speak english", "switch to english", "in english",
-        "mu lungereza", "kwa kiingereza", "lungereza",
+        "mu lungereza", "kwa kiingereza", "omu rungyereza", "i leb munu", "lungereza",
     ),
 }
 _EXPLICIT_RES: dict[str, re.Pattern[str]] = {
@@ -273,17 +321,20 @@ class LanguagePolicy:
         #    "Withholding tax eri ebitundu bimeka?" sounds English (P(en) 0.89
         #    measured) and is still a Luganda caller asking in Luganda.
         top, confidence = vote.top, vote.confidence
-        hits = lexical_hits(vote.text) if vote.text else {"en": 0, "lg": 0, "sw": 0}
-        if "lg" in cfg.languages and vote.text and not (top == "lg" and confidence >= cfg.switch_confidence):
-            p_lg = vote.probs.get("lg", 0.0)
-            bantu = p_lg + vote.probs.get("sw", 0.0)
-            in_luganda_call = self.locked and self.active == "lg"
-            if (
-                hits["lg"] >= cfg.lg_mix_min_words
-                and hits["lg"] > hits["sw"]
-                and (in_luganda_call or p_lg >= cfg.lg_mix_threshold or bantu >= 0.5)
-            ):
-                top, confidence = "lg", max(p_lg, cfg.switch_confidence)
+        hits = lexical_hits(vote.text) if vote.text else {"en": 0, "lg": 0, "sw": 0, "nyn": 0, "ach": 0}
+        for vern in ("lg", "nyn", "ach"):
+            if vern in cfg.languages and vote.text and not (top == vern and confidence >= cfg.switch_confidence):
+                p_vern = vote.probs.get(vern, 0.0)
+                non_en = sum(vote.probs.get(k, 0.0) for k in ("lg", "sw", "nyn", "ach"))
+                in_vern_call = self.locked and self.active == vern
+                other_max = max((hits.get(k, 0) for k in ("lg", "sw", "nyn", "ach") if k != vern), default=0)
+                if (
+                    hits.get(vern, 0) >= cfg.lg_mix_min_words
+                    and hits.get(vern, 0) > other_max
+                    and (in_vern_call or p_vern >= cfg.lg_mix_threshold or non_en >= 0.5)
+                ):
+                    top, confidence = vern, max(p_vern, cfg.switch_confidence)
+                    break
         if top not in cfg.languages:
             return Decision("none", self.active, "unsupported_language")
 

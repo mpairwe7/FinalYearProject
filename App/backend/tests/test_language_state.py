@@ -38,13 +38,18 @@ class NormalizeLocaleTagTest(unittest.TestCase):
             "en-GB": "en",
             "eng": "en",
             "sw_KE": "sw",
+            "nyn": "nyn",
+            "nyn-UG": "nyn",
+            "nyk": "nyn",
+            "ach": "ach",
+            "ach-UG": "ach",
         }
         for tag, expected in cases.items():
             with self.subTest(tag=tag):
                 self.assertEqual(normalize_locale_tag(tag), expected)
 
     def test_unsupported_or_empty_tags_are_empty(self) -> None:
-        for tag in ("", None, "fr", "nyn-UG", "zz"):
+        for tag in ("", None, "fr", "teo-UG", "zz"):
             with self.subTest(tag=tag):
                 self.assertEqual(normalize_locale_tag(tag), "")
 

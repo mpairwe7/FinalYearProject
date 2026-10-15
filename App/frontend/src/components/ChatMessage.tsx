@@ -448,7 +448,7 @@ function ChatMessageInner({
             <div className="deadline-sync-info">
               <span className="deadline-sync-title">{deadlineEvent.title}</span>
               <span className="deadline-sync-date">
-                Due: {deadlineEvent.startDate.toLocaleDateString(locale === 'lg' ? 'en-UG' : locale, {
+                Due: {deadlineEvent.startDate.toLocaleDateString(['lg', 'nyn', 'ach'].includes(locale) ? 'en-UG' : locale, {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',

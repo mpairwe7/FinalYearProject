@@ -240,7 +240,9 @@ _TAX_OUTPUT_KEYS: tuple[str, ...] = (
 _SIDE_QUESTION_RE: re.Pattern[str] = re.compile(
     r"(?:\?\s*$|\b(?:what\s+is|what\s+are|what\s+does|how\s+do\s+i|how\s+does|how\s+is|why\s+is|why\s+do|"
     r"which\s+supplies|is\s+it\s+exempt|who\s+qualifies|when\s+is\s+the\s+deadline|explain|meaning\s+of|"
-    r"kye\s+ki|kitegeeza\s+ki|gubalibwa\s+gutya|ebikwata\s+ku|ni\s+nini|maana\s+ya|inamaanisha\s+nini)\b)",
+    r"kye\s+ki|kitegeeza\s+ki|gubalibwa\s+gutya|ebikwata\s+ku|ni\s+nini|maana\s+ya|inamaanisha\s+nini|"
+    r"niki|ekikora\s+kita|amakuru\s+ga|nigubaririrwa\s+guta|shangahi|bingahi|"
+    r"obedo\s+ngo|tiyo\s+nining|te\s+lok|kikwano\s+nining|tye\s+adi)\b)",
     re.IGNORECASE,
 )
 
