@@ -247,13 +247,13 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
         "sources": manifest_sources,
         "duplicates": duplicate_audit,
     }
-    if lg_count or sw_count or nyn_count or ach_count:
-        manifest["multilingual_records"] = {
-            "lg": lg_count,
-            "sw": sw_count,
-            "nyn": nyn_count,
-            "ach": ach_count,
-        }
+    multilingual_counts = {
+        loc: count
+        for loc, count in (("lg", lg_count), ("sw", sw_count), ("nyn", nyn_count), ("ach", ach_count))
+        if count > 0 or (loc in ("lg", "sw") and (lg_count or sw_count))
+    }
+    if multilingual_counts:
+        manifest["multilingual_records"] = multilingual_counts
     manifest_path = jsonl_dir / FAQ_MANIFEST_NAME
     temporary_manifest = manifest_path.with_suffix(".json.tmp")
     with temporary_manifest.open("w", encoding="utf-8", newline="\n") as handle:
