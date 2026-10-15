@@ -241,6 +241,7 @@ def split_for_voice(
     limit: int | None = None,
     *,
     first_clause_limit: int | None = None,
+    low_bandwidth: bool = False,
 ) -> list[str]:
     """*text* in pieces of at most *limit* characters, cut at sentence, clause, then word breaks.
 
@@ -250,12 +251,17 @@ def split_for_voice(
     exactly 16.98 s. Speech runs up to ~0.12 s a character when digits are read
     one by one, so the default 120 characters stays inside the cap.
 
-    When *first_clause_limit* (or ``ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS``) is set,
-    the very first clause is emitted with a tighter cap (~55 chars) so the
-    caller hears the opening audio ~140 ms sooner.
+    When *first_clause_limit* (or ``ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS``, or
+    *low_bandwidth=True*) is set, the very first clause is emitted with a tighter
+    cap (~55 chars standard, ~38 chars on low-bandwidth 2G/3G) so the caller hears
+    the opening audio ~140-200 ms sooner.
     """
     limit = limit or _max_chars()
-    first_cap = first_clause_limit if first_clause_limit is not None else _first_clause_max_chars()
+    first_cap = (
+        first_clause_limit
+        if first_clause_limit is not None
+        else (38 if low_bandwidth else _first_clause_max_chars())
+    )
     if len(text) <= limit and (first_cap is None or len(text) <= first_cap):
         return [text]
     units: list[str] = []
@@ -272,6 +278,12 @@ def split_for_voice(
             head = clauses[0]
             tail = " ".join(clauses[1:])
             return [head, *_pack([tail, *packed[1:]], limit)]
+        if low_bandwidth:
+            word_pieces = _pack(packed[0].split(" "), first_cap)
+            if len(word_pieces) > 1 and len(word_pieces[0]) <= first_cap:
+                head = word_pieces[0]
+                tail = packed[0][len(head) :].lstrip()
+                return [head, *_pack([tail, *packed[1:]], limit)]
     return packed
 
 

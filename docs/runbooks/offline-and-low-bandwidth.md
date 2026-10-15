@@ -52,8 +52,8 @@ When completely disconnected, the browser serves `offline.html`, which includes:
    * Official WhatsApp: `+256 772 140 000` (`https://wa.me/256772140000`)
    * Support email: `services@ura.go.ug`
 3. **Key Statutory Deadlines & Rates Reference:**
-   * PAYE monthly tax-free threshold: **UGX 335,000** (FY2026/27).
-   * Standard VAT rate: **18%**; mandatory threshold: **UGX 150,000,000/year**.
+   * PAYE monthly tax-free threshold: **UGX 235,000** (0% band; 10% up to **UGX 335,000**, FY2026/27).
+   * Standard VAT rate: **18%**; compulsory registration threshold: **UGX 300,000,000/year** (effective 1 July 2026, FY2026/27; formerly UGX 150,000,000/year).
    * Return deadlines: **15th of each month** for PAYE/VAT/WHT; **31st December** for Income Tax.
 4. **Zero-Dependency Client-Side Statutory Tax Calculators:**
    * **Monthly PAYE Calculator:** Executes progressive tax calculations across all statutory brackets including high-earner surcharge (>UGX 10M).
@@ -70,7 +70,7 @@ When completely disconnected, the browser serves `offline.html`, which includes:
 * **Debounced Form Draft Persistence:** Taxpayer inquiry drafts are debounced (400 ms) and saved to local storage under `ura-chat-store.draftMessage`.
 * **Visibility State Flush (`page.tsx`):** On `visibilitychange` (`hidden`) and `window.pagehide`, in-progress chat sessions and message drafts are immediately committed to persistent storage without awaiting debounce timeouts.
 * **Multi-Step Stepper & Journey Recovery:** `sanitizeTurn()` explicitly retains `workflow` (interactive wizards, current step, option widgets), `nextActions`, and `resources` across sessions and reloads, preventing taxpayer data loss during mobile multitasking.
-* **Offline Action Outbox & Low-Bandwidth Voice Codec (`FLAG_OFFLINE_ACTION_OUTBOX`, `FLAG_LOW_BANDWIDTH_VOICE_CODEC`, `FLAG_CALL_DROP_RESUME`):** Backend support for syncing offline actions into `verified_slot_bank` and `ResolutionCase` is defined by `ResolutionLedger.sync_offline_actions()`, while 2G/3G voice sessions negotiate 8 kHz G.711 μ-law framing (75% bandwidth reduction) and 45-second HMAC-signed call drop-resume tickets (`receptionist/low_bandwidth.py`).
+* **Offline Action Outbox & Low-Bandwidth Voice Codec (`FLAG_OFFLINE_ACTION_OUTBOX`, `FLAG_LOW_BANDWIDTH_VOICE_CODEC`, `FLAG_CALL_DROP_RESUME`):** Backend support for syncing offline actions into `verified_slot_bank` and `ResolutionCase` is defined by `ResolutionLedger.sync_offline_actions()` (and automatically carried into live voice calls via `receptionist/carryover.py:chat_carryover()`), while 2G/3G voice sessions dynamically negotiate 8 kHz G.711 μ-law wire transcoding in `BrowserCallSerializer` (`receptionist/serializer.py`, 75% bandwidth reduction: `32 KB/s -> 8 KB/s`), `caption_only_degraded` audio suppression on `slow-2g`, and 45-second HMAC-signed call drop-resume tickets with cross-replica state snapshots (`receptionist/low_bandwidth.py`).
 
 ---
 

@@ -155,8 +155,12 @@ All switches and thresholds are configured via environment variables:
 | `ORPHEUS_TTS_FIRST_CLAUSE_MAX_CHARS` | unset (`55` when set) | Tighter character cap on the opening clause to reduce Orpheus first-audio TTFB |
 | `VOICE_SEMANTIC_ENDPOINT_MIN_SILENCE_MS` | `320` | Minimum semantic endpointing silence for syntactically complete turns |
 | `VOICE_SEMANTIC_ENDPOINT_NUMERIC_SILENCE_MS` | `1100` | Extended silence tolerance when caller is mid-number (TIN/PRN) or mid-conjunction |
-| `FLAG_LOW_BANDWIDTH_VOICE_CODEC` | `false` | Negotiates 8 kHz μ-law / 12 kbps Opus framing and caption-first degradation on 2G/3G links (`receptionist/low_bandwidth.py`) |
-| `FLAG_CALL_DROP_RESUME` | `false` | Enables HMAC-signed caller drop-resume ticket (`RECEPTIONIST_CALLER_RECONNECT_GRACE_S=45`) |
+| `FLAG_LOW_BANDWIDTH_VOICE_CODEC` | `false` | Negotiates 8 kHz μ-law / 12 kbps Opus wire transcoding in `BrowserCallSerializer` (`receptionist/serializer.py`) and caption-first degradation on 2G/3G links (`receptionist/low_bandwidth.py`) |
+| `FLAG_CALL_DROP_RESUME` | `false` | Enables HMAC-signed caller drop-resume ticket (`RECEPTIONIST_CALLER_RECONNECT_GRACE_S=45`) and shared `call_drop_snapshot` recovery |
+| `FLAG_EQ_MULTIMODAL_FUSION` | `false` | Fuses multi-turn lexical distress, native vernacular hardship (`lg`/`sw`/`nyn`/`ach`), and acoustic prosody into `AffectiveState` + affect-attuned 450 ms voice fillers |
+| `FLAG_WORKFLOW_TANGENT_RESUME` | `false` | Answers mid-workflow policy side-questions and resumes the parked workflow step |
+| `FLAG_AUTONOMOUS_OUTCOME_VERIFICATION` | `false` | Binds missing calculator/tool parameters from consented `verified_slot_bank`, `SemanticMemory`, and prior DAG receipts |
+| `FLAG_OFFICER_PREFERENCE_CAPTURE` | `false` | Captures PII-redacted edit diffs between AI co-pilot drafts and final officer replies for DPO/ORPO export |
 
 Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
 provider session window any more. See Pipecat's

@@ -48,13 +48,9 @@ call path does not open a stream to Orpheus again until the 30 second
 cooldown ends. `orpheus: up` is the streaming Luganda voice. A health check
 that only looks at HTTP 200 cannot tell these apart; read `status`.
 
-## ASR — `Sunbird/asr-whisper-large-v3-salt`
+## ASR — `Sunbird/SunflowerASR-51-african-languages` (formerly `Sunbird/asr-whisper-large-v3-salt`)
 
-One `whisper-large-v3` fine-tune covering English, Luganda, Kiswahili,
-Runyankole and Acholi in a single checkpoint (published WER: eng 0.018, lug
-0.142) — a strict upgrade over `WHISPER_ADAPTER_*`, which this deployment
-only ever populated for Luganda, so English and Kiswahili silently ran
-through the Luganda-merged adapter (see issue #303's audit).
+One `whisper-large-v3` fine-tune covering 51 African languages including English (`en`: `50259`), Luganda (`lg`: `50332`), Kiswahili (`sw`: `50318`), Runyankole (`nyn`: `50322`), and Acholi (`ach`: `50357`) in a single checkpoint (`SALT_LANGUAGE_TOKEN_IDS` in `speech_service.py`) — a strict upgrade over `WHISPER_ADAPTER_*`, which this deployment only ever populated for Luganda, so English and Kiswahili silently ran through the Luganda-merged adapter (see issue #303's audit).
 
 **On by default.** It is the top ASR tier (`⓪` in `_transcribe_chain`), tried
 before the LoRA adapters, Sherpa, faster-whisper and every cloud fallback.

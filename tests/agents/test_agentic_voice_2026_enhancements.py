@@ -1281,3 +1281,129 @@ def test_phase36_voice_s2s_fast_luganda_figure_guard_and_multimodal_affect_hando
         flags.clear("hybrid_speech_s2s")
         flags.clear("eq_multimodal_fusion")
         flags.clear("emotion_aware_prosody")
+
+
+def test_phase37_serializer_mulaw_network_telemetry_affect_fillers_and_offline_carryover(tmp_db, monkeypatch):
+    import json
+    import os
+
+    from app.receptionist.carryover import chat_carryover
+    from app.receptionist.low_bandwidth import restore_call_drop_state, verify_call_resume_ticket
+    from app.receptionist.phrases import empathetic_fillers
+    from app.receptionist.serializer import (
+        BrowserCallSerializer,
+        InputAudioRawFrame,
+        OutputAudioRawFrame,
+        OutputTransportMessageUrgentFrame,
+    )
+    from app.receptionist.store import create_call
+    from app.receptionist.transfer import close_transfer_on_timeout
+
+    monkeypatch.setenv("RECEPTIONIST_RESUME_SECRET", os.urandom(16).hex())
+    create_call(call_id="call-p37-1", conversation_id="conv-p37-1", locale="lg")
+    state = CallState(
+        call_id="call-p37-1",
+        conversation_id="conv-p37-1",
+        user_id="1000444555",
+        locale="lg",
+    )
+    room = CallRoom(call_id="call-p37-1", state=state)
+    serializer = BrowserCallSerializer(room=room)
+
+    flags.set("low_bandwidth_voice_codec", True)
+    flags.set("call_drop_resume", True)
+    flags.set("emotion_aware_prosody", True)
+    flags.set("continuous_relationship_memory", True)
+    flags.set("proactive_resolution_continuation", True)
+    flags.set("offline_action_outbox", True)
+    try:
+        # 1. Client sends mid-call "network_quality" frame -> negotiates mulaw_8k + mints resume_ticket + checkpoints state
+        ctrl_frame = asyncio.run(
+            serializer.deserialize(
+                json.dumps(
+                    {
+                        "type": "network_quality",
+                        "effective_type": "2g",
+                        "rtt_ms": 820,
+                        "save_data": True,
+                    }
+                )
+            )
+        )
+        assert isinstance(ctrl_frame, OutputTransportMessageUrgentFrame)
+        assert state.low_bandwidth_mode is True
+        assert state.audio_codec == "mulaw_8k"
+        assert state.caption_only_degraded is False
+        ack_msg = ctrl_frame.message
+        assert ack_msg["codec"] == "mulaw_8k"
+        assert ack_msg["resume_ticket"]
+        restored_snap = restore_call_drop_state("call-p37-1")
+        assert restored_snap is not None
+        assert restored_snap["audio_codec"] == "mulaw_8k"
+        verified_claims = verify_call_resume_ticket(ack_msg["resume_ticket"], expected_call_id="call-p37-1")
+        assert verified_claims is not None
+
+        # 2. Outbound OutputAudioRawFrame (32,000 bytes 16kHz PCM16) is transcoded to 8,000 bytes 8kHz mu-law
+        pcm_16k = (np.sin(2 * np.pi * 440 * np.linspace(0, 1.0, 16000, endpoint=False)) * 18000).astype(np.int16).tobytes()
+        assert len(pcm_16k) == 32000
+        wire_bytes = asyncio.run(serializer.serialize(OutputAudioRawFrame(audio=pcm_16k, sample_rate=16000, num_channels=1)))
+        assert isinstance(wire_bytes, bytes)
+        assert len(wire_bytes) == 8000
+
+        # Inbound 8,000-byte mu-law frame is decoded back to 32,000-byte 16kHz PCM16 InputAudioRawFrame
+        in_frame = asyncio.run(serializer.deserialize(wire_bytes))
+        assert isinstance(in_frame, InputAudioRawFrame)
+        assert len(in_frame.audio) == 32000
+
+        # When caption_only_degraded=True (slow-2g), binary audio frames are suppressed while captions still serialize
+        state.caption_only_degraded = True
+        assert asyncio.run(serializer.serialize(OutputAudioRawFrame(audio=pcm_16k, sample_rate=16000, num_channels=1))) is None
+        cap_json = asyncio.run(serializer.serialize(OutputTransportMessageUrgentFrame({"type": "caption", "text": "Gyebale ko"})))
+        assert isinstance(cap_json, str) and "Gyebale ko" in cap_json
+
+        # 3. Affect-attuned 450ms fillers & low-bandwidth Orpheus first-clause cap (<= 38 chars)
+        brain = UraReceptionistBrain(room=room, chat_model=MagicMock())
+        state.caller_affect = "urgent_distress"
+        emp_filler = brain._pick_filler()
+        assert emp_filler in empathetic_fillers("lg")
+
+        lb_pieces = split_for_voice(
+            "Thank you for calling Uganda Revenue Authority, here is your VAT calculation.",
+            limit=120,
+            low_bandwidth=True,
+        )
+        assert len(lb_pieces) >= 2
+        assert len(lb_pieces[0]) <= 38
+
+        # 4. Offline PWA -> Voice Call Carryover & Transfer Timeout Continuation
+        u = tmp_db.upsert_user(external_id="1000444555", tenant_id="default")
+        uid = u["id"]
+        state.user_id = uid
+        tmp_db.grant_consent(uid, "personalization", "2026-04")
+        memsvc = get_memory_service()
+        memsvc.resolution_ledger.sync_offline_actions(
+            uid,
+            [{"tool": "calculate_vat", "summary": "Computed VAT UGX 900,000", "slots": {"tin": "1000444555", "amount": 5000000}}],
+            tenant_id="default",
+        )
+        carry = chat_carryover("conv-p37-offline", user_id=uid, tenant_id="default")
+        assert carry is not None
+        assert "Computed VAT UGX 900,000" in carry.context
+        assert "tin" in carry.context
+
+        state.mode = "transferring"
+        state.topic = "vat_objection"
+        timeout_ev = close_transfer_on_timeout(room, "tkt-p37-99")
+        assert timeout_ev is not None
+        reminders = tmp_db.list_reminder_inbox(uid)
+        assert any("Callback Scheduled" in r.get("deadline_name", "") for r in reminders)
+    finally:
+        for f in (
+            "low_bandwidth_voice_codec",
+            "call_drop_resume",
+            "emotion_aware_prosody",
+            "continuous_relationship_memory",
+            "proactive_resolution_continuation",
+            "offline_action_outbox",
+        ):
+            flags.clear(f)

@@ -279,13 +279,36 @@ def phrase(key: str, language: str, **fmt: str) -> str:
     return text.format(**fmt) if fmt else text
 
 
+_EMPATHETIC_FILLERS: dict[str, tuple[str, ...]] = {
+    "en": (
+        "I understand — let me check the best option for you right now.",
+        "I hear you — let me look up the right guidance for you.",
+    ),
+    "lg": (
+        "Ntegedde — ka nkebere engeri esinga okukuyamba kati.",
+        "Nkuwulidde — ka nnoonye eky'okuddamu ekituufu mangu.",
+    ),
+    "sw": (
+        "Naelewa — ngoja niangalie njia bora ya kukusaidia sasa hivi.",
+        "Nimekusikia — wacha niangalie mwongozo sahihi mara moja.",
+    ),
+}
+
+
 def fillers(language: str) -> tuple[str, ...]:
     return _FILLERS.get(language) or _FILLERS["en"]
 
 
-def pick_filler(language: str, last: str | None = None) -> str:
-    """A filler for *language* that is not the one just used."""
-    pool = fillers(language)
+def empathetic_fillers(language: str) -> tuple[str, ...]:
+    return _EMPATHETIC_FILLERS.get(language) or _EMPATHETIC_FILLERS["en"]
+
+
+def pick_filler(language: str, last: str | None = None, *, affect: str = "calm") -> str:
+    """A filler for *language* (affect-attuned when caller is in distress) that is not the one just used."""
+    if affect in ("frustrated", "urgent_distress", "hardship"):
+        pool = empathetic_fillers(language)
+    else:
+        pool = fillers(language)
     choices = [f for f in pool if f != last]
     return random.choice(choices) if choices else pool[0]  # noqa: S311 — variety, not security
 

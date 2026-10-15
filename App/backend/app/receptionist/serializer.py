@@ -88,8 +88,16 @@ class BrowserCallSerializer(FrameSerializer):
         self.room = room
 
     async def serialize(self, frame: Frame) -> bytes | str | None:
-        """Convert a Pipecat frame into a WebSocket message."""
+        """Convert a Pipecat frame into a WebSocket message (with 2G/3G mu-law & caption-only support)."""
         if isinstance(frame, OutputAudioRawFrame):
+            state = getattr(self.room, "state", None) if self.room is not None else None
+            if state is not None:
+                if getattr(state, "caption_only_degraded", False) is True:
+                    return None
+                if getattr(state, "audio_codec", "pcm16_16k") == "mulaw_8k":
+                    from .low_bandwidth import pcm16_16k_to_mulaw_8k
+
+                    return pcm16_16k_to_mulaw_8k(frame.audio)
             return frame.audio
 
         if isinstance(frame, InterruptionFrame):
@@ -109,15 +117,29 @@ class BrowserCallSerializer(FrameSerializer):
     async def deserialize(self, data: bytes | str) -> Frame | None:
         """Convert a WebSocket message into a Pipecat frame."""
         if isinstance(data, bytes):
-            return InputAudioRawFrame(audio=data, sample_rate=16000, num_channels=1)
+            audio_bytes = data
+            state = getattr(self.room, "state", None) if self.room is not None else None
+            if state is not None and getattr(state, "audio_codec", "pcm16_16k") == "mulaw_8k":
+                from .low_bandwidth import mulaw_8k_to_pcm16_16k
+
+                audio_bytes = mulaw_8k_to_pcm16_16k(data)
+            return InputAudioRawFrame(audio=audio_bytes, sample_rate=16000, num_channels=1)
 
         if isinstance(data, str):
             try:
                 msg = json.loads(data)
             except Exception:
                 return None
+            if not isinstance(msg, dict):
+                return None
 
             msg_type = msg.get("type")
+            if msg_type in ("network_quality", "network_telemetry") and self.room is not None:
+                from .low_bandwidth import apply_network_telemetry_to_room
+
+                ack = apply_network_telemetry_to_room(self.room, msg)
+                return OutputTransportMessageUrgentFrame(ack)
+
             if msg_type == "interrupt":
                 return InterruptionFrame()
 
