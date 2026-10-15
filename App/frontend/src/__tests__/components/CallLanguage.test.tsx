@@ -134,6 +134,30 @@ describe('call language chip', () => {
     expect(screen.getByRole('button', { name: 'Call language: Kiswahili' })).toBeDefined();
   });
 
+  it('offers Runyankole and Acholi in the call language menu when advertised', async () => {
+    const socket = await startCall();
+    serverSays(socket, {
+      type: 'call_ready',
+      call_id: 'c1',
+      language_detection: true,
+      languages: ['en', 'lg', 'sw', 'nyn', 'ach'],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Call language: English · auto' }));
+    const options = screen.getAllByRole('menuitemradio');
+    expect(options.map((o) => o.textContent)).toEqual([
+      'English',
+      'Luganda',
+      'Kiswahili',
+      'Runyankole',
+      'Acholi',
+    ]);
+
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Runyankole' }));
+    expect(socket.setLanguage).toHaveBeenCalledWith('nyn');
+    expect(screen.getByRole('button', { name: 'Call language: Runyankole' })).toBeDefined();
+  });
+
   it('closes the menu on Escape', async () => {
     const socket = await startCall();
     serverSays(socket, { type: 'call_ready', call_id: 'c1', language_detection: true, languages: ['en', 'lg', 'sw'] });

@@ -22,13 +22,15 @@ logger = logging.getLogger(__name__)
 _FRUSTRATION_CUES_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:not\s+working|wrong|unfair|delayed|still\s+waiting|angry|frustrated|rejected|"
     r"penalty\s+is\s+too\s+high|why\s+did\s+you|useless|terikola|ebizibu| bukya|"
-    r"kuzibu|tatizo|shida|haifanyi\s+kazi|imekataa)\b",
+    r"kuzibu|tatizo|shida|haifanyi\s+kazi|imekataa|"
+    r"tikirikukora|obuzibu|pe\s+tiyo|peko)\b",
     re.IGNORECASE,
 )
 
 _CONFUSION_CUES_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:i\s+don'?t\s+understand|confused|what\s+does\s+that\s+mean|how\s+do\s+i\s+start|"
-    r"not\s+sure|sitegedde|simanyi|sielewi|sijui)\b",
+    r"not\s+sure|sitegedde|simanyi|sielewi|sijui|"
+    r"tinyetegyereize|timmanyire|pe\s+aniang|pe\s+angeyo)\b",
     re.IGNORECASE,
 )
 
@@ -133,12 +135,16 @@ def empathetic_opening_for(affect: str, locale: str = "en") -> str:
         return {
             "lg": "Ntegedde obuzibu bw'oyitamu, ka tukikoleko mangu. ",
             "sw": "Naelewa changamoto unayopitia, wacha tuishughulikie mara moja. ",
+            "nyn": "Nyetegyereza obuzibu obu orikurabamu, ka tukikoreho ahonaaho. ",
+            "ach": "Aniang peko ma itye ka wok ki iye, wek wati iye oyot-oyot. ",
             "en": "I understand this can be frustrating; let us resolve it step by step. ",
         }.get(loc, "I understand this can be frustrating; let us resolve it step by step. ")
     if affect == "confused":
         return {
             "lg": "Tofaayo, ka nkunnyonnyole mu mitendera emyangu. ",
             "sw": "Usijali, wacha nikuelezee kwa hatua rahisi. ",
+            "nyn": "Otafaayo, ka nkushoboororere omu madaara gworobi. ",
+            "ach": "Pe ipar, wek atit boti i rwom mayot. ",
             "en": "No problem, let me walk you through it clearly. ",
         }.get(loc, "No problem, let me walk you through it clearly. ")
     return ""

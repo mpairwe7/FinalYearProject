@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import re
 
-from .number_words import decimal_words, en_words, en_year, lg_words, sw_words
+from .number_words import ach_words, decimal_words, en_words, en_year, lg_words, nyn_words, sw_words
 
 # Citation markers: [1], [1, 2], [1; 3], ignoring markdown links [1](url)
 _CITATION_RE = re.compile(r"\s*\[\d+(?:\s*[,;]\s*\d+)*\](?!\()")
@@ -103,7 +103,7 @@ _SEC_RE = re.compile(r"\bSec(?:tion)?\.?\s*(\d+[A-Za-z]?)\b", re.IGNORECASE)
 # URA, and the written answer keeps the footer. Matched by its opening words,
 # so an answer that gives the number because it was asked for is still read.
 _CONTACT_FOOTER_RE = re.compile(
-    r"(?:If you get stuck at any step|Bw'oba ng'osanze obuzibu|Ikiwa utakabiliwa na changamoto)[^\n]*"
+    r"(?:If you get stuck at any step|Bw'oba ng'osanze obuzibu|Ikiwa utakabiliwa na changamoto|Ku oraashangye obuzibu|Ka inongo peko)[^\n]*"
 )
 
 # Asides that read badly and make Orpheus babble. The calculator writes a rate
@@ -127,12 +127,20 @@ _ECHO_ASIDE_RE = re.compile(r"[ \t]?\(([^()]{2,60})\)")
 
 # A range, "UGX 335,000 – UGX 410,000", read as a pause without its "to".
 _RANGE_RE = re.compile(r"([0-9][0-9,.]{0,24}[ \t]?%?)[ \t]+[\u2013\u2014-][ \t]+(?=(?:UGX|USD)?[ \t]?[0-9])")
-_RANGE_WORD = {"en": "to", "lg": "okutuuka ku", "sw": "hadi"}
+_RANGE_WORD = {
+    "en": "to",
+    "lg": "okutuuka ku",
+    "sw": "hadi",
+    "nyn": "kuhika aha",
+    "ach": "naka i",
+}
 
 # Percentages, keeping a word the text already has: "ku bitundu 18%" is not
 # "ku bitundu ebitundu 18 ku buli kikumi", nor "asilimia 18%" "asilimia asilimia".
 _LG_PCT_RE = re.compile(r"\b(e?bitundu[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+ku[ \t]+buli[ \t]+kikumi\b)?", re.IGNORECASE)
 _SW_PCT_RE = re.compile(r"\b(?:asilimia[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%", re.IGNORECASE)
+_NYN_PCT_RE = re.compile(r"\b(e?bicweka[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+aha[ \t]+(?:buli[ \t]+)?kikumi\b)?", re.IGNORECASE)
+_ACH_PCT_RE = re.compile(r"\b(dul[ \t]+)?([0-9]+(?:\.[0-9]+)?)[ \t]?%(?:[ \t]+i[ \t]+kom[ \t]+miya\b)?", re.IGNORECASE)
 
 # A number standing on its own: not part of a word (118A, 30th), a date, a
 # time, a decimal or a range written without spaces. ASCII digits only here
@@ -198,6 +206,15 @@ def _format_ugx_amount(amount_str: str, locale: str) -> str:
     if locale == "sw":
         return f"shilingi {_spoken_number(clean_num, 'sw')} za Uganda"
 
+    if locale == "nyn":
+        millions = int(val // 1_000_000)
+        if val >= 1_000_000 and val % 1_000_000 == 0 and millions <= 100:
+            return "shiringi akakaikuru kamwe" if millions == 1 else f"shiringi obukaikuru {nyn_words(millions, 'bu')}"
+        return f"shiringi {_spoken_number(clean_num, 'nyn', years=False)}"
+
+    if locale == "ach":
+        return f"cilingi {_spoken_number(clean_num, 'ach', years=False)} me Uganda"
+
     # English default
     if val >= 1_000_000_000 and val % 1_000_000_000 == 0:
         return f"{int(val // 1_000_000_000)} billion Uganda shillings"
@@ -258,6 +275,12 @@ def _spoken_number(number: str, locale: str, years: bool = True) -> str:
     if locale == "lg":
         is_year = years and len(number) == 4 and 1100 <= n <= 2099
         return lg_words(n) or (en_year(n) if is_year else en_words(n))
+    if locale == "nyn":
+        is_year = years and len(number) == 4 and 1100 <= n <= 2099
+        return nyn_words(n) or (en_year(n) if is_year else en_words(n))
+    if locale == "ach":
+        is_year = years and len(number) == 4 and 1100 <= n <= 2099
+        return ach_words(n) or (en_year(n) if is_year else en_words(n))
     return en_words(n)
 
 
@@ -265,6 +288,18 @@ def _lg_percent(match: re.Match[str]) -> str:
     number = match.group(2)
     words = lg_words(int(number), "bi") if "." not in number else None
     return f"{match.group(1) or 'ebitundu '}{words or _spoken_number(number, 'en')} ku buli kikumi"
+
+
+def _nyn_percent(match: re.Match[str]) -> str:
+    number = match.group(2)
+    words = nyn_words(int(number), "bi") if "." not in number else None
+    return f"{match.group(1) or 'ebicweka '}{words or _spoken_number(number, 'en')} aha kikumi"
+
+
+def _ach_percent(match: re.Match[str]) -> str:
+    number = match.group(2)
+    words = ach_words(int(number)) if "." not in number else None
+    return f"{match.group(1) or 'dul '}{words or _spoken_number(number, 'en')} i kom miya"
 
 
 def _bare_number(match: re.Match[str], locale: str) -> str:
@@ -379,6 +414,10 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
         t = _NUMBERED_STEP_RE.sub(r"Odaala \1: ", t)
     elif locale == "sw":
         t = _NUMBERED_STEP_RE.sub(r"Hatua \1: ", t)
+    elif locale == "nyn":
+        t = _NUMBERED_STEP_RE.sub(r"Idaara \1: ", t)
+    elif locale == "ach":
+        t = _NUMBERED_STEP_RE.sub(r"Rwom \1: ", t)
     else:
         t = _NUMBERED_STEP_RE.sub(r"Step \1: ", t)
 
@@ -394,6 +433,10 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
         t = _LG_PCT_RE.sub(_lg_percent, t)
     elif locale == "sw":
         t = _SW_PCT_RE.sub(lambda m: f"asilimia {_spoken_number(m.group(1), 'sw')}", t)
+    elif locale == "nyn":
+        t = _NYN_PCT_RE.sub(_nyn_percent, t)
+    elif locale == "ach":
+        t = _ACH_PCT_RE.sub(_ach_percent, t)
     else:
         t = _PCT_RE.sub(r"\1 percent", t)
 
@@ -405,8 +448,8 @@ def clean_text_for_speech(text: str, locale: str = "en") -> str:
         t = pattern.sub(replacement, t)
     t = _ECHO_ASIDE_RE.sub(_drop_echo, t)
 
-    # 11b. Luganda and Swahili figures as words (see number_words)
-    if locale in ("lg", "sw"):
+    # 11b. Vernacular figures as words (see number_words)
+    if locale in ("lg", "sw", "nyn", "ach"):
         t = _BARE_NUMBER_RE.sub(lambda m: _bare_number(m, locale), t)
 
     # 12. Punctuation and whitespace hygiene
@@ -431,12 +474,12 @@ _BANTU_ACRONYM_PHONETICS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def phoneticize_bantu_acronyms(text: str, locale: str = "lg") -> str:
-    """Spell out bare English acronyms (TIN -> T-I-N) for Orpheus Bantu voices (lg/sw).
+    """Spell out bare English acronyms (TIN -> T-I-N) for Orpheus Ugandan/East African voices.
 
     Prevents Orpheus-3B from reading 'TIN' as the English word 'team' or 'tin'
-    inside Luganda and Swahili sentences (see voice-receptionist-demo.md §6).
+    inside Luganda, Swahili, Runyankole, and Acholi sentences (see voice-receptionist-demo.md §6).
     """
-    if not text or (locale or "").lower() not in ("lg", "sw"):
+    if not text or (locale or "").lower() not in ("lg", "sw", "nyn", "ach"):
         return text or ""
     out = text
     for pat, repl in _BANTU_ACRONYM_PHONETICS:

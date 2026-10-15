@@ -161,6 +161,37 @@ _CANONICAL_PREWARMED: dict[tuple[str, str], dict[str, str]] = {
         "kodi ya zuio": "Withholding tax",
         "kiwango cha kodi ya zuio": "Withholding tax rate",
     },
+    ("nyn", "en"): {
+        "nimbaasa kwehandiikisa nta kutunga tin": "How do I register to get a TIN?",
+        "nimbaasa kwehandiikisa nta tin": "How do I register for a TIN?",
+        "omushoro gwa vat omuri uganda guri aha bicweka bingahi": "What percentage is the VAT tax rate in Uganda?",
+        "omushoro gwa paye nigubaririrwa guta": "How is PAYE tax calculated?",
+        "nshashura omushoro gwa paye shangahi": "How much PAYE tax do I pay?",
+        "efris neekoresibwa eta": "How is EFRIS used for invoicing and goods?",
+        "okusasirwa ekibonerezo ky'omushoro gwa ura": "URA tax penalty waiver and relief",
+        "nimbaasa kukora nta enamba ya prn okushashura omushoro": "How to generate a PRN payment slip to pay tax in the bank or by phone?",
+        "omushoro gw'amakampuni guri aha bicweka bingahi": "What percentage of annual corporate income tax should my company pay?",
+        "obuhabuzi bw'okwihayo ebintu omu customs": "Customs clearance guidance for goods at border",
+        "omushoro ogurikukwatirwaho": "Withholding tax",
+        "omushoro gw'amaju agarikupangisibwa": "Rental income tax rate in Uganda",
+        "nimbaasa kutunga nta satifikeeti ya tcc": "How do I apply for a Tax Clearance Certificate TCC?",
+        "nimbaasa kuhindura nta obwannannyini bw'emotoka": "How do I transfer motor vehicle ownership and logbook?",
+    },
+    ("ach", "en"): {
+        "atwero coyo nyinga nining me nongo tin": "How do I register to get a TIN?",
+        "wel mucoro me vat i uganda tye adi": "What is the VAT tax rate in Uganda?",
+        "mucoro me paye kikwano nining": "How is PAYE tax calculated?",
+        "aculu mucoro me paye adi": "How much PAYE tax do I pay?",
+        "efris tiyo nining": "How is EFRIS used for invoicing and goods?",
+        "weko pwod me mucoro me ura": "URA tax penalty waiver and relief",
+        "atwero yubo namba me prn nining me culu mucoro": "How to generate a PRN payment slip to pay tax in the bank or by phone?",
+        "mucoro me kampuni tye adi": "What percentage of annual corporate income tax should my company pay?",
+        "tela me kwanyo jami i customs": "Customs clearance guidance for goods at border",
+        "mucoro ma kigengo": "Withholding tax",
+        "mucoro me ot ma kipango": "Rental income tax rate in Uganda",
+        "atwero nongo waraga me tcc nining": "How do I apply for a Tax Clearance Certificate TCC?",
+        "atwero loko nying motoka nining": "How do I transfer motor vehicle ownership and logbook?",
+    },
 }
 
 
@@ -284,8 +315,10 @@ def figures(text: str, locale: str | None = None) -> set[float]:
     stripped = re.sub(r"\b(?:19|20)\d{2}\b", " ", stripped)
     # Strip tariff chapter references (Chapters 84 and 85, Sura 84)
     stripped = re.sub(r"\b(?:chapters?|sura|essuula)\s+\d+(?:\s*(?:and|ne|na|&)\s*\d+)?\b", " ", stripped, flags=re.IGNORECASE)
-    # Strip percentage per-hundred idioms so "kikumi" in "ku buli kikumi" is not read as 100
+    # Strip percentage per-hundred idioms so "kikumi" / "miya" is not read as 100
     stripped = re.sub(r"\bku\s+buli\s+kikumi\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\baha\s+(?:buli\s+)?kikumi\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\bi\s+kom\s+miya(?:\s+acel)?\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\bkatika\s+kila\s+(?:mia\s+moja|mia)\b", " ", stripped, flags=re.IGNORECASE)
     # Strip Swahili idiom "moja kwa moja" (direct/directly) so "moja" is not read as 1.0
     stripped = re.sub(r"\bmoja\s+kwa\s+moja\b", " ", stripped, flags=re.IGNORECASE)
@@ -298,6 +331,10 @@ def figures(text: str, locale: str | None = None) -> set[float]:
         target_words = _SW_WORD_NUMBERS
     elif locale == "lg":
         target_words = _LG_WORD_NUMBERS
+    elif locale in ("nyn", "nyk"):
+        target_words = _NYN_WORD_NUMBERS
+    elif locale == "ach":
+        target_words = _ACH_WORD_NUMBERS
     elif locale == "en":
         target_words = _EN_WORD_NUMBERS
 
@@ -311,7 +348,11 @@ def figures(text: str, locale: str | None = None) -> set[float]:
         for word, val in (
             ("kumi na nane", 18.0),
             ("kkumi na munaana", 18.0),
+            ("ikumi na munaana", 18.0),
+            ("apar wiye aboro", 18.0),
             ("kumi na tano", 15.0),
+            ("ikumi na bitaano", 15.0),
+            ("apar wiye abic", 15.0),
             ("arobaini na tano", 45.0),
             ("ana mu bitaano", 45.0),
         ):
@@ -424,6 +465,66 @@ _LG_WORD_NUMBERS: dict[str, float] = {
     "lukumi": 1000.0,
 }
 
+_NYN_WORD_NUMBERS: dict[str, float] = {
+    "emwe": 1.0,
+    "kimwe": 1.0,
+    "kamwe": 1.0,
+    "ibiri": 2.0,
+    "bibiri": 2.0,
+    "bubiri": 2.0,
+    "ishatu": 3.0,
+    "bishatu": 3.0,
+    "bushatu": 3.0,
+    "ina": 4.0,
+    "bina": 4.0,
+    "buna": 4.0,
+    "itaano": 5.0,
+    "bitaano": 5.0,
+    "butaano": 5.0,
+    "mukaaga": 6.0,
+    "mushanju": 7.0,
+    "munaana": 8.0,
+    "mwenda": 9.0,
+    "ikumi": 10.0,
+    "ikumi na ibiri": 12.0,
+    "ikumi na bibiri": 12.0,
+    "ikumi na itaano": 15.0,
+    "ikumi na bitaano": 15.0,
+    "ikumi na munaana": 18.0,
+    "makumi abiri": 20.0,
+    "makumi ashatu": 30.0,
+    "makumi ashatu na bitaano": 35.0,
+    "makumi ana": 40.0,
+    "makumi ana na bitaano": 45.0,
+    "makumi ataano": 50.0,
+    "kikumi": 100.0,
+    "rukumi": 1000.0,
+}
+
+_ACH_WORD_NUMBERS: dict[str, float] = {
+    "acel": 1.0,
+    "aryo": 2.0,
+    "adek": 3.0,
+    "angwen": 4.0,
+    "abic": 5.0,
+    "abicel": 6.0,
+    "abiro": 7.0,
+    "aboro": 8.0,
+    "abongwen": 9.0,
+    "apar": 10.0,
+    "apar wiye aryo": 12.0,
+    "apar wiye abic": 15.0,
+    "apar wiye aboro": 18.0,
+    "pyeraryo": 20.0,
+    "pyeradek": 30.0,
+    "pyeradek wiye abic": 35.0,
+    "pyerangwen": 40.0,
+    "pyerangwen wiye abic": 45.0,
+    "pyerabic": 50.0,
+    "miya acel": 100.0,
+    "elfu acel": 1000.0,
+}
+
 
 def figures_survived(source: str, translated: str, locale: str | None = None) -> bool:
     """True when *translated* states the same figures as *source*.
@@ -473,7 +574,7 @@ def figures_survived(source: str, translated: str, locale: str | None = None) ->
 #: ``Data/eval/rag_eval_lg.jsonl`` and the reviewed probes in
 #: ``tests/load/tax_education_accuracy_eval.py`` — no vocabulary is coined here.
 _CURRENCY_TOKEN_RE = re.compile(
-    r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|ssente|sente|milioni|obukadde|emitwalo)\b",
+    r"\b(?:UGX|USh(?:s)?|Shs?|shillings?|shilingi|shiringi|cilingi|ssente|sente|esente|cente|milioni|obukadde|obukaikuru|akakaikuru|emitwalo|emitwaro)\b",
     re.IGNORECASE,
 )
 

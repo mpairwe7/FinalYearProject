@@ -159,6 +159,38 @@ def format_prn_voucher_reply(voucher: dict[str, Any], locale: str = "en") -> str
             f"3. **Tovuti ya URA**: Lipa mtandaoni kwa kadi (Visa/Mastercard): https://ura.go.ug."
         )
 
+    if locale in ("nyn", "nyk"):
+        return (
+            f"### 🧾 Ekihandiiko ky'Okushashuriraho ekya PRN (Voucher)\n"
+            f"*Embeera: Okugezesa kwa Sandbox (Simulated Voucher)*\n\n"
+            f"- **Enamba ya PRN**: `{prn}`\n"
+            f"- **Esente Ezirikushashurwa**: **{amt}**\n"
+            f"- **Ekika ky'Omushoro**: {tax}\n"
+            f"- **Omushasuzi**: {name} (`TIN: {tin}`)\n"
+            f"- **Enamba y'Okusherura**: `{code}`\n"
+            f"- **Ebiro by'Okukora**: {exp} (ebiro 21)\n\n"
+            f"**Omuringo gw'Okushashura**:\n"
+            f"1. **Mobile Money**: Teera `*165#` (MTN) nari `*185#` (Airtel) → Shashura URA → Taamu PRN `{prn}`.\n"
+            f"2. **Banka Yoona**: Twara enamba ya PRN aha banka yoona omuri Uganda.\n"
+            f"3. **Omukura gwa URA**: Shashurira aha mukura: https://ura.go.ug → e-Services → Make a Payment."
+        )
+
+    if locale == "ach":
+        return (
+            f"### 🧾 Karatac me Culu Mucoro me PRN (Voucher)\n"
+            f"*Kit: Temo i Sandbox (Simulated Voucher)*\n\n"
+            f"- **Namba me PRN**: `{prn}`\n"
+            f"- **Wel Lim me Acula**: **{amt}**\n"
+            f"- **Kit Mucoro**: {tax}\n"
+            f"- **Lacul Mucoro**: {name} (`TIN: {tin}`)\n"
+            f"- **Namba me Yenyo**: `{code}`\n"
+            f"- **Tiyo Naka**: {exp} (nino 21)\n\n"
+            f"**Yoo me Culu Mucoro**:\n"
+            f"1. **Mobile Money**: Dii `*165#` (MTN) onyo `*185#` (Airtel) → Cul Mucoro me URA → Ket PRN `{prn}`.\n"
+            f"2. **Bank Mo Keken**: Ter namba me PRN i bank mo keken i Uganda.\n"
+            f"3. **Kabedo me URA**: Cul i intanet ki kadi: https://ura.go.ug → e-Services → Make a Payment."
+        )
+
     return (
         f"### 🧾 Payment Registration Number (PRN) Voucher\n"
         f"*Mode: Prototype Sandbox / Simulated Payment Voucher*\n\n"

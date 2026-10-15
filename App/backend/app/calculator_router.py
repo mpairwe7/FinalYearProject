@@ -33,18 +33,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Amount extraction
 # ---------------------------------------------------------------------------
-_CURRENCY = r"(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|shilingi|ssente|sente|ensimbi|/=|/-\b)"
+_CURRENCY = r"(?:ugx|ug\.?\s?shs?|u\.?shs?|shs?\.?|shillings?|shilingi|shiringi|cilingi|ssente|sente|esente|cente|ensimbi|/=|/-\b)"
 _AMOUNT_PREFIX_RE = re.compile(
-    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?nkumi|o?lukumi)\s+"
+    r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)\s+"
     r"(\d{1,3}(?:[,\s]\d{3})*|\d+(?:\.\d+)?)\b",
     re.IGNORECASE,
 )
 _AMOUNT_PREFIX_MULTIPLIERS = {
     "milioni": 1e6, "bilioni": 1e9, "elfu": 1e3, "laki": 1e5,
     "bukadde": 1e6, "obukadde": 1e6, "kakadde": 1e6, "akakadde": 1e6,
+    "bukaikuru": 1e6, "obukaikuru": 1e6, "kakaikuru": 1e6, "akakaikuru": 1e6,
     "buwumbi": 1e9, "obuwumbi": 1e9, "kawumbi": 1e9, "akawumbi": 1e9,
     "mitwalo": 1e4, "emitwalo": 1e4, "mutwalo": 1e4, "omutwalo": 1e4,
+    "mitwaro": 1e4, "emitwaro": 1e4, "mutwaro": 1e4, "omutwaro": 1e4,
     "nkumi": 1e3, "enkumi": 1e3, "lukumi": 1e3, "olukumi": 1e3,
+    "rukumi": 1e3, "orukumi": 1e3,
 }
 _AMOUNT_RE = re.compile(
     rf"""
@@ -187,11 +190,11 @@ _DEFINITIONAL_OPENER_RE = re.compile(
 #: "VAT ku UGX 2,000,000", "VAT kwa UGX 2,000,000", "PAYE kwa mshahara wa UGX 2,000,000")
 #: that carry a named tax and a money amount without an explicit verb.
 _TERSE_TAX_ON_AMOUNT_RE = re.compile(
-    r"^(?:(?:omusolo\s{1,4}gwa|kodi\s{1,4}ya|ushuru\s{1,4}wa)\s{1,4})?"
+    r"^(?:(?:omusolo\s{1,4}gwa|omushoro\s{1,4}gwa|mucoro\s{1,4}me|kodi\s{1,4}ya|ushuru\s{1,4}wa)\s{1,4})?"
     r"(?:v\.?a\.?t\.?|vati|value\s{1,4}added\s{1,4}tax|paye|pay\s{1,4}as\s{1,4}you\s{1,4}earn|"
     r"withholding(?:\s{1,4}tax)?|wht|rental(?:\s{1,4}(?:income\s{1,4})?tax)?|"
     r"corporation(?:\s{1,4}tax)?|corporate(?:\s{1,4}tax)?|customs(?:\s{1,4}duty)?|import\s{1,4}duty)"
-    r"\s{1,4}(?:on|for|ku|kwa)\s",
+    r"\s{1,4}(?:on|for|ku|kwa|aha|i\s{1,4}kom)\s",
     re.IGNORECASE,
 )
 # A question about what a published figure IS must never open a calculator that
@@ -1072,7 +1075,7 @@ class RatePlan:
 _RATE_ASK_RE = re.compile(
     r"\b(what(?:'s|\s+is|\s+are)?|how\s+many|current|how\s+much\s+is|how\s+is\b.*\b(?:calculated|computed)|how\s+much\s+tax|how\s+much\s+cut|tell\s+me|kiwango|o?muwendo|e?bitundu|asilimia|ssente\s+mmeka|kiasi\s+gani)\b[^?]*\b(percentages?|ratio|rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|calculated|computed|kiwango|viwango|o?muwendo|e?kkomo|kikomo|e?bitundu|asilimia|pay|charged|deducted|cut|take|adhabu|okubonerezebwa|siku|nnaku|tarehe)\b"
     r"|\b(rates?|thresholds?|limits?|bands?|exempt(?:ion|ions)?|relief|penalt(?:y|ies)?|fines?|allowance|days?|due|kiwango|viwango|o?muwendo|e?kkomo|kikomo|adhabu|okubonerezebwa|siku|nnaku|tarehe)\s+(of|for|kya|cha|ku|kwa|kye|gwa|bwa|eri)\b"
-    r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi)\b"
+    r"|\b(e?bitundu\s+bimeka|asilimia\s+ngapi|o?muwendo\s+gwa\s+ssente|ssente\s+mmeka|kiasi\s+gani|nnaku\s+mmeka|siku\s+ngapi|o?muwendo\b.*\bguli\s+gutya|gwa\s+bimeka|gw['’]ameka|y['’]emeka|kiwango\s+ni\s+kipi|kodi\s+ni\s+asilimia\s+ngapi|e?bicweka\s+bingahi|omushoro\b.*\bshangahi|wel\s+mucoro\b.*\badi|mucoro\b.*\btye\s+adi)\b"
     r"|\bhow\s+is\s+.*(?:calculated|computed|taxed)\b"
     r"|\bhow\s+much\s+(?:tax|cut)\b[^?]*\b(on|for|pay|charged|deducted|take)\b"
     r"|\b(?:can|is|are|may)\b[^?]*\b(?:import\b|offset\b|claim\b|clear|cleared|exempt|allowed|duty[-\s]?free|concession)\b"

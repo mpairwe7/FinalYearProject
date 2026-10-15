@@ -269,6 +269,22 @@ export function StaffTicketQueue({ who }: { who?: StaffIdentity }) {
             >
               🇰🇪 Swahili
             </button>
+            <button
+              type="button"
+              className={`ops-filter${view.locale === "nyn" ? " is-active" : ""}`}
+              aria-pressed={view.locale === "nyn"}
+              onClick={() => setView({ locale: "nyn" })}
+            >
+              🇺🇬 Runyankole
+            </button>
+            <button
+              type="button"
+              className={`ops-filter${view.locale === "ach" ? " is-active" : ""}`}
+              aria-pressed={view.locale === "ach"}
+              onClick={() => setView({ locale: "ach" })}
+            >
+              🇺🇬 Acholi
+            </button>
           </span>
 
           <span className="ops-toolbar-end tickets-toolbar-search">

@@ -115,7 +115,7 @@ def get_partial_transcript_interval_s() -> float:
 # ---------------------------------------------------------------------------
 
 #: Languages the receptionist can hold a call in, in the order they are offered.
-KNOWN_LANGUAGES: tuple[str, ...] = ("en", "sw", "lg")
+KNOWN_LANGUAGES: tuple[str, ...] = ("en", "sw", "lg", "nyn", "ach")
 
 
 def _env_float(name: str, default: float) -> float:
@@ -285,11 +285,14 @@ def get_clarify_threshold_for(language: str) -> float:
 def clarify_repeat_enabled(language: str) -> bool:
     """Whether "please repeat that word" is asked in *language*.
 
-    Off for Luganda by default: Whisper-SALT's per-word probabilities have
-    not been calibrated on Luganda, where 14% WER on read speech means a low
-    word score is the norm rather than a signal.
+    Off for Luganda, Runyankole, and Acholi by default: Whisper-SALT's per-word
+    probabilities have not been calibrated on those Ugandan languages, where a
+    low word score is the norm rather than a signal.
     """
-    return _env_bool(f"RECEPTIONIST_CLARIFY_REPEAT_{language.upper()}", language != "lg")
+    return _env_bool(
+        f"RECEPTIONIST_CLARIFY_REPEAT_{language.upper()}",
+        language not in ("lg", "nyn", "ach"),
+    )
 
 
 def get_presence_ttl_s() -> float:

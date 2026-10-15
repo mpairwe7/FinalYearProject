@@ -536,7 +536,7 @@ def turn_outcome(result: Mapping[str, Any]) -> str:
 
 #: The answer languages and decision sources a label may take (G123); anything
 #: else is folded into "other", so the series stay bounded.
-_DECISION_LOCALES = frozenset({"en", "lg", "sw"})
+_DECISION_LOCALES = frozenset({"en", "lg", "sw", "nyn", "ach"})
 
 
 def record_language_decision(result: Mapping[str, Any], *, channel: str) -> None:

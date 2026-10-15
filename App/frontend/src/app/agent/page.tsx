@@ -228,6 +228,20 @@ export function AgentQueue({ who }: { who: StaffIdentity }) {
           >
             🇰🇪 Swahili
           </button>
+          <button
+            type="button"
+            className={`st-trans-btn${view.locale === "nyn" ? " is-active" : ""}`}
+            onClick={() => setView({ locale: "nyn" })}
+          >
+            🇺🇬 Runyankole
+          </button>
+          <button
+            type="button"
+            className={`st-trans-btn${view.locale === "ach" ? " is-active" : ""}`}
+            onClick={() => setView({ locale: "ach" })}
+          >
+            🇺🇬 Acholi
+          </button>
         </div>
 
         {/* The shortcuts were always here; nothing on this page said so. */}

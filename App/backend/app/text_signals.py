@@ -72,6 +72,8 @@ _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"\b(habari\s+(yako|za\s+asubuhi|za\s+mchana|za\s+jioni|gani|za\s+leo)|mambo\s+vipi|asante\s+sana|karibu\s+sana)\b",
         r"^(oli\s+otya|wasuze\s+otya|osiibye\s+otya|mwasuze\s+mutya|ki\s+kati|gyebale|gyebaleko|weebale|webale|neeyanzizza|weraba|tunaalabagana)\b",
         r"\b(weebale\s+nnyo|webale\s+nyo|tukwanirizza\s+nnyo)\b",
+        r"^(agandi|oraire\s+ota|osiibire\s+ota|webare|webare\s+munonga|kare|ogumeho)\b",
+        r"^(kopango|ipwoyo|apwoyo|apwoyo\s+matek|itye\s+nining|iwoto\s+maber|wabineno)\b",
         r"^thank(s| you)\b",
         r"\bthank you for (asking|reaching out|your patience|getting in touch)\b",
         r"^(i am|i'm|we are|we're) (sorry|glad|happy|here)\b",
@@ -87,6 +89,7 @@ _COURTESY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"(frustrating|stressful|difficult|confusing|overwhelming|tough)\b",
         r"^(no worries|don't worry|do not worry)\b",
         r"^let('s| us) (sort|work|take|figure|go|get)\b",
+        r"^(nsonyiwa|ntegeera|mmanyi|ka nkikunnyonnyole|pole|naelewa|najua|wacha nilieleze|nsaasira|nyetegyereza|nimanya|ka nkushoboororere|kica|aniang|angeyo|wek atit)\b",
         # -- offers of help / sign-offs / engagement ----------------------
         # "happy to help" was listed but the models write "happy to assist"
         # just as often, and a closing pleasantry counted as an uncited factual
@@ -141,7 +144,9 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"frustrat|angry|annoy|fed up|ridiculous|useless|not working"
             r"|doesn't work|does not work|third time|again and again"
             r"|still (can't|cannot|no|not)"
-            r"|\b(?:terikola|tebikola|ebizibu|nkoye|nyiize|ekibonerezo\s+kinene|haifanyi\s+kazi|imekataa|faini\s+ni\s+kubwa)\b"
+            r"|\b(?:terikola|tebikola|ebizibu|nkoye|nyiize|ekibonerezo\s+kinene|haifanyi\s+kazi|imekataa|faini\s+ni\s+kubwa"
+            r"|tikirikukora|tibyakora|obuzibu|nkoire|ekibonerezo\s+kihango"
+            r"|pe\s+tiyo|pe\s+tye\s+ka\s+tic|peko|aolo|pwod\s+madit)\b"
         ),
     ),
     # "help me" and "lost my" used to be anxiety cues. They are how people ask
@@ -154,7 +159,9 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"worried|worry|worrying|scared|afraid|anxious|confus|stress"
             r"|don't know what|don't understand|do not understand"
-            r"|\b(?:ntidde|nnina\s+okutya|mweraliikirivu|nina\s+wasiwasi|naogopa|natishika)\b"
+            r"|\b(?:ntidde|nnina\s+okutya|mweraliikirivu|nina\s+wasiwasi|naogopa|natishika"
+            r"|ntiire|nyine\s+obwoba|nyeraliikiriire"
+            r"|alworo|atye\s+ki\s+lworo|cwinyacwer|aparo)\b"
         ),
     ),
     (
@@ -163,7 +170,9 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"urgent|asap|as soon as possible|deadline|due (today|tomorrow)"
             r"|\b(?:under\s+audit|being\s+audited|facing\s+penalt\w*|incurred\s+penalt\w*|threatened\s+with|been\s+fined)\b"
             r"|enforcement|seiz|arrears|overdue|late fee"
-            r"|\b(?:mangu\s+ddala|kwa\s+haraka|dharura|nsaba\s+kuyambibwa\s+mangu)\b"
+            r"|\b(?:mangu\s+ddala|kwa\s+haraka|dharura|nsaba\s+kuyambibwa\s+mangu"
+            r"|ahonaaho|bwangu\s+munonga|ninshaba\s+obuhwezi\s+bwangu"
+            r"|oyot[\s-]oyot|kombedi\s+kikome|amito\s+kony\s+oyot)\b"
         ),
     ),
 )
@@ -199,12 +208,14 @@ _HARDSHIP_RE = re.compile(
 _CONFUSION_RE = re.compile(
     r"\b(confus\w+|don'?t understand|do not understand|makes no sense"
     r"|i'?m lost|unclear|complicated"
-    r"|sitegedde|simanyi\s+makulu|sielewi|haieleweki)\b"
+    r"|sitegedde|simanyi\s+makulu|sielewi|haieleweki"
+    r"|tinyetegyereize|timmanyire\s+makuru|pe\s+aniang|pe\s+angeyo\s+te\s+lok)\b"
 )
 
 _WORRY_RE = re.compile(
     r"\b(worried|worry|worrying|scared|afraid|anxious|stress\w*|panic\w*|nervous"
-    r"|ntidde|mweraliikirivu|nina\s+wasiwasi|naogopa)\b"
+    r"|ntidde|mweraliikirivu|nina\s+wasiwasi|naogopa"
+    r"|ntiire|nyine\s+obwoba|nyeraliikiriire|alworo|atye\s+ki\s+lworo|aparo)\b"
 )
 
 _EMPATHY_ACKS: dict[str, str] = {
@@ -213,6 +224,38 @@ _EMPATHY_ACKS: dict[str, str] = {
     "urgency": "I know deadlines can be stressful, so here's the quickest way forward.",
     "hardship": "I'm sorry you're going through this — let's look at what options you have.",
     "confusion": "Let me put that a different way.",
+}
+
+_EMPATHY_ACKS_BY_LOCALE: dict[str, dict[str, str]] = {
+    "en": _EMPATHY_ACKS,
+    "lg": {
+        "frustration": "Nsonyiwa olw'obuzibu obwo — ka tukigonjole wamu.",
+        "anxiety": "Ntegeera nti kino kiyinza okweraliikiriza — ka tukikole mutendera ku mutendera.",
+        "urgency": "Mmanyi nti obudde bwe bukwatirira kyeraliikiriza, kale eno y'engeri esinga obwangu.",
+        "hardship": "Nsonyiwa olw'embeera gy'oyitamu — ka tulabe engeri eziyinza okukuyamba.",
+        "confusion": "Ka nkikunnyonnyole mu ngeri endala ennyangu.",
+    },
+    "sw": {
+        "frustration": "Pole kwa usumbufu huo — wacha tulitatue hili pamoja.",
+        "anxiety": "Naelewa hili linaweza kuleta wasiwasi — wacha tuende hatua kwa hatua.",
+        "urgency": "Najua tarehe za mwisho zinaweza kuleta shinikizo, kwa hivyo hii ndiyo njia ya haraka zaidi.",
+        "hardship": "Pole sana kwa changamoto unayopitia — wacha tuangalie chaguo za unafuu ulizo nazo.",
+        "confusion": "Wacha nilieleze hili kwa njia nyingine rahisi.",
+    },
+    "nyn": {
+        "frustration": "Nsaasira ahabw'obuzibu obwo — ka tukimarireho hamwe.",
+        "anxiety": "Nyetegyereza ngu eki nikibaasa kweraliikiriza — ka tugyende idaara aha rindi.",
+        "urgency": "Nimanya ngu obwire bw'okuheereza nibubaasa kweraliikiriza, nahabwekyo ogu nigwo muhanda gw'ahonaaho.",
+        "hardship": "Nsaasira munonga ahabw'eki orikurabamu — ka tureebe obuhwezi obu oine.",
+        "confusion": "Ka nkushoboororere omu muringo ogundi ogworobi.",
+    },
+    "ach": {
+        "frustration": "Kica pi peko meno — wek wayub lok man kacel.",
+        "anxiety": "Aniang ni man romo kelo par — wek wacit rwom ki rwom.",
+        "urgency": "Angeyo ni kare me agikki kelo par, pi meno man aye yoo ma oyot loyo.",
+        "hardship": "Kica matek pi tekare ma itye ka wok ki iye — wek wanen yoo me kony ma tye piri.",
+        "confusion": "Wek atit lok man i yoo mukene mayot.",
+    },
 }
 
 _TONE_HINTS: dict[str, str] = {
@@ -521,13 +564,25 @@ def local_government_tax_reply(query: str = "") -> str:
     )
 
 
-def empathy_ack(kind: str) -> str:
+def empathy_ack(kind: str, locale: str = "en") -> str:
     """One short, translation-friendly empathetic opener for a distress kind.
 
     Every returned string must satisfy ``is_courtesy_sentence`` so the
     acknowledgment never dilutes faithfulness or claim verification.
     """
-    return _EMPATHY_ACKS.get(kind, "")
+    loc = "nyn" if (locale or "en").strip().lower() == "nyk" else (locale or "en").strip().lower()
+    table = _EMPATHY_ACKS_BY_LOCALE.get(loc, _EMPATHY_ACKS)
+    return table.get(kind, _EMPATHY_ACKS.get(kind, ""))
+
+
+def _all_acks_for_kind(kind: str) -> tuple[str, ...]:
+    return tuple(
+        dict.fromkeys(
+            table[kind]
+            for table in _EMPATHY_ACKS_BY_LOCALE.values()
+            if kind in table and table[kind]
+        )
+    )
 
 
 def ack_already_given(kind: str, prior_replies: Sequence[str], lookback: int = 2) -> bool:
@@ -538,10 +593,13 @@ def ack_already_given(kind: str, prior_replies: Sequence[str], lookback: int = 2
     makes an assistant sound scripted. Callers that prepend an opener ask this
     first; :func:`strip_repeated_ack` covers replies that already carry one.
     """
-    ack = _EMPATHY_ACKS.get(kind, "")
-    if not ack:
+    candidates = _all_acks_for_kind(kind)
+    if not candidates:
         return False
-    return any((r or "").lstrip().startswith(ack) for r in list(prior_replies)[-lookback:])
+    return any(
+        any((r or "").lstrip().startswith(ack) for ack in candidates)
+        for r in list(prior_replies)[-lookback:]
+    )
 
 
 def strip_repeated_ack(reply: str, prior_replies: Sequence[str], lookback: int = 2) -> str:
@@ -552,9 +610,10 @@ def strip_repeated_ack(reply: str, prior_replies: Sequence[str], lookback: int =
     """
     text = reply or ""
     stripped = text.lstrip()
-    for kind, ack in _EMPATHY_ACKS.items():
-        if stripped.startswith(ack) and ack_already_given(kind, prior_replies, lookback):
-            return stripped[len(ack):].lstrip()
+    for kind in _EMPATHY_ACKS:
+        for ack in _all_acks_for_kind(kind):
+            if stripped.startswith(ack) and ack_already_given(kind, prior_replies, lookback):
+                return stripped[len(ack):].lstrip()
     return text
 
 
@@ -600,7 +659,7 @@ _CRISIS_RE = re.compile(
     r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
     r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
     r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
-    r"|okwetta|kujiua)\b"
+    r"|okwetta|kujiua|okweyita|kweyita|neko\s+koma)\b"
 )
 
 #: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency
@@ -643,6 +702,11 @@ _FEELING_WORDS = frozenset(
         # Contraction fragments: the tokenizer splits "I'm" into "i" + "m", so
         # without these "I'm confused" named a task called "m".
         "i", "m", "ve", "re", "ll", "d",
+        # Vernacular feeling-only tokens (lg, sw, nyn, ach)
+        "terikola", "tebikola", "nkoye", "nyiize", "sitegedde",
+        "haifanyi", "imekataa", "sielewi", "haieleweki",
+        "tikirikukora", "tibyakora", "nkoire", "tinyetegyereize",
+        "aolo", "aniang",
     }
 )
 
@@ -654,7 +718,13 @@ def is_feeling_only(message: str) -> bool:
 
 #: Small talk that names no task either ("hello", "thanks, ok").
 _SMALL_TALK_WORDS = frozenset(
-    {"hello", "hi", "hey", "thanks", "thank", "good", "morning", "afternoon", "evening", "ok", "okay", "yes", "no"}
+    {
+        "hello", "hi", "hey", "thanks", "thank", "good", "morning", "afternoon", "evening", "ok", "okay", "yes", "no",
+        "gyebale", "gyebaleko", "webale", "weebale", "kale", "yee", "nedda",
+        "habari", "jambo", "mambo", "asante", "sawa", "ndiyo", "hapana",
+        "agandi", "webare", "kare", "ego", "ngaaha",
+        "kopango", "apwoyo", "ber", "eyo", "pe",
+    }
 )
 
 
@@ -724,6 +794,16 @@ GREETING_REPLY_BY_LOCALE: dict[str, str] = {
         "ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo "
         "gw'oku mwalo, n'ebirala — nnyinza kukuyamba ntya leero?"
     ),
+    "nyn": (
+        "Agandi, kandi nyakiiriza! Ndi Omuhwezi wa Digito owa URA. Nimbaasa kukuhwera "
+        "aha by'okwehandiikisa aha mushoro, okuheereza ebihandiiko by'omushoro, okushashura, "
+        "eby'omushoro gw'ensharo, n'ebindi — nimbaasa kukuhwera nta erizooba?"
+    ),
+    "ach": (
+        "Kopango, dok ajoli! An Lakony me Dijitol me URA. Atwero konyi "
+        "i kom coyo nying pi mucoro, cwalo ripot me mucoro, culu mucoro, mucoro "
+        "me wang lobo, ki mukene — atwero konyi nining tin?"
+    ),
 }
 
 GRATITUDE_REPLY = (
@@ -741,6 +821,14 @@ GRATITUDE_REPLY_BY_LOCALE: dict[str, str] = {
         "Tukwanirizza nnyo — nsomedde nti nnyinzizza okuyamba! Waliwo ekirala "
         "ky'oyagala okumanya ku mpeereza za URA?"
     ),
+    "nyn": (
+        "Kare munonga — nashemererwa kuba naabaasa kukuhwera! Hariho ekindi "
+        "eki orikwenda kumanya aha buhereza bwa URA?"
+    ),
+    "ach": (
+        "Apwoyo matek — yoma ni atwero konyi! Tye gin mukene "
+        "ma imito ngeyo i kom tic me URA?"
+    ),
 }
 
 FAREWELL_REPLY = (
@@ -757,6 +845,14 @@ FAREWELL_REPLY_BY_LOCALE: dict[str, str] = {
     "lg": (
         "Weebale kwogera n'Omuyambi wa Digito owa URA — weraba kwa kati! "
         "Weeraba okutuukirira buli w'oyagalira, oba genda ku https://ura.go.ug."
+    ),
+    "nyn": (
+        "Webare kuganiira n'Omuhwezi wa Digito owa URA — ogumeho! "
+        "Noobaasa kutuhikirira obwire bwona, nari za aha https://ura.go.ug."
+    ),
+    "ach": (
+        "Apwoyo loko ki Lakony me Dijitol me URA — wabineno! "
+        "Itwero kubo kwedwa cawa mo keken, onyo cit i https://ura.go.ug."
     ),
 }
 
@@ -776,30 +872,47 @@ NEXT_ACTIONS_GREETING_BY_LOCALE: dict[str, list[str]] = {
         "Yiga ku musolo gwa VAT",
         "Waayo alipoota y'omusolo",
     ],
+    "nyn": [
+        "Buuza aha kwehandiikisa TIN",
+        "Yega aha mushoro gwa VAT",
+        "Heereza ekihandiiko ky'omushoro",
+    ],
+    "ach": [
+        "Peny i kom coyo nying pi TIN",
+        "Nge i kom mucoro me VAT",
+        "Cwal ripot me mucoro",
+    ],
 }
+
+
+def _norm_courtesy_loc(locale: str = "en") -> str:
+    raw = re.split(r"[-_]", (locale or "en").strip().lower())[0]
+    if raw == "nyk":
+        return "nyn"
+    return raw
 
 
 def get_greeting_reply(locale: str = "en") -> str:
     """Return localized greeting string."""
-    loc = (locale or "en").strip().lower()[:2]
+    loc = _norm_courtesy_loc(locale)
     return GREETING_REPLY_BY_LOCALE.get(loc, GREETING_REPLY)
 
 
 def get_gratitude_reply(locale: str = "en") -> str:
     """Return localized gratitude response."""
-    loc = (locale or "en").strip().lower()[:2]
+    loc = _norm_courtesy_loc(locale)
     return GRATITUDE_REPLY_BY_LOCALE.get(loc, GRATITUDE_REPLY)
 
 
 def get_farewell_reply(locale: str = "en") -> str:
     """Return localized farewell response."""
-    loc = (locale or "en").strip().lower()[:2]
+    loc = _norm_courtesy_loc(locale)
     return FAREWELL_REPLY_BY_LOCALE.get(loc, FAREWELL_REPLY)
 
 
 def get_greeting_next_actions(locale: str = "en") -> list[str]:
     """Return localized next-action suggestions for a greeting turn."""
-    loc = (locale or "en").strip().lower()[:2]
+    loc = _norm_courtesy_loc(locale)
     return NEXT_ACTIONS_GREETING_BY_LOCALE.get(loc, NEXT_ACTIONS_GREETING_BY_LOCALE["en"])
 
 
@@ -835,6 +948,28 @@ _LG_FAREWELL_PHRASES = frozenset({
     "weeraba", "tunaalabagana", "siiba bulungi", "sula bulungi", "mpaka",
 })
 
+_NYN_GREETING_WORDS = frozenset({"agandi"})
+_NYN_GREETING_PHRASES = frozenset({
+    "oraire ota", "osiibire ota", "muraire muta", "musiibire muta",
+})
+_NYN_GRATITUDE_PHRASES = frozenset({
+    "webare", "webare munonga", "mwebare", "mwebare munonga",
+})
+_NYN_FAREWELL_PHRASES = frozenset({
+    "ogumeho", "mugumeho", "siiba gye", "raara gye",
+})
+
+_ACH_GREETING_WORDS = frozenset({"kopango"})
+_ACH_GREETING_PHRASES = frozenset({
+    "itye nining", "ibut nining", "iruu nining", "wutye nining",
+})
+_ACH_GRATITUDE_PHRASES = frozenset({
+    "apwoyo", "apwoyo matek", "wapwoyo",
+})
+_ACH_FAREWELL_PHRASES = frozenset({
+    "wabineno", "ibed maber", "wubed maber",
+})
+
 
 def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
     """Identify the locale for a greeting or courtesy phrase."""
@@ -852,6 +987,18 @@ def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
         or any(p in text for p in _LG_GREETING_PHRASES | _LG_FAREWELL_PHRASES)
     ):
         return "lg"
+    if (
+        words & _NYN_GREETING_WORDS
+        or words & _NYN_GRATITUDE_PHRASES
+        or any(p in text for p in _NYN_GREETING_PHRASES | _NYN_FAREWELL_PHRASES)
+    ):
+        return "nyn"
+    if (
+        words & _ACH_GREETING_WORDS
+        or words & _ACH_GRATITUDE_PHRASES
+        or any(p in text for p in _ACH_GREETING_PHRASES | _ACH_FAREWELL_PHRASES)
+    ):
+        return "ach"
     return current_locale or "en"
 
 
@@ -876,7 +1023,13 @@ _CONVERSATIONAL_PREFIX_RE = re.compile(
     r"ninataka(?:\s+kujua|\s+kuelewa)?|"
     r"ningependa(?:\s+kujua|\s+kuelewa)?|"
     r"nieleze\s+wazi|"
-    r"samahani(?:\s+naomba)?"
+    r"samahani(?:\s+naomba)?|"
+    r"ninkushaba(?:\s+omanyise|\s+onshoboororere)?|"
+    r"nimbaasa\s+kumanya|"
+    r"nooyenda\s+kumanya|"
+    r"tim\s+ber(?:\s+itita|\s+ingeya)?|"
+    r"amito\s+ngeyo|"
+    r"atwero\s+ngeyo"
     r")\s*[:,\-—]?\s*",
     re.IGNORECASE,
 )
@@ -959,6 +1112,16 @@ LOCALIZED_CONTACT_FOOTERS = {
         "Ikiwa utakabiliwa na changamoto yoyote katika hatua yoyote, URA iko tayari "
         "kukusaidia: tembelea https://ura.go.ug, barua pepe services@ura.go.ug, piga simu "
         "bila malipo 0800 117 000 / 0800 217 000, au WhatsApp 0772 140 000."
+    ),
+    "nyn": (
+        "Ku oraashangye obuzibu bwona aha idaara ryona, URA eyeteekateekire kukuhwera: "
+        "za aha https://ura.go.ug, email services@ura.go.ug, teera esimu y'obusha "
+        "0800 117 000 / 0800 217 000, nari WhatsApp 0772 140 000."
+    ),
+    "ach": (
+        "Ka inongo peko mo keken i rwom mo keken, URA tye atera me konyi: "
+        "cit i https://ura.go.ug, email services@ura.go.ug, goyo cim me nono "
+        "0800 117 000 / 0800 217 000, onyo WhatsApp 0772 140 000."
     ),
 }
 

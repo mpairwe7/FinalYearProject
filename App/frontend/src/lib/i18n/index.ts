@@ -22,10 +22,12 @@ import { useChatStore } from '../../store/useChatStore';
 import { en, type Dictionary, type TranslationKey } from './en';
 import { lg } from './lg';
 import { sw } from './sw';
+import { nyn } from './nyn';
+import { ach } from './ach';
 
 export type { TranslationKey } from './en';
 
-const DICTIONARIES: Record<string, Partial<Dictionary>> = { en, lg, sw };
+const DICTIONARIES: Record<string, Partial<Dictionary>> = { en, lg, sw, nyn, ach };
 
 /** Values interpolated into `{placeholder}` slots. */
 export type TranslationVars = Record<string, string | number>;

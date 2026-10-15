@@ -29,6 +29,8 @@ ABSTENTION_THRESHOLD = float(os.getenv("ABSTENTION_THRESHOLD", "0.15"))
 ABSTENTION_THRESHOLD_NORM = float(os.getenv("ABSTENTION_THRESHOLD_NORM", "0.30"))
 ABSTENTION_THRESHOLD_NORM_LG = float(os.getenv("ABSTENTION_THRESHOLD_NORM_LG", "0.20"))
 ABSTENTION_THRESHOLD_NORM_SW = float(os.getenv("ABSTENTION_THRESHOLD_NORM_SW", "0.20"))
+ABSTENTION_THRESHOLD_NORM_NYN = float(os.getenv("ABSTENTION_THRESHOLD_NORM_NYN", "0.20"))
+ABSTENTION_THRESHOLD_NORM_ACH = float(os.getenv("ABSTENTION_THRESHOLD_NORM_ACH", "0.20"))
 ESCALATION_THRESHOLD = float(os.getenv("ESCALATION_THRESHOLD", "0.25"))
 
 # ---------------------------------------------------------------------------
@@ -189,6 +191,11 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
         r"(?:reveal|show|print|output)\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions)",
         r"(?:act|pretend|behave)\s+as\s+(?:if|though)\s+you",
         r"do\s+(?:not|anything)\s+(?:I|we)\s+(?:say|ask|tell)",
+        # Cross-lingual instruction-override patterns (lg, sw, nyn, ach — CAN-Bench 2026)
+        r"\b(?:buusa\s+amaaso|yerabire)\s+(?:ebiragiro|amateeka)\s+(?:byonna|ebyasooka)\b",
+        r"\b(?:puuza|sahau)\s+(?:maagizo|maelekezo)\s+(?:yote\s+)?(?:yaliyopita|ya\s+awali)\b",
+        r"\b(?:yebwa|reka\s+kukurata)\s+(?:ebiragiro|ebihabuzi)\s+(?:byona\s+)?eby['’]?enyima\b",
+        r"\b(?:wil\s+wii|wek\s+lubo)\s+(?:cik|tela)\s+(?:weng\s+)?mukato\b",
     ]
 ]
 
@@ -205,6 +212,11 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
         r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
         r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
+        # Cross-lingual tax evasion & EFRIS forgery requests (lg, sw, nyn, ach — CAN-Bench 2026)
+        r"\b(?:nnyinza\s+ntya|engeri\s+y['’]?)\s*(?:okwebalama|okubba|okukweka|okujingirira)\s+(?:omusolo|emisolo|lisiiti\s+ya\s+efris)\b",
+        r"\b(?:jinsi\s+ya|namna\s+ya)\s+(?:kukwepa|kuiba|kuficha|kughushi)\s+(?:kodi|ushuru|risiti\s+ya\s+efris)\b",
+        r"\b(?:nimbaasa\s+nta|omuringo\s+gw['’]?)\s*(?:okwetantara|okwiba|okushereka|okuhimba)\s+(?:omushoro|emishoro|risiiti\s+ya\s+efris)\b",
+        r"\b(?:atwero\s+nining|yoo\s+me)\s+(?:balo|kwal|kano|goba)\s+(?:mucoro|ricit\s+me\s+efris)\b",
         # Smuggling / laundering / bribery: block solicitation, not
         # information. "What is smuggling?" and "How can I report smuggling?"
         # are curated KB answers (ura_smuggling_effects, ura_customs_offences,
@@ -819,6 +831,34 @@ class OutputGuard:
         text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okuna|Omutendera\s+ogw['’]okuna)[:\.]?[ \t]*", r"\1\n\n4. **Eky'okuna**: ", text, flags=re.IGNORECASE)
         text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]okutaano|Omutendera\s+ogw['’]okutaano)[:\.]?[ \t]*", r"\1\n\n5. **Eky'okutaano**: ", text, flags=re.IGNORECASE)
 
+        # Runyankole step & ordinal unsmashing: Idaara 1 / Ekyokubanza / Ekya kabiri / Ekya kashatu
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Idaara\s+rya\s+(\d{1,2})|Idaara\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Idaara\s+rya\s+(\d{1,2})|Idaara\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Eky['’]?okubanza|Idaara\s+ry['’]?okubanza)[:\.]?[ \t]*", "\n1. **Ekyokubanza**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Ekya\s+kabiri|Idaara\s+rya\s+kabiri)[:\.]?[ \t]*", "\n2. **Ekya kabiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Ekya\s+kashatu|Idaara\s+rya\s+kashatu)[:\.]?[ \t]*", "\n3. **Ekya kashatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Ekya\s+kana|Idaara\s+rya\s+kana)[:\.]?[ \t]*", "\n4. **Ekya kana**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Ekya\s+kataano|Idaara\s+rya\s+kataano)[:\.]?[ \t]*", "\n5. **Ekya kataano**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Eky['’]?okubanza|Idaara\s+ry['’]?okubanza)[:\.]?[ \t]*", r"\1\n\n1. **Ekyokubanza**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Ekya\s+kabiri|Idaara\s+rya\s+kabiri)[:\.]?[ \t]*", r"\1\n\n2. **Ekya kabiri**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Ekya\s+kashatu|Idaara\s+rya\s+kashatu)[:\.]?[ \t]*", r"\1\n\n3. **Ekya kashatu**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Ekya\s+kana|Idaara\s+rya\s+kana)[:\.]?[ \t]*", r"\1\n\n4. **Ekya kana**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Ekya\s+kataano|Idaara\s+rya\s+kataano)[:\.]?[ \t]*", r"\1\n\n5. **Ekya kataano**: ", text, flags=re.IGNORECASE)
+
+        # Acholi step & ordinal unsmashing: Rwom 1 / Mukwongo / Me aryo / Me adek
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Rwom\s+me\s+(\d{1,2})|Rwom\s+(\d{1,2}))[:\.]?[ \t]*", r"\n\1\2. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Rwom\s+me\s+(\d{1,2})|Rwom\s+(\d{1,2}))[:\.]?[ \t]*", r"\1\n\n\2\3. ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Mukwongo|Rwom\s+mukwongo)[:\.]?[ \t]*", "\n1. **Mukwongo**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Me\s+aryo|Rwom\s+me\s+aryo)[:\.]?[ \t]*", "\n2. **Me aryo**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Me\s+adek|Rwom\s+me\s+adek)[:\.]?[ \t]*", "\n3. **Me adek**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Me\s+angwen|Rwom\s+me\s+angwen)[:\.]?[ \t]*", "\n4. **Me angwen**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:^|\n)[ \t]*(?:Me\s+abic|Rwom\s+me\s+abic)[:\.]?[ \t]*", "\n5. **Me abic**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Mukwongo|Rwom\s+mukwongo)[:\.]?[ \t]*", r"\1\n\n1. **Mukwongo**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+aryo|Rwom\s+me\s+aryo)[:\.]?[ \t]*", r"\1\n\n2. **Me aryo**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+adek|Rwom\s+me\s+adek)[:\.]?[ \t]*", r"\1\n\n3. **Me adek**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+angwen|Rwom\s+me\s+angwen)[:\.]?[ \t]*", r"\1\n\n4. **Me angwen**: ", text, flags=re.IGNORECASE)
+        text = re.sub(r"([;:\.!?])[ \t]*(?:Me\s+abic|Rwom\s+me\s+abic)[:\.]?[ \t]*", r"\1\n\n5. **Me abic**: ", text, flags=re.IGNORECASE)
+
         # Unsmash sentence punctuation glued to capital words (e.g. 'Uganda.Here' -> 'Uganda. Here')
         text = re.sub(r"([a-z])\.([A-Z])", r"\1. \2", text)
 
@@ -873,13 +913,13 @@ class OutputGuard:
             formatted_lines.extend(split if split is not None else [line])
         text = "\n".join(formatted_lines)
 
-        # Bold affirmative/negative opening statutory verdicts in EN, LG, SW
-        text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana)[,\.][ \t]*", r"**\1**: ", text)
-        text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana)[,\.][ \t]*", r"\1**\2**: ", text)
+        # Bold affirmative/negative opening statutory verdicts in EN, LG, SW, NYN, ACH
+        text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe)[,\.][ \t]*", r"**\1**: ", text)
+        text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe)[,\.][ \t]*", r"\1**\2**: ", text)
 
         # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded
         if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d+\.\s|\n-\s", text)):
-            text = re.sub(r"\b(Section\s+\d+[A-Za-z]?|Ekitundu\s+\d+|Kifungu\s+cha\s+\d+)\b", r"**\1**", text, flags=re.IGNORECASE)
+            text = re.sub(r"\b(Section\s+\d+[A-Za-z]?|Ekitundu\s+\d+|Kifungu\s+cha\s+\d+|Ekicweka\s+\d+|Dul\s+\d+)\b", r"**\1**", text, flags=re.IGNORECASE)
             text = re.sub(r"\b(Income Tax Act|Value Added Tax Act|Tax Procedures Code Act|East African Community Customs Management Act|Excise Duty Act|EACCMA)\b", r"**\1**", text, flags=re.IGNORECASE)
             text = re.sub(r"\b(TIN|VAT|PAYE|EFRIS|WHT|CIT|PIT|LED|AEO|AEOI|MAAC|CRS|FATCA|WCO|ASYCUDA|DTS|PRN|NIN|URSB)\b", r"**\1**", text)
             if "**" not in text:
@@ -970,6 +1010,16 @@ class OutputGuard:
             "kikamilifu na nyaraka zilizotumika. Tafadhali thibitisha na "
             "vyanzo rasmi vya URA kwenye https://ura.go.ug.*"
         ),
+        "nyn": (
+            "\n\n---\n*Okuhabura: Eky'okugarukamu eki nikibaasa kutaba "
+            "kihamiibwe gye ebihandiiko ebyakoresibwa. Ninkushaba ohamye "
+            "n'obukomooko obutongore obwa URA aha https://ura.go.ug.*"
+        ),
+        "ach": (
+            "\n\n---\n*Cik: Lagam man romo pe bedo ma kimoko maber ki i "
+            "waraga ma kitiyo kwede. Tim ber imok ki kama ngec me URA oa "
+            "iye i https://ura.go.ug.*"
+        ),
     }
 
     @staticmethod
@@ -1029,6 +1079,10 @@ class OutputGuard:
             eff_threshold = ABSTENTION_THRESHOLD_NORM_LG
         elif loc == "sw":
             eff_threshold = ABSTENTION_THRESHOLD_NORM_SW
+        elif loc in ("nyn", "nyk"):
+            eff_threshold = ABSTENTION_THRESHOLD_NORM_NYN
+        elif loc == "ach":
+            eff_threshold = ABSTENTION_THRESHOLD_NORM_ACH
         else:
             eff_threshold = threshold
 

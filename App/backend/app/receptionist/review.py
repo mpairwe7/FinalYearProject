@@ -52,9 +52,13 @@ def _words(*items: str) -> re.Pattern[str]:
 _DECLINE = _words(
     r"no,?\s+thank(?:s|\s+you)", r"not\s+sure", r"(?:i\s+)?(?:don'?t|do\s+not)\s+know",
     r"nedda,?\s+w?ee?bale", r"hapana,?\s+asante", r"sijui", r"simanyi",
+    r"ngaaha,?\s+webare", r"timmanyire", r"pe,?\s+apwoyo", r"pe\s+angeyo",
 )
 #: Negated criticism reads as faint praise: "not bad".
-_NEUTRAL_NEGATED = _words(r"not\s+(?:too\s+|that\s+|so\s+)?bad", r"si\s+mbaya", r"si\s+kibi")
+_NEUTRAL_NEGATED = _words(
+    r"not\s+(?:too\s+|that\s+|so\s+)?bad", r"si\s+mbaya", r"si\s+kibi",
+    r"tikibi", r"pe\s+rac",
+)
 #: Negation first, so "not helpful" never reads as "helpful".
 _NEGATIVE = _words(
     r"not\s+(?:really|much|at\s+all)",
@@ -67,6 +71,8 @@ _NEGATIVE = _words(
     r"tekiyambye", r"tekinnyambye", r"tekyannyamba", r"tekiyamba", r"tewannyambye", r"si\s+kirungi", r"kibi",
     # Swahili: it did not help (me), not good, bad, useless.
     r"haikusaidia", r"haijanisaidia", r"hukunisaidia", r"hujanisaidia", r"si\s+nzuri", r"mbaya", r"haifai",
+    # Runyankole & Acholi: did not help, bad.
+    r"tikyahwera", r"tikyanyhwera", r"pe\s+okonyo", r"pe\s+okonya", r"rac",
 )
 #: A partial yes: some of it helped.
 _NEUTRAL = _words(
@@ -74,15 +80,18 @@ _NEUTRAL = _words(
     r"more\s+or\s+less", r"half",
     r"kitono", r"mu\s+kigero",
     r"kiasi", r"kidogo",
+    r"kakye", r"manok",
 )
 _POSITIVE = _words(
     r"helpful", r"useful", r"(?:very\s+)?good", r"great", r"excellent", r"perfect", r"brilliant", r"wonderful",
     r"helped", r"thank(?:s|\s+you)", r"appreciate(?:d)?", r"satisfied", r"happy", r"clear", r"amazing",
     r"kiyambye", r"kinnyambye", r"nnyambye", r"kirungi", r"bulungi", r"nnyo", r"w?ee?bale", r"nsanyuse",
     r"imesaidia", r"imenisaidia", r"umenisaidia", r"nzuri", r"vizuri", r"asante", r"nimeridhika", r"safi",
+    r"kyahwera", r"kyanyhwera", r"gye", r"webare", r"munonga", r"nshemeireire",
+    r"okonyo", r"okonya", r"maber", r"apwoyo", r"matek", r"yoma",
 )
 #: "Okay" alone is lukewarm; with a yes or a thanks it is not counted here.
-_WEAK_NEUTRAL = _words(r"ok(?:ay)?", r"fine", r"alright", r"all\s+right", r"average", r"fair", r"kale")
+_WEAK_NEUTRAL = _words(r"ok(?:ay)?", r"fine", r"alright", r"all\s+right", r"average", r"fair", r"kale", r"kare", r"ber")
 
 #: A review answer that also asks something new is answered, not hung up on.
 _ASKS = re.compile(

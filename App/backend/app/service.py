@@ -53,6 +53,12 @@ from .connector_intent import ConnectorIntent, detect_connector_intent
 from .connector_outcome import classify_all as classify_connector_outcomes
 from .connector_outcome import compose as compose_connector_reply
 from .escalation_notify import notify_ticket_created, team_for_topic
+from .agents.patterns.ach import (
+    _FAREWELL_PHRASES as _ACH_FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES as _ACH_GRATITUDE_PHRASES,
+    _GREETING_PHRASES as _ACH_GREETING_PHRASES,
+    _GREETING_WORDS as _ACH_GREETING_WORDS,
+)
 from .agents.patterns.en import (
     HOW_TO_QUESTION_RE,
     _FAREWELL_PHRASES as _EN_FAREWELL_PHRASES,
@@ -66,6 +72,12 @@ from .agents.patterns.lg import (
     _GREETING_PHRASES as _LG_GREETING_PHRASES,
     _GREETING_WORDS as _LG_GREETING_WORDS,
 )
+from .agents.patterns.nyn import (
+    _FAREWELL_PHRASES as _NYN_FAREWELL_PHRASES,
+    _GRATITUDE_PHRASES as _NYN_GRATITUDE_PHRASES,
+    _GREETING_PHRASES as _NYN_GREETING_PHRASES,
+    _GREETING_WORDS as _NYN_GREETING_WORDS,
+)
 from .agents.patterns.sw import (
     _FAREWELL_PHRASES as _SW_FAREWELL_PHRASES,
     _GRATITUDE_PHRASES as _SW_GRATITUDE_PHRASES,
@@ -73,13 +85,33 @@ from .agents.patterns.sw import (
     _GREETING_WORDS as _SW_GREETING_WORDS,
 )
 
-_GREETING_WORDS = _EN_GREETING_WORDS | _LG_GREETING_WORDS | _SW_GREETING_WORDS
-_GREETING_PHRASES = _EN_GREETING_PHRASES | _LG_GREETING_PHRASES | _SW_GREETING_PHRASES
+_GREETING_WORDS = (
+    _EN_GREETING_WORDS
+    | _LG_GREETING_WORDS
+    | _SW_GREETING_WORDS
+    | _NYN_GREETING_WORDS
+    | _ACH_GREETING_WORDS
+)
+_GREETING_PHRASES = (
+    _EN_GREETING_PHRASES
+    | _LG_GREETING_PHRASES
+    | _SW_GREETING_PHRASES
+    | _NYN_GREETING_PHRASES
+    | _ACH_GREETING_PHRASES
+)
 _GRATITUDE_PHRASES = (
-    _EN_GRATITUDE_PHRASES | _LG_GRATITUDE_PHRASES | _SW_GRATITUDE_PHRASES
+    _EN_GRATITUDE_PHRASES
+    | _LG_GRATITUDE_PHRASES
+    | _SW_GRATITUDE_PHRASES
+    | _NYN_GRATITUDE_PHRASES
+    | _ACH_GRATITUDE_PHRASES
 )
 _FAREWELL_PHRASES = (
-    _EN_FAREWELL_PHRASES | _LG_FAREWELL_PHRASES | _SW_FAREWELL_PHRASES
+    _EN_FAREWELL_PHRASES
+    | _LG_FAREWELL_PHRASES
+    | _SW_FAREWELL_PHRASES
+    | _NYN_FAREWELL_PHRASES
+    | _ACH_FAREWELL_PHRASES
 )
 from .conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
@@ -2033,7 +2065,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 # Decided English, but the model wrote Luganda or Swahili: put
                 # it in English first, so the guards verify the reply that is
                 # served (see _answer_in_english).
-                if locale in ("", "en"):
+                if locale in ("", "en") or not llm_module.can_generate_in_locale(locale):
                     english_only = await asyncio.to_thread(_answer_in_english, full_reply)
                     if english_only != full_reply:
                         full_reply = english_only
@@ -2310,7 +2342,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             # Decided English, but the model wrote Luganda or Swahili: put it
             # in English first, so the guards verify the reply that is served
             # (see _answer_in_english).
-            if locale in ("", "en"):
+            if locale in ("", "en") or not llm_module.can_generate_in_locale(locale):
                 english_only = await asyncio.to_thread(_answer_in_english, full_reply)
                 if english_only != full_reply:
                     full_reply = english_only
@@ -2585,16 +2617,29 @@ def _resolve_courtesy_locale(message: str, current_locale: str = "en") -> str:
         or any(p in text for p in _LG_GREETING_PHRASES | _LG_FAREWELL_PHRASES)
     ):
         return "lg"
+    if (
+        words & _NYN_GREETING_WORDS
+        or words & _NYN_GRATITUDE_PHRASES
+        or any(p in text for p in _NYN_GREETING_PHRASES | _NYN_FAREWELL_PHRASES)
+    ):
+        return "nyn"
+    if (
+        words & _ACH_GREETING_WORDS
+        or words & _ACH_GRATITUDE_PHRASES
+        or any(p in text for p in _ACH_GREETING_PHRASES | _ACH_FAREWELL_PHRASES)
+    ):
+        return "ach"
     return current_locale or "en"
 
 
 _GRATITUDE_ONLY = re.compile(
-    r"^\s*(?:thank\s+you|thanks)(?:\s+so\s+much|\s+a\s+lot|\s+very\s+much)?[!. ]*$|^\s*(?:webale|asante|weebale)(?:\s+nyo|\s+sana)?[!. ]*$",
+    r"^\s*(?:thank\s+you|thanks)(?:\s+so\s+much|\s+a\s+lot|\s+very\s+much)?[!. ]*$"
+    r"|^\s*(?:webale|asante|weebale|webare|mwebare|apwoyo|wapwoyo)(?:\s+nnyo|\s+nyo|\s+sana|\s+munonga|\s+matek)?[!. ]*$",
     re.IGNORECASE,
 )
 
 _FAREWELL_ONLY = re.compile(
-    r"^\s*(?:goodbye|good\s+bye|bye|thanks\s+bye|thank\s+you\s+bye|kwaheri|weraba|weeraba)[!. ]*$",
+    r"^\s*(?:goodbye|good\s+bye|bye|thanks\s+bye|thank\s+you\s+bye|kwaheri|weraba|weeraba|ogumeho|mugumeho|wabineno|ibed\s+maber)[!. ]*$",
     re.IGNORECASE,
 )
 
@@ -2621,7 +2666,8 @@ _CONTACT_ASK_RE = re.compile(
     r"how\s+to\s+contact\s+ura|"
     r"contact\s+ura|"
     r"customer\s+care|contact\s+details|help\s+desk|helpline|toll[- ]?free\s+numbers?|"
-    r"okukwatagana\s+ne\s+ura|obuyambi\s+okuva\s+mu\s+ura|kuwasiliana\s+na\s+ura|msaada\s+kutoka\s+ura)\b",
+    r"okukwatagana\s+ne\s+ura|obuyambi\s+okuva\s+mu\s+ura|kuwasiliana\s+na\s+ura|msaada\s+kutoka\s+ura|"
+    r"okuhikirira\s+ura|obuhwezi\s+kuruga\s+omu\s+ura|kubo\s+ki\s+ura|kony\s+ki\s+bot\s+ura)\b",
     re.IGNORECASE,
 )
 
@@ -2653,7 +2699,7 @@ def _load_faq_data(data_dir: Path) -> tuple[dict[str, list[dict[str, str]]], dic
                     a = (row.get("answer") or row.get("Answer") or "").strip()
                     if q and a:
                         entry: dict[str, Any] = {"question": q, "answer": a, "source": csv_path.name}
-                        for lang in ("lg", "sw"):
+                        for lang in ("lg", "sw", "nyn", "ach"):
                             q_l = (row.get(f"question_{lang}") or row.get(f"Question_{lang}") or "").strip()
                             a_l = (row.get(f"answer_{lang}") or row.get(f"Answer_{lang}") or "").strip()
                             if q_l:
@@ -3386,8 +3432,8 @@ def _answer_in_english(reply: str) -> str:
     from .receptionist.language import lexical_hits  # noqa: PLC0415 — imports this module's peers
 
     hits = lexical_hits(reply or "")
-    source = "lg" if hits["lg"] >= hits["sw"] else "sw"
-    if hits[source] < 3 or hits[source] <= hits["en"]:
+    source = max(("lg", "sw", "nyn", "ach"), key=lambda k: hits.get(k, 0))
+    if hits.get(source, 0) < 3 or hits.get(source, 0) <= hits.get("en", 0):
         return reply
     pieces = _PARAGRAPH_BREAK_RE.split(reply)
     out = list(pieces)
@@ -3491,7 +3537,7 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
     if not text or target_locale in ("", "en"):
         return False
     # Strip any standard disclaimers before checking body language
-    body = re.sub(r"\*(?:Okulabula|Tahadhari|Note):.*$", "", text, flags=re.DOTALL).strip()
+    body = re.sub(r"\*(?:Okulabula|Tahadhari|Okuhabura|Cik|Note):.*$", "", text, flags=re.DOTALL).strip()
     if not body:
         return False
 
@@ -3522,6 +3568,21 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
             "waggulu", "basasula", "bwe", "era", "kye", "bye", "kampuni", "emisolo",
             "okwewandiisa", "musanyufu", "ebisaanyizo", "enkola", "omusaala", "abakozesa", "ekitongole",
             "gyebaleko", "webale", "yee", "nedda", "nsaba", "sente",
+        )
+        return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
+    if target_locale in ("nyn", "nyk"):
+        markers = (
+            "omushoro", "emishoro", "ebicweka", "shiringi", "esente", "okwehandiikisa",
+            "okushashura", "nimbaasa", "nkuhwere", "agandi", "webare", "munonga",
+            "obukaikuru", "akakaikuru", "ekitongore", "omukozi", "ebihandiiko", "ekihandiiko",
+            "omushasuzi", "ahari", "omuri", "erizooba", "hati",
+        )
+        return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
+    if target_locale == "ach":
+        markers = (
+            "mucoro", "mucara", "atwero", "nining", "kombedi", "apwoyo", "matek",
+            "kopango", "coyo", "nying", "waraga", "lacul", "latic", "konyi",
+            "akonyi", "lapeny", "lagam", "culu", "cilingi", "cente", "biacara",
         )
         return sum(1 for m in markers if f" {m} " in lowered or f" {m}," in lowered or f" {m}." in lowered) >= 2
     return False
@@ -3573,7 +3634,13 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
             else localize_reply(body_part.strip(), locale)
         )
         if loc_body and loc_body != body_part.strip():
-            prefix = "\n\nOyinz'okwagala okumanya:" if locale == "lg" else "\n\nUnaweza pia kutaka kujua:"
+            _follow_prefixes = {
+                "lg": "\n\nOyinz'okwagala okumanya:",
+                "sw": "\n\nUnaweza pia kutaka kujua:",
+                "nyn": "\n\nNoobaasa n'okwenda kumanya:",
+                "ach": "\n\nItwero bene mito ngeyo:",
+            }
+            prefix = _follow_prefixes.get(locale, "\n\nUnaweza pia kutaka kujua:")
             loc_follow = _translate_reply(follow_part.strip(), locale) or follow_part.strip()
             return f"{loc_body}{prefix} {loc_follow}"
 
@@ -3677,7 +3744,7 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
         return reply
 
     if contact_footer_present and localized:
-        footer_loc = LOCALIZED_CONTACT_FOOTERS["lg" if locale == "lg" else "sw"]
+        footer_loc = LOCALIZED_CONTACT_FOOTERS.get(locale) or LOCALIZED_CONTACT_FOOTERS["sw"]
         localized = f"{localized.rstrip()}\n\n{footer_loc}"
 
     localized = OutputGuard.normalize_structure(localized)
@@ -4472,9 +4539,9 @@ class ChatModel:
 
         # The taxpayer's saved answer language seeds a conversation whose first
         # message gives no language of its own ("TIN?"). English is the
-        # profile default, so only a saved Luganda or Swahili counts.
+        # profile default, so only a saved Ugandan/East African locale counts.
         preferred_locale = normalize_locale_tag(str(profile.get("primary_language") or ""))
-        if preferred_locale not in ("lg", "sw"):
+        if preferred_locale not in ("lg", "sw", "nyn", "ach"):
             preferred_locale = ""
 
         # Returned even when there is nothing yet to put in the prompt: every
@@ -5196,29 +5263,89 @@ class ChatModel:
         ("Learn about VAT", "sw"): "Jifunze kuhusu VAT",
         ("File a tax return", "lg"): "Waayo alipoota y'omusolo",
         ("File a tax return", "sw"): "Wasilisha marejesho ya kodi",
+        # Runyankole (nyn)
+        ("Speak to a URA officer", "nyn"): "Gamba n'omukozi wa URA",
+        ("Talk to an officer", "nyn"): "Gamba n'omukozi",
+        ("Ask for human support if your case is account-specific or time-sensitive.", "nyn"): "Shaba obuhwezi bw'omukozi waaba enshonga yaawe eri ey'akawunti yaawe nari erikwetenga obuhwezi bw'ahonaaho.",
+        ("Prepare the listed reference details before speaking to a URA officer.", "nyn"): "Tebeekanisa ebikwatiraine n'enshonga ebyorekirwe otakagambire n'omukozi wa URA.",
+        ("Use the URA Contact Centre if you need immediate human assistance.", "nyn"): "Koresa URA Contact Centre waaba nooyetenga obuhwezi bw'ahonaaho obw'omukozi.",
+        ("Would you like step-by-step guidance on this?", "nyn"): "Nooyenda obuhabuzi bw'idaara aha rindi ahari eki?",
+        ("Reply with the requested detail to continue the guided process.", "nyn"): "Garukamu n'ekirikwetengyesa kugumizamu n'entebeekanisa egi.",
+        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "nyn"): "Sindika 'cancel' waaba nooyenda kuruga omu ntebeekanisa egi obuuze ekibuuzo ekindi.",
+        ("Reply with the missing detail so I can answer more precisely.", "nyn"): "Garukamu n'amakuru agaburire mbaase kukugarukamu gye.",
+        ("Review the cited URA sources before acting on this answer.", "nyn"): "Shwijuma ebihandiiko bya URA ebijuriziibwe otakakozire aha kugarukamu oku.",
+        ("Rephrase your question about a URA service — I'm glad to help.", "nyn"): "Garukamu obuuze ekibuuzo kyawe aha buhereza bwa URA — nyeteekateekire kukuhwera.",
+        ("Ask how to register for a TIN", "nyn"): "Buuza aha kwehandiikisa TIN",
+        ("Ask about filing deadlines", "nyn"): "Buuza aha biro by'okuheereza emishoro",
+        ("Ask about TIN registration", "nyn"): "Buuza aha kwehandiikisa TIN",
+        ("Learn about VAT", "nyn"): "Yega aha mushoro gwa VAT",
+        ("File a tax return", "nyn"): "Heereza ekihandiiko ky'omushoro",
+        ("File a return", "nyn"): "Heereza ekihandiiko ky'omushoro",
+        ("Make a payment", "nyn"): "Shashura omushoro",
+        ("Register for a TIN", "nyn"): "Wehandiikise kutunga TIN",
+        # Acholi (ach)
+        ("Speak to a URA officer", "ach"): "Lok ki latic me URA",
+        ("Talk to an officer", "ach"): "Lok ki latic",
+        ("Ask for human support if your case is account-specific or time-sensitive.", "ach"): "Peny pi kony pa latic ka lok ni dok i kom akaunt ni onyo mito kony me oyot.",
+        ("Prepare the listed reference details before speaking to a URA officer.", "ach"): "Yub ngec ma kicoyo ma peya iloko ki latic me URA.",
+        ("Use the URA Contact Centre if you need immediate human assistance.", "ach"): "Ti ki URA Contact Centre ka imito kony pa latic oyot-oyot.",
+        ("Would you like step-by-step guidance on this?", "ach"): "Imito tela me rwom ki rwom i kom lok man?",
+        ("Reply with the requested detail to continue the guided process.", "ach"): "Gam ki ngec ma kimito me mede ki yoo me tela man.",
+        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "ach"): "Cwal 'cancel' ka imito weko yoo man ci ipeny lapeny mukene.",
+        ("Reply with the missing detail so I can answer more precisely.", "ach"): "Gam ki ngec ma orem wek agam maber.",
+        ("Review the cited URA sources before acting on this answer.", "ach"): "Ngi buk me URA ma kicimo ma peya itiyo ki lagam man.",
+        ("Rephrase your question about a URA service — I'm glad to help.", "ach"): "Nwo penyo lapeny ni i kom tic me URA — atye atera me konyi.",
+        ("Ask how to register for a TIN", "ach"): "Peny i kom coyo nying pi TIN",
+        ("Ask about filing deadlines", "ach"): "Peny i kom nino me cwalo ripot",
+        ("Ask about TIN registration", "ach"): "Peny i kom coyo nying pi TIN",
+        ("Learn about VAT", "ach"): "Nge i kom mucoro me VAT",
+        ("File a tax return", "ach"): "Cwal ripot me mucoro",
+        ("File a return", "ach"): "Cwal ripot me mucoro",
+        ("Make a payment", "ach"): "Cul mucoro",
+        ("Register for a TIN", "ach"): "Coo nyingi pi TIN",
     }
 
     _RESOURCE_TRANSLATIONS: Final[dict[tuple[str, str], str]] = {
         ("URA e-Services Web Portal", "lg"): "Omukutu gwa URA ogwa e-Services",
         ("URA e-Services Web Portal", "sw"): "Tovuti ya Huduma za URA Mtandaoni",
+        ("URA e-Services Web Portal", "nyn"): "Omukura gwa URA ogwa e-Services",
+        ("URA e-Services Web Portal", "ach"): "Kabedo me Intanet pa URA e-Services",
         ("Individual TIN Application Portal", "lg"): "Omukutu gw'okwewandiisa ku TIN y'omuntu kinnoomu",
         ("Individual TIN Application Portal", "sw"): "Tovuti ya Maombi ya TIN ya Mtu Binafsi",
+        ("Individual TIN Application Portal", "nyn"): "Omukura gw'okwehandiikisa TIN y'omuntu",
+        ("Individual TIN Application Portal", "ach"): "Kabedo me Coyo Nying pi TIN pa Ngat Acel",
         ("Non-Individual TIN Application (Companies & Partnerships)", "lg"): "Okwewandiisa ku TIN ya Bizinensi ne Kampuni",
         ("Non-Individual TIN Application (Companies & Partnerships)", "sw"): "Maombi ya TIN ya Kampuni na Ushirika",
+        ("Non-Individual TIN Application (Companies & Partnerships)", "nyn"): "Okwehandiikisa TIN ya Kampuni n'Obushuubuzi",
+        ("Non-Individual TIN Application (Companies & Partnerships)", "ach"): "Coyo Nying pi TIN me Kampuni ki Biacara",
         ("Online PRN Payment Slip Generation", "lg"): "Okukola Foomu y'okusasulirako eya PRN",
         ("Online PRN Payment Slip Generation", "sw"): "Kutengeneza Hati ya Malipo ya PRN Mtandaoni",
+        ("Online PRN Payment Slip Generation", "nyn"): "Okukora Foomu y'okushashuriraho eya PRN",
+        ("Online PRN Payment Slip Generation", "ach"): "Yubo Karatac me Culu Mucoro me PRN",
         ("e-Tax Portal Login", "lg"): "Yingira ku Mukutu gwa e-Tax",
         ("e-Tax Portal Login", "sw"): "Kuingia kwenye Tovuti ya e-Tax",
+        ("e-Tax Portal Login", "nyn"): "Taaha aha Mukura gwa e-Tax",
+        ("e-Tax Portal Login", "ach"): "Dony i Kabedo me e-Tax",
         ("EFRIS Portal Login", "lg"): "Yingira ku Mukutu gwa EFRIS",
         ("EFRIS Portal Login", "sw"): "Kuingia kwenye Tovuti ya EFRIS",
+        ("EFRIS Portal Login", "nyn"): "Taaha aha Mukura gwa EFRIS",
+        ("EFRIS Portal Login", "ach"): "Dony i Kabedo me EFRIS",
         ("VAT Registration Application Form", "lg"): "Foomu y'okwewandiisa ku musolo gwa VAT",
         ("VAT Registration Application Form", "sw"): "Fomu ya Maombi ya Usajili wa VAT",
+        ("VAT Registration Application Form", "nyn"): "Foomu y'okwehandiikisa aha mushoro gwa VAT",
+        ("VAT Registration Application Form", "ach"): "Fom me Coyo Nying pi Mucoro me VAT",
         ("Tax Clearance Certificate (TCC) Application", "lg"): "Saba Ebbaluwa y'okumalaayo Emisolo (TCC)",
         ("Tax Clearance Certificate (TCC) Application", "sw"): "Maombi ya Cheti cha Uondoaji Ushuru (TCC)",
+        ("Tax Clearance Certificate (TCC) Application", "nyn"): "Shaba Satifikeeti y'Okuhikiiriza Omushoro (TCC)",
+        ("Tax Clearance Certificate (TCC) Application", "ach"): "Peny pi Waraga me Culu Mucoro Maber (TCC)",
         ("Motor Vehicle Transfer Application", "lg"): "Okwewandiisa okukyusa Ebyapa by'Emmotoka",
         ("Motor Vehicle Transfer Application", "sw"): "Maombi ya Uhamisho wa Umiliki wa Gari",
+        ("Motor Vehicle Transfer Application", "nyn"): "Okushaba Okuhindura Obwannannyini bw'Emotoka",
+        ("Motor Vehicle Transfer Application", "ach"): "Loko Lanyut me Motoka",
         ("Tax Objection & Dispute Lodgement Form", "lg"): "Foomu y'okuwakanya Emisolo n'Enkaayana",
         ("Tax Objection & Dispute Lodgement Form", "sw"): "Fomu ya Kupinga Makadirio ya Kodi",
+        ("Tax Objection & Dispute Lodgement Form", "nyn"): "Foomu y'Okujurira aha Mushoro",
+        ("Tax Objection & Dispute Lodgement Form", "ach"): "Fom me Kwero Pimo Mucoro",
     }
 
     @classmethod
@@ -5477,6 +5604,222 @@ class ChatModel:
                 "importer": "omuntu ayingiza ebyamaguzi",
                 "clearing agent": "agenti wa Customs",
                 "warehouse operator": "omukulembeze w'ekifo eky'okuterekamu ebyamaguzi",
+            },
+        },
+        "nyn": {
+            "names": {
+                "TIN Registration": "Okwehandiikisa TIN",
+                "TIN Registration Guide": "Obuhabuzi bw'Okwehandiikisa TIN",
+                "Bonded Warehouse & BWIMS Guidance": "Obuhabuzi bwa BWIMS n'Amaterekero ga Customs",
+                "TIN Registration Help": "Obuhwezi bw'Okwehandiikisa TIN",
+                "Tax Invoice & EFRIS Document Review": "Okushwijuma Invoice y'Omushoro na EFRIS",
+                "VAT Registration Check": "Okushwijuma Okwehandiikisa aha VAT",
+                "VAT Calculator": "Okubaririra Omushoro gwa VAT",
+                "PAYE Calculator": "Okubaririra Omushoro gwa PAYE",
+                "Payment Assistance": "Obuhwezi bw'Okushashura Omushoro",
+                "Return Filing": "Okuheereza Ekihandiiko ky'Omushoro",
+                "Tax Clearance Certificate": "Satifikeeti y'Okuhikiiriza Omushoro",
+                "Return Filing Help": "Obuhwezi bw'Okuheereza Ekihandiiko ky'Omushoro",
+                "Customs Clearance Help": "Obuhwezi bw'Eby'Ensharo",
+                "Motor Vehicle Registration": "Okwehandiikisa Emotoka nari Pikipiki",
+                "Objection or Dispute": "Okujurira aha Mushoro",
+            },
+            "step_titles": {
+                "Taxpayer type": "Ekika ky'Omushasuzi",
+                "Applicant type": "Ekika ky'Orashaba",
+                "Documents": "Ebihandiiko",
+                "Document category": "Ekika ky'Ekihandiiko",
+                "Supplier TIN present": "TIN y'Orikuguza",
+                "Buyer TIN present": "TIN y'Origura",
+                "Net amount": "Omuhendo Otariho VAT",
+                "VAT amount": "Omuhendo gwa VAT",
+                "EFRIS serial": "Koodi ya EFRIS",
+                "Summary": "Okufunza",
+                "Continue securely": "Gumizamu omu Burinzi",
+                "Tax type": "Ekika ky'Omushoro",
+                "Reference type": "Ekika ky'Enamba",
+                "Amount": "Omuhendo",
+                "Amount due": "Omuhendo Ogurikushashurwa",
+                "Payment channel": "Omuringo gw'Okushashura",
+                "Confirm the amount": "Hamya Omuhendo",
+                "Pay and keep proof": "Shashura kandi Obiike Eky'Obuhame",
+                "Filing period": "Ekireere ky'Okuheereza",
+                "Supporting records": "Ebihandiiko Ebirikuhamya",
+                "Portal access": "Okutaaha aha Mukura",
+                "Recover portal access": "Garura Okutaaha aha Mukura",
+                "Prepare records": "Tebeekanisa Ebihandiiko",
+                "Continue in the URA portal": "Gumizamu aha mukura gwa URA",
+                "What do you need?": "Nooyenda buhwezi ki?",
+                "Your role": "Omurimo gwawe",
+                "Official next steps": "Amadaara Agarikukurataho",
+                "Kind": "Ekika ky'Omushasuzi",
+                "Legal name": "Eiziina ry'Ebiragiro",
+                "National ID (NIN)": "Indangamuntu (NIN) nari Paasipooti",
+                "National ID (NIN) / Passport": "Indangamuntu (NIN) nari Paasipooti",
+                "Company registration": "Okwehandiikisa Kampuni",
+                "NGO registration": "Okwehandiikisa NGO",
+                "Phone number": "Enamba y'Esimu",
+                "Email address": "Email",
+                "Confirm": "Hamya",
+                "Next steps": "Amadaara Agarikukurataho",
+                "Annual turnover": "Entaasya y'Omwaka",
+                "Monthly salary": "Omushaara gw'Okwezi",
+                "Gross amount": "Omuhendo Gwona",
+                "Tax rate": "Ekipimo ky'Omushoro",
+            },
+            "portal_labels": {
+                "Get a TIN": "Tunga TIN",
+                "URA eTax portal": "Omukura gwa URA eTax",
+                "EFRIS portal": "Omukura gwa EFRIS",
+                "Make a payment (Generate PRN)": "Shashura (Kora PRN)",
+                "Bonded Warehouse Information Management System (BWIMS)": "Omukura gwa BWIMS",
+                "Uganda Electronic Single Window": "Omukura gwa Uganda Electronic Single Window",
+            },
+            "options": {
+                "individual": "omuntu",
+                "organisation": "ekitongore",
+                "organization": "ekitongore",
+                "company": "kampuni",
+                "ngo": "ekitongore kya NGO",
+                "efris invoice": "Invoice ya EFRIS",
+                "standard tax invoice": "Invoice y'omushoro eya buriijo",
+                "fiscal receipt": "Risiiti ya EFRIS",
+                "withholding certificate": "Satifikeeti ya WHT",
+                "yes": "ego",
+                "no": "ngaaha",
+                "resident": "omutuuragye",
+                "non-resident": "otari mutuuragye",
+                "citizen": "omunsi",
+                "foreigner": "omugyenzi",
+                "vat": "VAT",
+                "paye": "PAYE",
+                "corporation tax": "omushoro gwa kampuni",
+                "withholding tax": "omushoro ogurikukwatirwaho",
+                "stamp duty": "omushoro gwa sitaampu",
+                "prn": "PRN",
+                "return": "ekihandiiko ky'omushoro",
+                "assessment": "okubaririra omushoro",
+                "unknown": "timmanyire",
+                "bank": "banka",
+                "mobile money": "esente aha simu",
+                "online card": "kaadi aha mukura",
+                "other": "ekindi",
+                "overview": "amakuru makuru",
+                "track cargo": "kurondoora ebintu",
+                "clear or release goods": "kurekura ebintu",
+                "warehouse operator guidance": "obuhabuzi bw'amaterekero",
+                "report a BWIMS issue": "kumanyisa ekizibu kya BWIMS",
+                "importer": "orikureeta ebintu",
+                "clearing agent": "agenti wa Customs",
+                "warehouse operator": "omukuru w'ihikiro",
+            },
+        },
+        "ach": {
+            "names": {
+                "TIN Registration": "Coyo Nying pi TIN",
+                "TIN Registration Guide": "Tela me Coyo Nying pi TIN",
+                "Bonded Warehouse & BWIMS Guidance": "Tela me BWIMS ki Dero Jami me Customs",
+                "TIN Registration Help": "Kony me Coyo Nying pi TIN",
+                "Tax Invoice & EFRIS Document Review": "Ngiyo Waraga me Mucoro ki EFRIS",
+                "VAT Registration Check": "Ngiyo Coyo Nying pi VAT",
+                "VAT Calculator": "Lakwan Mucoro me VAT",
+                "PAYE Calculator": "Lakwan Mucoro me PAYE",
+                "Payment Assistance": "Kony me Culu Mucoro",
+                "Return Filing": "Cwalo Ripot me Mucoro",
+                "Tax Clearance Certificate": "Waraga me Culu Mucoro Maber (TCC)",
+                "Return Filing Help": "Kony me Cwalo Ripot me Mucoro",
+                "Customs Clearance Help": "Kony me Wang Lobo (Customs)",
+                "Motor Vehicle Registration": "Coyo Nying Motoka onyo Pikipiki",
+                "Objection or Dispute": "Kwero Pimo Mucoro",
+            },
+            "step_titles": {
+                "Taxpayer type": "Kit Lacul Mucoro",
+                "Applicant type": "Kit Laco Nying",
+                "Documents": "Waraga",
+                "Document category": "Kit Waraga",
+                "Supplier TIN present": "TIN pa Lacat",
+                "Buyer TIN present": "TIN pa Lawil",
+                "Net amount": "Wel ma Peya Kimedo VAT",
+                "VAT amount": "Wel VAT",
+                "EFRIS serial": "Namba me EFRIS",
+                "Summary": "uku Lok",
+                "Continue securely": "Mede ki Gwok",
+                "Tax type": "Kit Mucoro",
+                "Reference type": "Kit Namba",
+                "Amount": "Wel Lim",
+                "Amount due": "Wel ma Myero Kicul",
+                "Payment channel": "Yoo me Culu",
+                "Confirm the amount": "Mok Wel Lim",
+                "Pay and keep proof": "Cul ci Igwok Ricit",
+                "Filing period": "Kare me Cwalo Ripot",
+                "Supporting records": "Waraga ma Konyo",
+                "Portal access": "Donyo i Kabedo me URA",
+                "Recover portal access": "Doko Donyo i Kabedo me URA",
+                "Prepare records": "Yub Waraga",
+                "Continue in the URA portal": "Mede i kabedo me URA",
+                "What do you need?": "Imito kony ango?",
+                "Your role": "Tic ni",
+                "Official next steps": "Rwom ma Lubo",
+                "Kind": "Kit Lacul Mucoro",
+                "Legal name": "Nying me Cik",
+                "National ID (NIN)": "Karatac me Ngec (NIN) onyo Passport",
+                "National ID (NIN) / Passport": "Karatac me Ngec (NIN) onyo Passport",
+                "Company registration": "Coyo Nying Kampuni",
+                "NGO registration": "Coyo Nying NGO",
+                "Phone number": "Namba me Cim",
+                "Email address": "Email",
+                "Confirm": "Mok",
+                "Next steps": "Rwom ma Lubo",
+                "Annual turnover": "Lim me Mwaka",
+                "Monthly salary": "Mucara me Dwe",
+                "Gross amount": "Wel Lim Weng",
+                "Tax rate": "Rwom me Mucoro",
+            },
+            "portal_labels": {
+                "Get a TIN": "Nong TIN",
+                "URA eTax portal": "Kabedo me URA eTax",
+                "EFRIS portal": "Kabedo me EFRIS",
+                "Make a payment (Generate PRN)": "Cul Mucoro (Yub PRN)",
+                "Bonded Warehouse Information Management System (BWIMS)": "Kabedo me BWIMS",
+                "Uganda Electronic Single Window": "Kabedo me Uganda Electronic Single Window",
+            },
+            "options": {
+                "individual": "ngat acel",
+                "organisation": "dul",
+                "organization": "dul",
+                "company": "kampuni",
+                "ngo": "dul me NGO",
+                "efris invoice": "Invoice me EFRIS",
+                "standard tax invoice": "Invoice me mucoro",
+                "fiscal receipt": "Ricit me EFRIS",
+                "withholding certificate": "Waraga me WHT",
+                "yes": "eyo",
+                "no": "pe",
+                "resident": "labedo lobo",
+                "non-resident": "pe labedo lobo",
+                "citizen": "lanywali Uganda",
+                "foreigner": "larok",
+                "vat": "VAT",
+                "paye": "PAYE",
+                "corporation tax": "mucoro me kampuni",
+                "withholding tax": "mucoro ma kigengo",
+                "stamp duty": "mucoro me citam",
+                "prn": "PRN",
+                "return": "ripot me mucoro",
+                "assessment": "pimo mucoro",
+                "unknown": "pe angeyo",
+                "bank": "bank",
+                "mobile money": "cente i cim",
+                "online card": "kadi me intanet",
+                "other": "mukene",
+                "overview": "ngec madit",
+                "track cargo": "lubo kor jami",
+                "clear or release goods": "gonyo jami",
+                "warehouse operator guidance": "tela pa lagwok dero",
+                "report a BWIMS issue": "tito peko me BWIMS",
+                "importer": "lakel jami",
+                "clearing agent": "latic me Customs",
+                "warehouse operator": "lagwok dero",
             },
         },
     }
@@ -6508,6 +6851,18 @@ class ChatModel:
                 f"Afisa wa URA ({officer}) amejibu kesi yako:"
                 if officer
                 else "Afisa wa URA amejibu kesi yako:"
+            )
+        elif target_locale == "nyn":
+            lead = (
+                f"Omukozi wa URA ({officer}) yaagarukamu enshonga yaawe:"
+                if officer
+                else "Omukozi wa URA yaagarukamu enshonga yaawe:"
+            )
+        elif target_locale == "ach":
+            lead = (
+                f"Latic me URA ({officer}) ogamo lok ni:"
+                if officer
+                else "Latic me URA ogamo lok ni:"
             )
         else:
             lead = (
@@ -8465,6 +8820,7 @@ class ChatModel:
         locale: str,
         personalization: dict[str, Any] | None = None,
         user_id: str | None = None,
+        raw_message: str = "",
     ) -> dict[str, Any] | None:
         """Start or continue a durable guided workflow when appropriate."""
         if not flags.is_enabled("workflows") or self._workflow_count <= 0:
@@ -8555,6 +8911,23 @@ class ChatModel:
                         workflow=workflow,
                     ),
                 }
+
+            # Prefer the taxpayer's original vernacular token when it directly satisfies
+            # the pending slot validator (e.g. "omuntu", "ngat acel", "ekitongore", "dul")
+            # before falling back to the MT-translated router_message.
+            pending_step = WorkflowRegistry.pending_step(session)
+            raw_clean = (raw_message or "").strip()
+            if (
+                pending_step is not None
+                and pending_step.validator
+                and raw_clean
+                and raw_clean != user_input
+            ):
+                from .workflows.slots import validate_slot
+
+                ok_raw, _, _ = validate_slot(raw_clean, pending_step.validator)
+                if ok_raw:
+                    user_input = raw_clean
 
             # The taxpayer asked something else. Hand the turn back so it is
             # answered from the corpus; the session stays active, so a later
@@ -9332,6 +9705,7 @@ class ChatModel:
                         locale=locale,
                         personalization=personalization,
                         user_id=user_id,
+                        raw_message=message,
                     )
                 if workflow_result:
                     if distress and workflow_result.get("reply"):
@@ -10021,7 +10395,7 @@ class ChatModel:
                 deterministic_sources = ordered_sources(hits)
                 deterministic_citations = HybridRetriever.build_citations(hits)
                 deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
-                    rewritten, hits, deterministic_citations
+                    router_rewritten or rewritten, hits, deterministic_citations
                 )
             if deterministic_reply:
                 reply = self._finalize_reply(deterministic_reply)
@@ -10120,9 +10494,18 @@ class ChatModel:
             agentic_used_tools = False
             agentic_reply = ""
             if use_agentic:
+                agentic_query = (
+                    router_rewritten
+                    if (
+                        locale not in ("", "en")
+                        and router_rewritten
+                        and not llm_module.can_generate_in_locale(locale)
+                    )
+                    else rewritten
+                )
                 with trace_stage("llm_agentic", timings=timings):
                     agentic = _call_llm_agentic(
-                        query=rewritten,
+                        query=agentic_query,
                         # A lookup is answered from the service, not from
                         # passages: they only spend the context window.
                         passages=[] if connector_intent is not None else hits,
@@ -10247,9 +10630,24 @@ class ChatModel:
                 # when no local LLM is configured (_call_llm_with_deadline
                 # routes there via the breaker/empty-reply handling).
                 if self._llm_available or _cloud_llm_ready():
+                    # TraSe / Translative-RAG (2026): when generating the English draft for a
+                    # non-English turn without a locale-specific LoRA adapter, pass the
+                    # English-translated query (router_rewritten) so a multilingual model
+                    # (Sunflower-9B) synthesizes in English against the English passages,
+                    # preserving token-overlap faithfulness and claim verification before
+                    # localize_reply translates the verified answer with figure sentinels.
+                    llm_query = (
+                        router_rewritten
+                        if (
+                            locale not in ("", "en")
+                            and router_rewritten
+                            and not llm_module.can_generate_in_locale(locale)
+                        )
+                        else rewritten
+                    )
                     with trace_stage("llm_generate", timings=timings):
                         reply = _call_llm_with_deadline(
-                            query=rewritten,
+                            query=llm_query,
                             passages=hits,
                             conversation_history=conversation_history or None,
                             locale=locale,
@@ -10299,10 +10697,10 @@ class ChatModel:
                 if distress:
                     reply = f"{empathy_ack(distress)}\n\n{reply}"
 
-            # Decided English, but the model wrote Luganda or Swahili: put it in
-            # English before the guards and grounding checks read it
-            # (see _answer_in_english).
-            if locale in ("", "en") and reply:
+            # _generate_en always produces an English draft unless a locale LoRA adapter
+            # is active; if the model still wrote in a vernacular language, translate it
+            # to English before English-context grounding and claim verification run.
+            if (locale in ("", "en") or not llm_module.can_generate_in_locale(locale)) and reply:
                 reply = _answer_in_english(reply)
 
             # 6. Output guardrails (OWASP LLM02 + LLM05 + LLM07)
@@ -10671,10 +11069,15 @@ class ChatModel:
 
         # Store in semantic cache (Phase 5) — a copy, so the empathy prefix
         # below never reaches a later (possibly calm) user via a cache hit.
+        # Never cache escalated, contradicted-withheld, or ticket-bearing turns
+        # (OWASP Agentic Risk #6: cross-session cache poisoning prevention).
         if (
             cache_allowed
             and flags.is_enabled("semantic_cache")
             and retrieval_mode not in ("blocked", "abstained")
+            and not escalate
+            and not withheld_contradicted
+            and not ticket_id
         ):
             self._cache.put(rewritten, dict(result), tenant_id=tenant_id or "default")
 
@@ -10988,6 +11391,7 @@ class ChatModel:
                 locale=locale,
                 personalization=personalization,
                 user_id=user_id,
+                raw_message=message,
             )
         if workflow_result:
             if distress and workflow_result.get("reply"):
@@ -11540,7 +11944,7 @@ class ChatModel:
             deterministic_sources = ordered_sources(hits)
             deterministic_citations = HybridRetriever.build_citations(hits)
             deterministic_reply, deterministic_curated = self._deterministic_procedure_reply(
-                rewritten, hits, deterministic_citations
+                router_rewritten or rewritten, hits, deterministic_citations
             )
             if deterministic_reply:
                 result = self._deterministic_result(
@@ -11736,9 +12140,17 @@ class ChatModel:
             "_hits": hits,
             "_history": conversation_history,
             "_context_summary": context_summary,
-            "_rewritten": rewritten,
+            "_rewritten": (
+                router_rewritten
+                if (
+                    locale not in ("", "en")
+                    and router_rewritten
+                    and not llm_module.can_generate_in_locale(locale)
+                )
+                else rewritten
+            ),
             "_personalization_context": self._build_effective_personalization_context(
-                personalization, conv_ctx, rewritten or message
+                personalization, conv_ctx, router_rewritten or rewritten or message
             ),
             "_tone_hint": tone_hint,
             "_distress": distress,

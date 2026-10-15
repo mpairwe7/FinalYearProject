@@ -72,6 +72,8 @@ const PROFILE_LANGUAGES = [
   { value: "en", label: "English" },
   { value: "lg", label: "Luganda" },
   { value: "sw", label: "Swahili" },
+  { value: "nyn", label: "Runyankole" },
+  { value: "ach", label: "Acholi" },
 ];
 
 /**

@@ -48,32 +48,45 @@ def _log_safe(value: str) -> str:
 # in service.py, both of which import this constant).
 SUPPORTED_LOCALES = frozenset(
     loc.strip()
-    for loc in os.getenv("SUPPORTED_LOCALES", "en,lg,sw").split(",")
+    for loc in os.getenv("SUPPORTED_LOCALES", "en,lg,sw,nyn,ach").split(",")
     if loc.strip()
 )
 
 
 def gate_locale(locale: str) -> str:
     """*locale* unchanged if it's in SUPPORTED_LOCALES, else "en"."""
-    return locale if locale in SUPPORTED_LOCALES else "en"
+    norm = "nyn" if locale == "nyk" else locale
+    return norm if norm in SUPPORTED_LOCALES else "en"
 
 
 # ---------------------------------------------------------------------------
 # Language detection — heuristic patterns for Ugandan languages
 # ---------------------------------------------------------------------------
-# Runyankole (nyn) — Bantu noun-class prefixes (word-start) + common verb forms
-_NYN_PREFIXES = re.compile(r"\b(oku|omu|aba|eki|ebi|obu|aha|omw|ogu|eky|enk|emb)\w+", re.IGNORECASE)
+# Runyankole (nyn) — distinctive Western Ugandan Bantu stems + tax/function words
+_NYN_PREFIXES = re.compile(
+    r"\b(okwehandi|okushashu|okushwiju|omusho|emisho|obushuu|ekitongo|ebihandi|ekihandi|obukaiku|akakaiku|orunyanko)\w*",
+    re.IGNORECASE,
+)
 _NYN_WORDS = re.compile(
-    r"\b(nkore|nkunda|tinkunda|kushonga|oine|aine|niwe|turi|"
-    r"twine|rwire|nindwire|ninkunda|ninaba|maka|omushuija|"
-    r"omwana|wangye|enshonga|nta|mpa|nimanya)\b",
+    r"\b(omushoro|emishoro|mushoro|omushaara|ebicweka|shangahi|bingahi|"
+    r"okwehandiikisa|kwehandiikisa|okushashura|nshashura|oshashura|"
+    r"nimbaasa|nkuhwere|kuhwera|agandi|webare|munonga|orunyankore|runyankole|runyankore|"
+    r"shiringi|obukaikuru|akakaikuru|ekitongore|ebihandiiko|ekihandiiko|"
+    r"omushasuzi|abashasuzi|kushwijuma|okushwijuma|obushuubuzi|okujurira|kujurira|orubanja|"
+    r"erizooba|hati|nta|ahari|omuri|kuruga|kuhika|kugamba|nkore|nkunda|tinkunda|kushonga|"
+    r"oine|aine|niwe|turi|twine|rwire|nindwire|ninkunda|ninaba|maka|omushuija|"
+    r"omwana|wangye|yaawe|enshonga|mpa|nimanya|tihaine|ebyangye|naabaasa|"
+    r"okugarukamu|ninkushaba|orurimi)\b",
     re.IGNORECASE,
 )
 _NYN_MARKERS = None  # computed in detect_language as prefix + word hits
-# Acholi (ach) common morphemes and particles
+# Acholi (ach) common morphemes, particles, and URA tax vocabulary (excluding 'tin'/'man'/'kit'/'gin')
 _ACH_MARKERS = re.compile(
-    r"\b(ango|ningo|atim|atwero|agengo|tye|bene|dong|kit|gin|"
-    r"lwak|dano|latin|piny|kwo|cam|wek|twero|cako|myero)\b",
+    r"\b(mucoro|mucara|atwero|nining|ango|ningo|atim|agengo|tye|bene|dong|"
+    r"lwak|dano|latin|piny|kwo|wek|twero|cako|myero|kombedi|apwoyo|matek|"
+    r"kopango|icwalo|cwalo|coyo|nying|nyinga|waraga|lacul|lutic|latic|"
+    r"konyi|akonyi|lapeny|lagam|gamo|culu|aculu|iculo|adi|cente|cilingi|"
+    r"biacara|jami|ngiyo|peny|penyo|peke|gimako|alok|walok|kede|acoli)\b",
     re.IGNORECASE,
 )
 # Swahili (sw) common function words and tax terms
@@ -570,7 +583,29 @@ _SWAHILI_WORDS: frozenset[str] = frozenset({
     "yapi", "hawa", "kuhusu", "kisheria", "majukumu", "inahusiana",
 })
 
-_LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS
+_RUNYANKOLE_WORDS: frozenset[str] = frozenset({
+    "omushoro", "emishoro", "mushoro", "omushaara", "ebicweka", "shangahi", "bingahi",
+    "okwehandiikisa", "kwehandiikisa", "okushashura", "nshashura", "oshashura",
+    "nimbaasa", "nkuhwere", "kuhwera", "agandi", "webare", "munonga", "orunyankore",
+    "runyankole", "runyankore", "shiringi", "obukaikuru", "akakaikuru", "ekitongore",
+    "ebihandiiko", "ekihandiiko", "omushasuzi", "abashasuzi", "kushwijuma", "okushwijuma",
+    "obushuubuzi", "okujurira", "kujurira", "orubanja", "erizooba", "hati", "nta",
+    "ahari", "omuri", "kuruga", "kuhika", "kugamba", "nkore", "nkunda", "tinkunda",
+    "kushonga", "oine", "aine", "niwe", "turi", "twine", "wangye", "yaawe", "enshonga",
+    "nimanya", "tihaine", "ebyangye", "naabaasa", "okugarukamu", "ninkushaba", "orurimi",
+})
+
+_ACHOLI_WORDS: frozenset[str] = frozenset({
+    "mucoro", "mucara", "atwero", "nining", "ango", "ningo", "atim", "agengo",
+    "tye", "bene", "dong", "lwak", "dano", "latin", "piny", "kwo", "wek", "twero",
+    "cako", "myero", "kombedi", "apwoyo", "matek", "kopango", "icwalo", "cwalo",
+    "coyo", "nying", "nyinga", "waraga", "lacul", "lutic", "latic", "konyi",
+    "akonyi", "lapeny", "lagam", "gamo", "culu", "aculu", "iculo", "adi", "cente",
+    "cilingi", "biacara", "jami", "ngiyo", "peny", "penyo", "peke", "gimako",
+    "alok", "walok", "kede", "acoli",
+})
+
+_LOCAL_LANGUAGE_WORDS = _LUGANDA_WORDS | _SWAHILI_WORDS | _RUNYANKOLE_WORDS | _ACHOLI_WORDS
 
 
 _GENERAL_ENGLISH_VOCAB: frozenset[str] = frozenset({
@@ -1049,10 +1084,12 @@ def detect_language(text: str, default_lang: str = "en") -> str:
 
     lg_hits = len(raw_words & _LUGANDA_WORDS)
     sw_hits = len(raw_words & _SWAHILI_WORDS) + len(_SW_MARKERS.findall(cleaned))
+    nyn_hits = len(raw_words & _RUNYANKOLE_WORDS) + len(_NYN_PREFIXES.findall(cleaned))
+    ach_hits = len(raw_words & _ACHOLI_WORDS)
     en_common = len(raw_words & _COMMON_ENGLISH_WORDS)
 
     # 2. Check for noisy or misspelled English ONLY when vernacular markers are absent.
-    if lg_hits == 0 and sw_hits == 0:
+    if lg_hits == 0 and sw_hits == 0 and nyn_hits == 0 and ach_hits == 0:
         corrected = correct_spelling(normalized)
         corr_cleaned = corrected.strip().lower()
         corr_words = set(re.findall(r"[a-z'’ŋ]+", corr_cleaned))
@@ -1072,14 +1109,12 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     n_words = max(len(words), 1)
 
     # 3. Strong lexical signals for supported Ugandan / East African locales
-    if sw_hits > lg_hits and (sw_hits >= 2 or (sw_hits >= 1 and en_hits == 0)):
-        return "sw"
-    if lg_hits > sw_hits and (lg_hits >= 2 or (lg_hits >= 1 and en_hits == 0)):
-        return "lg"
-    if sw_hits >= 2 and lg_hits == 0:
-        return "sw"
-    if lg_hits >= 2 and sw_hits == 0:
-        return "lg"
+    local_scores = {"lg": lg_hits, "sw": sw_hits, "nyn": nyn_hits, "ach": ach_hits}
+    ranked_local = sorted(local_scores.items(), key=lambda kv: kv[1], reverse=True)
+    top_lang, top_hits = ranked_local[0]
+    second_hits = ranked_local[1][1]
+    if top_hits > second_hits and (top_hits >= 2 or (top_hits >= 1 and en_hits == 0)):
+        return top_lang
 
     # Consult statistical detector (lingua)
     det = _get_language_detector()
@@ -1087,25 +1122,28 @@ def detect_language(text: str, default_lang: str = "en") -> str:
         try:
             result = det.detect(detector_text)
             if result.lang in SUPPORTED_LOCALES and result.is_confident(0.75):
-                # Extra guard: lingua must not override to lg/sw if English words dominate
-                if result.lang in ("lg", "sw") and en_hits > 0 and lg_hits == 0 and sw_hits == 0:
+                # Extra guard: lingua must not override to vernacular if English words dominate
+                if (
+                    result.lang in ("lg", "sw", "nyn", "ach")
+                    and en_hits > 0
+                    and lg_hits == 0
+                    and sw_hits == 0
+                    and nyn_hits == 0
+                    and ach_hits == 0
+                ):
                     return default_lang
                 return result.lang
         except Exception:
             logger.debug("LanguageDetector.detect failed; using marker heuristics")
-
-    # Quick heuristic: count marker hits per language
-    nyn_hits = len(_NYN_PREFIXES.findall(cleaned)) + len(_NYN_WORDS.findall(cleaned))
-    ach_hits = len(_ACH_MARKERS.findall(cleaned))
 
     nyn_ratio = nyn_hits / n_words
     ach_ratio = ach_hits / n_words
     sw_ratio = sw_hits / n_words
 
     # Strong signal thresholds for regional dialects
-    if nyn_ratio >= 0.20 and nyn_hits >= 2 and en_hits == 0:
+    if nyn_ratio >= 0.15 and nyn_hits >= 2 and en_hits <= nyn_hits:
         return "nyn"
-    if ach_ratio >= 0.20 and ach_hits >= 2 and en_hits == 0:
+    if ach_ratio >= 0.15 and ach_hits >= 2 and en_hits <= ach_hits:
         return "ach"
     if sw_ratio >= 0.15 and sw_hits >= 2:
         return "sw"
@@ -1113,9 +1151,16 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     # Fall back to statistical detector with lower confidence threshold
     if det is not None:
         try:
-            result = det.detect(corrected)
+            result = det.detect(detector_text)
             if result.is_confident(0.55):
-                if result.lang in ("lg", "sw") and en_hits > 0 and lg_hits == 0 and sw_hits == 0:
+                if (
+                    result.lang in ("lg", "sw", "nyn", "ach")
+                    and en_hits > 0
+                    and lg_hits == 0
+                    and sw_hits == 0
+                    and nyn_hits == 0
+                    and ach_hits == 0
+                ):
                     return default_lang
                 return result.lang
         except Exception:
@@ -1520,13 +1565,19 @@ def translate_query_for_retrieval(query: str, locale: str) -> str | None:
 
 
 def _reads_as_english(text: str) -> bool:
-    """Three or more words, at least two of them common English, none Luganda or Swahili."""
+    """Three or more words, at least two of them common English, none Ugandan/Swahili vernacular."""
     from .receptionist.language import lexical_hits  # imports this module
 
     if len(re.findall(r"[a-z']+", text.lower())) < 3:
         return False
     hits = lexical_hits(text)
-    return hits["en"] >= 2 and hits["lg"] == 0 and hits["sw"] == 0
+    return (
+        hits["en"] >= 2
+        and hits.get("lg", 0) == 0
+        and hits.get("sw", 0) == 0
+        and hits.get("nyn", 0) == 0
+        and hits.get("ach", 0) == 0
+    )
 
 
 def english_retrieval_query(query: str, locale: str | None) -> str:
@@ -1538,14 +1589,18 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     """
     text = (query or "").strip()
     loc = (locale or "en").strip().lower().split("-")[0]
+    if loc == "nyk":
+        loc = "nyn"
     if not text or loc in ("", "en"):
         return text
     if _reads_as_english(text):
-        # A Luganda or Swahili turn whose search text is already English —
+        # A vernacular turn whose search text is already English —
         # the history-aware rewriter, reading English history (G119), often
-        # returns it so. Translating it "from Luganda" costs a model call and
-        # can only make it worse.
+        # returns it so. Translating it costs a model call and can only make it worse.
         return text
+    cached_raw = mt.cache.get(loc, "en", text)
+    if cached_raw is not None:
+        return cached_raw
     if loc == "sw":
         from .receptionist.lexicon import normalize_swahili_tax_query
 
@@ -1554,6 +1609,14 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
         from .receptionist.lexicon import normalize_luganda_tax_query
 
         text = normalize_luganda_tax_query(text)
+    elif loc == "nyn":
+        from .receptionist.lexicon import normalize_runyankole_tax_query
+
+        text = normalize_runyankole_tax_query(text)
+    elif loc == "ach":
+        from .receptionist.lexicon import normalize_acholi_tax_query
+
+        text = normalize_acholi_tax_query(text)
     english = translate_query_for_retrieval(text, loc)
     if not english or english.casefold() == text.casefold():
         return text

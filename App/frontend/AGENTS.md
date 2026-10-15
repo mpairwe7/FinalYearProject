@@ -25,7 +25,7 @@ bun run lint
 | `src/components/charts/chartTheme.tsx` | Chart palette **and** the plain-language layer |
 | `src/lib/ticketUi.ts` | SLA / breach helpers |
 | `src/lib/oidcFlow.ts` | Authorize + RP-initiated logout |
-| `src/lib/i18n/` | Taxpayer-surface dictionary (en / lg / sw) |
+| `src/lib/i18n/` | Taxpayer-surface dictionary (en / lg / sw / nyn / ach) |
 
 Staff routes use `StaffGuard`. Do not claim flag toggles are cluster-wide.
 Live work (`/agent`, `/admin/tickets`, `/calls`, the call layer) is for

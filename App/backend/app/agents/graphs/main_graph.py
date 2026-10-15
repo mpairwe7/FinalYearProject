@@ -670,16 +670,31 @@ def node_synthesize(state: AgentGraphState) -> NodeResult:
 
     if state.hits:
         from ... import llm as _llm_module
+        from ...query import english_retrieval_query
+
         if _llm_module.is_available():
             try:
+                raw_q = state.rewritten_query or state.query
+                synth_query = (
+                    english_retrieval_query(raw_q, state.locale)
+                    if (
+                        state.locale not in ("", "en")
+                        and not _llm_module.can_generate_in_locale(state.locale)
+                    )
+                    else raw_q
+                )
                 llm_reply = _llm_module.generate(
-                    query=state.rewritten_query or state.query,
+                    query=synth_query or raw_q,
                     passages=state.hits,
                     conversation_history=state.conversation_history or None,
                     locale=state.locale,
                 )
                 if llm_reply and llm_reply.strip():
                     state.reply = llm_reply.strip()
+                    if state.locale in ("", "en") or not _llm_module.can_generate_in_locale(state.locale):
+                        from ...service import _answer_in_english
+
+                        state.reply = _answer_in_english(state.reply)
             except Exception:
                 logger.debug("graph: LLM synthesis failed, using best hit", exc_info=True)
         if not state.reply:
@@ -761,9 +776,17 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
 
 def _is_reasoning_miss(state: AgentGraphState) -> bool:
     """True when the reply ignores the question's content terms (G21)."""
+    from ... import mt
+    from ...receptionist.lexicon import normalize_codeswitched_query
     from ...text_signals import content_tokens
 
-    asked = content_tokens(state.rewritten_query or state.query)
+    raw_q = (state.rewritten_query or state.query or "").strip()
+    q_for_tokens = raw_q
+    loc = "nyn" if (state.locale or "").strip().lower() == "nyk" else (state.locale or "").strip().lower()
+    if loc not in ("", "en") and raw_q:
+        cached = mt.cache.get(loc, "en", raw_q)
+        q_for_tokens = cached if cached else normalize_codeswitched_query(raw_q, language=loc)
+    asked = content_tokens(q_for_tokens or raw_q)
     answered = content_tokens(state.reply)
     if not asked or not answered:
         return False

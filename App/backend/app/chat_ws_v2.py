@@ -851,7 +851,7 @@ async def chat_stream_ws(websocket: WebSocket, app: object) -> None:
         if isinstance(flagged, bool):
             locale_explicit = supported and flagged
         else:
-            locale_explicit = supported and locale in ("lg", "sw")
+            locale_explicit = supported and locale in ("lg", "sw", "nyn", "ach")
         conversation_id = config.get("conversation_id") or ""
         if not isinstance(conversation_id, str) or len(conversation_id) > 64:
             conversation_id = ""

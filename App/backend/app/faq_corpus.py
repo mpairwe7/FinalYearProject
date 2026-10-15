@@ -92,7 +92,7 @@ def _csv_rows(csv_path: Path) -> list[dict[str, Any]]:
                 "answer": answer,
                 "row_number": row_number,
             }
-            for lang in ("lg", "sw"):
+            for lang in ("lg", "sw", "nyn", "ach"):
                 q_lang = _clean(row.get(f"question_{lang}") or row.get(f"Question_{lang}"))
                 a_lang = _clean(row.get(f"answer_{lang}") or row.get(f"Answer_{lang}"))
                 if q_lang:
@@ -152,7 +152,7 @@ def _canonical_faq_records(
                 "tag": _faq_tag(csv_path),
                 "row_number": row_number,
             }
-            for lang in ("lg", "sw"):
+            for lang in ("lg", "sw", "nyn", "ach"):
                 if f"question_{lang}" in row:
                     candidate_record[f"question_{lang}"] = row[f"question_{lang}"]
                 if f"answer_{lang}" in row:
@@ -234,6 +234,8 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
 
     lg_count = sum(1 for records in records_by_source.values() for r in records if "answer_lg" in r)
     sw_count = sum(1 for records in records_by_source.values() for r in records if "answer_sw" in r)
+    nyn_count = sum(1 for records in records_by_source.values() for r in records if "answer_nyn" in r)
+    ach_count = sum(1 for records in records_by_source.values() for r in records if "answer_ach" in r)
 
     manifest: dict[str, Any] = {
         "schema_version": FAQ_JSONL_SCHEMA_VERSION,
@@ -245,8 +247,13 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
         "sources": manifest_sources,
         "duplicates": duplicate_audit,
     }
-    if lg_count or sw_count:
-        manifest["multilingual_records"] = {"lg": lg_count, "sw": sw_count}
+    multilingual_counts = {
+        loc: count
+        for loc, count in (("lg", lg_count), ("sw", sw_count), ("nyn", nyn_count), ("ach", ach_count))
+        if count > 0 or (loc in ("lg", "sw") and (lg_count or sw_count))
+    }
+    if multilingual_counts:
+        manifest["multilingual_records"] = multilingual_counts
     manifest_path = jsonl_dir / FAQ_MANIFEST_NAME
     temporary_manifest = manifest_path.with_suffix(".json.tmp")
     with temporary_manifest.open("w", encoding="utf-8", newline="\n") as handle:
@@ -401,7 +408,7 @@ def ingest_faq_jsonls(csv_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
                 "corpus_file": jsonl_path.name,
                 "duplicate_question_count": record["duplicate_question_count"],
             }
-            for lang in ("lg", "sw"):
+            for lang in ("lg", "sw", "nyn", "ach"):
                 if f"question_{lang}" in record:
                     doc[f"question_{lang}"] = _clean(record[f"question_{lang}"])
                 if f"answer_{lang}" in record:

@@ -1681,7 +1681,51 @@ class HybridRetriever:
         *subject* buckets HyDE percent rollout on the dense leg.
         """
         from .flags import flags
-        from .query import plan_retrieval
+        from .query import english_retrieval_query, plan_retrieval
+
+        loc = (locale or "en").strip().lower().split("-")[0]
+        # Single-pass translated-leg optimization for Ugandan indigenous locales (lg, nyn, ach):
+        # BAAI/bge-m3 + BM25 on untranslated lg/nyn/ach against an English corpus yields ~0%
+        # relevant top hits and _merge_translated_leg replaces them with en_hits anyway.
+        # Translating once up front avoids a redundant GPU embedding + Qdrant + reranker pass.
+        if loc in ("lg", "nyn", "nyk", "ach") and flags.is_enabled("translate_retrieve"):
+            english = english_retrieval_query(query, locale)
+            if english and english.casefold() != (query or "").strip().casefold():
+                plan_en = plan_retrieval(english, history=history)
+                merged_filters_en = {
+                    k: v for k, v in (filters or {}).items() if v not in (None, "", "any")
+                }
+                merged_filters_en.update(plan_en["filters"])
+                subqueries_en = plan_en["subqueries"]
+                if len(subqueries_en) <= 1:
+                    raw_subs = plan_retrieval(query, history=history)["subqueries"]
+                    if len(raw_subs) > 1:
+                        subqueries_en = [english_retrieval_query(s, locale) or s for s in raw_subs]
+                use_decompose_en = flags.is_enabled("query_decomposition") and len(subqueries_en) > 1
+                if use_decompose_en:
+                    batches_en = [
+                        self.search(
+                            sub,
+                            top_k=top_k,
+                            prefetch_limit=prefetch_limit,
+                            filters=merged_filters_en or None,
+                            subject=subject,
+                            locale=locale,
+                        )
+                        for sub in subqueries_en
+                    ]
+                    en_hits = merge_retrieval_hits(batches_en, top_k=top_k)
+                else:
+                    en_hits = self.search(
+                        english,
+                        top_k=top_k,
+                        prefetch_limit=prefetch_limit,
+                        filters=merged_filters_en or None,
+                        subject=subject,
+                        locale=locale,
+                    )
+                if en_hits:
+                    return apply_preference_boost(en_hits[:top_k], plan_en["prefer"])
 
         plan = plan_retrieval(query, history=history)
         merged_filters = {k: v for k, v in (filters or {}).items() if v not in (None, "", "any")}
@@ -1768,10 +1812,11 @@ class HybridRetriever:
             )
             return hits
         # G128: When reranker is disabled or ties, en_hits (translated leg) must
-        # rank ahead of hits (untranslated pass). In Luganda especially, bge-m3 cross-lingual
-        # dense + BM25 against English text yields 0% relevant top hits; using en_hits directly
-        # prevents context contamination. For Swahili and other languages, merge both legs.
-        if loc == "lg" and en_hits:
+        # rank ahead of hits (untranslated pass). In Ugandan indigenous languages
+        # (lg, nyn, ach), bge-m3 cross-lingual dense + BM25 against English text
+        # yields 0% relevant top hits; using en_hits directly prevents context
+        # contamination. For Swahili, merge both legs.
+        if loc in ("lg", "nyn", "nyk", "ach") and en_hits:
             merged = en_hits[:top_k]
         else:
             merged = merge_retrieval_hits([en_hits, hits], top_k=top_k)

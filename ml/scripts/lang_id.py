@@ -53,7 +53,36 @@ class LanguageDetector:
         if not text or not text.strip():
             return LanguageResult(lang=self.default_lang, confidence=0.0, backend="heuristic")
 
-        if self._detector is not None:
+        words = set(re.findall(r"[a-z'’ŋ]+", text.lower()))
+        nyn_words = {
+            "omushoro", "emishoro", "mushoro", "omushaara", "ebicweka", "shangahi",
+            "bingahi", "okwehandiikisa", "kwehandiikisa", "okushashura", "nshashura",
+            "oshashura", "nimbaasa", "nkuhwere", "kuhwera", "agandi", "webare",
+            "munonga", "orunyankore", "runyankole", "runyankore", "shiringi",
+            "obukaikuru", "akakaikuru", "ekitongore", "ebihandiiko", "ekihandiiko",
+            "omushasuzi", "abashasuzi", "kushwijuma", "okushwijuma", "obushuubuzi",
+            "okujurira", "kujurira", "orubanja", "erizooba", "hati", "nta", "ahari",
+            "omuri", "kuruga", "kuhika", "kugamba", "oine", "aine", "wangye", "yaawe",
+            "enshonga", "nimanya", "tihaine", "ebyangye", "naabaasa", "okugarukamu",
+            "ninkushaba", "orurimi",
+        }
+        ach_words = {
+            "mucoro", "mucara", "atwero", "nining", "ango", "ningo", "atim", "agengo",
+            "tye", "bene", "dong", "lwak", "dano", "latin", "piny", "kwo", "wek",
+            "twero", "cako", "myero", "kombedi", "apwoyo", "matek", "kopango",
+            "icwalo", "cwalo", "coyo", "nying", "nyinga", "waraga", "lacul", "lutic",
+            "latic", "konyi", "akonyi", "lapeny", "lagam", "gamo", "culu", "aculu",
+            "iculo", "adi", "cente", "cilingi", "biacara", "jami", "ngiyo", "peny",
+            "penyo", "peke", "gimako", "alok", "walok", "kede", "acoli",
+        }
+        nyn_score = len(words & nyn_words)
+        ach_score = len(words & ach_words)
+        if nyn_score >= 2:
+            return LanguageResult(lang="nyn", confidence=0.8, backend="heuristic")
+        if ach_score >= 2:
+            return LanguageResult(lang="ach", confidence=0.8, backend="heuristic")
+
+        if self._detector is not None and nyn_score == 0 and ach_score == 0:
             try:
                 confidences = self._detector.compute_language_confidence_values(text)
                 if confidences:
@@ -104,6 +133,10 @@ class LanguageDetector:
             return LanguageResult(lang="sw", confidence=0.7, backend="heuristic")
         if lg_score >= 2 or (lg_score >= 1 and en_score == 0):
             return LanguageResult(lang="lg", confidence=0.7, backend="heuristic")
+        if nyn_score >= 1 and en_score == 0:
+            return LanguageResult(lang="nyn", confidence=0.7, backend="heuristic")
+        if ach_score >= 1 and en_score == 0:
+            return LanguageResult(lang="ach", confidence=0.7, backend="heuristic")
         if en_score > 0:
             return LanguageResult(lang="en", confidence=0.8, backend="heuristic")
         return LanguageResult(lang=self.default_lang, confidence=0.6, backend="heuristic")

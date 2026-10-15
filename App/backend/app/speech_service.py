@@ -89,7 +89,7 @@ TTS_CACHE_SIZE = int(os.getenv("SPEECH_TTS_CACHE_SIZE", "256"))
 SPEECH_WARMUP = os.getenv("SPEECH_WARMUP", "true").lower() == "true"
 SPEECH_WARMUP_LOCALES = tuple(
     part.strip()
-    for part in os.getenv("SPEECH_WARMUP_LOCALES", "en,lg,sw").split(",")
+    for part in os.getenv("SPEECH_WARMUP_LOCALES", "en,lg,sw,nyn,ach").split(",")
     if part.strip()
 )
 
@@ -483,6 +483,7 @@ _URA_ASR_ISO_ALIASES: dict[str, str] = {
     "lg": "lg",
     "lug": "lg",
     "nyn": "nyn",
+    "nyk": "nyn",
     "ach": "ach",
 }
 
@@ -507,6 +508,14 @@ _SALT_PROMPT_SW = (
     "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, kodi, ushuru, "
     "forodha, ankara, risiti, usajili, Mamlaka ya Mapato ya Uganda."
 )
+_SALT_PROMPT_NYN = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, omushoro, "
+    "omushaara, ebicweka, okwehandiikisa, okushashura, Uganda Revenue Authority."
+)
+_SALT_PROMPT_ACH = (
+    "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, mucoro, "
+    "mucara, coyo nying, culu mucoro, Uganda Revenue Authority."
+)
 _SALT_PROMPT_NEUTRAL = (
     "URA, EFRIS, VAT, TIN, NIN, PAYE, PRN, WHT, DTS, TCC, URSB, "
     "Uganda Revenue Authority."
@@ -516,9 +525,9 @@ _SALT_PROMPT_NEUTRAL = (
 def salt_domain_prompt(language: str | None) -> str:
     """The Whisper-SALT conditioning line for *language*.
 
-    English, Luganda, and Kiswahili each have their own. Anything else —
-    including "we have not detected a language yet" — stays on the neutral
-    acronym line rather than the English sentence.
+    English, Luganda, Kiswahili, Runyankole, and Acholi each have their own.
+    Anything else — including "we have not detected a language yet" — stays on
+    the neutral acronym line rather than the English sentence.
     """
     if language == "en":
         return _SALT_PROMPT_EN
@@ -526,6 +535,10 @@ def salt_domain_prompt(language: str | None) -> str:
         return _SALT_PROMPT_LG
     if language == "sw":
         return _SALT_PROMPT_SW
+    if language in ("nyn", "nyk"):
+        return _SALT_PROMPT_NYN
+    if language == "ach":
+        return _SALT_PROMPT_ACH
     return _SALT_PROMPT_NEUTRAL
 
 
@@ -1387,7 +1400,7 @@ class SpeechModel:
         self,
         audio_bytes: bytes,
         sample_rate: int = 16000,
-        candidates: tuple[str, ...] = ("en", "sw", "lg"),
+        candidates: tuple[str, ...] = ("en", "sw", "lg", "nyn", "ach"),
     ) -> LanguageIdResult:
         """Which of *candidates* is being spoken, from Whisper-SALT's language token.
 
@@ -1643,7 +1656,7 @@ class SpeechModel:
         )
 
     def _detect_salt_language(self, audio_bytes: bytes, sample_rate: int) -> str | None:
-        """en/lg/sw from the Whisper-SALT language token, or None.
+        """en/lg/sw/nyn/ach from the Whisper-SALT language token, or None.
 
         Unit-test stand-ins are MagicMocks; running the encoder on those
         would not be a language vote. A real model that errors, or a top
@@ -1657,7 +1670,7 @@ class SpeechModel:
             return None
         token_ids = {
             code: SALT_LANGUAGE_TOKEN_IDS[code]
-            for code in ("en", "lg", "sw")
+            for code in ("en", "lg", "sw", "nyn", "ach")
             if code in SALT_LANGUAGE_TOKEN_IDS
         }
         if len(token_ids) < 2:

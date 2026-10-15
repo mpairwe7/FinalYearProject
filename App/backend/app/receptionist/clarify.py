@@ -141,6 +141,12 @@ _CONTEXT_MISHEARS: dict[tuple[str, str], str] = {
     ("kwa", "ora"): "ura",
     ("kutoka", "ora"): "ura",
     ("okuva", "ora"): "ura",
+    ("omuri", "era"): "ura",
+    ("ahari", "era"): "ura",
+    ("bot", "era"): "ura",
+    ("omuri", "ora"): "ura",
+    ("ahari", "ora"): "ura",
+    ("bot", "ora"): "ura",
 }
 
 

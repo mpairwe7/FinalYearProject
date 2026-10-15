@@ -127,6 +127,12 @@ def compute_call_metrics(
     is_sw = (state and state.locale == "sw") or call.get("locale") == "sw" or "sw" in lang_info.get("used", [])
     swahili_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_sw else None
 
+    is_nyn = (state and state.locale == "nyn") or call.get("locale") == "nyn" or "nyn" in lang_info.get("used", [])
+    runyankole_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_nyn else None
+
+    is_ach = (state and state.locale == "ach") or call.get("locale") == "ach" or "ach" in lang_info.get("used", [])
+    acholi_turn_latency_ms = _percentile(turn_to_audio_latencies, 50) if is_ach else None
+
     metrics_obj = {
         "language": lang_info,
         "duration_s": duration_s,
@@ -153,6 +159,8 @@ def compute_call_metrics(
         "ai_only_completion": ai_only_completion,
         "luganda_turn_latency_ms": luganda_turn_latency_ms,
         "swahili_turn_latency_ms": swahili_turn_latency_ms,
+        "runyankole_turn_latency_ms": runyankole_turn_latency_ms,
+        "acholi_turn_latency_ms": acholi_turn_latency_ms,
         "latency": {
             "stt_ms_p50": _percentile(stt_latencies, 50),
             "stt_ms_p95": _percentile(stt_latencies, 95),

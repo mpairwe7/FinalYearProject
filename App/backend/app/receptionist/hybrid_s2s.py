@@ -24,7 +24,9 @@ _STATUTORY_OR_NUMERIC_RE: Final[re.Pattern[str]] = re.compile(
     r"rate|rates|tax|duty|customs|tariff|penalty|interest|deadline|section|act|"
     r"calculate|how\s+much|shillings?|ugx|usd|million|billion|thousand|"
     r"omusolo|ebitundu|obukadde|akakadde|emitwalo|shilingi|tiini|"
-    r"kodi|ushuru|forodha|asilimia|milioni|marejesho)\b)",
+    r"kodi|ushuru|forodha|asilimia|milioni|marejesho|"
+    r"omushoro|emishoro|ebicweka|obukaikuru|akakaikuru|shiringi|esente|"
+    r"mucoro|mucara|cilingi|cente|dul|miya)\b)",
     re.IGNORECASE,
 )
 
@@ -32,21 +34,27 @@ _CONVERSATIONAL_FAST_RE: Final[re.Pattern[str]] = re.compile(
     r"^\W*(?:hello|hi|hey|good\s+(?:morning|afternoon|evening)|thank\s+you|thanks|"
     r"ok(?:ay)?|yes|no|sure|alright|please\s+help|i\s+have\s+a\s+question|"
     r"oli\s+otya|gyebale\s+ko|wasuze\s+otya|osiibye\s+otya|webale|yee|nedda|kale|"
-    r"habari|mambo|shikamoo|asante|sawa|ndiyo|hapana)\b",
+    r"habari|mambo|shikamoo|asante|sawa|ndiyo|hapana|"
+    r"agandi|oraire\s+ota|osiibire\s+ota|webare|ego|ngaaha|kare|"
+    r"kopango|itye\s+nining|apwoyo|eyo|ber)\b",
     re.IGNORECASE,
 )
 
 _INCOMPLETE_DIGIT_TAIL_RE: Final[re.Pattern[str]] = re.compile(
     r"(?<![,.\d])\b(?:\d{1,8}|zero|one|two|three|four|five|six|seven|eight|nine|"
     r"emu|bbiri|ssatu|nnya|ttaano|mukaaga|musanvu|munaana|mwenda|"
-    r"moja|mbili|tatu|nne|tano|sita|saba|nane|tisa)$",
+    r"moja|mbili|tatu|nne|tano|sita|saba|nane|tisa|"
+    r"emwe|ibiri|ishatu|ina|itaano|mushanju|"
+    r"acel|aryo|adek|angwen|abic|abicel|abiro|aboro|abongwen)$",
     re.IGNORECASE,
 )
 
 _TRAILING_CONJUNCTION_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:and|or|but|because|if|when|about|for|with|to|"
-    r"era|naye|oba|kubanga|ku|mu|wa|"
-    r"na|au|lakini|kwa|kuhusu)$",
+    r"era|naye|oba|kubanga|"
+    r"na|au|lakini|kwa|kuhusu|"
+    r"kandi|nari|kwonka|ahabw'okuba|ahari|"
+    r"dok|onyo|ento|pien|kede)$",
     re.IGNORECASE,
 )
 
@@ -158,14 +166,18 @@ def classify_hybrid_speech_mode(
 _FAST_GREETING_RE: Final[re.Pattern[str]] = re.compile(
     r"^\W*(?:hello|hi|hey|good\s+(?:morning|afternoon|evening)|"
     r"oli\s+otya|gyebale\s+ko|wasuze\s+otya|osiibye\s+otya|"
-    r"habari(?:\s+za\s+(?:asubuhi|mchana|jioni))?|mambo|shikamoo)\W*$",
+    r"habari(?:\s+za\s+(?:asubuhi|mchana|jioni))?|mambo|shikamoo|"
+    r"agandi|oraire\s+ota|osiibire\s+ota|"
+    r"kopango|itye\s+nining|ibut\s+nining)\W*$",
     re.IGNORECASE,
 )
 
 _FAST_THANKS_RE: Final[re.Pattern[str]] = re.compile(
     r"^\W*(?:thank\s+you(?:\s+very\s+much)?|thanks(?:\s+a\s+lot)?|"
     r"webale(?:\s+nnyo)?|weebale(?:\s+nnyo)?|"
-    r"asante(?:\s+sana)?|shukrani)\W*$",
+    r"asante(?:\s+sana)?|shukrani|"
+    r"webare(?:\s+munonga)?|mwebare(?:\s+munonga)?|"
+    r"apwoyo(?:\s+matek)?|wapwoyo)\W*$",
     re.IGNORECASE,
 )
 
@@ -180,12 +192,16 @@ def build_s2s_fast_reply(query: str, locale: str = "en") -> str | None:
         return {
             "lg": "Gyebale ko! Ndi kitongole kya URA. Nkuyambe ntya ku by'omusolo leero?",
             "sw": "Habari! Karibu Mamlaka ya Mapato ya Uganda (URA). Nikusaidie vipi kuhusu kodi leo?",
+            "nyn": "Agandi! Nyakiiriza omu kitongore kya URA. Nkuhwere nta aha by'omushoro erizooba?",
+            "ach": "Kopango! Ajoli i URA. Akonyi nining i kom mucoro tin?",
             "en": "Hello! Welcome to the Uganda Revenue Authority. How can I help you with your taxes today?",
         }.get(loc, "Hello! Welcome to the Uganda Revenue Authority. How can I help you with your taxes today?")
     if _FAST_THANKS_RE.search(clean):
         return {
             "lg": "Kale nnyo! Olina ekibuuzo ekirala ku musolo?",
             "sw": "Karibu sana! Je, una swali lingine kuhusu kodi?",
+            "nyn": "Kare munonga! Oine ekibuuzo ekindi aha mushoro?",
+            "ach": "Apwoyo matek! Itye ki lapeny mukene i kom mucoro?",
             "en": "You are very welcome! Do you have any other tax question I can help with?",
         }.get(loc, "You are very welcome! Do you have any other tax question I can help with?")
     return None
