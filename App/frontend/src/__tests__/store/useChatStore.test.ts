@@ -139,6 +139,50 @@ describe("useChatStore", () => {
     expect(store().chat.find((t) => t.notice)).toMatchObject({ notice: "officer_joined", officerName: "Officer Nakato" });
   });
 
+  it("the services chosen for a conversation come back with it — after a switch and after a reload", () => {
+    const first = store().ensureActiveConversationId();
+    store().setSelectedConnectorNamespaces(["efris", "payment_system"]);
+    store().addTurns([
+      createTurn("user", "Is my TIN registered?"),
+      createTurn("assistant", "EFRIS returned this record.", {
+        connectorsUsed: [{ namespace: "efris", label: "EFRIS", mode: "simulation", outcome: "found" }],
+        connectorNotices: [{ namespace: "payment_system", label: "Payments", reason: "unavailable" }],
+      }),
+    ]);
+    store().saveCurrentSession();
+
+    store().createNewSession();
+    expect(store().selectedConnectorNamespaces).toEqual([]);
+    store().ensureActiveConversationId();
+    store().addTurns([createTurn("user", "What is VAT?")]);
+    store().saveCurrentSession();
+
+    store().switchSession(first);
+    expect(store().selectedConnectorNamespaces).toEqual(["efris", "payment_system"]);
+
+    useChatStore.setState({ selectedConnectorNamespaces: [], chat: [] });
+    store().hydratePersisted();
+    expect(store().selectedConnectorNamespaces).toEqual(["efris", "payment_system"]);
+    const answer = store().chat.find((t) => t.content === "EFRIS returned this record.");
+    expect(answer?.connectorsUsed).toEqual([{ namespace: "efris", label: "EFRIS", mode: "simulation", outcome: "found" }]);
+    expect(answer?.connectorNotices).toEqual([{ namespace: "payment_system", label: "Payments", reason: "unavailable" }]);
+  });
+
+  it("removing a service is kept with the conversation too", () => {
+    store().ensureActiveConversationId();
+    store().setSelectedConnectorNamespaces(["efris", "ursb"]);
+    store().addTurns([createTurn("user", "Check my business")]);
+    store().saveCurrentSession();
+
+    store().setSelectedConnectorNamespaces(["ursb"]);
+    useChatStore.setState({ selectedConnectorNamespaces: [] });
+    store().hydratePersisted();
+    expect(store().selectedConnectorNamespaces).toEqual(["ursb"]);
+
+    store().setSelectedConnectorNamespaces(["Not A Namespace", "ursb", "ursb"]);
+    expect(store().selectedConnectorNamespaces).toEqual(["ursb"]);
+  });
+
   it("a new conversation starts with no case and no live chat", () => {
     store().ensureActiveConversationId();
     store().addTurns([createTurn("user", "Hello")]);

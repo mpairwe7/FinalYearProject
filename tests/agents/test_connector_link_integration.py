@@ -21,9 +21,13 @@ from app import llm
 from app.flags import flags
 from app.mcp import MCPClient
 from app.mcp.auth import MIN_SHARED_TOKEN_CHARS
-from app.mcp.chat_connectors import chat_connector_catalog, validate_chat_connector_selection
+from app.mcp.chat_connectors import (
+    chat_connector_catalog,
+    resolve_chat_connector_selection,
+    validate_chat_connector_selection,
+)
 from app.mcp.servers import gateway
-from app.mcp.transport import HttpTransport, InProcessTransport
+from app.mcp.transport import LIVENESS_TTL_S, HttpTransport, InProcessTransport
 from starlette.testclient import TestClient
 
 # The transport passes its deadline per request, which Starlette's TestClient
@@ -218,3 +222,42 @@ def test_an_agent_turn_reads_from_the_selected_connector(bind, monkeypatch: pyte
         "efris",
         "simulation",
     )
+    # What the client shows beside the answer: the service's name and how the
+    # lookup ended — never the record itself.
+    assert (completed["connector_label"], completed["connector_outcome"]) == ("EFRIS", "found")
+
+
+class _Switch:
+    """The gateway, until the cable is pulled."""
+
+    is_closed = False
+
+    def __init__(self, http: TestClient) -> None:
+        self.http = http
+        self.down = False
+
+    def post(self, *args: Any, **kwargs: Any) -> Any:
+        if self.down:
+            raise ConnectionError("connection refused")
+        return self.http.post(*args, **kwargs)
+
+
+def test_a_connector_that_goes_down_reads_unavailable_although_its_tool_list_is_cached(bind):
+    switch = _Switch(bind.http)
+    transport = HttpTransport("efris", "http://connectors.test/efris", token=TOKEN, client=switch)
+    client = MCPClient({"core": InProcessTransport(), "efris": transport})
+
+    assert chat_connector_catalog(client, user_role="public")["connectors"][0]["status"] == "available"
+    assert resolve_chat_connector_selection(client, ["efris"], user_role="public").usable == ["efris"]
+
+    switch.down = True
+    # The server allowed its tool list to be kept for an hour; liveness is
+    # believed for LIVENESS_TTL_S, then asked again.
+    transport._live_checked_at -= LIVENESS_TTL_S + 1
+
+    entry = chat_connector_catalog(client, user_role="public")["connectors"][0]
+    assert (entry["namespace"], entry["status"]) == ("efris", "unavailable")
+    selection = resolve_chat_connector_selection(client, ["efris"], user_role="public")
+    assert selection.usable == []
+    assert selection.skipped == [{"namespace": "efris", "label": "EFRIS", "reason": "unavailable"}]
+

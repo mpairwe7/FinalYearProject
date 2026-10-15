@@ -77,14 +77,15 @@ Every HTTP request to a connector server must present a bearer credential. With 
 1. Navigate to `/admin/connectors` in the staff console.
 2. In **Built-in connector status**, the dashboard identifies each fixture-backed plugin as a local simulation and shows local health and registered tool counts.
 3. In **Taxpayer-chat integrations**, review the remote MCP services and read-only operations available under your current role and consent scopes. The catalog is policy-filtered and does not expose endpoint URLs, credentials, or tool schemas.
-4. Each chat integration shows a `status`: `available` means the server answered tool discovery just now (cached for the lifetime the server allows); `unavailable` means it is bound but did not answer, and it cannot be selected. **Test connection** still checks the local simulator only, and reports its latency and tool count.
+4. Each chat integration shows a `status`: `available` means the server answered recently; `unavailable` means it is bound but is not answering, and it cannot be selected. The tool *list* is kept as long as the server allows (the bundled servers say an hour), but whether the server is answering is believed for only 30 seconds (`LIVENESS_TTL_S`) and then asked again with `server/discover`; a call that fails at the connection, or with 502/503/504, marks it down at once. **Test connection** still checks the local simulator only, and reports its latency and tool count.
+5. **Onboarding diagnostics** lists every server bound to this deployment and why it is, or is not, offered in chat — status, demo/live, how the link authenticates (a kind, never the credential), and a verdict per operation with the rule it breaks. It is built from the same checks the chat runs (`GET /v1/connectors/diagnostics`, staff only; see §4.6).
 
 ### 3.2 Deploying a New System Connector
-1. Open `/admin/connectors` and use **Add connector** to review the setup path. This dialog is guidance only; it does not submit or store connector data.
+1. Open `/admin/connectors` and use **Add connector** to review the setup path. Each step — bind, declare, switch on — is checked against the deployment as it is now and marked *Done* or *Needs attention*. The dialog still changes nothing: it does not submit or store connector data.
 2. Implement the connector server and register its namespace, tools, permissions, and protocol through the reviewed code change.
 3. Configure the remote endpoint with `MCP_SERVER_URL_<NAMESPACE>` and store any credential in the deployment secret store. Never submit bearer tokens or private keys through the browser.
 4. Review DNS/IP resolution, HTTPS/TLS identity, redirects, and outbound network access before deployment.
-5. Deploy the reviewed change and refresh `/admin/connectors`. The chat integration list reflects the current deployment and caller policy, including whether each bound server is answering. **Test connection** checks local simulator health only.
+5. Deploy the reviewed change and refresh `/admin/connectors`. The chat integration list reflects the current deployment and caller policy, including whether each bound server is answering. If the server is not listed there, **Onboarding diagnostics** says why (§4.6). **Test connection** checks local simulator health only.
 6. Declare what is behind the server: `MCP_SERVER_MODE_<NAMESPACE>=live` only for a reviewed live integration. Unset means `simulation`, which is shown as demo data and is never offered in production.
 7. From the deployed API runtime, confirm the namespace binds to the approved remote transport and that the server answers `server/discover`. The configured credential is sent by the transport in the authorization header and must never be printed:
 
@@ -156,7 +157,9 @@ print(client.health())
   2. The two ends hold different credentials. The API log names it: `was refused: the server did not accept this client's credentials (HTTP 401)`.
   3. The server is down or unreachable from the API container.
   4. A protocol mismatch: `the server does not speak MCP 2026-07-28 (it supports […])`.
+  5. Not unavailable but **absent**: every server answers, yet the picker lists nothing. `curl -s localhost:8930/health` shows `"tools": 0` per server and the gateway log has `connector simulators not registered: plugins could not be loaded`. The `plugins` package did not load in the gateway process (G155: the `app` package directory was on `sys.path`); Onboarding diagnostics shows "0 of 0 operations".
 - **Behaviour while it lasts**: the API does not retry that server for 15 seconds after a failed discovery, so a connector that is down costs one short deadline, not one per request. Other connectors are unaffected. A tool bound to an unavailable server is **not** run from the copy registered in the API process.
+- **What a taxpayer who had chosen it sees**: their turns are still answered. The endpoint leaves the service out of the turn and says so — `connector_notices: [{"namespace": …, "label": …, "reason": "unavailable"}]` on `/v1/chat`, the same list in the stream's `metadata` frame — and the chat shows "*<service>* is not answering right now, so this answer does not include a lookup there." The chip stays chosen and is marked *Unavailable*; the next turn after it recovers uses it again. Before this, the endpoint answered 403, the client's retry answered 403 too, and every message in that conversation read "could not reach the URA knowledge base" until the taxpayer removed the chip. Count: `ura_chat_connector_skipped_total{reason="unavailable"}`.
 - **Resolution**: fix the cause and wait out the 15-second window, or restart the API to clear it immediately.
 
 ### 4.4 A Call Is Refused with `HeaderMismatch` (`-32020`)
@@ -174,6 +177,30 @@ Two different things show as one symptom.
 - **Cause**: The server returned fields that violate the declared JSON schema.
 - **Impact**: Non-blocking (result is still passed to the LLM), but signals schema drift.
 - **Resolution**: Inspect the tool payload against the schema in `ToolSchema.output_schema` and align the response fields.
+
+### 4.6 A Bound Server Is Not Offered in Chat
+- **Symptom**: the server is bound and answering, but the picker does not list it (or lists fewer operations than it has). The catalog deliberately hides a server with nothing the caller may use, so the picker cannot say why.
+- **Where to look**: `/admin/connectors` → **Onboarding diagnostics**, or `GET /v1/connectors/diagnostics` as staff. Each server has a `status` and each operation a list of `problems`:
+
+  | Server `status` | Meaning |
+  |---|---|
+  | `ready` | Offered in taxpayer chat. |
+  | `feature_off` | Would be offered, but `FLAG_ENTERPRISE_CONNECTORS` is off. |
+  | `not_answering` | Bound, not answering (§4.3). |
+  | `no_eligible_operations` | Answering, but no operation passes the checks below. |
+  | `not_offered_in_production` | A simulator (`MCP_SERVER_MODE_<NAMESPACE>` unset) under `APP_ENV=production`. |
+
+  | Operation problem | Fix on the server |
+  |---|---|
+  | `no_annotations` | Declare MCP `annotations`. |
+  | `not_read_only` | `readOnlyHint: true` — only reads are offered in chat. |
+  | `destructive_not_false` | `destructiveHint: false` (MCP defaults a missing hint to destructive). |
+  | `no_risk_level` / `unknown_risk_level` | `_meta["ug.go.ura.chatbot/risk"]` of `low`, `medium` or `high`. |
+  | `needs_confirmation` | `_meta["ug.go.ura.chatbot/requiresConfirmation"]: false` — a chat lookup cannot confirm. |
+  | `no_scopes_for_risk` / `malformed_scopes` | `requiredScopes` (non-empty strings) for a medium or high risk read. |
+  | `duplicate_name` | Rename: two bound servers offer an operation with the same name, so neither is offered. |
+
+  An operation with no problems lists who can see it (`offered_to`: `public`, `verified_taxpayer` — the latter only with the scopes it requires). `refused_bindings` names any `MCP_SERVER_URL_*` variable the API refused to bind and the rule it broke (for example "production requires https"); the address itself is never shown. `credential` is `none`, `shared_token`, `shared_token_too_short` (the server treats it as absent) or `oauth_client_credentials`.
 
 ---
 
@@ -282,7 +309,19 @@ curl -s 'localhost:8083/v1/connectors?view=chat'
 curl -s localhost:8083/v1/chat -H 'Content-Type: application/json' \
   -d '{"message":"What does EFRIS hold for 1000000001?","connector_namespaces":["efris"]}'
 ```
-In the stream (`POST /v1/chat/stream`) the `agent_trace` event carries `{"type":"tool_call.completed","name":"efris_taxpayer_status","connector":"efris","connector_mode":"simulation","ok":true,…}`.
+In the stream (`POST /v1/chat/stream`) the `agent_trace` event carries `{"type":"tool_call.completed","name":"efris_taxpayer_status","connector":"efris","connector_mode":"simulation","connector_label":"EFRIS","connector_outcome":"found","ok":true,…}`; the chat shows it under the answer as **Looked up in: EFRIS · Demo data · Record found**. `connector_outcome` is one of `found`, `no_record`, `needs_input`, `unavailable` — never the record.
+
+```bash
+# 5. Why each bound server is or is not offered (staff session; the console's Onboarding diagnostics)
+#    GET /v1/connectors/diagnostics -> {"enabled": true, "servers": [{"namespace": "efris", "status": "ready", …}], "refused_bindings": []}
+
+# 6. A selection that cannot be used does not fail the turn
+docker stop ura-app-connectors
+curl -s localhost:8083/v1/chat -H 'Content-Type: application/json' \
+  -d '{"message":"What does EFRIS hold for 1000000001?","connector_namespaces":["efris"]}' | python3 -m json.tool | grep -A4 connector_notices
+#    within LIVENESS_TTL_S (30 s): [{"namespace": "efris", "label": "EFRIS", "reason": "unavailable"}], HTTP 200
+docker start ura-app-connectors
+```
 
 ### 7.3 What happens to a chat turn that has a service selected
 
@@ -302,7 +341,9 @@ Two environment knobs matter:
 - `CONNECTOR_TURN_LOCAL_TOOLS` (default `3`) — how many *local* tools are offered beside the selected service's. The full local registry is ~7,100 tokens of schema against a 4,096-token window; the server answered HTTP 400 and the turn silently fell back to retrieval, as if no service had been chosen. Tool schemas are now fitted to the window **every round** against the real prompt (`tool_budget.fit_tool_specs`), counted as the chat template renders them (spaced JSON — the compact form under-counted four tools by 50 tokens, which is a refused request).
 - `SUNFLOWER_MAX_MODEL_LEN` — **recommended `8192`** for a stack that serves connectors. `4096` works because of the fitting above, but leaves one service and one result per turn.
 
-Reading a live turn: `agent_trace` events carry `connector` and `connector_mode`; the API log line `tool schemas fitted to a context window of N: …` says when tools were slimmed or dropped.
+Reading a live turn: `agent_trace` events carry `connector`, `connector_mode`, `connector_label` and `connector_outcome`; the API log line `tool schemas fitted to a context window of N: …` says when tools were slimmed or dropped.
+
+Before any of this, the endpoint resolves the selection (`chat_connectors.resolve_chat_connector_selection`): only services in the caller's current catalog reach the turn, and each one left out is reported with a reason — `unavailable` (not answering), `not_offered` (not available to this account: signed out, consent withdrawn, never bound), `disabled` (`FLAG_ENTERPRISE_CONNECTORS` off). The turn is answered either way. The chat keeps a conversation's chosen services with that conversation (switching away and back, or reloading, restores them), removes one that is `not_offered` or `disabled`, and marks one that is `unavailable`.
 
 ### 7.4 What it does not do
 - It does not contact URA, NIRA, URSB, a bank or a payment network, and a record it returns is not a URA record.

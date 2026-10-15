@@ -106,7 +106,14 @@ from .calculator_router import (
 from .claim_verifier import verify_claims
 from .corrective_rag import corrective_retrieve, needs_clarification
 from .flags import flags
-from .guardrails import STORE_RAW_PROMPTS, GuardResult, InputGuard, OutputGuard, redact_pii_text
+from .guardrails import (
+    STORE_RAW_PROMPTS,
+    GuardResult,
+    InputGuard,
+    OutputGuard,
+    redact_pii_text,
+    user_stated_identifiers,
+)
 from .language_state import LanguageDecision, normalize_locale_tag, resolve_turn_locale
 from .memory import get_memory_service
 from .premise_guard import check_false_premise
@@ -1654,6 +1661,12 @@ async def run_chat_turn(
     both streamed paths before.
     """
     failed = False
+    # Set here, in the request's own context, so every step of the turn sees
+    # it — the threads (asyncio.to_thread copies this context) and the agentic
+    # stream alike. Set only inside the retrieval thread, it never reached the
+    # stream's redaction, and the TIN a taxpayer asked about came back as
+    # [REDACTED_UG_TIN] (G143, G154).
+    _ACTIVE_USER_STATED_IDS.set(user_stated_identifiers(str(kwargs.get("message") or "")))
     with turn_usage_scope() as usage, turn_attributes_scope():
         async for event_type, payload in _run_chat_turn_events(model, **kwargs):
             if event_type == "error":
@@ -8913,7 +8926,7 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
-        user_stated_ids = tuple(re.findall(r"\b1\d{9}\b|\b2\d{11,13}\b", message))
+        user_stated_ids = user_stated_identifiers(message)
         _ACTIVE_USER_STATED_IDS.set(user_stated_ids)
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale
@@ -10803,7 +10816,7 @@ class ChatModel:
         thread_id = conversation_id or str(uuid.uuid4())
         set_turn_attribute("gen_ai.conversation.id", thread_id)
         agent_role = "rag_answerer"
-        user_stated_ids = tuple(re.findall(r"\b1\d{9}\b|\b2\d{11,13}\b", message))
+        user_stated_ids = user_stated_identifiers(message)
         _ACTIVE_USER_STATED_IDS.set(user_stated_ids)
 
         # A BCP 47 tag ("sw-UG", "lug") names its base language; a locale

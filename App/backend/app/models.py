@@ -73,6 +73,20 @@ class ResourceLink(BaseModel):
     verified_on: str = Field(..., description="ISO date the link was last confirmed live")
 
 
+class ConnectorNotice(BaseModel):
+    """A selected chat connector that a turn did not use (see ``ChatResponse.connector_notices``)."""
+
+    namespace: str = Field(..., pattern=r"^[a-z0-9_]{1,64}$")
+    label: str = Field(..., max_length=80)
+    reason: Literal["disabled", "unavailable", "not_offered"] = Field(
+        ...,
+        description=(
+            "disabled: the deployment has chat connectors off; unavailable: not answering "
+            "right now; not_offered: not available to this account"
+        ),
+    )
+
+
 class ChatResponse(BaseModel):
     reply: str
     sources: list[str] = Field(default_factory=list)
@@ -145,6 +159,14 @@ class ChatResponse(BaseModel):
         None,
         description="Knowledge discrepancy report metadata if the user disputed previous guidance",
     )
+    connector_notices: list[ConnectorNotice] = Field(
+        default_factory=list,
+        description=(
+            "Selected services this turn was answered without, and why. The turn is "
+            "answered either way; nothing listed here was consulted."
+        ),
+    )
+
 
 
 # ---------------------------------------------------------------------------

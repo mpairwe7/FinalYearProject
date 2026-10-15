@@ -345,9 +345,10 @@ async def _run_response_create(
 
     final_log: dict[str, Any] | None = None
     full_reply = ""
-    from .guardrails import OutputGuard, StreamingDLPFilter
+    from .guardrails import OutputGuard, StreamingDLPFilter, user_stated_identifiers
 
-    dlp_filter = StreamingDLPFilter()
+    stated_ids = user_stated_identifiers(user_input)
+    dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)
 
     try:
         async for event_type, payload in service_module.run_chat_turn(
@@ -410,7 +411,9 @@ async def _run_response_create(
                 await _send_json(websocket, {"type": frame_type})
             elif event_type == "revision":
                 dlp_filter.flush()
-                sanitized_text = OutputGuard.redact_pii(payload if isinstance(payload, str) else "")
+                sanitized_text = OutputGuard.redact_pii(
+                    payload if isinstance(payload, str) else "", allowed_values=stated_ids
+                )
                 await _send_json(websocket, {"type": frame_type, "text": sanitized_text})
             elif event_type in ("metadata", "grounding"):
                 if event_type == "grounding":

@@ -12,7 +12,11 @@ from app.guardrails import scan_external_tool_text
 from app.mcp import MCPClient
 from app.mcp.chat_connectors import (
     chat_connector_catalog,
+    connector_diagnostics,
     connector_mode,
+    is_taxpayer_read_tool,
+    read_tool_problems,
+    resolve_chat_connector_selection,
     validate_chat_connector_selection,
 )
 from app.mcp.transport import InProcessTransport
@@ -670,3 +674,170 @@ def test_forced_selection_never_falls_back_to_everything(monkeypatch):
     # many tools still works.
     monkeypatch.setattr(flags, "is_enabled", lambda name: name == "tool_rag")
     assert llm._select_tools_for_query("q", names) == names
+
+
+# ---------------------------------------------------------------------------
+# A selection that cannot be used is left out of the turn, not fatal to it
+# ---------------------------------------------------------------------------
+
+
+def test_a_selection_that_cannot_be_used_is_left_out_with_a_reason(monkeypatch):
+    monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
+    client = make_client(
+        StaticTransport("efris", [descriptor("efris_taxpayer_status")]),
+        DownTransport("payment_system"),
+        StaticTransport("tin_registration", [descriptor("tin_lookup", risk="high", scopes=["ura_account_access"])]),
+    )
+
+    selection = resolve_chat_connector_selection(
+        client,
+        ["efris", "payment_system", "tin_registration", "ghost", "efris"],
+        user_role="public",
+    )
+
+    assert selection.usable == ["efris"]
+    assert selection.skipped == [
+        {"namespace": "payment_system", "label": "Payments", "reason": "unavailable"},
+        # Bound and answering, but nothing in it this caller may use.
+        {"namespace": "tin_registration", "label": "TIN services", "reason": "not_offered"},
+        # Never bound: indistinguishable from "not yours", on purpose.
+        {"namespace": "ghost", "label": "Ghost", "reason": "not_offered"},
+    ]
+    assert not validate_chat_connector_selection(client, ["efris", "ghost"], user_role="public")
+    assert validate_chat_connector_selection(client, ["efris"], user_role="public")
+
+
+def test_switching_connectors_off_leaves_every_selection_out_without_failing(monkeypatch):
+    monkeypatch.setattr(flags, "is_enabled", lambda _name: False)
+    client = make_client(StaticTransport("efris", [descriptor("efris_taxpayer_status")]))
+
+    selection = resolve_chat_connector_selection(client, ["efris"], user_role="public")
+
+    assert selection.usable == []
+    assert selection.skipped == [{"namespace": "efris", "label": "EFRIS", "reason": "disabled"}]
+    assert resolve_chat_connector_selection(client, [], user_role="public") == type(selection)()
+
+
+# ---------------------------------------------------------------------------
+# One gate, with reasons: the chat and the staff diagnostics cannot disagree
+# ---------------------------------------------------------------------------
+
+
+def test_read_tool_problems_name_every_missing_declaration():
+    assert read_tool_problems(descriptor("safe_read")) == []
+    assert read_tool_problems(descriptor("x", destructive=None)) == ["destructive_not_false"]
+    assert read_tool_problems(descriptor("x", risk=None)) == ["no_risk_level"]
+    assert read_tool_problems(descriptor("x", risk="critical")) == ["unknown_risk_level"]
+    assert read_tool_problems(descriptor("x", read_only=False, destructive=True)) == [
+        "not_read_only",
+        "destructive_not_false",
+    ]
+    assert read_tool_problems(descriptor("x", confirmation=True)) == ["needs_confirmation"]
+    assert read_tool_problems(descriptor("x", confirmation=None)) == ["needs_confirmation"]
+    assert read_tool_problems(descriptor("x", risk="high")) == ["no_scopes_for_risk"]
+    assert read_tool_problems(descriptor("x", risk="high", scopes=["ura_account_access"])) == []
+    assert "no_risk_level" in read_tool_problems(descriptor("x", malformed_meta=True))
+    bare = descriptor("x")
+    bare.pop("annotations")
+    assert read_tool_problems(bare) == ["no_annotations"]
+
+
+def test_the_chat_gate_is_the_absence_of_problems():
+    cases = [
+        descriptor("a"),
+        descriptor("b", destructive=None),
+        descriptor("c", risk=None),
+        descriptor("d", read_only=False, destructive=True),
+        descriptor("e", confirmation=True),
+        descriptor("f", risk="high"),
+        descriptor("g", risk="medium", scopes=["tax_records"]),
+        descriptor("h", malformed_meta=True),
+    ]
+    for case in cases:
+        assert is_taxpayer_read_tool(case) is (read_tool_problems(case) == []), case["name"]
+
+
+def test_diagnostics_say_why_a_bound_server_is_or_is_not_offered(monkeypatch):
+    monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
+    monkeypatch.delenv("APP_ENV", raising=False)
+    client = make_client(
+        StaticTransport(
+            "efris",
+            [
+                descriptor("efris_taxpayer_status"),
+                descriptor("efris_issue_invoice", read_only=False, destructive=True, confirmation=True),
+            ],
+        ),
+        StaticTransport("ursb", [descriptor("ursb_lookup", risk="high", scopes=["business_records"])]),
+        StaticTransport("dts", [descriptor("dts_write", read_only=False)]),
+        DownTransport("payment_system"),
+    )
+
+    report = connector_diagnostics(client)
+
+    assert report["ok"] is True
+    assert report["enabled"] is True
+    assert report["environment"] == "development"
+    by_ns = {server["namespace"]: server for server in report["servers"]}
+    efris = by_ns["efris"]
+    assert (efris["status"], efris["tools_listed"], efris["tools_offered"]) == ("ready", 2, 1)
+    tools = {tool["name"]: tool for tool in efris["tools"]}
+    assert tools["efris_taxpayer_status"]["offered_to"] == ["public", "verified_taxpayer"]
+    assert tools["efris_issue_invoice"]["problems"] == [
+        "not_read_only",
+        "destructive_not_false",
+        "needs_confirmation",
+    ]
+    assert tools["efris_issue_invoice"]["offered_to"] == []
+    # A scoped read reaches only a signed-in taxpayer who granted the scope.
+    ursb_tool = by_ns["ursb"]["tools"][0]
+    assert (ursb_tool["problems"], ursb_tool["offered_to"]) == ([], ["verified_taxpayer"])
+    assert ursb_tool["required_scopes"] == ["business_records"]
+    assert by_ns["dts"]["status"] == "no_eligible_operations"
+    assert (by_ns["payment_system"]["status"], by_ns["payment_system"]["reachable"]) == ("not_answering", False)
+    # A stand-in transport says nothing about how it authenticates.
+    assert {server["credential"] for server in report["servers"]} == {"none"}
+
+
+def test_diagnostics_report_production_and_the_feature_switch(monkeypatch):
+    client = make_client(StaticTransport("efris", [descriptor("efris_taxpayer_status")]))
+    monkeypatch.setattr(flags, "is_enabled", lambda _name: False)
+    assert connector_diagnostics(client)["servers"][0]["status"] == "feature_off"
+
+    monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("MCP_SERVER_MODE_EFRIS", raising=False)
+    report = connector_diagnostics(client)
+    assert report["environment"] == "production"
+    assert report["servers"][0]["status"] == "not_offered_in_production"
+
+
+def test_duplicate_tool_names_are_reported_not_silently_dropped(monkeypatch):
+    monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
+    client = make_client(
+        StaticTransport("efris", [descriptor("taxpayer_status")]),
+        StaticTransport("ursb", [descriptor("taxpayer_status")]),
+    )
+
+    report = connector_diagnostics(client)
+
+    for server in report["servers"]:
+        assert server["tools"][0]["problems"] == ["duplicate_name"]
+        assert server["status"] == "no_eligible_operations"
+    assert chat_connector_catalog(client, user_role="public")["connectors"] == []
+
+
+def test_a_refused_binding_is_named_by_variable_and_rule_never_by_address(monkeypatch):
+    monkeypatch.setattr(flags, "is_enabled", lambda name: name == "enterprise_connectors")
+    monkeypatch.setenv("MCP_SERVER_URL_LEDGER", "ftp://ledger.internal/mcp")
+    client = make_client(StaticTransport("efris", [descriptor("efris_taxpayer_status")]))
+
+    report = connector_diagnostics(client)
+
+    refused = {item["namespace"]: item for item in report["refused_bindings"]}
+    assert refused["ledger"] == {
+        "namespace": "ledger",
+        "variable": "MCP_SERVER_URL_LEDGER",
+        "problem": "it is not an http(s) URL",
+    }
+    assert "ledger.internal" not in str(report)

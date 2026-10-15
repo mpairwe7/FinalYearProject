@@ -1151,27 +1151,31 @@ def index_freshness() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Chat endpoint (with conversation logging)
 # ---------------------------------------------------------------------------
-def _validate_chat_connector_selection(body: ChatRequest, ctx: AuthContext) -> None:
-    """Fail closed when a request selects an unconfigured or unauthorized service."""
+def _resolve_chat_connectors(body: ChatRequest, ctx: AuthContext) -> tuple[list[str], list[dict[str, str]]]:
+    """The selected services this turn may use, and a notice for each one it may not.
+
+    Nothing outside the caller's current catalog is ever dispatched (fail
+    closed), but an unusable selection no longer fails the turn: a service
+    that stops answering, or that this account may no longer use, is left
+    out and named in ``connector_notices`` so the client can say so and
+    update the chip. It used to answer 403/409, which the client's retry
+    met again, and every later message read "could not reach the URA
+    knowledge base" until the taxpayer found the chip and removed it.
+    """
     if not body.connector_namespaces:
-        return
-    from .flags import flags
-
-    if not flags.is_enabled("enterprise_connectors"):
-        raise HTTPException(status_code=409, detail="Chat connectors are not enabled.")
+        return [], []
     from .mcp import get_client
-    from .mcp.chat_connectors import validate_chat_connector_selection
+    from .mcp.chat_connectors import resolve_chat_connector_selection
 
-    if not validate_chat_connector_selection(
+    selection = resolve_chat_connector_selection(
         get_client(),
         body.connector_namespaces,
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="One or more selected services are unavailable for this account.",
-        )
+    )
+    for skipped in selection.skipped:
+        metrics.inc("chat_connector_skipped_total", labels={"reason": skipped["reason"]})
+    return selection.usable, selection.skipped
 
 
 @app.post("/v1/chat", response_model=ChatResponse, tags=["chat"])
@@ -1182,7 +1186,7 @@ def chat(
     model: ChatModel = Depends(get_model),
     ctx: AuthContext = Depends(optional_user),
 ) -> ChatResponse:
-    _validate_chat_connector_selection(body, ctx)
+    connector_namespaces, connector_notices = _resolve_chat_connectors(body, ctx)
     session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
     # The answer's id in the conversation log, returned with it so a rating
@@ -1206,7 +1210,7 @@ def chat(
         user_role=ctx.role,
         granted_purposes=ctx.user.granted_purposes if ctx.user else [],
         attachments=attachments or None,
-        connector_namespaces=body.connector_namespaces,
+        connector_namespaces=connector_namespaces,
         channel="rest",
     )
 
@@ -1266,7 +1270,7 @@ def chat(
             except Exception:
                 logger.debug("Escalation event tracking failed", exc_info=True)
 
-    return ChatResponse(**{**result, "turn_id": turn_id})
+    return ChatResponse(**{**result, "turn_id": turn_id, "connector_notices": connector_notices})
 
 
 # ---------------------------------------------------------------------------
@@ -1287,7 +1291,7 @@ async def chat_stream(
     """
     from . import service as service_module
 
-    _validate_chat_connector_selection(body, ctx)
+    connector_namespaces, connector_notices = _resolve_chat_connectors(body, ctx)
 
     session_id = request.headers.get("X-Session-ID") or body.conversation_id or ""
     request_id = getattr(request.state, "request_id", None)
@@ -1302,10 +1306,11 @@ async def chat_stream(
         # Phase 2: SSE buffers agentic events into a compact ``agent_trace``
         # summary emitted just before ``grounding``.  Live tool-call frames
         # are exclusive to the WS path.
-        from .guardrails import OutputGuard, StreamingDLPFilter
+        from .guardrails import OutputGuard, StreamingDLPFilter, user_stated_identifiers
 
         agent_trace: list[dict[str, Any]] = []
-        dlp_filter = StreamingDLPFilter()
+        stated_ids = user_stated_identifiers(body.message)
+        dlp_filter = StreamingDLPFilter(allowed_values=stated_ids)
         async for event_type, payload in service_module.run_chat_turn(
             model,
             message=body.message,
@@ -1323,7 +1328,7 @@ async def chat_stream(
             user_role=getattr(ctx, "role", "public"),
             granted_purposes=ctx.user.granted_purposes if ctx.user else [],
             attachments=attachments or None,
-            connector_namespaces=body.connector_namespaces,
+            connector_namespaces=connector_namespaces,
         ):
             if event_type == "_keepalive":
                 yield {
@@ -1368,10 +1373,13 @@ async def chat_stream(
                     "admission",
                     "ok",
                     "elapsed_ms",
-                    # Which connector a tool call went to and whether it
-                    # is a simulator: a namespace and an enum, no payload.
+                    # Which connector a tool call went to, whether it is
+                    # a simulator, its display name and how the lookup
+                    # ended: a namespace, a label and two enums, no payload.
                     "connector",
                     "connector_mode",
+                    "connector_label",
+                    "connector_outcome",
                 }
                 agent_trace.append(
                     {
@@ -1388,7 +1396,10 @@ async def chat_stream(
                 yield {"event": "agent_trace", "data": json.dumps(agent_trace)}
                 agent_trace = []
             if event_type == "metadata":
-                yield {"event": event_type, "data": json.dumps({**payload, "turn_id": turn_id})}
+                frame = {**payload, "turn_id": turn_id}
+                if connector_notices:
+                    frame["connector_notices"] = connector_notices
+                yield {"event": event_type, "data": json.dumps(frame)}
             elif event_type == "grounding":
                 yield {"event": event_type, "data": json.dumps(payload)}
             elif event_type == "error":
@@ -1405,7 +1416,7 @@ async def chat_stream(
                 yield {"event": "done", "data": payload if isinstance(payload, str) else ""}
             elif event_type == "revision":
                 dlp_filter.flush()
-                sanitized_rev = OutputGuard.redact_pii(payload if isinstance(payload, str) else "")
+                sanitized_rev = OutputGuard.redact_pii(payload if isinstance(payload, str) else "", allowed_values=stated_ids)
                 yield {"event": "revision", "data": sanitized_rev}
             else:
                 yield {"event": event_type, "data": payload if isinstance(payload, str) else ""}

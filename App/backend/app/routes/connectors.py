@@ -68,6 +68,28 @@ def list_system_connectors(request: Request, response: Response) -> dict[str, An
         }
 
 
+@router.get("/v1/connectors/diagnostics")
+def connector_onboarding_diagnostics(
+    response: Response,
+    _ctx: AuthContext = Depends(get_admin_access),
+) -> dict[str, Any]:
+    """Why each bound MCP server is, or is not, offered in taxpayer chat.
+
+    The staff "Add connector" flow cannot register a server (that is a
+    reviewed deployment change), but it can say what the deployment did:
+    which servers are bound, whether they answer, how the link
+    authenticates, and — per operation — what keeps it out of the chat
+    picker. Built from the same gate the chat uses; no URL, credential or
+    schema leaves the server.
+    """
+    del _ctx
+    response.headers["Cache-Control"] = "private, no-store"
+    from ..mcp import get_client
+    from ..mcp.chat_connectors import connector_diagnostics
+
+    return connector_diagnostics(get_client())
+
+
 @router.post("/v1/connectors/{name}/toggle")
 def toggle_system_connector(
     name: str,

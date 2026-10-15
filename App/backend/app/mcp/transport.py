@@ -29,6 +29,7 @@ import uuid
 from typing import Any, Protocol
 
 from .auth import (
+    MIN_SHARED_TOKEN_CHARS,
     OAUTH_CLIENT_CREDENTIALS_EXTENSION,
     ClientCredentialsToken,
     TokenError,
@@ -44,7 +45,7 @@ from .protocol import (  # noqa: F401 — re-exported for existing imports
 logger = logging.getLogger(__name__)
 
 #: ``MCP_SERVER_URL_<NAMESPACE>`` binds a namespace to a remote server.
-_URL_ENV_PREFIX = "MCP_SERVER_URL_"
+URL_ENV_PREFIX = "MCP_SERVER_URL_"
 _TOKEN_ENV_PREFIX = "MCP_SERVER_TOKEN_"  # noqa: S105 - an env-var name prefix, not a secret
 
 #: Discovery (``server/discover``, ``tools/list``) answers from memory on a
@@ -54,6 +55,15 @@ _TOKEN_ENV_PREFIX = "MCP_SERVER_TOKEN_"  # noqa: S105 - an env-var name prefix, 
 DISCOVERY_TIMEOUT_S = 3.0
 #: After a failed discovery, do not try that server again for this long.
 DISCOVERY_RETRY_S = 15.0
+#: How long "this server is answering" is believed. The tool *list* may be
+#: kept as long as the server says (the bundled servers say an hour), which
+#: is right for the list and wrong for liveness: a server that went down
+#: was shown as available — and could be chosen — for up to that hour.
+LIVENESS_TTL_S = 30.0
+#: Deadline for the reachability probe itself (``server/discover``).
+LIVENESS_TIMEOUT_S = 2.0
+#: Gateway answers that mean "nothing is behind this address right now".
+_UNREACHABLE_STATUSES = frozenset({502, 503, 504})
 
 _MCP_UNSUPPORTED_PROTOCOL_VERSION = -32022
 _BASE64_PREFIX = "=?base64?"
@@ -369,8 +379,47 @@ class HttpTransport:
         #: reported unavailable without another network round trip.
         self._retry_after: float = 0.0
         self._last_error: str = ""
+        #: The last reachability answer and when it was learned (monotonic).
+        self._live: bool = True
+        self._live_checked_at: float = 0.0
         self._client: Any = client
         self._lock = threading.Lock()
+
+    @property
+    def credential_kind(self) -> str:
+        """How this client authenticates to the server — a kind, never the credential.
+
+        ``shared_token_too_short`` is a token the server will treat as absent
+        (it would answer 401 and the link would read as down).
+        """
+        if self._token_source is not None:
+            return "oauth_client_credentials"
+        if self._token:
+            return "shared_token" if len(self._token) >= MIN_SHARED_TOKEN_CHARS else "shared_token_too_short"
+        return "none"
+
+    def _record_liveness(self, live: bool) -> None:
+        self._live = live
+        self._live_checked_at = time.monotonic()
+
+    def is_live(self) -> bool:
+        """Whether the server answered a reachability probe recently.
+
+        Answers from memory for :data:`LIVENESS_TTL_S`; otherwise asks with
+        ``server/discover`` under a short deadline. A failed call on any
+        path (:meth:`_post`) records the server as down at once, so a turn
+        that just failed is not followed by a picker that says "available".
+        """
+        now = time.monotonic()
+        if now < self._retry_after:
+            return False
+        if self._live_checked_at and now - self._live_checked_at < LIVENESS_TTL_S:
+            return self._live
+        live = self.ping(timeout_s=LIVENESS_TIMEOUT_S)
+        if not live:
+            self._retry_after = now + DISCOVERY_RETRY_S
+        self._record_liveness(live)
+        return live
 
     def _get_client(self) -> Any:
         """The one pooled client for this server.
@@ -422,11 +471,18 @@ class HttpTransport:
             raise TransportError("httpx is required for remote MCP servers") from exc
         method = str(body.get("method", ""))
         try:
-            return self._get_client().post(self.base_url, json=body, headers=headers, timeout=timeout_s)
+            response = self._get_client().post(self.base_url, json=body, headers=headers, timeout=timeout_s)
         except Exception as exc:  # noqa: BLE001 - surfaced as a structured error
+            self._record_liveness(False)
             # The URL is safe to name; the token lives in a header and is
             # never part of the message.
             raise TransportError(f"{method} to {self.base_url} failed: {type(exc).__name__}") from exc
+        status = getattr(response, "status_code", 0)
+        if status in _UNREACHABLE_STATUSES:
+            self._record_liveness(False)
+        elif isinstance(status, int) and 200 <= status < 300:
+            self._record_liveness(True)
+        return response
 
     def _request(
         self,
@@ -642,7 +698,7 @@ def _cache_seconds(ttl_ms: Any) -> float:
         return 3600.0
 
 
-def _remote_url_problem(url: str) -> str:
+def remote_url_problem(url: str) -> str:
     """Why *url* may not be bound, or ``""`` when it may.
 
     A bearer token is sent to this address on every request, so outside
@@ -669,11 +725,11 @@ def build_transports() -> dict[str, ToolTransport]:
     in_process = InProcessTransport()
     transports: dict[str, ToolTransport] = {ns: in_process for ns in ToolRegistry.namespaces()}
     for key, value in os.environ.items():
-        if not key.startswith(_URL_ENV_PREFIX) or not value.strip():
+        if not key.startswith(URL_ENV_PREFIX) or not value.strip():
             continue
-        namespace = key[len(_URL_ENV_PREFIX) :].lower()
+        namespace = key[len(URL_ENV_PREFIX) :].lower()
         url = value.strip()
-        problem = _remote_url_problem(url)
+        problem = remote_url_problem(url)
         if problem:
             logger.error("MCP namespace %s is not bound to its remote server: %s", namespace, problem)
             continue

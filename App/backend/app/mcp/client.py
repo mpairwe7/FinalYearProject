@@ -148,6 +148,9 @@ class RemoteNamespace:
     #: Self-reported by the server (name, version, instructions).  For
     #: display and logs only — never an input to an authorization decision.
     server: dict[str, Any] = field(default_factory=dict)
+    #: How this client authenticates to it (``HttpTransport.credential_kind``):
+    #: a kind for staff diagnostics, never the credential.
+    credential: str = ""
 
 
 def _meta_of(descriptor: dict[str, Any], key: str, default: Any) -> Any:
@@ -287,6 +290,7 @@ class MCPClient:
         return normalized
 
     def _probe_remote(self, namespace: str, transport: ToolTransport) -> RemoteNamespace:
+        credential = str(getattr(transport, "credential_kind", "") or "")
         try:
             descriptors = transport.list_tools()
         except Exception as exc:  # noqa: BLE001 — fail closed per server
@@ -295,7 +299,13 @@ class MCPClient:
                 namespace,
                 type(exc).__name__,
             )
-            return RemoteNamespace(namespace, reachable=False)
+            return RemoteNamespace(namespace, reachable=False, credential=credential)
+        # The tool list may come from a cache the server allowed for an hour;
+        # whether the server is answering *now* is a separate, shorter-lived
+        # question (HttpTransport.is_live).
+        is_live = getattr(transport, "is_live", None)
+        if callable(is_live) and not is_live():
+            return RemoteNamespace(namespace, reachable=False, credential=credential)
         tools = tuple(
             self._with_transport_namespace(descriptor, namespace)
             for descriptor in descriptors
@@ -313,7 +323,15 @@ class MCPClient:
                 server = {"name": str(info.get("name", "")), "version": str(info.get("version", ""))}
             if isinstance(discovered.get("instructions"), str):
                 server["instructions"] = discovered["instructions"]
-        return RemoteNamespace(namespace, reachable=True, tools=tools, server=server)
+        return RemoteNamespace(namespace, reachable=True, tools=tools, server=server, credential=credential)
+
+    def remote_namespace_names(self) -> set[str]:
+        """The namespaces bound to a remote server, without asking any of them."""
+        return {
+            namespace
+            for namespace, transport in self._transports.items()
+            if not isinstance(transport, InProcessTransport)
+        }
 
     def remote_namespaces(self) -> list[RemoteNamespace]:
         """Every deployment-bound remote server, reachable or not.

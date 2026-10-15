@@ -73,6 +73,41 @@ the CSP allows `img-src 'self' data:` and not `blob:`).
 The main chat composer offers **Add a connector** beside file and photo
 attachments. It loads a browser-safe catalog from `GET /v1/connectors?view=chat`
 and lets the taxpayer select approved services for the current conversation.
+The catalog is asked once when the chat opens, so where a deployment has no
+chat connectors switched on the menu leaves the entry out instead of offering a
+panel that only says "not enabled" (it stays when the answer is not known yet,
+or the question failed).
+
+**A choice is kept with its conversation.** The chosen services are stored with
+the conversation in this browser, so switching to another chat and back, or
+reloading, brings them back — a follow-up such as "check it again" is not
+silently answered without the service. A new conversation starts with none.
+
+**What is shared is said before anything is chosen.** The picker states that
+only what a lookup needs is sent to the service — for example a TIN, PRN or
+stamp code the taxpayer typed — together with their account reference when
+they are signed in (`ug.go.ura.chatbot/userId` in the request `_meta`).
+
+**An answer says where it came from.** Under a reply that consulted a service
+the chat shows **Looked up in: EFRIS · Demo data · Record found** — the
+service's name, whether it is a practice system, and how the lookup ended
+(`found`, `no_record`, `needs_input`, `unavailable`), from the stream's
+`agent_trace`. The record itself never travels in the trace.
+
+**A chosen service that cannot be used does not fail the chat.** The endpoint
+resolves the selection on every turn. A service that is not answering, that
+this account may no longer use (signed out, consent withdrawn), or that the
+deployment switched off is left out of the turn, the turn is answered without
+it, and `connector_notices` (on `/v1/chat`, and in the stream's `metadata`
+frame) says which and why. The chat shows one line under the answer —
+"Payments is not answering right now, so this answer does not include a lookup
+there." — marks a service that is down *Unavailable* on its chip (it stays
+chosen and is used again once it answers), and removes one this account can no
+longer use. Before, the endpoint answered 403/409 and every later message in
+that conversation failed with "could not reach the URA knowledge base".
+Availability is checked again at most every 30 seconds even though a server's
+tool list may be cached for an hour, and a failed call marks the service down at
+once.
 The chat request carries only selected namespace identifiers; the server
 resolves them to deployment-bound MCP tools and checks the caller's role,
 consent scopes, and the `enterprise_connectors` flag again before dispatch.
@@ -193,10 +228,22 @@ development only, is refused in production, and never grants a role.
 - Staff and administrators use `/admin/connectors` to review local simulator
   health and a separate, policy-filtered catalog of deployment-managed remote
   chat services. The catalog shows operations eligible for the signed-in
-  staff account without exposing endpoint URLs, credentials, or tool schemas;
-  it does not verify remote reachability. Local **Test connection** checks
-  simulator health only. The staff console's **Add connector** opens deployment
-  setup guidance; it does not register a server or accept endpoint credentials.
+  staff account without exposing endpoint URLs, credentials, or tool schemas.
+  Local **Test connection** checks simulator health only.
+- **Onboarding diagnostics** (`GET /v1/connectors/diagnostics`, staff only)
+  says why each bound server is, or is not, offered in taxpayer chat: its
+  status (`ready`, `feature_off`, `not_answering`, `no_eligible_operations`,
+  `not_offered_in_production`), how the link authenticates (`none`,
+  `shared_token`, `shared_token_too_short`, `oauth_client_credentials` — a
+  kind, never the credential), and for each operation the declaration it is
+  missing (`not_read_only`, `destructive_not_false`, `needs_confirmation`, …)
+  or who it is offered to. Settings the API refused to bind are named by
+  variable and rule, never by address. It runs the same gate the chat does
+  (`chat_connectors.read_tool_problems`), so it cannot disagree with the picker.
+- The staff console's **Add connector** walks the setup path — implement and
+  review, bind, declare, switch on — and marks each step *Done* or *Needs
+  attention* from the diagnostics. It does not register a server or accept
+  endpoint credentials.
 - `POST /v1/connectors/register` always returns `410 Gone`. New connectors
   require a reviewed server implementation and deployment configuration. See
   `docs/runbooks/enterprise-connectors-and-mcp.md` for the operational path.
@@ -303,8 +350,25 @@ Modules: `app/connector_intent.py` (routing and argument guard), `app/connector_
 `forced_operations`, `summarise_records`), `app/service.py` (`_with_connector_outcomes`).
 The runbook's §7.3 lists the knobs and §4.5a the failure signatures.
 
+A selection that cannot be used is resolved before any of this
+(`chat_connectors.resolve_chat_connector_selection`): only the usable services reach the
+turn, and the rest come back as `connector_notices` with a reason (`unavailable`,
+`not_offered`, `disabled`).
+
 Known limits, deliberately not hidden: a message that asks two services two things is
 routed per service lexically, and a value that is the right *kind* but meant for the other
 service (a TIN typed as URSB's search text) is not caught — ask one service at a time for
-the best result. A TIN the taxpayer typed is shown as `[REDACTED_UG_TIN]` when the model
-repeats it, because output redaction is global and has no "the user wrote this" exemption.
+the best result.
+
+A TIN or PRN the taxpayer typed in the message is shown back as written, on every path —
+REST, the SSE stream and the WebSocket stream (`guardrails.user_stated_identifiers`, set for the
+whole turn by `service.run_chat_turn`). Any other identifier, including another TIN in the same
+record, is still redacted.
+
+**Single-host gateway.** `app.tools.plugins` must not put the `app` package directory on
+`sys.path`: in the image that directory is `/app/app`, and `import plugins` then finds the
+backend's `app/plugins` bridge instead of the project's `plugins` package. From 2026-10-14
+to 2026-10-15 that left the `connectors` container serving six servers with **no tools** —
+healthy on `/health`, invisible in the picker. `curl -s localhost:8930/health` shows the tool
+count per server; Onboarding diagnostics shows "0 of 0 operations". Regression test:
+`tests/agents/test_connector_gateway_layout.py`, which rebuilds the container layout.

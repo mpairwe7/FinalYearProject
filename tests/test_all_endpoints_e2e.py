@@ -29,6 +29,7 @@ Qwen/Qdrant/Whisper load happens and the production startup gate is skipped.
 from __future__ import annotations
 
 import base64
+import json
 import os
 import sys
 import types
@@ -197,6 +198,7 @@ EXPECTED_ENDPOINTS: set[tuple[str, str]] = {
     ("GET", "/v1/offline/bundle"),
     # --- System connectors (EFRIS, DTS, URSB, BWIMS, TIN, Payments, External) ---
     ("GET", "/v1/connectors"),
+    ("GET", "/v1/connectors/diagnostics"),
     ("POST", "/v1/connectors/{name}/toggle"),
     ("GET", "/v1/connectors/{name}/records"),
     ("POST", "/v1/connectors/register"),
@@ -333,6 +335,7 @@ COVERAGE: dict[tuple[str, str], str] = {
     ("POST", "/v1/offline/sync"): "test_api_endpoints.OfflineModelEndpoints",
     ("GET", "/v1/offline/bundle"): "test_api_endpoints.OfflineModelEndpoints",
     ("GET", "/v1/connectors"): "this:test_connectors_endpoints",
+    ("GET", "/v1/connectors/diagnostics"): "this:test_connectors_endpoints",
     ("POST", "/v1/connectors/{name}/toggle"): "this:test_connectors_endpoints",
     ("GET", "/v1/connectors/{name}/records"): "this:test_connectors_endpoints",
     ("POST", "/v1/connectors/register"): "this:test_connectors_endpoints",
@@ -505,10 +508,10 @@ def test_every_endpoint_has_coverage():
 
 
 def test_manifest_endpoint_count():
-    """Lock the surface size so additions are deliberate (122 HTTP + 7 WS)."""
+    """Lock the surface size so additions are deliberate (123 HTTP + 7 WS)."""
     ws = {e for e in EXPECTED_ENDPOINTS if e[0] == "WS"}
     http = EXPECTED_ENDPOINTS - ws
-    assert len(http) == 122, f"expected 122 HTTP endpoints, found {len(http)}"
+    assert len(http) == 123, f"expected 123 HTTP endpoints, found {len(http)}"
     assert len(ws) == 7, f"expected 7 WS endpoints, found {len(ws)}"
 
 
@@ -909,6 +912,17 @@ def test_connectors_endpoints():
     r6 = c.post("/v1/connectors/efris/configure", json={"mode": "simulation"}, headers=_bearer(STAFF))
     assert r6.status_code == 410
     assert "Runtime connector configuration is disabled" in r6.json()["detail"]
+
+    # Onboarding diagnostics: staff only, and nothing a browser must not hold.
+    assert c.get("/v1/connectors/diagnostics").status_code in (401, 503)
+    assert c.get("/v1/connectors/diagnostics", headers=_bearer(USER)).status_code == 403
+    r7 = c.get("/v1/connectors/diagnostics", headers=_bearer(STAFF))
+    assert r7.status_code == 200
+    assert r7.headers["cache-control"] == "private, no-store"
+    diag = r7.json()
+    assert diag["ok"] is True
+    assert set(diag) >= {"enabled", "environment", "protocol_version", "servers", "refused_bindings"}
+    assert "://" not in json.dumps(diag)  # no server address reaches the console
 
 
 def test_outbox_live_endpoints() -> None:

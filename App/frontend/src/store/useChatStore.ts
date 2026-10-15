@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
 import type { DocumentAnalysisData } from '../lib/attachments';
+import {
+  sanitizeConnectorSelection,
+  sanitizeConnectorUses,
+  parseConnectorNotices,
+  type ConnectorNotice,
+  type ConnectorUse,
+} from '../lib/connectors';
 
 export interface Citation {
   ref: string;
@@ -116,6 +123,10 @@ export interface ChatTurn {
     frequency_count?: number;
     discrepancy_type?: string;
   };
+  /** Services this answer looked things up in, and how each lookup ended. */
+  connectorsUsed?: ConnectorUse[];
+  /** Selected services this answer was given without, and why. */
+  connectorNotices?: ConnectorNotice[];
 }
 
 /** The chat's own notices: an officer joining, and the hand-back to the AI. */
@@ -154,6 +165,12 @@ export interface Conversation {
   activeTicketId?: string;
   /** The live chat with an officer on that ticket, if one has started. */
   officerChat?: OfficerChatSync;
+  /**
+   * The services the taxpayer chose for this conversation. A choice is made
+   * once and meant for the whole conversation, so it comes back on a switch
+   * and a reload instead of silently lapsing into plain answers.
+   */
+  connectorNamespaces?: string[];
 }
 
 /**
@@ -198,6 +215,8 @@ interface ChatStore {
   activeTicketId: string | null;
   /** The active conversation's live chat with an officer. */
   officerChat: OfficerChatSync | null;
+  /** Services selected for the active conversation (namespaces). */
+  selectedConnectorNamespaces: string[];
   supportCaseOpen: boolean;
   // Actions
   setMessage: (value: string) => void;
@@ -215,6 +234,8 @@ interface ChatStore {
   setActiveTicketId: (ticketId: string | null) => void;
   /** Record where the live officer chat stands (null when it is over). */
   setOfficerChat: (sync: OfficerChatSync | null) => void;
+  /** Choose the services for the active conversation; kept with it. */
+  setSelectedConnectorNamespaces: (namespaces: string[]) => void;
   setSupportCaseOpen: (open: boolean) => void;
   addTurns: (turns: ChatTurn[]) => void;
   updateLastTurn: (updater: (turn: ChatTurn) => ChatTurn) => void;
@@ -311,6 +332,10 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (typeof value.thoughtForMs === 'number' && Number.isFinite(value.thoughtForMs)) {
     turn.thoughtForMs = value.thoughtForMs;
   }
+  const used = sanitizeConnectorUses(value.connectorsUsed);
+  if (used.length) turn.connectorsUsed = used;
+  const notices = parseConnectorNotices(value.connectorNotices);
+  if (notices.length) turn.connectorNotices = notices;
   const disc = value.discrepancyReport ?? (value as Record<string, unknown>).discrepancy_report;
   if (isRecord(disc) && typeof disc.id === 'string') {
     turn.discrepancyReport = {
@@ -388,6 +413,8 @@ function sanitizeConversation(value: unknown): Conversation | null {
   if (typeof value.activeTicketId === 'string' && value.activeTicketId) conversation.activeTicketId = value.activeTicketId;
   const sync = sanitizeOfficerChat(value.officerChat);
   if (sync) conversation.officerChat = sync;
+  const connectors = sanitizeConnectorSelection(value.connectorNamespaces);
+  if (connectors.length) conversation.connectorNamespaces = connectors;
   return conversation;
 }
 
@@ -637,6 +664,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
   activeConversationId: null as string | null,
   activeTicketId: null as string | null,
   officerChat: null as OfficerChatSync | null,
+  selectedConnectorNamespaces: [] as string[],
   supportCaseOpen: false,
 
   setMessage: (value) => {
@@ -683,6 +711,19 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     }));
     if (cid) get().saveCurrentSession();
   },
+  setSelectedConnectorNamespaces: (namespaces) => {
+    const next = sanitizeConnectorSelection(namespaces);
+    const cid = get().activeConversationId;
+    set((state) => ({
+      selectedConnectorNamespaces: next,
+      conversations: cid
+        ? state.conversations.map((c) =>
+            c.id === cid ? { ...c, connectorNamespaces: next.length ? next : undefined } : c,
+          )
+        : state.conversations,
+    }));
+    writePersistedChatState(get());
+  },
   setSupportCaseOpen: (open) => set({ supportCaseOpen: open }),
 
   addTurns: (turns) =>
@@ -709,6 +750,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       activeConversationId: null,
       activeTicketId: null,
       officerChat: null,
+      selectedConnectorNamespaces: [],
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -725,7 +767,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
 
   /** Save the current chat as a conversation (or update existing). */
   saveCurrentSession: () => {
-    const { chat, conversations, activeConversationId, activeTicketId, officerChat } = get();
+    const { chat, conversations, activeConversationId, activeTicketId, officerChat, selectedConnectorNamespaces } =
+      get();
     // Only save if there are user messages
     if (chat.length <= 1) {
       writePersistedChatState(get());
@@ -742,6 +785,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
     // reload or a switch back resumes them.
     if (activeTicketId) conv.activeTicketId = activeTicketId;
     if (officerChat) conv.officerChat = officerChat;
+    if (selectedConnectorNamespaces.length) conv.connectorNamespaces = selectedConnectorNamespaces;
     const existing = conversations.find((c) => c.id === id);
 
     if (existing) {
@@ -759,6 +803,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
                 updatedAt: now,
                 activeTicketId: activeTicketId || undefined,
                 officerChat: officerChat || undefined,
+                connectorNamespaces: selectedConnectorNamespaces.length ? selectedConnectorNamespaces : undefined,
               }
             : c,
         ),
@@ -782,6 +827,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       activeConversationId: null,
       activeTicketId: null,
       officerChat: null,
+      selectedConnectorNamespaces: [],
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -807,6 +853,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       message: '',
       activeTicketId: target.activeTicketId || null,
       officerChat: target.officerChat || null,
+      selectedConnectorNamespaces: target.connectorNamespaces ?? [],
       supportCaseOpen: false,
     });
     writePersistedChatState(get());
@@ -824,6 +871,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
         message: '',
         activeTicketId: null,
         officerChat: null,
+        selectedConnectorNamespaces: [],
       });
     } else {
       set({ conversations: filtered });
@@ -878,6 +926,7 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       message: '',
       activeTicketId: null,
       officerChat: null,
+      selectedConnectorNamespaces: [],
     });
     writePersistedChatState(get());
   },
@@ -901,6 +950,8 @@ export const useChatStore = create<ChatStore>()((set, get) => ({
       // A reload mid-case resumes the case and its live chat.
       activeTicketId: activeConversation?.activeTicketId ?? null,
       officerChat: activeConversation?.officerChat ?? null,
+      // ...and the services chosen for it.
+      selectedConnectorNamespaces: activeConversation?.connectorNamespaces ?? [],
     });
     writePersistedChatState(get());
   },
