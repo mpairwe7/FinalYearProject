@@ -29,6 +29,14 @@
   gap: var(--ops-band);
 }
 
+/* Grid items default to min-width: auto, so the widest table (Officers on
+   duty) would set the column's width and push a phone's page sideways. Let the
+   columns shrink; the table scrolls inside its own TableScroll instead. */
+.ov-cols > *,
+.ov-side > * {
+  min-width: 0;
+}
+
 /* Officers on duty -------------------------------------------------------- */
 
 .ov-duty-summary {
