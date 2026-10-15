@@ -150,3 +150,39 @@ def classify_hybrid_speech_mode(
     except Exception:
         logger.debug("hybrid_s2s: metric record skipped", exc_info=True)
     return decision
+
+
+_FAST_GREETING_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:hello|hi|hey|good\s+(?:morning|afternoon|evening)|"
+    r"oli\s+otya|gyebale\s+ko|wasuze\s+otya|osiibye\s+otya|"
+    r"habari(?:\s+za\s+(?:asubuhi|mchana|jioni))?|mambo|shikamoo)\W*$",
+    re.IGNORECASE,
+)
+
+_FAST_THANKS_RE: Final[re.Pattern[str]] = re.compile(
+    r"^\W*(?:thank\s+you(?:\s+very\s+much)?|thanks(?:\s+a\s+lot)?|"
+    r"webale(?:\s+nnyo)?|weebale(?:\s+nnyo)?|"
+    r"asante(?:\s+sana)?|shukrani)\W*$",
+    re.IGNORECASE,
+)
+
+
+def build_s2s_fast_reply(query: str, locale: str = "en") -> str | None:
+    """Return an immediate sub-millisecond conversational response for pure S2S fast turns, or None."""
+    clean = (query or "").strip()
+    if not clean or _STATUTORY_OR_NUMERIC_RE.search(clean):
+        return None
+    loc = (locale or "en").strip().lower()
+    if _FAST_GREETING_RE.search(clean):
+        return {
+            "lg": "Gyebale ko! Ndi kitongole kya URA. Nkuyambe ntya ku by'omusolo leero?",
+            "sw": "Habari! Karibu Mamlaka ya Mapato ya Uganda (URA). Nikusaidie vipi kuhusu kodi leo?",
+            "en": "Hello! Welcome to the Uganda Revenue Authority. How can I help you with your taxes today?",
+        }.get(loc, "Hello! Welcome to the Uganda Revenue Authority. How can I help you with your taxes today?")
+    if _FAST_THANKS_RE.search(clean):
+        return {
+            "lg": "Kale nnyo! Olina ekibuuzo ekirala ku musolo?",
+            "sw": "Karibu sana! Je, una swali lingine kuhusu kodi?",
+            "en": "You are very welcome! Do you have any other tax question I can help with?",
+        }.get(loc, "You are very welcome! Do you have any other tax question I can help with?")
+    return None

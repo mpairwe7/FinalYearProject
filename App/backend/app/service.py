@@ -625,11 +625,10 @@ def _structure_excerpt(text: str) -> str:
             t = f"{prefix}\n\n{bullets}{suffix}"
     return OutputGuard.normalize_structure(t)
 
-# Shared executor for LLM calls — bounded so one slow generation cannot
-# exhaust worker threads under load.  Size is small on purpose: Qwen runs
-# one inference at a time per process anyway (no true batching without vLLM).
+# Shared executor for LLM calls — bounded (8-16 workers, default 12) so vLLM
+# continuous batching can serve concurrent requests without thread starvation.
 _LLM_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=int(os.getenv("LLM_MAX_CONCURRENCY", "2")),
+    max_workers=int(os.getenv("LLM_MAX_CONCURRENCY", "12")),
     thread_name_prefix="llm",
 )
 _LLM_CIRCUIT = CircuitBreaker(

@@ -147,7 +147,7 @@ User Query
 | Min-p sampling | 0.08 | `LLM_MIN_P` — **vLLM path only**; rarely binds at temperature 0.2 |
 | Presence penalty | 0.05 | `LLM_PRESENCE_PENALTY` — **vLLM path only** |
 | No repeat n-gram | 0 (off) | `LLM_NO_REPEAT_NGRAM_SIZE` — **Transformers path only**; vLLM `SamplingParams` has no such field |
-| Concurrency | 2 | `LLM_MAX_CONCURRENCY` |
+| Concurrency | 12 (8–16 bounded thread pool) | `LLM_MAX_CONCURRENCY` |
 | Deadline | 45s | `LLM_DEADLINE_SECONDS` |
 | Trust remote code | `false` | `LLM_TRUST_REMOTE_CODE` (OWASP LLM03) |
 | Model revision | unset | `LLM_MODEL_REVISION` (SLSA pin) |

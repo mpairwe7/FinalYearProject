@@ -126,9 +126,19 @@ class UraSpeechTTS(TTSService):
         async for frame in self._voice(text, context_id):
             yield frame
         state = getattr(self.room, "state", None)
-        if getattr(state, "speech_rate_slow", False):
+        raw_rate = getattr(state, "recommended_speech_rate", 1.0)
+        rec_rate = float(raw_rate) if isinstance(raw_rate, (int, float)) else 1.0
+        raw_pause = getattr(state, "dictation_pause_ms", 120)
+        dict_pause = int(raw_pause) if isinstance(raw_pause, (int, float)) else 120
+        is_slow = getattr(state, "speech_rate_slow", False) is True
+        if is_slow:
             silence = b"\x00" * 640  # 20 ms at 16 kHz mono PCM16
             for _ in range(get_slow_pause_ms() // 20):
+                yield TTSAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1)
+        elif 0.5 <= rec_rate < 0.98:
+            scaled_pause_ms = max(60, int(dict_pause * (1.0 / max(0.75, rec_rate))))
+            silence = b"\x00" * 640
+            for _ in range(max(1, scaled_pause_ms // 20)):
                 yield TTSAudioRawFrame(audio=silence, sample_rate=16000, num_channels=1)
 
     async def _voice(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:

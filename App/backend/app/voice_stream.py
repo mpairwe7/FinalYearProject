@@ -469,13 +469,56 @@ class VoiceSession:
             # generate() localised the reply itself; it is English if that failed.
             tts_lang = str(llm_result.get("reply_locale") or detected_lang)
 
-        # Clean speech text for natural phonetics and pacing
+        # Clean speech text for natural phonetics, dictation pacing, and figure verification
+        tts_allowed = self.tts_enabled
+        figure_guard_blocked = False
+        verified_caption_text = reply_for_tts
         try:
+            from .flags import flags
+            from .receptionist.spoken_figure_guard import inject_dictation_pauses, verify_spoken_figures
             from .speech_normalization import clean_text_for_speech
 
-            reply_for_tts = clean_text_for_speech(reply_for_tts, locale=tts_lang)
+            cleaned_speech = clean_text_for_speech(reply_for_tts, locale=tts_lang)
+            if flags.is_enabled("spoken_figure_guard", subject=self.user_id or None):
+                paused = inject_dictation_pauses(cleaned_speech)
+                ver = verify_spoken_figures(
+                    reply_text,
+                    paused,
+                    locale=tts_lang,
+                    subject=self.user_id or "",
+                )
+                if ver.ok:
+                    reply_for_tts = paused
+                else:
+                    tts_allowed = False
+                    figure_guard_blocked = True
+                    reply_for_tts = verified_caption_text
+            else:
+                reply_for_tts = cleaned_speech
         except Exception:
             pass
+
+        # Checkpoint longitudinal ResolutionCase on voice_ws turns when consented
+        if self.user_id:
+            try:
+                from .flags import flags
+                from .memory import ResolutionCase, get_memory_service
+
+                if flags.is_enabled("continuous_relationship_memory", subject=self.user_id):
+                    memsvc = get_memory_service()
+                    case = ResolutionCase(
+                        user_id=self.user_id,
+                        tenant_id=self.tenant_id,
+                        thread_id=self.conversation_id,
+                        source_channel="voice_ws",
+                        locale=detected_lang,
+                        primary_objective=query_text[:120],
+                        status="in_progress",
+                        completed_steps=[f"Voice WS turn {self._turn_count} answered"],
+                    )
+                    memsvc.checkpoint_resolution_case(self.user_id, case, tenant_id=self.tenant_id)
+            except Exception:
+                pass
 
         if self._cancelled.is_set():
             return
@@ -485,7 +528,7 @@ class VoiceSession:
         tts_t0 = time.perf_counter()
         chunk_idx = 0
 
-        if self.tts_enabled and reply_for_tts.strip():
+        if tts_allowed and reply_for_tts.strip():
             sentences = _split_sentences(reply_for_tts)
             audio_started = False
 
@@ -543,7 +586,12 @@ class VoiceSession:
                 )
             yield VoiceStreamEvent(type="audio_end", data={})
         else:
-            # No TTS — just emit the reply text as a single chunk
+            # No TTS (or blocked by spoken_figure_guard) — emit the verified reply text
+            if figure_guard_blocked:
+                yield VoiceStreamEvent(
+                    type="tts_degraded",
+                    data={"detail": "spoken_figure_guard_fallback_text_only"},
+                )
             yield VoiceStreamEvent(
                 type="reply_text",
                 data={"text": reply_for_tts, "chunk_index": 0},

@@ -424,13 +424,14 @@ class LivePartialTranscriptTap(FrameProcessor):
         try:
             from ..flags import flags
             from .hybrid_s2s import compute_semantic_endpoint_silence_ms
+            from .lexicon import normalize_call_query
 
             self.room.state.semantic_endpoint_silence_ms = compute_semantic_endpoint_silence_ms(
                 text, locale=self.language
             )
             uid = getattr(self.room.state, "user_id", "") or None
             if flags.is_enabled("speculative_prefetch", subject=uid) and len(text.split()) >= 4:
-                self.room.state.prefetched_query = text
+                self.room.state.prefetched_query = normalize_call_query(text, self.language)
         except Exception:
             logger.debug("Partial semantic endpoint / prefetch update skipped", exc_info=True)
 
