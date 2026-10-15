@@ -37,7 +37,7 @@ _CONVERSATIONAL_FAST_RE: Final[re.Pattern[str]] = re.compile(
 )
 
 _INCOMPLETE_DIGIT_TAIL_RE: Final[re.Pattern[str]] = re.compile(
-    r"\b(?:\d{1,8}|zero|one|two|three|four|five|six|seven|eight|nine|"
+    r"(?<![,.\d])\b(?:\d{1,8}|zero|one|two|three|four|five|six|seven|eight|nine|"
     r"emu|bbiri|ssatu|nnya|ttaano|mukaaga|musanvu|munaana|mwenda|"
     r"moja|mbili|tatu|nne|tano|sita|saba|nane|tisa)$",
     re.IGNORECASE,
@@ -103,10 +103,13 @@ def classify_hybrid_speech_mode(
     loc = (locale or "en").lower()
     silence_ms = compute_semantic_endpoint_silence_ms(clean, locale=loc)
 
+    from ..text_signals import detect_user_distress
+
     has_statutory = bool(
         has_money_amount(clean)
         or detect_calculator_intent(clean) is not None
         or _STATUTORY_OR_NUMERIC_RE.search(clean)
+        or detect_user_distress(clean) != ""
         or active_workflow_slot_type in {"tin", "currency", "amount", "date", "prn", "number"}
     )
 
