@@ -196,7 +196,7 @@ ledger as part of the turn row (`escalation_tier`, `escalation_reasons`), digest
 
 ## 10. Phase 38 delivery log
 
-- PR: _filled in when opened_.
+- PR: #578.
 - Runbook: [`docs/runbooks/escalation-and-handoff.md`](../runbooks/escalation-and-handoff.md).
 - Tests: `App/backend/tests/test_escalation_policy.py`, `test_turn_cases.py`,
   `test_taxpayer_escalation.py` (tenant); root `tests/agents/test_phase38_cx.py`;
