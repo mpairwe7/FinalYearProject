@@ -72,7 +72,51 @@ def _max_chars() -> int:
         return 120
 
 
-_DEFAULT_SPEAKERS = {"lg": "salt_lug_0001", "sw": "waxal_swa_0006", "en": "salt_eng_0001"}
+_DEFAULT_SPEAKERS = {
+    # ISO 639-1 UI codes
+    "lg": "salt_lug_0001",
+    "sw": "waxal_swa_0006",
+    "en": "salt_eng_0001",
+    # ISO 639-3 Sunbird/tts config codes (per Sunbird/orpheus-3b-tts-multilingual model card)
+    "lug": "salt_lug_0001",
+    "swa": "waxal_swa_0006",
+    "eng": "salt_eng_0001",
+    "nyn": "salt_nyn_0001",
+    "ach": "salt_ach_0001",
+    "teo": "salt_teo_0001",
+    "luo": "waxal_luo_0001",
+    "kin": "bateesa_kin_0001",
+    "rw": "bateesa_kin_0001",
+    "kik": "waxal_kik_0003",
+    "ki": "waxal_kik_0003",
+    "yor": "waxal_yor_0002",
+    "yo": "waxal_yor_0002",
+    "hau": "waxal_hau_0004",
+    "ha": "waxal_hau_0004",
+    "ibo": "waxal_ibo_0003",
+    "ig": "waxal_ibo_0003",
+    "afr": "slr32_afr_0009",
+    "af": "slr32_afr_0009",
+    "xho": "slr32_xho_0012",
+    "xh": "slr32_xho_0012",
+    "ewe": "slr129_ewe_0001",
+    "ee": "slr129_ewe_0001",
+    "ful": "waxal_ful_0003",
+    "ff": "waxal_ful_0003",
+    "lin": "slr129_lin_0001",
+    "ln": "slr129_lin_0001",
+}
+_ISO_EQUIVALENTS: dict[str, tuple[str, ...]] = {
+    "lg": ("lg", "lug"),
+    "lug": ("lg", "lug"),
+    "sw": ("sw", "swa"),
+    "swa": ("sw", "swa"),
+    "en": ("en", "eng"),
+    "eng": ("en", "eng"),
+    "nyn": ("nyn",),
+    "ach": ("ach",),
+    "teo": ("teo",),
+}
 _SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
 _CLAUSE_BREAK_RE = re.compile(r"(?<=[,;:\u2014\u2013])\s+")
 
@@ -94,13 +138,22 @@ def in_cooldown() -> bool:
 
 
 def speaker_for(language: str) -> str | None:
-    """The Orpheus speaker for *language*, or ``None`` if Orpheus does not voice it here."""
+    """The Orpheus speaker for *language* (ISO 639-1 or ISO 639-3), or ``None`` if unvoiced."""
     if not is_configured():
         return None
-    enabled = {p.strip() for p in os.getenv("ORPHEUS_TTS_LANGUAGES", "lg,sw,en").split(",") if p.strip()}
-    if language not in enabled:
+    norm = (language or "").strip().lower()
+    if not norm:
         return None
-    return os.getenv(f"ORPHEUS_TTS_SPEAKER_{language.upper()}", "").strip() or _DEFAULT_SPEAKERS.get(language)
+    enabled = {p.strip().lower() for p in os.getenv("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach").split(",") if p.strip()}
+    equivalents = _ISO_EQUIVALENTS.get(norm, (norm,))
+    if not any(code in enabled for code in equivalents):
+        return None
+    canonical = equivalents[0]
+    return (
+        os.getenv(f"ORPHEUS_TTS_SPEAKER_{canonical.upper()}", "").strip()
+        or os.getenv(f"ORPHEUS_TTS_SPEAKER_{norm.upper()}", "").strip()
+        or _DEFAULT_SPEAKERS.get(norm)
+    )
 
 
 def _check_cooldown() -> None:

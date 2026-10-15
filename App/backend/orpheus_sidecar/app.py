@@ -67,14 +67,43 @@ MAX_TOKENS = int(os.getenv("ORPHEUS_MAX_TOKENS", "1200"))
 # headroom for a second caller. See evals/reports/orpheus_tts_*.json.
 QUANTIZATION = os.getenv("ORPHEUS_QUANTIZATION", "").strip() or None
 
-# The model card's speaker table (Luganda, Swahili, English + multilingual Sunbird/Waxal/SLR32 voices).
+# Complete official speaker catalog from Sunbird/orpheus-3b-tts-multilingual model card (20 configs).
 SPEAKERS: frozenset[str] = frozenset({
+    # Acholi (ach)
+    "salt_ach_0001", "waxal_ach_0001", "waxal_ach_0005", "waxal_ach_0006", "waxal_ach_0008",
+    # Afrikaans (afr)
+    "slr32_afr_0009",
+    # English (eng)
+    "salt_eng_0001", "salt_eng_0002", "salt_eng_0003",
+    # Ewe (ewe)
+    "slr129_ewe_0001",
+    # Fulah (ful)
+    "waxal_ful_0003", "waxal_ful_0004", "waxal_ful_0006",
+    # Hausa (hau)
+    "waxal_hau_0004", "waxal_hau_0006", "waxal_hau_0007", "waxal_hau_0008",
+    # Igbo (ibo)
+    "waxal_ibo_0003", "waxal_ibo_0005", "waxal_ibo_0008",
+    # Kikuyu (kik)
+    "waxal_kik_0003", "waxal_kik_0004",
+    # Kinyarwanda (kin)
+    "bateesa_kin_0001",
+    # Lingala (lin)
+    "slr129_lin_0001",
+    # Luganda (lug)
     "salt_lug_0001", "waxal_lug_0002", "waxal_lug_0003", "waxal_lug_0004",
     "waxal_lug_0005", "waxal_lug_0006", "waxal_lug_0007", "waxal_lug_0008",
+    # Luo (luo)
+    "waxal_luo_0001", "waxal_luo_0002", "waxal_luo_0003", "waxal_luo_0004",
+    # Runyankole (nyn)
+    "salt_nyn_0001", "waxal_nyn_0003", "waxal_nyn_0004", "waxal_nyn_0007", "waxal_nyn_0008",
+    # Swahili (swa)
     "waxal_swa_0006", "waxal_swa_0007",
-    "salt_eng_0001", "salt_eng_0002", "salt_eng_0003",
-    "waxal_yor_0002", "waxal_hau_0004", "slr32_afr_0009",
-    "salt_nyn_0001", "salt_ach_0001",
+    # Ateso (teo)
+    "salt_teo_0001",
+    # Xhosa (xho)
+    "slr32_xho_0012",
+    # Yoruba (yor)
+    "waxal_yor_0002", "waxal_yor_0006", "waxal_yor_0008",
 })
 _VOICE_RE = re.compile(r"^[a-z0-9]+_[a-z]{3}_\d{4}$")
 

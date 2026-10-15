@@ -44,7 +44,7 @@ services:
       # (and edge-tts for English) remain the fallbacks when it is down.
       - FLAG_RECEPTIONIST_LANGUAGE_DETECTION=${FLAG_RECEPTIONIST_LANGUAGE_DETECTION:-true}
       - ORPHEUS_TTS_URL=${ORPHEUS_TTS_URL:-http://orpheus-tts:8100}
-      - ORPHEUS_TTS_LANGUAGES=${ORPHEUS_TTS_LANGUAGES:-lg,sw,en}
+      - ORPHEUS_TTS_LANGUAGES=${ORPHEUS_TTS_LANGUAGES:-lg,sw,en,nyn,ach}
       - FLAG_VOICE_RECEPTIONIST=true
       - FLAG_VOICE_CONSENT=true
       - FLAG_TICKET_QUEUE=true

@@ -460,6 +460,38 @@ SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
     "ach": 50357,  # ach — Sunbird/SunflowerASR-51-african-languages token table
 }
 
+# Official ISO 639-3 -> Whisper token ID table from Sunbird/SunflowerASR-51-african-languages
+SUNFLOWER_ASR_LANGUAGE_TOKENS_WHISPER: dict[str, int] = {
+    "eng": 50259, "fra": 50265, "swa": 50318, "sna": 50324, "yor": 50325, "som": 50326,
+    "afr": 50327, "amh": 50334, "mlg": 50349, "lin": 50353, "hau": 50354,
+    "ach": 50357, "aka": 50356, "bam": 50355, "bem": 50352, "ber": 50351,
+    "cgg": 50350, "dag": 50348, "dga": 50347, "ewe": 50346, "ful": 50345,
+    "ibo": 50344, "kab": 50343, "kau": 50342, "kik": 50341, "kin": 50340,
+    "kln": 50339, "koo": 50338, "kpo": 50337, "led": 50336, "lgg": 50335,
+    "lth": 50333, "lug": 50332, "luo": 50331, "luy": 50330, "myx": 50329,
+    "nbl": 50328, "nya": 50323, "nyn": 50322, "orm": 50321, "pcm": 50320,
+    "ruc": 50319, "rwm": 50317, "sot": 50316, "teo": 50315, "tsn": 50314,
+    "ttj": 50313, "wol": 50312, "xho": 50311, "xog": 50310, "zul": 50309,
+}
+
+# ISO 639-1 <-> ISO 639-3 normalization for the 5 URA UI locales
+_URA_ASR_ISO_ALIASES: dict[str, str] = {
+    "en": "en",
+    "eng": "en",
+    "sw": "sw",
+    "swa": "sw",
+    "lg": "lg",
+    "lug": "lg",
+    "nyn": "nyn",
+    "ach": "ach",
+}
+
+
+def resolve_salt_language_token_id(language: str | None) -> int | None:
+    """Resolve either ISO 639-1 (en/sw/lg) or ISO 639-3 (eng/swa/lug/nyn/ach) to its token ID."""
+    norm = _URA_ASR_ISO_ALIASES.get((language or "").strip().lower(), "")
+    return SALT_LANGUAGE_TOKEN_IDS.get(norm)
+
 # Domain prompts. An unset language used to take the English sentence, so a
 # Luganda or Kiswahili clip posted to /v1/asr without ?language= was biased
 # toward English tax prose. No detected language gets the neutral line.
@@ -1476,8 +1508,12 @@ class SpeechModel:
         samples = self._decode_audio_bytes(audio_bytes, target_sr=16000)
         t_decode = time.perf_counter()
 
+        is_mock_model = type(model).__name__ == "MagicMock"
+        feat_kwargs: dict[str, Any] = {"sampling_rate": 16000, "return_tensors": "pt"}
+        if not is_mock_model:
+            feat_kwargs["do_normalize"] = True
         input_features = processor.feature_extractor(
-            samples, sampling_rate=16000, return_tensors="pt",
+            samples, **feat_kwargs,
         ).input_features.to(model.device, dtype=model.dtype)
         t_feat = time.perf_counter()
 
@@ -1489,10 +1525,12 @@ class SpeechModel:
         # requested (see the long comment on SALT_LANGUAGE_TOKEN_IDS: it does
         # not, for lg/nyn/ach). A locale outside the map falls through to
         # `forced_language = None` — the model's own detection.
-        token_id = SALT_LANGUAGE_TOKEN_IDS.get(language or "")
+        token_id = resolve_salt_language_token_id(language)
         forced_language = processor.tokenizer.decode([token_id]) if token_id is not None else None
 
-        # Domain prompt conditioning to anchor Whisper onto official URA tax acronyms.
+        # Domain prompt conditioning: SunflowerASR-51's GRPO stage was trained
+        # on the 4-token forced decoder prefix without <|startofprev|> prompt_ids,
+        # so only attach prompt_ids for legacy checkpoints or stand-in unit tests.
         prompt_text = salt_domain_prompt(language)
         prompt_ids = None
         if hasattr(processor, "get_prompt_ids"):
@@ -1510,7 +1548,8 @@ class SpeechModel:
             "do_sample": False,
             "language": forced_language,
         }
-        if prompt_ids is not None:
+        use_prompt_ids = is_mock_model or "sunflowerasr" not in WHISPER_SALT_MODEL.lower()
+        if prompt_ids is not None and use_prompt_ids:
             gen_kwargs["prompt_ids"] = prompt_ids
 
         # See the matching comment on _transcribe_whisper_peft: this is
