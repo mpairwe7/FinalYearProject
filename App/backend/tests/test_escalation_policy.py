@@ -30,6 +30,13 @@ class StakesTests(unittest.TestCase):
         self.assertEqual(detect_high_stakes("akaunti imefungwa na URA"), ("enforcement",))
         self.assertEqual(detect_high_stakes("leo ni siku ya mwisho ya kulipa"), ("deadline_today",))
 
+    def test_runyankole_and_acholi_enforcement_phrases_the_lexicon_already_lists(self) -> None:
+        self.assertEqual(detect_high_stakes("Tihaine sente, ebyangye babikwata"), ("enforcement",))
+        self.assertEqual(detect_high_stakes("Cente peke, jami na gimako"), ("enforcement",))
+        for text in ("Tihaine sente, ebyangye babikwata", "Cente peke, jami na gimako"):
+            verdict = assess_escalation(text)
+            self.assertEqual((verdict.tier, verdict.priority), (TIER_PRIORITY, "urgent"), text)
+
     def test_an_ordinary_question_has_nothing_at_stake(self) -> None:
         for text in ("What is the VAT rate?", "I earn UGX 2,000,000 per month", "How do I file by end of day?", ""):
             self.assertEqual(detect_high_stakes(text), (), text)

@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import time
 import unittest
+from pathlib import Path
 from typing import Any
 from unittest import mock
-
-from pathlib import Path
 
 from app.memory.resolution_ledger import (
     _WORKFLOW_DOMAINS,

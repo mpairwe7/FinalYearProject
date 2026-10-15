@@ -664,9 +664,11 @@ _ENFORCEMENT_RE = re.compile(
     r"|(?:goods|cargo|vehicle|truck|car|container|stock)\s+(?:were\s+|was\s+|have\s+been\s+|has\s+been\s+)?(?:seized|impounded|detained)"
     r"|(?:sealed|closed|locked)\s+(?:my\s+|our\s+)?(?:shop|premises|business|office)"
     r"|auction\w*|enforcement\s+(?:notice|action|officers?)|demand\s+notice"
-    # Luganda / Swahili / Runyankole forms of the same events (shared with _HARDSHIP_RE)
+    # Luganda / Swahili / Runyankole / Acholi forms of the same events: the
+    # phrases _HARDSHIP_RE lists as enforcement cues, so one lexicon says it.
     r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde"
-    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|ebyangye\s+babikwata)\b"
+    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|ebyangye\s+babikwata"
+    r"|jami\s+na\s+gimako)\b"
 )
 _DEADLINE_TODAY_RE = re.compile(
     r"\b(?:(?:due|deadline|expires?|closes?)\s+(?:is\s+)?(?:today|tonight|by\s+midnight)"

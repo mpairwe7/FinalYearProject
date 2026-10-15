@@ -379,7 +379,9 @@ stakes, effort and confidence, reading the last three messages so the
 button's own empty message does not erase what was said before it; with
 `structured_text_handoff` the ticket carries `HandoffEnvelope` v2.1 and the
 details to ask for are pruned against what the taxpayer already gave
-(names only). In the conversation itself, the same policy decides when
+(names only, read under the workflow's owner-scoped state key); the button's
+placeholder hand-off takes its topic, team and details from the conversation.
+In the conversation itself, the same policy decides when
 **Talk to an officer** is offered, and puts it first when urgent.
 See `docs/plans/agentic-cx-phase38-plan.md`.
 

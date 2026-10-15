@@ -176,6 +176,7 @@ ledger as part of the turn row (`escalation_tier`, `escalation_reasons`), digest
 | **Emotional misclassification** | QW2 tiers | Deterministic, explainable reasons; *offer* not impose; tier `priority` needs two signals (affect × stakes, or affect × effort); evaluated on a labelled en/lg/sw set before ramp. |
 | **Latency** | QW1–QW3 | No model calls; one consent lookup and one working-memory write per substantive turn, off the token stream. |
 | **Brand / trust** | Over-offering officers | Kill criteria in §6; officer capacity check before `priority` promises a callback. |
+| **Vernacular coverage** | `detect_high_stakes`, affect lexicon | Enforcement cues exist for en/lg/sw and the phrases the shared lexicon lists for nyn/ach; "a deadline today" has none for nyn/ach, and those turns are also read through the English rewrite. A message in a language without a stakes cue is still *offered* a person (hardship alone → `offer`, `high`), never put first. Native review of every vernacular cue is open (runbook `escalation-and-handoff.md`). |
 
 ---
 
@@ -196,4 +197,26 @@ ledger as part of the turn row (`escalation_tier`, `escalation_reasons`), digest
 ## 10. Phase 38 delivery log
 
 - PR: _filled in when opened_.
-- Live verification: _filled in after the GPU stack run_.
+- Runbook: [`docs/runbooks/escalation-and-handoff.md`](../runbooks/escalation-and-handoff.md).
+- Tests: `App/backend/tests/test_escalation_policy.py`, `test_turn_cases.py`,
+  `test_taxpayer_escalation.py` (tenant); root `tests/agents/test_phase38_cx.py`;
+  `TicketCaseChat.test.tsx`. Full backend + root suites: the same 65
+  container-only failures as `dev`, no new ones.
+- Live verification (2026-10-16): an isolated api built from this branch
+  (own analytics database, GPU 4, the shared Sunflower vLLM) with all three
+  flags on, driven through REST, SSE and the staff console in a browser —
+  25/25 API checks and the staff ticket panel. It found five defects that the
+  unit tests had not, all fixed in this change:
+  1. the hand-off read the workflow by the id the client sent; the engine
+     keys it by owner, so `already_given` was always empty on a real ticket;
+  2. "Talk to an officer" arrived with `topic: general` and nothing to ask, so
+     there was nothing to prune — the topic, team and details now come from
+     the conversation;
+  3. a guided workflow's case domain was read from the *answer* to its last
+     step ("VAT" to the return-filing steps opened a VAT case);
+  4. "register" and "pay" outranked the named tax: "Do I need to register for
+     VAT?" opened a TIN-registration case, "stamp duty" a customs one;
+  5. a rate read out shares `retrieval_mode: calculator` with a computation,
+     so "What is the VAT rate?" opened a case.
+  It also found that `/v1/escalate` ignored the caller's tenant.
+- Not done here: M1–M6 and A1–A3 (§4.2–4.3).
