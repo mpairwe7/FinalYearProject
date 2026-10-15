@@ -125,7 +125,13 @@ def compact_messages(
 
 def analyze_context_window(state: AgentGraphState) -> dict[str, Any]:
     """Analyze token footprint, context utilization, and attention rot risk."""
-    from ...llm import LLM_CONTEXT_WINDOW, _estimate_tokens, _served_context_window
+    from ...llm import (
+        LLM_CONTEXT_WINDOW,
+        _estimate_tokens,
+        _served_context_window,
+        model_uses_yarn,
+        native_model_context_window,
+    )
 
     query_tokens = _estimate_tokens(state.rewritten_query or state.query)
     summary_tokens = _estimate_tokens(state.context_summary)
@@ -138,6 +144,8 @@ def analyze_context_window(state: AgentGraphState) -> dict[str, Any]:
 
     served = _served_context_window()
     window = served if served > 0 else LLM_CONTEXT_WINDOW
+    native_window = native_model_context_window()
+    uses_yarn = model_uses_yarn()
     utilization_pct = round((total_estimated / max(window, 1)) * 100, 2)
 
     # Detect context rot / attention dilution risk
@@ -151,6 +159,8 @@ def analyze_context_window(state: AgentGraphState) -> dict[str, Any]:
     return {
         "estimated_tokens": total_estimated,
         "context_window": window,
+        "native_max_position_embeddings": native_window,
+        "uses_yarn": uses_yarn,
         "utilization_pct": utilization_pct,
         "rot_risk": rot_risk,
         "token_breakdown": {
@@ -209,7 +219,13 @@ def compact_prompt_context(
             )
         history = recent
 
-    from ...llm import LLM_CONTEXT_WINDOW, _estimate_tokens, _served_context_window
+    from ...llm import (
+        LLM_CONTEXT_WINDOW,
+        _estimate_tokens,
+        _served_context_window,
+        model_uses_yarn,
+        native_model_context_window,
+    )
 
     query_tokens = _estimate_tokens(query)
     summary_tokens = _estimate_tokens(updated_summary)
@@ -225,6 +241,8 @@ def compact_prompt_context(
     analytics = {
         "estimated_tokens": total_estimated,
         "context_window": window,
+        "native_max_position_embeddings": native_model_context_window(),
+        "uses_yarn": model_uses_yarn(),
         "utilization_pct": utilization_pct,
         "rot_risk": rot_risk,
     }

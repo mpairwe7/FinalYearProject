@@ -1,12 +1,13 @@
-"""LLM generation layer — Sunflower-14B-FP8 answer synthesis (2026).
+"""LLM generation layer — Sunflower-Qwen3.5-9B (Sunflower v2) answer synthesis (2026).
 
 True RAG: top-k retrieved passages are fed to an instruction-tuned LLM
 that synthesizes a grounded, cited answer.  Default model is
-Sunbird/Sunflower-14B-FP8 (Apache-2.0, Qwen3-14B architecture, FP8
-compressed-tensors quantized, natively multilingual across 31 Ugandan
-languages + English, hybrid thinking/non-thinking modes inherited from
-Qwen3's chat template). GATED on HuggingFace — HF_TOKEN must belong to an
-account granted access, or LLM_MODEL may point at a local download.
+Sunbird/Sunflower-Qwen3.5-9B (Sunflower v2, Qwen3.5-9B architecture with
+native 256K / 262,144 max_position_embeddings without YaRN RoPE scaling,
+natively multilingual across 31 Ugandan languages + English, hybrid
+thinking/non-thinking modes inherited from Qwen3's chat template). GATED on
+HuggingFace — HF_TOKEN must belong to an account granted access, or LLM_MODEL
+may point at a local download.
 
 On GPUs without native FP8 tensor cores (e.g. Ampere/A6000),
 LLM_BACKEND=vllm is materially faster than LLM_BACKEND=local: vLLM
@@ -31,10 +32,10 @@ air-gapped or privacy-sensitive deployments.
 Model swap guide: see docs/MODEL_SWAP_GUIDE.md for tested alternatives.
 
 Environment variables:
-    LLM_MODEL               – HF model ID (default: Sunbird/Sunflower-14B-FP8)
+    LLM_MODEL               – HF model ID (default: Sunbird/Sunflower-Qwen3.5-9B)
     LLM_MODEL_REVISION      – HF revision/commit SHA to pin (default: None)
     LLM_TRUST_REMOTE_CODE   – "true" to allow model-defined Python (default: false)
-    LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192, up to 131072 with YaRN)
+    LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192; up to 262144 native on Sunflower-Qwen3.5-9B without YaRN)
     LLM_TEMPERATURE         – generation temperature (default: 0.2)
     LLM_MAX_TOKENS          – max new tokens (default: 512)
     LLM_REPETITION_PENALTY  – repetition penalty, both paths (default: 1.1)
@@ -77,6 +78,36 @@ LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-Qwen3.5-9B")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
 LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
+#: Native max_position_embeddings on Sunbird/Sunflower-Qwen3.5-9B & Sunflower-Qwen3.8-27B (256K without YaRN).
+NATIVE_SUNFLOWER_V2_CONTEXT_WINDOW: Final[int] = 262_144
+NATIVE_SUNFLOWER_V2_MAX_POSITION_EMBEDDINGS: Final[int] = 262_144
+
+
+def uses_native_long_context_without_yarn(model_name: str | None = None) -> bool:
+    """True when *model_name* (default ``LLM_MODEL``) natively supports 256K/262K context without YaRN."""
+    name = (model_name or LLM_MODEL or "").lower()
+    return any(
+        token in name
+        for token in ("sunflower-qwen3.5", "sunflower-qwen3.8", "sunflowerv2", "sunflower-v2", "qwen3.5")
+    )
+
+
+def model_uses_yarn(model_name: str | None = None) -> bool:
+    """True only when *model_name* relies on YaRN RoPE scaling (e.g. legacy Sunflower-14B)."""
+    name = (model_name or LLM_MODEL or "").lower()
+    return "sunflower-14b" in name or "yarn" in name
+
+
+def native_model_context_window(model_name: str | None = None) -> int:
+    """Return the model family's native max_position_embeddings without substituting LLM_CONTEXT_WINDOW."""
+    if uses_native_long_context_without_yarn(model_name):
+        return NATIVE_SUNFLOWER_V2_MAX_POSITION_EMBEDDINGS
+    name = (model_name or LLM_MODEL or "").lower()
+    if "sunflower-14b" in name:
+        return 131_072
+    if any(t in name for t in ("qwen3-8b", "qwen3-30b", "qwen3-235b")):
+        return 40_960
+    return 32_768
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
@@ -1715,6 +1746,8 @@ def translate_text(
     text: str,
     source_lang: str = "en",
     target_lang: str = "lg",
+    *,
+    tone_register: str = "",
 ) -> str:
     """Lightweight LLM-prompted translation with repetition control.
 
@@ -1811,6 +1844,15 @@ def translate_text(
         "Write all numbers, percentages, dates, and monetary amounts "
         "using exact Arabic numerals and standard currency notation — do NOT drop, omit, invent, or add any numbers, percentages, dates, or figures, and do NOT write numbers or amounts out as words."
     )
+    affect_note = ""
+    try:
+        from .flags import flags
+        from .mt import build_affect_mt_instruction
+
+        if target_lang != "en" and (tone_register or flags.is_enabled("eq_multimodal_fusion")):
+            affect_note = build_affect_mt_instruction(tone_register, target_lang)
+    except Exception:
+        affect_note = ""
     glossary_hints = get_translation_glossary_hints(text, target_lang)
     if target_lang == "en":
         user_prompt = (
@@ -1822,7 +1864,7 @@ def translate_text(
     else:
         user_prompt = (
             f"Translate from {src_name} to {lang_name}."
-            f"{constraint_note}{example}\n\n"
+            f"{constraint_note}{affect_note}{example}\n\n"
             f"Translate to {lang_name}: {text}"
         )
     messages = [

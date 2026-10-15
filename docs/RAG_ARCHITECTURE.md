@@ -5,9 +5,9 @@
 The URA Chatbot implements a production-grade Retrieval-Augmented Generation pipeline with local LLM inference, agentic supervisor routing, guided workflows, and a full speech pipeline. The system runs entirely on-premises (no external API calls for core RAG), making it suitable for air-gapped or privacy-sensitive government deployments.
 
 **API Version**: 1.3.0
-**LLM**: Sunbird/Sunflower-14B-FP8 (Qwen3-14B base, FP8-quantized, via vLLM — Apache-2.0, natively multilingual for Ugandan languages; Qwen/Qwen3-8B is the simple local-Transformers fallback, see docs/MODEL_SWAP_GUIDE.md)
+**LLM**: Sunbird/Sunflower-Qwen3.5-9B (Sunflower v2, Qwen3.5-9B base with native 256K / 262,144 context window without YaRN, FP8 via vLLM — natively multilingual for Ugandan languages; Qwen/Qwen3-8B is the simple local-Transformers fallback, see docs/MODEL_SWAP_GUIDE.md)
 **Retrieval**: Qdrant dense (BAAI/bge-m3, 1024-dim) + BM25 sparse + RRF fusion + mxbai-rerank-base-v2
-**Speech**: Whisper (ASR) + Piper (TTS) + Sunbird AI cloud fallback (5 Ugandan languages)
+**Speech**: Sunbird/SunflowerASR-51-african-languages (ASR) + Sunbird/orpheus-3b-tts-multilingual (TTS) + Sunbird AI cloud fallback (5 Ugandan languages)
 **Auth**: JWT (HS256 dev / RS256 OIDC prod), RBAC, consent-gated personalization
 
 ## Pipeline Flow (12 Stages)
@@ -136,9 +136,9 @@ User Query
 
 | Setting | Default | Env Var |
 |---------|---------|---------|
-| Model | `Sunbird/Sunflower-14B-FP8` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
+| Model | `Sunbird/Sunflower-Qwen3.5-9B` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
 | Backend | `local` (HF transformers) | `LLM_BACKEND` (`local` or `vllm`) |
-| Context window | 131072 tokens (128K–131K with YaRN) | `LLM_CONTEXT_WINDOW` |
+| Context window | 8192 code default (`262144` in `.env.example` — 256K / 262K native `max_position_embeddings` without YaRN) | `LLM_CONTEXT_WINDOW` |
 | Device | `auto` (GPU if available) | `LLM_DEVICE` |
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |
@@ -242,7 +242,7 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   every older one. Before, the summary started at turn seven and turns four to
   six reached the model in neither.
 - **Prompt budget under vLLM (G120).** `llm._fit_to_context` asks the server for
-  its served window (`/v1/models` `max_model_len`, up to 131,072 for Sunflower with YaRN) and the
+  its served window (`/v1/models` `max_model_len`, up to 262,144 native for `Sunbird/Sunflower-Qwen3.5-9B` without YaRN) and the
   prompt's exact token count (`/tokenize`); over budget it drops the oldest
   replayed exchanges whole, then shortens the passages, never the question or
   the answer-language instruction. The streamed answer, which had no budget,
@@ -282,8 +282,8 @@ supervisor's ESCALATE and specialist routes run on streaming turns too (G115).
   - **Episodic Memory**: Coarse conversational summaries, interaction timelines, and topic tags.
   - **Semantic Memory**: Granular, confidence-filtered fact triplets with statutory citations (`memory_store`, `memory_recall`, `memory_discard` tools).
   - **Procedural Memory**: Statutory SOP checklists, skills, and trajectory exemplars (`ProceduralMemory`, `TrajectoryExemplar`) for TIN registration, VAT return filing, and assessment objections.
-- **Standardized Handoff Envelopes (`memory/handoff.py`)**: Structured handoff packets (`HandoffEnvelope`, `HandoffGoal`, `EvidenceCard`, `RecommendedAction`) providing cross-agent and officer desk state continuity.
-- **Context Compactor & Rot Analytics (`compactor.py`)**: YaRN RoPE 131k token budget monitoring with dynamic observation compaction and context rot risk alerting.
+- **Standardized Handoff Envelopes (`memory/handoff.py`)**: Structured handoff packets (`HandoffEnvelope`, `HandoffGoal`, `EvidenceCard`, `RecommendedAction`) providing cross-agent and officer desk state continuity, zero-repetition `verified_slot_bank`, `affect_trajectory`, and `pending_background_tasks`.
+- **Context Compactor & Rot Analytics (`compactor.py`)**: Native 256K / 262,144 token budget monitoring (`Sunbird/Sunflower-Qwen3.5-9B` without YaRN) with dynamic observation compaction and context rot risk alerting.
 - **Scoped Output Redaction Exemption (G143)**: `_ACTIVE_USER_STATED_IDS` ContextVar threads user-declared TINs/PRNs into `OutputGuard.redact_pii()`, preventing response censorship of the taxpayer's own identifiers.
 
 **Where state lives** (the session / user / app / invocation scopes of Google
@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (73 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (77 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -537,12 +537,12 @@ The local serving stack operates across dedicated hardware allocations on NVIDIA
          ┌─────────────┼───────────────────────────┐
          ▼             ▼                           ▼
 [ ura-app-vllm ] [ ura-app-qdrant ]      [ ura-app-orpheus-tts ]
- (GPU 2: 131k YaRN) (v1.19.0 Vectors)     (Optional Sidecar: 8100)
+ (GPU 2: 262k Native) (v1.19.0 Vectors)   (Optional Sidecar: 8100)
 ```
 
 1. **vLLM Generator Pod (`ura-app-vllm-sunflower`)**:
    - Dedicated to **GPU 2** (40.1 GB VRAM allocated, 85% utilization ceiling).
-   - Serves `Sunbird/Sunflower-14B-FP8` with **YaRN RoPE context extension** (`factor: 4.0`, `max_model_len: 131,072`).
+   - Serves `Sunbird/Sunflower-Qwen3.5-9B` (Sunflower v2) with **native 256K / 262,144 context window without YaRN** (`max_position_embeddings: 262,144`, `--max-model-len 262144`, FP8 weights + FP8 KV cache).
    - Supports native tool-calling via `--enable-auto-tool-choice --tool-call-parser hermes` and chunked prefill (`max_num_batched_tokens: 16,384`).
 2. **API & Speech Host (`ura-app-api:gpu`)**:
    - Dedicated to **GPU 3** (12.6 GB VRAM allocated, 36.5 GB headroom).
@@ -616,7 +616,7 @@ The speech engine prioritizes local neural models on GPU, falling back through p
    - `_ACTIVE_USER_STATED_IDS` ContextVar threads taxpayer-declared TINs and PRNs into `OutputGuard.redact_pii()`, preventing response censorship of the user's own identifiers while ensuring payment cards and passwords remain unconditionally redacted.
 4. **4-Tier Cognitive Memory Integration**:
    - Working memory entity extraction (business names, locations, amounts) combined with procedural trajectory exemplars for statutory tax operations (TIN registration, VAT return filing, assessment objections).
-   - YaRN RoPE 131k token allocation compactor with real-time context-rot analytics (`rot_risk_threshold: 0.85`).
+   - Native 256K / 262,144 token allocation compactor (`Sunbird/Sunflower-Qwen3.5-9B` without YaRN) with real-time context-rot analytics (`rot_risk_threshold: 0.85`).
 5. **EU AI Act Article 50(2) Compliance**:
    - Every synthesized audio WAV embeds an IPTC `trainedAlgorithmicMedia` INFO chunk, providing verifiable machine-readable marking of AI-generated synthetic speech.
 6. **Hybrid Speech S2S + Regulated Cascaded Router & Spoken Figure Guard (`receptionist/hybrid_s2s.py`, `receptionist/spoken_figure_guard.py`)**:
@@ -661,6 +661,9 @@ Energy-based VAD with hysteresis (numpy only, no silero-vad dependency):
 | `ura_relationship_resumption_total` | counter | Cross-channel `ResolutionCase` resumption and completion counts |
 | `ura_eq_interventions_total` | counter | Emotional intelligence (EQ) interventions (`de_escalated_autonomous`, `escalated_officer`) |
 | `ura_workforce_delegation_total` | counter | Coordinated Human <-> AI workforce delegations (`officer_to_ai`, `ai_to_officer`) |
+| `ura_slot_repetition_prevented_total` | counter | Tool/workflow parameters bound from `verified_slot_bank`, `semantic_memory`, or `dag_receipt` without re-asking the taxpayer |
+| `ura_workflow_tangent_resumed_total` | counter | Mid-workflow policy side-questions answered and seamlessly resumed on the parked step |
+| `ura_officer_copilot_edit_distance_ratio` | histogram | Normalized edit distance `[0..1]` between AI co-pilot draft and final officer reply |
 
 ## Feature Flags (`flags.py`)
 
@@ -714,9 +717,13 @@ All major subsystems are behind feature flags for progressive rollout:
 | `risk_tiered_autonomy_gates` | off | Enforces Low/Medium/High/Critical risk-tiered autonomy gates, soft-confirmation confidence floor ($\ge 0.80$), and mandatory officer approval on High-risk proposals |
 | `quality_circuit_breaker` | off | Automatically throttles Medium/High-risk autonomy when rolling quality scorecard or figure fidelity drops below threshold |
 | `verifiable_decision_receipts` | off | Attaches human-readable `DecisionReceipt` explanations (`audit_event_id`, statutory basis, verified inputs, reversal instructions) to consequential responses |
+| `eq_multimodal_fusion` | off | Fuses multi-turn lexical distress trajectory (`tools/empathy.py`), native Ugandan vernacular hardship cues (`lg`/`sw`/`nyn`/`ach`), and voice `ProsodyProfile` into a smoothed `AffectiveState` score with affect-conditioned MT register |
+| `workflow_tangent_resume` | off | Allows active guided workflows (`workflows/registry.py`) to answer mid-flow policy side-questions and seamlessly resume the parked workflow step |
+| `autonomous_outcome_verification` | off | Binds missing tool arguments from consented `verified_slot_bank`, `SemanticMemory`, and prior specialist DAG receipts in `main_graph.bind_arguments()` and verifies post-action outcomes |
+| `officer_preference_capture` | off | Captures PII-redacted edit diffs between AI co-pilot drafts and final officer replies in `officer_chat.py` for offline DPO/ORPO preference alignment |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**73** in total, including the per-phase switches for voice, offline and
+**77** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

@@ -77,6 +77,15 @@ _MAX_PATTERN_CHARS = 1000
 #: Below this word count a stop-word-only query is a clarification.
 _CLARIFY_MIN_WORDS = 2
 
+_DOMESTIC_TAX_HEAD_RE = re.compile(
+    r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax)\b",
+    re.IGNORECASE,
+)
+_POLICY_OR_RELIEF_RE = re.compile(
+    r"\b(?:deferment|exemption|exempt|relief|instalment\s+agreement|waiver|remission)\b",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Supervisor
@@ -335,9 +344,8 @@ class Supervisor:
         )
         has_rate = any(pat.search(probe) for pat, _, _ in pats.rate)
         has_temporal = any(pat.search(q) for pat, _, _ in pats.temporal)
-        has_domestic_tax = bool(
-            re.search(r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax|deferment|exemption)\b", q, re.I)
-        )
+        has_domestic_tax = bool(_DOMESTIC_TAX_HEAD_RE.search(q))
+        has_policy_or_relief = bool(_POLICY_OR_RELIEF_RE.search(q))
 
         sub_routes: list[AgentRoute] = []
         tools: list[str] = list(base.suggested_tools)
@@ -347,9 +355,16 @@ class Supervisor:
             for t in ("calculate_customs_duty", "calculate_vat", "lookup_rate", "search_ura_knowledge_base"):
                 if t not in tools:
                     tools.append(t)
+            if has_temporal and "get_filing_deadlines" not in tools:
+                tools.append("get_filing_deadlines")
         elif has_calc and has_temporal:
             sub_routes.extend([AgentRoute.TOOLS, AgentRoute.TAX_SPECIALIST])
             for t in ("get_filing_deadlines", "get_current_date", "search_ura_knowledge_base"):
+                if t not in tools:
+                    tools.append(t)
+        elif has_domestic_tax and has_policy_or_relief and (has_calc or has_rate):
+            sub_routes.extend([AgentRoute.TAX_SPECIALIST, AgentRoute.TOOLS])
+            for t in ("lookup_rate", "search_ura_knowledge_base"):
                 if t not in tools:
                     tools.append(t)
 

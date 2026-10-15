@@ -50,17 +50,63 @@ system of record, and replicas do not need to agree about it.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import logging
 import os
 import re
 import threading
 from collections import Counter, OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 from .entailment import canonical_amounts, percentages
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_TONE_REGISTER: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "_ACTIVE_TONE_REGISTER", default="neutral"
+)
+
+
+def get_active_tone_register() -> str:
+    """Return the active EQ tone register for the current turn, or 'neutral'."""
+    return _ACTIVE_TONE_REGISTER.get() or "neutral"
+
+
+@contextlib.contextmanager
+def affect_register_scope(tone_register: str) -> Iterator[None]:
+    """Scope an EQ tone register ('empathetic_reassuring', 'patient_clear', 'direct_urgent') across MT calls."""
+    clean = (tone_register or "").strip()
+    if not clean:
+        yield
+        return
+    token = _ACTIVE_TONE_REGISTER.set(clean)
+    try:
+        yield
+    finally:
+        _ACTIVE_TONE_REGISTER.reset(token)
+
+
+def build_affect_mt_instruction(tone_register: str = "", target_lang: str = "lg") -> str:
+    """Build a concise tone-register instruction for prompted MT when eq_multimodal_fusion is active."""
+    reg = (tone_register or get_active_tone_register() or "neutral").strip().lower()
+    if reg == "empathetic_reassuring":
+        return (
+            " Maintain a calm, respectful, trauma-informed, and reassuring tone in the target language; "
+            "preserve empathetic openings and keep all #NMBR...# sentinels intact."
+        )
+    if reg == "patient_clear":
+        return (
+            " Use clear, simple, step-by-step phrasing in the target language without bureaucratic jargon; "
+            "keep all #NMBR...# sentinels intact."
+        )
+    if reg == "direct_urgent":
+        return (
+            " Keep the phrasing direct and action-oriented, highlighting deadlines and next steps clearly; "
+            "keep all #NMBR...# sentinels intact."
+        )
+    return ""
 
 #: Entries held per direction pair. Sized for a working set of repeated FAQ
 #: questions and their answers rather than a whole corpus — 0 disables.

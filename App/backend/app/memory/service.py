@@ -284,13 +284,19 @@ class MemoryService:
         workflow_state_snapshot: dict[str, Any] | None = None,
         officer_macros: list[dict[str, str]] | None = None,
         eq_guidance: dict[str, Any] | None = None,
+        required_inputs: list[str] | None = None,
+        verified_slot_bank: dict[str, Any] | None = None,
+        affect_trajectory: list[dict[str, Any]] | None = None,
+        pending_background_tasks: list[str] | None = None,
     ) -> HandoffEnvelope:
         """Construct an immutable, structured handoff envelope for human or peer escalation."""
         import os
 
         from ..flags import flags
 
-        eq_enabled = flags.is_enabled("eq_adaptive_retrieval", subject=user_id or None)
+        eq_enabled = flags.is_enabled("eq_adaptive_retrieval", subject=user_id or None) or flags.is_enabled(
+            "eq_multimodal_fusion", subject=user_id or None
+        )
         effective_priority = priority or "normal"
         if eq_enabled and caller_affect in ("frustrated", "urgent_distress", "hardship") and effective_priority == "normal":
             effective_priority = "high"
@@ -307,18 +313,35 @@ class MemoryService:
             if effective_priority == "high"
             else 120
         )
+        effective_slots: dict[str, Any] = {}
+        if user_id and flags.is_enabled("zero_effort_slot_prefill", subject=user_id):
+            effective_slots.update(self.resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id))
+        if verified_slot_bank:
+            effective_slots.update(verified_slot_bank)
+        tin_str = (
+            user_id
+            if user_id and user_id.isdigit() and len(user_id) == 10
+            else str(effective_slots.get("tin") or "")
+        )
+        known_slot_keys = {str(k).strip().lower() for k, v in effective_slots.items() if v not in (None, "")}
+        if tin_str:
+            known_slot_keys.update({"tin", "taxpayer_tin", "taxpayer_id"})
+        pruned_inputs = [
+            req for req in (required_inputs or []) if str(req).strip().lower() not in known_slot_keys
+        ]
         now = time.time()
         env = HandoffEnvelope(
             thread_id=thread_id,
             tenant_id=tenant_id,
             goal=HandoffGoal(primary_objective=objective, target_resolution=target_resolution),
-            taxpayer_tin=user_id if user_id and user_id.isdigit() and len(user_id) == 10 else "",
+            taxpayer_tin=tin_str,
             taxpayer_locale=locale or "en",
             verified_evidence=evidence or [],
             blockers_and_risks=blockers or [],
             next_action=RecommendedAction(
                 action_type=next_action_type,
                 suggested_message=suggested_message,
+                required_inputs=pruned_inputs,
             ),
             source_channel=source_channel,
             caller_affect=caller_affect,
@@ -331,6 +354,9 @@ class MemoryService:
             ),
             officer_macros=officer_macros or [],
             eq_guidance=dict(eq_guidance or {}),
+            verified_slot_bank=effective_slots,
+            affect_trajectory=list(affect_trajectory or []),
+            pending_background_tasks=list(pending_background_tasks or []),
         )
         try:
             from ..analytics import metrics

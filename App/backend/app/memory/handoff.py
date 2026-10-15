@@ -91,6 +91,21 @@ class HandoffEnvelope:
     decision_trace: list[str] = field(default_factory=list)
     reversibility_summary: str = ""
     quality_scorecard_summary: dict[str, Any] = field(default_factory=dict)
+    # Phase 35 (October 2026) — Zero-Repetition Slot Bank, Affect Trajectory & Background Tasks
+    verified_slot_bank: dict[str, Any] = field(default_factory=dict)
+    affect_trajectory: list[dict[str, Any]] = field(default_factory=list)
+    pending_background_tasks: list[str] = field(default_factory=list)
+
+    def zero_repetition_score(self) -> float:
+        """Return 1.0 when next_action.required_inputs asks for zero already-verified slots."""
+        req = [str(k).strip().lower() for k in (self.next_action.required_inputs or []) if str(k).strip()]
+        if not req:
+            return 1.0
+        known = {str(k).strip().lower() for k, v in (self.verified_slot_bank or {}).items() if v not in (None, "")}
+        if self.taxpayer_tin.strip():
+            known.update({"tin", "taxpayer_tin", "taxpayer_id"})
+        overlap = sum(1 for k in req if k in known)
+        return round(max(0.0, 1.0 - (overlap / len(req))), 3)
 
     def completeness_ratio(self) -> float:
         """Compute structured handoff completeness score in [0.0, 1.0]."""
@@ -132,6 +147,9 @@ class HandoffEnvelope:
             "decision_trace": list(self.decision_trace),
             "reversibility_summary": self.reversibility_summary,
             "quality_scorecard_summary": dict(self.quality_scorecard_summary),
+            "verified_slot_bank": dict(self.verified_slot_bank),
+            "affect_trajectory": list(self.affect_trajectory),
+            "pending_background_tasks": list(self.pending_background_tasks),
         }
 
     @classmethod
@@ -207,4 +225,7 @@ class HandoffEnvelope:
             decision_trace=list(data.get("decision_trace", [])),
             reversibility_summary=str(data.get("reversibility_summary", "")),
             quality_scorecard_summary=dict(data.get("quality_scorecard_summary", {})),
+            verified_slot_bank=dict(data.get("verified_slot_bank", {})),
+            affect_trajectory=list(data.get("affect_trajectory", [])),
+            pending_background_tasks=list(data.get("pending_background_tasks", [])),
         )

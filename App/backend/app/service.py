@@ -3515,7 +3515,7 @@ def _is_already_in_locale(text: str, target_locale: str) -> bool:
     return False
 
 
-def localize_reply(reply: str, locale: str) -> str:
+def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
     """Render *reply* in *locale*, or return the English unchanged.
 
     Answers are generated in English (see ``llm.can_generate_in_locale``) and
@@ -3555,7 +3555,11 @@ def localize_reply(reply: str, locale: str) -> str:
     suggestion_sep = "\n\nYou might also want to know:"
     if suggestion_sep in text:
         body_part, _, follow_part = text.partition(suggestion_sep)
-        loc_body = localize_reply(body_part.strip(), locale)
+        loc_body = (
+            localize_reply(body_part.strip(), locale, tone_register=tone_register)
+            if tone_register
+            else localize_reply(body_part.strip(), locale)
+        )
         if loc_body and loc_body != body_part.strip():
             prefix = "\n\nOyinz'okwagala okumanya:" if locale == "lg" else "\n\nUnaweza pia kutaka kujua:"
             loc_follow = _translate_reply(follow_part.strip(), locale) or follow_part.strip()
@@ -3612,22 +3616,23 @@ def localize_reply(reply: str, locale: str) -> str:
 
     localized: str | None = None
     reason = "skipped"
-    if mt.MT_PROTECT_FIGURES:
-        protected, figure_map = mt.protect_figures(source_to_translate)
-        if figure_map:
-            localized, reason = _attempt(protected, figure_map)
-            if localized is None:
-                metrics.inc(
-                    "reply_localization_protected_retry_total",
-                    labels={"locale": locale, "reason": reason},
-                )
-                logger.info(
-                    "protected reply localization to %s failed (%s); retrying unprotected",
-                    safe_locale,
-                    reason,
-                )
-    if localized is None:
-        localized, reason = _attempt(source_to_translate, {})
+    with mt.affect_register_scope(tone_register):
+        if mt.MT_PROTECT_FIGURES:
+            protected, figure_map = mt.protect_figures(source_to_translate)
+            if figure_map:
+                localized, reason = _attempt(protected, figure_map)
+                if localized is None:
+                    metrics.inc(
+                        "reply_localization_protected_retry_total",
+                        labels={"locale": locale, "reason": reason},
+                    )
+                    logger.info(
+                        "protected reply localization to %s failed (%s); retrying unprotected",
+                        safe_locale.replace("\r", "").replace("\n", ""),
+                        reason.replace("\r", "").replace("\n", ""),
+                    )
+        if localized is None:
+            localized, reason = _attempt(source_to_translate, {})
 
     if localized is None:
         if reason == "figures_changed":
@@ -5598,8 +5603,10 @@ class ChatModel:
         return out
 
     @staticmethod
-    def _localize_reply(reply: str, locale: str) -> str:
+    def _localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
         """Instance-side alias for :func:`localize_reply`."""
+        if tone_register:
+            return localize_reply(reply, locale, tone_register=tone_register)
         return localize_reply(reply, locale)
 
     @staticmethod
@@ -8842,7 +8849,18 @@ class ChatModel:
             result["reply_locale"] = "en"
             if effective not in ("", "en"):
                 english = str(result.get("reply", ""))
-                result["reply"] = self._localize_reply(english, effective)
+                tone_reg = str(result.get("eq_tone_register") or "")
+                if not tone_reg and flags.is_enabled("eq_multimodal_fusion", subject=user_id):
+                    try:
+                        from .tools.empathy import assess as _assess_turn_eq
+
+                        tone_reg = str(_assess_turn_eq(message, record_metric=False).get("tone_register") or "")
+                    except Exception:
+                        tone_reg = ""
+                if tone_reg and tone_reg != "neutral":
+                    result["reply"] = self._localize_reply(english, effective, tone_register=tone_reg)
+                else:
+                    result["reply"] = self._localize_reply(english, effective)
                 if result["reply"] != english or _is_already_in_locale(english.strip(), effective):
                     result["reply_locale"] = effective
                 if result["reply"] != english:
