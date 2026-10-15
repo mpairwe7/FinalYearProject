@@ -72,6 +72,10 @@ def test_2026_flags_registered_and_logged_variants():
         "risk_tiered_autonomy_gates",
         "quality_circuit_breaker",
         "verifiable_decision_receipts",
+        "eq_multimodal_fusion",
+        "workflow_tangent_resume",
+        "autonomous_outcome_verification",
+        "officer_preference_capture",
     ):
         assert name in all_flags
         assert all_flags[name] is False
@@ -89,6 +93,10 @@ def test_2026_flags_registered_and_logged_variants():
     assert "risk_tiered_autonomy_gates" in variants
     assert "quality_circuit_breaker" in variants
     assert "verifiable_decision_receipts" in variants
+    assert "eq_multimodal_fusion" in variants
+    assert "workflow_tangent_resume" in variants
+    assert "autonomous_outcome_verification" in variants
+    assert "officer_preference_capture" in variants
 
 
 def test_hybrid_speech_s2s_router_and_semantic_endpointing():
@@ -893,3 +901,305 @@ def test_phase34_sunbird_v2_model_defaults(monkeypatch):
         )
     assert wavs == [b"\x01\x00\x02\x00", b"\x03\x00\x04\x00"]
     assert mock_post.call_args.args[0] == "http://orpheus-tts:8100/v1/audio/speech/batch"
+
+
+def test_phase35_sunflower_v2_native_262k_context_without_yarn():
+    from app import llm
+    from app.agents.graphs.compactor import analyze_context_window, compact_prompt_context
+
+    assert llm.NATIVE_SUNFLOWER_V2_CONTEXT_WINDOW == 262_144
+    assert llm.uses_native_long_context_without_yarn("Sunbird/Sunflower-Qwen3.5-9B") is True
+    assert llm.uses_native_long_context_without_yarn("Sunbird/Sunflower-14B-FP8") is False
+    assert llm.native_model_context_window("Sunbird/Sunflower-Qwen3.5-9B") == 262_144
+    assert llm.native_model_context_window("Sunbird/Sunflower-14B-FP8") == 131_072
+
+    state = AgentGraphState(
+        query="Explain customs valuation and VAT deferment",
+        conversation_history=[{"user_message": "hello", "bot_reply": "welcome"}],
+    )
+    info = analyze_context_window(state)
+    assert info["native_max_position_embeddings"] == 262_144
+    assert info["uses_yarn"] is False
+
+    _, _, prompt_analytics = compact_prompt_context(
+        "Explain customs valuation",
+        [{"user_message": "hello", "bot_reply": "welcome"}],
+    )
+    assert prompt_analytics["native_max_position_embeddings"] == 262_144
+    assert prompt_analytics["uses_yarn"] is False
+
+
+def test_phase35_multimodal_eq_fusion_vernacular_hardship_and_affect_mt():
+    from app import mt
+    from app.query import plan_retrieval
+    from app.receptionist.prosody import ProsodyProfile
+    from app.text_signals import detect_user_distress
+    from app.tools.empathy import fuse_multimodal_affect
+
+    # 1. Native Ugandan vernacular hardship & distress detection (lg, sw, nyn, ach)
+    assert detect_user_distress("Ebintu byange babikutte era sirina ssente") == "hardship"
+    assert detect_user_distress("Duka langu limefungwa na sina pesa") == "hardship"
+    assert detect_user_distress("Tihaine sente okusasula omusolo") == "hardship"
+    assert detect_user_distress("Cente peke") == "hardship"
+    assert detect_user_distress("Ntidde nnyo ekibonerezo") == "anxiety"
+    assert detect_user_distress("Nina wasiwasi kuhusu faini") == "anxiety"
+
+    flags.set("eq_multimodal_fusion", True)
+    try:
+        # 2. Multi-turn sustained frustration trajectory in Stage 0b2 plan_retrieval
+        history = [
+            "The portal is not working for my VAT return",
+            "It still does not work and keeps failing",
+        ]
+        plan = plan_retrieval("This is frustrating, why is it still not working?", history=history)
+        assert plan["prefer"].get("eq_sustained") is True
+        assert plan["prefer"].get("eq_tone_register") == "empathetic_reassuring"
+        assert "section 39" in str(plan["prefer"].get("eq_relief_terms", "")).lower()
+
+        # 3. Multimodal fusion (lexical + acoustic prosody + clarification effort + smoothing)
+        prosody = ProsodyProfile(
+            caller_affect="frustrated",
+            rms_energy=0.22,
+            energy_variance=0.10,
+            words_per_second=4.1,
+            recommended_speech_rate=0.92,
+        )
+        fused = fuse_multimodal_affect(
+            "Duka langu limefungwa na sina pesa!",
+            history=history,
+            prosody_profile=prosody,
+            clarifications_asked=2,
+            previous_smoothed_score=0.50,
+        )
+        assert fused.affect == "hardship"
+        assert fused.smoothed_score >= 0.72
+        assert fused.should_auto_escalate is True
+        assert fused.tone_register == "empathetic_reassuring"
+        assert fused.priority_boost in ("high", "urgent")
+        assert fused.recommended_speech_rate <= 0.90
+
+        # 4. Affect-conditioned MT instruction scoping (nested empty scope preserves outer register)
+        with mt.affect_register_scope("empathetic_reassuring"):
+            assert mt.get_active_tone_register() == "empathetic_reassuring"
+            with mt.affect_register_scope(""):
+                assert mt.get_active_tone_register() == "empathetic_reassuring"
+            instr = mt.build_affect_mt_instruction(target_lang="lg")
+            assert "reassuring" in instr
+            assert "#NMBR" in instr
+        assert mt.get_active_tone_register() == "neutral"
+    finally:
+        flags.clear("eq_multimodal_fusion")
+
+
+def test_phase35_memory_backed_tool_binding_and_workflow_tangent_resume(tmp_db):
+    from pathlib import Path
+
+    from app.agents.graphs.main_graph import bind_arguments, node_act
+    from app.workflows.registry import WorkflowRegistry, auto_load_flows
+
+    auto_load_flows(Path("App/backend/app/workflows/flows"))
+    memsvc = get_memory_service()
+    u = tmp_db.upsert_user(external_id="1000777111", tenant_id="default")
+    uid = u["id"]
+    tmp_db.grant_consent(uid, "personalization", "2026-04")
+
+    # Store verified monthly_salary in verified_slot_bank
+    assert memsvc.resolution_ledger.store_verified_slots(
+        uid,
+        {"monthly_salary": 3_500_000, "tin": "1000777111"},
+        tenant_id="default",
+    ) is True
+
+    flags.set("autonomous_outcome_verification", True)
+    flags.set("workflow_tangent_resume", True)
+    try:
+        # 1. bind_arguments resolves missing monthly_salary from consented verified_slot_bank
+        state = AgentGraphState(
+            query="Calculate my PAYE tax",
+            rewritten_query="Calculate my PAYE tax",
+            user_id=uid,
+            tenant_id="default",
+            plan=["calculate_paye"],
+        )
+        bound = bind_arguments("calculate_paye", state)
+        assert bound is not None
+        assert bound.get("monthly_gross") == 3_500_000
+
+        act_res = node_act(state)
+        assert act_res.next_node == "observe"
+        assert len(state.tool_calls) == 1
+        assert state.tool_calls[0]["ok"] is True
+        assert state.tool_calls[0]["verified_outcome"] is True
+        assert state.tool_calls[0]["bound_arguments"]["monthly_gross"] == 3_500_000
+
+        # 2. Mid-workflow policy side-question tangent & auto-resume
+        session = WorkflowRegistry.create_session("return_filing")
+        assert session is not None
+        # First turn emits Step 1 prompt (taxpayer_type slot)
+        t1 = WorkflowRegistry.advance(session, "")
+        assert t1.slot_name == "taxpayer_type"
+        step1_idx = session.current_step_idx
+
+        # Taxpayer asks a policy side-question instead of choosing individual/non-individual
+        t_tangent = WorkflowRegistry.advance(session, "What is the current VAT rate in Uganda?")
+        assert t_tangent.is_tangent is True
+        assert t_tangent.validation_error == ""
+        assert "18%" in t_tangent.question
+        assert "Now, returning to Step" in t_tangent.question
+        # Session remains parked on Step 1
+        assert session.current_step_idx == step1_idx
+
+        # Taxpayer now provides the valid taxpayer_type -> advances cleanly to Step 2
+        t2 = WorkflowRegistry.advance(session, "individual")
+        assert t2.is_tangent is False
+        assert t2.validation_error == ""
+        assert session.slots.get("taxpayer_type") == "individual"
+        assert session.current_step_idx > step1_idx
+    finally:
+        flags.clear("autonomous_outcome_verification")
+        flags.clear("workflow_tangent_resume")
+
+
+def test_phase35_multi_case_resolution_ledger_anon_promotion_and_officer_preferences(tmp_db):
+    from app import officer_chat
+
+    memsvc = get_memory_service()
+    u = tmp_db.upsert_user(external_id="1000999222", tenant_id="default")
+    uid = u["id"]
+    tmp_db.grant_consent(uid, "personalization", "2026-04")
+
+    # 1. Multi-case concurrent ResolutionLedger across distinct domains (Customs vs VAT)
+    case_customs = ResolutionCase(
+        case_id="res-customs-01",
+        user_id=uid,
+        primary_objective="Customs duty valuation on imported machinery",
+        status="awaiting_user_action",
+        pending_steps=["Upload commercial invoice"],
+    )
+    case_vat = ResolutionCase(
+        case_id="res-vat-02",
+        user_id=uid,
+        primary_objective="VAT return amendment for September",
+        status="in_progress",
+        pending_steps=["Confirm input VAT schedule"],
+    )
+    assert memsvc.checkpoint_resolution_case(uid, case_customs, asr_confidence=0.95) is True
+    assert memsvc.checkpoint_resolution_case(uid, case_vat, asr_confidence=0.95) is True
+
+    active_cases = memsvc.resolution_ledger.list_active_cases(uid)
+    assert len(active_cases) >= 2
+    picked_customs = memsvc.resolution_ledger.select_case_for_turn(
+        uid, query="I have the commercial invoice for my customs import duty"
+    )
+    assert picked_customs is not None
+    assert picked_customs.case_id == "res-customs-01"
+    assert picked_customs.domain_tag == "customs"
+
+    picked_vat = memsvc.resolution_ledger.select_case_for_turn(
+        uid, query="Let us finish my VAT return amendment"
+    )
+    assert picked_vat is not None
+    assert picked_vat.case_id == "res-vat-02"
+    assert picked_vat.domain_tag == "vat"
+
+    # 2. Anonymous-to-authenticated session promotion
+    anon_sid = "anon-sess-p35"
+    tmp_db.upsert_working_memory(
+        anon_sid,
+        "default",
+        {"verified_slot_bank": {"tin": "1000999222", "gross_rent": 12_000_000}},
+        ttl_seconds=3600,
+    )
+    anon_wf_key = tmp_db.conversation_state_key("conv-promote-35", session_id=anon_sid, user_id=None)
+    tmp_db.upsert_workflow_session(
+        anon_wf_key,
+        workflow_id="return_filing",
+        current_step_idx=2,
+        slots={"tin": "1000999222", "tax_type": "VAT"},
+        status="active",
+    )
+    promo = memsvc.resolution_ledger.promote_anonymous_session(
+        anon_sid,
+        uid,
+        conversation_id="conv-promote-35",
+    )
+    assert promo["ok"] is True
+    assert promo["promoted_slots"] >= 2
+    assert promo["workflow_migrated"] is True
+    promoted_bank = memsvc.resolution_ledger.get_verified_slots(uid)
+    assert promoted_bank.get("gross_rent") == 12_000_000
+
+    # 3. HandoffEnvelope v2.1 zero-repetition pruning
+    flags.set("zero_effort_slot_prefill", True)
+    try:
+        env = memsvc.create_handoff_envelope(
+            thread_id="conv-promote-35",
+            user_id=uid,
+            objective="Rental tax review",
+            target_resolution="Confirm rental deduction",
+            required_inputs=["tin", "gross_rent", "tenancy_agreement"],
+        )
+        assert "tin" not in env.next_action.required_inputs
+        assert "gross_rent" not in env.next_action.required_inputs
+        assert "tenancy_agreement" in env.next_action.required_inputs
+        assert env.zero_repetition_score() == 1.0
+    finally:
+        flags.clear("zero_effort_slot_prefill")
+
+    # 4. Closed-loop Officer Co-Pilot preference pair capture
+    flags.set("officer_ai_co_execution", True)
+    flags.set("officer_preference_capture", True)
+    try:
+        ticket = tmp_db.create_ticket(
+            reason="vat_objection_review",
+            user_query="How do I object to a VAT assessment?",
+            conversation_id="conv-p35-pref",
+            user_id=uid,
+            locale="en",
+        )
+        officer_chat.build_officer_copilot_draft(
+            ticket,
+            "You may object within 45 days on the portal.",
+        )
+        officer_chat.append_message(
+            ticket,
+            "officer",
+            "Under TPCA Section 24(1), lodge your Notice of Objection via the URA web portal within 45 days of service of the assessment decision.",
+            officer_id="staff-042",
+            officer_name="Officer Kato",
+        )
+        pairs = officer_chat.list_officer_preference_pairs(limit=10)
+        assert len(pairs) >= 1
+        latest = next(p for p in pairs if p["ticket_id"] == str(ticket["id"]))
+        assert "TPCA Section 24(1)" in latest["chosen_reply"]
+        assert "45 days on the portal" in latest["rejected_draft"]
+        assert latest["edit_ratio"] > 0.1
+
+        # 5. export_preferences.py includes officer_copilot_edit pairs
+        import tempfile
+        from pathlib import Path
+        from evals.export_preferences import export_pairs
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_file = Path(tmpdir) / "prefs.jsonl"
+            n_exported = export_pairs(out_file)
+            assert n_exported >= 1
+            exported_text = out_file.read_text(encoding="utf-8")
+            assert "officer_copilot_edit" in exported_text
+            assert "TPCA Section 24(1)" in exported_text
+
+        # 6. Dynamic policy/relief + calculation DAG route in Supervisor
+        flags.set("multi_agent_dag", True)
+        try:
+            dag_relief = supervisor.plan_multi_agent_dag(
+                "Does my business qualify for VAT exemption and how much VAT is on 25,000,000?",
+                locale="en",
+            )
+            assert dag_relief.requires_multi_agent is True
+            assert AgentRoute.TAX_SPECIALIST in dag_relief.sub_routes
+            assert AgentRoute.TOOLS in dag_relief.sub_routes
+        finally:
+            flags.clear("multi_agent_dag")
+    finally:
+        flags.clear("officer_ai_co_execution")
+        flags.clear("officer_preference_capture")

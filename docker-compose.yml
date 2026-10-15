@@ -208,13 +208,12 @@ services:
   # Requires an NVIDIA GPU + nvidia-container-toolkit on the host.
   # ---------------------------------------------------------------------------
   vllm:
-    image: vllm/vllm-openai:v0.8.5
+    image: vllm/vllm-openai:v0.17.1
     container_name: ura-vllm
     command: >
-      --model ${LLM_MODEL:-Sunbird/Sunflower-14B-FP8}
+      --model ${LLM_MODEL:-Sunbird/Sunflower-Qwen3.5-9B}
       --port 8001
-      --max-model-len ${VLLM_MAX_MODEL_LEN:-131072}
-      --hf-overrides '{"rope_scaling": {"factor": 4.0, "original_max_position_embeddings": 32768, "rope_type": "yarn", "type": "yarn"}, "max_position_embeddings": 131072}'
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-262144}
       --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.85}
       --dtype ${VLLM_DTYPE:-auto}
       --enable-prefix-caching

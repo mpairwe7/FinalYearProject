@@ -1335,7 +1335,10 @@ def extract_retrieval_filters(query: str) -> dict[str, Any]:
     return filters
 
 
-def extract_retrieval_preferences(query: str) -> dict[str, Any]:
+def extract_retrieval_preferences(
+    query: str,
+    history: list[str] | None = None,
+) -> dict[str, Any]:
     """Soft ranking hints: mentioned tax type, 'current' fiscal year, and EQ relief terms."""
     prefer: dict[str, Any] = {}
     text = query or ""
@@ -1348,13 +1351,17 @@ def extract_retrieval_preferences(query: str) -> dict[str, Any]:
         try:
             from .flags import flags
 
-            if flags.is_enabled("eq_adaptive_retrieval"):
+            if flags.is_enabled("eq_adaptive_retrieval") or flags.is_enabled("eq_multimodal_fusion"):
                 from .tools.empathy import assess as _assess_eq
 
-                eq = _assess_eq(text, record_metric=False)
+                eq = _assess_eq(text, history=history, record_metric=False)
                 if eq.get("retrieval_preference_terms"):
                     prefer["eq_relief_terms"] = eq["retrieval_preference_terms"]
                     prefer["eq_affect"] = eq.get("kind", "")
+                if eq.get("sustained"):
+                    prefer["eq_sustained"] = True
+                if eq.get("tone_register") and eq.get("tone_register") != "neutral":
+                    prefer["eq_tone_register"] = eq["tone_register"]
         except Exception:
             logger.debug("eq_adaptive_retrieval preference check skipped", exc_info=True)
     return prefer
@@ -1388,9 +1395,13 @@ def decompose_query(query: str) -> list[str]:
     return cleaned[:3]
 
 
-def plan_retrieval(query: str) -> dict[str, Any]:
+def plan_retrieval(
+    query: str,
+    *,
+    history: list[str] | None = None,
+) -> dict[str, Any]:
     """Bundle filters, preferences, and sub-queries for one retrieval turn."""
-    prefer = extract_retrieval_preferences(query)
+    prefer = extract_retrieval_preferences(query, history=history)
     subqueries = decompose_query(query)
     eq_terms = str(prefer.get("eq_relief_terms") or "").strip()
     if eq_terms and subqueries:

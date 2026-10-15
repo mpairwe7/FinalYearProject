@@ -30,7 +30,9 @@ is safe on the latency-sensitive turn path and reproducible in tests.
 
 from __future__ import annotations
 
+import os
 import re
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from ..text_signals import (
@@ -140,7 +142,11 @@ def assess(
 
     relief_statutes: list[str] = []
     relief_terms = ""
-    if kind == "hardship" or (kind == "anxiety" and intensity in ("moderate", "high")):
+    if (
+        kind == "hardship"
+        or (kind == "anxiety" and intensity in ("moderate", "high"))
+        or (kind in ("frustration", "anxiety") and trajectory["sustained"])
+    ):
         relief_statutes = [
             "TPCA Section 39 (remission of interest)",
             "TPCA Section 40(4) (instalment agreement / agency notice relief)",
@@ -148,13 +154,23 @@ def assess(
         ]
         relief_terms = "instalment payment penalty waiver remission voluntary disclosure section 39 section 66"
 
+    tone_register = (
+        "empathetic_reassuring"
+        if kind in ("hardship", "anxiety", "frustration") and (intensity in ("moderate", "high") or trajectory["sustained"] or kind == "hardship")
+        else "patient_clear"
+        if kind == "confusion"
+        else "direct_urgent"
+        if kind == "urgency"
+        else "neutral"
+    )
+
     priority_boost = "high" if offer_human else "normal"
 
     if kind and record_metric:
         try:
             from ..flags import flags
 
-            if flags.is_enabled("eq_adaptive_retrieval"):
+            if flags.is_enabled("eq_adaptive_retrieval") or flags.is_enabled("eq_multimodal_fusion"):
                 from ..analytics import metrics
 
                 metrics.inc(
@@ -174,6 +190,7 @@ def assess(
         "sustained": trajectory["sustained"],
         "acknowledgement": acknowledgement,
         "tone_hint": tone_hint,
+        "tone_register": tone_register,
         "lead_with_acknowledgement": bool(acknowledgement)
         and guidance["lead_with_acknowledgement"],
         "offer_human_handoff": offer_human,
@@ -187,6 +204,164 @@ def assess(
         "retrieval_preference_terms": relief_terms,
         "priority_boost": priority_boost,
     }
+
+
+@dataclass(frozen=True)
+class AffectiveState:
+    """Unified multimodal (lexical + acoustic prosody + effort trajectory) affective state."""
+
+    affect: str = ""
+    intensity: str = "none"
+    raw_score: float = 0.0
+    smoothed_score: float = 0.0
+    sustained: bool = False
+    crisis: bool = False
+    tone_register: str = "neutral"  # "neutral" | "empathetic_reassuring" | "patient_clear" | "direct_urgent"
+    should_auto_escalate: bool = False
+    recommended_speech_rate: float = 1.0
+    recommended_relief_statutes: list[str] = field(default_factory=list)
+    retrieval_preference_terms: str = ""
+    priority_boost: str = "normal"
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def fuse_multimodal_affect(
+    message: str,
+    *,
+    history: list[str] | None = None,
+    prosody_profile: Any | None = None,
+    clarifications_asked: int = 0,
+    previous_smoothed_score: float = 0.0,
+    user_id: str | None = None,
+    record_metric: bool = True,
+) -> AffectiveState:
+    """Fuse lexical distress, multi-turn trajectory, acoustic prosody, and clarification effort."""
+    lex = assess(message, history=history, record_metric=False)
+    if lex.get("crisis"):
+        return AffectiveState(
+            affect="hardship",
+            intensity="high",
+            raw_score=1.0,
+            smoothed_score=1.0,
+            sustained=True,
+            crisis=True,
+            tone_register="empathetic_reassuring",
+            should_auto_escalate=True,
+            recommended_speech_rate=0.88,
+            recommended_relief_statutes=[],
+            retrieval_preference_terms="",
+            priority_boost="urgent",
+        )
+
+    kind = str(lex.get("kind") or "")
+    intensity = str(lex.get("intensity") or "none")
+    sustained = bool(lex.get("sustained", False))
+
+    lex_map = {"none": 0.0, "low": 0.42, "moderate": 0.68, "high": 0.90}
+    lex_score = lex_map.get(intensity, 0.0)
+    if kind == "hardship":
+        lex_score = max(lex_score, 0.92)
+    elif sustained and kind in ("frustration", "anxiety"):
+        lex_score = max(lex_score, 0.84)
+
+    effort_score = min(1.0, max(0, int(clarifications_asked)) / 3.0)
+
+    acoustic_score = 0.0
+    speech_rate = 1.0
+    if prosody_profile is not None:
+        p_affect = str(getattr(prosody_profile, "caller_affect", "calm") or "calm")
+        rms = float(getattr(prosody_profile, "rms_energy", 0.0) or 0.0)
+        e_var = float(getattr(prosody_profile, "energy_variance", 0.0) or 0.0)
+        wps = float(getattr(prosody_profile, "words_per_second", 0.0) or 0.0)
+        speech_rate = float(getattr(prosody_profile, "recommended_speech_rate", 1.0) or 1.0)
+        if p_affect == "urgent_distress":
+            acoustic_score = 0.95
+        elif p_affect == "frustrated":
+            acoustic_score = 0.78
+        elif p_affect == "confused":
+            acoustic_score = 0.52
+        if rms >= 0.18 and (e_var >= 0.08 or wps >= 3.8):
+            acoustic_score = max(acoustic_score, 0.85)
+        if not kind and p_affect in ("frustrated", "urgent_distress"):
+            kind = "frustration"
+            intensity = "high" if p_affect == "urgent_distress" else "moderate"
+        elif not kind and p_affect == "confused":
+            kind = "confusion"
+            intensity = "moderate"
+
+    if prosody_profile is not None:
+        raw_score = 0.45 * lex_score + 0.35 * acoustic_score + 0.20 * effort_score
+    else:
+        raw_score = 0.75 * lex_score + 0.25 * effort_score
+    if kind == "hardship":
+        raw_score = max(raw_score, 0.85)
+    elif sustained and kind in ("frustration", "anxiety"):
+        raw_score = max(raw_score, 0.80)
+    raw_score = round(min(1.0, max(0.0, raw_score)), 3)
+
+    if previous_smoothed_score > 0.0:
+        smoothed = round(min(1.0, 0.65 * raw_score + 0.35 * float(previous_smoothed_score)), 3)
+    else:
+        smoothed = raw_score
+
+    try:
+        threshold = max(0.50, min(0.99, float(os.getenv("EQ_AUTO_ESCALATE_THRESHOLD", "0.80"))))
+    except ValueError:
+        threshold = 0.80
+
+    should_escalate = (
+        smoothed >= threshold
+        or kind == "hardship"
+        or sustained
+        or bool(lex.get("offer_human_handoff", False))
+    )
+
+    if kind in ("hardship", "anxiety", "frustration") and (smoothed >= 0.55 or sustained or kind == "hardship"):
+        tone_reg = "empathetic_reassuring"
+        speech_rate = min(speech_rate, 0.90)
+    elif kind == "confusion" or clarifications_asked >= 2:
+        tone_reg = "patient_clear"
+        speech_rate = min(speech_rate, 0.92)
+    elif kind == "urgency":
+        tone_reg = "direct_urgent"
+    else:
+        tone_reg = str(lex.get("tone_register") or "neutral")
+
+    priority_boost = "urgent" if (kind == "hardship" or smoothed >= threshold) else ("high" if should_escalate else "normal")
+
+    if kind and record_metric:
+        try:
+            from ..flags import flags
+
+            if flags.is_enabled("eq_multimodal_fusion", subject=user_id) or flags.is_enabled("eq_adaptive_retrieval", subject=user_id):
+                from ..analytics import metrics
+
+                metrics.inc(
+                    "eq_interventions_total",
+                    labels={
+                        "affect": kind,
+                        "outcome": "escalated_officer" if should_escalate else "de_escalated_autonomous",
+                    },
+                )
+        except Exception as _exc:  # noqa: BLE001
+            _ = _exc
+
+    return AffectiveState(
+        affect=kind,
+        intensity=intensity,
+        raw_score=raw_score,
+        smoothed_score=smoothed,
+        sustained=sustained,
+        crisis=False,
+        tone_register=tone_reg,
+        should_auto_escalate=should_escalate,
+        recommended_speech_rate=round(speech_rate, 2),
+        recommended_relief_statutes=list(lex.get("recommended_relief_statutes") or []),
+        retrieval_preference_terms=str(lex.get("retrieval_preference_terms") or ""),
+        priority_boost=priority_boost,
+    )
 
 
 class EmotionalToneTool(Tool):

@@ -27,6 +27,34 @@ def get_resolution_case_ttl_seconds() -> int:
         return 168 * 3600
 
 
+def get_max_concurrent_cases() -> int:
+    """Maximum concurrent ResolutionCase entries per user across tax domains (default 5)."""
+    try:
+        return max(1, min(20, int(os.getenv("RESOLUTION_MAX_CONCURRENT_CASES", "5"))))
+    except ValueError:
+        return 5
+
+
+def infer_domain_tag(text: str) -> str:
+    """Infer a coarse tax domain tag from an objective or query string."""
+    lower = (text or "").lower()
+    if any(w in lower for w in ("customs", "duty", "import", "cif", "tariff", "ASYCUDA".lower(), "transit", "forodha")):
+        return "customs"
+    if any(w in lower for w in ("efris", "fdn", "fiscal", "invoice")):
+        return "efris"
+    if any(w in lower for w in ("objection", "dispute", "appeal", "tat", "remission", "waiver")):
+        return "objection"
+    if any(w in lower for w in ("tin", "register", "registration")):
+        return "tin_registration"
+    if any(w in lower for w in ("vat", "value added")):
+        return "vat"
+    if any(w in lower for w in ("paye", "salary", "employment")):
+        return "paye"
+    if any(w in lower for w in ("prn", "payment", "pay")):
+        return "payment"
+    return "general"
+
+
 @dataclass
 class ResolutionCase:
     """Longitudinal state of an ongoing taxpayer resolution journey."""
@@ -38,6 +66,7 @@ class ResolutionCase:
     source_channel: str = "web"  # "web" | "voice_call" | "voice_ws"
     locale: str = "en"
     primary_objective: str = ""
+    domain_tag: str = ""
     status: str = "in_progress"  # "in_progress" | "awaiting_user_action" | "in_progress_background" | "escalated_officer" | "resolved"
     completed_steps: list[str] = field(default_factory=list)
     pending_steps: list[str] = field(default_factory=list)
@@ -48,11 +77,14 @@ class ResolutionCase:
     expires_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        if not self.domain_tag:
+            self.domain_tag = infer_domain_tag(self.primary_objective)
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ResolutionCase:
         now = time.time()
+        obj = str(data.get("primary_objective") or "")
         return cls(
             case_id=str(data.get("case_id") or f"res-{uuid.uuid4().hex[:10]}"),
             user_id=str(data.get("user_id") or ""),
@@ -60,7 +92,8 @@ class ResolutionCase:
             thread_id=str(data.get("thread_id") or ""),
             source_channel=str(data.get("source_channel") or "web"),
             locale=str(data.get("locale") or "en"),
-            primary_objective=str(data.get("primary_objective") or ""),
+            primary_objective=obj,
+            domain_tag=str(data.get("domain_tag") or infer_domain_tag(obj)),
             status=str(data.get("status") or "in_progress"),
             completed_steps=list(data.get("completed_steps") or []),
             pending_steps=list(data.get("pending_steps") or []),
@@ -128,11 +161,31 @@ class ResolutionLedger:
             case.tenant_id = tenant
             case.updated_at = now
             case.expires_at = now + ttl
+            if not case.domain_tag:
+                case.domain_tag = infer_domain_tag(case.primary_objective)
+            case_dict = case.to_dict()
+
+            existing = db.get_working_memory(user_id, tenant_id=tenant) or {}
+            cases_map = dict(existing.get("active_resolution_cases") or {})
+            cases_map[case.case_id] = case_dict
+            # Prune resolved/expired or oldest beyond cap
+            max_cases = get_max_concurrent_cases()
+            active_items = [
+                (cid, cdata)
+                for cid, cdata in cases_map.items()
+                if isinstance(cdata, dict)
+                and float(cdata.get("expires_at") or (now + ttl)) > now
+                and str(cdata.get("status") or "") != "resolved"
+            ]
+            active_items.sort(key=lambda item: float(item[1].get("updated_at") or 0.0), reverse=True)
+            bounded_map = dict(active_items[:max_cases])
+
             return db.upsert_working_memory(
                 user_id,
                 tenant,
                 {
-                    "active_resolution_case": case.to_dict(),
+                    "active_resolution_case": case_dict,
+                    "active_resolution_cases": bounded_map,
                     "last_topic": case.primary_objective or "general",
                 },
                 ttl_seconds=ttl,
@@ -434,3 +487,149 @@ class ResolutionLedger:
             except Exception:
                 logger.debug("resolution_ledger: completion metric failed", exc_info=True)
         return ok
+
+    def list_active_cases(
+        self,
+        user_id: str,
+        *,
+        tenant_id: str = "default",
+    ) -> list[ResolutionCase]:
+        """Return all unexpired, non-resolved concurrent ResolutionCases for *user_id*, newest first."""
+        if not user_id:
+            return []
+        try:
+            from .. import database as db
+
+            tenant = tenant_id or "default"
+            if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
+                return []
+            working = db.get_working_memory(user_id, tenant_id=tenant)
+            if not isinstance(working, dict):
+                return []
+            now = time.time()
+            results: dict[str, ResolutionCase] = {}
+            raw_map = working.get("active_resolution_cases")
+            if isinstance(raw_map, dict):
+                for cid, cdata in raw_map.items():
+                    if isinstance(cdata, dict):
+                        c = ResolutionCase.from_dict(cdata)
+                        if (not c.expires_at or c.expires_at > now) and c.status != "resolved":
+                            results[c.case_id or str(cid)] = c
+            raw_single = working.get("active_resolution_case")
+            if isinstance(raw_single, dict):
+                c_single = ResolutionCase.from_dict(raw_single)
+                if (not c_single.expires_at or c_single.expires_at > now) and c_single.status != "resolved":
+                    results[c_single.case_id] = c_single
+            return sorted(results.values(), key=lambda x: x.updated_at, reverse=True)
+        except Exception:
+            logger.debug("resolution_ledger: list_active_cases failed", exc_info=True)
+            return []
+
+    def select_case_for_turn(
+        self,
+        user_id: str,
+        *,
+        query: str = "",
+        domain_tag: str = "",
+        tenant_id: str = "default",
+        current_channel: str = "",
+    ) -> ResolutionCase | None:
+        """Select the best matching active ResolutionCase by domain_tag or query keywords."""
+        cases = self.list_active_cases(user_id, tenant_id=tenant_id)
+        if not cases:
+            return None
+        target_domain = (domain_tag or infer_domain_tag(query)).strip().lower()
+        selected = cases[0]
+        if target_domain and target_domain != "general":
+            for c in cases:
+                if (c.domain_tag or infer_domain_tag(c.primary_objective)) == target_domain:
+                    selected = c
+                    break
+        if current_channel and selected.source_channel and current_channel != selected.source_channel:
+            try:
+                from ..analytics import metrics
+
+                metrics.inc(
+                    "relationship_resumption_total",
+                    labels={
+                        "from_channel": selected.source_channel,
+                        "to_channel": current_channel,
+                        "status": "resumed",
+                    },
+                )
+            except Exception:
+                logger.debug("resolution_ledger: select_case_for_turn metric skipped", exc_info=True)
+        return selected
+
+    def promote_anonymous_session(
+        self,
+        anonymous_session_id: str,
+        user_id: str,
+        *,
+        conversation_id: str = "",
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        """Promote anonymous session slots and active workflow state into an authenticated user profile."""
+        if not anonymous_session_id or not user_id or anonymous_session_id == user_id:
+            return {"ok": False, "promoted_slots": 0, "workflow_migrated": False}
+        try:
+            from .. import database as db
+
+            tenant = tenant_id or "default"
+            if not db.has_active_consent(user_id, "personalization", tenant_id=tenant):
+                return {
+                    "ok": False,
+                    "promoted_slots": 0,
+                    "workflow_migrated": False,
+                    "skipped": "consent_required",
+                }
+
+            anon_working = db.get_working_memory(anonymous_session_id, tenant_id=tenant) or {}
+            anon_slots = anon_working.get("verified_slot_bank")
+            promoted_slots = 0
+            if (
+                isinstance(anon_slots, dict)
+                and anon_slots
+                and self.store_verified_slots(user_id, anon_slots, tenant_id=tenant)
+            ):
+                promoted_slots = len(anon_slots)
+
+            workflow_migrated = False
+            if conversation_id:
+                anon_key = db.conversation_state_key(
+                    conversation_id,
+                    session_id=anonymous_session_id,
+                    user_id=None,
+                    tenant_id=tenant,
+                )
+                auth_key = db.conversation_state_key(
+                    conversation_id,
+                    session_id=anonymous_session_id,
+                    user_id=user_id,
+                    tenant_id=tenant,
+                )
+                wf_row = db.get_workflow_session(anon_key, tenant_id=tenant)
+                if isinstance(wf_row, dict) and wf_row.get("workflow_id"):
+                    db.upsert_workflow_session(
+                        auth_key,
+                        workflow_id=str(wf_row["workflow_id"]),
+                        current_step_idx=int(wf_row.get("current_step_idx") or 0),
+                        slots=dict(wf_row.get("slots") or {}),
+                        status=str(wf_row.get("status") or "active"),
+                        tenant_id=tenant,
+                    )
+                    workflow_migrated = True
+                    wf_slots = wf_row.get("slots")
+                    if isinstance(wf_slots, dict) and wf_slots:
+                        clean_wf_slots = {k: v for k, v in wf_slots.items() if not str(k).startswith("_")}
+                        if clean_wf_slots and self.store_verified_slots(user_id, clean_wf_slots, tenant_id=tenant):
+                            promoted_slots += len(clean_wf_slots)
+
+            return {
+                "ok": True,
+                "promoted_slots": promoted_slots,
+                "workflow_migrated": workflow_migrated,
+            }
+        except Exception:
+            logger.debug("resolution_ledger: promote_anonymous_session failed", exc_info=True)
+            return {"ok": False, "promoted_slots": 0, "workflow_migrated": False}

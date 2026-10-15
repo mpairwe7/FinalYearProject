@@ -336,7 +336,18 @@ class Supervisor:
         has_rate = any(pat.search(probe) for pat, _, _ in pats.rate)
         has_temporal = any(pat.search(q) for pat, _, _ in pats.temporal)
         has_domestic_tax = bool(
-            re.search(r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax|deferment|exemption)\b", q, re.I)
+            re.search(
+                r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax|deferment|exemption|instalment|remission|waiver)\b",
+                q,
+                re.I,
+            )
+        )
+        has_policy_or_relief = bool(
+            re.search(
+                r"\b(?:deferment|exemption|exempt|relief|instalment|waiver|remission|deductible|qualify|penalty)\b",
+                q,
+                re.I,
+            )
         )
 
         sub_routes: list[AgentRoute] = []
@@ -347,9 +358,16 @@ class Supervisor:
             for t in ("calculate_customs_duty", "calculate_vat", "lookup_rate", "search_ura_knowledge_base"):
                 if t not in tools:
                     tools.append(t)
+            if has_temporal and "get_filing_deadlines" not in tools:
+                tools.append("get_filing_deadlines")
         elif has_calc and has_temporal:
             sub_routes.extend([AgentRoute.TOOLS, AgentRoute.TAX_SPECIALIST])
             for t in ("get_filing_deadlines", "get_current_date", "search_ura_knowledge_base"):
+                if t not in tools:
+                    tools.append(t)
+        elif has_domestic_tax and has_policy_or_relief and (has_calc or has_rate):
+            sub_routes.extend([AgentRoute.TAX_SPECIALIST, AgentRoute.TOOLS])
+            for t in ("lookup_rate", "search_ura_knowledge_base"):
                 if t not in tools:
                     tools.append(t)
 

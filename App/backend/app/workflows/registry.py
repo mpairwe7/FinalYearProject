@@ -38,6 +38,9 @@ class WorkflowTurn:
     portal_action: dict[str, Any] | None = None
     all_steps: list[dict[str, Any]] = field(default_factory=list)
     resources: list[dict[str, Any]] = field(default_factory=list)
+    is_tangent: bool = False
+    tangent_query: str = ""
+    parked_step_prompt: str = ""
 
 
 @dataclass
@@ -136,6 +139,9 @@ def _make_turn(
     validation_error: str = "",
     tool_call: dict[str, Any] | None = None,
     slot_name: str = "",
+    is_tangent: bool = False,
+    tangent_query: str = "",
+    parked_step_prompt: str = "",
 ) -> WorkflowTurn:
     """A :class:`WorkflowTurn` carrying *step*'s stepper metadata and the progress track."""
     step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
@@ -154,6 +160,9 @@ def _make_turn(
         portal_action=dict(step.portal_action) if step and step.portal_action else None,
         all_steps=all_steps,
         resources=list(step.resources) if step else [],
+        is_tangent=is_tangent,
+        tangent_query=tangent_query,
+        parked_step_prompt=parked_step_prompt,
     )
 
 
@@ -226,6 +235,61 @@ _TAX_OUTPUT_KEYS: tuple[str, ...] = (
     "gross",
     "amount",
 )
+
+
+_SIDE_QUESTION_RE: re.Pattern[str] = re.compile(
+    r"(?:\?\s*$|\b(?:what\s+is|what\s+are|what\s+does|how\s+do\s+i|how\s+does|how\s+is|why\s+is|why\s+do|"
+    r"which\s+supplies|is\s+it\s+exempt|who\s+qualifies|when\s+is\s+the\s+deadline|explain|meaning\s+of|"
+    r"kye\s+ki|kitegeeza\s+ki|gubalibwa\s+gutya|ebikwata\s+ku|ni\s+nini|maana\s+ya|inamaanisha\s+nini)\b)",
+    re.IGNORECASE,
+)
+
+
+def is_side_question(user_input: str) -> bool:
+    """Return True if *user_input* reads as a policy/clarification question mid-workflow."""
+    text = (user_input or "").strip()
+    if len(text.split()) < 3:
+        return False
+    return bool(_SIDE_QUESTION_RE.search(text))
+
+
+def resolve_workflow_side_question(user_input: str) -> str:
+    """Resolve a mid-workflow policy or rate side-question deterministically without losing slot state."""
+    q = (user_input or "").strip()
+    if not q:
+        return ""
+    try:
+        from ..calculator_router import plan_rate_lookup
+        from ..mcp import get_client
+
+        rate_plan = plan_rate_lookup(q)
+        if rate_plan and rate_plan.tax_type:
+            call = get_client().call_tool("lookup_rate", {"tax_type": rate_plan.tax_type}, user_role="public")
+            res = call.result if call and isinstance(call.result, dict) else {}
+            if res.get("ok") and res.get("formatted"):
+                name = res.get("display_name") or res.get("tax_type")
+                fy = f" ({res['fiscal_year']})" if res.get("fiscal_year") else ""
+                return f"Regarding your question: the official {name} rate{fy} is {res['formatted']}."
+    except Exception:
+        logger.debug("workflow side-question rate lookup skipped", exc_info=True)
+
+    try:
+        from ..tools import ToolRegistry
+
+        edu = ToolRegistry.get("explain_tax_concept")
+        if edu is not None:
+            for concept in ("vat", "paye", "tin", "withholding", "efris", "presumptive", "rental", "customs", "chargeable income"):
+                if concept in q.lower():
+                    out = edu.execute(concept=concept)
+                    if isinstance(out, dict) and out.get("ok") and out.get("explanation"):
+                        return f"Regarding your question: {str(out['explanation']).strip()}"
+    except Exception:
+        logger.debug("workflow side-question education lookup skipped", exc_info=True)
+
+    return (
+        "Regarding your question: under URA statutory guidelines, only verified taxable supplies "
+        "or chargeable amounts for the selected period should be entered in this step."
+    )
 
 
 def delegate_workflow_slot_calculation(
@@ -421,6 +485,50 @@ class WorkflowRegistry:
                 if bridged_val is not None:
                     is_valid, normalised, error = validate_slot(bridged_val, step.validator, resolver)
             if not is_valid:
+                try:
+                    import os
+
+                    from ..flags import flags
+
+                    max_hops = max(1, int(os.getenv("WORKFLOW_MAX_TANGENT_HOPS", "2")))
+                except ValueError:
+                    max_hops = 2
+
+                tangent_hops = int(session.slots.get("_tangent_count") or 0)
+                if (
+                    flags.is_enabled("workflow_tangent_resume")
+                    and tangent_hops < max_hops
+                    and is_side_question(user_input)
+                ):
+                    session.slots["_tangent_count"] = tangent_hops + 1
+                    side_answer = resolve_workflow_side_question(user_input)
+                    step_idx, total_s, _ = compute_workflow_progress(wf, session, step.id)
+                    s_title = step.title or default_step_title(step.id)
+                    try:
+                        from ..analytics import metrics
+
+                        metrics.inc(
+                            "workflow_tangent_resumed_total",
+                            labels={"workflow_id": session.workflow_id},
+                        )
+                    except Exception:
+                        logger.debug("workflow_tangent_resumed_total metric skipped", exc_info=True)
+                    resume_text = (
+                        f"{side_answer}\n\n"
+                        f"Now, returning to Step {step_idx} of {total_s} ({s_title}): {step.question}"
+                    ).strip()
+                    return _make_turn(
+                        wf,
+                        session,
+                        step,
+                        question=resume_text,
+                        validation_error="",
+                        slot_name=step.slot,
+                        is_tangent=True,
+                        tangent_query=user_input.strip(),
+                        parked_step_prompt=step.question,
+                    )
+
                 return _make_turn(
                     wf,
                     session,

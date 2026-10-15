@@ -162,13 +162,28 @@ def node_retrieve(state: AgentGraphState) -> NodeResult:
     if retriever.initialize():
         search = getattr(retriever, "search_planned", retriever.search)
         subject = state.user_id or None
+        user_hist = [
+            str(m.get("user_message") or m.get("content") or "").strip()
+            for m in (state.conversation_history or [])
+            if isinstance(m, dict) and (m.get("user_message") or m.get("role") == "user")
+        ]
+        user_hist = [h for h in user_hist if h]
         try:
-            hits = search(query, top_k=state.top_k, locale=state.locale, subject=subject)
+            hits = search(
+                query,
+                top_k=state.top_k,
+                locale=state.locale,
+                subject=subject,
+                history=user_hist or None,
+            )
         except TypeError:
             try:
-                hits = search(query, top_k=state.top_k, locale=state.locale)
+                hits = search(query, top_k=state.top_k, locale=state.locale, subject=subject)
             except TypeError:
-                hits = search(query, top_k=state.top_k)
+                try:
+                    hits = search(query, top_k=state.top_k, locale=state.locale)
+                except TypeError:
+                    hits = search(query, top_k=state.top_k)
         if hits:
             hits, was_corrected = corrective_retrieve(
                 query, retriever, hits, top_k=state.top_k, subject=subject
@@ -319,6 +334,119 @@ def bind_arguments(tool_name: str, state: AgentGraphState) -> dict[str, object] 
     if set(required) == {"taxpayer_id"} and state.user_id:
         return {"taxpayer_id": state.user_id}
 
+    # 6. Memory-backed & DAG-receipt argument binding (Phase 35)
+    try:
+        from ...flags import flags
+
+        uid = state.user_id or None
+        if flags.is_enabled("autonomous_outcome_verification", subject=uid) or flags.is_enabled(
+            "zero_effort_slot_prefill", subject=uid
+        ):
+            bound = _bind_from_memory_or_dag(tool_name, required, state)
+            if bound is not None:
+                return bound
+    except Exception:
+        logger.debug("graph: memory/DAG parameter binding failed for %s", tool_name, exc_info=True)
+
+    return None
+
+
+_SLOT_CANDIDATE_KEYS: dict[str, tuple[str, ...]] = {
+    "amount": ("amount", "taxable_amount", "invoice_amount", "payment_amount", "landed_cost", "cif_value", "cif", "annual_turnover"),
+    "net_amount": ("net_amount", "net", "amount", "taxable_amount"),
+    "gross_amount": ("gross_amount", "gross", "amount", "monthly_gross"),
+    "value": ("value", "cif_value", "cif", "amount"),
+    "payment": ("payment", "payment_amount", "amount"),
+    "monthly_gross": ("monthly_gross", "monthly_salary", "gross_salary", "salary", "gross_amount"),
+    "monthly_salary": ("monthly_salary", "gross_salary", "salary", "monthly_gross"),
+    "salary": ("salary", "monthly_salary", "gross_salary", "monthly_gross"),
+    "gross_salary": ("gross_salary", "monthly_salary", "salary", "monthly_gross"),
+    "gross_turnover": ("gross_turnover", "annual_turnover", "turnover"),
+    "turnover": ("turnover", "annual_turnover", "gross_turnover"),
+    "annual_turnover": ("annual_turnover", "gross_turnover", "turnover"),
+    "annual_gross_rent": ("annual_gross_rent", "gross_rent", "rental_income", "rent"),
+    "gross_rent": ("gross_rent", "annual_gross_rent", "rental_income", "rent"),
+    "rent": ("rent", "gross_rent", "annual_gross_rent", "rental_income"),
+    "rental_income": ("rental_income", "gross_rent", "annual_gross_rent", "rent"),
+    "chargeable_income": ("chargeable_income", "taxable_income", "annual_turnover", "amount"),
+    "cif_value": ("cif_value", "cif", "customs_value", "amount"),
+    "taxpayer_id": ("tin", "taxpayer_id"),
+    "tin": ("tin", "taxpayer_id"),
+}
+
+
+def _bind_from_memory_or_dag(
+    tool_name: str,
+    required: list[str],
+    state: AgentGraphState,
+) -> dict[str, object] | None:
+    """Resolve missing tool parameters from prior DAG observations, verified_slot_bank, or SemanticMemory."""
+    params: dict[str, object] = {}
+    bound_source = ""
+
+    # A. Prior specialist observations in the same DAG turn
+    for obs in reversed(state.observations):
+        if not isinstance(obs, dict) or not obs.get("ok", True):
+            continue
+        for req in required:
+            if req in params:
+                continue
+            for cand in _SLOT_CANDIDATE_KEYS.get(req, (req,)):
+                val = obs.get(cand)
+                if val not in (None, "") and isinstance(val, (int, float, str)):
+                    params[req] = val
+                    bound_source = bound_source or "dag_receipt"
+                    break
+
+    # B. Consented verified_slot_bank & SemanticMemory
+    if state.user_id and not all(p in params for p in required):
+        from ...memory.service import get_memory_service
+
+        memsvc = get_memory_service()
+        slot_bank = memsvc.resolution_ledger.get_verified_slots(
+            state.user_id, tenant_id=state.tenant_id or "default"
+        )
+        for req in required:
+            if req in params:
+                continue
+            for cand in _SLOT_CANDIDATE_KEYS.get(req, (req,)):
+                val = slot_bank.get(cand)
+                if val not in (None, ""):
+                    params[req] = val
+                    bound_source = bound_source or "verified_slot_bank"
+                    break
+
+        if not all(p in params for p in required):
+            facts = memsvc.read_facts(state.user_id, tenant_id=state.tenant_id or "default")
+            fact_map = {str(f.predicate or f.category).lower(): f.object_value for f in facts}
+            for req in required:
+                if req in params:
+                    continue
+                for cand in _SLOT_CANDIDATE_KEYS.get(req, (req,)):
+                    val = fact_map.get(cand.lower())
+                    if val not in (None, ""):
+                        try:
+                            from ...tax.money import parse_money_amount
+
+                            parsed = parse_money_amount(str(val))
+                            params[req] = parsed if parsed is not None and parsed > 0 else val
+                        except Exception:
+                            params[req] = val
+                        bound_source = bound_source or "semantic_memory"
+                        break
+
+    if params and all(p in params for p in required):
+        if bound_source:
+            try:
+                from ...analytics import metrics
+
+                metrics.inc(
+                    "slot_repetition_prevented_total",
+                    labels={"source": bound_source},
+                )
+            except Exception:
+                logger.debug("slot_repetition_prevented_total metric skipped", exc_info=True)
+        return params
     return None
 
 
@@ -362,11 +490,16 @@ def node_act(state: AgentGraphState) -> NodeResult:
             iteration=state.iterations,
         )
         state.budget.record(tool_name, arguments, result.result)
+        verified_ok = bool(
+            result.ok and isinstance(result.result, dict) and result.result.get("ok", True)
+        )
         state.tool_calls.append(
             {
                 "call_id": result.call_id,
                 "name": tool_name,
                 "ok": result.ok,
+                "verified_outcome": verified_ok,
+                "bound_arguments": dict(arguments),
                 "duration_ms": result.duration_ms,
                 "result": result.result,
             }

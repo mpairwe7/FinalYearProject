@@ -1670,6 +1670,7 @@ class HybridRetriever:
         *,
         locale: str | None = None,
         subject: str | None = None,
+        history: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Search with query-time filters, multi-intent split, and soft boosts.
 
@@ -1682,7 +1683,7 @@ class HybridRetriever:
         from .flags import flags
         from .query import plan_retrieval
 
-        plan = plan_retrieval(query)
+        plan = plan_retrieval(query, history=history)
         merged_filters = {k: v for k, v in (filters or {}).items() if v not in (None, "", "any")}
         merged_filters.update(plan["filters"])
         subqueries = plan["subqueries"]

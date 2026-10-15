@@ -6,6 +6,7 @@ Does not fine-tune. Writes JSONL a DPO/KTO job can consume later.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from pathlib import Path
@@ -52,6 +53,25 @@ def export_pairs(path: Path) -> int:
                     "ticket_id": ticket.get("id"),
                 }
             )
+    with contextlib.suppress(Exception):
+        from app import officer_chat
+
+        for pref in officer_chat.list_officer_preference_pairs(limit=500):
+            chosen = str(pref.get("chosen_reply") or "").strip()
+            rejected = str(pref.get("rejected_draft") or "").strip()
+            prompt_ctx = str(pref.get("prompt_context") or pref.get("topic") or "").strip()
+            if prompt_ctx and chosen and rejected:
+                pairs.append(
+                    {
+                        "prompt": prompt_ctx,
+                        "chosen": chosen,
+                        "rejected": rejected,
+                        "source": "officer_copilot_edit",
+                        "ticket_id": pref.get("ticket_id"),
+                        "locale": pref.get("locale", "en"),
+                        "edit_ratio": pref.get("edit_ratio", 0.0),
+                    }
+                )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as fh:
         for item in pairs:

@@ -141,6 +141,7 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"frustrat|angry|annoy|fed up|ridiculous|useless|not working"
             r"|doesn't work|does not work|third time|again and again"
             r"|still (can't|cannot|no|not)"
+            r"|\b(?:terikola|tebikola|ebizibu|nkoye|nyiize|ekibonerezo\s+kinene|haifanyi\s+kazi|imekataa|faini\s+ni\s+kubwa)\b"
         ),
     ),
     # "help me" and "lost my" used to be anxiety cues. They are how people ask
@@ -153,6 +154,7 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"worried|worry|worrying|scared|afraid|anxious|confus|stress"
             r"|don't know what|don't understand|do not understand"
+            r"|\b(?:ntidde|nnina\s+okutya|mweraliikirivu|nina\s+wasiwasi|naogopa|natishika)\b"
         ),
     ),
     (
@@ -161,6 +163,7 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"urgent|asap|as soon as possible|deadline|due (today|tomorrow)"
             r"|\b(?:under\s+audit|being\s+audited|facing\s+penalt\w*|incurred\s+penalt\w*|threatened\s+with|been\s+fined)\b"
             r"|enforcement|seiz|arrears|overdue|late fee"
+            r"|\b(?:mangu\s+ddala|kwa\s+haraka|dharura|nsaba\s+kuyambibwa\s+mangu)\b"
         ),
     ),
 )
@@ -181,7 +184,13 @@ _HARDSHIP_RE = re.compile(
     r"|agency\s+notice|distress\s+warrant"
     r"|sealed\s+(?:my\s+)?(?:shop|premises|business)"
     r"|seized\s+(?:my\s+)?(?:goods|cargo|vehicle|truck|car)"
-    r"|lost\s+my\s+job|unemployed)\b"
+    r"|lost\s+my\s+job|unemployed"
+    # Native Ugandan vernacular hardship & enforcement cues (lg, sw, nyn, ach)
+    r"|ssente\s+zaggwawo|sirina\s+ssente|talina\s+ssente"
+    r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde|bizinesi\s+yange\s+egudde"
+    r"|sina\s+pesa|biashara\s+imefungwa|duka\s+langu\s+limefungwa|bidhaa\s+zimekamatwa|akaunti\s+imefungwa"
+    r"|tihaine\s+sente|ebyangye\s+babikwata"
+    r"|cente\s+peke|jami\s+na\s+gimako)\b"
 )
 
 #: Comprehension trouble — the explanation needs rebuilding, not
@@ -189,10 +198,14 @@ _HARDSHIP_RE = re.compile(
 #: understand", so this is checked against a genuine-worry cue below.
 _CONFUSION_RE = re.compile(
     r"\b(confus\w+|don'?t understand|do not understand|makes no sense"
-    r"|i'?m lost|unclear|complicated)\b"
+    r"|i'?m lost|unclear|complicated"
+    r"|sitegedde|simanyi\s+makulu|sielewi|haieleweki)\b"
 )
 
-_WORRY_RE = re.compile(r"\b(worried|worry|worrying|scared|afraid|anxious|stress\w*|panic\w*|nervous)\b")
+_WORRY_RE = re.compile(
+    r"\b(worried|worry|worrying|scared|afraid|anxious|stress\w*|panic\w*|nervous"
+    r"|ntidde|mweraliikirivu|nina\s+wasiwasi|naogopa)\b"
+)
 
 _EMPATHY_ACKS: dict[str, str] = {
     "frustration": "I'm sorry for the trouble — let's get this sorted out together.",

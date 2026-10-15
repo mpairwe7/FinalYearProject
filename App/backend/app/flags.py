@@ -544,6 +544,33 @@ _REGISTRY: dict[str, Flag] = {
             "Attach human-readable decision_receipt explanations (audit ID, statutory basis, "
             "verified inputs, and reversal instructions) to consequential responses.",
         ),
+        # Phase 35 (October 2026) — Multimodal EQ Fusion, Workflow Tangent Resume,
+        # Memory-Backed Autonomous Outcome Verification & Closed-Loop Officer Preferences
+        Flag(
+            "eq_multimodal_fusion",
+            False,
+            "Fuse multi-turn lexical distress trajectory, native Ugandan vernacular hardship "
+            "cues (lg/sw/nyn/ach), and acoustic prosody into a smoothed AffectiveState score "
+            "with affect-conditioned translation register.",
+        ),
+        Flag(
+            "workflow_tangent_resume",
+            False,
+            "Allow active guided workflows to answer mid-flow policy side-questions via "
+            "specialist/RAG and seamlessly resume the parked workflow step.",
+        ),
+        Flag(
+            "autonomous_outcome_verification",
+            False,
+            "Bind missing tool arguments from consented verified_slot_bank, SemanticMemory, "
+            "and prior specialist DAG receipts, and verify post-action outcomes.",
+        ),
+        Flag(
+            "officer_preference_capture",
+            False,
+            "Capture PII-redacted edit diffs between AI co-pilot drafts and final officer "
+            "replies in officer_chat for offline DPO/ORPO preference export.",
+        ),
     ]
 }
 
@@ -718,6 +745,10 @@ class FeatureFlags:
                 "risk_tiered_autonomy_gates",
                 "quality_circuit_breaker",
                 "verifiable_decision_receipts",
+                "eq_multimodal_fusion",
+                "workflow_tangent_resume",
+                "autonomous_outcome_verification",
+                "officer_preference_capture",
             )
         }
 
