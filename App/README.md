@@ -28,7 +28,7 @@ App/
 │   │   ├── speech_service.py # SpeechModel (ASR/Whisper + TTS/Piper + MT + Sunbird fallback)
 │   │   ├── service.py       # ChatModel (RAG orchestrator + agentic routing)
 │   │   ├── llm.py           # Qwen3-8B vLLM + local generation + tool-calling
-│   │   ├── flags.py         # Feature flag registry (45 flags, cohort rollout)
+│   │   ├── flags.py         # Feature flag registry (77 flags, cohort rollout)
 │   │   ├── agents/          # Supervisor router + agent graph runtime
 │   │   ├── tools/           # 19 tools (calculators, rates, calendar, RAG, education, empathy, escalate)
 │   │   ├── workflows/       # YAML-driven slot-filling engine + TIN registration
@@ -1934,7 +1934,7 @@ curl -i https://struttingly-nongeological-briella.ngrok-free.dev/api/v1/admin/ti
 |---------|------|-----|-------------|
 | Backend (FastAPI) | 8083 container / 8887 local dev | API retrieval GPU mapping + CPU reranker | RAG retrieval, workflows, auth, speech orchestration |
 | Frontend (Next.js 16) | 3032 Compose / 13000 standalone | — | PWA + `/api` proxy + consent + analytics queue |
-| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `docker-compose.local-sunflower.yml` (default GPU 4) | Sunbird/Sunflower-14B-FP8 (131K YaRN context window) + tool-calling via OpenAI-compatible API |
+| vLLM | 8011 | `SUNFLOWER_GPU_ID` via `docker-compose.local-sunflower.yml` (default GPU 4) | Sunbird/Sunflower-Qwen3.5-9B (262K native context window without YaRN, FP8) + tool-calling via OpenAI-compatible API |
 | Qdrant | 6333 | CPU | dense + sparse retrieval index |
 | Redis | internal 6379 | CPU | semantic cache and distributed rate-limit storage |
 | ngrok | public HTTPS -> 3032 | — | silent background tunnel to the frontend; no GPU is used by ngrok |
