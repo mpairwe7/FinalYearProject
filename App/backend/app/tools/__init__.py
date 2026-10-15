@@ -297,7 +297,6 @@ class ToolRegistry:
 
     # -- dispatch ------------------------------------------------------
     @classmethod
-    @classmethod
     def call(
         cls,
         name: str,

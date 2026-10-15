@@ -1734,10 +1734,31 @@ def translate_text(
         logger.warning("Prompted MT refused input: text too long (%d chars)", len(text))
         return ""
 
-    _names = {"lg": "Luganda", "en": "English", "sw": "Swahili",
-              "nyn": "Runyankole", "ach": "Acholi"}
-    lang_name = _names.get(target_lang, target_lang)
-    src_name = _names.get(source_lang, source_lang)
+    _names = {
+        "lg": "Luganda",
+        "lug": "Luganda",
+        "en": "English",
+        "eng": "English",
+        "sw": "Swahili",
+        "swa": "Swahili",
+        "nyn": "Runyankole",
+        "ach": "Acholi",
+        "teo": "Ateso",
+        "lgg": "Lugbara",
+        "ttj": "Rutooro",
+        "cgg": "Rukiga",
+        "xog": "Lusoga",
+        "nyo": "Runyoro",
+        "luo": "Luo",
+        "kin": "Kinyarwanda",
+        "rw": "Kinyarwanda",
+        "som": "Somali",
+        "lin": "Lingala",
+        "fra": "French",
+        "fr": "French",
+    }
+    lang_name = _names.get((target_lang or "").strip().lower(), target_lang)
+    src_name = _names.get((source_lang or "").strip().lower(), source_lang)
     # Prompt shape follows Sunflower-14B's own model card, which puts the
     # translation directive in the USER turn ("Translate from Luganda to
     # English: ...") under a fixed Sunflower persona system prompt — not, as
