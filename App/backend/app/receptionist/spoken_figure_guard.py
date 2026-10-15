@@ -66,6 +66,22 @@ def inject_dictation_pauses(spoken_text: str) -> str:
     return " ".join(out)
 
 
+_DIGIT_MAP_BY_LOCALE: dict[str, dict[str, str]] = {
+    "en": {
+        "0": "zero", "1": "one", "2": "two", "3": "three", "4": "four",
+        "5": "five", "6": "six", "7": "seven", "8": "eight", "9": "nine",
+    },
+    "lg": {
+        "0": "zeero", "1": "emu", "2": "bbiri", "3": "ssatu", "4": "nnya",
+        "5": "ttaano", "6": "mukaaga", "7": "musanvu", "8": "munaana", "9": "mwenda",
+    },
+    "sw": {
+        "0": "sufuri", "1": "moja", "2": "mbili", "3": "tatu", "4": "nne",
+        "5": "tano", "6": "sita", "7": "saba", "8": "nane", "9": "tisa",
+    },
+}
+
+
 def _spoken_realizations_for(val: float, locale: str) -> tuple[str, ...]:
     """Canonical spoken-word realizations produced by ``speech_normalization`` for *val*."""
     from ..speech_normalization import (
@@ -76,6 +92,12 @@ def _spoken_realizations_for(val: float, locale: str) -> tuple[str, ...]:
 
     num_str = str(int(val)) if val == int(val) else f"{val:g}"
     candidates: list[str] = []
+    if val == int(val) and len(num_str) >= 6:
+        # Spaced digit sequence (e.g. "1 0 0 0 0 0 0 1 0 0") and spelled-out digits for TINs/PRNs
+        candidates.append(" ".join(num_str))
+        for loc_key in (locale, "en"):
+            dmap = _DIGIT_MAP_BY_LOCALE.get(loc_key, _DIGIT_MAP_BY_LOCALE["en"])
+            candidates.append(" ".join(dmap.get(ch, ch) for ch in num_str))
     for loc in (locale, "en"):
         try:
             words = _spoken_number(num_str, loc, years=False).strip().lower()
