@@ -101,6 +101,9 @@ const CREDENTIAL_TEXT: Record<string, string> = {
   oauth_client_credentials: "OAuth 2.1 client credentials",
 };
 
+/** Credential kinds a server will accept; a short shared token reads as none. */
+const USABLE_CREDENTIALS = new Set(["shared_token", "oauth_client_credentials"]);
+
 const AUDIENCE_TEXT: Record<string, string> = {
   public: "anonymous taxpayers",
   verified_taxpayer: "signed-in taxpayers",
@@ -284,7 +287,7 @@ export function ConnectorBoard() {
   const listedOperations = servers.reduce((sum, server) => sum + server.tools_listed, 0);
   const bindStep: "done" | "todo" | "unknown" = !diagnostics
     ? "unknown"
-    : servers.length > 0 && servers.every((server) => server.reachable && server.credential !== "none")
+    : servers.length > 0 && servers.every((server) => server.reachable && USABLE_CREDENTIALS.has(server.credential))
         && diagnostics.refused_bindings.length === 0
       ? "done"
       : "todo";
@@ -590,7 +593,7 @@ export function ConnectorBoard() {
                           <span className={`ops-chip ${server.mode === "live" ? "is-info" : "is-warn"}`}>
                             {server.mode === "live" ? "Live" : "Demo data"}
                           </span>
-                          <span className={`ops-chip ${server.credential === "none" || server.credential === "shared_token_too_short" ? "is-danger" : ""}`}>
+                          <span className={`ops-chip ${USABLE_CREDENTIALS.has(server.credential) ? "" : "is-danger"}`}>
                             {CREDENTIAL_TEXT[server.credential] ?? server.credential}
                           </span>
                         </div>
@@ -688,7 +691,7 @@ export function ConnectorBoard() {
                     {servers.some((server) => !server.reachable)
                       ? `, ${servers.filter((server) => !server.reachable).length} not answering`
                       : ""}
-                    {servers.some((server) => server.credential === "none" || server.credential === "shared_token_too_short")
+                    {servers.some((server) => !USABLE_CREDENTIALS.has(server.credential))
                       ? ", some without a usable credential"
                       : ""}
                     {diagnostics.refused_bindings.length

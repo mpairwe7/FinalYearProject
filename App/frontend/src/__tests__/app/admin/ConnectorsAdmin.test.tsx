@@ -208,6 +208,30 @@ describe("connector admin board", () => {
     expect(steps[3]).toHaveTextContent("Done");
   });
 
+  it("does not count a shared token the server will refuse as a binding that is done", async () => {
+    const shortToken = {
+      ...diagnostics,
+      servers: [{ ...diagnostics.servers[0], credential: "shared_token_too_short" }],
+      refused_bindings: [],
+    };
+    vi.stubGlobal("fetch", vi.fn((url: RequestInfo | URL) => {
+      if (String(url) === "/api/v1/connectors/diagnostics") return response(shortToken);
+      if (String(url) === "/api/v1/connectors?view=chat") {
+        return response({ ok: true, enabled: true, connectors: [chatConnector] });
+      }
+      return response({ ok: true, live: false, mode: "simulation", connectors: [connector] });
+    }));
+    render(<ConnectorBoard />);
+    await screen.findByTestId("connector-diagnostics-summary");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add connector" }));
+    const dialog = await screen.findByRole("dialog", { name: "Add a connector" });
+    const bind = within(dialog).getAllByRole("listitem")[1];
+    expect(bind).toHaveTextContent("Needs attention");
+    expect(bind).toHaveTextContent("some without a usable credential");
+    expect(screen.getByText("Shared token shorter than 32 characters")).toHaveClass("is-danger");
+  });
+
   it("says when diagnostics could not be read, and leaves the steps unchecked", async () => {
     vi.stubGlobal("fetch", vi.fn((url: RequestInfo | URL) => {
       if (String(url) === "/api/v1/connectors/diagnostics") return response({ ok: false });

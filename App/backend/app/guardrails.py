@@ -486,16 +486,29 @@ def contains_pii(text: str) -> bool:
 
 #: A TIN (10 digits from 1) or a PRN (12-14 digits from 2) typed by the taxpayer.
 _USER_STATED_ID_RE = re.compile(r"\b1\d{9}\b|\b2\d{11,13}\b")
+#: The redactor's own TIN pattern, so every format it would hide — "TIN:
+#: 1000000001", "100-000-0001", "100 000 0001" — is also one a taxpayer can state.
+_UG_TIN_RE = next(pattern for kind, pattern in _PII_PATTERNS if kind == "ug_tin")
 
 
 def user_stated_identifiers(message: str) -> tuple[str, ...]:
-    """The TINs and PRNs the taxpayer wrote in *message* (G143).
+    """The TINs and PRNs the taxpayer wrote in *message*, as digits (G143).
 
     Echoing these back is not a disclosure — the taxpayer just typed them — and
     redacting them made a lookup they asked for unreadable ("EFRIS holds … for
-    TIN [REDACTED_UG_TIN]"). Everything else stays redacted.
+    TIN [REDACTED_UG_TIN]"). A spaced or hyphenated TIN is normalised to its
+    digits, which is how the redactor compares it. Everything else stays redacted.
     """
-    return tuple(_USER_STATED_ID_RE.findall(message or ""))
+    text = message or ""
+    found: list[str] = []
+    for value in _USER_STATED_ID_RE.findall(text):
+        if value not in found:
+            found.append(value)
+    for match in _UG_TIN_RE.finditer(text):
+        digits = re.sub(r"\D", "", match.group(0))
+        if digits and digits not in found:
+            found.append(digits)
+    return tuple(found)
 
 
 class StreamingDLPFilter:
