@@ -34,7 +34,7 @@ tool-calling, agentic routing, workflows, memory, audit, and speech.
 The chatbot now ships with:
 
 - **Hybrid retrieval** (Qdrant dense + BM25 RRF + cross-encoder rerank; optional HyDE on the dense leg via `FLAG_HYDE`)
-- **Grounded generation** (`Sunbird/Sunflower-14B-FP8` via vLLM, spotlight markers,
+- **Grounded generation** (`Sunbird/Sunflower-Qwen3.5-9B` via vLLM with native 256K / 262,144 context window without YaRN, spotlight markers,
 token-aware trimming, structured-output option)
 - **OWASP LLM Top 10 (2025) coverage** — prompt-injection guards,
 PII redaction, system-prompt leakage detection, grounding checks
@@ -58,20 +58,19 @@ OWASP ZAP DAST, AI red teaming (50 NIST AI 600-1 prompts)
 bias audit, carbon tracking, incident response simulation
 - **Auth system** — JWT (HS256/RS256), RBAC with 5 roles, consent
 management (UDPA 2019), user profiles (`auth/` directory)
-- **Tool-calling framework** — 25 registered tools, ToolRegistry,
+- **Tool-calling framework** — 54 registered tools across 18 namespaces, ToolRegistry,
 generate_with_tools loop (`tools/` directory)
 - **Supervisor routing** — 7 routes with per-specialist tool
-whitelists (`agents/` directory)
-- **Guided workflows** — 14 YAML-declared workflows with slot filling
+whitelists and multi-specialist DAG planning (`agents/` directory)
+- **Guided workflows** — 19 YAML-declared workflows with slot filling and mid-workflow policy tangent auto-resume
 (`workflows/` directory)
 - **Ticket queue** — CRUD admin endpoints, escalation tool
-- **Speech pipeline** — ASR (`Sunbird/asr-whisper-large-v3-salt`),
-TTS (Spark-TTS-SALT), MT, Sunbird AI cloud fallback
-- **Memory system** — semantic facts, episodic summaries, working
-memory (`memory/` directory)
-- **Audit ledger** — hash-chained, Merkle tree proofs (`audit/`
+- **Speech pipeline** — ASR (`Sunbird/SunflowerASR-51-african-languages`),
+TTS (`Sunbird/orpheus-3b-tts-multilingual` streaming sidecar + `Spark-TTS-SALT` fallback), MT, Sunbird AI cloud fallback, and 8 kHz G.711 μ-law 2G/3G wire transcoding
+- **Memory system** — 4-tier cognitive memory (working, episodic, semantic, procedural) + multi-case `ResolutionLedger` and `HandoffEnvelope` v2.1 (`memory/` directory)
+- **Audit ledger** — hash-chained, Merkle tree proofs, and `ActionAuditRecord` v3 with `InteractionQualityScorecard` (`audit/`
 directory)
-- **Feature flags** — 49 flags via `flags.py`, with percentage / cohort / allowlist rollout
+- **Feature flags** — 77 flags via `flags.py`, with percentage / cohort / allowlist rollout
 - **MCP 2026-07-28** — spec `_meta`, `Mcp-Name` check, MRTR `inputRequests`,
   shared idempotency. Decision log:
   `App/docs/traceability/mcp-hardening-2026-08-17.md`.

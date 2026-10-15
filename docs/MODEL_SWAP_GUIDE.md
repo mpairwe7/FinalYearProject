@@ -12,8 +12,9 @@ without restrictions.
 # Current defaults (set in .env or docker-compose.yml — updated 2026-10-15)
 LLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B  # llm.py — Sunflower v2 (67 African languages, Apache-2.0)
                                          # Served via vLLM with --quantization fp8 --kv-cache-dtype fp8
-                                         # --dtype auto --max-model-len 65536 (supports 64K–262K native context).
+                                         # --dtype auto --max-model-len 262144 (native 256K/262K context without YaRN).
                                          # Also supports Sunbird/Sunflower-Qwen3.8-27B.
+LLM_MAX_CONCURRENCY=12                   # service.py — 8-16 bounded LLM thread-pool size for vLLM continuous batching
 WHISPER_SALT_MODEL=Sunbird/SunflowerASR-51-african-languages  # 51 African languages (SFT + GRPO)
 ORPHEUS_MODEL=Sunbird/orpheus-3b-tts-multilingual             # Primary streaming TTS (lg, sw, en)
 DENSE_MODEL=BAAI/bge-m3            # retriever.py / indexer.py — dense embeddings
@@ -51,7 +52,7 @@ against the local in-process Transformers+BitsAndBytes path. See §1.
 
 | Model | Params | MMLU | License | VRAM | Context | Notes |
 |-------|--------|------|---------|------|---------|-------|
-| **Sunbird/Sunflower-Qwen3.5-9B** (default) | 9B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~9.5 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 65K–262K (native `max_position_embeddings: 262144`) | Sunflower V2 built on Qwen3.5-9B; continued pretraining + SFT + GRPO across **67 African languages** + English (`enable_thinking=False` recommended). Served via `vllm serve Sunbird/Sunflower-Qwen3.5-9B --quantization fp8 --kv-cache-dtype fp8 --dtype auto --max-model-len 65536 --gpu-memory-utilization 0.90 --max-num-seqs 8`. Replaced `Sunbird/Sunflower-14B-FP8` in the local HF cache on 2026-10-15. |
+| **Sunbird/Sunflower-Qwen3.5-9B** (default) | 9B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~9.5 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 65K–262K (native `max_position_embeddings: 262144` without YaRN) | Sunflower V2 built on Qwen3.5-9B; continued pretraining + SFT + GRPO across **67 African languages** + English (`enable_thinking=False` recommended). Served via `vllm serve Sunbird/Sunflower-Qwen3.5-9B --quantization fp8 --kv-cache-dtype fp8 --dtype auto --max-model-len 262144 --gpu-memory-utilization 0.90 --max-num-seqs 12`. Replaced `Sunbird/Sunflower-14B-FP8` in the local HF cache on 2026-10-15. |
 | **Sunbird/Sunflower-Qwen3.8-27B** (high-capacity option) | 27B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~27 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 128K–262K (native `max_position_embeddings: 262144`) | Larger Sunflower V2 sibling; uses the identical vLLM on-the-fly FP8 + FP8 KV-cache serving recipe (`SUNFLOWER_MODEL=Sunbird/Sunflower-Qwen3.8-27B`). |
 | Qwen/Qwen3-8B (previous default; simple/no-vLLM fallback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | `llm.py`'s own code-level default when `LLM_MODEL` is unset entirely; ungated; hybrid thinking mode. The one path the lg/sw/nyn/ach LoRA adapters (`fine-tuning/adapters/`) apply to — they are trained against this base and loaded via `set_adapter()`, only on `LLM_BACKEND=local`. |
 | Qwen/Qwen3-30B-A3B | 30B (3B active) | 81.4 | Apache-2.0 | 18 GB | 128K | MoE — 30B quality at 3B cost; needs vLLM/SGLang |
@@ -63,9 +64,8 @@ against the local in-process Transformers+BitsAndBytes path. See §1.
 ### Swap command
 
 ```bash
-# Current default — multilingual, gated (requires approved HF_TOKEN)
-# Proven recipe: docs/runbooks/capacity-slo.md
-LLM_MODEL=Sunbird/Sunflower-14B-FP8 LLM_BACKEND=vllm LLM_CONTEXT_WINDOW=131072
+# Current default — Sunflower V2 9B, native 262K context without YaRN
+LLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B LLM_BACKEND=vllm LLM_CONTEXT_WINDOW=262144 LLM_MAX_CONCURRENCY=12
 # local dev: cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d
 
 # Ungated rollback — fits on RTX A6000 easily, English-centric, no vLLM sidecar needed

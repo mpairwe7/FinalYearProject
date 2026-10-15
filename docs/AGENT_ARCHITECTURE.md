@@ -5,10 +5,10 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag**.
-`FLAG_TOOL_USE` and `FLAG_TICKET_QUEUE` default OFF.
+Most capabilities below are **gated behind a feature flag** (`flags.py`, 77 flags total).
+`FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
-holds ≥ 0.95 (`agentic_mode_gate`).
+holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
 
 | Flag | Purpose |
 |---|---|
@@ -55,10 +55,11 @@ per-request in tests via `flags.set("tool_use", True)`.
       └──────┬──────────────────────────────────────────┘
              ▼
       ┌─────────────────────────────────────────────────┐
-      │                Qwen2.5-3B on GPU                │
+      │     Sunbird/Sunflower-Qwen3.5-9B on vLLM        │
+      │      (262K native context, no YaRN, FP8)        │
       │  - force_agentic → generate_with_tools() loop   │
       │    • parse <tool_call> blocks                   │
-      │    • dispatch via ToolRegistry                  │
+      │    • dispatch via ToolRegistry (54 tools)       │
       │    • append `tool` message, regenerate          │
       │    • bounded max_iterations=3                   │
       │  - otherwise → plain generate() (Phase 1-13)    │

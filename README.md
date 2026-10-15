@@ -13,7 +13,7 @@ This repository is a customer-service conversation AI for Uganda Revenue Authori
 |----------|-------------|
 | [Documentation Index](docs/README.md) | Getting started and project overview |
 | [API Reference](docs/API_REFERENCE.md) | REST API endpoints (sync + SSE streaming) |
-| [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 6-phase advanced RAG pipeline design |
+| [RAG Architecture](docs/RAG_ARCHITECTURE.md) | 12-stage production RAG + Agentic + Speech pipeline design |
 | [Deployment Guide](docs/DEPLOYMENT.md) | Production deployment, TLS, scaling, SLOs |
 | [Monitoring & Observability](docs/MONITORING.md) | OpenTelemetry, Prometheus, alerting |
 | [Data Schema & Evaluation](docs/data-schema-and-eval.md) | Database models and evaluation criteria |
@@ -51,8 +51,8 @@ FinalYearProject/
 │   │   └── app/
 │   │       ├── main.py        # FastAPI app + endpoints (sync + SSE streaming)
 │   │       ├── models.py      # Pydantic v2 request/response models
-│   │       ├── service.py     # ChatModel (6-phase RAG + classification)
-│   │       ├── llm.py         # Qwen3-8B local/vLLM generation, 4-bit BnB, LoRA routing
+│   │       ├── service.py     # ChatModel (12-stage RAG + agentic routing + speech)
+│   │       ├── llm.py         # Sunbird/Sunflower-Qwen3.5-9B (262K native context) / Qwen3-8B generation, LoRA routing
 │   │       ├── query.py       # Query rewriting (abbreviations, spelling, coreference)
 │   │       ├── cache.py       # Semantic cache (cosine similarity)
 │   │       ├── corrective_rag.py # Corrective re-retrieval + clarification
@@ -115,40 +115,37 @@ FinalYearProject/
 3) **Quality gates**: Deployment is gated on `evaluate-rag` and `production-gates` job success.
 4) **Feedback loop**: User thumbs-down feedback → `ml/pipelines/export_feedback.py` → retriever negative judgments + regression test candidates → retriever/reranker tuning.
 
-## URA Chatbot — Advanced RAG Pipeline (2026)
+## URA Chatbot — Advanced 12-Stage RAG & Agentic Pipeline (October 2026)
 
-The API backend (`App/backend/app/`) implements a production-grade 6-phase Retrieval-Augmented Generation pipeline with local LLM inference:
+The API backend (`App/backend/app/`) implements a production-grade 12-stage Retrieval-Augmented Generation and Agentic CX pipeline with local LLM inference:
 
 ```
 User Query
-  → Query Rewriting (spell-correct, abbreviation expand, coreference resolve)
-  → InputGuard (OWASP LLM01 prompt injection detection)
-  → Semantic Cache (cosine similarity ≥ 0.92 → instant reply)
-  → Hybrid Retrieval (dense + BM25 RRF → cross-encoder rerank)
-  → Corrective RAG (re-retrieve if avg score < threshold)
-  → Clarification / Abstention check
-  → LLM Synthesis (Qwen3-8B, local 4-bit Transformers or vLLM)
-  → OutputGuard (PII redaction, XSS sanitization, grounding check)
-  → Escalation evaluation → SSE stream or sync response
+  → Stage 0..0c: Conversation History, Query Rewriting, Retrieval Plan (+EQ Relief), Answer Language
+  → Stage 1..1d: InputGuard (OWASP LLM01) → Guided Workflows (with Tangent Resume) → Semantic Cache → Supervisor / Multi-Agent DAG
+  → Stage 2..3c2: Hybrid Retrieval (BAAI/bge-m3 + BM25 DBSF/RRF → mxbai-rerank-base-v2) → Corrective RAG → Language Boosting & FAQ Blending
+  → Stage 4..5: Abstention Check → LLM Synthesis (Sunbird/Sunflower-Qwen3.5-9B 262K native context via vLLM or Tool-Calling Loop)
+  → Stage 6..9: OutputGuard (PII redaction, XSS strip) → Faithfulness & Numeric Contradiction Check → Escalation / HandoffEnvelope v2.1 → AuditLedger v3
 ```
 
 | Component | Implementation | Details |
 |-----------|---------------|---------|
 | **Chunking** | `RecursiveCharacterTextSplitter` | QA: 600 tokens, PDF: 1000 tokens; section/page metadata |
-| **Embeddings** | Configurable (`all-MiniLM-L6-v2` / `multilingual-e5-large`) | Auto-detected dimensions (384/1024) |
-| **Vector Store** | Qdrant (local persistent) | Versioned collections, non-destructive indexing |
-| **Retrieval** | Hybrid dense + BM25 sparse | RRF fusion + circuit breaker with exponential backoff |
-| **Reranking** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Thread-safe cross-encoder reranking |
-| **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), spell correction, coreference resolution |
+| **Embeddings** | `BAAI/bge-m3` | 1024-dim multilingual dense embeddings |
+| **Vector Store** | Qdrant (`v1.19.0` local persistent) | Versioned collections, alias-based zero-downtime indexing |
+| **Retrieval** | Hybrid dense + BM25 sparse | DBSF / RRF fusion + circuit breaker with exponential backoff |
+| **Reranking** | `mixedbread-ai/mxbai-rerank-base-v2` | Cross-encoder reranking with clean single-sigmoid probabilities |
+| **Query Rewriting** | `query.py` | Abbreviation expansion (15+ URA terms), vernacular-safe spell correction, coreference resolution |
 | **Semantic Cache** | `cache.py` | Cosine similarity matching, configurable TTL/threshold/max-size |
 | **Corrective RAG** | `corrective_rag.py` | Re-retrieve with expanded query when initial quality is low |
-| **Generation** | `Sunbird/Sunflower-14B-FP8` | vLLM HTTP (FP8 compressed-tensors, natively multilingual for Ugandan languages); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the simple fallback and what the lg/sw/nyn/ach LoRA adapters target |
+| **Generation** | `Sunbird/Sunflower-Qwen3.5-9B` | vLLM HTTP (FP8, native 256K / 262,144 context window without YaRN, `LLM_MAX_CONCURRENCY=12`, natively multilingual across 67 African languages); `Qwen/Qwen3-8B` + local Transformers/BnB 4-bit is the fallback and what the lg/sw/nyn/ach LoRA adapters target |
 | **LoRA Routing** | Qwen3 adapters for `lg`, `sw`, `nyn`, `ach` | Per-locale PEFT adapters loaded from `fine-tuning/adapters/` and selected with `set_adapter()` |
-| **Multi-turn Memory** | `database.py` | 5-turn sliding window from SQLite conversation history |
-| **Safety** | OWASP LLM Top 10 guardrails | Injection detection, PII redaction, XSS sanitization, grounding verification |
-| **Escalation** | `guardrails.py` | Auto-flag for human review on low faithfulness or no results |
-| **Observability** | OpenTelemetry + Prometheus | Per-stage latency spans, token usage metrics |
-| **Evaluation** | Hit@K, MRR, NDCG, faithfulness | 8-metric quality gates block deployment below thresholds |
+| **Cognitive Memory** | `memory/` (`4-tier` + `ResolutionLedger`) | Working, Episodic, Semantic, and Procedural memory + multi-case `ResolutionLedger` and `HandoffEnvelope` v2.1 |
+| **Speech & Voice** | `Sunbird/SunflowerASR-51-african-languages` + `Orpheus-3B-TTS` | Hybrid S2S + Regulated Cascaded Router, `spoken_figure_guard`, multimodal affect prosody, and 8 kHz G.711 μ-law 2G/3G wire transcoding |
+| **Safety & Governance** | OWASP LLM Top 10 + `governance_v3.py` | Injection detection, PII redaction, `#NMBRA#` sentinel figure protection, `ActionAuditRecord` v3, and `InteractionQualityScorecard` |
+| **Escalation** | `guardrails.py` + `officer_chat.py` | Auto-flag for human review, bilingual Officer Co-Pilot drafts, `Officer -> AI` workflow delegation, and DPO preference capture |
+| **Observability** | OpenTelemetry + Prometheus | Per-stage GenAI latency spans, token usage metrics, bounded label series |
+| **Evaluation** | Hit@K, MRR, NDCG, faithfulness | 8-metric quality gates + 30,000-scenario trilingual (TTT/STT/TTS) stress & fuzzy verification |
 
 - Data model, ingestion flow, and evaluation rubric are documented in [docs/data-schema-and-eval.md](docs/data-schema-and-eval.md).
 
