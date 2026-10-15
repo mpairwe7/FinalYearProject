@@ -78,8 +78,23 @@ class TestTextTurnsKeepTheCase:
 
         db, user_id = consented
         monkeypatch.setenv("FLAG_CONTINUOUS_RELATIONSHIP_MEMORY", "false")
-        _record_turn_case("PAYE on 2m", {"retrieval_mode": "calculator"}, user_id=user_id, tenant_id="default", channel="rest")
+        _record_turn_case(
+            "PAYE on 2,000,000", {"retrieval_mode": "calculator"}, user_id=user_id, tenant_id="default", channel="rest"
+        )
         assert _cases(db, user_id) == {}
+
+    def test_a_rate_read_out_is_not_progress_but_a_computation_is(self, consented) -> None:
+        from app.service import _record_turn_case
+
+        db, user_id = consented
+        # Both come back as retrieval_mode "calculator"; only the figure makes it a case.
+        _record_turn_case("What is the VAT rate in Uganda?", {"retrieval_mode": "calculator"}, user_id=user_id, tenant_id="default", channel="rest")
+        assert _cases(db, user_id) == {}
+        _record_turn_case("PAYE on UGX 2,500,000 a month", {"retrieval_mode": "calculator"}, user_id=user_id, tenant_id="default", channel="rest")
+        _record_turn_case("and on UGX 3,000,000?", {"retrieval_mode": "calculator", "current_topic": "paye"}, user_id=user_id, tenant_id="default", channel="sse")
+        cases = _cases(db, user_id)
+        # The bare follow-up names no tax; the conversation's topic put it on the PAYE case.
+        assert [c["domain_tag"] for c in cases.values()] == ["paye"]
 
 
 def _ticket(db, *, query: str, prior: list[str] = (), handoff: dict | None = None) -> dict:
@@ -129,8 +144,11 @@ class TestEveryPathToAnOfficer:
 
     def test_what_was_already_given_is_not_asked_again_and_never_copied(self, tmp_db) -> None:
         conversation = f"c-{uuid.uuid4().hex[:8]}"
+        # The workflow engine stores a session under the owner-scoped state key
+        # (tenant, owner, conversation hashed) - never the id the client sent.
+        state_key = tmp_db.conversation_state_key(conversation, session_id="s", tenant_id="default")
         tmp_db.upsert_workflow_session(
-            conversation, "return_filing", 1, {"tax_type": "vat", "filing_period": "2026-09", "tin": "1000000001"}
+            state_key, "return_filing", 1, {"tax_type": "vat", "filing_period": "2026-09", "tin": "1000000001"}
         )
         from app.service import ChatModel
 
@@ -150,6 +168,45 @@ class TestEveryPathToAnOfficer:
         assert "1000000001" not in json.dumps(stored)
         assert stored["envelope"]["verified_slot_bank"] == {"filing_period": "provided", "tax_type": "provided", "tin": "provided"}
 
+    def test_another_owners_workflow_under_the_bare_id_is_not_read(self, tmp_db) -> None:
+        from app.service import ChatModel
+
+        conversation = f"c-{uuid.uuid4().hex[:8]}"
+        tmp_db.upsert_workflow_session(conversation, "return_filing", 1, {"tax_type": "vat", "filing_period": "2026-09"})
+        model = ChatModel.__new__(ChatModel)
+        ticket_id = ChatModel._maybe_create_ticket(
+            model, reason="r", user_query="I need help", bot_reply="", session_id="s",
+            conversation_id=conversation, handoff={"topic": "account_specific", "priority": "normal",
+                                                   "required_details": ["tax type and return period"]},
+            locale="en",
+        )
+        stored = tmp_db.get_ticket(ticket_id)["handoff"]
+        assert stored["already_given"] == []
+        assert stored["required_details"] == ["tax type and return period"]
+
+    def test_the_button_takes_its_topic_and_details_from_the_conversation(self, tmp_db) -> None:
+        # /v1/escalate builds a placeholder hand-off: topic "general", nothing to ask for.
+        placeholder = {"topic": "general", "summary": "asked for an officer", "priority": "normal", "requested_by": "taxpayer"}
+        ticket = _ticket(
+            tmp_db,
+            query="Talk to an officer",
+            prior=["What is VAT?", "My container is held at Malaba and I need the customs entry released"],
+            handoff=placeholder,
+        )
+        handoff = ticket["handoff"]
+        assert handoff["topic"] == "customs"
+        assert "entry or declaration number" in handoff["required_details"]
+        assert ticket["team"] == "customs"
+
+    def test_a_real_topic_is_never_replaced(self, tmp_db) -> None:
+        ticket = _ticket(
+            tmp_db,
+            query="I want to lodge an objection",
+            handoff={"topic": "objection_or_dispute", "priority": "normal", "required_details": ["assessment or objection reference number"]},
+        )
+        assert ticket["handoff"]["topic"] == "objection_or_dispute"
+        assert ticket["handoff"]["required_details"] == ["assessment or objection reference number"]
+
     def test_flags_off_leave_the_ticket_as_it_was(self, tmp_db, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("FLAG_EQ_STAKES_ESCALATION", "false")
         monkeypatch.setenv("FLAG_STRUCTURED_TEXT_HANDOFF", "false")
@@ -167,7 +224,15 @@ class TestTheOfferInTheConversation:
         result = {"retrieval_mode": "hybrid", "reply": "Here is how agency notices work.", "next_actions": ["Check balance"]}
         apply_turn_guidance("I can't afford this, they issued an agency notice to my bank", result, subject=USER)
         assert result["next_actions"][0] == HANDOFF_ACTION
-        assert result["escalation_offer"]["tier"] == "priority"
+
+    def test_stakes_without_distress_are_offered_after_the_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from app.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
+
+        monkeypatch.setenv("FLAG_EQ_STAKES_ESCALATION", "true")
+        result = {"retrieval_mode": "hybrid", "reply": "Here is the procedure.", "next_actions": ["Check release status"]}
+        apply_turn_guidance("Customs seized my goods at Malaba. What is the procedure?", result, subject=USER)
+        assert result["next_actions"][-1] == HANDOFF_ACTION
+        assert result["next_actions"][0] != HANDOFF_ACTION
 
     def test_an_ordinary_question_is_not_offered_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from app.turn_guidance import HANDOFF_ACTION, apply_turn_guidance
@@ -176,4 +241,3 @@ class TestTheOfferInTheConversation:
         result = {"retrieval_mode": "hybrid", "reply": "18%.", "next_actions": []}
         apply_turn_guidance("What is the VAT rate?", result, subject=USER)
         assert HANDOFF_ACTION not in result["next_actions"]
-        assert "escalation_offer" not in result

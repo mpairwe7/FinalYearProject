@@ -37,7 +37,7 @@ from .escalation_policy import (
 from .flags import flags
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -103,18 +103,29 @@ def prune_required_details(details: Sequence[str], given: Sequence[str]) -> list
     return kept
 
 
-def given_slot_names(conversation_id: str, *, tenant_id: str = "default", user_id: str = "") -> list[str]:
-    """Names of what the taxpayer has already given: this conversation's
-    workflow slots, plus their consented slot bank. Names only."""
-    names: set[str] = set()
+def workflow_session(state_key: str, *, tenant_id: str = "default") -> Mapping[str, Any]:
+    """The conversation's guided workflow, read by its owner-scoped state key.
+
+    The workflow engine stores a session under ``conversation_state_key``
+    (tenant, owner and conversation hashed), never the bare conversation id:
+    looking it up by the id the client sent found nothing — and must not, or
+    one taxpayer's id would read another's workflow.
+    """
+    if not state_key:
+        return {}
     try:
         from . import database as db  # noqa: PLC0415
 
-        session = db.get_workflow_session(conversation_id, tenant_id) if conversation_id else None
-        if session:
-            names.update(k for k, v in (session.get("slots") or {}).items() if v not in ("", None))
+        return db.get_workflow_session(state_key, tenant_id) or {}
     except Exception:
-        logger.debug("workflow slots unavailable for handoff", exc_info=True)
+        logger.debug("workflow session unavailable for handoff", exc_info=True)
+        return {}
+
+
+def given_slot_names(session: Mapping[str, Any], *, tenant_id: str = "default", user_id: str = "") -> list[str]:
+    """Names of what the taxpayer has already given: the workflow *session*'s
+    answered slots, plus their consented slot bank. Names only."""
+    names: set[str] = {k for k, v in (session.get("slots") or {}).items() if v not in ("", None)}
     if user_id:
         try:
             from .memory import get_memory_service  # noqa: PLC0415
@@ -133,32 +144,59 @@ def _names_only(envelope: dict[str, Any]) -> dict[str, Any]:
     return envelope
 
 
+def _handoff_domain(user_query: str, history: Sequence[str], session: Mapping[str, Any]) -> str:
+    """What the hand-off is about: the workflow under way, else the latest message naming a tax.
+
+    The button's own message ("The taxpayer asked to speak to a URA officer.")
+    names nothing; read alone, every such case was a "General tax enquiry".
+    """
+    from .memory.resolution_ledger import infer_domain_tag, workflow_domain  # noqa: PLC0415
+
+    workflow_id = str(session.get("workflow_id") or "")
+    if workflow_id:
+        return workflow_domain(workflow_id)
+    for text in (user_query, *reversed(history)):
+        domain = infer_domain_tag(text)
+        if domain != "general":
+            return domain
+    return "general"
+
+
 def enrich_handoff(
     handoff: dict[str, Any] | None,
     *,
     user_query: str,
     transcript: Sequence[Mapping[str, Any]],
     conversation_id: str,
+    workflow_state_key: str = "",
     user_id: str = "",
     tenant_id: str = "default",
     locale: str = "en",
     modality: str = "text",
     priority: str = "normal",
+    classify_topic: Callable[[str], str] | None = None,
+    details_for_topic: Callable[[str], Sequence[str]] | None = None,
 ) -> str:
     """Add the escalation assessment and the envelope to *handoff*; return the ticket priority.
 
     *transcript* is the conversation as it stood, ending with the escalated
-    turn. Never raises and never lowers a priority it was given.
+    turn; *workflow_state_key* is the conversation's owner-scoped state key
+    (``database.conversation_state_key``). *classify_topic* and
+    *details_for_topic* are the service's own hand-off classifier, injected:
+    "Talk to an officer" arrives with the placeholder topic ``general`` and no
+    details to ask for, so — with the structured hand-off on — they are read
+    from the conversation the way an auto-escalation reads them from its
+    message. Never raises and never lowers a priority it was given.
     """
     if handoff is None:
         return priority
     subject = user_id or None
     effective = priority or "normal"
     assessment = None
+    history = [h for h in (str(turn.get("user_message") or "") for turn in list(transcript)[:-1]) if h]
     try:
         if flags.is_enabled("eq_stakes_escalation", subject=subject):
-            history = [str(turn.get("user_message") or "") for turn in list(transcript)[:-1]]
-            assessment = strongest_assessment(user_query, [h for h in history if h])
+            assessment = strongest_assessment(user_query, history)
             handoff["escalation"] = assessment.to_dict()
             effective = higher_priority(effective, assessment.priority)
             handoff["priority"] = higher_priority(str(handoff.get("priority") or "normal"), effective)
@@ -178,9 +216,19 @@ def enrich_handoff(
     try:
         if flags.is_enabled("structured_text_handoff", subject=subject):
             from .memory import get_memory_service  # noqa: PLC0415
-            from .memory.resolution_ledger import infer_domain_tag, objective_for  # noqa: PLC0415
+            from .memory.resolution_ledger import objective_for  # noqa: PLC0415
 
-            given = given_slot_names(conversation_id, tenant_id=tenant_id, user_id=user_id)
+            session = workflow_session(workflow_state_key, tenant_id=tenant_id or "default")
+            if (
+                classify_topic is not None
+                and details_for_topic is not None
+                and not handoff.get("required_details")
+                and str(handoff.get("topic") or "") in ("", "general")
+            ):
+                topic = classify_topic(" ".join([*history, user_query][-_ASSESS_LAST_MESSAGES:]))
+                handoff["topic"] = topic
+                handoff["required_details"] = list(details_for_topic(topic))
+            given = given_slot_names(session, tenant_id=tenant_id, user_id=user_id)
             required = prune_required_details(list(handoff.get("required_details") or []), given)
             handoff["required_details"] = required
             handoff["already_given"] = [name.replace("_", " ") for name in given]
@@ -188,7 +236,7 @@ def enrich_handoff(
             envelope = get_memory_service().create_handoff_envelope(
                 thread_id=conversation_id,
                 user_id=user_id,
-                objective=objective_for(infer_domain_tag(user_query)),
+                objective=objective_for(_handoff_domain(user_query, history, session)),
                 target_resolution=f"An officer resolves this {str(handoff.get('topic') or 'tax').replace('_', ' ')} request",
                 tenant_id=tenant_id or "default",
                 next_action_type="officer_reply",

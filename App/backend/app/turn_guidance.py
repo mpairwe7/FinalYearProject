@@ -151,7 +151,6 @@ def _offer_person(
     assessment = assess_escalation(text, history=list(prior_messages), result=result)
     if not assessment.offers_person:
         return
-    result["escalation_offer"] = assessment.to_dict()
     if HANDOFF_ACTION in actions:
         actions.remove(HANDOFF_ACTION)
     if assessment.tier == TIER_PRIORITY:

@@ -7,11 +7,16 @@ import unittest
 from typing import Any
 from unittest import mock
 
+from pathlib import Path
+
 from app.memory.resolution_ledger import (
+    _WORKFLOW_DOMAINS,
     DOMAIN_OBJECTIVES,
     ResolutionLedger,
     case_for_prompt,
     case_update_for_turn,
+    infer_domain_tag,
+    workflow_domain,
 )
 
 
@@ -59,6 +64,53 @@ class TurnClassificationTests(unittest.TestCase):
 
     def test_a_cancelled_workflow_is_not_progress(self) -> None:
         self.assertIsNone(case_update_for_turn("stop", {"workflow": {"id": "calc_vat", "status": "cancelled"}}))
+
+    def test_a_rate_read_out_is_a_plain_answer(self) -> None:
+        # The rate lookup and the calculator both answer as "calculator"; the
+        # taxpayer's figure is what makes it a computation.
+        self.assertIsNone(case_update_for_turn("What is the VAT rate in Uganda?", {"retrieval_mode": "calculator"}))
+        self.assertIsNone(case_update_for_turn("What is the PAYE threshold?", {"retrieval_mode": "calculator"}))
+        self.assertIsNotNone(case_update_for_turn("PAYE on UGX 2,500,000", {"retrieval_mode": "calculator"}))
+
+    def test_a_bare_follow_up_belongs_to_the_conversation_topic(self) -> None:
+        update = case_update_for_turn("and on 3,000,000?", {"retrieval_mode": "calculator", "current_topic": "paye"})
+        self.assertEqual(update.domain_tag, "paye")
+
+    def test_a_workflow_is_read_from_the_workflow_not_the_answer(self) -> None:
+        # Answering "VAT" to the return-filing steps is not a VAT case.
+        update = case_update_for_turn(
+            "VAT", {"workflow": {"id": "return_filing", "name": "Return Filing", "status": "active"}}
+        )
+        self.assertEqual(update.domain_tag, "returns")
+
+
+class DomainTests(unittest.TestCase):
+    def test_a_named_tax_beats_the_generic_words(self) -> None:
+        self.assertEqual(infer_domain_tag("Do I need to register for VAT?"), "vat")
+        self.assertEqual(infer_domain_tag("How do I pay my PAYE?"), "paye")
+        self.assertEqual(infer_domain_tag("I want to register for a TIN"), "tin_registration")
+        self.assertEqual(infer_domain_tag("How do I generate a PRN?"), "payment")
+
+    def test_excise_and_stamp_duty_are_not_customs(self) -> None:
+        self.assertEqual(infer_domain_tag("excise duty on beer"), "excise")
+        self.assertEqual(infer_domain_tag("customs duty on a car"), "customs")
+        self.assertEqual(infer_domain_tag("how much is stamp duty on a lease"), "general")
+
+    def test_the_other_flows_have_their_own_domains(self) -> None:
+        self.assertEqual(infer_domain_tag("I need a tax clearance certificate"), "tax_clearance")
+        self.assertEqual(infer_domain_tag("transfer of ownership for my motor vehicle"), "motor_vehicle")
+        self.assertEqual(infer_domain_tag("how do I file a nil return"), "returns")
+        self.assertEqual(infer_domain_tag("corporation tax on my company"), "income_tax")
+
+    def test_every_objective_has_a_phrase_and_every_flow_a_domain(self) -> None:
+        flows = Path(__file__).resolve().parents[1] / "app" / "workflows" / "flows"
+        ids = {path.stem for path in flows.glob("*.yaml")}
+        self.assertTrue(ids, "workflow definitions not found")
+        self.assertEqual(sorted(ids - set(_WORKFLOW_DOMAINS)), [])
+        for domain in _WORKFLOW_DOMAINS.values():
+            self.assertIn(domain, DOMAIN_OBJECTIVES, domain)
+        self.assertEqual(workflow_domain("calc_excise_duty"), "excise")
+        self.assertEqual(workflow_domain("a_new_flow", "Rental Income Guide"), "income_tax")
 
 
 class LedgerUpsertTests(unittest.TestCase):

@@ -7125,11 +7125,24 @@ class ChatModel:
         # again (Phase 38; both behind flags, see app.officer_handoff).
         from .officer_handoff import enrich_handoff
 
+        # The workflow engine keys a conversation's state by its owner. A chat
+        # turn has the verified key in context; "Talk to an officer" arrives
+        # outside one, so derive it from the same owner the chat used.
+        workflow_state_key = _ACTIVE_CONVERSATION_STATE.get() or (
+            db.conversation_state_key(
+                conversation_id, session_id=session_id, user_id=user_id or None, tenant_id=effective_tenant
+            )
+            if conversation_id
+            else ""
+        )
         priority = enrich_handoff(
             handoff,
             user_query=user_query,
             transcript=transcript,
             conversation_id=conversation_id,
+            workflow_state_key=workflow_state_key,
+            classify_topic=self._handoff_topic,
+            details_for_topic=self._handoff_required_details,
             user_id=user_id,
             tenant_id=effective_tenant,
             locale=eff_locale,

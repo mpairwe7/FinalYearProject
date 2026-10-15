@@ -20,10 +20,12 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _ALLOWED_CHANNELS = frozenset({"web", "voice_call", "voice_ws", "offline_pwa", "rest", "sse", "other"})
+# "Stamp duty" is a domestic tax, not customs.
 _CUSTOMS_DOMAIN_RE = re.compile(
-    r"\b(?:customs|duty|duties|import|imports|imported|importing|cif|tariff|asycuda|transit|forodha)\b",
+    r"\b(?:customs|(?<!stamp\s)duty|(?<!stamp\s)duties|import|imports|imported|importing|cif|tariff|asycuda|transit|forodha)\b",
     re.IGNORECASE,
 )
+_EXCISE_DOMAIN_RE = re.compile(r"\b(?:excise|excisable|tax\s+stamps?|dts)\b", re.IGNORECASE)
 _EFRIS_DOMAIN_RE = re.compile(r"\b(?:efris|fdn|fiscal|invoice|invoices)\b", re.IGNORECASE)
 _OBJECTION_DOMAIN_RE = re.compile(
     r"\b(?:objection|objections|dispute|disputes|appeal|appeals|tat|remission|waiver)\b",
@@ -33,6 +35,21 @@ _TIN_DOMAIN_RE = re.compile(r"\b(?:tin|register|registration)\b", re.IGNORECASE)
 _VAT_DOMAIN_RE = re.compile(r"\b(?:vat|value\s+added)\b", re.IGNORECASE)
 _PAYE_DOMAIN_RE = re.compile(r"\b(?:paye|salary|employment)\b", re.IGNORECASE)
 _PAYMENT_DOMAIN_RE = re.compile(r"\b(?:prn|payment|pay)\b", re.IGNORECASE)
+_INCOME_TAX_DOMAIN_RE = re.compile(
+    r"\b(?:income\s+tax|corporation\s+tax|corporate\s+tax|company\s+tax|rental\s+(?:income|tax)|rent\s+tax"
+    r"|capital\s+gains?|withholding|wht|presumptive|provisional\s+tax)\b",
+    re.IGNORECASE,
+)
+_CLEARANCE_DOMAIN_RE = re.compile(r"\b(?:tax\s+clearance|clearance\s+certificate|tcc)\b", re.IGNORECASE)
+_MOTOR_DOMAIN_RE = re.compile(
+    r"\b(?:motor\s+vehicles?|number\s+plates?|log\s?books?|(?:vehicle|car)\s+(?:registration|transfer)"
+    r"|transfer\s+of\s+ownership)\b",
+    re.IGNORECASE,
+)
+_RETURNS_DOMAIN_RE = re.compile(
+    r"\b(?:nil\s+returns?|returns?\s+filing|(?:file|filing|filed|submit|submitting|lodge|lodging)\s+(?:\w+\s+){0,3}?returns?)\b",
+    re.IGNORECASE,
+)
 
 
 def _bounded_channel(channel: str) -> str:
@@ -57,21 +74,30 @@ def get_max_concurrent_cases() -> int:
         return 5
 
 
+#: Tax domains in precedence order: the first match names the domain. A named
+#: tax comes before the generic words — "register" and "pay" — that every tax
+#: shares: "Do I need to register for VAT?" is a VAT case, not TIN
+#: registration, and "excise duty" is excise, not customs.
 _DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("excise", _EXCISE_DOMAIN_RE),
     ("customs", _CUSTOMS_DOMAIN_RE),
     ("efris", _EFRIS_DOMAIN_RE),
     ("objection", _OBJECTION_DOMAIN_RE),
-    ("tin_registration", _TIN_DOMAIN_RE),
     ("vat", _VAT_DOMAIN_RE),
     ("paye", _PAYE_DOMAIN_RE),
+    ("income_tax", _INCOME_TAX_DOMAIN_RE),
+    ("tax_clearance", _CLEARANCE_DOMAIN_RE),
+    ("motor_vehicle", _MOTOR_DOMAIN_RE),
+    ("returns", _RETURNS_DOMAIN_RE),
     ("payment", _PAYMENT_DOMAIN_RE),
+    ("tin_registration", _TIN_DOMAIN_RE),
 )
 
 
 def mentioned_domains(text: str) -> list[str]:
-    """Every tax domain *text* mentions, in :func:`infer_domain_tag`'s order.
+    """Every tax domain *text* mentions, in precedence order.
 
-    "My VAT registration" mentions both TIN registration and VAT; picking a
+    "My VAT registration" mentions both VAT and TIN registration; picking a
     case for it needs both, not just the first.
     """
     raw = text or ""
@@ -79,22 +105,11 @@ def mentioned_domains(text: str) -> list[str]:
 
 
 def infer_domain_tag(text: str) -> str:
-    """Infer a coarse tax domain tag from an objective or query string using whole-word matching."""
+    """The first tax domain *text* mentions (whole words, ``_DOMAIN_PATTERNS`` order), else ``general``."""
     raw = text or ""
-    if _CUSTOMS_DOMAIN_RE.search(raw):
-        return "customs"
-    if _EFRIS_DOMAIN_RE.search(raw):
-        return "efris"
-    if _OBJECTION_DOMAIN_RE.search(raw):
-        return "objection"
-    if _TIN_DOMAIN_RE.search(raw):
-        return "tin_registration"
-    if _VAT_DOMAIN_RE.search(raw):
-        return "vat"
-    if _PAYE_DOMAIN_RE.search(raw):
-        return "paye"
-    if _PAYMENT_DOMAIN_RE.search(raw):
-        return "payment"
+    for domain, pattern in _DOMAIN_PATTERNS:
+        if pattern.search(raw):
+            return domain
     return "general"
 
 
@@ -110,9 +125,15 @@ DOMAIN_OBJECTIVES: dict[str, str] = {
     "efris": "EFRIS e-invoicing",
     "objection": "Objection, dispute or waiver",
     "payment": "Tax payment (PRN)",
+    "excise": "Excise duty or tax stamps",
+    "income_tax": "Income, rental, corporation or withholding tax",
+    "tax_clearance": "Tax clearance certificate",
+    "motor_vehicle": "Motor vehicle registration or transfer",
+    "returns": "Filing a tax return",
     "general": "General tax enquiry",
 }
 #: Guided workflows and chat connectors, by the case domain they work on.
+#: Every flow under ``app/workflows/flows`` has an entry (a test holds this).
 _WORKFLOW_DOMAINS: dict[str, str] = {
     "tin_registration": "tin_registration",
     "tin_procedure_help": "tin_registration",
@@ -125,12 +146,22 @@ _WORKFLOW_DOMAINS: dict[str, str] = {
     "calc_customs_duty": "customs",
     "bwims_warehouse_guidance": "customs",
     "audit_invoice_compliance": "efris",
+    "calc_capital_gains": "income_tax",
+    "calc_corporation_tax": "income_tax",
+    "calc_rental_tax": "income_tax",
+    "calc_withholding": "income_tax",
+    "calc_excise_duty": "excise",
+    "motor_vehicle_registration": "motor_vehicle",
+    "return_filing": "returns",
+    "tax_clearance": "tax_clearance",
 }
 _CONNECTOR_DOMAINS: dict[str, str] = {
     "efris": "efris",
     "payment_system": "payment",
     "tin_registration": "tin_registration",
     "bwims": "customs",
+    "digital_tax_stamps": "excise",
+    "ursb": "tin_registration",
 }
 #: How many steps a case keeps; older ones are dropped first.
 _MAX_CASE_STEPS = 12
@@ -139,6 +170,27 @@ _MAX_CASE_STEPS = 12
 def objective_for(domain_tag: str) -> str:
     """The case objective for *domain_tag* — a fixed phrase, never user text."""
     return DOMAIN_OBJECTIVES.get(domain_tag, DOMAIN_OBJECTIVES["general"])
+
+
+def workflow_domain(workflow_id: str, name: str = "") -> str:
+    """The case domain a guided workflow works on — read from the workflow, never a step's answer.
+
+    An answer names something else: read from "VAT" and "company", one return
+    filing scattered across a VAT case and a general one.
+    """
+    return _WORKFLOW_DOMAINS.get(workflow_id) or infer_domain_tag(f"{name} {workflow_id.replace('_', ' ')}")
+
+
+def _states_amount(message: str) -> bool:
+    """Whether the taxpayer gave a figure, by the calculator router's own test.
+
+    The router answers a rate question from the table only when it carries no
+    amount (``plan_rate_lookup``), and both come back as ``calculator``: a rate
+    read out is a plain answer, a computation on the taxpayer's figure is progress.
+    """
+    from ..calculator_router import extract_amounts  # noqa: PLC0415
+
+    return bool(extract_amounts(message or ""))
 
 
 @dataclass(frozen=True)
@@ -163,13 +215,16 @@ def case_update_for_turn(message: str, result: Mapping[str, Any]) -> TurnCaseUpd
         return None
     mode = str(result.get("retrieval_mode") or "")
     message_domain = infer_domain_tag(message)
+    if message_domain == "general":
+        # A bare follow-up ("2,500,000") names no tax; the conversation's topic does.
+        message_domain = infer_domain_tag(str(result.get("current_topic") or ""))
     if result.get("ticket_id") or mode == "escalated" or result.get("escalation_required"):
         return TurnCaseUpdate(message_domain, "Handed to a URA officer", "escalated_officer", "escalation")
     workflow = result.get("workflow")
     if isinstance(workflow, Mapping) and workflow.get("id") and workflow.get("status") != "cancelled":
         workflow_id = str(workflow.get("id"))
-        domain = _WORKFLOW_DOMAINS.get(workflow_id) or message_domain
         name = " ".join(str(workflow.get("name") or workflow_id.replace("_", " ")).split())[:80]
+        domain = workflow_domain(workflow_id, name)
         if workflow.get("completed") or workflow.get("status") == "completed":
             return TurnCaseUpdate(domain, f"Completed guided steps: {name}", "awaiting_user_action", "workflow")
         return TurnCaseUpdate(domain, f"Started guided steps: {name}", "in_progress", "workflow")
@@ -179,7 +234,7 @@ def case_update_for_turn(message: str, result: Mapping[str, Any]) -> TurnCaseUpd
         domain = _CONNECTOR_DOMAINS.get(namespace) or message_domain
         label = " ".join(str(used[0].get("label") or namespace).split())[:40]
         return TurnCaseUpdate(domain, f"Looked up in {label}", "in_progress", "lookup")
-    if mode == "calculator":
+    if mode == "calculator" and _states_amount(message):
         return TurnCaseUpdate(message_domain, "Calculated with the official rate table", "in_progress", "calculation")
     return None
 
