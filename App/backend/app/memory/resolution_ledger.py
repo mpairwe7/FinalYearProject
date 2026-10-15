@@ -13,6 +13,7 @@ import os
 import re
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -56,6 +57,27 @@ def get_max_concurrent_cases() -> int:
         return 5
 
 
+_DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("customs", _CUSTOMS_DOMAIN_RE),
+    ("efris", _EFRIS_DOMAIN_RE),
+    ("objection", _OBJECTION_DOMAIN_RE),
+    ("tin_registration", _TIN_DOMAIN_RE),
+    ("vat", _VAT_DOMAIN_RE),
+    ("paye", _PAYE_DOMAIN_RE),
+    ("payment", _PAYMENT_DOMAIN_RE),
+)
+
+
+def mentioned_domains(text: str) -> list[str]:
+    """Every tax domain *text* mentions, in :func:`infer_domain_tag`'s order.
+
+    "My VAT registration" mentions both TIN registration and VAT; picking a
+    case for it needs both, not just the first.
+    """
+    raw = text or ""
+    return [domain for domain, pattern in _DOMAIN_PATTERNS if pattern.search(raw)]
+
+
 def infer_domain_tag(text: str) -> str:
     """Infer a coarse tax domain tag from an objective or query string using whole-word matching."""
     raw = text or ""
@@ -74,6 +96,123 @@ def infer_domain_tag(text: str) -> str:
     if _PAYMENT_DOMAIN_RE.search(raw):
         return "payment"
     return "general"
+
+
+#: What a case is about, by tax domain. A case's objective is one of these and
+#: never the taxpayer's own words, which can hold a TIN, an amount or a name:
+#: the voice path used to store the first 120 characters of the question as the
+#: objective of a *new* case on every turn (Phase 38).
+DOMAIN_OBJECTIVES: dict[str, str] = {
+    "vat": "VAT question or registration",
+    "paye": "PAYE and employment tax",
+    "tin_registration": "TIN registration",
+    "customs": "Customs and import duties",
+    "efris": "EFRIS e-invoicing",
+    "objection": "Objection, dispute or waiver",
+    "payment": "Tax payment (PRN)",
+    "general": "General tax enquiry",
+}
+#: Guided workflows and chat connectors, by the case domain they work on.
+_WORKFLOW_DOMAINS: dict[str, str] = {
+    "tin_registration": "tin_registration",
+    "tin_procedure_help": "tin_registration",
+    "calc_vat": "vat",
+    "calc_vat_registration": "vat",
+    "calc_paye": "paye",
+    "payment_assistance": "payment",
+    "objection_or_dispute": "objection",
+    "customs_clearance": "customs",
+    "calc_customs_duty": "customs",
+    "bwims_warehouse_guidance": "customs",
+    "audit_invoice_compliance": "efris",
+}
+_CONNECTOR_DOMAINS: dict[str, str] = {
+    "efris": "efris",
+    "payment_system": "payment",
+    "tin_registration": "tin_registration",
+    "bwims": "customs",
+}
+#: How many steps a case keeps; older ones are dropped first.
+_MAX_CASE_STEPS = 12
+
+
+def objective_for(domain_tag: str) -> str:
+    """The case objective for *domain_tag* — a fixed phrase, never user text."""
+    return DOMAIN_OBJECTIVES.get(domain_tag, DOMAIN_OBJECTIVES["general"])
+
+
+@dataclass(frozen=True)
+class TurnCaseUpdate:
+    """What a finished turn adds to the taxpayer's case for one domain."""
+
+    domain_tag: str
+    step: str
+    status: str
+    event: str  # "workflow" | "lookup" | "calculation" | "escalation"
+
+
+def case_update_for_turn(message: str, result: Mapping[str, Any]) -> TurnCaseUpdate | None:
+    """The case progress a finished turn represents, or ``None`` for a plain answer.
+
+    Only turns that *do* something open or move a case: a guided workflow, a
+    lookup in a chosen service, a calculation, a hand-off to an officer. A
+    question answered from the corpus is not a case — opening one for every
+    conversation would bury the real ones under the five-case limit.
+    """
+    if not isinstance(result, Mapping):
+        return None
+    mode = str(result.get("retrieval_mode") or "")
+    message_domain = infer_domain_tag(message)
+    if result.get("ticket_id") or mode == "escalated" or result.get("escalation_required"):
+        return TurnCaseUpdate(message_domain, "Handed to a URA officer", "escalated_officer", "escalation")
+    workflow = result.get("workflow")
+    if isinstance(workflow, Mapping) and workflow.get("id") and workflow.get("status") != "cancelled":
+        workflow_id = str(workflow.get("id"))
+        domain = _WORKFLOW_DOMAINS.get(workflow_id) or message_domain
+        name = " ".join(str(workflow.get("name") or workflow_id.replace("_", " ")).split())[:80]
+        if workflow.get("completed") or workflow.get("status") == "completed":
+            return TurnCaseUpdate(domain, f"Completed guided steps: {name}", "awaiting_user_action", "workflow")
+        return TurnCaseUpdate(domain, f"Started guided steps: {name}", "in_progress", "workflow")
+    used = [use for use in result.get("connectors_used") or () if isinstance(use, Mapping)]
+    if used:
+        namespace = str(used[0].get("namespace") or "")
+        domain = _CONNECTOR_DOMAINS.get(namespace) or message_domain
+        label = " ".join(str(used[0].get("label") or namespace).split())[:40]
+        return TurnCaseUpdate(domain, f"Looked up in {label}", "in_progress", "lookup")
+    if mode == "calculator":
+        return TurnCaseUpdate(message_domain, "Calculated with the official rate table", "in_progress", "calculation")
+    return None
+
+
+def case_for_prompt(working: Mapping[str, Any] | None, message: str) -> ResolutionCase | None:
+    """The open case this turn is about: its domain's case, else the newest one.
+
+    Read from an already-loaded working-memory snapshot (no database call),
+    so the prompt names the case for *this* question, not just the last one
+    written.
+    """
+    if not isinstance(working, Mapping):
+        return None
+    now = time.time()
+    cases: list[ResolutionCase] = []
+    raw_map = working.get("active_resolution_cases")
+    if isinstance(raw_map, Mapping):
+        cases.extend(ResolutionCase.from_dict(dict(c)) for c in raw_map.values() if isinstance(c, Mapping))
+    raw_single = working.get("active_resolution_case")
+    if isinstance(raw_single, Mapping) and not any(c.case_id == raw_single.get("case_id") for c in cases):
+        cases.append(ResolutionCase.from_dict(dict(raw_single)))
+    live = [
+        c for c in cases
+        if c.status != "resolved" and (not c.expires_at or c.expires_at > now) and c.primary_objective
+    ]
+    if not live:
+        return None
+    live.sort(key=lambda c: c.updated_at, reverse=True)
+    mentioned = set(mentioned_domains(message))
+    for case in live:
+        if case.domain_tag in mentioned:
+            return case
+    return live[0]
 
 
 @dataclass
@@ -608,6 +747,77 @@ class ResolutionLedger:
             except Exception:
                 logger.debug("resolution_ledger: select_case_for_turn metric skipped", exc_info=True)
         return selected
+
+    def upsert_turn_case(
+        self,
+        user_id: str,
+        *,
+        domain_tag: str,
+        channel: str,
+        step: str = "",
+        status: str = "in_progress",
+        locale: str = "en",
+        thread_id: str = "",
+        tenant_id: str = "default",
+        asr_confidence: float | None = None,
+    ) -> ResolutionCase | None:
+        """Open the taxpayer's case for *domain_tag*, or move the one already open.
+
+        One case per domain: a second VAT turn updates the VAT case instead of
+        opening another (the voice path used to open one per turn and push real
+        cases out past ``RESOLUTION_MAX_CONCURRENT_CASES``). The objective is
+        :data:`DOMAIN_OBJECTIVES`' phrase for the domain. Consent-gated through
+        :meth:`checkpoint`; returns ``None`` when nothing was written.
+        """
+        if not user_id:
+            return None
+        domain = (domain_tag or "general").strip().lower() or "general"
+        existing = next(
+            (
+                case
+                for case in self.list_active_cases(user_id, tenant_id=tenant_id)
+                if (case.domain_tag or infer_domain_tag(case.primary_objective)) == domain
+            ),
+            None,
+        )
+        bounded_channel = _bounded_channel(channel)
+        if existing is None:
+            case = ResolutionCase(
+                user_id=user_id,
+                tenant_id=tenant_id or "default",
+                thread_id=thread_id,
+                source_channel=bounded_channel,
+                locale=locale or "en",
+                primary_objective=objective_for(domain),
+                domain_tag=domain,
+                status=status,
+            )
+            event = "opened"
+        else:
+            case = existing
+            case.thread_id = thread_id or case.thread_id
+            case.source_channel = bounded_channel
+            case.locale = locale or case.locale
+            case.status = status
+            event = "updated"
+        if step and step not in case.completed_steps:
+            case.completed_steps = [*case.completed_steps, step][-_MAX_CASE_STEPS:]
+        if not self.checkpoint(user_id, case, tenant_id=tenant_id, asr_confidence=asr_confidence):
+            return None
+        try:
+            from ..analytics import metrics
+
+            metrics.inc(
+                "cx_case_events_total",
+                labels={
+                    "channel": bounded_channel,
+                    "domain": domain if domain in DOMAIN_OBJECTIVES else "general",
+                    "event": "escalated" if status == "escalated_officer" else event,
+                },
+            )
+        except Exception:
+            logger.debug("resolution_ledger: case event metric skipped", exc_info=True)
+        return case
 
     def promote_anonymous_session(
         self,

@@ -528,27 +528,29 @@ class VoiceSession:
         except Exception:
             pass
 
-        # Checkpoint longitudinal ResolutionCase on voice_ws turns when consented
+        # Move the taxpayer's case for this domain when consented. One case per
+        # domain, objective from a fixed table: this used to open a *new* case
+        # every turn with the first 120 characters of the question (a TIN, an
+        # amount, a name) as its objective, pushing real cases out (Phase 38).
         if self.user_id:
             try:
                 from .flags import flags
-                from .memory import ResolutionCase, get_memory_service
+                from .memory import get_memory_service
+                from .memory.resolution_ledger import infer_domain_tag
 
-                if flags.is_enabled("continuous_relationship_memory", subject=self.user_id):
-                    memsvc = get_memory_service()
-                    case = ResolutionCase(
-                        user_id=self.user_id,
-                        tenant_id=self.tenant_id,
-                        thread_id=self.conversation_id,
-                        source_channel="voice_ws",
+                domain = infer_domain_tag(query_text)
+                if domain != "general" and flags.is_enabled("continuous_relationship_memory", subject=self.user_id):
+                    get_memory_service().resolution_ledger.upsert_turn_case(
+                        self.user_id,
+                        domain_tag=domain,
+                        channel="voice_ws",
+                        step="Asked by voice",
                         locale=detected_lang,
-                        primary_objective=query_text[:120],
-                        status="in_progress",
-                        completed_steps=[f"Voice WS turn {self._turn_count} answered"],
+                        thread_id=self.conversation_id,
+                        tenant_id=self.tenant_id,
                     )
-                    memsvc.checkpoint_resolution_case(self.user_id, case, tenant_id=self.tenant_id)
             except Exception:
-                pass
+                logger.debug("voice case update skipped", exc_info=True)
 
         if self._cancelled.is_set():
             return

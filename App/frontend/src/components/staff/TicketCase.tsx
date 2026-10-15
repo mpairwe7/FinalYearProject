@@ -33,6 +33,26 @@ function PresenceBeat({ ticketId, viewer }: { ticketId: string; viewer: string }
   return null;
 }
 
+/** The escalation policy's reason codes, as an officer reads them. */
+const ESCALATION_REASON: Record<string, string> = {
+  "affect:hardship": "in hardship",
+  "affect:frustration": "frustrated",
+  "affect:anxiety": "anxious",
+  "affect:urgency": "pressed for time",
+  "affect:confusion": "confused",
+  "affect:sustained": "upset across several messages",
+  "stakes:enforcement": "enforcement action (account, goods or premises)",
+  "stakes:deadline_today": "a deadline today",
+  "stakes:large_amount": "a large amount at issue",
+  "effort:long_conversation": "a long conversation",
+  "confidence:unanswered": "the assistant could not answer",
+  "safety:crisis": "a safety concern",
+};
+
+function escalationReasons(reasons: string[] | undefined): string {
+  return (reasons ?? []).map((code) => ESCALATION_REASON[code] ?? code).join(" · ");
+}
+
 function turnTime(ts: number): string {
   try {
     return new Date(ts * 1000).toLocaleString(undefined, {
@@ -195,9 +215,22 @@ export function TicketCase({
         </section>
       ) : null}
 
-      {handoff.summary || handoff.opening_guidance || handoff.required_details?.length ? (
+      {handoff.summary ||
+      handoff.opening_guidance ||
+      handoff.required_details?.length ||
+      handoff.escalation?.reasons?.length ||
+      handoff.already_given?.length ? (
         <section className="st-brief">
           <span className="st-brief-label">Handoff brief</span>
+          {handoff.escalation?.reasons?.length ? (
+            <p className="st-brief-escalation" data-testid="handoff-escalation">
+              <strong>
+                {handoff.escalation.tier === "priority" ? "Prioritised" : "Offered a person"}:
+              </strong>{" "}
+              {escalationReasons(handoff.escalation.reasons)}
+              {handoff.escalation.sla_seconds ? ` — respond within ${handoff.escalation.sla_seconds} s` : ""}
+            </p>
+          ) : null}
           {handoff.summary ? <p>{handoff.summary}</p> : null}
           {warm && handoff.opening_guidance ? (
             <p>
@@ -213,6 +246,11 @@ export function TicketCase({
                 ))}
               </ul>
             </>
+          ) : null}
+          {handoff.already_given?.length ? (
+            <p data-testid="handoff-already-given">
+              <strong>Already given — do not ask again:</strong> {handoff.already_given.join(", ")}
+            </p>
           ) : null}
         </section>
       ) : null}

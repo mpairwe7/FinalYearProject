@@ -21,12 +21,14 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,50 @@ def _judge_verdict(result: Mapping[str, Any]) -> str:
     return ""
 
 
+#: Retrieval modes whose answer rests on a table, a calculation, a guided
+#: flow or a service record rather than on retrieved passages.
+_DETERMINISTIC_MODES = frozenset(
+    {"calculator", "workflow", "education", "contact_channels", "tin_registration_guidance", "agentic"}
+)
+#: The relief a taxpayer in hardship should hear about (instalments, waiver,
+#: remission, extension, objection).
+_RELIEF_RE = re.compile(
+    r"\b(?:instal+ments?|payment\s+plan|waiv\w*|remission|extension\s+of\s+time|objection|relief)\b",
+    re.IGNORECASE,
+)
+#: (completed, total) sub-tasks by outcome: an answer completes the turn's
+#: task, a clarification or a hand-off half does, a refusal does not.
+_COMPLETENESS = {
+    "answered": (1, 1),
+    "clarification": (1, 2),
+    "escalated": (1, 2),
+    "abstained": (0, 1),
+    "blocked": (0, 1),
+    "out_of_scope": (0, 1),
+}
+
+
+def _scorecard_evidence(message: str, result: Mapping[str, Any], reply: str, outcome: str) -> dict[str, Any]:
+    """What this turn actually did, for the scorecard's empathy, completeness,
+    handoff and grounding dimensions — which were constants before (Phase 38)."""
+    from ..text_signals import detect_user_distress  # noqa: PLC0415
+
+    distress = detect_user_distress(message) in ("hardship", "anxiety", "frustration")
+    completed, total = _COMPLETENESS.get(outcome, (1, 1))
+    handoff = result.get("handoff") if isinstance(result.get("handoff"), Mapping) else {}
+    completeness = handoff.get("completeness") if isinstance(handoff, Mapping) else None
+    used = [u for u in result.get("connectors_used") or () if isinstance(u, Mapping)]
+    return {
+        "distress_detected": distress,
+        "relief_cited": bool(_RELIEF_RE.search(reply or "")),
+        "sub_tasks_total": total,
+        "sub_tasks_completed": completed,
+        "handoff_completeness_ratio": float(completeness) if isinstance(completeness, int | float) else None,
+        "deterministic_basis": str(result.get("retrieval_mode") or "") in _DETERMINISTIC_MODES
+        or any(u.get("outcome") in ("found", "no_record") for u in used),
+    }
+
+
 def build_turn_payload(
     *,
     message: str,
@@ -211,6 +257,7 @@ def build_turn_payload(
                 sources=sources,
                 figure_fidelity_passed=fig_ok,
                 policy_adherence_passed=pol_ok,
+                **_scorecard_evidence(message, result, reply, payload["outcome"]),
             )
             payload["quality_scorecard"] = {
                 "scorecard_id": sc.scorecard_id,

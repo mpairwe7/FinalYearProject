@@ -646,6 +646,86 @@ def distress_trajectory(
 
 
 # ---------------------------------------------------------------------------
+# Stakes
+#
+# How much is riding on the answer, apart from how the taxpayer feels about
+# it. A worried question about a VAT rate and a worried message about a bank
+# account URA has frozen read the same to the distress classifier; only the
+# second should reach a person ahead of the queue. Deterministic, like the
+# rest of this module, and deliberately conservative: each code needs a
+# concrete enforcement, deadline or amount cue, not a mood.
+# ---------------------------------------------------------------------------
+
+_ENFORCEMENT_RE = re.compile(
+    r"\b(?:agency\s+notice|distress\s+warrant|warrant\s+of\s+(?:arrest|distress)|garnish\w*"
+    r"|(?:account|bank)\s+(?:has\s+been\s+|was\s+|is\s+)?(?:frozen|attached|blocked)"
+    r"|(?:froze|frozen|attached|blocked)\s+(?:my\s+|our\s+)?(?:bank\s+)?account"
+    r"|seiz\w*\s+(?:my\s+|our\s+)?(?:goods|cargo|vehicle|truck|car|container|stock|property)"
+    r"|(?:goods|cargo|vehicle|truck|car|container|stock)\s+(?:were\s+|was\s+|have\s+been\s+|has\s+been\s+)?(?:seized|impounded|detained)"
+    r"|(?:sealed|closed|locked)\s+(?:my\s+|our\s+)?(?:shop|premises|business|office)"
+    r"|auction\w*|enforcement\s+(?:notice|action|officers?)|demand\s+notice"
+    # Luganda / Swahili / Runyankole forms of the same events (shared with _HARDSHIP_RE)
+    r"|ebintu\s+byange\s+babikutte|bamazze\s+okusiba\s+edduuka|edduuka\s+lyange\s+baligadde"
+    r"|akaunti\s+imefungwa|bidhaa\s+zimekamatwa|duka\s+langu\s+limefungwa|ebyangye\s+babikwata)\b"
+)
+_DEADLINE_TODAY_RE = re.compile(
+    r"\b(?:(?:due|deadline|expires?|closes?)\s+(?:is\s+)?(?:today|tonight|by\s+midnight)"
+    r"|(?:today|tonight)\s+is\s+the\s+(?:last\s+day|deadline)"
+    r"|last\s+day\s+(?:is\s+)?today|by\s+(?:midnight|end\s+of\s+(?:the\s+)?day)\s+today"
+    r"|leo\s+ni\s+siku\s+ya\s+mwisho|siku\s+ya\s+mwisho\s+ni\s+leo"
+    r"|olwaleero\s+lwe\s+lunaku\s+olusembayo)\b"
+)
+_AMOUNT_RE = re.compile(
+    r"(?:\b(?:ugx|ushs?|shs?)\.?\s*(?P<a1>\d[\d,]*(?:\.\d+)?)\s*(?P<u1>bn|billion|m|million|k)?\b)"
+    r"|(?:\b(?P<a2>\d[\d,]*(?:\.\d+)?)\s*(?P<u2>bn|billion|m|million)\b)"
+)
+_UNIT = {"k": 1_000, "m": 1_000_000, "million": 1_000_000, "bn": 1_000_000_000, "billion": 1_000_000_000}
+
+
+def _amounts_ugx(text: str) -> list[float]:
+    amounts: list[float] = []
+    for match in _AMOUNT_RE.finditer(text):
+        raw = match.group("a1") or match.group("a2") or ""
+        unit = (match.group("u1") or match.group("u2") or "").lower()
+        try:
+            value = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        amounts.append(value * _UNIT.get(unit, 1))
+    return amounts
+
+
+def strip_stakes(message: str) -> str:
+    """*message* (normalised) without its enforcement phrases.
+
+    The hardship pattern counts "seized my goods" as hardship, and the stakes
+    detector counts it as enforcement. Reading affect from what is left keeps
+    one fact from being counted twice: "Customs seized my goods — what is the
+    procedure?" is enforcement, not distress.
+    """
+    return " ".join(_ENFORCEMENT_RE.sub(" ", _normalise(message)).split())
+
+
+def detect_high_stakes(message: str, *, amount_threshold_ugx: float = 10_000_000) -> tuple[str, ...]:
+    """What is at stake in *message*: ``enforcement``, ``deadline_today``, ``large_amount``.
+
+    Empty for an ordinary question. Codes, not prose, so an escalation policy
+    and an audit row can both carry them.
+    """
+    text = _normalise(message)
+    if not text:
+        return ()
+    stakes: list[str] = []
+    if _ENFORCEMENT_RE.search(text):
+        stakes.append("enforcement")
+    if _DEADLINE_TODAY_RE.search(text):
+        stakes.append("deadline_today")
+    if any(amount >= amount_threshold_ugx for amount in _amounts_ugx(text)):
+        stakes.append("large_amount")
+    return tuple(stakes)
+
+
+# ---------------------------------------------------------------------------
 # Crisis
 #
 # A message about ending one's life is not a tax question and must not be

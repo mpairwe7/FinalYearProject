@@ -16,21 +16,28 @@ the dozen exits (workflow, calculator, FAQ, generated, …) behave alike:
   worried taxpayer answered three times read the same line three times.
 * **Offer a person when distress persists.** One upset message is handled by
   tone. The same upset across consecutive turns means the answers are not
-  landing, and another rephrasing is the wrong move.
+  landing, and another rephrasing is the wrong move. With
+  ``eq_stakes_escalation`` on, the decision is :mod:`app.escalation_policy`'s,
+  which also weighs what is at stake (a frozen account, a deadline today) —
+  an offer it marks ``priority`` is put first.
 
 Pure and deterministic apart from reading the workflow registry and flags.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
+from .escalation_policy import TIER_PRIORITY, assess_escalation
 from .flags import flags
 from .text_signals import detect_user_distress, distress_trajectory, strip_repeated_ack
 from .workflows.registry import WorkflowRegistry
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+logger = logging.getLogger(__name__)
 
 #: The next action that asks for an officer. Its wording matches the
 #: supervisor's "talk to … officer" escalation rule, so a click routes
@@ -126,18 +133,60 @@ def finalize_turn_actions(result: dict[str, Any], *, escalated: bool) -> dict[st
     return result
 
 
+def _offer_person(
+    message: str,
+    rewritten: str,
+    result: dict[str, Any],
+    actions: list[str],
+    prior_messages: Sequence[str],
+) -> None:
+    """Offer a person when the escalation policy says so — first, if it is urgent.
+
+    Both forms of the message are read: the taxpayer's own words carry the
+    Luganda and Kiswahili cues, the English rewrite the English ones.
+    """
+    if result.get("escalation_required"):
+        return
+    text = message if not rewritten or rewritten == message else f"{message}\n{rewritten}"
+    assessment = assess_escalation(text, history=list(prior_messages), result=result)
+    if not assessment.offers_person:
+        return
+    result["escalation_offer"] = assessment.to_dict()
+    if HANDOFF_ACTION in actions:
+        actions.remove(HANDOFF_ACTION)
+    if assessment.tier == TIER_PRIORITY:
+        actions.insert(0, HANDOFF_ACTION)
+    else:
+        actions.append(HANDOFF_ACTION)
+    try:
+        from .analytics import metrics  # noqa: PLC0415
+
+        metrics.inc(
+            "cx_escalation_tier_total",
+            labels={
+                "tier": assessment.tier,
+                "trigger": assessment.reasons[0].split(":", 1)[0] if assessment.reasons else "none",
+                "path": "offer",
+            },
+        )
+    except Exception:  # noqa: BLE001 - a counter never changes the turn
+        logger.debug("escalation offer metric skipped", exc_info=True)
+
+
 def apply_turn_guidance(
     message: str,
     result: dict[str, Any],
     *,
     rewritten: str = "",
     recent_turns: Sequence[Mapping[str, Any]] = (),
+    subject: str | None = None,
 ) -> dict[str, Any]:
     """Apply the three turn-level decisions to *result* in place and return it.
 
     *recent_turns* are the conversation's earlier turns, oldest first, as
     ``database.get_recent_turns`` returns them (``user_message`` and
-    ``bot_reply``); the current turn must not be among them.
+    ``bot_reply``); the current turn must not be among them. *subject* (the
+    taxpayer's id) addresses flag rollouts.
     """
     if not isinstance(result, dict):
         return result
@@ -154,15 +203,18 @@ def apply_turn_guidance(
         actions.insert(0, offer)
 
     if str(result.get("retrieval_mode") or "") not in ("escalated", "crisis_support"):
-        # English lexicon: the rewritten (English) form lets a Luganda or
-        # Kiswahili turn be read too when machine translation produced one.
-        kind = detect_user_distress(rewritten or message)
-        if (
-            distress_trajectory(kind, prior_messages)["sustained"]
-            and not result.get("escalation_required")
-            and HANDOFF_ACTION not in actions
-        ):
-            actions.append(HANDOFF_ACTION)
+        if flags.is_enabled("eq_stakes_escalation", subject=subject):
+            _offer_person(message, rewritten, result, actions, prior_messages)
+        else:
+            # English lexicon: the rewritten (English) form lets a Luganda or
+            # Kiswahili turn be read too when machine translation produced one.
+            kind = detect_user_distress(rewritten or message)
+            if (
+                distress_trajectory(kind, prior_messages)["sustained"]
+                and not result.get("escalation_required")
+                and HANDOFF_ACTION not in actions
+            ):
+                actions.append(HANDOFF_ACTION)
 
     # Anticipatory civic nudges based on tax topic
     topic = str(result.get("current_topic") or "").lower()

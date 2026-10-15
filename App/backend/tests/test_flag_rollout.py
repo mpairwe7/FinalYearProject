@@ -287,6 +287,9 @@ class RegistryIntegrityTests(unittest.TestCase):
             "risk_tiered_autonomy_gates",
             "quality_circuit_breaker",
             "verifiable_decision_receipts",
+            # Phase 38: offered officers and structured text handoffs ramp by cohort.
+            "eq_stakes_escalation",
+            "structured_text_handoff",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

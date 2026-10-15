@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (77 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (79 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -721,9 +721,11 @@ All major subsystems are behind feature flags for progressive rollout:
 | `workflow_tangent_resume` | off | Allows active guided workflows (`workflows/registry.py`) to answer mid-flow policy side-questions and seamlessly resume the parked workflow step |
 | `autonomous_outcome_verification` | off | Binds missing tool arguments from consented `verified_slot_bank`, `SemanticMemory`, and prior specialist DAG receipts in `main_graph.bind_arguments()` and verifies post-action outcomes |
 | `officer_preference_capture` | off | Captures PII-redacted edit diffs between AI co-pilot drafts and final officer replies in `officer_chat.py` for offline DPO/ORPO preference alignment |
+| `eq_stakes_escalation` | off | Phase 38: `escalation_policy.assess_escalation` weighs affect, stakes (`text_signals.detect_high_stakes`: enforcement, a deadline today, a large amount), effort and confidence; text chat offers an officer (first when `priority`), and every ticket path takes its priority and SLA. Offers only — never escalates by itself |
+| `structured_text_handoff` | off | Phase 38: text-chat tickets (auto-escalations and `POST /v1/escalate`) carry `HandoffEnvelope` v2.1 via `officer_handoff.enrich_handoff`; details to ask for are pruned against what the taxpayer already gave (slot names only, never values) |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**77** in total, including the per-phase switches for voice, offline and
+**79** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

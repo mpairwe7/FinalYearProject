@@ -462,12 +462,23 @@ def evaluate_interaction_scorecard(
     repeated_tool_failures: int = 0,
     audit_event_id: str = "",
     subject: str | None = None,
+    deterministic_basis: bool | None = None,
 ) -> InteractionQualityScorecard:
-    """Compute a deterministic 100% turn-level QA scorecard and update the circuit breaker."""
+    """Compute a deterministic 100% turn-level QA scorecard and update the circuit breaker.
+
+    *deterministic_basis* says whether the reply rests on something other than
+    retrieved sources — a rate table, a calculator, a workflow, a service
+    record. When a caller passes it, a reply is no longer credited with
+    statutory grounding merely for containing "UGX" or "%" (the heuristic a
+    caller that passes nothing still gets).
+    """
     import uuid
 
     now_utc = dt.datetime.now(_UTC_TZ).isoformat()
-    has_sources_or_calc = bool(sources) or ("ugx" in (reply_text or "").lower()) or ("%" in (reply_text or ""))
+    if deterministic_basis is None:
+        has_sources_or_calc = bool(sources) or ("ugx" in (reply_text or "").lower()) or ("%" in (reply_text or ""))
+    else:
+        has_sources_or_calc = bool(sources) or deterministic_basis
     statutory_score = 1.0 if (has_sources_or_calc and figure_fidelity_passed) else (0.85 if reply_text else 0.0)
     figure_score = 1.0 if figure_fidelity_passed else 0.0
     policy_score = 1.0 if policy_adherence_passed else 0.0

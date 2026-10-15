@@ -233,6 +233,25 @@ def classify_all(
     return outcomes
 
 
+def connectors_used(
+    tool_calls: Iterable[Mapping[str, Any]] | None, *, label_for: Any = None
+) -> list[dict[str, str]]:
+    """The services a turn consulted, once each, with how the last lookup ended.
+
+    What the client shows beside the answer and the case ledger records as a
+    step — names, a mode and an outcome kind; never the record.
+    """
+    used: dict[str, dict[str, str]] = {}
+    for outcome in classify_all(tool_calls, label_for=label_for):
+        used[outcome.connector] = {
+            "namespace": outcome.connector,
+            "label": outcome.label,
+            "mode": outcome.mode,
+            "outcome": outcome.kind,
+        }
+    return list(used.values())
+
+
 def deterministic(outcomes: Sequence[Outcome]) -> bool:
     """True when the reply is worded from the services' answers alone.
 
