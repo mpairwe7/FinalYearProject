@@ -376,6 +376,11 @@ class ClaimRouteTests(unittest.TestCase):
     def test_ending_a_call_nobody_joined_is_refused(self):
         self.assertEqual(self.post("end", "okello").status_code, 409)
 
+    def test_admin_can_terminate_waiting_call(self):
+        res = self.post("end", "boss", role="ura_admin")
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.json().get("ended"))
+
     def test_the_console_hides_calls_on_a_deployment_without_them(self):
         with patch.object(flags, "is_enabled", return_value=False), self.assertRaises(WebSocketDisconnect) as closed:
             with self.client.websocket_connect(f"/v1/admin/calls/stream?token={self.token('okello')}") as ws:
