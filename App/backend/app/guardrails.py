@@ -486,8 +486,9 @@ def contains_pii(text: str) -> bool:
 
 #: A TIN (10 digits from 1) or a PRN (12-14 digits from 2) typed by the taxpayer.
 _USER_STATED_ID_RE = re.compile(r"\b1\d{9}\b|\b2\d{11,13}\b")
-#: The redactor's own TIN pattern, so every format it would hide — "TIN:
-#: 1000000001", "100-000-0001", "100 000 0001" — is also one a taxpayer can state.
+#: The redactor's own TIN pattern, so every format it would hide — prefixed
+#: ("TIN: …"), hyphenated or spaced in groups of 3-3-4 — is also one a taxpayer
+#: can state.
 _UG_TIN_RE = next(pattern for kind, pattern in _PII_PATTERNS if kind == "ug_tin")
 
 
