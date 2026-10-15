@@ -155,6 +155,7 @@ def open_transfer(
             caller_affect=getattr(state, "caller_affect", "calm"),
             priority=priority,
             officer_macros=macros,
+            affect_trajectory=list(getattr(state, "affect_trajectory", []) or []),
         )
         envelope.case_reference = ref
         env_dict = envelope.to_dict()

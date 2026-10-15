@@ -513,8 +513,11 @@ class UraReceptionistBrain(LLMService):
 
         mean_prob = round(sum(word_probs) / len(word_probs), 3) if word_probs else None
 
-        # Acoustic & lexical prosody analysis (2026 Emotion-Aware Prosody)
-        if flags.is_enabled("emotion_aware_prosody", subject=self.room.state.user_id or None):
+        # Acoustic & lexical prosody analysis + Multimodal EQ Fusion (2026)
+        uid_subject = self.room.state.user_id or None
+        if flags.is_enabled("emotion_aware_prosody", subject=uid_subject) or flags.is_enabled(
+            "eq_multimodal_fusion", subject=uid_subject
+        ):
             try:
                 from .prosody import analyze_utterance_prosody
 
@@ -528,10 +531,37 @@ class UraReceptionistBrain(LLMService):
                 self.room.state.caller_affect = profile.caller_affect
                 self.room.state.recommended_speech_rate = profile.recommended_speech_rate
                 self.room.state.prosody_tag = profile.prosody_tag
-                if profile.caller_affect in ("frustrated", "urgent_distress"):
+                self.room.state.dictation_pause_ms = profile.dictation_pause_ms
+                if flags.is_enabled("eq_multimodal_fusion", subject=uid_subject):
+                    from ..tools.empathy import fuse_multimodal_affect
+
+                    prev_smooth = float(getattr(self.room.state, "smoothed_affect_score", 0.0) or 0.0)
+                    fused = fuse_multimodal_affect(
+                        user_text,
+                        prosody_profile=profile,
+                        clarifications_asked=self.room.state.clarifications_asked,
+                        previous_smoothed_score=prev_smooth,
+                        user_id=uid_subject,
+                    )
+                    self.room.state.smoothed_affect_score = fused.smoothed_score
+                    self.room.state.recommended_speech_rate = min(
+                        profile.recommended_speech_rate, fused.recommended_speech_rate
+                    )
+                    if fused.affect in ("hardship", "frustration") and fused.smoothed_score >= 0.75:
+                        self.room.state.caller_affect = "urgent_distress"
+                    traj = list(getattr(self.room.state, "affect_trajectory", []) or [])
+                    traj.append(
+                        {
+                            "turn": self.room.state.turn_seq,
+                            "affect": self.room.state.caller_affect,
+                            "score": fused.smoothed_score,
+                        }
+                    )
+                    self.room.state.affect_trajectory = traj[-10:]
+                if self.room.state.caller_affect in ("frustrated", "urgent_distress"):
                     self.room.state.speech_rate_slow = True
             except Exception:
-                logger.debug("Prosody analysis skipped on call %s", self.room.call_id, exc_info=True)
+                logger.debug("Prosody/multimodal affect analysis skipped on call %s", self.room.call_id, exc_info=True)
 
         # The answer to "was this call helpful?" is recorded as a review, not
         # an utterance: "useless!!" there is an opinion of the call, and the
@@ -777,6 +807,7 @@ class UraReceptionistBrain(LLMService):
 
     def _extract_english_tax_query(self, luganda_query: str) -> str:
         """Extract a clean English search query from a Luganda taxpayer question."""
+        from .. import mt
         from .lexicon import normalize_luganda_tax_query, repair_asr_entities
 
         # The GPU stack's Sunflower reads this. Repair Whisper's TIN/URA
@@ -789,6 +820,11 @@ class UraReceptionistBrain(LLMService):
         # Swahili calls go through has that history, this one-shot extraction
         # did not (G122).
         earlier = self._earlier_in_call()
+        if not earlier:
+            cached_en = mt.cache.get("lg", "en", normalized)
+            if cached_en:
+                return cached_en
+
         prompt = (
             (f"<earlier_call>\n{earlier}\n</earlier_call>\n\n" if earlier else "")
             + f"Luganda question: {normalized}\nEnglish search query:"
@@ -805,6 +841,8 @@ class UraReceptionistBrain(LLMService):
             ]
             res = _vllm_generate(messages, max_tokens=64, temperature=0.0).strip().strip('"')
             if res and len(res) > 2:
+                if not earlier:
+                    mt.cache.put("lg", "en", normalized, res)
                 return res
         except Exception:
             logger.debug("Luganda query extraction failed", exc_info=True)
@@ -911,11 +949,19 @@ class UraReceptionistBrain(LLMService):
                 passages.append(s)
         context_text = "\n\n".join(passages[:3])
 
-        # 3. Direct Luganda Generation
+        # 3. Direct Luganda Generation with Figure & Unit Survival Gate
+        from .. import mt
+
         luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
+        if luganda_reply and english_reply:
+            if not (
+                mt.figures_survived(english_reply, luganda_reply, locale="lg")
+                and mt.units_survived(english_reply, luganda_reply)
+            ):
+                logger.info("Direct Luganda call synthesis failed figure/unit check; falling back to sentinel-guarded _localize_reply")
+                luganda_reply = ""
         if not luganda_reply:
             if english_reply:
-
                 loc_fn = getattr(self.chat_model, "_localize_reply", None)
                 if callable(loc_fn):
                     try:
@@ -1072,13 +1118,53 @@ class UraReceptionistBrain(LLMService):
 
         # Hybrid Speech Mode Classification (Path A S2S Fast vs Path B Cascaded Guarded)
         try:
-            from .hybrid_s2s import classify_hybrid_speech_mode
+            from .hybrid_s2s import build_s2s_fast_reply, classify_hybrid_speech_mode
 
-            classify_hybrid_speech_mode(
+            active_slot = str(getattr(self.room.state, "active_workflow_slot_type", "") or "")
+            hybrid_dec = classify_hybrid_speech_mode(
                 question,
                 locale=self.language,
                 subject=self.room.state.user_id or "",
+                active_workflow_slot_type=active_slot,
             )
+            self.room.state.semantic_endpoint_silence_ms = hybrid_dec.recommended_vad_silence_ms
+            self.room.state.last_hybrid_speech_mode = hybrid_dec.mode
+            if hybrid_dec.mode == "s2s_fast":
+                fast_reply = build_s2s_fast_reply(question, locale=self.language)
+                if fast_reply:
+                    fast_ms = round((time.perf_counter() - t0) * 1000, 1)
+                    fast_result = {
+                        "reply": fast_reply,
+                        "retrieval_mode": "s2s_fast",
+                        "locale": self.language,
+                        "faithfulness_score": 1.0,
+                        "sources": [],
+                    }
+                    record_chat_turn(fast_result, elapsed_ms=fast_ms, channel="call")
+                    try:
+                        db.log_conversation(
+                            session_id=self.room.call_id,
+                            conversation_id=self.room.state.conversation_id,
+                            user_message=question,
+                            bot_reply=fast_reply,
+                            sources="[]",
+                            response_time_ms=fast_ms,
+                            confidence=float(mean_word_prob or 1.0),
+                            user_id=self.room.state.user_id,
+                            locale=self.room.state.locale,
+                            tenant_id=self.room.state.tenant_id or "default",
+                        )
+                    except Exception:
+                        logger.debug("s2s_fast conversation log skipped", exc_info=True)
+                    self.room.state.ai_answers_count += 1
+                    self.room.state.latencies.append({"brain_ms": fast_ms})
+                    await self._say_and_record(
+                        fast_reply,
+                        kind="answer",
+                        faithfulness=1.0,
+                        latencies={"brain_ms": fast_ms},
+                    )
+                    return
         except Exception:
             logger.debug("Hybrid speech mode classification skipped", exc_info=True)
 

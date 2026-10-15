@@ -941,16 +941,17 @@ _THOUGHT_BLOCK_RE = re.compile(
 _THOUGHT_FENCE_RE = re.compile(r"```(?:thought|thinking).*?```", flags=re.DOTALL | re.IGNORECASE)
 
 
-def strip_thought(text: str) -> str:
+def strip_thought(text: str, *, preseeded_think: bool = False) -> str:
     """Extract and hide internal thinking tags and fences, returning only the clean structured response."""
     if not text:
         return ""
     # Strip <think>...</think>, <thought>...</thought>, etc., including unclosed tags
     cleaned = _THOUGHT_BLOCK_RE.sub("", text)
     # If the chat template pre-seeded <think> in the prompt so the output contains only a closing </think> tag
-    m_close = _THOUGHT_TAG_CLOSE_RE.search(cleaned)
-    if m_close:
-        cleaned = cleaned[m_close.end() :]
+    if preseeded_think:
+        m_close = _THOUGHT_TAG_CLOSE_RE.search(cleaned)
+        if m_close:
+            cleaned = cleaned[m_close.end() :]
     cleaned = _THOUGHT_FENCE_RE.sub("", cleaned)
     return cleaned.strip()
 
@@ -1298,7 +1299,10 @@ def _vllm_generate(
         choices = payload.get("choices", [])
         if not choices:
             return ""
-        return strip_thought(str(choices[0].get("message", {}).get("content", "")))
+        return strip_thought(
+            str(choices[0].get("message", {}).get("content", "")),
+            preseeded_think=uses_native_long_context_without_yarn(),
+        )
     except Exception:
         logger.exception("vLLM HTTP generate failed")
         return ""
@@ -1349,7 +1353,10 @@ async def async_vllm_generate(
             choices = payload.get("choices", [])
             if not choices:
                 return ""
-            return strip_thought(str(choices[0].get("message", {}).get("content", "")))
+            return strip_thought(
+                str(choices[0].get("message", {}).get("content", "")),
+                preseeded_think=uses_native_long_context_without_yarn(),
+            )
     except Exception as exc:
         logger.debug("async_vllm_generate dispatch fallback: %s", exc)
     import asyncio
@@ -1445,7 +1452,13 @@ def _vllm_chat_completion(
                     "arguments": xc.get("arguments", {}),
                 })
 
-        return {"content": strip_thought(content), "tool_calls": parsed_calls}
+        return {
+            "content": strip_thought(
+                content,
+                preseeded_think=uses_native_long_context_without_yarn(),
+            ),
+            "tool_calls": parsed_calls,
+        }
     except urllib.error.HTTPError as http_err:
         err_body = ""
         with contextlib.suppress(Exception):

@@ -116,6 +116,10 @@ class CallState:
     caller_affect: str = "calm"
     recommended_speech_rate: float = 1.0
     prosody_tag: str = "<neutral>"
+    dictation_pause_ms: int = 120
+    smoothed_affect_score: float = 0.0
+    affect_trajectory: list[dict[str, Any]] = field(default_factory=list)
+    last_hybrid_speech_mode: str = "cascaded_guarded"
     semantic_endpoint_silence_ms: int = 500
     prefetched_query: str = ""
     prefetched_hits: list[dict[str, Any]] = field(default_factory=list)

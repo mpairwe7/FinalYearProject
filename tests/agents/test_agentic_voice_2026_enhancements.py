@@ -1217,3 +1217,67 @@ def test_phase35_multi_case_resolution_ledger_anon_promotion_and_officer_prefere
     finally:
         flags.clear("officer_ai_co_execution")
         flags.clear("officer_preference_capture")
+
+
+def test_phase36_voice_s2s_fast_luganda_figure_guard_and_multimodal_affect_handoff(tmp_db):
+    from app.receptionist.hybrid_s2s import build_s2s_fast_reply
+
+    # 1. S2S fast conversational responder & zero-RAG brain execution
+    assert build_s2s_fast_reply("Oli otya", locale="lg") is not None
+    assert "URA" in str(build_s2s_fast_reply("Oli otya", locale="lg"))
+    assert build_s2s_fast_reply("Habari za asubuhi", locale="sw") is not None
+    assert build_s2s_fast_reply("Webale nnyo", locale="lg") is not None
+    # Numeric or statutory queries must NEVER return a fast S2S reply
+    assert build_s2s_fast_reply("What is the VAT rate on UGX 2,000,000?", locale="en") is None
+
+    state = CallState(call_id="call-p36-1", conversation_id="conv-p36-1", locale="lg")
+    room = CallRoom(call_id="call-p36-1", state=state)
+    chat_model = MagicMock()
+    chat_model._maybe_handle_fast_paths.return_value = None
+    chat_model.generate.return_value = {
+        "reply": "The standard VAT rate in Uganda is 18% on UGX 2,000,000.",
+        "sources": ["VAT Act Cap 349"],
+        "confidence": 0.92,
+        "faithfulness_score": 0.98,
+    }
+    chat_model._localize_reply.return_value = "Kiwendo kya VAT mu Uganda kiri 18% ku UGX 2,000,000."
+
+    brain = UraReceptionistBrain(room=room, chat_model=chat_model)
+    spoken: list[tuple[str, str]] = []
+
+    async def fake_say(text: str, kind: str = "answer", **kwargs):
+        spoken.append((kind, text))
+
+    brain._say_and_record = fake_say  # type: ignore[method-assign]
+
+    flags.set("hybrid_speech_s2s", True)
+    flags.set("eq_multimodal_fusion", True)
+    flags.set("emotion_aware_prosody", True)
+    try:
+        # S2S fast greeting executes without calling chat_model.generate
+        asyncio.run(brain._generate_and_speak("Gyebale ko"))
+        assert state.last_hybrid_speech_mode == "s2s_fast"
+        assert chat_model.generate.call_count == 0
+        assert len(spoken) == 1
+        assert "URA" in spoken[-1][1]
+
+        # 2. Sentinel-guarded Luganda call synthesis fallback when direct synthesis mutates figures
+        brain._extract_english_tax_query = lambda q: "What is the VAT rate on UGX 2,000,000?"  # type: ignore[method-assign]
+        # Simulate direct Luganda synthesis mutating 18% -> 25%
+        brain._synthesize_luganda_reply = lambda ctx, q: "Kiwendo kya VAT mu Uganda kiri 25% ku UGX 2,000,000."  # type: ignore[method-assign]
+        lg_out = asyncio.run(brain._generate_luganda_answer("Omusolo gwa VAT ku bukadde bubiri guli mmeka?"))
+        # Must reject the mutated 25% direct synthesis and fall back to sentinel-protected _localize_reply (18%)
+        assert "18%" in lg_out["reply"]
+        assert "25%" not in lg_out["reply"]
+        chat_model._localize_reply.assert_called_once()
+
+        # 3. Multimodal affect fusion across voice turns
+        asyncio.run(brain.handle_external_question("Ebintu byange babikutte era sirina ssente!"))
+        assert state.smoothed_affect_score >= 0.70
+        assert len(state.affect_trajectory) >= 1
+        assert state.affect_trajectory[-1]["affect"] in ("hardship", "frustration", "urgent_distress")
+        assert state.speech_rate_slow is True
+    finally:
+        flags.clear("hybrid_speech_s2s")
+        flags.clear("eq_multimodal_fusion")
+        flags.clear("emotion_aware_prosody")
