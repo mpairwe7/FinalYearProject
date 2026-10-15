@@ -3106,7 +3106,10 @@ def update_statutory_precedence(
         clauses.append("statute_reference = ?")
         params.append(statute_reference.strip())
     params.append(pid)
-    cur = conn.execute(f"UPDATE statutory_precedences SET {', '.join(clauses)} WHERE id = ?", tuple(params))
+    cur = conn.execute(
+        f"UPDATE statutory_precedences SET {', '.join(clauses)} WHERE id = ?",  # noqa: S608  # nosec B608
+        tuple(params),
+    )
     conn.commit()
     return cur.rowcount > 0
 

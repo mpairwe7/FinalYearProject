@@ -297,7 +297,20 @@ class ToolRegistry:
 
     # -- dispatch ------------------------------------------------------
     @classmethod
-    def call(cls, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def call(
+        cls,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        user_id: str = "",
+        tenant_id: str = "default",
+        channel: str = "rest",
+        caller_confirmed: bool = False,
+        officer_approved: bool = False,
+        approving_officer_id: str = "",
+        ticket_id: str | None = None,
+    ) -> dict[str, Any]:
         """Dispatch a tool call by name, returning a JSON-safe dict.
 
         All exceptions are captured — the LLM should never see a
@@ -324,8 +337,63 @@ class ToolRegistry:
                 "live": False,
             }
 
+        arg_dict = dict(arguments or {})
+        resolved_user_id = str(user_id or arg_dict.get("user_id") or "")
+        resolved_tenant_id = str(tenant_id or arg_dict.get("tenant_id") or "default")
+        resolved_session_id = str(arg_dict.get("conversation_id") or "tool_dispatch")
+        key_only_params = {"argument_keys": sorted(str(k) for k in arg_dict)}
+
+        # Preventive Autonomy Gate (Phase 34) — evaluate before tool.execute
         try:
-            result = tool.execute(**(arguments or {}))
+            from ..flags import flags
+
+            if flags.is_enabled("risk_tiered_autonomy_gates", subject=resolved_user_id or None):
+                from ..audit.governance_v3 import append_action_audit_v3, evaluate_autonomy_gate
+
+                gate_outcome, _ = evaluate_autonomy_gate(
+                    name,
+                    intent_confidence=1.0,
+                    caller_confirmed=caller_confirmed,
+                    officer_approved=officer_approved,
+                    approving_officer_id=approving_officer_id,
+                    ticket_id=ticket_id,
+                    subject=resolved_user_id or None,
+                )
+                if gate_outcome in ("hard_blocked", "proposed_awaiting_officer", "failed_closed"):
+                    elapsed_ms = (time.perf_counter() - t0) * 1000
+                    rec, receipt = append_action_audit_v3(
+                        session_id=resolved_session_id,
+                        tool_or_action_name=name,
+                        intent_detected=name,
+                        intent_confidence=1.0,
+                        parameters_redacted=key_only_params,
+                        parameters_digest_source=arg_dict,
+                        response_summary_redacted={"ok": False, "autonomy_outcome": gate_outcome},
+                        execution_status="blocked" if gate_outcome != "proposed_awaiting_officer" else "proposed",
+                        execution_latency_ms=elapsed_ms,
+                        channel=channel,
+                        user_id=resolved_user_id,
+                        tenant_id=resolved_tenant_id,
+                        caller_confirmed=caller_confirmed,
+                        officer_approved=officer_approved,
+                        approving_officer_id=approving_officer_id,
+                        ticket_id=ticket_id,
+                    )
+                    gated_res: dict[str, Any] = {
+                        "ok": False,
+                        "autonomy_outcome": gate_outcome,
+                        "error": f"Action '{name}' requires approval or is blocked ({gate_outcome}).",
+                    }
+                    if flags.is_enabled("verifiable_decision_receipts", subject=resolved_user_id or None):
+                        gated_res["decision_receipt"] = receipt.model_dump()
+                    elif rec.audit_event_id:
+                        gated_res["audit_event_id"] = rec.audit_event_id
+                    return gated_res
+        except Exception:
+            logger.debug("Preventive autonomy gate check skipped for %s", name, exc_info=True)
+
+        try:
+            result = tool.execute(**arg_dict)
             if not isinstance(result, dict):
                 result = {"ok": True, "result": result}
             elif "ok" not in result:
@@ -336,7 +404,7 @@ class ToolRegistry:
             logger.info(
                 "Tool %s rejected arguments (argument_keys=%s, error_type=%s)",
                 name,
-                sorted((arguments or {}).keys()),
+                sorted(arg_dict.keys()),
                 type(e).__name__,
             )
             return {
@@ -355,6 +423,40 @@ class ToolRegistry:
             result.setdefault("mode", "simulation")
             result.setdefault("live", False)
             result.setdefault("simulation_notice", _SIMULATION_NOTICE)
+
+        try:
+            from ..flags import flags
+
+            if flags.is_enabled("action_level_audit_v3", subject=resolved_user_id or None) or flags.is_enabled(
+                "verifiable_decision_receipts", subject=resolved_user_id or None
+            ):
+                from ..audit.governance_v3 import append_action_audit_v3
+
+                rec, receipt = append_action_audit_v3(
+                    session_id=resolved_session_id,
+                    tool_or_action_name=name,
+                    intent_detected=name,
+                    intent_confidence=1.0,
+                    parameters_redacted=key_only_params,
+                    parameters_digest_source=arg_dict,
+                    response_summary_redacted={"ok": bool(result.get("ok", True))},
+                    execution_status="success" if result.get("ok", True) else "error",
+                    execution_latency_ms=elapsed_ms,
+                    channel=channel,
+                    user_id=resolved_user_id,
+                    tenant_id=resolved_tenant_id,
+                    caller_confirmed=caller_confirmed,
+                    officer_approved=officer_approved,
+                    approving_officer_id=approving_officer_id,
+                    ticket_id=ticket_id,
+                )
+                if flags.is_enabled("verifiable_decision_receipts", subject=resolved_user_id or None):
+                    result["decision_receipt"] = receipt.model_dump()
+                elif rec.audit_event_id:
+                    result["audit_event_id"] = rec.audit_event_id
+        except Exception:
+            logger.debug("Phase 34 tool audit enrichment skipped for %s", name, exc_info=True)
+
         return result
 
 

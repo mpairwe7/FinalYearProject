@@ -513,6 +513,37 @@ _REGISTRY: dict[str, Flag] = {
             "Enable PWA offline calculator/workflow action outbox sync into "
             "verified_slot_bank and ResolutionCase upon network recovery.",
         ),
+        # Phase 34 (2026) — Enterprise Governance, Action-Level Audit v3 & Continuous QA Scorecard
+        Flag(
+            "action_level_audit_v3",
+            False,
+            "Emit structured ActionAuditRecord v3 (decision trace, guardrail verdicts, "
+            "approval gate, and reversibility contract) into the tamper-evident AuditLedger.",
+        ),
+        Flag(
+            "continuous_quality_scorecard",
+            False,
+            "Run 100% turn-level InteractionQualityScorecard evaluation across statutory "
+            "accuracy, figure fidelity, policy adherence, empathy, and handoff cleanliness.",
+        ),
+        Flag(
+            "risk_tiered_autonomy_gates",
+            False,
+            "Enforce Low/Medium/High/Critical risk-tiered autonomy gates, soft-confirmation "
+            "confidence floor (>=0.80), and mandatory officer approval on High-risk actions.",
+        ),
+        Flag(
+            "quality_circuit_breaker",
+            False,
+            "Automatically throttle autonomous Medium/High-risk execution when rolling "
+            "quality scorecard or figure-fidelity metrics drop below the safety threshold.",
+        ),
+        Flag(
+            "verifiable_decision_receipts",
+            False,
+            "Attach human-readable decision_receipt explanations (audit ID, statutory basis, "
+            "verified inputs, and reversal instructions) to consequential responses.",
+        ),
     ]
 }
 
@@ -682,6 +713,11 @@ class FeatureFlags:
                 "workflow_specialist_bridge",
                 "low_bandwidth_voice_codec",
                 "call_drop_resume",
+                "action_level_audit_v3",
+                "continuous_quality_scorecard",
+                "risk_tiered_autonomy_gates",
+                "quality_circuit_breaker",
+                "verifiable_decision_receipts",
             )
         }
 

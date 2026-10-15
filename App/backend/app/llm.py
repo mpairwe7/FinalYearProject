@@ -73,7 +73,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 LLM_BACKEND = os.getenv("LLM_BACKEND", "local").lower()  # "local" | "vllm"
-LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
+LLM_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-Qwen3.5-9B")
 LLM_MODEL_REVISION = os.getenv("LLM_MODEL_REVISION", "") or None
 LLM_TRUST_REMOTE_CODE = os.getenv("LLM_TRUST_REMOTE_CODE", "false").lower() == "true"
 LLM_CONTEXT_WINDOW = int(os.getenv("LLM_CONTEXT_WINDOW", "8192"))
@@ -1793,14 +1793,16 @@ def translate_text(
     glossary_hints = get_translation_glossary_hints(text, target_lang)
     if target_lang == "en":
         user_prompt = (
-            f"Translate the following {src_name} text into {lang_name}. "
+            f"Translate from {src_name} to {lang_name}. "
             f"It may be a question — translate the question itself, do not answer it."
-            f"{constraint_note}{glossary_hints}{example}\n\n{src_name}: {text}\n{lang_name}:"
+            f"{constraint_note}{glossary_hints}{example}\n\n"
+            f"Translate from {src_name} to {lang_name}: {text}"
         )
     else:
         user_prompt = (
-            f"Translate the following {src_name} text into {lang_name}. "
-            f"{constraint_note}{example}\n\n{src_name}: {text}\n{lang_name}:"
+            f"Translate from {src_name} to {lang_name}."
+            f"{constraint_note}{example}\n\n"
+            f"Translate to {lang_name}: {text}"
         )
     messages = [
         {"role": "system", "content": system_prompt},

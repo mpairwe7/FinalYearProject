@@ -58,23 +58,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 
 MODEL = os.getenv("ORPHEUS_MODEL", "Sunbird/orpheus-3b-tts-multilingual")
 SNAC_MODEL = os.getenv("ORPHEUS_SNAC_MODEL", "hubertsiuzdak/snac_24khz")
-GPU_MEM_UTIL = float(os.getenv("ORPHEUS_GPU_MEM_UTIL", "0.35"))
-MAX_MODEL_LEN = int(os.getenv("ORPHEUS_MAX_MODEL_LEN", "2048"))
+GPU_MEM_UTIL = float(os.getenv("ORPHEUS_GPU_MEM_UTIL", "0.85"))
+MAX_MODEL_LEN = int(os.getenv("ORPHEUS_MAX_MODEL_LEN", "4096"))
 SNAC_DEVICE = os.getenv("ORPHEUS_SNAC_DEVICE", "cuda")
-MAX_TOKENS = int(os.getenv("ORPHEUS_MAX_TOKENS", "1400"))
+MAX_TOKENS = int(os.getenv("ORPHEUS_MAX_TOKENS", "1200"))
 # "fp8" = weight-only FP8 (Marlin kernels on Ampere). Decoding a 3B model is
 # memory-bound, and at bf16 an RTX A6000 generates at ~0.96x real time — no
 # headroom for a second caller. See evals/reports/orpheus_tts_*.json.
 QUANTIZATION = os.getenv("ORPHEUS_QUANTIZATION", "").strip() or None
 
-# The model card's speaker table (Luganda, Swahili, English). A voice outside
-# it is refused rather than guessed: the language travels only in the speaker
-# tag, and an unknown tag produces confident gibberish.
+# The model card's speaker table (Luganda, Swahili, English + multilingual Sunbird/Waxal/SLR32 voices).
 SPEAKERS: frozenset[str] = frozenset({
     "salt_lug_0001", "waxal_lug_0002", "waxal_lug_0003", "waxal_lug_0004",
     "waxal_lug_0005", "waxal_lug_0006", "waxal_lug_0007", "waxal_lug_0008",
     "waxal_swa_0006", "waxal_swa_0007",
     "salt_eng_0001", "salt_eng_0002", "salt_eng_0003",
+    "waxal_yor_0002", "waxal_hau_0004", "slr32_afr_0009",
+    "salt_nyn_0001", "salt_ach_0001",
 })
 _VOICE_RE = re.compile(r"^[a-z0-9]+_[a-z]{3}_\d{4}$")
 
@@ -83,6 +83,19 @@ class SpeechRequest(BaseModel):
     input: str = Field(min_length=1, max_length=600)
     voice: str = Field(default="salt_lug_0001", max_length=32)
     response_format: str = Field(default="pcm", pattern="^(pcm|wav)$")
+    seed: int | None = None
+    temperature: float = Field(default=0.6, ge=0.1, le=1.2)
+    top_p: float = Field(default=0.95, ge=0.5, le=1.0)
+    repetition_penalty: float = Field(default=1.1, ge=1.0, le=2.0)
+
+
+class BatchSpeechItem(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+    speaker_id: str = Field(default="salt_lug_0001", max_length=32)
+
+
+class BatchSpeechRequest(BaseModel):
+    items: list[BatchSpeechItem] = Field(min_length=1, max_length=32)
     seed: int | None = None
     temperature: float = Field(default=0.6, ge=0.1, le=1.2)
     top_p: float = Field(default=0.95, ge=0.5, le=1.0)
@@ -247,3 +260,37 @@ async def speech(req: SpeechRequest) -> Response:
                     n / 2 / SAMPLE_RATE, (time.perf_counter() - t0) * 1000)
 
     return StreamingResponse(body(), media_type="audio/pcm", headers={"X-Sample-Rate": str(SAMPLE_RATE)})
+
+
+@app.post("/v1/audio/speech/batch")
+async def speech_batch(req: BatchSpeechRequest) -> dict[str, Any]:
+    """Multi-speaker batched synthesis via vLLM PagedAttention + continuous batching."""
+    import base64
+
+    if not engine.ready:
+        raise HTTPException(status_code=503, detail="loading")
+    for item in req.items:
+        if not _VOICE_RE.match(item.speaker_id) or item.speaker_id not in SPEAKERS:
+            raise HTTPException(status_code=400, detail=f"unknown voice: {item.speaker_id}")
+
+    kwargs = {
+        "seed": req.seed,
+        "temperature": req.temperature,
+        "top_p": req.top_p,
+        "repetition_penalty": req.repetition_penalty,
+    }
+
+    async def _one(item: BatchSpeechItem) -> dict[str, Any]:
+        cleaned = " ".join(item.text.split())
+        pcm = b"".join([chunk async for chunk in engine.stream(cleaned, item.speaker_id, **kwargs)])
+        return {
+            "speaker_id": item.speaker_id,
+            "sample_rate": SAMPLE_RATE,
+            "num_samples": len(pcm) // 2,
+            "pcm_b64": base64.b64encode(pcm).decode("ascii"),
+        }
+
+    t0 = time.perf_counter()
+    results = await asyncio.gather(*(_one(it) for it in req.items))
+    logger.info("batch_synth items=%d total_ms=%.0f", len(results), (time.perf_counter() - t0) * 1000)
+    return {"sample_rate": SAMPLE_RATE, "items": list(results)}

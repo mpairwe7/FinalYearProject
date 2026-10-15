@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (68 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (73 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -709,9 +709,14 @@ All major subsystems are behind feature flags for progressive rollout:
 | `low_bandwidth_voice_codec` | off | Negotiates 8 kHz G.711 μ-law / 12 kbps Opus framing (`receptionist/low_bandwidth.py`) and caption-first audio degradation on 2G/3G or Data Saver links |
 | `call_drop_resume` | off | Mints HMAC-signed single-use `call_resume_ticket` for 45-second caller reconnect recovery on mobile socket drops |
 | `offline_action_outbox` | off | Syncs queued PWA offline calculator receipts and workflow slots into `verified_slot_bank` and `ResolutionCase` upon reconnection |
+| `action_level_audit_v3` | off | Emits structured `ActionAuditRecord` v3 (`audit/governance_v3.py`) with UTC+EAT timestamps, salted TIN HMAC, decision trace, guardrail verdicts, officer approval gate, and reversibility contract into `AuditLedger` |
+| `continuous_quality_scorecard` | off | Runs 100% deterministic turn-level `InteractionQualityScorecard` evaluation across statutory accuracy, figure fidelity, policy adherence, empathy, and handoff cleanliness |
+| `risk_tiered_autonomy_gates` | off | Enforces Low/Medium/High/Critical risk-tiered autonomy gates, soft-confirmation confidence floor ($\ge 0.80$), and mandatory officer approval on High-risk proposals |
+| `quality_circuit_breaker` | off | Automatically throttles Medium/High-risk autonomy when rolling quality scorecard or figure fidelity drops below threshold |
+| `verifiable_decision_receipts` | off | Attaches human-readable `DecisionReceipt` explanations (`audit_event_id`, statutory basis, verified inputs, reversal instructions) to consequential responses |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**68** in total, including the per-phase switches for voice, offline and
+**73** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

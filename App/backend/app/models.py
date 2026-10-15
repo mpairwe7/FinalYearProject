@@ -85,7 +85,7 @@ class ChatResponse(BaseModel):
             "clarification | workflow | escalated"
         ),
     )
-    model: str = "Sunbird/Sunflower-14B-FP8"
+    model: str = "Sunbird/Sunflower-Qwen3.5-9B"
     conversation_id: str | None = None
     turn_id: str | None = Field(
         None,

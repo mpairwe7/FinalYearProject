@@ -67,6 +67,11 @@ def test_2026_flags_registered_and_logged_variants():
         "low_bandwidth_voice_codec",
         "call_drop_resume",
         "offline_action_outbox",
+        "action_level_audit_v3",
+        "continuous_quality_scorecard",
+        "risk_tiered_autonomy_gates",
+        "quality_circuit_breaker",
+        "verifiable_decision_receipts",
     ):
         assert name in all_flags
         assert all_flags[name] is False
@@ -79,6 +84,11 @@ def test_2026_flags_registered_and_logged_variants():
     assert "workflow_specialist_bridge" in variants
     assert "low_bandwidth_voice_codec" in variants
     assert "call_drop_resume" in variants
+    assert "action_level_audit_v3" in variants
+    assert "continuous_quality_scorecard" in variants
+    assert "risk_tiered_autonomy_gates" in variants
+    assert "quality_circuit_breaker" in variants
+    assert "verifiable_decision_receipts" in variants
 
 
 def test_hybrid_speech_s2s_router_and_semantic_endpointing():
@@ -666,3 +676,220 @@ def test_phase33_acoustic_risk_escalation_and_offline_action_outbox_sync(tmp_db)
         registry._rooms.pop("call-risk-33", None)
         flags.clear("emotion_aware_prosody")
         flags.clear("offline_action_outbox")
+
+
+def test_phase34_enterprise_governance_audit_v3_and_quality_circuit_breaker(tmp_db, monkeypatch):
+    import os
+
+    from app.agents.prompts import governance_prompt
+    from app.audit.governance_v3 import (
+        append_action_audit_v3,
+        classify_action_risk,
+        evaluate_autonomy_gate,
+        evaluate_interaction_scorecard,
+        quality_circuit_breaker,
+    )
+
+    quality_circuit_breaker.reset()
+    monkeypatch.setenv("AUDIT_TAXPAYER_HMAC_SALT", os.urandom(16).hex())
+
+    # 1. Risk-Tiered Autonomy Classification & Gate Enforcement
+    assert classify_action_risk("calculate_paye") == "low"
+    assert classify_action_risk("verify_tin") == "medium"
+    assert classify_action_risk("tin_registration_submit") == "high"
+    assert classify_action_risk("mutate_tax_liability_ledger") == "critical"
+
+    out_low, _ = evaluate_autonomy_gate("calculate_paye", intent_confidence=0.95)
+    assert out_low == "autonomous_executed"
+
+    out_med_ok, _ = evaluate_autonomy_gate("verify_tin", intent_confidence=0.88)
+    assert out_med_ok == "soft_confirmed_executed"
+
+    out_med_low_conf, _ = evaluate_autonomy_gate("verify_tin", intent_confidence=0.60)
+    assert out_med_low_conf == "proposed_awaiting_officer"
+
+    out_high_unapproved, gate_high = evaluate_autonomy_gate(
+        "tin_registration_submit",
+        intent_confidence=0.99,
+        caller_confirmed=True,
+        officer_approved=False,
+    )
+    assert out_high_unapproved == "proposed_awaiting_officer"
+    assert gate_high.approval_required is True
+
+    out_high_approved, gate_approved = evaluate_autonomy_gate(
+        "tin_registration_submit",
+        intent_confidence=0.99,
+        caller_confirmed=True,
+        officer_approved=True,
+        approving_officer_id="officer-ura-042",
+        ticket_id="TKT-901",
+    )
+    assert out_high_approved == "officer_approved_executed"
+    assert gate_approved.officer_approval_obtained is True
+    assert len(gate_approved.approving_officer_id_hash) == 32
+
+    out_crit, _ = evaluate_autonomy_gate(
+        "mutate_tax_liability_ledger",
+        intent_confidence=1.0,
+        caller_confirmed=True,
+        officer_approved=True,
+        approving_officer_id="officer-ura-042",
+    )
+    assert out_crit == "hard_blocked"
+
+    # 2. Tamper-evident ActionAuditRecord v3 & DecisionReceipt
+    flags.set("audit_ledger", True)
+    flags.set("action_level_audit_v3", True)
+    flags.set("risk_tiered_autonomy_gates", True)
+    flags.set("continuous_quality_scorecard", True)
+    flags.set("quality_circuit_breaker", True)
+    flags.set("verifiable_decision_receipts", True)
+    try:
+        assert "Enterprise Safety" in governance_prompt()
+
+        rec, receipt = append_action_audit_v3(
+            session_id="conv-p34-001",
+            tool_or_action_name="tin_registration_submit",
+            intent_detected="tin_registration",
+            intent_confidence=0.96,
+            agent_role="tax_specialist",
+            decision_trace=["router:tin_registration", "gate:high_risk_officer_approved"],
+            parameters_redacted={"taxpayer_type": "individual", "tin": "1000***999"},
+            response_summary_redacted={"status": "submitted"},
+            user_id="1000555999",
+            caller_confirmed=True,
+            officer_approved=True,
+            approving_officer_id="officer-ura-042",
+            ticket_id="TKT-901",
+            pre_state={"draft_step": 2},
+            statutory_basis=["Tax Procedures Code Act Sec. 4 & Sec. 23 (FY2026-27)"],
+        )
+        assert rec.audit_event_id
+        assert len(rec.row_hash) == 64
+        assert len(rec.taxpayer_tin_hmac) == 64
+        assert rec.autonomy_outcome == "officer_approved_executed"
+        assert rec.reversibility.reversible is True
+        assert "TPC Sec. 23" in receipt.reversibility_note
+        assert receipt.audit_event_id == rec.audit_event_id
+
+        # 3. 100% Continuous Quality Scorecard & Self-Healing Circuit Breaker
+        sc_good = evaluate_interaction_scorecard(
+            session_id="conv-p34-001",
+            locale="lg",
+            channel="voice_cascaded",
+            reply_text="Omusolo gwa PAYE ku UGX 2,800,000 guba UGX 728,250.",
+            sources=["Income Tax Act Cap 340"],
+            figure_fidelity_passed=True,
+            policy_adherence_passed=True,
+            distress_detected=True,
+            relief_cited=True,
+        )
+        assert sc_good.composite_quality_score == 1.0
+        assert sc_good.flagged_for_human_review is False
+        assert quality_circuit_breaker.is_throttled() is False
+
+        # Trigger figure-drift anomaly -> circuit breaker trips and throttles Medium-risk autonomy
+        sc_drift = evaluate_interaction_scorecard(
+            session_id="conv-p34-002",
+            locale="lg",
+            channel="voice_cascaded",
+            reply_text="Corrupted figure output",
+            figure_fidelity_passed=False,
+        )
+        assert "NUMERIC_DRIFT_DETECTED" in sc_drift.anomaly_flags
+        assert sc_drift.flagged_for_human_review is True
+        assert sc_drift.autonomy_throttle_triggered is True
+        assert quality_circuit_breaker.is_throttled() is True
+
+        # Medium-risk tool is now automatically downgraded to officer approval while throttled
+        out_med_throttled, _ = evaluate_autonomy_gate("verify_tin", intent_confidence=0.95)
+        assert out_med_throttled == "proposed_awaiting_officer"
+
+        # 4. ToolRegistry.call decision_receipt & HandoffEnvelope v3 governance roundtrip
+        from app.tools import ToolRegistry
+
+        vat_res = ToolRegistry.call("calculate_vat", {"amount": 10_000_000})
+        assert vat_res.get("ok") is True
+        assert "decision_receipt" in vat_res
+        assert vat_res["decision_receipt"]["risk_tier"] == "low"
+
+        env = HandoffEnvelope(
+            thread_id="conv-p34-001",
+            audit_event_ids=[rec.audit_event_id],
+            decision_trace=["router:tin_registration", "gate:officer_approved"],
+            reversibility_summary=receipt.reversibility_note,
+            quality_scorecard_summary={"composite": sc_good.composite_quality_score},
+        )
+        restored_env = HandoffEnvelope.from_dict(env.to_dict())
+        assert restored_env.audit_event_ids == [rec.audit_event_id]
+        assert restored_env.decision_trace == ["router:tin_registration", "gate:officer_approved"]
+        assert "TPC Sec. 23" in restored_env.reversibility_summary
+        assert restored_env.quality_scorecard_summary["composite"] == 1.0
+    finally:
+        quality_circuit_breaker.reset()
+        for f in (
+            "audit_ledger",
+            "action_level_audit_v3",
+            "risk_tiered_autonomy_gates",
+            "continuous_quality_scorecard",
+            "quality_circuit_breaker",
+            "verifiable_decision_receipts",
+        ):
+            flags.clear(f)
+
+
+def test_phase34_sunbird_v2_model_defaults(monkeypatch):
+    import base64
+    import importlib
+    from unittest.mock import patch
+
+    import httpx
+    from app import llm, orpheus_tts, spark_tts_salt
+    from app import speech_service as ss
+
+    try:
+        with monkeypatch.context() as defaults:
+            for name in ("LLM_MODEL", "WHISPER_SALT_MODEL", "SPARK_TTS_ENABLED"):
+                defaults.delenv(name, raising=False)
+
+            importlib.reload(llm)
+            importlib.reload(ss)
+            importlib.reload(spark_tts_salt)
+
+            assert llm.LLM_MODEL == "Sunbird/Sunflower-Qwen3.5-9B"
+            assert ss.WHISPER_SALT_MODEL == "Sunbird/SunflowerASR-51-african-languages"
+            assert ss.SALT_LANGUAGE_TOKEN_IDS["lg"] == 50332
+            assert ss.SALT_LANGUAGE_TOKEN_IDS["nyn"] == 50322
+            assert ss.SALT_LANGUAGE_TOKEN_IDS["ach"] == 50357
+            assert spark_tts_salt.SPARK_TTS_ENABLED is False
+    finally:
+        importlib.reload(llm)
+        importlib.reload(ss)
+        importlib.reload(spark_tts_salt)
+
+    monkeypatch.setenv("ORPHEUS_TTS_URL", "http://orpheus-tts:8100")
+    assert orpheus_tts.speaker_for("lg") == "salt_lug_0001"
+    assert orpheus_tts.speaker_for("sw") == "waxal_swa_0006"
+    assert orpheus_tts.speaker_for("en") == "salt_eng_0001"
+
+    batch_resp = httpx.Response(
+        200,
+        json={
+            "sample_rate": 24000,
+            "items": [
+                {"speaker_id": "salt_lug_0001", "pcm_b64": base64.b64encode(b"\x01\x00\x02\x00").decode("ascii")},
+                {"speaker_id": "waxal_swa_0006", "pcm_b64": base64.b64encode(b"\x03\x00\x04\x00").decode("ascii")},
+            ],
+        },
+    )
+    with patch("httpx.post", return_value=batch_resp) as mock_post:
+        wavs = orpheus_tts.synthesize_batch(
+            [
+                {"text": "Mwattu, oli otya?", "speaker_id": "salt_lug_0001"},
+                {"text": "Habari yako rafiki.", "speaker_id": "waxal_swa_0006"},
+            ],
+            seed=123,
+        )
+    assert wavs == [b"\x01\x00\x02\x00", b"\x03\x00\x04\x00"]
+    assert mock_post.call_args.args[0] == "http://orpheus-tts:8100/v1/audio/speech/batch"

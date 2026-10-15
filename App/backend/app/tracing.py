@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 OTEL_ENABLED = os.getenv("OTEL_ENABLED", "false").lower() == "true"
 OTEL_SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "ura-chatbot-api")
 OTEL_ENDPOINT = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-GEN_AI_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-14B-FP8")
+GEN_AI_MODEL = os.getenv("LLM_MODEL", "Sunbird/Sunflower-Qwen3.5-9B")
 #: The assistant as a GenAI agent (``gen_ai.agent.name``).
 AGENT_NAME = "ura-assistant"
 _EXCLUDED_URLS = "health,ready,metrics"

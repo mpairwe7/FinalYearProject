@@ -86,6 +86,11 @@ class HandoffEnvelope:
     english_transcript_digest: list[dict[str, str]] = field(default_factory=list)
     officer_macros: list[dict[str, str]] = field(default_factory=list)
     eq_guidance: dict[str, Any] = field(default_factory=dict)
+    # Phase 34 (2026) — Enterprise Governance & Action-Level Auditability
+    audit_event_ids: list[str] = field(default_factory=list)
+    decision_trace: list[str] = field(default_factory=list)
+    reversibility_summary: str = ""
+    quality_scorecard_summary: dict[str, Any] = field(default_factory=dict)
 
     def completeness_ratio(self) -> float:
         """Compute structured handoff completeness score in [0.0, 1.0]."""
@@ -123,6 +128,10 @@ class HandoffEnvelope:
             "english_transcript_digest": list(self.english_transcript_digest),
             "officer_macros": list(self.officer_macros),
             "eq_guidance": dict(self.eq_guidance),
+            "audit_event_ids": list(self.audit_event_ids),
+            "decision_trace": list(self.decision_trace),
+            "reversibility_summary": self.reversibility_summary,
+            "quality_scorecard_summary": dict(self.quality_scorecard_summary),
         }
 
     @classmethod
@@ -194,4 +203,8 @@ class HandoffEnvelope:
             english_transcript_digest=list(data.get("english_transcript_digest", [])),
             officer_macros=list(data.get("officer_macros", [])),
             eq_guidance=dict(data.get("eq_guidance", {})),
+            audit_event_ids=list(data.get("audit_event_ids", [])),
+            decision_trace=list(data.get("decision_trace", [])),
+            reversibility_summary=str(data.get("reversibility_summary", "")),
+            quality_scorecard_summary=dict(data.get("quality_scorecard_summary", {})),
         )

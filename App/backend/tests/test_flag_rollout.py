@@ -282,6 +282,11 @@ class RegistryIntegrityTests(unittest.TestCase):
             "low_bandwidth_voice_codec",
             "call_drop_resume",
             "offline_action_outbox",
+            "action_level_audit_v3",
+            "continuous_quality_scorecard",
+            "risk_tiered_autonomy_gates",
+            "quality_circuit_breaker",
+            "verifiable_decision_receipts",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

@@ -191,7 +191,7 @@ def _upsert_chat(ticket: dict[str, Any], **fields: Any) -> None:
             pass  # another request created it first
     sets = ", ".join(f"{k} = ?" for k in fields)
     db.execute(
-        f"UPDATE ticket_chats SET {sets}, updated_at = ? WHERE ticket_id = ?",  # noqa: S608 - fixed keys
+        f"UPDATE ticket_chats SET {sets}, updated_at = ? WHERE ticket_id = ?",  # noqa: S608  # nosec B608 - fixed keys
         (*fields.values(), now, ticket_id),
     )
 
@@ -471,8 +471,8 @@ def delete_for_tickets(ticket_ids: list[str]) -> int:
         return 0
     _ensure()
     ph = ",".join("?" * len(ticket_ids))
-    n = db.execute(f"DELETE FROM ticket_messages WHERE ticket_id IN ({ph})", tuple(ticket_ids))  # noqa: S608
-    db.execute(f"DELETE FROM ticket_chats WHERE ticket_id IN ({ph})", tuple(ticket_ids))  # noqa: S608
+    n = db.execute(f"DELETE FROM ticket_messages WHERE ticket_id IN ({ph})", tuple(ticket_ids))  # noqa: S608  # nosec B608
+    db.execute(f"DELETE FROM ticket_chats WHERE ticket_id IN ({ph})", tuple(ticket_ids))  # noqa: S608  # nosec B608
     return n
 
 

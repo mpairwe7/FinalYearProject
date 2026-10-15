@@ -1,8 +1,9 @@
-# Runbook — Sunbird SALT speech backends
+# Runbook — Sunbird SALT speech backends (Updated 2026-10-15)
 
-Operator guide for the two Sunbird SALT models wired into
-`App/backend/app/speech_service.py`: ASR (`Sunbird/asr-whisper-large-v3-salt`)
-and TTS (`Sunbird/spark-tts-salt`).
+Operator guide for the Sunbird V2 speech models wired into
+`App/backend/app/speech_service.py` and `App/backend/app/orpheus_tts.py`:
+- **Primary ASR**: `Sunbird/SunflowerASR-51-african-languages` (51 African languages, Whisper large-v3 SFT on 7,412h + GRPO on CER; replaced `Sunbird/asr-whisper-large-v3-salt` in local HF cache on 2026-10-15).
+- **Primary TTS**: `Sunbird/orpheus-3b-tts-multilingual` (`ORPHEUS_TTS_LANGUAGES=lg,sw,en`, speakers `salt_lug_0001`, `waxal_swa_0006`, `salt_eng_0001`, 24 kHz streaming via SNAC decoder; replaced `Sunbird/spark-tts-salt` which is disabled by default via `SPARK_TTS_ENABLED=false` and removed from local HF cache).
 
 ## Warm-up — who pays for the cold path
 

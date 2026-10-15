@@ -10731,9 +10731,16 @@ class ChatModel:
         """
         from .audit.turns import append_turn
 
+        enriched = dict(result) if isinstance(result, dict) else {}
+        enriched.setdefault("figure_fidelity_passed", not bool(enriched.get("figure_fidelity_rescued", False)))
+        enriched.setdefault(
+            "policy_adherence_passed",
+            not bool(enriched.get("guardrail_blocked", False))
+            and str(enriched.get("retrieval_mode") or "") != "guardrail_blocked",
+        )
         return append_turn(
             message=message,
-            result=result,
+            result=enriched,
             channel=channel,
             session_id=session_id,
             user_id=user_id,

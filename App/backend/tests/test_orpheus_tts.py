@@ -46,11 +46,11 @@ class SpeakerSelection(unittest.TestCase):
             self.assertIsNone(orpheus_tts.speaker_for("lg"))
             self.assertFalse(orpheus_tts.is_configured())
 
-    def test_luganda_by_default_and_only_luganda(self):
+    def test_multilingual_by_default(self):
         with patch.dict(os.environ, ON):
             self.assertEqual(orpheus_tts.speaker_for("lg"), "salt_lug_0001")
-            self.assertIsNone(orpheus_tts.speaker_for("sw"))
-            self.assertIsNone(orpheus_tts.speaker_for("en"))
+            self.assertEqual(orpheus_tts.speaker_for("sw"), "waxal_swa_0006")
+            self.assertEqual(orpheus_tts.speaker_for("en"), "salt_eng_0001")
 
     def test_languages_and_speakers_come_from_env(self):
         env = {**ON, "ORPHEUS_TTS_LANGUAGES": "lg,sw", "ORPHEUS_TTS_SPEAKER_LG": "waxal_lug_0005"}
@@ -98,7 +98,7 @@ class SynthesizeClient(unittest.TestCase):
     def test_no_voice_for_the_language_never_calls_out(self):
         with patch.dict(os.environ, ON), patch("httpx.post") as post:
             with self.assertRaises(orpheus_tts.OrpheusUnavailable):
-                orpheus_tts.synthesize("Hello", "en")
+                orpheus_tts.synthesize("Bonjour", "fr")
         post.assert_not_called()
 
     def test_long_text_is_voiced_in_pieces_joined_in_order(self):
