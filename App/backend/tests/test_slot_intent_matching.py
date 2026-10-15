@@ -213,8 +213,8 @@ class SemanticResolverTests(unittest.TestCase):
                 self.assertIs(value, expected)
 
     def test_unclear_from_the_model_still_falls_through(self):
-        """Observed live: Qwen3-8B answers "unclear" for Luganda "nedda"."""
-        ok, _, error = validate_slot("nedda", "boolean", lambda r, o: "unclear")
+        """Observed live: Qwen3-8B answers "unclear" for an unmapped vernacular token."""
+        ok, _, error = validate_slot("simanyi", "boolean", lambda r, o: "unclear")
         self.assertFalse(ok)
         self.assertIn("yes or no", error)
 

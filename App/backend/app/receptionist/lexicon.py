@@ -608,8 +608,11 @@ def normalize_codeswitched_query(text: str, language: str = "en") -> str:
         if pattern.search(normalized):
             normalized = pattern.sub(LUGANDA_ENGLISH_TAX_TERMS[term], normalized)
     normalized = normalize_swahili_tax_query(normalized)
-    normalized = normalize_runyankole_tax_query(normalized)
-    return normalize_acholi_tax_query(normalized)
+    for pattern, repl in _RUNYANKOLE_TERM_PATTERNS:
+        normalized = pattern.sub(repl, normalized)
+    for pattern, repl in _ACHOLI_TERM_PATTERNS:
+        normalized = pattern.sub(repl, normalized)
+    return normalized
 
 
 def normalize_call_query(text: str, language: str) -> str:

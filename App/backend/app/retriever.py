@@ -1696,13 +1696,34 @@ class HybridRetriever:
                     k: v for k, v in (filters or {}).items() if v not in (None, "", "any")
                 }
                 merged_filters_en.update(plan_en["filters"])
-                en_hits = self.search(
-                    english,
-                    top_k=top_k,
-                    prefetch_limit=prefetch_limit,
-                    filters=merged_filters_en or None,
-                    subject=subject,
-                )
+                subqueries_en = plan_en["subqueries"]
+                if len(subqueries_en) <= 1:
+                    raw_subs = plan_retrieval(query, history=history)["subqueries"]
+                    if len(raw_subs) > 1:
+                        subqueries_en = [english_retrieval_query(s, locale) or s for s in raw_subs]
+                use_decompose_en = flags.is_enabled("query_decomposition") and len(subqueries_en) > 1
+                if use_decompose_en:
+                    batches_en = [
+                        self.search(
+                            sub,
+                            top_k=top_k,
+                            prefetch_limit=prefetch_limit,
+                            filters=merged_filters_en or None,
+                            subject=subject,
+                            locale=locale,
+                        )
+                        for sub in subqueries_en
+                    ]
+                    en_hits = merge_retrieval_hits(batches_en, top_k=top_k)
+                else:
+                    en_hits = self.search(
+                        english,
+                        top_k=top_k,
+                        prefetch_limit=prefetch_limit,
+                        filters=merged_filters_en or None,
+                        subject=subject,
+                        locale=locale,
+                    )
                 if en_hits:
                     return apply_preference_boost(en_hits[:top_k], plan_en["prefer"])
 

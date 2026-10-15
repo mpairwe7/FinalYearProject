@@ -61,7 +61,7 @@ export const ach: Partial<Dictionary> = {
   'composer.connectorUseTitle': 'Ti ki tic i lok',
   'composer.connectorUseDescription': 'Yer tic, lor dirica man, ci ipeny lapeny ni. Kany tye tic me kwano keken ma oyee; man pe cwalo tic onyo yenyo TIN kono URA oyubo tic ma oyee.',
   'composer.connectorSafetyTitle': 'Gwok akaunt ni',
-  'composer.connectorSafetyDescription': 'Pe icwal namba me Karatac me Ngec (National ID), password onyo код meicel i lok. Namba me National ID keken pe moko ni akaunt me mucoro obedo megi.',
+  'composer.connectorSafetyDescription': 'Pe icwal namba me Karatac me Ngec (National ID), password onyo koodi meicel i lok. Namba me National ID keken pe moko ni akaunt me mucoro obedo megi.',
   'composer.connectorManagedDescription': 'Tic ma URA ongiyo dok oyee keken aye kiromo kubo kany.',
   'composer.connectorsIntro': 'Yer tic ma imito yenyo iye ngec i lok man.',
   'composer.connectorsSelectedCount': '{count} kiyero',
@@ -151,7 +151,7 @@ export const ach: Partial<Dictionary> = {
   'language.trigger': 'Leb',
   'language.title': 'Yero leb',
   'language.description':
-    'Loko leb me wang كمبيوتر ki leb ma lakony gamo kwede.',
+    'Loko leb me wang kompyuta ki leb ma lakony gamo kwede.',
 
   'message.you': 'Iwaco',
   'message.assistant': 'Lakony ogamo',
@@ -285,7 +285,7 @@ export const ach: Partial<Dictionary> = {
   'documents.screenState': 'Kit ma screen tye kwede',
   'documents.possibleIssue': 'Peko ma romo bedo tye',
   'documents.recommendedSteps': 'Rwom ma lubo ma kicimo',
-  'documents.screenshotCaution': 'Tela man a ki i cal me screen dok romo pe bedo کامل. Ngi kabedo me intanet ma peya iketo ngec, dok imok ki URA.',
+  'documents.screenshotCaution': 'Tela man a ki i cal me screen dok romo pe bedo ducu. Ngi kabedo me intanet ma peya iketo ngec, dok imok ki URA.',
   'documents.openOfficialPortal': 'Yab Kabedo me URA ↗',
   'documents.inspectScreenAreas': 'Nen kama myero inen i screen man',
   'documents.detectedScreenAreas': 'Kama pol kare nen iye',

@@ -1141,9 +1141,9 @@ def detect_language(text: str, default_lang: str = "en") -> str:
     sw_ratio = sw_hits / n_words
 
     # Strong signal thresholds for regional dialects
-    if nyn_ratio >= 0.15 and nyn_hits >= 2:
+    if nyn_ratio >= 0.15 and nyn_hits >= 2 and en_hits <= nyn_hits:
         return "nyn"
-    if ach_ratio >= 0.15 and ach_hits >= 2:
+    if ach_ratio >= 0.15 and ach_hits >= 2 and en_hits <= ach_hits:
         return "ach"
     if sw_ratio >= 0.15 and sw_hits >= 2:
         return "sw"

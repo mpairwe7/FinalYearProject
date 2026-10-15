@@ -90,7 +90,6 @@ _WORD_ALIASES: dict[str, str] = {
     "ngaaha": "no",
     "apana": "no",
     "pe": "no",
-    "ku": "no",
 }
 
 _FILLER = {
@@ -293,7 +292,7 @@ _AFFIRMATIVE = {
 _NEGATIVE = {
     "no", "n", "nope", "nah", "not", "false", "0", "cancel", "stop", "never",
     "negative", "dont", "don't", "skip",
-    "nedda", "hapana", "ngaaha", "apana", "pe", "ku",
+    "nedda", "hapana", "ngaaha", "apana", "pe",
 }
 
 

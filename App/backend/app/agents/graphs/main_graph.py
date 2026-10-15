@@ -776,15 +776,16 @@ def node_reflect(state: AgentGraphState) -> NodeResult:
 
 def _is_reasoning_miss(state: AgentGraphState) -> bool:
     """True when the reply ignores the question's content terms (G21)."""
-    from ...query import english_retrieval_query
+    from ... import mt
+    from ...receptionist.lexicon import normalize_codeswitched_query
     from ...text_signals import content_tokens
 
-    raw_q = state.rewritten_query or state.query
-    q_for_tokens = (
-        english_retrieval_query(raw_q, state.locale)
-        if state.locale not in ("", "en")
-        else raw_q
-    )
+    raw_q = (state.rewritten_query or state.query or "").strip()
+    q_for_tokens = raw_q
+    loc = "nyn" if (state.locale or "").strip().lower() == "nyk" else (state.locale or "").strip().lower()
+    if loc not in ("", "en") and raw_q:
+        cached = mt.cache.get(loc, "en", raw_q)
+        q_for_tokens = cached if cached else normalize_codeswitched_query(raw_q, language=loc)
     asked = content_tokens(q_for_tokens or raw_q)
     answered = content_tokens(state.reply)
     if not asked or not answered:

@@ -234,6 +234,8 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
 
     lg_count = sum(1 for records in records_by_source.values() for r in records if "answer_lg" in r)
     sw_count = sum(1 for records in records_by_source.values() for r in records if "answer_sw" in r)
+    nyn_count = sum(1 for records in records_by_source.values() for r in records if "answer_nyn" in r)
+    ach_count = sum(1 for records in records_by_source.values() for r in records if "answer_ach" in r)
 
     manifest: dict[str, Any] = {
         "schema_version": FAQ_JSONL_SCHEMA_VERSION,
@@ -245,8 +247,13 @@ def export_faq_csvs_to_jsonl(csv_dir: Path, jsonl_dir: Path) -> dict[str, int]:
         "sources": manifest_sources,
         "duplicates": duplicate_audit,
     }
-    if lg_count or sw_count:
-        manifest["multilingual_records"] = {"lg": lg_count, "sw": sw_count}
+    if lg_count or sw_count or nyn_count or ach_count:
+        manifest["multilingual_records"] = {
+            "lg": lg_count,
+            "sw": sw_count,
+            "nyn": nyn_count,
+            "ach": ach_count,
+        }
     manifest_path = jsonl_dir / FAQ_MANIFEST_NAME
     temporary_manifest = manifest_path.with_suffix(".json.tmp")
     with temporary_manifest.open("w", encoding="utf-8", newline="\n") as handle:

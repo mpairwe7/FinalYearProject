@@ -68,7 +68,7 @@ class IdentifyLanguageTests(unittest.TestCase):
         fake = FakeWhisper({self.ids["en"]: 1.0, self.ids["sw"]: 0.0, self.ids["lg"]: 3.0})
         res = model_with(fake).identify_language(ONE_SECOND)
         self.assertIsNone(res.error)
-        self.assertEqual(set(res.probs), {"en", "sw", "lg"})
+        self.assertEqual(set(res.probs), set(self.ids))
         self.assertEqual(res.top, "lg")
         self.assertAlmostEqual(sum(res.probs.values()), 1.0, places=3)
         self.assertGreater(res.probs["lg"], 0.8)

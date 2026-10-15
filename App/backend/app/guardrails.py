@@ -914,8 +914,8 @@ class OutputGuard:
         text = "\n".join(formatted_lines)
 
         # Bold affirmative/negative opening statutory verdicts in EN, LG, SW, NYN, ACH
-        text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe|Ku)[,\.][ \t]*", r"**\1**: ", text)
-        text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe|Ku)[,\.][ \t]*", r"\1**\2**: ", text)
+        text = re.sub(r"^(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe)[,\.][ \t]*", r"**\1**: ", text)
+        text = re.sub(r"(\n\n)(Yes|No|Yee|Nedda|Ndiyo|Hapana|Ego|Eego|Ngaaha|Eyo|Eeyo|Pe)[,\.][ \t]*", r"\1**\2**: ", text)
 
         # For substantive unstructured replies (>= 35 words), ensure key statutory anchors or headings are bolded
         if len(text.split()) >= 35 and not ("**" in text or re.search(r"\d+\.\s|\n-\s", text)):

@@ -1918,6 +1918,43 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss():
     )
     assert _is_reasoning_miss(state_ach) is False
 
+    # 3. Bare "dul 3" (Acholi for "group 3") is not treated as a percentage, while "dul 18 i kom miya" is
+    from app.entailment import percentages
+
+    assert "3" not in percentages("Dul 3 tye ki lutic 10")
+    assert "18" in percentages("Mucoro me VAT obedo dul 18 i kom miya")
+
+    # 4. Established conversation locale is preserved in _resolve_conversational_locale
+    from app.conversational import _resolve_conversational_locale
+
+    assert _resolve_conversational_locale("Ahabw'enki nitushashura omusolo?", locale="nyn") == "nyn"
+
+    # 5. Multi-intent Luganda query decomposition in HybridRetriever.search_planned
+    from unittest.mock import patch
+    from app.retriever import HybridRetriever
+
+    ret = HybridRetriever.__new__(HybridRetriever)
+    searched_calls: list[tuple[str, str | None]] = []
+
+    def _fake_search(q, top_k=4, prefetch_limit=20, filters=None, *, subject=None, locale=None):
+        searched_calls.append((q, locale))
+        return [{"id": f"id-{len(searched_calls)}", "text": f"Passage for {q}", "score_rrf": 0.9}]
+
+    ret.search = _fake_search  # type: ignore[method-assign]
+    with (
+        patch("app.flags.flags.is_enabled", side_effect=lambda name, **kw: name in ("translate_retrieve", "query_decomposition")),
+        patch("app.query.english_retrieval_query", return_value="How do I register for a TIN and what is the VAT rate in Uganda?"),
+    ):
+        planned_hits = ret.search_planned(
+            "Nsobola ntya okwewandiisa ku TIN era omusolo gwa VAT guli mmeka?",
+            top_k=4,
+            locale="lg",
+        )
+    assert len(searched_calls) >= 2
+    assert all(loc == "lg" for _, loc in searched_calls)
+    assert len(planned_hits) >= 2
+
+
 
 
 

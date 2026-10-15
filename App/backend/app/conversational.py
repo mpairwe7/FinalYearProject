@@ -285,7 +285,7 @@ _BUSINESS_EMPATHY_RESPONSES = {
         "Man aye lok maber ma konyo lutim biacara i Uganda:\n\n"
         "1. **Pe Kiculi Mucoro Ma Peya Inongo Magoba**: Mucoro me lim ma odonyo kiculo i kom magoba keken, pe i kom lim me cako biacara.\n"
         "2. **Kony pi Biacara Matidi (Presumptive Tax)**: Ka lim ma odonyo i mwaka tye i te cilingi milioni 10, pe iculo mucoro me biacara. I kin milioni 10 naka 50, iculo mucoro matidi ma pe mito buk me kwano lim madongo.\n"
-        "3. **Rwom me VAT**: Pe kيديyi me coyo nying pi VAT kono lim me cato jami me mwaka oo **cilingi milioni 150**.\n"
+        "3. **Rwom me VAT**: Pe kicoyo nying pi VAT kono lim me cato jami me mwaka oo **cilingi milioni 150**.\n"
         "4. **Pwony me Nono pa URA**: URA miyo pwony ki tela me nono bot lutim biacara.\n\n"
         "Biacara ango ma itye ka timo onyo imito cako? Atwero tito boti rwom ki rwom."
     ),
@@ -456,6 +456,16 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
     """Resolve the active locale for a conversational turn, honouring both text evidence and thread locale."""
     norm_loc = "nyn" if (locale or "").strip().lower() == "nyk" else (locale or "en").strip().lower()
+    if norm_loc in ("lg", "sw", "nyn", "ach"):
+        try:
+            from .language_state import resolve_turn_locale
+
+            decision = resolve_turn_locale(text, history=[{"locale": norm_loc}])
+            if decision.locale in ("en", "lg", "sw", "nyn", "ach"):
+                return decision.locale
+        except Exception:
+            pass
+        return norm_loc
     for cand_loc, pat in _CONVERSATIONAL_LOCALE_PATTERNS:
         if pat.search(text):
             return cand_loc

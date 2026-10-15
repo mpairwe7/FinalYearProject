@@ -77,9 +77,9 @@ class LanguageDetector:
         }
         nyn_score = len(words & nyn_words)
         ach_score = len(words & ach_words)
-        if nyn_score >= 2 or (nyn_score >= 1 and len(words) <= 4):
+        if nyn_score >= 2:
             return LanguageResult(lang="nyn", confidence=0.8, backend="heuristic")
-        if ach_score >= 2 or (ach_score >= 1 and len(words) <= 4):
+        if ach_score >= 2:
             return LanguageResult(lang="ach", confidence=0.8, backend="heuristic")
 
         if self._detector is not None and nyn_score == 0 and ach_score == 0:

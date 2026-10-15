@@ -256,7 +256,7 @@ class ProductionHardeningTests(unittest.TestCase):
             "VOICE_RECEPTIONIST_SINGLE_REPLICA_ACK": "true",
             # Every call runs on the local engine: the Orpheus voice for all languages.
             "ORPHEUS_TTS_URL": "http://orpheus-tts:8100",
-            "ORPHEUS_TTS_LANGUAGES": "lg,sw,en",
+            "ORPHEUS_TTS_LANGUAGES": "lg,sw,en,nyn,ach",
         }
         with patch.dict(os.environ, env, clear=True):
             _validate_production_env()

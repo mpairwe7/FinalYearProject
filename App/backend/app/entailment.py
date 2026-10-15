@@ -29,9 +29,9 @@ _CONTRADICTION_PROB_MIN = float(os.getenv("ENTAILMENT_CONTRADICTION_MIN", "0.6")
 # or Acholi ("dul 18 i kom miya").
 _PCT_RE = re.compile(
     r"(?:"
-    r"\b(?:asilimia|ebitundu|[eo]?b[iu]cweka|ekicweka|dula?|kigero\s+kya)\s*(\d+(?:\.\d+)?)\b"
+    r"\b(?:asilimia|ebitundu|[eo]?b[iu]cweka|ekicweka|kigero\s{1,4}kya)\s{0,4}(\d{1,6}(?:\.\d{1,4})?)\b"
     r"|"
-    r"(\d+(?:\.\d+)?)\s*(?:%|per\s?cent(?:age)?|\b(?:kwa\s+mia|ku\s+buli\s+kikumi|aha\s+(?:buli\s+)?kikumi|i\s+kom\s+m?iya|ekomya|ku\s+100)\b)"
+    r"\b(?:dula?\s{1,4})?(\d{1,6}(?:\.\d{1,4})?)\s{0,4}(?:%|per\s?cent(?:age)?|\b(?:kwa\s{1,4}mia|ku\s{1,4}buli\s{1,4}kikumi|aha\s{1,4}(?:buli\s{1,4})?kikumi|i\s{1,4}kom\s{1,4}m?iya|ekomya|ku\s{1,4}100)\b)"
     r")",
     re.IGNORECASE,
 )
@@ -204,8 +204,9 @@ _AMOUNT_SUFFIX = {
 # Multipliers placed BEFORE digits (common in Swahili, Luganda, Runyankole, & Acholi, e.g. "milioni 150", "obukadde 150", "obukaikuru 150")
 _AMOUNT_PREFIX_RE = re.compile(
     r"\b(milioni|bilioni|elfu|laki|o?bukadde|a?kakadde|o?bukaikuru|a?kakaikuru|o?buwumbi|a?kawumbi|e?mitwalo|o?mutwalo|e?mitwaro|o?mutwaro|e?nkumi|o?lukumi|o?rukumi)"
-    r"(?:\s+(?:bwa|kwa|za|ya|nga|me)?\s*(?:ssente|sente|esente|cente|siringi|shilingi|shiringi|cilingi|shs|ugx)?)?\s+"
-    r"(\d{1,3}(?:[,\s]\d{3})+|\d+(?:\.\d+)?)\b",
+    r"(?:\s{1,4}(?:bwa|kwa|za|ya|nga|me))?"
+    r"(?:\s{1,4}(?:ssente|sente|esente|cente|siringi|shilingi|shiringi|cilingi|shs|ugx))?"
+    r"\s{1,4}(\d{1,3}(?:[,\s]\d{3}){1,6}|\d{1,15}(?:\.\d{1,4})?)\b",
     re.IGNORECASE,
 )
 _AMOUNT_PREFIX_MULTIPLIERS = {

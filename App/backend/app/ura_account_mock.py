@@ -168,7 +168,7 @@ def format_prn_voucher_reply(voucher: dict[str, Any], locale: str = "en") -> str
             f"- **Ekika ky'Omushoro**: {tax}\n"
             f"- **Omushasuzi**: {name} (`TIN: {tin}`)\n"
             f"- **Enamba y'Okusherura**: `{code}`\n"
-            f"- ** ebiro by'Okukora**: {exp} (ebiro 21)\n\n"
+            f"- **Ebiro by'Okukora**: {exp} (ebiro 21)\n\n"
             f"**Omuringo gw'Okushashura**:\n"
             f"1. **Mobile Money**: Teera `*165#` (MTN) nari `*185#` (Airtel) → Shashura URA → Taamu PRN `{prn}`.\n"
             f"2. **Banka Yoona**: Twara enamba ya PRN aha banka yoona omuri Uganda.\n"

@@ -87,7 +87,7 @@ _POSITIVE = _words(
     r"helped", r"thank(?:s|\s+you)", r"appreciate(?:d)?", r"satisfied", r"happy", r"clear", r"amazing",
     r"kiyambye", r"kinnyambye", r"nnyambye", r"kirungi", r"bulungi", r"nnyo", r"w?ee?bale", r"nsanyuse",
     r"imesaidia", r"imenisaidia", r"umenisaidia", r"nzuri", r"vizuri", r"asante", r"nimeridhika", r"safi",
-    r"kyahwera", r"kyanyhwera", r"kirungi", r"gye", r"webare", r"munonga", r"nshemeireire",
+    r"kyahwera", r"kyanyhwera", r"gye", r"webare", r"munonga", r"nshemeireire",
     r"okonyo", r"okonya", r"maber", r"apwoyo", r"matek", r"yoma",
 )
 #: "Okay" alone is lukewarm; with a yes or a thanks it is not counted here.

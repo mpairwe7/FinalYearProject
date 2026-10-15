@@ -326,12 +326,12 @@ class LanguagePolicy:
             if vern in cfg.languages and vote.text and not (top == vern and confidence >= cfg.switch_confidence):
                 p_vern = vote.probs.get(vern, 0.0)
                 non_en = sum(vote.probs.get(k, 0.0) for k in ("lg", "sw", "nyn", "ach"))
-                in_vern_call = self.locked and self.active == vern
+                in_lg_call = self.locked and self.active == "lg" and vern == "lg"
                 other_max = max((hits.get(k, 0) for k in ("lg", "sw", "nyn", "ach") if k != vern), default=0)
                 if (
                     hits.get(vern, 0) >= cfg.lg_mix_min_words
                     and hits.get(vern, 0) > other_max
-                    and (in_vern_call or p_vern >= cfg.lg_mix_threshold or non_en >= 0.5)
+                    and (in_lg_call or p_vern >= cfg.lg_mix_threshold or non_en >= 0.5)
                 ):
                     top, confidence = vern, max(p_vern, cfg.switch_confidence)
                     break

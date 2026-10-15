@@ -659,7 +659,7 @@ _CRISIS_RE = re.compile(
     r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
     r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
     r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
-    r"|okwetta|kujiua|okweyita|kweyita|neke|neko\s+koma)\b"
+    r"|okwetta|kujiua|okweyita|kweyita|neko\s+koma)\b"
 )
 
 #: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency

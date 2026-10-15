@@ -51,10 +51,10 @@ _INCOMPLETE_DIGIT_TAIL_RE: Final[re.Pattern[str]] = re.compile(
 
 _TRAILING_CONJUNCTION_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(?:and|or|but|because|if|when|about|for|with|to|"
-    r"era|naye|oba|kubanga|ku|mu|wa|"
+    r"era|naye|oba|kubanga|"
     r"na|au|lakini|kwa|kuhusu|"
-    r"kandi|nari|kwonka|ahabw'okuba|aha|omu|ahari|"
-    r"dok|onyo|ento|pien|ki|kede|i)$",
+    r"kandi|nari|kwonka|ahabw'okuba|ahari|"
+    r"dok|onyo|ento|pien|kede)$",
     re.IGNORECASE,
 )
 
