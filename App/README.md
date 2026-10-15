@@ -1004,7 +1004,7 @@ The frontend is containerised and deployed via Docker Hub (see `App/frontend/Doc
 | `LLM_MAX_TOKENS` | Max new tokens; compose uses `512` for complete procedural answers | `512` |
 | `LLM_DEADLINE_SECONDS` | Hard wall-clock deadline per LLM call | `45` |
 | `LLM_TOTAL_BUDGET_SECONDS` | Hard wall-clock cap on the *whole* local→Gemini→Workers AI chain for one request (checked before each hop, not mid-call) — keeps one degraded request from tying up a worker for the sum of every hop's own timeout | `70` |
-| `LLM_MAX_CONCURRENCY` | Bounded LLM thread-pool size | `2` |
+| `LLM_MAX_CONCURRENCY` | Bounded LLM thread-pool size (8–16 recommended for vLLM) | `12` |
 | `LLM_STRUCTURED_OUTPUT` | Emit JSON `{answer, citations, abstain}` | `false` |
 | **Self-Reflection (Self-RAG)** | | |
 | `SELF_REFLECT_ENABLED` | Regenerate once when faithfulness is weak | `false` |

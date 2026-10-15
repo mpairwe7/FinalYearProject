@@ -947,6 +947,10 @@ def strip_thought(text: str) -> str:
         return ""
     # Strip <think>...</think>, <thought>...</thought>, etc., including unclosed tags
     cleaned = _THOUGHT_BLOCK_RE.sub("", text)
+    # If the chat template pre-seeded <think> in the prompt so the output contains only a closing </think> tag
+    m_close = _THOUGHT_TAG_CLOSE_RE.search(cleaned)
+    if m_close:
+        cleaned = cleaned[m_close.end() :]
     cleaned = _THOUGHT_FENCE_RE.sub("", cleaned)
     return cleaned.strip()
 
@@ -1389,6 +1393,7 @@ def _vllm_chat_completion(
             "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         if tools:
             payload["tools"] = tools
