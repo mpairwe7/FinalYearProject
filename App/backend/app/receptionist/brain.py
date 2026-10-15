@@ -365,8 +365,14 @@ class UraReceptionistBrain(LLMService):
         return self.room.state.locale or "en"
 
     def _pick_filler(self) -> str:
-        """A filler in the call's language, never the one just used."""
-        chosen = pick_filler(self.language, self._last_filler)
+        """A filler in the call's language (affect-attuned when prosody/EQ is active), never the one just used."""
+        affect = "calm"
+        uid_subject = getattr(self.room.state, "user_id", "") or None
+        if flags.is_enabled("emotion_aware_prosody", subject=uid_subject) or flags.is_enabled(
+            "eq_multimodal_fusion", subject=uid_subject
+        ):
+            affect = str(getattr(self.room.state, "caller_affect", "calm") or "calm")
+        chosen = pick_filler(self.language, self._last_filler, affect=affect)
         self._last_filler = chosen
         return chosen
 

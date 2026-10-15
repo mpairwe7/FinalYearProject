@@ -210,3 +210,109 @@ def verify_call_resume_ticket(
             del _CONSUMED_RESUME_NONCES[oldest_nonce]
         _CONSUMED_RESUME_NONCES[nonce] = exp_ts
     return payload
+
+
+def apply_network_telemetry_to_room(
+    room: object,
+    telemetry: dict[str, object] | None,
+) -> dict[str, object]:
+    """Apply client network telemetry to *room.state* and mint a drop-resume ticket when eligible."""
+    state = getattr(room, "state", None)
+    if state is None:
+        return {"type": "bandwidth_adaptation", "enabled": False, "codec": "pcm16_16k", "caption_only": False}
+    uid = str(getattr(state, "user_id", "") or "")
+    tid = str(getattr(state, "tenant_id", "default") or "default")
+    call_id = str(getattr(room, "call_id", "") or getattr(state, "call_id", "") or "")
+    conv_id = str(getattr(state, "conversation_id", "") or call_id)
+
+    prof = negotiate_low_bandwidth_mode(telemetry, subject=uid)
+    state.low_bandwidth_mode = prof.enabled
+    state.audio_codec = prof.codec
+    state.caption_only_degraded = prof.caption_only
+
+    resume_ticket = ""
+    if prof.enabled and call_id:
+        resume_ticket = mint_call_resume_ticket(
+            call_id,
+            conv_id,
+            user_id=uid,
+            tenant_id=tid,
+        )
+        if resume_ticket:
+            state.resume_ticket_nonce = resume_ticket.split(".", 1)[0][-16:]
+            checkpoint_call_drop_state(room)
+
+    return {
+        "type": "bandwidth_adaptation",
+        "enabled": prof.enabled,
+        "codec": prof.codec,
+        "sample_rate": prof.sample_rate,
+        "caption_only": prof.caption_only,
+        "bitrate_kbps": prof.bitrate_kbps,
+        "resume_ticket": resume_ticket,
+    }
+
+
+def checkpoint_call_drop_state(room: object) -> bool:
+    """Persist essential CallState fields in shared working memory for cross-replica drop recovery."""
+    state = getattr(room, "state", None)
+    if state is None:
+        return False
+    call_id = str(getattr(room, "call_id", "") or getattr(state, "call_id", "") or "")
+    if not call_id:
+        return False
+    uid = str(getattr(state, "user_id", "") or "")
+    tid = str(getattr(state, "tenant_id", "default") or "default")
+    if not flags.is_enabled("call_drop_resume", subject=uid or None):
+        return False
+    try:
+        from .. import database as db
+
+        snapshot = {
+            "call_id": call_id,
+            "conversation_id": str(getattr(state, "conversation_id", "") or ""),
+            "user_id": uid,
+            "tenant_id": tid,
+            "locale": str(getattr(state, "locale", "en") or "en"),
+            "ticket_id": getattr(state, "ticket_id", None),
+            "topic": str(getattr(state, "topic", "") or ""),
+            "caller_affect": str(getattr(state, "caller_affect", "calm") or "calm"),
+            "smoothed_affect_score": float(getattr(state, "smoothed_affect_score", 0.0) or 0.0),
+            "affect_trajectory": list(getattr(state, "affect_trajectory", []) or []),
+            "low_bandwidth_mode": bool(getattr(state, "low_bandwidth_mode", False)),
+            "audio_codec": str(getattr(state, "audio_codec", "pcm16_16k") or "pcm16_16k"),
+            "caption_only_degraded": bool(getattr(state, "caption_only_degraded", False)),
+            "updated_at": time.time(),
+        }
+        return bool(
+            db.upsert_working_memory(
+                f"call_drop:{call_id}",
+                tid,
+                {"call_drop_snapshot": snapshot},
+                ttl_seconds=get_caller_reconnect_grace_s(),
+            )
+        )
+    except Exception:
+        logger.debug("checkpoint_call_drop_state skipped", exc_info=True)
+        return False
+
+
+def restore_call_drop_state(
+    call_id: str,
+    *,
+    tenant_id: str = "default",
+) -> dict[str, object] | None:
+    """Restore a checkpointed CallState snapshot after verifying a call_resume_ticket."""
+    if not call_id:
+        return None
+    try:
+        from .. import database as db
+
+        working = db.get_working_memory(f"call_drop:{call_id}", tenant_id=tenant_id or "default")
+        if not isinstance(working, dict):
+            return None
+        snap = working.get("call_drop_snapshot")
+        return dict(snap) if isinstance(snap, dict) else None
+    except Exception:
+        logger.debug("restore_call_drop_state skipped", exc_info=True)
+        return None

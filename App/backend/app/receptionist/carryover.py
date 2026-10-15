@@ -65,16 +65,46 @@ def chat_carryover(
     except Exception:
         logger.debug("carryover: chat history unavailable", exc_info=True)
         return None
+
     if not turns:
-        return None
+        try:
+            other_owner = db.query_one(
+                "SELECT 1 AS found FROM conversations WHERE tenant_id = ? AND conversation_id = ? LIMIT 1",
+                (tenant_id or "default", parent),
+            )
+            if other_owner:
+                return None
+        except Exception:
+            return None
 
     from ..context_manager import english_view, normalize_history_turns, summarize_older_turns
+    from ..flags import flags
 
-    english = english_view(normalize_history_turns(turns))
-    parts = [summarize_older_turns(english)]
+    parts: list[str] = []
+    if turns:
+        english = english_view(normalize_history_turns(turns))
+        parts.append(summarize_older_turns(english))
     topic = _chat_topic(parent, session=session, user_id=user_id, tenant_id=tenant_id)
     if topic:
         parts.append(f"Current task: {topic['label']}.")
+
+    if user_id and flags.is_enabled("continuous_relationship_memory", subject=user_id):
+        try:
+            from ..memory import get_memory_service
+
+            memsvc = get_memory_service()
+            active_case = memsvc.get_active_resolution_case(user_id, tenant_id=tenant_id or "default")
+            if active_case and active_case.primary_objective:
+                parts.append(f"Active resolution case: {active_case.primary_objective} ({active_case.status}).")
+            slot_bank = memsvc.resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id or "default")
+            if slot_bank:
+                slot_keys = ", ".join(sorted(str(k) for k in slot_bank.keys())[:5])
+                parts.append(f"Verified slots available: {slot_keys}.")
+        except Exception:
+            logger.debug("carryover: resolution ledger enrichment skipped", exc_info=True)
+
+    if not turns and not parts:
+        return None
     context = " ".join(p for p in parts if p).strip()[:MAX_CONTEXT_CHARS]
     return ChatCarryover(
         conversation_id=parent,

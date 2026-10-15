@@ -224,6 +224,28 @@ def close_transfer_on_timeout(room: Any, ticket_ref: str) -> dict[str, Any] | No
         needs_callback=True,
         callback_reason="no_officer_available",
     )
+    try:
+        from .. import database as db
+        from ..flags import flags
+        from .carryover import checkpoint_call_resolution
+
+        ref = case_reference(ticket_ref) if ticket_ref else f"CALL-{room.call_id[:8].upper()}"
+        checkpoint_call_resolution(
+            room,
+            objective=getattr(state, "topic", "") or "Voice transfer callback",
+            status="awaiting_user_action",
+            pending_steps=[f"Officer callback owed ({ref})"],
+        )
+        uid = str(getattr(state, "user_id", "") or "")
+        if uid and flags.is_enabled("proactive_resolution_continuation", subject=uid):
+            db.upsert_reminder_inbox(
+                user_id=uid,
+                deadline_name=f"Callback Scheduled: {ref}",
+                due_date=time.strftime("%Y-%m-%d", time.gmtime(time.time() + 86400)),
+                message=f"All officers were busy during call {ref}. An officer callback or web continuation is queued.",
+            )
+    except Exception:
+        logger.debug("close_transfer_on_timeout continuation hook skipped", exc_info=True)
     hub.publish_lobby("call.transfer_timed_out", {"call_id": room.call_id, "ticket_ref": ticket_ref})
     status_event = {"type": "status", "status": "ai", "ticket_ref": ticket_ref}
     hub.publish_call(room.call_id, "status", status_event)
