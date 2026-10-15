@@ -45,6 +45,12 @@ _schema_ready = False
 _MAX_PENDING_DRAFTS = 256
 _pending_copilot_drafts: OrderedDict[str, str] = OrderedDict()
 _draft_lock = threading.Lock()
+_ALLOWED_LOCALES = frozenset({"en", "lg", "sw", "nyn", "ach"})
+
+
+def _bounded_locale(locale: str) -> str:
+    clean = (locale or "en").strip().lower()
+    return clean if clean in _ALLOWED_LOCALES else "other"
 
 
 def _store_pending_draft(ticket_id: str, draft_en: str) -> None:
@@ -138,6 +144,7 @@ def append_message(
     text_localized: str = "",
     officer_id: str = "",
     officer_name: str = "",
+    is_delegation: bool = False,
 ) -> dict[str, Any]:
     """Add one message to the ticket's thread and return it (with its ``seq``)."""
     if sender not in SENDERS:
@@ -169,7 +176,7 @@ def append_message(
                     row["officer_id"], row["officer_name"], row["created_at"], row["tenant_id"],
                 ),
             )
-            if sender == "officer":
+            if sender == "officer" and not is_delegation:
                 draft_prev = _pop_pending_draft(ticket_id)
                 if draft_prev:
                     with contextlib.suppress(Exception):
@@ -493,6 +500,7 @@ def delegate_ticket_to_ai(
         transition_note,
         officer_id=officer_id,
         officer_name=officer_name,
+        is_delegation=True,
     )
     try:
         from .analytics import metrics
@@ -534,27 +542,29 @@ def capture_officer_preference_pair(
 
     similarity = SequenceMatcher(None, rejected, chosen).ratio()
     edit_ratio = round(max(0.0, min(1.0, 1.0 - similarity)), 3)
-    locale = str(ticket.get("locale") or "en").strip().lower() or "en"
+    raw_locale = str(ticket.get("locale") or "en").strip().lower() or "en"
+    metric_locale = _bounded_locale(raw_locale)
     with contextlib.suppress(Exception):
         from .analytics import metrics
 
         metrics.observe(
             "officer_copilot_edit_distance_ratio",
             edit_ratio,
-            labels={"locale": locale},
+            labels={"locale": metric_locale},
         )
 
     if rejected == chosen:
         return None
 
     handoff = ticket.get("handoff") if isinstance(ticket.get("handoff"), dict) else {}
-    topic = str((handoff or {}).get("topic") or ticket.get("reason") or "general")[:120]
+    raw_topic = str((handoff or {}).get("topic") or ticket.get("reason") or "general")
+    topic = _redact(raw_topic, limit=120) or "general"
     prompt_ctx = _redact(str(ticket.get("user_query") or (handoff or {}).get("summary") or topic))
     row = {
         "id": f"pref-{uuid.uuid4().hex[:12]}",
         "ticket_id": str(ticket.get("id") or ""),
         "tenant_id": str(ticket.get("tenant_id") or "default"),
-        "locale": locale,
+        "locale": metric_locale,
         "topic": topic,
         "prompt_context": prompt_ctx,
         "chosen_reply": chosen,
@@ -584,13 +594,27 @@ def capture_officer_preference_pair(
     return row
 
 
-def list_officer_preference_pairs(limit: int = 100, tenant_id: str = "default") -> list[dict[str, Any]]:
+def list_officer_preference_pairs(
+    limit: int = 100,
+    tenant_id: str | None = "default",
+    *,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     """Return captured PII-redacted officer preference pairs for offline DPO/ORPO alignment."""
     _ensure()
+    bounded_limit = max(1, min(int(limit), 1000))
+    bounded_offset = max(0, int(offset))
+    if tenant_id is None:
+        return db.query_all(
+            "SELECT id, ticket_id, tenant_id, locale, topic, prompt_context, chosen_reply, rejected_draft, "
+            "edit_ratio, created_at FROM officer_preference_pairs ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+            (bounded_limit, bounded_offset),
+        )
     return db.query_all(
         "SELECT id, ticket_id, tenant_id, locale, topic, prompt_context, chosen_reply, rejected_draft, "
-        "edit_ratio, created_at FROM officer_preference_pairs WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
-        (tenant_id or "default", max(1, min(int(limit), 1000))),
+        "edit_ratio, created_at FROM officer_preference_pairs WHERE tenant_id = ? "
+        "ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+        (tenant_id or "default", bounded_limit, bounded_offset),
     )
 
 
@@ -602,6 +626,9 @@ def delete_for_tickets(ticket_ids: list[str]) -> int:
     if not ticket_ids:
         return 0
     _ensure()
+    with _draft_lock:
+        for tid in ticket_ids:
+            _pending_copilot_drafts.pop(str(tid), None)
     ph = ",".join("?" * len(ticket_ids))
     n = db.execute(f"DELETE FROM ticket_messages WHERE ticket_id IN ({ph})", tuple(ticket_ids))  # noqa: S608  # nosec B608
     db.execute(f"DELETE FROM ticket_chats WHERE ticket_id IN ({ph})", tuple(ticket_ids))  # noqa: S608  # nosec B608

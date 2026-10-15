@@ -10,12 +10,33 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_ALLOWED_CHANNELS = frozenset({"web", "voice_call", "voice_ws", "offline_pwa", "rest", "sse", "other"})
+_CUSTOMS_DOMAIN_RE = re.compile(
+    r"\b(?:customs|duty|duties|import|imports|imported|importing|cif|tariff|asycuda|transit|forodha)\b",
+    re.IGNORECASE,
+)
+_EFRIS_DOMAIN_RE = re.compile(r"\b(?:efris|fdn|fiscal|invoice|invoices)\b", re.IGNORECASE)
+_OBJECTION_DOMAIN_RE = re.compile(
+    r"\b(?:objection|objections|dispute|disputes|appeal|appeals|tat|remission|waiver)\b",
+    re.IGNORECASE,
+)
+_TIN_DOMAIN_RE = re.compile(r"\b(?:tin|register|registration)\b", re.IGNORECASE)
+_VAT_DOMAIN_RE = re.compile(r"\b(?:vat|value\s+added)\b", re.IGNORECASE)
+_PAYE_DOMAIN_RE = re.compile(r"\b(?:paye|salary|employment)\b", re.IGNORECASE)
+_PAYMENT_DOMAIN_RE = re.compile(r"\b(?:prn|payment|pay)\b", re.IGNORECASE)
+
+
+def _bounded_channel(channel: str) -> str:
+    clean = (channel or "").strip().lower()
+    return clean if clean in _ALLOWED_CHANNELS else "other"
 
 
 def get_resolution_case_ttl_seconds() -> int:
@@ -36,21 +57,21 @@ def get_max_concurrent_cases() -> int:
 
 
 def infer_domain_tag(text: str) -> str:
-    """Infer a coarse tax domain tag from an objective or query string."""
-    lower = (text or "").lower()
-    if any(w in lower for w in ("customs", "duty", "import", "cif", "tariff", "ASYCUDA".lower(), "transit", "forodha")):
+    """Infer a coarse tax domain tag from an objective or query string using whole-word matching."""
+    raw = text or ""
+    if _CUSTOMS_DOMAIN_RE.search(raw):
         return "customs"
-    if any(w in lower for w in ("efris", "fdn", "fiscal", "invoice")):
+    if _EFRIS_DOMAIN_RE.search(raw):
         return "efris"
-    if any(w in lower for w in ("objection", "dispute", "appeal", "tat", "remission", "waiver")):
+    if _OBJECTION_DOMAIN_RE.search(raw):
         return "objection"
-    if any(w in lower for w in ("tin", "register", "registration")):
+    if _TIN_DOMAIN_RE.search(raw):
         return "tin_registration"
-    if any(w in lower for w in ("vat", "value added")):
+    if _VAT_DOMAIN_RE.search(raw):
         return "vat"
-    if any(w in lower for w in ("paye", "salary", "employment")):
+    if _PAYE_DOMAIN_RE.search(raw):
         return "paye"
-    if any(w in lower for w in ("prn", "payment", "pay")):
+    if _PAYMENT_DOMAIN_RE.search(raw):
         return "payment"
     return "general"
 
@@ -165,31 +186,44 @@ class ResolutionLedger:
                 case.domain_tag = infer_domain_tag(case.primary_objective)
             case_dict = case.to_dict()
 
-            existing = db.get_working_memory(user_id, tenant_id=tenant) or {}
-            cases_map = dict(existing.get("active_resolution_cases") or {})
-            cases_map[case.case_id] = case_dict
-            # Prune resolved/expired or oldest beyond cap
             max_cases = get_max_concurrent_cases()
-            active_items = [
-                (cid, cdata)
-                for cid, cdata in cases_map.items()
-                if isinstance(cdata, dict)
-                and float(cdata.get("expires_at") or (now + ttl)) > now
-                and str(cdata.get("status") or "") != "resolved"
-            ]
-            active_items.sort(key=lambda item: float(item[1].get("updated_at") or 0.0), reverse=True)
-            bounded_map = dict(active_items[:max_cases])
+            for _attempt in range(3):
+                existing = db.get_working_memory(user_id, tenant_id=tenant) or {}
+                cases_map = dict(existing.get("active_resolution_cases") or {})
+                raw_legacy = existing.get("active_resolution_case")
+                if isinstance(raw_legacy, dict) and raw_legacy.get("case_id"):
+                    legacy_cid = str(raw_legacy["case_id"])
+                    if legacy_cid not in cases_map:
+                        cases_map[legacy_cid] = raw_legacy
+                cases_map[case.case_id] = case_dict
+                active_items = [
+                    (cid, cdata)
+                    for cid, cdata in cases_map.items()
+                    if isinstance(cdata, dict)
+                    and float(cdata.get("expires_at") or (now + ttl)) > now
+                    and str(cdata.get("status") or "") != "resolved"
+                ]
+                active_items.sort(key=lambda item: float(item[1].get("updated_at") or 0.0), reverse=True)
+                bounded_map = dict(active_items[:max_cases])
+                primary_legacy = active_items[0][1] if active_items else case_dict
 
-            return db.upsert_working_memory(
-                user_id,
-                tenant,
-                {
-                    "active_resolution_case": case_dict,
-                    "active_resolution_cases": bounded_map,
-                    "last_topic": case.primary_objective or "general",
-                },
-                ttl_seconds=ttl,
-            )
+                ok = db.upsert_working_memory(
+                    user_id,
+                    tenant,
+                    {
+                        "active_resolution_case": primary_legacy,
+                        "active_resolution_cases": bounded_map,
+                        "last_topic": str(primary_legacy.get("primary_objective") or case.primary_objective or "general"),
+                    },
+                    ttl_seconds=ttl,
+                )
+                if not ok:
+                    return False
+                verify = db.get_working_memory(user_id, tenant_id=tenant) or {}
+                verify_map = verify.get("active_resolution_cases") or {}
+                if case.status == "resolved" or (isinstance(verify_map, dict) and case.case_id in verify_map):
+                    return True
+            return True
         except Exception:
             logger.debug("resolution_ledger: checkpoint failed", exc_info=True)
             return False
@@ -539,12 +573,16 @@ class ResolutionLedger:
         if not cases:
             return None
         target_domain = (domain_tag or infer_domain_tag(query)).strip().lower()
-        selected = cases[0]
+        selected: ResolutionCase | None = None
         if target_domain and target_domain != "general":
             for c in cases:
                 if (c.domain_tag or infer_domain_tag(c.primary_objective)) == target_domain:
                     selected = c
                     break
+            if selected is None:
+                return None
+        else:
+            selected = cases[0]
         if current_channel and selected.source_channel and current_channel != selected.source_channel:
             try:
                 from ..analytics import metrics
@@ -552,8 +590,8 @@ class ResolutionLedger:
                 metrics.inc(
                     "relationship_resumption_total",
                     labels={
-                        "from_channel": selected.source_channel,
-                        "to_channel": current_channel,
+                        "from_channel": _bounded_channel(selected.source_channel),
+                        "to_channel": _bounded_channel(current_channel),
                         "status": "resumed",
                     },
                 )
@@ -569,9 +607,9 @@ class ResolutionLedger:
         conversation_id: str = "",
         tenant_id: str = "default",
     ) -> dict[str, Any]:
-        """Promote anonymous session slots and active workflow state into an authenticated user profile."""
+        """Promote anonymous session slots, resolution cases, and active workflow state into an authenticated profile."""
         if not anonymous_session_id or not user_id or anonymous_session_id == user_id:
-            return {"ok": False, "promoted_slots": 0, "workflow_migrated": False}
+            return {"ok": False, "promoted_slots": 0, "promoted_cases": 0, "workflow_migrated": False}
         try:
             from .. import database as db
 
@@ -580,6 +618,7 @@ class ResolutionLedger:
                 return {
                     "ok": False,
                     "promoted_slots": 0,
+                    "promoted_cases": 0,
                     "workflow_migrated": False,
                     "skipped": "consent_required",
                 }
@@ -593,6 +632,23 @@ class ResolutionLedger:
                 and self.store_verified_slots(user_id, anon_slots, tenant_id=tenant)
             ):
                 promoted_slots = len(anon_slots)
+
+            now = time.time()
+            promoted_cases = 0
+            anon_cases_raw: dict[str, dict[str, Any]] = {}
+            raw_map = anon_working.get("active_resolution_cases")
+            if isinstance(raw_map, dict):
+                for cid, cdata in raw_map.items():
+                    if isinstance(cdata, dict):
+                        anon_cases_raw[str(cdata.get("case_id") or cid)] = cdata
+            raw_single = anon_working.get("active_resolution_case")
+            if isinstance(raw_single, dict) and raw_single.get("primary_objective"):
+                anon_cases_raw.setdefault(str(raw_single.get("case_id") or "anon-case"), raw_single)
+            for cdata in anon_cases_raw.values():
+                c_obj = ResolutionCase.from_dict(cdata)
+                if (not c_obj.expires_at or c_obj.expires_at > now) and c_obj.status != "resolved":
+                    if self.checkpoint(user_id, c_obj, tenant_id=tenant):
+                        promoted_cases += 1
 
             workflow_migrated = False
             if conversation_id:
@@ -628,8 +684,9 @@ class ResolutionLedger:
             return {
                 "ok": True,
                 "promoted_slots": promoted_slots,
+                "promoted_cases": promoted_cases,
                 "workflow_migrated": workflow_migrated,
             }
         except Exception:
             logger.debug("resolution_ledger: promote_anonymous_session failed", exc_info=True)
-            return {"ok": False, "promoted_slots": 0, "workflow_migrated": False}
+            return {"ok": False, "promoted_slots": 0, "promoted_cases": 0, "workflow_migrated": False}

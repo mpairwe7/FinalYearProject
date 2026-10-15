@@ -1102,6 +1102,20 @@ def test_phase35_multi_case_resolution_ledger_anon_promotion_and_officer_prefere
     assert picked_vat.case_id == "res-vat-02"
     assert picked_vat.domain_tag == "vat"
 
+    # Whole-word domain matching: "important" must not match "import" (customs)
+    from app.memory.resolution_ledger import infer_domain_tag
+
+    assert infer_domain_tag("I have an important question about VAT") == "vat"
+    # Non-matching explicit domain returns None rather than an unrelated case
+    assert memsvc.resolution_ledger.select_case_for_turn(uid, domain_tag="paye") is None
+
+    # Resolving case_vat leaves case_customs as the active legacy case
+    case_vat.status = "resolved"
+    assert memsvc.checkpoint_resolution_case(uid, case_vat, asr_confidence=0.95) is True
+    remaining_active = memsvc.get_active_resolution_case(uid)
+    assert remaining_active is not None
+    assert remaining_active.case_id == "res-customs-01"
+
     # 2. Anonymous-to-authenticated session promotion
     anon_sid = "anon-sess-p35"
     tmp_db.upsert_working_memory(

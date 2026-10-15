@@ -313,9 +313,11 @@ class MemoryService:
             if effective_priority == "high"
             else 120
         )
-        effective_slots = dict(verified_slot_bank or {})
-        if not effective_slots and user_id and flags.is_enabled("zero_effort_slot_prefill", subject=user_id):
-            effective_slots = self.resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id)
+        effective_slots: dict[str, Any] = {}
+        if user_id and flags.is_enabled("zero_effort_slot_prefill", subject=user_id):
+            effective_slots.update(self.resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id))
+        if verified_slot_bank:
+            effective_slots.update(verified_slot_bank)
         tin_str = (
             user_id
             if user_id and user_id.isdigit() and len(user_id) == 10

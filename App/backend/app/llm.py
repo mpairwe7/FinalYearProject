@@ -92,14 +92,22 @@ def uses_native_long_context_without_yarn(model_name: str | None = None) -> bool
     )
 
 
+def model_uses_yarn(model_name: str | None = None) -> bool:
+    """True only when *model_name* relies on YaRN RoPE scaling (e.g. legacy Sunflower-14B)."""
+    name = (model_name or LLM_MODEL or "").lower()
+    return "sunflower-14b" in name or "yarn" in name
+
+
 def native_model_context_window(model_name: str | None = None) -> int:
-    """Return the architecture's native max_position_embeddings (262,144 for Sunflower v2 9B without YaRN)."""
+    """Return the model family's native max_position_embeddings without substituting LLM_CONTEXT_WINDOW."""
     if uses_native_long_context_without_yarn(model_name):
         return NATIVE_SUNFLOWER_V2_MAX_POSITION_EMBEDDINGS
     name = (model_name or LLM_MODEL or "").lower()
     if "sunflower-14b" in name:
         return 131_072
-    return max(LLM_CONTEXT_WINDOW, 32_768)
+    if any(t in name for t in ("qwen3-8b", "qwen3-30b", "qwen3-235b")):
+        return 40_960
+    return 32_768
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,

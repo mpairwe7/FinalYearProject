@@ -138,7 +138,7 @@ User Query
 |---------|---------|---------|
 | Model | `Sunbird/Sunflower-Qwen3.5-9B` (vLLM) | `LLM_MODEL` / `LLM_BACKEND` |
 | Backend | `local` (HF transformers) | `LLM_BACKEND` (`local` or `vllm`) |
-| Context window | 262144 tokens (256K / 262K native `max_position_embeddings` without YaRN) | `LLM_CONTEXT_WINDOW` |
+| Context window | 8192 code default (`262144` in `.env.example` — 256K / 262K native `max_position_embeddings` without YaRN) | `LLM_CONTEXT_WINDOW` |
 | Device | `auto` (GPU if available) | `LLM_DEVICE` |
 | Dtype | `auto` | `LLM_TORCH_DTYPE` |
 | Temperature | 0.2 | `LLM_TEMPERATURE` |

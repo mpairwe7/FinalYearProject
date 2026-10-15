@@ -3555,7 +3555,11 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
     suggestion_sep = "\n\nYou might also want to know:"
     if suggestion_sep in text:
         body_part, _, follow_part = text.partition(suggestion_sep)
-        loc_body = localize_reply(body_part.strip(), locale, tone_register=tone_register)
+        loc_body = (
+            localize_reply(body_part.strip(), locale, tone_register=tone_register)
+            if tone_register
+            else localize_reply(body_part.strip(), locale)
+        )
         if loc_body and loc_body != body_part.strip():
             prefix = "\n\nOyinz'okwagala okumanya:" if locale == "lg" else "\n\nUnaweza pia kutaka kujua:"
             loc_follow = _translate_reply(follow_part.strip(), locale) or follow_part.strip()
@@ -3624,8 +3628,8 @@ def localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
                     )
                     logger.info(
                         "protected reply localization to %s failed (%s); retrying unprotected",
-                        safe_locale,
-                        reason,
+                        safe_locale.replace("\r", "").replace("\n", ""),
+                        reason.replace("\r", "").replace("\n", ""),
                     )
         if localized is None:
             localized, reason = _attempt(source_to_translate, {})
@@ -5601,7 +5605,9 @@ class ChatModel:
     @staticmethod
     def _localize_reply(reply: str, locale: str, *, tone_register: str = "") -> str:
         """Instance-side alias for :func:`localize_reply`."""
-        return localize_reply(reply, locale, tone_register=tone_register)
+        if tone_register:
+            return localize_reply(reply, locale, tone_register=tone_register)
+        return localize_reply(reply, locale)
 
     @staticmethod
     def _recompute_for_verification(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -8851,7 +8857,10 @@ class ChatModel:
                         tone_reg = str(_assess_turn_eq(message, record_metric=False).get("tone_register") or "")
                     except Exception:
                         tone_reg = ""
-                result["reply"] = self._localize_reply(english, effective, tone_register=tone_reg)
+                if tone_reg and tone_reg != "neutral":
+                    result["reply"] = self._localize_reply(english, effective, tone_register=tone_reg)
+                else:
+                    result["reply"] = self._localize_reply(english, effective)
                 if result["reply"] != english or _is_already_in_locale(english.strip(), effective):
                     result["reply_locale"] = effective
                 if result["reply"] != english:

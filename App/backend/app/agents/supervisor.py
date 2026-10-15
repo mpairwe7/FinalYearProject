@@ -77,6 +77,15 @@ _MAX_PATTERN_CHARS = 1000
 #: Below this word count a stop-word-only query is a clarification.
 _CLARIFY_MIN_WORDS = 2
 
+_DOMESTIC_TAX_HEAD_RE = re.compile(
+    r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax)\b",
+    re.IGNORECASE,
+)
+_POLICY_OR_RELIEF_RE = re.compile(
+    r"\b(?:deferment|exemption|exempt|relief|instalment\s+agreement|waiver|remission)\b",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Supervisor
@@ -335,20 +344,8 @@ class Supervisor:
         )
         has_rate = any(pat.search(probe) for pat, _, _ in pats.rate)
         has_temporal = any(pat.search(q) for pat, _, _ in pats.temporal)
-        has_domestic_tax = bool(
-            re.search(
-                r"\b(?:vat|paye|wht|withholding|cit|corporation\s+tax|rental|income\s+tax|deferment|exemption|instalment|remission|waiver)\b",
-                q,
-                re.I,
-            )
-        )
-        has_policy_or_relief = bool(
-            re.search(
-                r"\b(?:deferment|exemption|exempt|relief|instalment|waiver|remission|deductible|qualify|penalty)\b",
-                q,
-                re.I,
-            )
-        )
+        has_domestic_tax = bool(_DOMESTIC_TAX_HEAD_RE.search(q))
+        has_policy_or_relief = bool(_POLICY_OR_RELIEF_RE.search(q))
 
         sub_routes: list[AgentRoute] = []
         tools: list[str] = list(base.suggested_tools)

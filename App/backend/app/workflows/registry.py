@@ -276,6 +276,18 @@ def resolve_workflow_side_question(user_input: str) -> str:
     try:
         from ..tools import ToolRegistry
 
+        if any(w in q.lower() for w in ("deadline", "due date", "when is", "filing date")):
+            dl_tool = ToolRegistry.get("get_filing_deadlines")
+            if dl_tool is not None:
+                dl_out = dl_tool.execute()
+                if isinstance(dl_out, dict) and dl_out.get("ok") and isinstance(dl_out.get("deadlines"), list):
+                    top_dl = dl_out["deadlines"][:2]
+                    dl_summary = "; ".join(
+                        f"{d.get('name', 'Deadline')}: {d.get('date', '')}" for d in top_dl if isinstance(d, dict)
+                    )
+                    if dl_summary:
+                        return f"Regarding your question: upcoming statutory deadlines are {dl_summary}."
+
         edu = ToolRegistry.get("explain_tax_concept")
         if edu is not None:
             for concept in ("vat", "paye", "tin", "withholding", "efris", "presumptive", "rental", "customs", "chargeable income"):
@@ -287,8 +299,8 @@ def resolve_workflow_side_question(user_input: str) -> str:
         logger.debug("workflow side-question education lookup skipped", exc_info=True)
 
     return (
-        "Regarding your question: under URA statutory guidelines, only verified taxable supplies "
-        "or chargeable amounts for the selected period should be entered in this step."
+        "Regarding your question: I could not verify that specific rule during this guided step; "
+        "you can ask me right after we finish this workflow, or contact URA on 0800 117 000."
     )
 
 
@@ -475,7 +487,58 @@ class WorkflowRegistry:
                 slot_name=step.id,
             )
 
-        # Validate slot input
+        # Validate slot input (checking free-text steps for mid-workflow side-questions first)
+        if step.slot:
+            try:
+                import os
+
+                from ..flags import flags
+
+                max_hops = max(1, int(os.getenv("WORKFLOW_MAX_TANGENT_HOPS", "2")))
+                tangent_enabled = flags.is_enabled("workflow_tangent_resume")
+            except ValueError:
+                max_hops = 2
+                tangent_enabled = False
+            tangent_hops = int(session.slots.get("_tangent_count") or 0)
+
+            def _emit_tangent_turn() -> WorkflowTurn:
+                session.slots["_tangent_count"] = tangent_hops + 1
+                side_answer = resolve_workflow_side_question(user_input)
+                step_idx, total_s, _ = compute_workflow_progress(wf, session, step.id)
+                s_title = step.title or default_step_title(step.id)
+                try:
+                    from ..analytics import metrics
+
+                    metrics.inc(
+                        "workflow_tangent_resumed_total",
+                        labels={"workflow_id": session.workflow_id},
+                    )
+                except Exception:
+                    logger.debug("workflow_tangent_resumed_total metric skipped", exc_info=True)
+                resume_text = (
+                    f"{side_answer}\n\n"
+                    f"Now, returning to Step {step_idx} of {total_s} ({s_title}): {step.question}"
+                ).strip()
+                return _make_turn(
+                    wf,
+                    session,
+                    step,
+                    question=resume_text,
+                    validation_error="",
+                    slot_name=step.slot,
+                    is_tangent=True,
+                    tangent_query=user_input.strip(),
+                    parked_step_prompt=step.question,
+                )
+
+            if (
+                tangent_enabled
+                and tangent_hops < max_hops
+                and (not step.validator or step.validator == "text")
+                and is_side_question(user_input)
+            ):
+                return _emit_tangent_turn()
+
         if step.slot and step.validator:
             is_valid, normalised, error = validate_slot(user_input, step.validator, resolver)
             if not is_valid and step.validator in ("currency", "amount", "number"):
@@ -485,49 +548,12 @@ class WorkflowRegistry:
                 if bridged_val is not None:
                     is_valid, normalised, error = validate_slot(bridged_val, step.validator, resolver)
             if not is_valid:
-                try:
-                    import os
-
-                    from ..flags import flags
-
-                    max_hops = max(1, int(os.getenv("WORKFLOW_MAX_TANGENT_HOPS", "2")))
-                except ValueError:
-                    max_hops = 2
-
-                tangent_hops = int(session.slots.get("_tangent_count") or 0)
                 if (
-                    flags.is_enabled("workflow_tangent_resume")
+                    tangent_enabled
                     and tangent_hops < max_hops
                     and is_side_question(user_input)
                 ):
-                    session.slots["_tangent_count"] = tangent_hops + 1
-                    side_answer = resolve_workflow_side_question(user_input)
-                    step_idx, total_s, _ = compute_workflow_progress(wf, session, step.id)
-                    s_title = step.title or default_step_title(step.id)
-                    try:
-                        from ..analytics import metrics
-
-                        metrics.inc(
-                            "workflow_tangent_resumed_total",
-                            labels={"workflow_id": session.workflow_id},
-                        )
-                    except Exception:
-                        logger.debug("workflow_tangent_resumed_total metric skipped", exc_info=True)
-                    resume_text = (
-                        f"{side_answer}\n\n"
-                        f"Now, returning to Step {step_idx} of {total_s} ({s_title}): {step.question}"
-                    ).strip()
-                    return _make_turn(
-                        wf,
-                        session,
-                        step,
-                        question=resume_text,
-                        validation_error="",
-                        slot_name=step.slot,
-                        is_tangent=True,
-                        tangent_query=user_input.strip(),
-                        parked_step_prompt=step.question,
-                    )
+                    return _emit_tangent_turn()
 
                 return _make_turn(
                     wf,
