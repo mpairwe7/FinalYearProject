@@ -290,7 +290,14 @@ class StatelessMCPServer:
                 {"ok": False, "error": "policy_denied", "policy": decision}, is_error=True
             )
 
-        result = ToolRegistry.call(name, arguments)
+        result = ToolRegistry.call(
+            name,
+            arguments,
+            user_id=str(identity.get("user_id") or ""),
+            tenant_id=str(identity.get("tenant_id") or "default"),
+            channel="mcp",
+            caller_confirmed=bool((params.get("_meta") or {}).get("confirmed", False)),
+        )
         return call_result(result, is_error=not result.get("ok", True))
 
     def handle_resources_list(self) -> dict[str, Any]:

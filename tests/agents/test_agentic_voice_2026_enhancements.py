@@ -678,7 +678,9 @@ def test_phase33_acoustic_risk_escalation_and_offline_action_outbox_sync(tmp_db)
         flags.clear("offline_action_outbox")
 
 
-def test_phase34_enterprise_governance_audit_v3_and_quality_circuit_breaker(tmp_db):
+def test_phase34_enterprise_governance_audit_v3_and_quality_circuit_breaker(tmp_db, monkeypatch):
+    import os
+
     from app.agents.prompts import governance_prompt
     from app.audit.governance_v3 import (
         append_action_audit_v3,
@@ -689,6 +691,7 @@ def test_phase34_enterprise_governance_audit_v3_and_quality_circuit_breaker(tmp_
     )
 
     quality_circuit_breaker.reset()
+    monkeypatch.setenv("AUDIT_TAXPAYER_HMAC_SALT", os.urandom(16).hex())
 
     # 1. Risk-Tiered Autonomy Classification & Gate Enforcement
     assert classify_action_risk("calculate_paye") == "low"
@@ -837,16 +840,56 @@ def test_phase34_enterprise_governance_audit_v3_and_quality_circuit_breaker(tmp_
 
 
 def test_phase34_sunbird_v2_model_defaults(monkeypatch):
+    import base64
+    import importlib
+    from unittest.mock import patch
+
+    import httpx
     from app import llm, orpheus_tts, spark_tts_salt
     from app import speech_service as ss
 
-    assert llm.LLM_MODEL == "Sunbird/Sunflower-Qwen3.5-9B"
-    assert ss.WHISPER_SALT_MODEL == "Sunbird/SunflowerASR-51-african-languages"
-    assert ss.SALT_LANGUAGE_TOKEN_IDS["lg"] == 50332
-    assert ss.SALT_LANGUAGE_TOKEN_IDS["nyn"] == 50322
-    assert ss.SALT_LANGUAGE_TOKEN_IDS["ach"] == 50357
-    assert spark_tts_salt.SPARK_TTS_ENABLED is False
+    try:
+        with monkeypatch.context() as defaults:
+            for name in ("LLM_MODEL", "WHISPER_SALT_MODEL", "SPARK_TTS_ENABLED"):
+                defaults.delenv(name, raising=False)
+
+            importlib.reload(llm)
+            importlib.reload(ss)
+            importlib.reload(spark_tts_salt)
+
+            assert llm.LLM_MODEL == "Sunbird/Sunflower-Qwen3.5-9B"
+            assert ss.WHISPER_SALT_MODEL == "Sunbird/SunflowerASR-51-african-languages"
+            assert ss.SALT_LANGUAGE_TOKEN_IDS["lg"] == 50332
+            assert ss.SALT_LANGUAGE_TOKEN_IDS["nyn"] == 50322
+            assert ss.SALT_LANGUAGE_TOKEN_IDS["ach"] == 50357
+            assert spark_tts_salt.SPARK_TTS_ENABLED is False
+    finally:
+        importlib.reload(llm)
+        importlib.reload(ss)
+        importlib.reload(spark_tts_salt)
+
     monkeypatch.setenv("ORPHEUS_TTS_URL", "http://orpheus-tts:8100")
     assert orpheus_tts.speaker_for("lg") == "salt_lug_0001"
     assert orpheus_tts.speaker_for("sw") == "waxal_swa_0006"
     assert orpheus_tts.speaker_for("en") == "salt_eng_0001"
+
+    batch_resp = httpx.Response(
+        200,
+        json={
+            "sample_rate": 24000,
+            "items": [
+                {"speaker_id": "salt_lug_0001", "pcm_b64": base64.b64encode(b"\x01\x00\x02\x00").decode("ascii")},
+                {"speaker_id": "waxal_swa_0006", "pcm_b64": base64.b64encode(b"\x03\x00\x04\x00").decode("ascii")},
+            ],
+        },
+    )
+    with patch("httpx.post", return_value=batch_resp) as mock_post:
+        wavs = orpheus_tts.synthesize_batch(
+            [
+                {"text": "Mwattu, oli otya?", "speaker_id": "salt_lug_0001"},
+                {"text": "Habari yako rafiki.", "speaker_id": "waxal_swa_0006"},
+            ],
+            seed=123,
+        )
+    assert wavs == [b"\x01\x00\x02\x00", b"\x03\x00\x04\x00"]
+    assert mock_post.call_args.args[0] == "http://orpheus-tts:8100/v1/audio/speech/batch"

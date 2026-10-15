@@ -7,7 +7,7 @@
 #   cd App && docker compose -f docker-compose.yml -f docker-compose.local-sunflower.yml up -d
 services:
   vllm:
-    image: vllm/vllm-openai:v0.8.5
+    image: vllm/vllm-openai:v0.17.1
     container_name: ura-app-vllm-sunflower
     command:
       - --model
@@ -38,7 +38,7 @@ services:
     ports:
       - "8011:8001"
     volumes:
-      - ${SUNFLOWER_LOCAL_MODEL_DIR:-/mnt/nas1/caches/huggingface_cache/hub/models--Sunbird--Sunflower-Qwen3.5-9B/snapshots/c56081c5024b1c11186a69898f5f6a7a2dabe454}:/model:ro
+      - ${SUNFLOWER_LOCAL_MODEL_DIR:?Set SUNFLOWER_LOCAL_MODEL_DIR to the local model snapshot directory}:/model:ro
     ipc: host
     environment:
       - NVIDIA_VISIBLE_DEVICES=${SUNFLOWER_GPU_ID:-4}

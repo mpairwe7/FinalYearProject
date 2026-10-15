@@ -157,7 +157,7 @@ def request(
     columns = ", ".join(row)
     try:
         db.execute(
-            f"INSERT INTO service_ratings ({columns}) VALUES ({', '.join('?' for _ in row)})",  # noqa: S608 - fixed columns
+            f"INSERT INTO service_ratings ({columns}) VALUES ({', '.join('?' for _ in row)})",  # noqa: S608  # nosec B608 - fixed columns
             tuple(row.values()),
         )
     except Exception:
@@ -189,8 +189,8 @@ def answer(
     _ensure()
     column, value = _key_column(ticket_id, call_id)
     affected = db.execute(
-        "UPDATE service_ratings SET status = ?, score = ?, sentiment = ?, comment = ?, answered_at = ? "
-        f"WHERE source = ? AND {column} = ? AND status = 'pending'",  # noqa: S608 - fixed column
+        "UPDATE service_ratings SET status = ?, score = ?, sentiment = ?, comment = ?, answered_at = ? "  # nosec B608
+        f"WHERE source = ? AND {column} = ? AND status = 'pending'",  # noqa: S608  # nosec B608 - fixed column
         (
             status,
             int(score) if score is not None else None,

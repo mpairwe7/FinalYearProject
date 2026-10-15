@@ -256,6 +256,62 @@ def synthesize(text: str, language: str) -> bytes:
         return b"".join(pool.map(lambda piece: _post(url, {**body, "input": piece}), pieces))
 
 
+def synthesize_batch(
+    items: list[dict[str, str]],
+    *,
+    temperature: float = 0.6,
+    top_p: float = 0.95,
+    repetition_penalty: float = 1.1,
+    seed: int | None = None,
+) -> list[bytes]:
+    """Multi-speaker batched synthesis via the sidecar's ``/v1/audio/speech/batch`` endpoint.
+
+    *items* is a list of ``{"text": str, "speaker_id": str}`` (or ``{"text": str, "language": str}``)
+    dictionaries — different speakers and languages can be mixed in one GPU pass.
+    Returns 24 kHz PCM16 byte buffers in the same order.
+    """
+    import base64
+    import httpx
+
+    if not items:
+        return []
+    if not is_configured():
+        raise OrpheusUnavailable("ORPHEUS_TTS_URL is not configured")
+    _check_cooldown()
+
+    normalized_items: list[dict[str, str]] = []
+    for it in items:
+        text = str(it.get("text") or "").strip()
+        spk = str(it.get("speaker_id") or "").strip()
+        if not spk:
+            lang = str(it.get("language") or "lg").strip()
+            spk = speaker_for(lang) or "salt_lug_0001"
+        normalized_items.append({"text": text, "speaker_id": spk})
+
+    payload: dict[str, object] = {
+        "items": normalized_items,
+        "temperature": temperature,
+        "top_p": top_p,
+        "repetition_penalty": repetition_penalty,
+    }
+    if seed is not None:
+        payload["seed"] = seed
+
+    url = f"{_url()}/v1/audio/speech/batch"
+    try:
+        resp = httpx.post(url, json=payload, timeout=_timeout_s())
+    except httpx.HTTPError as exc:
+        _mark_down(exc)
+        raise OrpheusUnavailable(str(exc)) from exc
+    if resp.status_code != 200:
+        raise OrpheusUnavailable(f"Orpheus batch returned HTTP {resp.status_code}")
+    data = resp.json()
+    out_items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(out_items, list) or len(out_items) != len(normalized_items):
+        raise OrpheusUnavailable("Orpheus batch returned malformed items")
+    return [base64.b64decode(str(entry.get("pcm_b64") or "")) for entry in out_items]
+
+
 def _post(url: str, body: dict[str, object]) -> bytes:
     import httpx
 

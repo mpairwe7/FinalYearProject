@@ -444,47 +444,14 @@ WHISPER_SALT_DEVICE = os.getenv("WHISPER_SALT_DEVICE", "") or WHISPER_DEVICE
 
 # SALT special-token ids to force, keyed by this deployment's locale codes.
 #
-# en (50259) and sw (50318) sit in Whisper's ORIGINAL, fixed 99-language
-# table and decode to "<|en|>" / "<|sw|>" — straightforwardly correct,
-# confirmed by decode.
+# en (50259) and sw (50318) sit in Whisper's original 99-language table and
+# decode to "<|en|>" / "<|sw|>".
 #
-# lg/nyn/ach do NOT decode to anything sensible on this checkpoint: this
-# tokenizer's special-token vocabulary was inspected directly
-# (`tokenizer.get_added_vocab()`) and tops out at id 50358 (`<|yue|>`,
-# Cantonese — the last of Whisper's ORIGINAL 99 languages). No
-# Ugandan-language token was ever added. The ids the model card's own usage
-# example lists for lug (50355), nyn (50354) and ach (50357) decode on this
-# tokenizer to Bashkir, Hausa and Sundanese.
-#
-# That looks like a stale/wrong table — the first-pass conclusion here was
-# to stop forcing anything for these three and let the model's own language
-# detection run instead (`language=None`). It was wrong. A controlled A/B
-# (same process, same model instance, same two Luganda clips, only the
-# `language=` argument varied) showed forcing id 50355 matches or BEATS
-# `None`: one clip identical either way, the other correct only when 50355
-# was forced ("Yali tasaana kugoba..." vs `None`'s "Yaritasaana kugoba...").
-# A separate check — forcing the *confirmed-correct* `en` token on the same
-# Luganda audio — produced visibly worse text than either, which rules out
-# "forcing never mattered" as an explanation for the first result.
-#
-# Conclusion: the fine-tune's continued pretraining most likely repurposed
-# these specific base-Whisper language-token EMBEDDINGS as stand-ins for its
-# own custom languages without extending the tokenizer's vocab_size — the
-# numeric id carries fine-tuned meaning even though decoding it still shows
-# the original Whisper-base string. So the ids are used, on the strength of
-# that measurement, while the misleading `decode()` step from the model
-# card's own example (which produced the stale-looking string in the first
-# place) is not.
-#
-# nyn and ach were NOT independently verified this way — no Runyankole or
-# Acholi audio was available to test with — and are set from the model
-# card's table only on the strength of the lg result plus the shared
-# training methodology (one continued-pretraining run, same repurposing
-# mechanism most likely applied uniformly). If either sounds wrong in
-# practice, that is the assumption to revisit first; do not "fix" it by
-# reverting to `None` without re-running the same kind of controlled
-# comparison that overturned the first attempt at this — see
-# docs/runbooks/salt-speech-backends.md.
+# For Sunbird/SunflowerASR-51-african-languages, the 40 African languages not
+# in base Whisper are mapped onto unused Whisper language-token slots per the
+# official model-card table (lug=50332, nyn=50322, ach=50357). Use the numeric
+# IDs from the current model-card table directly; do not infer them from the
+# base Whisper tokenizer's string labels.
 SALT_LANGUAGE_TOKEN_IDS: dict[str, int] = {
     "en": 50259,   # <|en|> — Whisper's original table; decode-verified
     "sw": 50318,   # <|sw|> — Whisper's original table; decode-verified
@@ -1400,8 +1367,8 @@ class SpeechModel:
         candidates and softmaxed over those alone. No text is decoded, so the
         cost is the encoder (~30-60 ms on an A6000) — a fraction of a
         transcription, which is why the receptionist can afford it on every
-        utterance. ``lg`` is id 50355, the repurposed ``<|ba|>`` slot; see the
-        comment on that table for why that id and not a "correct-looking" one.
+        utterance. The candidates use the IDs in
+        :data:`SALT_LANGUAGE_TOKEN_IDS`; ``lg`` uses id 50332 for this model.
 
         No domain prompt, unlike :meth:`_transcribe_whisper_salt`: its prompt
         text is itself language-specific and would vote for the language it
@@ -1485,16 +1452,14 @@ class SpeechModel:
         language: str | None,
         with_words: bool = False,
     ) -> TranscribeResult | None:
-        """Offline STT via Sunbird/asr-whisper-large-v3-salt — one model, every locale.
+        """Offline STT via Sunbird/SunflowerASR-51-african-languages — one model, every locale.
 
         Same shape as :meth:`_transcribe_whisper_peft` (both are plain
         WhisperForConditionalGeneration + WhisperProcessor pairs, so they
         share ``_decode_audio_bytes``), but this one needs no per-language
         model dict: it is a single fine-tune, steered per call by forcing
         the decoder's language token per :data:`SALT_LANGUAGE_TOKEN_IDS` —
-        see the long comment there for why those ids are trusted (a
-        controlled A/B test) rather than the model card's own decode of
-        them (misleading — see the same comment).
+        see :data:`SALT_LANGUAGE_TOKEN_IDS` for the current model's mapping.
         """
         import torch
 
@@ -1536,8 +1501,11 @@ class SpeechModel:
             except Exception:
                 prompt_ids = None
 
+        max_target_pos = getattr(getattr(model, "config", None), "max_target_positions", 448)
+        if not isinstance(max_target_pos, int) or max_target_pos <= 0:
+            max_target_pos = 448
         gen_kwargs: dict[str, Any] = {
-            "max_new_tokens": 444,
+            "max_length": max_target_pos,
             "num_beams": 1,
             "do_sample": False,
             "language": forced_language,

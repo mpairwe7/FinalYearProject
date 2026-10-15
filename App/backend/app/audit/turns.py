@@ -201,14 +201,16 @@ def build_turn_payload(
         if flags.is_enabled("continuous_quality_scorecard"):
             from .governance_v3 import evaluate_interaction_scorecard
 
+            fig_ok = bool(result.get("figure_fidelity_passed", True))
+            pol_ok = bool(result.get("policy_adherence_passed", True))
             sc = evaluate_interaction_scorecard(
                 session_id=str(result.get("conversation_id") or ""),
                 locale=str(result.get("reply_locale") or result.get("locale") or "en"),
                 channel=channel,
                 reply_text=reply,
                 sources=sources,
-                figure_fidelity_passed=True,
-                policy_adherence_passed=True,
+                figure_fidelity_passed=fig_ok,
+                policy_adherence_passed=pol_ok,
             )
             payload["quality_scorecard"] = {
                 "scorecard_id": sc.scorecard_id,

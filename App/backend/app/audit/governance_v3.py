@@ -302,19 +302,18 @@ class QualityCircuitBreaker:
         self._window_size = max(5, window_size)
         self._composite_floor = composite_floor
         self._scores: collections.deque[float] = collections.deque(maxlen=self._window_size)
-        self._figure_drift_events = 0
+        self._drift: collections.deque[bool] = collections.deque(maxlen=self._window_size)
         self._lock = threading.Lock()
 
     def record(self, scorecard: InteractionQualityScorecard) -> bool:
         """Record a scorecard and return True if autonomy throttling is now active."""
         with self._lock:
             self._scores.append(scorecard.composite_quality_score)
-            if scorecard.figure_fidelity_score < 1.0:
-                self._figure_drift_events += 1
+            self._drift.append(scorecard.figure_fidelity_score < 1.0)
             return self._is_throttled_unlocked()
 
     def _is_throttled_unlocked(self) -> bool:
-        if self._figure_drift_events > 0:
+        if any(self._drift):
             return True
         if len(self._scores) >= 3:
             mean_score = sum(self._scores) / len(self._scores)
@@ -331,7 +330,7 @@ class QualityCircuitBreaker:
     def reset(self) -> None:
         with self._lock:
             self._scores.clear()
-            self._figure_drift_events = 0
+            self._drift.clear()
 
 
 quality_circuit_breaker = QualityCircuitBreaker()
@@ -542,9 +541,11 @@ def evaluate_interaction_scorecard(
 def _hash_taxpayer_identifier(raw_id: str, tenant_id: str = "default") -> str:
     if not raw_id:
         return ""
-    salt = (os.getenv("AUDIT_TAXPAYER_HMAC_SALT") or os.getenv("AUTH_DEV_SECRET") or "ura-audit-salt").encode()
+    raw_salt = (os.getenv("AUDIT_TAXPAYER_HMAC_SALT") or "").strip()
+    if not raw_salt:
+        return ""
     msg = f"{tenant_id}:{raw_id.strip()}".encode()
-    return hmac.new(salt, msg, hashlib.sha256).hexdigest()
+    return hmac.new(raw_salt.encode(), msg, hashlib.sha256).hexdigest()
 
 
 def append_action_audit_v3(
@@ -556,6 +557,7 @@ def append_action_audit_v3(
     agent_role: str = "tax_specialist",
     decision_trace: list[str] | None = None,
     parameters_redacted: dict[str, Any] | None = None,
+    parameters_digest_source: dict[str, Any] | None = None,
     response_summary_redacted: dict[str, Any] | None = None,
     execution_status: Literal[
         "success", "error", "timeout", "blocked", "simulated_sandbox", "proposed"
@@ -598,9 +600,10 @@ def append_action_audit_v3(
     rev_contract = get_reversibility_contract(tool_or_action_name, pre_state=pre_state)
 
     params_dict = dict(parameters_redacted or {})
+    digest_dict = dict(parameters_digest_source if parameters_digest_source is not None else params_dict)
     resp_dict = dict(response_summary_redacted or {})
     params_sha = hashlib.sha256(
-        json.dumps(params_dict, sort_keys=True, default=str).encode("utf-8")
+        json.dumps(digest_dict, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
     resp_sha = hashlib.sha256(
         json.dumps(resp_dict, sort_keys=True, default=str).encode("utf-8")
@@ -660,7 +663,7 @@ def append_action_audit_v3(
         resolution_status=res_status,
     )
 
-    if flags.is_enabled("action_level_audit_v3", subject=user_id or None) and flags.is_enabled("audit_ledger"):
+    if flags.is_enabled("action_level_audit_v3", subject=user_id or None):
         try:
             from . import get_ledger
 
