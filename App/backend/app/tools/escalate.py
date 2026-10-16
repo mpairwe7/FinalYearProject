@@ -154,6 +154,7 @@ class EscalateToHumanTool(Tool):
         )
         after_hours = not hours["on_duty"]
         next_open_eat = ""
+        close_time_eat = ""
         use_cxp_bh = flags.is_enabled("cxp_business_hours")
         if use_cxp_bh:
             from ..escalation_policy import evaluate_cxp_schedule  # noqa: PLC0415
@@ -161,6 +162,7 @@ class EscalateToHumanTool(Tool):
             sched = evaluate_cxp_schedule(check_presence=True)
             after_hours = sched.after_hours
             next_open_eat = sched.next_open_label if after_hours else ""
+            close_time_eat = sched.close_time_eat if after_hours else ""
 
         msg = (
             f"Ticket {ticket.get('id', '')[:8]} created at priority "
@@ -170,7 +172,7 @@ class EscalateToHumanTool(Tool):
         if use_cxp_bh and after_hours:
             msg = (
                 f"Ticket {ticket.get('id', '')[:8]} queued at priority {priority}. "
-                f"Live URA CXP officer operations close at 11:00 PM EAT and reopen at "
+                f"Live URA CXP officer operations close at {close_time_eat} and reopen at "
                 f"{next_open_eat}; an officer will review your case first thing when "
                 f"operations resume, while the 24/7 AI assistant remains available now."
             )

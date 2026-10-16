@@ -857,13 +857,6 @@ _ESCALATION_CREATED_MESSAGE = (
     "here in this conversation, so you do not need to start again. You can "
     "also call URA toll-free on 0800 117 000 or 0800 217 000."
 )
-_ESCALATION_AFTER_HOURS_MESSAGE = (
-    "A URA officer has been asked to look at this, and your case is queued for "
-    "priority review. Live CXP officer operations close at 11:00 PM EAT and "
-    "reopen at 7:00 AM EAT — their reply will appear here in this conversation "
-    "as soon as operations resume, so you do not need to start again. Meanwhile, "
-    "this AI assistant remains available 24/7 to help you."
-)
 _ESCALATION_REUSED_MESSAGE = (
     "A URA officer is already looking at this conversation. Their reply will "
     "appear here, so there is no need to ask again. You can also call URA "
@@ -2893,20 +2886,19 @@ def request_human_officer(
     next_open_eat = ""
     use_cxp_bh = flags.is_enabled("cxp_business_hours", subject=ctx.user_id or None)
     if use_cxp_bh:
-        from .escalation_policy import after_hours_escalation_message, evaluate_cxp_schedule
-
-        sched = evaluate_cxp_schedule(check_presence=True)
-        if sched.after_hours:
+        cxp_sched = handoff.get("cxp_schedule") or {}
+        if handoff.get("after_hours") is True or cxp_sched.get("after_hours") is True:
             is_after_hours = True
-            next_open_eat = sched.next_open_label
-            handoff["after_hours"] = True
-            handoff["next_open_eat"] = next_open_eat
+            next_open_eat = str(cxp_sched.get("next_open_label") or handoff.get("next_open_eat") or "")
 
-    if use_cxp_bh and is_after_hours and not reused:
-        metrics.inc("escalation_requested_total", labels={"outcome": "after_hours_queued"})
+    if use_cxp_bh and is_after_hours:
+        metrics.inc(
+            "escalation_requested_total",
+            labels={"outcome": "reused_off_duty" if reused else "after_hours_queued"},
+        )
         from .escalation_policy import after_hours_escalation_message
 
-        final_msg = after_hours_escalation_message(locale)
+        final_msg = after_hours_escalation_message(locale, reused=reused)
     else:
         metrics.inc(
             "escalation_requested_total",

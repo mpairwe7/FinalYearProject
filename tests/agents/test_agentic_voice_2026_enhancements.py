@@ -2027,6 +2027,9 @@ def test_phase44_cxp_after_hours_escalation_and_sla_pause(monkeypatch):
     from app.officer_handoff import enrich_handoff
     from app.receptionist.phrases import phrase
 
+    for env_name in ("CXP_FORCE_AFTER_HOURS", "CXP_OPEN_HOUR", "CXP_CLOSE_HOUR", "CXP_TIMEZONE"):
+        monkeypatch.delenv(env_name, raising=False)
+
     tz = ZoneInfo("Africa/Kampala")
     # 11:30 PM EAT (23:30) — after CXP operations stop at 11:00 PM (23:00)
     ts_after_hours = dt.datetime(2026, 10, 16, 23, 30, 0, tzinfo=tz).timestamp()

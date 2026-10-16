@@ -270,7 +270,7 @@ def evaluate_cxp_schedule(
     force_mode = (os.getenv("CXP_FORCE_AFTER_HOURS", "") or "").strip().lower()
     if force_mode in ("1", "true", "yes"):
         within = False
-    elif force_mode in ("0", "false", "no") or live_online:
+    elif force_mode in ("open", "force_open") or live_online:
         within = True
     elif open_h < close_h:
         within = open_h <= local_dt.hour < close_h
@@ -343,87 +343,155 @@ def business_hours_elapsed_seconds(start_ts: float, end_ts: float) -> float:
     return max(0.0, total_s)
 
 
+def _eat_12h_label(eat_24h: str) -> str:
+    """Convert a 24-hour 'HH:00 EAT' label from CxpScheduleStatus into 'H:00 AM/PM EAT'."""
+    try:
+        hour = int(str(eat_24h).split(":", 1)[0].strip()) % 24
+        return f"{hour % 12 or 12}:00 {'AM' if hour < 12 else 'PM'} EAT"
+    except Exception:
+        return str(eat_24h)
+
+
 _AFTER_HOURS_NOTICES: dict[str, str] = {
     "en": (
-        "\n\n**After-Hours Escalation Notice (CXP Hours: 7:00 AM – 11:00 PM EAT)**: "
-        "Live URA officer operations close at 11:00 PM EAT and reopen at 7:00 AM EAT. "
+        "\n\n**After-Hours Escalation Notice (CXP Hours: {open_eat} – {close_eat})**: "
+        "Live URA officer operations close at {close_eat} ({close_24h}) and reopen at {open_eat} ({open_24h}). "
         "Your case and conversation history have been queued for priority officer review as soon as operations resume, "
         "and their reply will appear right here in this conversation. Meanwhile, I remain available 24/7 to assist you."
     ),
     "lg": (
-        "\n\n**Okumanyisa ku Ssaawa z'Okukola (CXP: 7:00 AM – 11:00 PM EAT)**: "
-        "Abakozi ba URA bakola okutuuka ssaawa ttaano ez'ekiro (11:00 PM EAT) ne baddamu ku ssaawa emu ey'oku makya (7:00 AM EAT). "
+        "\n\n**Okumanyisa ku Ssaawa z'Okukola (CXP: {open_eat} – {close_eat})**: "
+        "Abakozi ba URA bakola okutuuka ssaawa ttaano ez'ekiro ({close_eat} / {close_24h}) ne baddamu ku ssaawa emu ey'oku makya ({open_eat} / {open_24h}). "
         "Ensonga yo etereddwa mu lukalala olw'okukolebwako mu bwangu nga bwe banaddamu, era eky'okuddamu kyabwe kijja kulabikira wano. "
         "Mu kiseera kino, nkyali wano essaawa 24/7 okukuyamba."
     ),
     "sw": (
-        "\n\n**Taarifa ya Saa za Kazi (CXP: 7:00 AM – 11:00 PM EAT)**: "
-        "Maafisa wa URA wanafanya kazi hadi saa tano usiku (11:00 PM EAT) na kufungua tena saa moja asubuhi (7:00 AM EAT). "
+        "\n\n**Taarifa ya Saa za Kazi (CXP: {open_eat} – {close_eat})**: "
+        "Maafisa wa URA wanafanya kazi hadi saa tano usiku ({close_eat} / {close_24h}) na kufungua tena saa moja asubuhi ({open_eat} / {open_24h}). "
         "Suala lako limewekwa kwenye foleni ya kipaumbele pindi shughuli zitakaporejea, na jibu lao litaonekana hapa hapa. "
         "Kwa sasa, niko hapa saa 24/7 kukusaidia."
     ),
     "nyn": (
-        "\n\n**Okumanyisa aha Shaaha z'Okukora (CXP: 7:00 AM – 11:00 PM EAT)**: "
-        "Abakozi ba URA nibakora kuhika shaaha itaano z'ekiro (11:00 PM EAT) kandi bagarukaho shaaha emwe y'akasheeshe (7:00 AM EAT). "
+        "\n\n**Okumanyisa aha Shaaha z'Okukora (CXP: {open_eat} – {close_eat})**: "
+        "Abakozi ba URA nibakora kuhika shaaha itaano z'ekiro ({close_eat} / {close_24h}) kandi bagarukaho shaaha emwe y'akasheeshe ({open_eat} / {open_24h}). "
         "Enshonga yaawe eteirwe omu rweego rw'okubanza kushwijumwa ahonaaho baagarukaho, kandi eky'okugarukamu kyabo nikiija kureebeka aha. "
         "Omu bwire obu, ndi aha shaaha 24/7 kukuhwera."
     ),
     "ach": (
-        "\n\n**Ngec i kom Cawa me Tic (CXP: 7:00 AM – 11:00 PM EAT)**: "
-        "Lutic me URA gitiyo naka cawa abic me dyewor (11:00 PM EAT) dok giyabo cawa acel me odiko (7:00 AM EAT). "
+        "\n\n**Ngec i kom Cawa me Tic (CXP: {open_eat} – {close_eat})**: "
+        "Lutic me URA gitiyo naka cawa abic me dyewor ({close_eat} / {close_24h}) dok giyabo cawa acel me odiko ({open_eat} / {open_24h}). "
         "Lokki dong kiketo i rek me kony oyot-oyot ka tic ocake, dok lagam gi binen kany i lok man. "
         "Kombedi, pud atye kany cawa 24/7 me konyi."
     ),
 }
 
 
-def after_hours_escalation_notice(locale: str = "en") -> str:
-    """Localized notice appended when an escalation occurs after CXP hours (11 PM – 7 AM EAT)."""
+def after_hours_escalation_notice(
+    locale: str = "en",
+    *,
+    schedule: CxpScheduleStatus | None = None,
+) -> str:
+    """Localized notice appended when an escalation occurs after CXP operating hours."""
     loc = (locale or "en").strip().lower().split("-")[0]
-    return _AFTER_HOURS_NOTICES.get(loc, _AFTER_HOURS_NOTICES["en"])
+    sched = schedule or evaluate_cxp_schedule()
+    template = _AFTER_HOURS_NOTICES.get(loc, _AFTER_HOURS_NOTICES["en"])
+    return template.format(
+        open_eat=_eat_12h_label(sched.open_time_eat),
+        close_eat=_eat_12h_label(sched.close_time_eat),
+        open_24h=sched.open_time_eat,
+        close_24h=sched.close_time_eat,
+    )
 
 
 _AFTER_HOURS_ESCALATION_MESSAGES: dict[str, str] = {
     "en": (
         "A URA officer has been asked to look at this, and your case is queued for "
-        "priority review. Live CXP officer operations close at 11:00 PM EAT and "
-        "reopen at 7:00 AM EAT — their reply will appear here in this conversation "
+        "priority review. Live CXP officer operations close at {close_eat} ({close_24h}) and "
+        "reopen at {open_eat} ({open_24h}) — their reply will appear here in this conversation "
         "as soon as operations resume, so you do not need to start again. Meanwhile, "
         "this AI assistant remains available 24/7 to help you."
     ),
     "lg": (
         "Omukozi wa URA asabiddwa okwetegereza ensonga eno, era etereddwa mu lukalala "
         "olw'okukolebwako mu bwangu. Abakozi ba URA bakola okutuuka ssaawa ttaano ez'ekiro "
-        "(11:00 PM EAT) ne baddamu ku ssaawa emu ey'oku makya (7:00 AM EAT) — eky'okuddamu "
+        "({close_eat} / {close_24h}) ne baddamu ku ssaawa emu ey'oku makya ({open_eat} / {open_24h}) — eky'okuddamu "
         "kyabwe kijja kulabikira wano mu mboozi eno nga bwe banaddamu, kale teweetaaga "
         "kutandika buto. Mu kiseera kino, omuyambi wa AI ono ali wano essaawa 24/7 okukuyamba."
     ),
     "sw": (
         "Afisa wa URA ameombwa kuangalia suala hili, na kesi yako imewekwa kwenye foleni "
-        "ya kipaumbele. Maafisa wa CXP wanafanya kazi hadi saa tano usiku (11:00 PM EAT) "
-        "na kufungua tena saa moja asubuhi (7:00 AM EAT) — jibu lao litaonekana hapa katika "
+        "ya kipaumbele. Maafisa wa CXP wanafanya kazi hadi saa tano usiku ({close_eat} / {close_24h}) "
+        "na kufungua tena saa moja asubuhi ({open_eat} / {open_24h}) — jibu lao litaonekana hapa katika "
         "mazungumzo haya pindi shughuli zitakaporejea, kwa hivyo huna haja ya kuanza upya. "
         "Kwa sasa, msaidizi huyu wa AI anaendelea kupatikana saa 24/7 kukusaidia."
     ),
     "nyn": (
         "Omukozi wa URA ashabiirwe kushwijuma enshonga egi, kandi eteirwe omu rweego "
         "rw'okubanza kukorwaho. Abakozi ba CXP nibakora kuhika shaaha itaano z'ekiro "
-        "(11:00 PM EAT) kandi bagarukaho shaaha emwe y'akasheeshe (7:00 AM EAT) — "
+        "({close_eat} / {close_24h}) kandi bagarukaho shaaha emwe y'akasheeshe ({open_eat} / {open_24h}) — "
         "eky'okugarukamu kyabo nikiija kureebeka aha omu kiganiro eki ahonaaho baagarukaho, "
         "nahabwekyo torikwetenga kutandika busya. Omu bwire obu, omuhwezi wa AI ogu ari aha shaaha 24/7 kukuhwera."
     ),
     "ach": (
         "Kilimo latic me URA me neno lok man, dok lokki kiketo i rek me kony oyot-oyot. "
-        "Lutic me CXP gitiyo naka cawa abic me dyewor (11:00 PM EAT) dok giyabo cawa acel "
-        "me odiko (7:00 AM EAT) — lagam gi binen kany i lok man cut-cut ka tic ocake, "
+        "Lutic me CXP gitiyo naka cawa abic me dyewor ({close_eat} / {close_24h}) dok giyabo cawa acel "
+        "me odiko ({open_eat} / {open_24h}) — lagam gi binen kany i lok man cut-cut ka tic ocake, "
         "pi meno pe mite ni icak manyen. Kombedi, lakony me AI man pud tye kany cawa 24/7 me konyi."
     ),
 }
 
+_AFTER_HOURS_REUSED_MESSAGES: dict[str, str] = {
+    "en": (
+        "Your question is already queued with URA's officers for priority review. "
+        "Live CXP officer operations close at {close_eat} ({close_24h}) and reopen at "
+        "{open_eat} ({open_24h}) — their reply will appear here as soon as operations "
+        "resume, so there is no need to ask again. Meanwhile, this AI assistant "
+        "remains available 24/7 to help you."
+    ),
+    "lg": (
+        "Ekibuuzo kyo kyamaze dda okuteekebwa mu lukalala lw'abakozi ba URA. "
+        "Abakozi ba CXP bakola okutuuka {close_eat} ({close_24h}) ne baddamu ku "
+        "{open_eat} ({open_24h}) — eky'okuddamu kyabwe kijja kulabikira wano nga bwe "
+        "banaddamu, kale teweetaaga kuddamu kubuuza. Mu kiseera kino, omuyambi wa AI "
+        "ono ali wano essaawa 24/7 okukuyamba."
+    ),
+    "sw": (
+        "Swali lako tayari liko kwenye foleni ya maafisa wa URA kwa ukaguzi wa kipaumbele. "
+        "Maafisa wa CXP wanafanya kazi hadi {close_eat} ({close_24h}) na kufungua tena "
+        "{open_eat} ({open_24h}) — jibu lao litaonekana hapa pindi shughuli zitakaporejea, "
+        "kwa hivyo hakuna haja ya kuuliza tena. Kwa sasa, msaidizi huyu wa AI yuko hapa saa 24/7."
+    ),
+    "nyn": (
+        "Ekibuuzo kyawe kyateirwe kare omu rweego rw'abakozi ba URA kushwijumwa. "
+        "Abakozi ba CXP nibakora kuhika {close_eat} ({close_24h}) kandi bagarukaho "
+        "{open_eat} ({open_24h}) — eky'okugarukamu kyabo nikiija kureebeka aha ahonaaho "
+        "baagarukaho, nahabwekyo torikwetenga kubuuza obundi. Omuhwezi wa AI ogu ari aha shaaha 24/7."
+    ),
+    "ach": (
+        "Lapeny ni dong tye i rek pa lutic me URA. Lutic me CXP gitiyo naka "
+        "{close_eat} ({close_24h}) dok giyabo {open_eat} ({open_24h}) — lagam gi binen "
+        "kany cut-cut ka tic ocake, pi meno pe mite ni ipeny doki. Lakony me AI man "
+        "pud tye kany cawa 24/7 me konyi."
+    ),
+}
 
-def after_hours_escalation_message(locale: str = "en") -> str:
-    """Localized confirmation returned by POST /v1/escalate when CXP is closed (after 11 PM EAT)."""
+
+def after_hours_escalation_message(
+    locale: str = "en",
+    *,
+    reused: bool = False,
+    schedule: CxpScheduleStatus | None = None,
+) -> str:
+    """Localized confirmation returned by POST /v1/escalate when CXP is closed."""
     loc = (locale or "en").strip().lower().split("-")[0]
-    return _AFTER_HOURS_ESCALATION_MESSAGES.get(loc, _AFTER_HOURS_ESCALATION_MESSAGES["en"])
+    sched = schedule or evaluate_cxp_schedule()
+    table = _AFTER_HOURS_REUSED_MESSAGES if reused else _AFTER_HOURS_ESCALATION_MESSAGES
+    template = table.get(loc, table["en"])
+    return template.format(
+        open_eat=_eat_12h_label(sched.open_time_eat),
+        close_eat=_eat_12h_label(sched.close_time_eat),
+        open_24h=sched.open_time_eat,
+        close_24h=sched.close_time_eat,
+    )
 
 

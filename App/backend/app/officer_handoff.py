@@ -198,12 +198,14 @@ def enrich_handoff(
     subject = user_id or None
     effective = priority or "normal"
     assessment = None
+    schedule = None
     history = [h for h in (str(turn.get("user_message") or "") for turn in list(transcript)[:-1]) if h]
     try:
         if flags.is_enabled("cxp_business_hours", subject=subject):
             schedule = evaluate_cxp_schedule(check_presence=True)
             handoff["cxp_schedule"] = schedule.to_dict()
             handoff["after_hours"] = schedule.after_hours
+            handoff["next_open_eat"] = schedule.next_open_label if schedule.after_hours else ""
             handoff["routing_mode"] = "async_priority_queue" if schedule.after_hours else "live_queue"
     except Exception:
         logger.debug("cxp schedule enrichment skipped", exc_info=True)
@@ -268,11 +270,7 @@ def enrich_handoff(
             envelope_dict = _names_only(envelope.to_dict())
             if assessment is not None:
                 envelope_dict.setdefault("sla", {})["target_response_seconds"] = assessment.sla_seconds
-            if flags.is_enabled("cxp_business_hours", subject=subject):
-                schedule = evaluate_cxp_schedule(check_presence=True)
-                handoff["cxp_schedule"] = schedule.to_dict()
-                handoff["after_hours"] = schedule.after_hours
-                handoff["routing_mode"] = "async_priority_queue" if schedule.after_hours else "live_queue"
+            if schedule is not None:
                 sla_block = envelope_dict.setdefault("sla", {})
                 sla_block["paused"] = schedule.sla_paused
                 sla_block["pause_reason"] = schedule.sla_pause_reason

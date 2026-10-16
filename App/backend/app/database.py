@@ -2336,6 +2336,7 @@ def compose_sla_stats(
         "officer_hours": hours.label(now),
     }
     if use_bh:
+        out_stats["sla_clock"] = "cxp_business_hours"
         out_stats["after_hours_paused"] = after_hours_paused
         out_stats["sla_paused"] = schedule_paused
     return out_stats
