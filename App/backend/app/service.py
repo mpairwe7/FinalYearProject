@@ -1790,6 +1790,9 @@ def _finish_streamed_turn(
 
     result = log_payload.get("result") or {}
     served = {**result, "reply": str(log_payload.get("full_reply") or "")}
+    if log_payload.get("english_reply"):
+        # The answer before localisation, for checks written in English.
+        served["_english_reply"] = str(log_payload["english_reply"])
     try:
         record_chat_turn(
             served,

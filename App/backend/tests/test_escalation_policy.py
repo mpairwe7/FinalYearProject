@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import unittest
+from unittest import mock
 
 from app.escalation_policy import (
     TIER_NONE,
@@ -93,6 +95,13 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(higher_priority("unknown", "low"), "unknown")
         self.assertEqual(sla_seconds("high"), 60)
         self.assertEqual(sla_seconds("normal"), 120)
+
+    def test_hardship_tightens_the_target_and_never_loosens_it(self) -> None:
+        self.assertEqual(sla_seconds("high", hardship=True), 45)
+        with mock.patch.dict(os.environ, {"EQ_HARDSHIP_SLA_TARGET_SECONDS": "90"}):
+            self.assertEqual(sla_seconds("high", hardship=True), 60)
+            self.assertEqual(sla_seconds("normal", hardship=True), 90)
+            self.assertEqual(sla_seconds("urgent", hardship=True), 30)
 
 
 class OfficerHandoffTests(unittest.TestCase):

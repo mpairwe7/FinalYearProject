@@ -181,6 +181,65 @@ class StreamedTurnTest(unittest.TestCase):
         log = {"result": {"retrieval_mode": "faq"}, "full_reply": "ok", "elapsed_ms": 5.0}
         self._run("sse", [("_log", log)], object())
 
+    def test_the_answer_before_localisation_reaches_the_scorecard(self) -> None:
+        model = mock.Mock()
+        log = {
+            "result": {"retrieval_mode": "hybrid", "locale": "lg", "reply_locale": "lg"},
+            "full_reply": "Osobola okusaba enteekateeka y'okusasula mu bitundu.",
+            "english_reply": "You can apply for an instalment payment plan.",
+            "elapsed_ms": 900.0,
+        }
+        self._run("sse", [("_log", log)], model)
+        result = model.record_turn_audit.call_args.kwargs["result"]
+        self.assertEqual(result["_english_reply"], "You can apply for an instalment payment plan.")
+        self.assertEqual(result["reply"], log["full_reply"])
+
+
+class ScorecardEvidenceTest(unittest.TestCase):
+    """What the Phase 38 scorecard is told about a turn (CodeRabbit on #578)."""
+
+    HARDSHIP = "I cannot afford to pay this penalty"
+
+    def test_anxiety_and_frustration_are_not_judged_for_relief(self) -> None:
+        from app.audit.governance_v3 import evaluate_interaction_scorecard
+
+        for message in ("I'm really worried about my VAT return", "This is so frustrating, nothing works!!"):
+            evidence = turns._scorecard_evidence(message, {"retrieval_mode": "hybrid"}, "Here is how it works.", "answered")
+            self.assertFalse(evidence["distress_detected"], message)
+            card = evaluate_interaction_scorecard(session_id="s", reply_text="Here is how it works.", **evidence)
+            self.assertNotIn("MISSING_STATUTORY_RELIEF_ON_HARDSHIP", card.anomaly_flags, message)
+
+    def test_a_negated_relief_is_not_relief(self) -> None:
+        def relief(reply: str) -> bool:
+            return turns._scorecard_evidence(self.HARDSHIP, {"retrieval_mode": "hybrid"}, reply, "answered")["relief_cited"]
+
+        self.assertFalse(relief("No relief is available for this penalty."))
+        self.assertFalse(relief("URA does not offer a waiver in this case."))
+        self.assertTrue(relief("You can apply for an instalment payment plan."))
+        self.assertTrue(relief("Relief is not available, but you can request an extension of time."))
+
+    def test_a_localised_reply_is_read_in_english_or_not_at_all(self) -> None:
+        luganda = "Osobola okusaba enteekateeka y'okusasula mu bitundu."
+        translated = {"retrieval_mode": "hybrid", "reply_locale": "lg", "_english_reply": "You can apply for a payment plan."}
+        evidence = turns._scorecard_evidence(self.HARDSHIP, translated, luganda, "answered")
+        self.assertTrue(evidence["distress_detected"])
+        self.assertTrue(evidence["relief_cited"])
+        # Only the localised text: the English keywords cannot judge it.
+        untranslated = {"retrieval_mode": "hybrid", "reply_locale": "lg"}
+        self.assertFalse(turns._scorecard_evidence(self.HARDSHIP, untranslated, luganda, "answered")["distress_detected"])
+
+    def test_agentic_counts_only_through_a_deterministic_tool_that_ran(self) -> None:
+        def basis(tool_calls) -> bool:
+            return turns._scorecard_evidence("PAYE?", {"retrieval_mode": "agentic"}, "...", "answered", tool_calls)[
+                "deterministic_basis"
+            ]
+
+        self.assertFalse(basis(()))
+        self.assertTrue(basis(["calculate_paye"]))
+        self.assertFalse(basis([{"name": "search_ura_knowledge_base", "result": {"hits": 3}}]))
+        self.assertFalse(basis([{"name": "calculate_paye", "result": {"error": "missing salary"}}]))
+        self.assertTrue(basis([{"name": "calculate_paye", "result": {"paye": 638250}}]))
+
 
 class GenerateDefersAuditTest(unittest.TestCase):
     """The REST row is written after localization, so it hashes the served reply."""

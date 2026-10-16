@@ -154,16 +154,56 @@ def _judge_verdict(result: Mapping[str, Any]) -> str:
 
 
 #: Retrieval modes whose answer rests on a table, a calculation, a guided
-#: flow or a service record rather than on retrieved passages.
+#: flow or a service record rather than on retrieved passages. "agentic" is
+#: not one: the agentic stream can answer with no tool call at all, so it
+#: counts only through a deterministic tool that ran (_ran_deterministic_tool).
 _DETERMINISTIC_MODES = frozenset(
-    {"calculator", "workflow", "education", "contact_channels", "tin_registration_guidance", "agentic"}
+    {"calculator", "workflow", "education", "contact_channels", "tin_registration_guidance"}
 )
+#: Tools whose answer is retrieved passages — grounded by its sources, not
+#: by a table, a calculation or a record.
+_RETRIEVAL_TOOLS = frozenset({"search_ura_knowledge_base"})
+_RELIEF_TERMS = r"(?:instal+ments?|payment\s+plan|waiv\w*|remission|extension\s+of\s+time|objection|relief)"
 #: The relief a taxpayer in hardship should hear about (instalments, waiver,
 #: remission, extension, objection).
-_RELIEF_RE = re.compile(
-    r"\b(?:instal+ments?|payment\s+plan|waiv\w*|remission|extension\s+of\s+time|objection|relief)\b",
+_RELIEF_RE = re.compile(rf"\b{_RELIEF_TERMS}\b", re.IGNORECASE)
+#: A relief mention that says there is none: "No relief is available", "URA
+#: does not offer a waiver", "an extension of time is not possible".
+_RELIEF_NEGATED_RE = re.compile(
+    rf"\b(?:no|not|never|without|cannot|can't|isn't|aren't|won't|unable\s+to)\b(?:\W+\w+){{0,3}}?\W+{_RELIEF_TERMS}\b"
+    rf"|\b{_RELIEF_TERMS}\b(?:\W+\w+){{0,3}}?\W+(?:is|are)\s+not\s+(?:available|possible|allowed|granted)\b",
     re.IGNORECASE,
 )
+
+
+def _relief_offered(reply: str) -> bool:
+    """Whether *reply* offers a remedy: a relief mention that is not negated."""
+    negated = [match.span() for match in _RELIEF_NEGATED_RE.finditer(reply or "")]
+    return any(
+        not any(start <= mention.start() and mention.end() <= end for start, end in negated)
+        for mention in _RELIEF_RE.finditer(reply or "")
+    )
+
+
+def _ran_deterministic_tool(tool_calls: Iterable[Any]) -> bool:
+    """Whether a calculator, rate or service tool ran and did not fail.
+
+    The REST loop records tool names, the stream the calls with their
+    results; a call whose recorded result is an error does not count.
+    """
+    for call in tool_calls or ():
+        if isinstance(call, str):
+            name, outcome = call, None
+        elif isinstance(call, Mapping):
+            name, outcome = str(call.get("name") or ""), call.get("result")
+        else:
+            continue
+        if not name or name in _RETRIEVAL_TOOLS:
+            continue
+        if isinstance(outcome, Mapping) and (outcome.get("error") or outcome.get("ok") is False):
+            continue
+        return True
+    return False
 #: (completed, total) sub-tasks by outcome: an answer completes the turn's
 #: task, a clarification or a hand-off half does, a refusal does not.
 _COMPLETENESS = {
@@ -176,24 +216,41 @@ _COMPLETENESS = {
 }
 
 
-def _scorecard_evidence(message: str, result: Mapping[str, Any], reply: str, outcome: str) -> dict[str, Any]:
+def _scorecard_evidence(
+    message: str,
+    result: Mapping[str, Any],
+    reply: str,
+    outcome: str,
+    tool_calls: Iterable[Any] = (),
+) -> dict[str, Any]:
     """What this turn actually did, for the scorecard's empathy, completeness,
-    handoff and grounding dimensions — which were constants before (Phase 38)."""
+    handoff and grounding dimensions — which were constants before (Phase 38).
+
+    The relief check is a hardship check (the scorecard's
+    ``MISSING_STATUTORY_RELIEF_ON_HARDSHIP``): an anxious or frustrated
+    taxpayer needs a clear answer, not a payment plan. Its keywords are
+    English, so it reads the answer before localisation (``_english_reply``)
+    and judges nothing when only a localised reply is at hand.
+    """
     from ..text_signals import detect_user_distress  # noqa: PLC0415
 
-    distress = detect_user_distress(message) in ("hardship", "anxiety", "frustration")
+    english = str(result.get("_english_reply") or "")
+    if not english and str(result.get("reply_locale") or result.get("locale") or "en") in ("", "en"):
+        english = reply
+    hardship = detect_user_distress(message) == "hardship" and bool(english)
     completed, total = _COMPLETENESS.get(outcome, (1, 1))
     handoff = result.get("handoff") if isinstance(result.get("handoff"), Mapping) else {}
     completeness = handoff.get("completeness") if isinstance(handoff, Mapping) else None
     used = [u for u in result.get("connectors_used") or () if isinstance(u, Mapping)]
     return {
-        "distress_detected": distress,
-        "relief_cited": bool(_RELIEF_RE.search(reply or "")),
+        "distress_detected": hardship,
+        "relief_cited": hardship and _relief_offered(english),
         "sub_tasks_total": total,
         "sub_tasks_completed": completed,
         "handoff_completeness_ratio": float(completeness) if isinstance(completeness, int | float) else None,
         "deterministic_basis": str(result.get("retrieval_mode") or "") in _DETERMINISTIC_MODES
-        or any(u.get("outcome") in ("found", "no_record") for u in used),
+        or any(u.get("outcome") in ("found", "no_record") for u in used)
+        or _ran_deterministic_tool(tool_calls),
     }
 
 
@@ -257,7 +314,7 @@ def build_turn_payload(
                 sources=sources,
                 figure_fidelity_passed=fig_ok,
                 policy_adherence_passed=pol_ok,
-                **_scorecard_evidence(message, result, reply, payload["outcome"]),
+                **_scorecard_evidence(message, result, reply, payload["outcome"], tool_calls),
             )
             payload["quality_scorecard"] = {
                 "scorecard_id": sc.scorecard_id,

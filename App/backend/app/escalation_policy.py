@@ -73,11 +73,11 @@ def sla_seconds(priority: str, *, hardship: bool = False) -> int:
     """Target officer response for a ticket of *priority* (as the envelope's SLA)."""
     if priority == "urgent":
         return 30
+    base = 60 if priority == "high" else 120
     if hardship:
-        return _env_int("EQ_HARDSHIP_SLA_TARGET_SECONDS", 45, floor=15)
-    if priority == "high":
-        return 60
-    return 120
+        # Hardship tightens the target; a configured value never loosens it.
+        return min(base, _env_int("EQ_HARDSHIP_SLA_TARGET_SECONDS", 45, floor=15))
+    return base
 
 
 def higher_priority(first: str, second: str) -> str:

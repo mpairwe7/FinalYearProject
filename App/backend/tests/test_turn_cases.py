@@ -140,6 +140,17 @@ class LedgerUpsertTests(unittest.TestCase):
         self.ledger.upsert_turn_case("u-1", domain_tag="paye", channel="web")
         self.assertEqual(len(self._cases()), 2)
 
+    def test_a_reused_legacy_case_loses_its_raw_objective(self) -> None:
+        from app.memory.resolution_ledger import ResolutionCase
+
+        # Before Phase 38 the voice path stored the question itself.
+        legacy = ResolutionCase(user_id="u-1", primary_objective="what is owed on 1000000001 for UGX 4,500,000")
+        self.assertTrue(self.ledger.checkpoint("u-1", legacy))
+        self.ledger.upsert_turn_case("u-1", domain_tag=legacy.domain_tag, channel="web", step="Asked again")
+        stored = next(iter(self._cases().values()))
+        self.assertEqual(stored["primary_objective"], DOMAIN_OBJECTIVES[legacy.domain_tag])
+        self.assertNotIn("1000000001", str(stored))
+
     def test_nothing_is_written_without_consent(self) -> None:
         self.memory.consent = False
         self.assertIsNone(self.ledger.upsert_turn_case("u-1", domain_tag="vat", channel="web"))

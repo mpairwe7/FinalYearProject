@@ -850,6 +850,10 @@ class ResolutionLedger:
             event = "opened"
         else:
             case = existing
+            # A legacy voice case stored the raw question (a TIN, an amount)
+            # as its objective; the fixed phrase replaces it on first reuse.
+            case.primary_objective = objective_for(domain)
+            case.domain_tag = domain
             case.thread_id = thread_id or case.thread_id
             case.source_channel = bounded_channel
             case.locale = locale or case.locale

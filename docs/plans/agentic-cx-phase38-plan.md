@@ -103,10 +103,13 @@ and English-router form, and the read-only, code-routed connector surface (G138â
 on every exit, beside `apply_turn_guidance`, and only *adds* to `next_actions` and to the handoff. M1 adds a
 shadow branch after Stage 7 that never writes to the reply.
 
-**Memory and relationships.** `ResolutionLedger` gains one upsert entry point, `upsert_turn_case(user_id,
-domain, objective, step, status, channel)`, used by text (QW1) and voice. Cases are keyed by `domain_tag`;
-an update never creates a second case for the same domain. Objectives come from a fixed table
-(`DOMAIN_OBJECTIVES`), so no raw text is stored. All reads and writes stay behind `has_active_consent(...,
+**Memory and relationships.** `ResolutionLedger` gains one upsert entry point,
+`upsert_turn_case(user_id, *, domain_tag, channel, step="", status="in_progress", locale="en",
+thread_id="", tenant_id="default", asr_confidence=None)`, used by text (QW1) and voice. Cases are keyed
+by `domain_tag`; an update never creates a second case for the same domain. There is no objective
+parameter: objectives come from a fixed table (`DOMAIN_OBJECTIVES`), and a reused case is reset to its
+domain's phrase, so no raw text is stored (a legacy voice case's raw-question objective is replaced on
+first reuse). All reads and writes stay behind `has_active_consent(...,
 "personalization")`.
 
 **HandoffEnvelope.** No new fields. Text paths now fill: `goal`, `caller_affect`, `affect_trajectory`,

@@ -51,11 +51,19 @@ that cohort.
 
 ## Roll back
 
-Switch the flag off (`FLAG_EQ_STAKES_ESCALATION=false`, or remove the
-percentage). New turns and tickets revert at once: no offer beyond the legacy
-"sustained distress" button, priority `normal`, no envelope, topic `general`
-on the button. Tickets already raised keep what they were given. Resolution
-cases are consent-gated state and age out on `RESOLUTION_CASE_TTL_HOURS`.
+Each flag reverts only its own behaviour; to revert all of Phase 38, switch
+both off (`=false`, or remove the percentage). New turns and tickets revert at
+once:
+
+* `FLAG_EQ_STAKES_ESCALATION=false`: no offer beyond the legacy "sustained
+  distress" one, and tickets keep the priority their path gave them
+  (`normal` for the button) with no "Prioritised: …" reasons.
+* `FLAG_STRUCTURED_TEXT_HANDOFF=false`: no envelope, no "Already given" line,
+  nothing pruned, and the button's ticket keeps topic `general` (team
+  `general`) with no details to ask for.
+
+Tickets already raised keep what they were given. Resolution cases are
+consent-gated state and age out on `RESOLUTION_CASE_TTL_HOURS`.
 
 ## Privacy and limits
 

@@ -765,6 +765,8 @@ class FeatureFlags:
                 "workflow_tangent_resume",
                 "autonomous_outcome_verification",
                 "officer_preference_capture",
+                "eq_stakes_escalation",
+                "structured_text_handoff",
             )
         }
 
