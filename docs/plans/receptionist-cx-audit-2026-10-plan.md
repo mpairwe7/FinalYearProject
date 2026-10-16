@@ -196,5 +196,5 @@ shared state, see the runbook); LiveKit Cloud's adaptive interruption model.
 | Phase | PR | State |
 |---|---|---|
 | R1 | #581 | **Merged 2026-10-16** (`98c7c9e550`). Unit: 504 receptionist tests green on the CI interpreter. Live, isolated GPU stack (Sunflower vLLM, SunflowerASR, Orpheus): 14/18 replay scenarios, the new `18_crisis_while_waiting` and `11` (hold, then callback through the epoch-bound countdown) included (`evals/reports/call_replay_2026-10-16_r1_isolated.json`). The four failures (2, 8, 13, 14) fail the same way on pre-R1 `dev` on the same stack (`…_dev_baseline_ab.json`, 0/4): a Luganda answer over the 25 s cap, SunflowerASR mishearing the synthetic Luganda officer request, and G198. |
-| R2 | #582 | in review |
+| R2 | #582 | **Merged 2026-10-16** (`ee26e89df0`). Live, isolated GPU stack: unstaffed 10/13, the new `19_no_officer_online_is_a_callback_at_once` included; staffed 3/5 (`11` hold then callback, `18` crisis while waiting, `20` call me back while waiting); off duty (`CXP_CLOSED_DATES` = today) 1/1 with the off-duty wording and the hours on screen (`evals/reports/call_replay_2026-10-16_r2_*.json`). Failures as on pre-R1 `dev` (`2`, `8`, `13`, `14`) plus `5`, an English fallback after two failed figure checks (G185, R4); the `14` trace gave G198's real cause. |
 | R3 | — | in review |
