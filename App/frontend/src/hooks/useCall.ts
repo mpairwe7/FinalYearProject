@@ -100,6 +100,11 @@ export function useCall() {
     store.setStatus('transferring');
   }, [store]);
 
+  /** While waiting: an officer calls back instead; the server ends the wait and says so. */
+  const requestCallback = useCallback(() => {
+    socketRef.current?.requestCallback();
+  }, []);
+
   const toggleMute = useCallback(() => {
     store.setMuted((prev) => {
       const next = !prev;
@@ -325,6 +330,11 @@ export function useCall() {
               }
               break;
             }
+            case 'queue': {
+              const position = msg.position;
+              store.setQueuePosition(typeof position === 'number' && position > 0 ? position : null);
+              break;
+            }
             case 'language': {
               const language = msg.language;
               if (!isCallLanguage(language)) break;
@@ -409,6 +419,8 @@ export function useCall() {
     startCall,
     hangup,
     requestOfficer,
+    requestCallback,
+    queuePosition: store.queuePosition,
     toggleMute,
     setLanguage,
     audioBlocked: store.audioBlocked,

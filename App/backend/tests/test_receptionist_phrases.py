@@ -48,7 +48,9 @@ class Greeting(unittest.TestCase):
         self.assertTrue(greeting.startswith("Hi, thanks for contacting URA."))
         self.assertIn("preferred language", greeting)
         self.assertTrue(greeting.endswith("How can I help you today?"))
-        for name in ("English", "Luganda", "Swahili"):
+        # Every call opens with this line, so it names every call language (G189):
+        # a Runyankole or Acholi caller must not hear only three offered.
+        for name in ("English", "Luganda", "Swahili", "Runyankole", "Acholi"):
             self.assertIn(name, greeting)
 
     def test_the_caller_hears_first_that_it_is_an_ai_and_a_person_is_one_request_away(self):

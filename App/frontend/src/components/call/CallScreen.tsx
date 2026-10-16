@@ -122,6 +122,8 @@ export function CallScreen() {
     startCall,
     hangup,
     requestOfficer,
+    requestCallback,
+    queuePosition,
     toggleMute,
     languageDetection,
     languages,
@@ -258,6 +260,11 @@ export function CallScreen() {
             {status === 'transferring' && ticketRef && (
               <span className="call-ticket-chip">{`Ticket: ${caseReference(ticketRef)}`}</span>
             )}
+            {status === 'transferring' && queuePosition !== null && (
+              <span className="call-ticket-chip call-queue-chip" role="status" data-testid="call-queue-position">
+                {t('call.queuePosition', { position: String(queuePosition) })}
+              </span>
+            )}
             {live && <span className="call-timer">{formatDuration(duration)}</span>}
           </div>
         </header>
@@ -364,6 +371,17 @@ export function CallScreen() {
                     title={t('call.talkOfficer')}
                   >
                     <UserIcon />
+                  </button>
+                )}
+                {status === 'transferring' && (
+                  <button
+                    type="button"
+                    className="call-ctl"
+                    onClick={requestCallback}
+                    aria-label={t('call.callMeBack')}
+                    title={t('call.callMeBack')}
+                  >
+                    <PhoneIcon size={20} />
                   </button>
                 )}
                 <button

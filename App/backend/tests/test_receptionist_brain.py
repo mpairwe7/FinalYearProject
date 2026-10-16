@@ -42,6 +42,11 @@ def _words(text: str) -> list[dict]:
 
 class TestReceptionistBrain(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # An officer is on shift: these tests are about the wait, not about nobody being
+        # there to take the call (that is test_receptionist_queue_experience, G180).
+        staffed = patch("app.receptionist.transfer.is_staff_available", return_value=True)
+        staffed.start()
+        self.addCleanup(staffed.stop)
         db.init_db()
         init_receptionist_schema()
 
@@ -477,6 +482,11 @@ class TestReceptionistBrainLanguages(unittest.IsolatedAsyncioTestCase):
     """The brain speaks the call's current language and hears officer requests in any."""
 
     async def asyncSetUp(self):
+        # An officer is on shift: these tests are about the wait, not about nobody being
+        # there to take the call (that is test_receptionist_queue_experience, G180).
+        staffed = patch("app.receptionist.transfer.is_staff_available", return_value=True)
+        staffed.start()
+        self.addCleanup(staffed.stop)
         import uuid
 
         db.init_db()

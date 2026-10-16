@@ -301,6 +301,8 @@ export const ach: Partial<Dictionary> = {
   'call.mute': 'nek maikrofoni',
   'call.unmute': 'Yab maikrofoni',
   'call.talkOfficer': 'Lok ki latic me URA',
+  'call.callMeBack': 'Goy cim bota',
+  'call.queuePosition': 'Kabedo i rek: {position}',
   'call.hangup': 'Nek cim',
   'call.transferring': 'Tye ka kubi ki latic me URA…',
   'call.onHold': 'Tim ber ikur',

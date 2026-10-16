@@ -27,7 +27,9 @@ UNREVIEWED: frozenset[str] = frozenset({"lg", "sw", "nyn", "ach"})
 #: keep, which Orpheus reads badly (it said "999 or 112" as "nine nine or one
 #: twelve"; see speech_normalization for the phone numbers it loops on).
 #: Spoken lines give an emergency number in words, the screen in digits.
-UNSPOKEN: frozenset[str] = frozenset({"crisis_screen", "reference_screen", "tollfree_screen"})
+UNSPOKEN: frozenset[str] = frozenset(
+    {"crisis_screen", "reference_screen", "tollfree_screen", "officer_hours_screen"}
+)
 
 _PHRASES: dict[str, dict[str, str]] = {
     "en": {
@@ -36,8 +38,8 @@ _PHRASES: dict[str, dict[str, str]] = {
         # AI, and that a person is one request away.
         "greeting": (
             "Hi, thanks for contacting URA. I'm your AI assistant today. Ask your question "
-            "in your preferred language — English, Luganda or Swahili — and I'll give you "
-            "the answer in that language. You can ask for an officer at any time. "
+            "in your preferred language — English, Luganda, Swahili, Runyankole or Acholi — and "
+            "I'll give you the answer in that language. You can ask for an officer at any time. "
             "How can I help you today?"
         ),
         "more_detail": "Would you like more detail?",
@@ -61,6 +63,25 @@ _PHRASES: dict[str, dict[str, str]] = {
             "All our officers are busy, so an officer will call you back. "
             "Meanwhile, I can still help with other questions."
         ),
+        # Nobody is signed in to take the call (G180): said instead of a hold for nobody.
+        "officers_unavailable": (
+            "No officer is available to take your call right now, so an officer will call you back. "
+            "Meanwhile, I can still help with other questions."
+        ),
+        # Outside the officers' working hours (G195): no hold, a callback when they return.
+        "officers_off_duty": (
+            "Our officers are off duty at this hour, so an officer will call you back when they "
+            "are next on duty. Meanwhile, I can still help with other questions."
+        ),
+        "officer_hours_screen": "Officers' hours: {hours}",
+        # The waiting caller asked to be called back instead (G186).
+        "callback_confirmed": (
+            "Of course. An officer will call you back; your reference is on your screen. "
+            "Meanwhile, I can still help with other questions."
+        ),
+        "queue_next": "You're next in line.",
+        # While an officer has put the caller on hold (G187).
+        "officer_hold_update": "Thank you for holding. Your officer will be back with you shortly.",
         "reference_screen": "Your reference: {ref}",
         "clarify_term": "Excuse me, did you say {term}?",
         "clarify_confirm": "So if I got it right, you're asking about {highlight} — is that right?",
@@ -116,7 +137,7 @@ _PHRASES: dict[str, dict[str, str]] = {
     "lg": {
         "greeting": (
             "Gyebale ko, weebale okutuukirira URA. Nze muyambi wo owa AI leero. Buuza ekibuuzo kyo "
-            "mu lulimi lw'oyagala — Lungereza, Luganda oba Kiswahili — nange nja kukuddamu "
+            "mu lulimi lw'oyagala — Lungereza, Luganda, Kiswahili, Lunyankole oba Lwacholi — nange nja kukuddamu "
             "mu lulimi olwo. Osobola okusaba omukozi wa URA essaawa yonna. "
             "Nnyinza kukuyamba ntya leero?"
         ),
@@ -140,6 +161,21 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Abakozi baffe bonna balina emirimu, kale omukozi ajja kukukubira essimu. "
             "Mu kiseera kino, nkyasobola okukuyamba ku bibuuzo ebirala."
         ),
+        "officers_unavailable": (
+            "Kati tewali mukozi asobola kukwogerako, kale omukozi ajja kukukubira essimu. "
+            "Mu kiseera kino, nkyasobola okukuyamba ku bibuuzo ebirala."
+        ),
+        "officers_off_duty": (
+            "Abakozi baffe tebali ku mulimu mu kiseera kino, kale omukozi ajja kukukubira essimu "
+            "nga bakomyewo ku mulimu. Mu kiseera kino, nkyasobola okukuyamba ku bibuuzo ebirala."
+        ),
+        "officer_hours_screen": "Essaawa z'abakozi: {hours}",
+        "callback_confirmed": (
+            "Kale. Omukozi ajja kukukubira essimu; namba yo ey'okujuliza eri ku ssirini yo. "
+            "Mu kiseera kino, nkyasobola okukuyamba ku bibuuzo ebirala."
+        ),
+        "queue_next": "Ggwe addako.",
+        "officer_hold_update": "Webale okulinda. Omukozi wo ajja kudda gy'oli mangu.",
         "reference_screen": "Namba yo ey'okujuliza: {ref}",
         "clarify_term": "Nsonyiwa, ogambye {term}?",
         "clarify_confirm": "Kale, obuuza ku {highlight} — kituufu?",
@@ -184,7 +220,7 @@ _PHRASES: dict[str, dict[str, str]] = {
     "sw": {
         "greeting": (
             "Habari, asante kwa kuwasiliana na URA. Mimi ni msaidizi wako wa AI leo. Uliza swali "
-            "lako kwa lugha unayopendelea — Kiingereza, Luganda au Kiswahili — nami "
+            "lako kwa lugha unayopendelea — Kiingereza, Luganda, Kiswahili, Kinyankole au Kiacholi — nami "
             "nitakujibu kwa lugha hiyo. Unaweza kuomba afisa wakati wowote. Nikusaidie vipi leo?"
         ),
         "more_detail": "Ungependa maelezo zaidi?",
@@ -207,6 +243,21 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Maafisa wetu wote wana shughuli, kwa hiyo afisa atakupigia simu. "
             "Kwa sasa, bado ninaweza kukusaidia na maswali mengine."
         ),
+        "officers_unavailable": (
+            "Hakuna afisa anayepatikana kupokea simu yako sasa hivi, kwa hiyo afisa atakupigia simu. "
+            "Kwa sasa, bado ninaweza kukusaidia na maswali mengine."
+        ),
+        "officers_off_duty": (
+            "Maafisa wetu hawako kazini kwa saa hii, kwa hiyo afisa atakupigia simu watakaporudi "
+            "kazini. Kwa sasa, bado ninaweza kukusaidia na maswali mengine."
+        ),
+        "officer_hours_screen": "Saa za maafisa: {hours}",
+        "callback_confirmed": (
+            "Sawa. Afisa atakupigia simu; nambari yako ya kumbukumbu iko kwenye skrini yako. "
+            "Kwa sasa, bado ninaweza kukusaidia na maswali mengine."
+        ),
+        "queue_next": "Wewe ndiye unayefuata.",
+        "officer_hold_update": "Asante kwa kusubiri. Afisa wako atarudi kwako hivi punde.",
         "reference_screen": "Nambari yako ya kumbukumbu: {ref}",
         "clarify_term": "Samahani, ulisema {term}?",
         "clarify_confirm": "Kwa hiyo, kama nimeelewa vizuri, unauliza kuhusu {highlight} — ni sahihi?",
@@ -276,6 +327,21 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Abakozi baitu boona baine emirimo, nahabwekyo omukozi naija kukuteerera esimu. "
             "Omu bwire obu, nimbaasa kukuhwera aha bibuuzo ebindi."
         ),
+        "officers_unavailable": (
+            "Hati tihariho mukozi orikubaasa kukugambaho, nahabwekyo omukozi naija kukuteerera esimu. "
+            "Omu bwire obu, nimbaasa kukuhwera aha bibuuzo ebindi."
+        ),
+        "officers_off_duty": (
+            "Abakozi baitu tibari aha murimo omu bwire obu, nahabwekyo omukozi naija kukuteerera "
+            "esimu baagaruka aha murimo. Omu bwire obu, nimbaasa kukuhwera aha bibuuzo ebindi."
+        ),
+        "officer_hours_screen": "Shaaha z'abakozi: {hours}",
+        "callback_confirmed": (
+            "Kare. Omukozi naija kukuteerera esimu; enamba yaawe y'okujuriza eri aha screen yaawe. "
+            "Omu bwire obu, nimbaasa kukuhwera aha bibuuzo ebindi."
+        ),
+        "queue_next": "Niiwe orikukurataho.",
+        "officer_hold_update": "Webare kurinda. Omukozi waawe naija kugaruka ahari iwe ahonaaho.",
         "reference_screen": "Enamba yaawe y'okujuriza: {ref}",
         "clarify_term": "Nsaasira, waagamba {term}?",
         "clarify_confirm": "Nahabwekyo, naaba nkyetegyereize gye, noobuuza ahari {highlight} — kihikire?",
@@ -344,6 +410,21 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Luticwa weng gitye ki tic, pi meno latic bigoyo cim boti. "
             "Kombedi, pud atwero konyi ki lapeny mukene."
         ),
+        "officers_unavailable": (
+            "Kombedi pe latic mo ma twero loko kwedi, pi meno latic bigoyo cim boti. "
+            "Kombedi, pud atwero konyi ki lapeny mukene."
+        ),
+        "officers_off_duty": (
+            "Luticwa pe gitye i tic i cawa man, pi meno latic bigoyo cim boti ka gudwogo i tic. "
+            "Kombedi, pud atwero konyi ki lapeny mukene."
+        ),
+        "officer_hours_screen": "Cawa pa lutic: {hours}",
+        "callback_confirmed": (
+            "Ber. Latic bigoyo cim boti; namba ni me ngec tye i screen ni. "
+            "Kombedi, pud atwero konyi ki lapeny mukene."
+        ),
+        "queue_next": "In aye ilubo.",
+        "officer_hold_update": "Apwoyo kuro. Latic ni bidwogo boti oyot.",
         "reference_screen": "Namba ni me ngec: {ref}",
         "clarify_term": "Kica, iwaco {term}?",
         "clarify_confirm": "Pi meno, ka aniang maber, itye ka penyo i kom {highlight} — tye kakare?",

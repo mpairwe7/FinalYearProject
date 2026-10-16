@@ -145,6 +145,33 @@ describe('CallScreen component', () => {
     expect(screen.getByText('Ticket: TIC-1458BC4D')).toBeDefined();
   });
 
+  it('shows a waiting caller their place in the queue and offers a call-back (G186)', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('transferring');
+    useCallStore.getState().setQueuePosition(2);
+
+    render(<CallScreen />);
+
+    expect(screen.getByTestId('call-queue-position').textContent).toBe('Place in queue: 2');
+    expect(screen.getByRole('button', { name: 'Call me back instead' })).toBeDefined();
+    // Waiting already: the officer request is not offered twice.
+    expect(screen.queryByRole('button', { name: 'Talk to an officer' })).toBeNull();
+  });
+
+  it('offers the call-back only while waiting, and forgets the place once the wait ends', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('transferring');
+    useCallStore.getState().setQueuePosition(1);
+    useCallStore.getState().setStatus('ai');
+
+    render(<CallScreen />);
+
+    expect(useCallStore.getState().queuePosition).toBeNull();
+    expect(screen.queryByTestId('call-queue-position')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Call me back instead' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Talk to an officer' })).toBeDefined();
+  });
+
   it('displays bridged officer state when officer joins', () => {
     useCallStore.getState().openCall();
     useCallStore.getState().setStatus('officer');

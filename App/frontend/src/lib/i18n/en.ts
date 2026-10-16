@@ -323,6 +323,8 @@ export const en = {
   'call.mute': 'Mute',
   'call.unmute': 'Unmute',
   'call.talkOfficer': 'Talk to an officer',
+  'call.callMeBack': 'Call me back instead',
+  'call.queuePosition': 'Place in queue: {position}',
   'call.hangup': 'End call',
   'call.transferring': 'Connecting you to an officer…',
   'call.onHold': 'On hold',

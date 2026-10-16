@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Any, Final
 
 from .. import database as db
+from .. import officer_hours
 from ..analytics import record_chat_turn
 from ..flags import flags
 from ..speech_normalization import clean_text_for_speech
@@ -37,10 +38,12 @@ from .hub import hub
 from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, get_call, update_call
+from . import transfer as call_transfer
 from .transfer import (
     case_reference,
     close_transfer_on_timeout,
     open_transfer,
+    queue_position,
     raise_waiting_priority,
     stop_countdown,
 )
@@ -51,6 +54,7 @@ from .serializer import (
     Frame,
     InterruptionFrame,
     OutputTransportMessageFrame,
+    RequestCallbackFrame,
     RequestOfficerFrame,
 )
 
@@ -287,6 +291,20 @@ _SPEED_SLOW_PATTERNS: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 
+#: A waiting caller asking to be called back instead (G186): "call me back",
+#: "can I get a callback"; Luganda "munkubire / onkubire essimu" ("call me"),
+#: Swahili "nipigie simu", Runyankole "onteerere / munteerere esimu", Acholi
+#: "goy cim bota" — built from the receptionist's own reviewed "an officer will
+#: call you back" lines; native review pending, and the screen button always works.
+_CALLBACK_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(?:(?:call|ring|phone)\s+me\s+(?:back|later)|call[\s-]?back"
+    r"|(?:mu|o)nkubire\s+essimu|nkubira\s+essimu"
+    r"|(?:u|m)?nipigie\s+simu|nipigiwe\s+simu"
+    r"|(?:o|mu)nteerere\s+esimu"
+    r"|(?:wu)?goy\s+cim\s+bota)\b",
+    re.IGNORECASE,
+)
+
 #: "goodbye" also as speech-to-text writes it: "good bye", "good-bye".
 _HANGUP_VOICE_PATTERNS: Final[re.Pattern[str]] = re.compile(
     r"\b(?:hang\s+up|end\s+(?:the\s+)?call|disconnect|good[\s-]?bye"
@@ -464,6 +482,11 @@ class UraReceptionistBrain(LLMService):
 
         if isinstance(frame, RequestOfficerFrame):
             await self._transfer("caller_requested")
+            return
+
+        if isinstance(frame, RequestCallbackFrame):
+            if self.room.state.mode == "transferring":
+                await self._callback_instead()
             return
 
         if isinstance(frame, LLMContextFrame):
@@ -812,6 +835,9 @@ class UraReceptionistBrain(LLMService):
         if detect_crisis(user_text):
             await self._support_crisis_waiting()
             return
+        if _is_control_request(_CALLBACK_RE, user_text):
+            await self._callback_instead()
+            return
         if review_answer and self.room.state.review_state == "asking_transfer":
             call_review.record(self.room, user_text, language)
             await self._say_and_record(phrase("review_thanks_transfer", language), kind="notice")
@@ -852,6 +878,31 @@ class UraReceptionistBrain(LLMService):
         except Exception:
             logger.debug("Spoken confirm resolution metric skipped", exc_info=True)
         await self._say_and_record(phrase("confirm_done", language), kind="answer")
+
+    async def _callback_instead(self) -> None:
+        """The waiting caller would rather be called back: the wait ends, the callback is owed."""
+        await self._end_wait_with_callback(
+            self.room.state.ticket_id or "", reason="caller_requested_callback", line="callback_confirmed"
+        )
+
+    async def _end_wait_with_callback(self, ticket_ref: str, *, reason: str, line: str) -> None:
+        """End the wait as a callback: the caller is told why, with the reference on screen.
+
+        Shared by the three ways a wait becomes a callback: nobody answered in
+        time, nobody was signed in to answer, or the caller asked for one.
+        """
+        stop_countdown(self.room)
+        status_event = close_transfer_on_timeout(self.room, ticket_ref, callback_reason=reason)
+        if status_event is None:
+            return
+        # Nobody came: a review asked as the transfer began is now unanswered.
+        if self.room.state.review_state == "asking_transfer":
+            call_review.settle(self.room)
+        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)
+        await self._say_and_record(phrase(line, self.language), kind="notice")
+        if ticket_ref:
+            reference = phrase("reference_screen", self.language, ref=case_reference(ticket_ref))
+            await self._say_and_record(reference, kind="notice", speak=False)
 
     async def _support_crisis_waiting(self) -> None:
         """The crisis lines for a caller already waiting, then the call raised to urgent."""
@@ -1632,6 +1683,7 @@ class UraReceptionistBrain(LLMService):
 
         # 2-3. Ticket, call state, voice_calls row, staff lobby event. A caller
         # at risk goes to the front of the queue, whatever they called about.
+        staffed = call_transfer.is_staff_available()
         tid, status_event = open_transfer(
             self.room,
             self.chat_model,
@@ -1640,6 +1692,17 @@ class UraReceptionistBrain(LLMService):
             handoff=handoff,
             priority="urgent" if reason == "safety_concern" else "",
         )
+        if not staffed:
+            # Nobody is signed in to take it (G91, G180): no hold for nobody. The
+            # ticket stays for the officers, and the callback is owed at once —
+            # outside their working hours, for when they are next on duty (G195).
+            if officer_hours.on_duty():
+                await self._end_wait_with_callback(tid or "", reason="no_officer_online", line="officers_unavailable")
+            else:
+                await self._end_wait_with_callback(tid or "", reason="outside_working_hours", line="officers_off_duty")
+                hours = phrase("officer_hours_screen", self.language, hours=officer_hours.officer_hours().label())
+                await self._say_and_record(hours, kind="notice", speak=False)
+            return
 
         # 4. Spoken notice & status event to caller
         if ask_review:
@@ -1650,9 +1713,21 @@ class UraReceptionistBrain(LLMService):
         await self.push_frame(
             OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM
         )
+        # 5. Their place in the queue, on screen at once (G186).
+        await self._show_queue_position(queue_position(self.room))
 
         # 6. Start transfer timeout timer
         self.start_queue_countdown(tid or "")
+
+    async def _show_queue_position(self, position: int) -> None:
+        """The caller's place in the queue, for their screen — not a transcript line.
+
+        It changes while they wait; written into the transcript it would be
+        noise for the officer's brief, the summary and the risk monitor.
+        """
+        await self.push_frame(
+            OutputTransportMessageFrame({"type": "queue", "position": position}), FrameDirection.DOWNSTREAM
+        )
 
     def start_queue_countdown(self, ticket_ref: str) -> None:
         """Keep the waiting caller told, and time the wait out to a callback.
@@ -1691,26 +1766,26 @@ class UraReceptionistBrain(LLMService):
 
         every = get_hold_update_s()
         waited = 0.0
+        shown = queue_position(self.room)
+        told_next = False
         while every and waited + every < timeout_s:
             await asyncio.sleep(every)
             waited += every
             if not waiting():
                 return
-            if not state.claimed_by and not state.reconnecting_officer:
-                await self._say_and_record(phrase("still_holding", self.language), kind="notice")
+            if state.claimed_by or state.reconnecting_officer:
+                continue  # an officer is joining: no hold line over their greeting
+            await self._say_and_record(phrase("still_holding", self.language), kind="notice")
+            position = queue_position(self.room)
+            if position != shown:
+                shown = position
+                await self._show_queue_position(position)
+            if position == 1 and not told_next:
+                told_next = True
+                await self._say_and_record(phrase("queue_next", self.language), kind="notice")
         await asyncio.sleep(timeout_s - waited)
         while waiting() and state.claimed_by:
             await asyncio.sleep(0.5)
         if not waiting():
             return
-        status_event = close_transfer_on_timeout(self.room, ticket_ref)
-        if status_event is None:
-            return
-        # Nobody came: a review asked as the transfer began is now unanswered.
-        if state.review_state == "asking_transfer":
-            call_review.settle(self.room)
-        await self.push_frame(OutputTransportMessageFrame(status_event), FrameDirection.DOWNSTREAM)
-        await self._say_and_record(phrase("officers_busy", self.language), kind="notice")
-        if ticket_ref:
-            reference = phrase("reference_screen", self.language, ref=case_reference(ticket_ref))
-            await self._say_and_record(reference, kind="notice", speak=False)
+        await self._end_wait_with_callback(ticket_ref, reason="no_officer_available", line="officers_busy")

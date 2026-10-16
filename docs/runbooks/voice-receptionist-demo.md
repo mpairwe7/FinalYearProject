@@ -120,7 +120,11 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_CLARIFY_THRESHOLD` | `0.55` | Word acoustic probability below which ClarifyGate assesses candidates |
 | `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` | `2` | Number of failed clarification attempts before auto-transferring |
 | `RECEPTIONIST_TRANSFER_TIMEOUT_S` | `90` | Seconds to hold for available officer before promising a callback |
-| `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer; `0` turns them off |
+| `RECEPTIONIST_HOLD_UPDATE_S` | `30` | Seconds between *"Thank you for holding…"* lines while the caller waits for an officer, and between reassurances while an officer has them on hold; `0` turns them off |
+| `CXP_TIMEZONE` | `Africa/Kampala` | Time zone of the officers' working hours (`app/officer_hours.py`) |
+| `CXP_OPEN_HOUR` / `CXP_CLOSE_HOUR` | `7` / `23` | Whole hours the desk opens and closes (the CXP desk closes at 11 PM). A close at or before the open runs past midnight; `0`/`24` never closes |
+| `CXP_WORKING_DAYS` | every day | Days a shift starts on, e.g. `mon,tue,wed,thu,fri` |
+| `CXP_CLOSED_DATES` | unset | `YYYY-MM-DD,…` with no shift (public holidays) |
 | `RECEPTIONIST_BRIEF_EVERY_TURNS` | `3` | Caller turns between rolling rebuilds of the officer's brief (always rebuilt on transfer) |
 | `RECEPTIONIST_CLAIM_TIMEOUT_S` | `20` | How long an officer's "Take call" holds the call before their audio must join |
 | `RECEPTIONIST_MAX_CALL_S` | `900` | Hard ceiling for one call connection (15 minutes). A value that is set but not a positive number stops startup and fails the G36 gate instead of falling back |
@@ -318,7 +322,7 @@ upstream (`502`) until it is brought up again.
 3. Click **Accept & Call**.
 4. The synthesizer plays two PBX dialing ring pulses.
 5. The AI answers (always in English, whatever the chat language is — §6):
-   *"Hi, thanks for contacting URA. I'm your AI assistant today. Ask your question in your preferred language — English, Luganda or Swahili — and I'll give you the answer in that language. You can ask for an officer at any time. How can I help you today?"*
+   *"Hi, thanks for contacting URA. I'm your AI assistant today. Ask your question in your preferred language — English, Luganda, Swahili, Runyankole or Acholi — and I'll give you the answer in that language. You can ask for an officer at any time. How can I help you today?"*
    It says it is an AI, and that a person is one request away, before anything else.
    The recording notice is the consent dialog in step 3; the greeting no longer repeats it.
 
@@ -372,6 +376,8 @@ caller hears the AI first.
 | Trigger | What happens | `transfer_reason` |
 |---|---|---|
 | The caller asks for a person, however it is put: "Can I speak with an agent?", "Put me through to someone", or just "Officer" / "Agent, please" (Luganda *omukozi*, Swahili *afisa*); or taps **Talk to an officer** | Transferred at once | `caller_requested` |
+| …and **no officer is signed in** (presence; a lookup error counts as signed in) | No hold for nobody: *"No officer is available to take your call right now, so an officer will call you back…"*, the reference on screen, the ticket kept for the officers. The screen never shows a wait | callback `no_officer_online` |
+| …**outside the officers' working hours** (`CXP_*`, default 07:00–23:00 EAT) with nobody signed in | *"Our officers are off duty at this hour, so an officer will call you back when they are next on duty…"*; the hours and the reference on screen (times are never spoken). An officer working late still takes the call | callback `outside_working_hours` |
 | A dispute, objection, appeal or legal question | Transferred at once | `tax_dispute` (or the chat's reason) |
 | Nothing in the knowledge base, or the lookup fails or takes over 25 s | Transferred at once | `no_knowledge_match`, `system_error`, `timeout` |
 | Clarification fails `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` times | Transferred | `clarification_failed` |
@@ -417,7 +423,13 @@ could not be completed on the call and offers an officer (G177).
    marked as owed a callback (`needs_callback`, reason `no_officer_available`; lobby
    `call.transfer_timed_out`) — a **Callback** chip on its row. An officer who takes the
    call at the last moment is waited for; the caller is not told everyone is busy while
-   an officer is joining. Replay check: `scripts/replay_call_audio.py --only 11_officer`
+   an officer is joining. Their **place in the queue** shows on screen from the start
+   (*"Place in queue: 2"*; a `queue` message, never a transcript line), and once they are
+   first they hear *"You're next in line."* with a hold line — said once. A caller who would
+   rather not wait taps **Call me back instead**, or says so ("call me back", Luganda
+   *munkubire essimu*, Swahili *nipigie simu*, Runyankole *onteerere esimu*, Acholi *goy cim
+   bota*): the wait ends as a callback (`caller_requested_callback`) and the AI stays on the
+   line. Replay check: `scripts/replay_call_audio.py --only 11_officer`
    (about 2 minutes).
    The same countdown runs for **every** wait, not only the AI's transfer: when an officer
    passes the call on, or their audio drops and does not come back within
@@ -448,6 +460,10 @@ could not be completed on the call and offers an officer (G177).
 6. The call follows the officer: open a ticket mid-call and a dock at the bottom of every
    staff page keeps the timer, **Mute** (`M`), **End** (`E`) and **Back to call**. Leaving
    the page asks first.
+7. **Hold** tells the caller *"Please hold."* in the call's language (their screen also plays
+   a tone), then *"Thank you for holding. Your officer will be back with you shortly."* every
+   `RECEPTIONIST_HOLD_UPDATE_S` until the officer resumes — which says nothing: the officer
+   speaks.
 
 ### Step 6: Hang-up & Performance Evaluation
 1. Either side ends it: the officer's **End call** plays *"Thank you for calling URA.
@@ -553,6 +569,8 @@ local way: "Vati" and "tiini" are VAT and TIN.
 | client → server | `call_start.parent_conversation_id`, `call_start.chat_session` | the chat the call was started from, and (signed out) the chat session that owns it — see *Calls started from the chat* below |
 | server → client | `call_ready.language_detection`, `.languages`, `.language` | show the language chip; the opening language |
 | server → client | `{"type":"language","language":"lg","source":"auto"\|"explicit"\|"override","confidence":0.93}` | the call's language is now … |
+| client → server | `{"type":"request_callback"}` | while waiting: end the wait as a callback (the **Call me back instead** button) |
+| server → client | `{"type":"queue","position":2}` | the waiting caller's place in the queue (same tenant, unclaimed, priority then wait) |
 | client → server | `{"type":"set_language","language":"sw"}` | pin the call to a language — any of `RECEPTIONIST_LANGUAGES` (en, sw, lg, nyn, ach by default), on the WebSocket and LiveKit paths alike (`config.call_language`; the LiveKit loop once dropped nyn/ach, G182) |
 
 **Calls started from the chat (G122).** A call started from the chat sends the chat's
@@ -588,7 +606,7 @@ Orpheus runs weight-only FP8 (`ORPHEUS_QUANTIZATION=fp8`): at bf16 an RTX A6000
 generates at only ~0.96× real time, which leaves no headroom; FP8 measured 234 ms to
 first audio at 0.63× real time (`evals/reports/orpheus_tts_2026-09-24_*.json`).
 
-**Replay check** (`scripts/replay_call_audio.py`, seventeen scenarios): besides the
+**Replay check** (`scripts/replay_call_audio.py`, twenty scenarios): besides the
 language events, each turn declares the language its answer must be in and fails if
 the receptionist's own word lists place it in another — a Swahili caller answered in
 English passed every other check. `12_silent_caller` says nothing after the greeting
@@ -597,7 +615,13 @@ an officer and says yes (transferred) or no (stays with the AI); "Officer, pleas
 alone transfers; a caller in crisis hears the crisis lines, emergency numbers in
 words, and is transferred on yes. `17_yes_over_the_answer_is_asked_again` says "Yes,
 please" over the worried caller's answer, before its officer offer is heard: the
-assistant stops, asks the question again and transfers no one. A scenario can require text in a reply
+assistant stops, asks the question again and transfers no one. `18_crisis_while_waiting`
+says it wants to end its life while in the queue: crisis lines at once, the call stays first.
+`19_no_officer_online_is_a_callback_at_once` and `20_call_me_back_while_waiting` cover G180 and
+G186. A transfer with nobody signed in is a callback at once, so the queue scenarios are marked
+`staffed` and run only with `--staffed`, after marking an officer available on the server
+(`presence.upsert_presence("replay_officer", status="available")`, with
+`RECEPTIONIST_PRESENCE_TTL_S` raised for the run); the nobody-online ones run without it. A scenario can require text in a reply
 (`expect_reply`), text said while lingering, and a status that must never come. The harness receives audio at the demo socket's pace,
 twice real time, so it can start talking during a pause *between* greeting sentences;
 that shows up as one barge-in on a first turn and is an artefact of the harness, not

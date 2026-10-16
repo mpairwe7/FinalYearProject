@@ -66,6 +66,7 @@ UTTERANCES: dict[str, tuple[str, str]] = {
     "en_no": ("en", "No, thank you."),
     "en_officer_word": ("en", "Officer, please."),
     "en_crisis": ("en", "I can't pay these taxes. I just want to end my life."),
+    "en_call_me_back": ("en", "Actually, can you just call me back instead?"),
 }
 
 
@@ -95,6 +96,11 @@ class Scenario:
     expect_said_while_lingering: tuple[str, ...] = ()
     # A status that must never arrive (a declined officer offer stays with the AI).
     forbid_status: str | None = None
+    # Whether an officer must be signed in (True), must not be (False), or either
+    # (None). A transfer with nobody on shift is a callback at once (G180), so
+    # the queue scenarios need a staffed desk: run them with --staffed after
+    # marking an officer available, the others without.
+    staffed: bool | None = None
     note: str = ""
 
 
@@ -130,7 +136,7 @@ SCENARIOS = [
     # request would then land on a call that is already transferring.
     Scenario("8_transfer_from_luganda", ["lg_vat", "lg_person"], ["lg"], expect_status="transferring", reply_languages=["lg", "lg"],
              expect_status_on="lg_person",
-             note="Officer request in Luganda transfers; staff see a Luganda caller."),
+             staffed=True, note="Officer request in Luganda transfers; staff see a Luganda caller."),
     Scenario("9_barge_in_greeting", ["en_vat"], ["en"], barge_turn=0, reply_languages=["en"],
              note="Talking over the greeting stops it, and the question is answered."),
     Scenario("10_barge_in_luganda_answer", ["en_vat", "lg_tin"], ["lg"], override="lg", barge_turn=1, reply_languages=["lg", "lg"],
@@ -141,7 +147,7 @@ SCENARIOS = [
     Scenario("11_officer_request_times_out", ["en_officer"], None, expect_status="transferring", reply_languages=["en"],
              expect_status_on="en_officer", linger_s=100.0, expect_after_linger="ai",
              expect_said_while_lingering=("Thank you for holding", "an officer will call you back", "Your reference: TIC-"),
-             note="The receptionist queues the call with the packet's topic (account) and priority (high), "
+             staffed=True, note="The receptionist queues the call with the packet's topic (account) and priority (high), "
                   "tells the caller every 30 s that they are still holding; nobody answers, so it returns "
                   "to the AI owing a callback, with a short reference on screen."),
     # Says nothing after the greeting. RECEPTIONIST_IDLE_REPROMPT_S (12 s) after
@@ -154,7 +160,7 @@ SCENARIOS = [
     Scenario("13_officer_offer_accepted", ["en_worried_tin", "en_yes"], None, expect_status="transferring",
              expect_status_on="en_yes", reply_languages=["en", "en"],
              expect_reply={"en_worried_tin": ("Would you like to speak to an officer",)},
-             note="The answer ends on the officer offer alone; yes transfers the call."),
+             staffed=True, note="The answer ends on the officer offer alone; yes transfers the call."),
     Scenario("14_officer_offer_declined", ["en_worried_tin", "en_no"], None, forbid_status="transferring",
              reply_languages=["en", "en"],
              expect_reply={"en_worried_tin": ("Would you like to speak to an officer",),
@@ -162,12 +168,12 @@ SCENARIOS = [
              note="No keeps the AI on the call."),
     Scenario("15_one_word_officer", ["en_officer_word"], None, expect_status="transferring",
              expect_status_on="en_officer_word", reply_languages=["en"],
-             note="\"Officer, please\" alone is a request for a person, as the greeting says."),
+             staffed=True, note="\"Officer, please\" alone is a request for a person, as the greeting says."),
     Scenario("16_crisis_support", ["en_crisis", "en_yes"], None, expect_status="transferring",
              expect_status_on="en_yes", reply_languages=["en", "en"],
              expect_reply={"en_crisis": ("nine nine nine, or one one two", "0800 21 21 21",
                                          "connect you to a URA officer as well")},
-             note="Crisis lines in full (emergency numbers in words, the counselling line on screen), "
+             staffed=True, note="Crisis lines in full (emergency numbers in words, the counselling line on screen), "
                   "then an urgent transfer on yes."),
     # "Yes please" said over the answer, before its officer offer was heard,
     # is a backchannel: the question is asked again and nobody is transferred.
@@ -181,8 +187,18 @@ SCENARIOS = [
              expect_status_on="en_officer", reply_languages=["en", "en"], forbid_status="ai",
              expect_reply={"en_crisis": ("nine nine nine, or one one two", "0800 21 21 21",
                                          "come to you first")},
-             note="A caller in the queue who speaks of ending their life hears the crisis lines at once "
+             staffed=True, note="A caller in the queue who speaks of ending their life hears the crisis lines at once "
                   "and stays first in the queue (urgent); the call never falls back to the AI."),
+    # G180: nobody signed in means a callback at once, not 90 s on hold for nobody.
+    Scenario("19_no_officer_online_is_a_callback_at_once", ["en_officer"], None, expect_status="ai",
+             expect_status_on="en_officer", forbid_status="transferring", reply_languages=["en"], staffed=False,
+             expect_reply={"en_officer": ("No officer is available", "Your reference: TIC-")},
+             note="The ticket is kept for the officers and the callback owed; the caller is told so at once."),
+    # G186: a waiting caller can ask to be called back instead.
+    Scenario("20_call_me_back_while_waiting", ["en_officer", "en_call_me_back"], None, expect_status="ai",
+             expect_status_on="en_call_me_back", reply_languages=["en", "en"], staffed=True,
+             expect_reply={"en_call_me_back": ("An officer will call you back", "Your reference: TIC-")},
+             note="The wait ends as a callback (caller_requested_callback); the AI stays on the line."),
 ]
 
 
@@ -465,6 +481,7 @@ async def run_scenario(url: str, sc: Scenario, reply_wait_s: float, barge_gain_d
 
 async def main_async(args: argparse.Namespace) -> None:
     chosen = [s for s in SCENARIOS if not args.only or any(o in s.name for o in args.only.split(","))]
+    chosen = [s for s in chosen if s.staffed is None or s.staffed == args.staffed]
     chosen = [s for s in chosen for _ in range(max(1, args.repeat))]
     results = []
     for sc in chosen:
@@ -505,6 +522,9 @@ def main() -> None:
     ap.add_argument("--reply-wait", type=float, default=30.0)
     ap.add_argument("--repeat", type=int, default=1, help="run each chosen scenario this many times")
     ap.add_argument("--label", default="", help="appended to the report name, e.g. _flag_off")
+    ap.add_argument("--staffed", action="store_true",
+                    help="an officer is marked available on the server: run the queue scenarios "
+                         "(staffed=True) instead of the nobody-online ones (staffed=False)")
     ap.add_argument("--barge-gain-db", type=float, default=0.0,
                     help="level of the barge-in turn, e.g. -15: a browser's echo canceller "
                          "turns the caller down while the assistant is talking")

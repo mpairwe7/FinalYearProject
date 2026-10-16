@@ -75,6 +75,11 @@ class RequestOfficerFrame(Frame):
 
 
 @dataclass
+class RequestCallbackFrame(Frame):
+    """The waiting caller tapped "Call me back instead" (G186)."""
+
+
+@dataclass
 class SetLanguageFrame(Frame):
     """The caller picked the call's language on screen — an override for the rest of the call."""
 
@@ -145,6 +150,9 @@ class BrowserCallSerializer(FrameSerializer):
 
             if msg_type == "request_officer":
                 return RequestOfficerFrame(reason=msg.get("reason", "caller_requested"))
+
+            if msg_type == "request_callback":
+                return RequestCallbackFrame()
 
             if msg_type == "set_language":
                 language = call_language(msg.get("language"))

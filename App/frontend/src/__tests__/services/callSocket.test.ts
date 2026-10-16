@@ -10,6 +10,17 @@ describe('CallSocket authentication', () => {
     vi.unstubAllGlobals();
   });
 
+  it('asks for a call-back with its own message', () => {
+    vi.stubGlobal('WebSocket', FakeSocket);
+    const socket = new CallSocket({ onAudio: vi.fn(), onMessage: vi.fn(), onError: vi.fn(), onClose: vi.fn() });
+    socket.connect({ locale: 'en', voice_consent_accepted: true });
+    const fake = FakeSocket.find('/calls/stream')!;
+    fake.open();
+    socket.requestCallback();
+    expect(JSON.parse(String(fake.sent[fake.sent.length - 1]))).toEqual({ type: 'request_callback' });
+    socket.close();
+  });
+
   it('sends credentials in call_start, not in the WebSocket URL', () => {
     const token = 'header.payload.signature';
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
