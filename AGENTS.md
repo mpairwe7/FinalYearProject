@@ -14,15 +14,18 @@ This file is the repo-wide router. Package rules live next to the code.
 | `apps/api` | FastAPI entry (`App/backend`) | `apps/api/AGENTS.md` |
 | `apps/web` | Next.js entry (`App/frontend`) | `apps/web/AGENTS.md` |
 | `evals/` | Golden sets, red-team gate, preference export | `evals/AGENTS.md` |
-| `data/` + `Data/` | FAQ, PDFs, crawl, eval JSONL | `data/README.md` |
+| `Data/` | FAQ, PDFs, crawl, eval JSONL | `Data/README.md` |
+| `ml/` | Offline training, corpus pipelines, local ASR/MT/TTS wrappers | `ml/AGENTS.md` |
 | `infra/` | Compose overlays and example HPA (not applied) | `infra/AGENTS.md` |
+| `monitoring/` | Prometheus, Alertmanager, OpenSLO & promtool tests | `monitoring/AGENTS.md` |
 | `governance/` | Risk manifest + compliance gate | `governance/AGENTS.md` |
+| `threat-model/` | STRIDE / OWASP / MITRE ATLAS threat model as code | `threat-model/AGENTS.md` |
 | `docs/` | Architecture, gaps, model card | `docs/AGENTS.md` |
 | `tests/` | Pytest (agents + API e2e) | `tests/AGENTS.md` |
 | `prompts/` | Pointer to runtime prompts | `prompts/README.md` |
 | `skills/` | Pointer to Cursor/Claude skills | `skills/README.md` |
 | `packages/` | Why this is not a split monorepo | `packages/README.md` |
-| `plugins/` | System plugins (EFRIS, DTS) & connectors | `plugins/README.md` |
+| `plugins/` | System plugins (EFRIS, DTS) & connectors | `plugins/AGENTS.md` |
 | `configs/` | Prototype env | `configs/README.md` |
 
 Do not move `App/backend` or `App/frontend`. Docker, HF Space, and CI import `app.*`.

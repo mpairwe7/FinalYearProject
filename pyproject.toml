@@ -4,9 +4,9 @@
 
 [project]
 name = "ura-chatbot"
-version = "1.1.0"
+version = "1.2.0"
 description = "AI-powered customer service assistant for Uganda Revenue Authority"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.10,<3.15"
 license = "Apache-2.0"
 
 [build-system]
@@ -155,6 +155,8 @@ ignore = [
 # Only T201, unlike the blanket list above: the security and correctness lints
 # stay on, because these run against live deployments and real credentials.
 "scripts/**" = ["T201"]
+"governance/**" = ["T201"]
+"threat-model/**" = ["T201"]
 "ml/pipelines/**" = ["T201", "S311", "S110", "S112", "S310", "E741"]
 # Backend CLI entry-points (audit verifier, etc.)
 "App/backend/app/audit/verifier.py" = ["T201"]
