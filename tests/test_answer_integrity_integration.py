@@ -307,7 +307,7 @@ class TestTaxpayerEscalationEndpoint:
         Outside working hours the endpoint words its reply differently (G196),
         so wording asserted here would fail every run after 23:00 Kampala time.
         """
-        for name in ("CXP_TIMEZONE", "CXP_WORKING_DAYS", "CXP_CLOSED_DATES", "CXP_FORCE_AFTER_HOURS"):
+        for name in ("CXP_TIMEZONE", "CXP_WORKING_DAYS", "CXP_CLOSED_DATES"):
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("CXP_OPEN_HOUR", "0")
         monkeypatch.setenv("CXP_CLOSE_HOUR", "24")

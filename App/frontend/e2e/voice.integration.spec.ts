@@ -59,10 +59,10 @@ test.describe("Voice STT/TTS — real backend (integration)", () => {
     const r = await resp;
     expect(r.status()).toBe(200);
 
-    // Mock ASR returns no transcript → the client renders the graceful voice-error
-    // turn ("Voice error: No speech detected …"). Assert the round-trip surfaced.
+    // Mock ASR returns no transcript → the server says why (error_code: no_speech) and
+    // the client words it for the reader: "Didn't catch that", not an outage (G201).
     await expect(page.locator(".message-row-assistant").last()).toContainText(
-      /no speech detected|voice error/i,
+      /didn.t catch that/i,
       { timeout: 20_000 },
     );
   });

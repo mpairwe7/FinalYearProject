@@ -72,6 +72,17 @@ export const StopIcon = () => (
     <rect x="6" y="6" width="12" height="12" rx="2" />
   </svg>
 );
+export const PauseIcon = () => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+    <path d="M9 6v12" />
+    <path d="M15 6v12" />
+  </svg>
+);
+export const PlayIcon = () => (
+  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+    <path d="M8 5.5v13l10-6.5-10-6.5Z" />
+  </svg>
+);
 export const UserIcon = () => (
   <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
     <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Z" /><path d="M3 21a9 9 0 0 1 18 0" />

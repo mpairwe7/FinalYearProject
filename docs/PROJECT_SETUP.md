@@ -495,6 +495,27 @@ their recording.
 On a phone, the composer's hint line hid everything, including these notices;
 it now hides only the standing disclaimer.
 
+**A reply being read aloud can be paused, followed and stopped from one place**
+(`components/NarrationBar.tsx`, G200). Whenever a reply is read — its **Listen**
+button, or narration reading every reply by itself — a bar sits on the composer:
+*Pause reading* / *Resume reading* (the playback context is suspended, so every
+queued sentence waits with it), *Stop reading*, and the sentence being heard
+(from the streamed piece's own text; hidden from screen readers, which would read
+it over the audio). This is the mechanism WCAG 2.2 SC 1.4.2 asks for when audio
+plays by itself: before it, a reply could be stopped only from its own button,
+which a long conversation scrolls out of view. **Escape** does the same from the
+keyboard (`hooks/useVoiceEscape.ts`, G204): it cancels a recording, else stops
+dictation (what was heard stays in the composer), else stops the reading — one
+per press, and never while a dialog that Escape belongs to is open. A reply that
+could not be read aloud at all says so on the bar for 8 s, with **Try again**,
+instead of a Listen tap that silently did nothing (G202).
+
+**The voice speaks the reader's language** (G201). The Listen button, the bar,
+every dictation notice and the voice-mode errors are translated in en, lg, sw,
+nyn and ach (non-English drafts await native review); a failed voice turn says
+"I couldn't process your voice", never the server's raw error. The Settings
+dialog is still English in every locale (G205).
+
 **Hearing nothing is not an outage.** The ASR chain advances on a non-empty
 transcript, so a backend that ran fine and heard silence used to be
 indistinguishable from one that crashed: the chain ended on *"All ASR backends

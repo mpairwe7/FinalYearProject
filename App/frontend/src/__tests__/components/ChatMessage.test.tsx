@@ -150,6 +150,17 @@ describe("ChatMessage", () => {
     expect(alert).toHaveTextContent("low confidence");
   });
 
+  it("names its Listen button in the reader's language (G201)", () => {
+    try {
+      useChatStore.setState({ locale: "sw" });
+      renderMsg(assistantTurn, { locale: "sw" });
+      const listen = screen.getByRole("button", { name: /^Sikiliza kwa / });
+      expect(listen).toHaveTextContent("Sikiliza");
+    } finally {
+      useChatStore.setState({ locale: "en" });
+    }
+  });
+
   it("outside officers' hours, says when the handoff will be read (G196)", () => {
     renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: OFF_DUTY });
     const notice = screen.getByTestId("escalation-off-duty");

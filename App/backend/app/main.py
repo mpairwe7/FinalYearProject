@@ -2163,6 +2163,7 @@ async def voice_chat(
         return VoiceChatResponse(
             transcript="",
             error=f"ASR failed: {asr_result.error}",
+            error_code="asr_failed",
             asr_latency_s=round(asr_latency, 3),
             asr_backend=asr_result.backend,
             total_latency_s=round(time.perf_counter() - t_start, 3),
@@ -2178,6 +2179,7 @@ async def voice_chat(
             transcript="",
             transcript_language=detected_lang,
             error="No speech detected. Please speak clearly and try again.",
+            error_code="no_speech",
             asr_latency_s=round(asr_latency, 3),
             asr_backend=asr_result.backend,
             total_latency_s=round(time.perf_counter() - t_start, 3),

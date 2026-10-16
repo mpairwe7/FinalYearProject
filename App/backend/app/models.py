@@ -688,6 +688,11 @@ class VoiceChatResponse(BaseModel):
     tts_backend: str = ""
     mt_backend: str = ""
     error: str | None = None
+    error_code: Literal["no_speech", "asr_failed"] | None = Field(
+        None,
+        description="Why there is no transcript, for the client to word in the user's language: "
+        "no_speech (it ran and heard nothing) or asr_failed",
+    )
 
 
 class SpeechHealthResponse(BaseModel):
