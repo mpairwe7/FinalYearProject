@@ -50,16 +50,7 @@ plugins/
 │   ├── client.py             # Typed SDK for Payment operations
 │   ├── connector.py          # PaymentConnector with 5 Tool implementations
 │   └── README.md
-├── EFRIS/                    # Symlink -> efris
-├── dts/                      # Symlink -> digital_tax_stamps
-├── digital tax stamps/       # Symlink -> digital_tax_stamps
-├── URSB/                     # Symlink -> ursb
-├── BWIMS/                    # Symlink -> bwims
-├── TIN/                      # Symlink -> tin_registration
-├── tin/                      # Symlink -> tin_registration
-├── payment/                  # Symlink -> payment_system
-├── payments/                 # Symlink -> payment_system
-└── make_payment/             # Symlink -> payment_system
+└── apps/                     # Simulator FastAPI apps + safety boundary (common_ui.py)
 ```
 
 ## Connectors & Agent Tools (23 Tools Total)

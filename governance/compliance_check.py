@@ -67,6 +67,13 @@ REQUIRED_FILES = [
     "App/backend/app/client_telemetry.py",
     "App/backend/app/ai_disclosure.py",
     "ml/configs/quality_baseline.json",
+    # Monorepo standardization & hierarchical agent governance (G208)
+    "AGENTS.md",
+    "ml/AGENTS.md",
+    "monitoring/AGENTS.md",
+    "threat-model/AGENTS.md",
+    "plugins/AGENTS.md",
+    "tests/test_monorepo_architecture_governance.py",
 ]
 
 # Content keywords that MUST appear in specific files.
@@ -112,6 +119,10 @@ REQUIRED_CONTENT: dict[str, list[str]] = {
         "LLM09",
         "LLM10",
         "devsecops_threat_modelling",
+        "owasp_agentic_2026",
+        "ASI01",
+        "ASI10",
+        "aibom_inventory",
     ],
     "threat-model/validate_threats.py": [
         "THREAT_REGISTRY",
@@ -193,7 +204,7 @@ def _verified_by_refs(manifest_path: Path) -> list[tuple[str, str]]:
 
     def walk(node: object) -> None:
         if isinstance(node, dict):
-            label = str(node.get("control") or node.get("requirement") or "")
+            label = str(node.get("control") or node.get("requirement") or node.get("id") or "")
             for ref in node.get("verified_by") or []:
                 refs.append((label, str(ref)))
             for value in node.values():

@@ -14,7 +14,7 @@ system:
     URA documents, FAQ databases, and taxation handbooks.
   intended_users: "URA taxpayers, tax agents, general public"
   deployment_regions: ["UG"]
-  languages: ["en", "lg"]
+  languages: ["en", "lg", "sw", "nyn", "ach"]
 
 # =============================================================================
 # NIST AI RMF 1.0 + Generative AI Profile
@@ -394,3 +394,106 @@ devsecops_threat_modelling:
       mitigated: 27
       accepted: 1
     validation: "CI gate in .github/workflows/devsecops-sast-dast.yml (threat-model job)"
+
+# =============================================================================
+# OWASP Top 10 for Agentic Applications 2026 (ASI01–ASI10) & AIBOM Inventory
+# Reference: https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
+# =============================================================================
+owasp_agentic_2026:
+  edition: "OWASP Top 10 for Agentic Applications 2026"
+  risks:
+    - id: "ASI01"
+      name: "Agent Goal Hijack"
+      status: "mitigated"
+      evidence: "App/backend/app/guardrails.py, App/backend/app/agents/supervisor.py"
+      controls: "Cross-lingual prompt-injection & harmful-intent screening (en, lg, sw, nyn, ach) prior to supervisor routing and tool dispatch"
+      verified_by:
+        - "tests/agents/test_agentic_voice_2026_enhancements.py::test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrails"
+    - id: "ASI02"
+      name: "Tool Misuse and Exploitation"
+      status: "mitigated"
+      evidence: "App/backend/app/mcp/policy.py, App/backend/app/tools/__init__.py"
+      controls: "Allow-listed ToolRegistry and MCP policy engine with per-tool risk tiers, required scopes, and bounded tool-call budgets"
+      verified_by:
+        - "App/backend/tests/test_mcp_policy.py"
+    - id: "ASI03"
+      name: "Identity and Privilege Abuse"
+      status: "mitigated"
+      evidence: "App/backend/app/auth.py, App/backend/app/main.py"
+      controls: "Strict role separation (_require_live_officer, _desk_writer) ensuring only ura_staff handle live taxpayer queues/calls while admins/auditors are read/audit-only"
+      verified_by:
+        - "tests/agents/test_auth.py"
+    - id: "ASI04"
+      name: "Agentic Supply Chain"
+      status: "mitigated"
+      evidence: "governance/ai_risk_manifest.yaml, App/backend/app/mcp/client.py"
+      controls: "Pinned model and dependency manifests (aibom_inventory), Mcp-Name verification, disabled dynamic remote MCP registration, and SLSA/Trivy CI gates"
+      verified_by:
+        - "App/backend/tests/test_mcp_hardening.py"
+    - id: "ASI05"
+      name: "Unexpected Code Execution (RCE)"
+      status: "mitigated"
+      evidence: "App/backend/app/documents.py, .bandit.yaml"
+      controls: "No eval/exec tool execution; isolated subprocess document parsing (DOCUMENT_PARSE_ISOLATED) and PDF structural/malware guards"
+      verified_by:
+        - "App/backend/tests/test_pdf_guards.py"
+    - id: "ASI06"
+      name: "Memory and Context Poisoning"
+      status: "mitigated"
+      evidence: "App/backend/app/memory/service.py, App/backend/app/officer_handoff.py"
+      controls: "Tenant- and user-scoped 4-tier cognitive memory, low-ASR-confidence memory write suppression, and _-prefixed internal workflow state exclusion (G171)"
+      verified_by:
+        - "App/backend/tests/test_memory_lifecycle.py"
+    - id: "ASI07"
+      name: "Insecure Inter-Agent Communication"
+      status: "mitigated"
+      evidence: "App/backend/app/agents/graphs/main_graph.py, App/backend/app/memory/resolution_ledger.py"
+      controls: "Typed AgentGraphState and HandoffEnvelope v2.1 schema validation across specialist nodes (CUSTOMS_SPECIALIST, TAX_SPECIALIST, TOOLS)"
+      verified_by:
+        - "tests/agents/test_phase38_cx.py"
+    - id: "ASI08"
+      name: "Cascading Agent Failures"
+      status: "mitigated"
+      evidence: "App/backend/app/resilience.py, App/backend/app/quality_circuit_breaker.py"
+      controls: "Provider circuit breakers, bounded ReAct/revision loops, and runtime quality circuit breaker throttling autonomy on grounding degradation"
+      verified_by:
+        - "App/backend/tests/test_resilience.py"
+    - id: "ASI09"
+      name: "Human-Agent Trust Exploitation"
+      status: "mitigated"
+      evidence: "App/backend/app/receptionist/brain.py, App/backend/app/escalation_policy.py, plugins/apps/common_ui.py"
+      controls: "Fail-closed spoken action confirmation (G177), explicit AI disclosure (G170), simulation headers (live=false), and transparent 5-locale CXP operating-hours disclosure (G174/G196)"
+      verified_by:
+        - "App/backend/tests/test_receptionist_safety_integrity.py"
+        - "tests/agents/test_plugin_apps_boundary.py"
+    - id: "ASI10"
+      name: "Rogue Agents & Unaudited Autonomy"
+      status: "mitigated"
+      evidence: "App/backend/app/audit/turns.py, App/backend/app/audit/ledger.py, App/backend/app/flags.py"
+      controls: "Hash-chained turn and action audit ledger v3 with RFC 3161 seals, risk-tiered autonomy gates, and per-feature kill switches"
+      verified_by:
+        - "App/backend/tests/test_audit_turns.py"
+
+aibom_inventory:
+  schema: "CycloneDX-AIBOM-1.6"
+  models:
+    - id: "Sunbird/Sunflower-Qwen3.5-9B"
+      role: "Primary multilingual RAG & agentic reasoning LLM (262k native context)"
+      locales: ["en", "lg", "sw", "nyn", "ach"]
+      runtime: "vLLM (FP8 weights + FP8 KV cache)"
+    - id: "Sunbird/orpheus-3b-tts-multilingual"
+      role: "Primary neural text-to-speech synthesis sidecar"
+      locales: ["en", "lg", "sw", "nyn", "ach"]
+      runtime: "Orpheus vLLM sidecar (FP8)"
+    - id: "Sunbird/SunflowerASR-51-african-languages"
+      role: "Primary multilingual speech-to-text ASR model"
+      locales: ["en", "lg", "sw", "nyn", "ach"]
+      runtime: "Whisper-SALT GPU pipeline"
+    - id: "BAAI/bge-m3"
+      role: "Dense multilingual embedding model for Qdrant hybrid retrieval"
+      locales: ["en", "lg", "sw", "nyn", "ach"]
+      runtime: "sentence-transformers"
+    - id: "mixedbread-ai/mxbai-rerank-base-v2"
+      role: "Cross-encoder passage reranker"
+      locales: ["en", "lg", "sw", "nyn", "ach"]
+      runtime: "sentence-transformers CrossEncoder"

@@ -157,3 +157,8 @@ App/Model/index_reindex_requested.json
 # Local evaluation checkpoints and logs
 docs/Reports/data/*_checkpoint.json
 docs/Reports/data/*.log
+
+# Retired Flutter mobile build artifacts & Dart tool caches
+MobileApp/
+.dart_tool/
+.flutter-plugins*
