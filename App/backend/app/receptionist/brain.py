@@ -860,7 +860,7 @@ class UraReceptionistBrain(LLMService):
         await self._say_and_record(spoken, kind="answer")
         await self._say_and_record(phrase("crisis_screen", language), kind="notice", speak=False)
         if raise_waiting_priority(self.room, reason="safety_concern"):
-            logger.warning("Call %s raised to urgent while waiting (safety_concern)", self.room.call_id)
+            logger.warning("Call %s raised to urgent in the queue (safety_concern)", self.room.call_id)
 
     def _earlier_in_call(self, exchanges: int = 2) -> str:
         """The call so far, in English: what the chat carried over and the last exchanges."""
@@ -1041,7 +1041,7 @@ class UraReceptionistBrain(LLMService):
             mt.figures_survived(english_reply, luganda_reply, locale="lg")
             and mt.units_survived(english_reply, luganda_reply)
         ):
-            logger.info("Direct Luganda call synthesis failed figure/unit check; falling back to sentinel-guarded _localize_reply")
+            logger.info("Direct Luganda call synthesis failed the figure/unit check; using the guarded _localize_reply")
             luganda_reply = ""
         if not luganda_reply:
             luganda_reply = english_reply

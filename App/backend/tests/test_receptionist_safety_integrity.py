@@ -60,6 +60,7 @@ class BrainCase(unittest.IsolatedAsyncioTestCase):
         self.brain = UraReceptionistBrain(room=self.room, chat_model=self.chat_model)
         self.brain.push_frame = AsyncMock()
         self.lobby = patch.object(transfer_mod.hub, "publish_lobby").start()
+        self.call_events = patch.object(transfer_mod.hub, "publish_call").start()
         self.flags = patch.object(flags, "is_enabled", side_effect=queue_on).start()
         self.addCleanup(patch.stopall)
 
@@ -105,9 +106,14 @@ class CrisisWhileWaitingTests(BrainCase):
         self.assertEqual(self.state.priority, "urgent")
         self.assertEqual(get_call(self.call_id)["priority"], "urgent")
         ticket_priority.assert_called_once_with("TICK-R1-0001", "urgent")
-        raised = self.lobby_events("call.transfer_requested")[-1]
-        self.assertEqual((raised["priority"], raised["reason"]), ("urgent", "safety_concern"))
-        self.assertEqual(raised["waiting_since"], waiting_since)  # the wait is not reset
+        self.assertEqual(
+            self.lobby_events("call.priority_raised"),
+            [{"call_id": self.call_id, "priority": "urgent", "reason": "safety_concern"}],
+        )
+        # Not a new wait: re-sending transfer_requested would reset the row's claim and wait.
+        self.assertEqual(len(self.lobby_events("call.transfer_requested")), 1)
+        self.assertEqual(self.state.transfer_requested_at, waiting_since)
+        self.call_events.assert_any_call(self.call_id, "priority", {"priority": "urgent", "reason": "safety_concern"})
         self.chat_model.generate.assert_not_called()  # never a tax answer
 
     async def test_other_speech_while_waiting_still_waits_for_the_officer(self):
@@ -124,8 +130,16 @@ class CrisisWhileWaitingTests(BrainCase):
             await self.say("I want to end my life.")
             await self.say("I really want to kill myself.")
         self.assertEqual(self.texts().count(phrase("crisis_screen", "en")), 2)
-        urgent = [e for e in self.lobby_events("call.transfer_requested") if e["priority"] == "urgent"]
-        self.assertEqual(len(urgent), 1)
+        self.assertEqual(len(self.lobby_events("call.priority_raised")), 1)
+
+    async def test_a_claimed_call_keeps_its_claim_when_raised(self):
+        await self.brain.process_frame(RequestOfficerFrame())
+        self.state.claimed_by = "officer_okello"  # an officer is joining
+        with patch.object(transfer_mod, "_update_ticket_priority"):
+            await self.say("I want to end my life.")
+        self.assertEqual(self.state.claimed_by, "officer_okello")
+        self.assertEqual(len(self.lobby_events("call.transfer_requested")), 1)  # only the original
+        self.assertEqual(self.lobby_events("call.priority_raised")[-1]["priority"], "urgent")
 
 
 class OfficerRequestReentryTests(BrainCase):

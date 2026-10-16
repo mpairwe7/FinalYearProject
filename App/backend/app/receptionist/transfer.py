@@ -80,11 +80,13 @@ def stop_countdown(room: Any) -> None:
 def raise_waiting_priority(room: Any, *, reason: str, priority: str = "urgent") -> bool:
     """A caller already waiting needs a person sooner: raise the call and its ticket.
 
-    The staff lobby gets ``call.transfer_requested`` again with the call's
-    *original* wait, so the queue re-sorts it (urgent first) and an alert an
-    officer dismissed comes back, without the wait ring starting over. Returns
-    False, changing nothing, when the call is not waiting or is already at
-    *priority* or above.
+    The lobby gets ``call.priority_raised`` (metadata only), which re-sorts the
+    queue and brings back an alert an officer dismissed. It is not
+    ``call.transfer_requested``: that resets the queue row's claim and wait, and
+    a call an officer has taken — joining, or in their reconnect grace — must
+    not look free to the others. The call's own channel gets ``priority`` too,
+    so the officer taking it sees why. Returns False, changing nothing, when
+    the call is not waiting or is already at *priority* or above.
     """
     state = room.state
     if state.mode != "transferring" or priority not in PRIORITIES:
@@ -97,22 +99,8 @@ def raise_waiting_priority(room: Any, *, reason: str, priority: str = "urgent") 
     update_call(room.call_id, priority=priority, transfer_reason=reason)
     if state.ticket_id:
         _update_ticket_priority(state.ticket_id, priority)
-    hub.publish_lobby(
-        "call.transfer_requested",
-        {
-            "call_id": room.call_id,
-            "status": "transferring",
-            "started_at": state.started_at,
-            "reason": reason,
-            "ticket_ref": state.ticket_id or "",
-            "topic": state.topic or DEFAULT_TOPIC,
-            "priority": priority,
-            "language": state.locale,
-            "waiting_since": state.transfer_requested_at or time.time(),
-            "target_team": state.target_team,
-            "attempt": state.transfer_attempts,
-        },
-    )
+    hub.publish_lobby("call.priority_raised", {"call_id": room.call_id, "priority": priority, "reason": reason})
+    hub.publish_call(room.call_id, "priority", {"priority": priority, "reason": reason})
     return True
 
 

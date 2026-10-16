@@ -753,7 +753,7 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
     try:
         presence.finish_wrap_up(officer_id)
     except Exception:
-        logger.warning("Could not restore the presence of officer %s", officer_id, exc_info=True)
+        logger.warning("Could not restore the lapsed officer's presence on call %s", room.call_id, exc_info=True)
     # Outside the lock: a slow LiveKit API must not hold up the next claim.
     await revoke_media(room, stale_identity)
 

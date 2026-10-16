@@ -134,8 +134,10 @@ reassurance line while held, and a resume line).
 ### R3 — Dead air, time limits, degraded modes, inclusivity
 
 G183 (progress cues at about 5 s and 12 s, in the call language, never repeating), G184
-(spoken and on-screen warning a minute before the ceiling, with the reference; a bridged call is
-not cut at the AI ceiling), G185 (a spoken pointer to the screen when speech is withheld or
+(WCAG 2.2.1's *Extend* option for a call the AI is handling: a spoken and on-screen warning a
+minute before the ceiling — more than the 20 s the criterion asks — and one simple action, a
+"yes" or a tap, extends it, at least ten times; a call an officer is on is not cut at the AI's
+ceiling at all), G185 (a spoken pointer to the screen when speech is withheld or
 fails), G189 (greeting names all five languages), G191 if the live check confirms it.
 
 ### R4 — Honesty and observability
