@@ -66,7 +66,6 @@ _TAG_ALIASES: dict[str, str] = {
     "swa": "sw",
     "swh": "sw",
     "nyn": "nyn",
-    "nyk": "nyn",
     "runyankole": "nyn",
     "runyankore": "nyn",
     "ach": "ach",

@@ -250,7 +250,7 @@ _GLOSSARY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 def get_translation_glossary_hints(text: str, target_lang: str) -> str:
     """Return concise glossary constraints for translation into *target_lang*."""
-    norm_lang = "nyn" if target_lang == "nyk" else target_lang
+    norm_lang = target_lang
     if norm_lang not in ("lg", "sw", "nyn", "ach") or not text:
         return ""
 

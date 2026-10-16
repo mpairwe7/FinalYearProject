@@ -1444,11 +1444,10 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
         is_courtesy_sentence,
     )
 
-    # 1. Locale activation & tag normalization (including 'nyk' -> 'nyn')
+    # 1. Locale activation & tag normalization ('nyn' and 'ach')
     assert {"en", "lg", "sw", "nyn", "ach"} <= SUPPORTED_LOCALES
     assert KNOWN_LANGUAGES == ("en", "sw", "lg", "nyn", "ach")
     assert normalize_locale_tag("nyn") == "nyn"
-    assert normalize_locale_tag("nyk") == "nyn"
     assert normalize_locale_tag("nyn-UG") == "nyn"
     assert normalize_locale_tag("ach") == "ach"
     assert normalize_locale_tag("ach-UG") == "ach"
@@ -1559,7 +1558,6 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
 
     # 4. STT & Voice Receptionist: ASR tokens/prompts, lexicon normalization, LID policy, phrases, hybrid S2S
     assert ss.resolve_salt_language_token_id("nyn") == 50322
-    assert ss.resolve_salt_language_token_id("nyk") == 50322
     assert ss.resolve_salt_language_token_id("ach") == 50357
     assert "omushoro" in ss.salt_domain_prompt("nyn")
     assert "mucoro" in ss.salt_domain_prompt("ach")
@@ -1844,7 +1842,7 @@ def test_phase40_qa_audit_gaps_prometheus_slots_calculators_and_resumption():
     sample_hits = [{"score_norm": 0.24, "text": "VAT rate in Uganda is 18%."}]
     # 0.24 is below English 0.30 threshold, but above the 0.20 cross-lingual threshold for lg/sw/nyn/ach
     assert OutputGuard.should_abstain(sample_hits, locale="en") is True
-    for vern_loc in ("lg", "sw", "nyn", "nyk", "ach"):
+    for vern_loc in ("lg", "sw", "nyn", "ach"):
         assert OutputGuard.should_abstain(sample_hits, locale=vern_loc) is False
 
 
@@ -1953,6 +1951,61 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss():
     assert len(searched_calls) >= 2
     assert all(loc == "lg" for _, loc in searched_calls)
     assert len(planned_hits) >= 2
+
+
+def test_phase43_voice_picker_orpheus_speaker_forwarding_and_receptionist_parity(monkeypatch):
+    from app import orpheus_tts
+    from app.receptionist.brain import _OFFER_DECLINE_RE, _REPEAT_PATTERNS
+    from app.receptionist.clarify import classify_yes_no
+
+    monkeypatch.setenv("ORPHEUS_TTS_URL", "http://orpheus-tts:8100")
+    monkeypatch.setenv("ORPHEUS_TTS_LANGUAGES", "lg,sw,en,nyn,ach")
+
+    # 1. User-selected alternate catalog voices are honoured per locale, while invalid/foreign voices fall back to default
+    assert orpheus_tts.speaker_for("lg", voice="waxal_lug_0004") == "waxal_lug_0004"
+    assert orpheus_tts.speaker_for("nyn", voice="waxal_nyn_0003") == "waxal_nyn_0003"
+    assert orpheus_tts.speaker_for("ach", voice="waxal_ach_0005") == "waxal_ach_0005"
+    assert orpheus_tts.speaker_for("sw", voice="waxal_swa_0007") == "waxal_swa_0007"
+    assert orpheus_tts.speaker_for("nyn", voice="waxal_ach_0005") == "salt_nyn_0001"
+    assert orpheus_tts.speaker_for("ach", voice="en-US-AriaNeural") == "salt_ach_0001"
+
+    # 2. Receptionist repeat patterns and yes/no classification across all 5 locales (with 'ku' excluded)
+    for rep in ("repeat that", "kiddemu", "rudia tena", "kigarukemu", "tim ber inwo"):
+        assert _REPEAT_PATTERNS.search(rep) is not None, f"Missed repeat command: {rep}"
+
+    assert _OFFER_DECLINE_RE.search("pe apwoyo") is not None
+    assert _OFFER_DECLINE_RE.search("ngaaha webare") is not None
+    assert _OFFER_DECLINE_RE.search("ku") is None
+    assert classify_yes_no("ku mwezi", "ach") == "neither"
+    assert classify_yes_no("pe", "ach") == "no"
+    assert classify_yes_no("ngaaha", "nyn") == "no"
+    assert classify_yes_no("eego", "nyn") == "yes"
+    assert classify_yes_no("eyo", "ach") == "yes"
+
+    # 3. Call summary 5-locale dominance detection, clarify mishears, and pre-warmed call query MT cache
+    from app import mt
+    from app.receptionist.clarify import entity_mishear
+    from app.receptionist.lexicon import normalize_call_query
+    from app.receptionist.summary import _call_languages
+
+    lang_nyn, used_nyn = _call_languages(
+        {"locale": "en"},
+        [{"speaker": "caller", "text": "Nimbaasa kwehandiikisa nta kutunga TIN aha mukura gwa URA omuri Uganda?"}],
+    )
+    assert lang_nyn == "nyn" and "nyn" in used_nyn
+
+    lang_ach, used_ach = _call_languages(
+        {"locale": "en"},
+        [{"speaker": "caller", "text": "Atwero coyo nyinga nining me nongo TIN ki culu mucoro me VAT?"}],
+    )
+    assert lang_ach == "ach" and "ach" in used_ach
+
+    assert entity_mishear("efurisi") == "efris"
+    assert entity_mishear("viati") == "vat"
+    assert mt.cache.get("nyn", "en", normalize_call_query("Nimbaasa kwehandiikisa nta kutunga TIN?", "nyn")) == "How do I register to get a TIN?"
+    assert mt.cache.get("ach", "en", normalize_call_query("Atwero coyo nyinga nining me nongo TIN?", "ach")) == "How do I register to get a TIN?"
+
+
 
 
 

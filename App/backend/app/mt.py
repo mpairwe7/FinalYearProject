@@ -163,10 +163,15 @@ _CANONICAL_PREWARMED: dict[tuple[str, str], dict[str, str]] = {
     },
     ("nyn", "en"): {
         "nimbaasa kwehandiikisa nta kutunga tin": "How do I register to get a TIN?",
+        "nimbaasa kwehandiikisa nta tin registration": "How do I register to get a TIN?",
+        "nimbaasa kwehandiikisa nta how to register for tin": "How do I register to get a TIN?",
         "nimbaasa kwehandiikisa nta tin": "How do I register for a TIN?",
         "omushoro gwa vat omuri uganda guri aha bicweka bingahi": "What percentage is the VAT tax rate in Uganda?",
+        "vat value added tax rate omuri uganda guri aha bicweka bingahi": "What percentage is the VAT tax rate in Uganda?",
         "omushoro gwa paye nigubaririrwa guta": "How is PAYE tax calculated?",
+        "paye pay as you earn tax nigubaririrwa guta": "How is PAYE tax calculated?",
         "nshashura omushoro gwa paye shangahi": "How much PAYE tax do I pay?",
+        "nshashura paye pay as you earn tax shangahi": "How much PAYE tax do I pay?",
         "efris neekoresibwa eta": "How is EFRIS used for invoicing and goods?",
         "okusasirwa ekibonerezo ky'omushoro gwa ura": "URA tax penalty waiver and relief",
         "nimbaasa kukora nta enamba ya prn okushashura omushoro": "How to generate a PRN payment slip to pay tax in the bank or by phone?",
@@ -179,9 +184,13 @@ _CANONICAL_PREWARMED: dict[tuple[str, str], dict[str, str]] = {
     },
     ("ach", "en"): {
         "atwero coyo nyinga nining me nongo tin": "How do I register to get a TIN?",
+        "atwero coyo nyinga nining me tin registration": "How do I register to get a TIN?",
         "wel mucoro me vat i uganda tye adi": "What is the VAT tax rate in Uganda?",
+        "vat value added tax rate i uganda tye adi": "What is the VAT tax rate in Uganda?",
         "mucoro me paye kikwano nining": "How is PAYE tax calculated?",
+        "paye pay as you earn tax kikwano nining": "How is PAYE tax calculated?",
         "aculu mucoro me paye adi": "How much PAYE tax do I pay?",
+        "aculu paye pay as you earn tax adi": "How much PAYE tax do I pay?",
         "efris tiyo nining": "How is EFRIS used for invoicing and goods?",
         "weko pwod me mucoro me ura": "URA tax penalty waiver and relief",
         "atwero yubo namba me prn nining me culu mucoro": "How to generate a PRN payment slip to pay tax in the bank or by phone?",
@@ -190,6 +199,7 @@ _CANONICAL_PREWARMED: dict[tuple[str, str], dict[str, str]] = {
         "mucoro ma kigengo": "Withholding tax",
         "mucoro me ot ma kipango": "Rental income tax rate in Uganda",
         "atwero nongo waraga me tcc nining": "How do I apply for a Tax Clearance Certificate TCC?",
+        "atwero nongo tax clearance certificate tcc nining": "How do I apply for a Tax Clearance Certificate TCC?",
         "atwero loko nying motoka nining": "How do I transfer motor vehicle ownership and logbook?",
     },
 }
@@ -331,7 +341,7 @@ def figures(text: str, locale: str | None = None) -> set[float]:
         target_words = _SW_WORD_NUMBERS
     elif locale == "lg":
         target_words = _LG_WORD_NUMBERS
-    elif locale in ("nyn", "nyk"):
+    elif locale == "nyn":
         target_words = _NYN_WORD_NUMBERS
     elif locale == "ach":
         target_words = _ACH_WORD_NUMBERS

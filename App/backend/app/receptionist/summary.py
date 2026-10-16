@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 SUMMARY_SYSTEM = (
     "You are a structured call summarization engine for Uganda Revenue Authority (URA). "
     "Analyze the transcript and output strictly valid JSON without conversational commentary. "
-    "The transcript may be in English, Luganda or Swahili; write every field in English — "
+    "The transcript may be in English, Luganda, Swahili, Runyankole, or Acholi; write every field in English — "
     "the officers reading it work in English."
 )
 
@@ -130,8 +130,11 @@ def _call_languages(call: dict[str, Any], turns: list[dict[str, Any]]) -> tuple[
     language = str((lang_metrics or {}).get("final") or locale)
     caller_text = " ".join(str(t.get("text", "")) for t in turns if t.get("speaker") == "caller")
     hits = lexical_hits(caller_text)
-    if language != "lg" and hits["lg"] > max(hits["en"], hits["sw"]) and hits["lg"] >= 3:
-        language = "lg"
+    for cand in ("lg", "sw", "nyn", "ach"):
+        other_max = max((hits.get(k, 0) for k in ("en", "lg", "sw", "nyn", "ach") if k != cand), default=0)
+        if language != cand and hits.get(cand, 0) > other_max and hits.get(cand, 0) >= 3:
+            language = cand
+            break
     if language not in used:
         used.append(language)
     return language, used

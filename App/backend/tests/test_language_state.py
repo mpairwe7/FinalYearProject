@@ -40,7 +40,6 @@ class NormalizeLocaleTagTest(unittest.TestCase):
             "sw_KE": "sw",
             "nyn": "nyn",
             "nyn-UG": "nyn",
-            "nyk": "nyn",
             "ach": "ach",
             "ach-UG": "ach",
         }

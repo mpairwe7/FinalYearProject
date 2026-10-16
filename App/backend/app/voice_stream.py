@@ -340,8 +340,6 @@ class VoiceSession:
             return
 
         detected_lang = asr_result.language or self.language
-        if detected_lang == "nyk":
-            detected_lang = "nyn"
         from .receptionist.lexicon import (
             normalize_acholi_tax_query,
             normalize_luganda_tax_query,

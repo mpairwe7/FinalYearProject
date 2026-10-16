@@ -63,7 +63,7 @@ def synthesize_pcm16(speech_model: Any, text: str, language: str, voice: str | N
     if not res or not res.audio:
         return b""
     backend = str(getattr(res, "backend", "") or "")
-    if language == "lg" and backend.startswith("edge") and not allow_edge_standin_lg():
+    if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
         return b""
     try:
         return decode_to_pcm16(speech_model, res.audio)
@@ -169,10 +169,10 @@ class UraSpeechTTS(TTSService):
             return
         backend = str(getattr(res, "backend", "") or "")
         self.last_backend = backend
-        if language == "lg" and backend.startswith("edge") and not allow_edge_standin_lg():
-            # edge-tts has no Luganda voice; what it returned is an English
-            # speaker reading Luganda. The caption still reaches the screen.
-            logger.warning("Dropping English stand-in voice for a Luganda line (%s)", backend)
+        if language in ("lg", "nyn", "ach") and backend.startswith("edge") and not allow_edge_standin_lg():
+            # edge-tts has no Luganda, Runyankole, or Acholi voice; what it returned
+            # is an English speaker reading Ugandan text. The caption still reaches the screen.
+            logger.warning("Dropping English stand-in voice for a %s line (%s)", language, backend)
             return
 
         # Decode audio bytes into PCM16 at 16000Hz
@@ -195,7 +195,7 @@ class UraSpeechTTS(TTSService):
             await asyncio.sleep(0.001)
 
     def _should_stream(self, text: str, language: str) -> bool:
-        if not orpheus_tts.speaker_for(language) or orpheus_tts.in_cooldown():
+        if not orpheus_tts.speaker_for(language, voice=self.voice) or orpheus_tts.in_cooldown():
             return False
         cache_get = getattr(self.speech_model, "tts_cache_get", None)
         # A pre-warmed or already-spoken line is instant from the cache.
@@ -210,7 +210,7 @@ class UraSpeechTTS(TTSService):
         async def source() -> AsyncIterator[bytes]:
             nonlocal complete
             try:
-                async for pcm in orpheus_tts.stream(text, language):
+                async for pcm in orpheus_tts.stream(text, language, voice=self.voice):
                     if not pieces:
                         self.last_first_chunk_ms = round((time.perf_counter() - t0) * 1000, 1)
                     pieces.append(pcm)
@@ -241,7 +241,7 @@ class UraSpeechTTS(TTSService):
             duration_s=round(n / orpheus_tts.SAMPLE_RATE, 3),
             latency_s=0.0,
             backend="orpheus_salt",
-            voice=orpheus_tts.speaker_for(language) or "",
+            voice=orpheus_tts.speaker_for(language, voice=self.voice) or "",
         ))
 
 

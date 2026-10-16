@@ -55,8 +55,7 @@ SUPPORTED_LOCALES = frozenset(
 
 def gate_locale(locale: str) -> str:
     """*locale* unchanged if it's in SUPPORTED_LOCALES, else "en"."""
-    norm = "nyn" if locale == "nyk" else locale
-    return norm if norm in SUPPORTED_LOCALES else "en"
+    return locale if locale in SUPPORTED_LOCALES else "en"
 
 
 # ---------------------------------------------------------------------------
@@ -1589,8 +1588,6 @@ def english_retrieval_query(query: str, locale: str | None) -> str:
     """
     text = (query or "").strip()
     loc = (locale or "en").strip().lower().split("-")[0]
-    if loc == "nyk":
-        loc = "nyn"
     if not text or loc in ("", "en"):
         return text
     if _reads_as_english(text):

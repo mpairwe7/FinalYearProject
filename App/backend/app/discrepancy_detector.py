@@ -244,7 +244,7 @@ def format_discrepancy_acknowledgement(
             f"kunaweza kuwa na mabadiliko ya kisheria au viwango. Nimewasilisha ripoti ya uhakiki "
             f"(#KB-{short_id}) kwa timu yetu ya kiufundi ili kuthibitisha.{assertion_note}"
         )
-    if locale in ("nyn", "nyk"):
+    if locale == "nyn":
         return (
             f"Webare munonga kworeka enshonga egi! Kurugiirira aha biragiro bya URA ebya hati, "
             f"nihabaasa kubaho empinduka omu biragiro nari ebipimo. Ntareebaho alipoota y'okushwijuma "

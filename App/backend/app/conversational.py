@@ -80,10 +80,10 @@ _EMPATHY_BUSINESS_STRESS_RE = re.compile(
     r"\b((?:scared|afraid|terrified|worried|nervous)\s+(?:of|about)\s+(?:starting\s+a\s+business|taxes|ura)"
     r"|business\s+is\s+(?:really\s+)?(?:tough|hard|struggling|bad|failing|slow)"
     r"|feel\s+overwhelmed\s+by\s+tax\w*|taxes\s+are\s+(?:too\s+)?confusing|struggling\s+to\s+survive"
-    r"|ntya\s+okutandika\s+bizinensi|embeera\s+ya\s+bizinensi\s+nzibu|obusuubuzi\s+buzibu|sirina\s+ssente\s+zimala"
-    r"|nina\s+hofu\s+ya\s+kuanza\s+biashara|biashara\s+ni\s+ngumu|kodi\s+zinanitisha|ugumu\s+wa\s+maisha"
-    r"|nintina\s+kutandika\s+obushuubuzi|obushuubuzi\s+bugumire|omushoro\s+niguntiinisa"
-    r"|alworo\s+cako\s+biacara|biacara\s+tek|mucoro\s+miyo\s+lworo)\b",
+    r"|(?:ntya|ntidde)\s+okutandika\s+(?:bizinensi|obusuubuzi)|embeera\s+ya\s+bizinensi\s+nzibu|obusuubuzi\s+buzibu|sirina\s+ssente\s+zimala"
+    r"|nina\s+hofu\s+ya\s+(?:kuanza\s+biashara|kodi)|biashara\s+ni\s+ngumu|kodi\s+zinanitisha|ugumu\s+wa\s+maisha"
+    r"|(?:nintina|ntiina)\s+o?kutandika\s+obushuubuzi|obushuubuzi\s+bugumire|omushoro\s+niguntiinisa"
+    r"|(?:alworo|atye\s+ki\s+lworo\s+me)\s+cako\s+biacara|biacara\s+tek|mucoro\s+miyo\s+lworo)\b",
     re.IGNORECASE,
 )
 
@@ -455,7 +455,7 @@ _CONVERSATIONAL_LOCALE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 def _resolve_conversational_locale(text: str, locale: str = "en") -> str:
     """Resolve the active locale for a conversational turn, honouring both text evidence and thread locale."""
-    norm_loc = "nyn" if (locale or "").strip().lower() == "nyk" else (locale or "en").strip().lower()
+    norm_loc = (locale or "en").strip().lower()
     if norm_loc in ("lg", "sw", "nyn", "ach"):
         try:
             from .language_state import resolve_turn_locale

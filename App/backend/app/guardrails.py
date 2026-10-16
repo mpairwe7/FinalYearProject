@@ -192,10 +192,10 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
         r"(?:act|pretend|behave)\s+as\s+(?:if|though)\s+you",
         r"do\s+(?:not|anything)\s+(?:I|we)\s+(?:say|ask|tell)",
         # Cross-lingual instruction-override patterns (lg, sw, nyn, ach — CAN-Bench 2026)
-        r"\b(?:buusa\s+amaaso|yerabire)\s+(?:ebiragiro|amateeka)\s+(?:byonna|ebyasooka)\b",
-        r"\b(?:puuza|sahau)\s+(?:maagizo|maelekezo)\s+(?:yote\s+)?(?:yaliyopita|ya\s+awali)\b",
-        r"\b(?:yebwa|reka\s+kukurata)\s+(?:ebiragiro|ebihabuzi)\s+(?:byona\s+)?eby['’]?enyima\b",
-        r"\b(?:wil\s+wii|wek\s+lubo)\s+(?:cik|tela)\s+(?:weng\s+)?mukato\b",
+        r"\b(?:buusa\s+amaaso|yerabire|sazaamu)\s+(?:ebiragiro|amateeka)\s+(?:byonna|gonna|ebyasooka)\b",
+        r"\b(?:puuza|sahau|futa)\s+(?:maagizo|maelekezo|sheria)\s+(?:yote\s+|zote\s+)?(?:yaliyopita|ya\s+awali|za\s+usalama)\b",
+        r"\b(?:yebwa|reka\s+kukurata|ruga\s+aha)\s+(?:ebiragiro|ebihabuzi|biragiro)\s+(?:byona\s+)?(?:eby['’]?enyima|by['’]?oburinzi)\b",
+        r"\b(?:wil\s+wii|wek\s+lubo|juk)\s+(?:cik|tela)\s+(?:weng\s+)?(?:mukato|me\s+gwoko\s+kuc)\b",
     ]
 ]
 
@@ -206,17 +206,17 @@ _HARMFUL_INTENT_PATTERNS: list[re.Pattern[str]] = [
     re.compile(p, re.IGNORECASE)
     for p in [
         # Direct fraud/evasion requests
-        r"(?:how\s+(?:to|do\s+(?:I|you|we))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
-        r"(?:help|teach)\s+me\s+(?:to\s+)?(?:evade|avoid|dodge|hide|conceal)\s+(?:tax|VAT|income|revenue|customs|duty|PAYE)",
+        r"(?:how\s+(?:to|do\s+(?:I|you|we)|can\s+(?:I|you|we|one))|explain\s+how\s+to|methods?\s+(?:to|for)|ways?\s+to|steps?\s+to)\s+(?:evade|avoid|dodge|escape|cheat|hide|conceal|under[\-\s]?report|misreport|falsif|forge|fake|fabricat)",
+        r"(?:help|teach)\s+me\s+(?:to\s+)?(?:evade|avoid|dodge|hide|conceal)\s+(?:paying\s+)?(?:tax|taxes|VAT|income|revenue|customs|duty|PAYE)",
         r"\b(?:schemes?|tricks?|tactics?|strategies)\s+(?:to|for)\s+(?:evade|dodge|cheat\s+on)\s+(?:tax|VAT|income|revenue)",
         r"(?:forge|fake|fabricat|counterfeit|falsif)\w*\s+(?:(?:a|an|the|my|some)\s+)?"
-        r"(?:fake\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
+        r"(?:fake\s+)?(?:tax\s+clearance\s+)?(?:receipt|invoice|EFRIS|document|TIN|certificate|return|declaration)",
         r"(?:under[\-\s]?report|misreport|under[\-\s]?declare)\s+(?:income|revenue|sales|earnings|profit|expenses?|VAT)",
         # Cross-lingual tax evasion & EFRIS forgery requests (lg, sw, nyn, ach — CAN-Bench 2026)
-        r"\b(?:nnyinza\s+ntya|engeri\s+y['’]?)\s*(?:okwebalama|okubba|okukweka|okujingirira)\s+(?:omusolo|emisolo|lisiiti\s+ya\s+efris)\b",
-        r"\b(?:jinsi\s+ya|namna\s+ya)\s+(?:kukwepa|kuiba|kuficha|kughushi)\s+(?:kodi|ushuru|risiti\s+ya\s+efris)\b",
-        r"\b(?:nimbaasa\s+nta|omuringo\s+gw['’]?)\s*(?:okwetantara|okwiba|okushereka|okuhimba)\s+(?:omushoro|emishoro|risiiti\s+ya\s+efris)\b",
-        r"\b(?:atwero\s+nining|yoo\s+me)\s+(?:balo|kwal|kano|goba)\s+(?:mucoro|ricit\s+me\s+efris)\b",
+        r"\b(?:nnyinza\s+ntya|engeri\s+y['’]?|nnyamba)\s*(?:okwebalama|okubba|okukweka|okujingirira)\s+(?:omusolo|emisolo|ensimbi|lisiiti\s+ya\s+efris)",
+        r"\b(?:jinsi\s+ya|namna\s+ya|nisaidie)\s+(?:kukwepa|kuiba|kuficha|kughushi)\s+(?:kodi|ushuru|mapato|risiti\s+ya\s+efris)",
+        r"\b(?:nimbaasa\s+nta|omuringo\s+gw['’]?|mpweera)\s*(?:okwetantara|okwiba|okushereka|okuhimba)\s+(?:omushoro|emishoro|entaasya|risiiti\s+ya\s+efris)",
+        r"\b(?:atwero\s+nining|yoo\s+me|kony\s+an\s+me)\s+(?:balo|kwal|kano|goba)\s+(?:mucoro|lim|ricit\s+me\s+efris)",
         # Smuggling / laundering / bribery: block solicitation, not
         # information. "What is smuggling?" and "How can I report smuggling?"
         # are curated KB answers (ura_smuggling_effects, ura_customs_offences,
@@ -1079,7 +1079,7 @@ class OutputGuard:
             eff_threshold = ABSTENTION_THRESHOLD_NORM_LG
         elif loc == "sw":
             eff_threshold = ABSTENTION_THRESHOLD_NORM_SW
-        elif loc in ("nyn", "nyk"):
+        elif loc == "nyn":
             eff_threshold = ABSTENTION_THRESHOLD_NORM_NYN
         elif loc == "ach":
             eff_threshold = ABSTENTION_THRESHOLD_NORM_ACH

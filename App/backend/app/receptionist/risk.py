@@ -106,12 +106,24 @@ def evaluate_call_risk(call_id: str) -> dict[str, Any]:
     if len(low_prob_turns) >= 2:
         signals.append("low_word_confidence")
 
-    # 5. Abstentions
+    # 5. Abstentions (across all 5 supported languages: en, lg, sw, nyn, ach)
+    _ABSTENTION_MARKERS = (
+        "cannot advise",
+        "unable to answer",
+        "i don't have enough information",
+        "sisobola kukolera",
+        "sirina bukakafu",
+        "siwezi kuchakata",
+        "sina uhakika",
+        "tindikubaasa kukora",
+        "tihaine buhamizo",
+        "pe atwero tic",
+        "pe atye ki mok",
+    )
     abstention_turns = [
         t for t in turns
         if t.get("kind") == "abstention"
-        or "cannot advise" in str(t.get("text") or "").lower()
-        or "unable to answer" in str(t.get("text") or "").lower()
+        or any(m in str(t.get("text") or "").lower() for m in _ABSTENTION_MARKERS)
     ]
     if len(abstention_turns) >= 1:
         signals.append("abstention")

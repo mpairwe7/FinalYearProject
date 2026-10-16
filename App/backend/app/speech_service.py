@@ -483,7 +483,6 @@ _URA_ASR_ISO_ALIASES: dict[str, str] = {
     "lg": "lg",
     "lug": "lg",
     "nyn": "nyn",
-    "nyk": "nyn",
     "ach": "ach",
 }
 
@@ -535,7 +534,7 @@ def salt_domain_prompt(language: str | None) -> str:
         return _SALT_PROMPT_LG
     if language == "sw":
         return _SALT_PROMPT_SW
-    if language in ("nyn", "nyk"):
+    if language == "nyn":
         return _SALT_PROMPT_NYN
     if language == "ach":
         return _SALT_PROMPT_ACH
@@ -1980,10 +1979,11 @@ class SpeechModel:
         # A dead sidecar stays in cooldown for 30s. Skip the call entirely:
         # synthesize() would otherwise raise after a DNS failure, and every
         # Luganda sentence on the local GPU stack paid that before Spark.
-        if orpheus_tts.speaker_for(language) and not orpheus_tts.in_cooldown():
+        resolved_orpheus_speaker = orpheus_tts.speaker_for(language, voice=voice)
+        if resolved_orpheus_speaker and not orpheus_tts.in_cooldown():
             t_orpheus = time.perf_counter()
             try:
-                pcm = orpheus_tts.synthesize(text, language)
+                pcm = orpheus_tts.synthesize(text, language, voice=voice)
                 n = len(pcm) // 2
                 return SynthesizeResult(
                     audio=orpheus_tts.pcm16_to_wav(pcm),
@@ -1992,7 +1992,7 @@ class SpeechModel:
                     duration_s=round(n / orpheus_tts.SAMPLE_RATE, 3),
                     latency_s=round(time.perf_counter() - t_orpheus, 3),
                     backend="orpheus_salt",
-                    voice=orpheus_tts.speaker_for(language) or "",
+                    voice=resolved_orpheus_speaker,
                 )
             except orpheus_tts.OrpheusUnavailable as exc:
                 logger.info("Orpheus TTS unavailable for %s (%s); trying the next voice", language, exc)
