@@ -114,13 +114,53 @@ def _update_ticket_priority(ticket_id: str, priority: str) -> None:
 
 
 def is_staff_available(target_team: str = "") -> bool:
-    """Return True if any officer is currently marked online for the target team."""
+    """Whether any officer is signed in (on shift) for *target_team* — anyone at all when empty.
+
+    Fails open: when presence cannot be read the call is queued as before,
+    because telling a caller nobody is there when someone might be is the
+    worse mistake.
+    """
     try:
         from .presence import count_active_officers
 
         return count_active_officers(target_team) > 0
     except Exception:
+        logger.warning("Officer presence unavailable; queueing the call anyway", exc_info=True)
         return True
+
+
+def queue_position(room: Any) -> int:
+    """The waiting caller's place in the queue, counting from 1.
+
+    Ahead of them: calls of the same tenant still waiting for an officer (not
+    claimed, not in an officer's reconnect grace) with a higher priority, or
+    the same priority and an earlier wait — the order the staff console sorts
+    the queue in. Delay information is honest only when it is this simple; the
+    desk has no handle-time history to estimate a wait from (G186).
+    """
+    from .state import registry
+
+    state = room.state
+
+    def rank(s: Any) -> tuple[int, float]:
+        priority = s.priority if s.priority in PRIORITIES else "normal"
+        return (-PRIORITIES.index(priority), float(s.transfer_requested_at or 0.0))
+
+    mine = rank(state)
+    ahead = 0
+    for other in registry.list_live():
+        o = other.state
+        if (
+            other is room
+            or o.mode != "transferring"
+            or o.claimed_by
+            or o.reconnecting_officer
+            or (o.tenant_id or "default") != (state.tenant_id or "default")
+        ):
+            continue
+        if rank(o) < mine:
+            ahead += 1
+    return ahead + 1
 
 
 def open_transfer(
@@ -273,23 +313,38 @@ def open_transfer(
     return tid, status_event
 
 
-def close_transfer_on_timeout(room: Any, ticket_ref: str) -> dict[str, Any] | None:
-    """No officer answered in time: back to the AI, and the caller is owed a callback.
+#: Why a waiting call became a callback: nobody answered in time, nobody was
+#: signed in to answer (G180) — outside working hours, nobody could be (G195) —
+#: or the caller asked to be called back (G186).
+CALLBACK_REASONS = (
+    "no_officer_available",
+    "no_officer_online",
+    "outside_working_hours",
+    "caller_requested_callback",
+)
 
-    Returns the status event for the caller's socket, or ``None`` when the
-    call is no longer waiting (an officer joined, or it ended) — then there
-    is nothing to time out and the engine says nothing.
+
+def close_transfer_on_timeout(
+    room: Any, ticket_ref: str, *, callback_reason: str = "no_officer_available"
+) -> dict[str, Any] | None:
+    """The wait ends without an officer: back to the AI, and the caller is owed a callback.
+
+    *callback_reason* is one of :data:`CALLBACK_REASONS`. Returns the status
+    event for the caller's socket, or ``None`` when the call is no longer
+    waiting (an officer joined, or it ended) — then there is nothing to close
+    and the engine says nothing.
     """
     state = room.state
     if state.mode != "transferring":
         return None
-    logger.info("Transfer timeout reached for call %s", room.call_id)
+    logger.info("Wait on call %s ends as a callback (%s)", room.call_id, callback_reason)
     state.mode = "ai"
+    state.queue_epoch += 1
     update_call(
         room.call_id,
         status="ai",
         needs_callback=True,
-        callback_reason="no_officer_available",
+        callback_reason=callback_reason,
     )
     try:
         from .. import database as db

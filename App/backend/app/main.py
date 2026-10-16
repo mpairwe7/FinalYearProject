@@ -4682,7 +4682,7 @@ async def hold_call_endpoint(
     _desk_writer(ctx)
     on = bool(body.get("on", True))
     try:
-        result = await desk.hold(call_id, ctx.user_id, on=on)
+        result = await desk.hold(call_id, ctx.user_id, on=on, speech_model=getattr(app.state, "speech", None))
     except desk.DeskError as exc:
         return _desk_error(exc)
     _staff_call_event(ctx, call_id, "officer_hold_on" if on else "officer_hold_off")

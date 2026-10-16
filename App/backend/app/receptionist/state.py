@@ -164,6 +164,8 @@ class CallRoom:
         # under this lock; the claim itself is also atomic in the database.
         self.desk_lock = asyncio.Lock()
         self.claim_timer: asyncio.Task[None] | None = None
+        # Reassures a caller an officer has put on hold (desk.hold, G187).
+        self.hold_timer: asyncio.Task[None] | None = None
         self.end_event = asyncio.Event()
         self.listeners: list[asyncio.Queue[bytes]] = []
 
@@ -212,8 +214,9 @@ class CallRoom:
             self.state.end_reason = reason
             self.end_event.set()
 
-            if self.state.transfer_timer_task and not self.state.transfer_timer_task.done():
-                self.state.transfer_timer_task.cancel()
+            for timer in (self.state.transfer_timer_task, self.hold_timer):
+                if timer is not None and not timer.done():
+                    timer.cancel()
             # A review question still waiting for its answer is now unanswered.
             try:
                 from .review import settle

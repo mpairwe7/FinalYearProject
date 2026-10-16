@@ -122,6 +122,8 @@ export function CallScreen() {
     startCall,
     hangup,
     requestOfficer,
+    requestCallback,
+    queuePosition,
     toggleMute,
     languageDetection,
     languages,
@@ -258,6 +260,11 @@ export function CallScreen() {
             {status === 'transferring' && ticketRef && (
               <span className="call-ticket-chip">{`Ticket: ${caseReference(ticketRef)}`}</span>
             )}
+            {status === 'transferring' && queuePosition !== null && (
+              <span className="call-ticket-chip call-queue-chip" role="status" data-testid="call-queue-position">
+                {t('call.queuePosition', { position: String(queuePosition) })}
+              </span>
+            )}
             {live && <span className="call-timer">{formatDuration(duration)}</span>}
           </div>
         </header>
@@ -355,15 +362,17 @@ export function CallScreen() {
               <CallOrb active={live} />
 
               <div className="call-dock-side call-dock-side--end">
-                {status === 'ai' && (
+                {(status === 'ai' || status === 'transferring') && (
+                  // One button that changes its job when the wait starts, so a
+                  // keyboard user who asked for an officer keeps their focus.
                   <button
                     type="button"
                     className="call-ctl"
-                    onClick={requestOfficer}
-                    aria-label={t('call.talkOfficer')}
-                    title={t('call.talkOfficer')}
+                    onClick={status === 'ai' ? requestOfficer : requestCallback}
+                    aria-label={status === 'ai' ? t('call.talkOfficer') : t('call.callMeBack')}
+                    title={status === 'ai' ? t('call.talkOfficer') : t('call.callMeBack')}
                   >
-                    <UserIcon />
+                    {status === 'ai' ? <UserIcon /> : <PhoneIcon size={20} />}
                   </button>
                 )}
                 <button

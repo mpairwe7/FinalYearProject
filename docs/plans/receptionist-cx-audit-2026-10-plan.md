@@ -1,8 +1,8 @@
 # Call receptionist: QA, CX and robustness audit, and Phases R1–R4
 
-Status: **R1 in progress** (delivery log in §8); R2–R4 proposed.
+Status: **R1 merged (#581); R2 in review** (delivery log in §8); R3–R5 proposed.
 Written 2026-10-16 against `dev` @ `73dbfe6eb7` (after Phase 39, #580). Tracking issue: #441.
-Gap register rows: G175–G194; G91 reopened. (G174 is left free: an uncommitted "CXP business hours" change
+Gap register rows: G175–G198; G91 reopened, then fixed in R2. (G174 is left free: an uncommitted "CXP business hours" change
 in the main checkout already uses it.)
 
 Roles taken for this audit: QA engineer (does the call behave), auditor (does it meet the
@@ -14,8 +14,10 @@ current research and regulation, verified online and cited in §2. Every finding
 a line of code before it was written down; the ones marked *reproduced* also have a failing
 test written before the fix.
 
-The phases are numbered R1–R4 (receptionist) so they do not collide with the #441 phase
-numbers.
+The phases are numbered R1–R5 (receptionist) so they do not collide with the #441 phase
+numbers. Scope added at the owner's request on 2026-10-16: Runyankole and Acholi everywhere the
+receptionist speaks or listens, and escalations and handoffs **outside officers' working hours**
+(the CXP desk closes at 11 PM EAT; the AI answers all night), for calls and for the chat.
 
 ---
 
@@ -38,6 +40,7 @@ numbers.
 | Silent drops | When the figure guard blocks speech, or synthesis fails, a voice caller hears nothing. | Medium |
 | Queue | Waiting callers get no position, no "call me back" and no way to cancel; the officer's hold is silent (`on_hold` is defined in five languages and never spoken). | Medium |
 | Honesty | Call-drop resume tickets are minted but no endpoint or client consumes them; the runbook says the flag enables resume. | Medium |
+| Working hours | After 11 PM a transfer still promised a person; a chat handoff said an officer "has been asked to look at this" at 2 AM; the SLA clock ran through the night. | Medium (owner's request) |
 | Performance | The risk monitor runs synchronously on the event loop on every turn (two DB reads and an O(n²) similarity scan). | Low (measure first) |
 | Process | mypy is configured but not run in CI; it had reported the G176 crash (`attr-defined`) on `dev`. | Medium |
 
@@ -105,6 +108,12 @@ numbers.
   `cancel_on_idle_timeout=False` (Pipecat 1.11: `idle_timeout_secs=300`, idle frames are bot
   speech, transcripts and user speech); `CallerAudioTap` swallows caller audio while bridged.
   The multilingual builder has disabled it since 2026-09-23.
+* **G198** *(live replay, reproduced on pre-R1 `dev` by A/B on the same stack)* — the yes/no
+  question that ends an answer can be voiced seconds after the answer's last sentence. In
+  scenario 14 the three sentences were synthesised at 09:48:27.7, :37.1 and :42.2 and "Would
+  you like to speak to an officer about this?" only at 09:49:00.6 — after the caller's "No thank
+  you" (09:49:00.4). A caller who answers in that pause is treated, correctly by the rule, as
+  having spoken over a question not yet heard, and is asked again.
 * **G194** — `pyproject.toml [tool.mypy]` exists; no workflow runs mypy. On `dev`:
   `desk.py: error: Module has no attribute "clear_officer"  [attr-defined]`.
 
@@ -124,23 +133,35 @@ numbers.
 | G192 | `open_transfer` keeps topic and priority on the call. | Unit: officer transfer re-publishes them. |
 | G193 | `cancel_on_idle_timeout=False` in the single-language pipeline. | Unit (Pipecat): the built task has it off. |
 
-### R2 — Queue and hold experience
+### R2 — Waiting for a person: availability, queue, callback, hold, working hours (calls)
 
-G180 (presence pre-check: nobody online → callback at once, honestly worded; fail-open on a
-lookup error), G186 (position on screen; "you are next" spoken when true; "call me back" and
-"never mind" while waiting, by voice and a screen button), G187 (officer hold spoken, with a
-reassurance line while held, and a resume line).
+| Gap | Fix | Acceptance |
+|---|---|---|
+| G180 (G91) | Presence pre-check before queueing: nobody signed in → the ticket kept, callback owed (`no_officer_online`), the caller told at once; a lookup error queues as before. | Unit: no officer → no wait, `officers_unavailable`, reference on screen; replay `19_no_officer_online_is_a_callback_at_once`. |
+| G195 | `app/officer_hours.py` (desk schedule, configurable, default 07:00–23:00 `Africa/Kampala`); outside it with nobody signed in → `officers_off_duty`, hours on screen, callback `outside_working_hours`. An officer working late still takes the call. | Unit: boundaries, night shifts, holidays, bad settings; off-duty path. |
+| G186 | Queue position as a `queue` message (never a transcript line); "You're next in line" once; "Call me back instead" by button or voice (en/lg/sw/nyn/ach) → callback `caller_requested_callback`. No expected-wait estimate (no honest data for one). | Unit + replay `20_call_me_back_while_waiting`. |
+| G187 | Spoken hold (`on_hold`), reassurance every `RECEPTIONIST_HOLD_UPDATE_S`, stopped on resume, transfer or end. | Unit. |
+| G189 | Greetings name all five call languages. | Unit. |
 
-### R3 — Dead air, time limits, degraded modes, inclusivity
+### R3 — Chat handoffs outside working hours
+
+G196 (one hours-aware "what happens next" message for `POST /v1/escalate`, `escalate_to_human`
+and auto-escalated turns, written in English and localized in the one place replies are —
+`localize_reply` — so Runyankole and Acholi readers get it too), G197 (the SLA clock counts
+only working seconds, `officer_hours.working_seconds`), and the officers' view of what came in
+overnight.
+
+### R4 — Dead air, time limits, degraded modes
 
 G183 (progress cues at about 5 s and 12 s, in the call language, never repeating), G184
 (WCAG 2.2.1's *Extend* option for a call the AI is handling: a spoken and on-screen warning a
 minute before the ceiling — more than the 20 s the criterion asks — and one simple action, a
 "yes" or a tap, extends it, at least ten times; a call an officer is on is not cut at the AI's
 ceiling at all), G185 (a spoken pointer to the screen when speech is withheld or
-fails), G189 (greeting names all five languages), G191 if the live check confirms it.
+fails), G191 if the live check confirms it, G198 (find why the closing question waits, and voice it
+with the answer's last sentence).
 
-### R4 — Honesty and observability
+### R5 — Honesty and observability
 
 G188 (implement resume, or mark the flag as minting only and say so in the runbook), G190
 (measure on the GPU stack; move off the event loop if it costs), G194 (a mypy gate for the
@@ -152,9 +173,11 @@ with bounded labels, and replay scenarios for every new behaviour.
 
 The main checkout carries an uncommitted, idle change (last edited 2026-10-16 12:26 JST) that
 adds `cxp_business_hours` (its own G174) and edits `brain._transfer`, `phrases.py` and
-`transfer.close_transfer_on_timeout`. It does an after-hours variant of what G180 does for any
-hour. Whoever lands second rebases; R2 keeps its presence check in one helper so the two can
-share it.
+`transfer.close_transfer_on_timeout`. R2 and R3 cover the same ground (G195–G197) and keep its
+`CXP_*` setting names and its `callback_reason` keyword, but not its shape: it appended an English
+notice to replies in three places, after localization (so a Luganda reply ended in English), and
+de-duplicated by matching the text "11:00 PM EAT". R3 composes the message once, before
+localization. That change should be dropped rather than merged once R3 lands.
 
 ## 6. Human-only follow-ups
 
@@ -172,4 +195,5 @@ shared state, see the runbook); LiveKit Cloud's adaptive interruption model.
 
 | Phase | PR | State |
 |---|---|---|
-| R1 | — | in progress |
+| R1 | #581 | **Merged 2026-10-16** (`98c7c9e550`). Unit: 504 receptionist tests green on the CI interpreter. Live, isolated GPU stack (Sunflower vLLM, SunflowerASR, Orpheus): 14/18 replay scenarios, the new `18_crisis_while_waiting` and `11` (hold, then callback through the epoch-bound countdown) included (`evals/reports/call_replay_2026-10-16_r1_isolated.json`). The four failures (2, 8, 13, 14) fail the same way on pre-R1 `dev` on the same stack (`…_dev_baseline_ab.json`, 0/4): a Luganda answer over the 25 s cap, SunflowerASR mishearing the synthetic Luganda officer request, and G198. |
+| R2 | — | in review |

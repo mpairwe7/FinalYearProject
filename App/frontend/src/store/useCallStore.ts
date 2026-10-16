@@ -53,6 +53,8 @@ interface CallStoreState {
   languages: CallLanguage[];
   language: CallLanguage;
   languageSource: CallLanguageSource;
+  /** The caller's place in the officers' queue while waiting (server `queue` message). */
+  queuePosition: number | null;
 
   openCall: () => void;
   closeCall: () => void;
@@ -68,6 +70,7 @@ interface CallStoreState {
   setAudioBlocked: (blocked: boolean) => void;
   setLanguageOptions: (detection: boolean, languages: CallLanguage[], language: CallLanguage) => void;
   setLanguage: (language: CallLanguage, source: CallLanguageSource) => void;
+  setQueuePosition: (position: number | null) => void;
   reset: () => void;
 }
 
@@ -88,6 +91,7 @@ const initialState = {
   languages: ['en'] as CallLanguage[],
   language: 'en' as CallLanguage,
   languageSource: 'default' as CallLanguageSource,
+  queuePosition: null as number | null,
 };
 
 export const useCallStore = create<CallStoreState>((set) => ({
@@ -108,9 +112,12 @@ export const useCallStore = create<CallStoreState>((set) => ({
       languages: ['en'],
       language: 'en',
       languageSource: 'default',
+      queuePosition: null,
     }),
   closeCall: () => set({ isOpen: false, status: 'idle' }),
-  setStatus: (status) => set({ status }),
+  // A place in the queue only means something while the caller is waiting.
+  setStatus: (status) =>
+    set((state) => ({ status, queuePosition: status === 'transferring' ? state.queuePosition : null })),
   setDuration: (duration) =>
     set((state) => ({
       duration: typeof duration === 'function' ? duration(state.duration) : duration,
@@ -154,5 +161,6 @@ export const useCallStore = create<CallStoreState>((set) => ({
   setLanguageOptions: (languageDetection, languages, language) =>
     set({ languageDetection, languages, language, languageSource: 'default' }),
   setLanguage: (language, languageSource) => set({ language, languageSource }),
+  setQueuePosition: (queuePosition) => set({ queuePosition }),
   reset: () => set(initialState),
 }));

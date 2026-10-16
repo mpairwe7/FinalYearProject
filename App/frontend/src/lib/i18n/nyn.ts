@@ -301,6 +301,8 @@ export const nyn: Partial<Dictionary> = {
   'call.mute': 'Sirisa eiraka',
   'call.unmute': 'Garuraho eiraka',
   'call.talkOfficer': 'Gamba n’omukozi wa URA',
+  'call.callMeBack': 'Onteerere esimu',
+  'call.queuePosition': 'Omwanya omu murongo: {position}',
   'call.hangup': 'ita esimu',
   'call.transferring': 'Ninkukwatanisa n’omukozi wa URA…',
   'call.onHold': 'Ninkushaba orindeho',

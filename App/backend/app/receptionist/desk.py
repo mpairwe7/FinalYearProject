@@ -31,7 +31,7 @@ import time
 from typing import Any
 
 from . import livekit, presence
-from .config import get_claim_timeout_s, get_officer_reconnect_grace_s
+from .config import get_claim_timeout_s, get_hold_update_s, get_officer_reconnect_grace_s
 from .hub import hub
 from .phrases import phrase
 from .state import CallRoom, registry
@@ -309,8 +309,13 @@ async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any
     return {"ended": True, "call_id": call_id}
 
 
-async def hold(call_id: str, officer_id: str, on: bool) -> dict[str, Any]:
-    """Put an active call on hold or resume it."""
+async def hold(call_id: str, officer_id: str, on: bool, speech_model: Any = None) -> dict[str, Any]:
+    """Put an active call on hold or resume it.
+
+    The caller is told they are on hold, then reassured every
+    ``RECEPTIONIST_HOLD_UPDATE_S`` until the officer resumes: a silent hold
+    reads as a dropped call (G187). Resuming says nothing — the officer speaks.
+    """
     room = _live_room(call_id)
     async with room.desk_lock:
         if room.state.mode != "bridged" and not (not on and getattr(room.state, "on_hold", False)):
@@ -326,6 +331,10 @@ async def hold(call_id: str, officer_id: str, on: bool) -> dict[str, Any]:
             update_call(call_id, hold_started_at=now)
             if room.officer is not None:
                 room.officer.on_hold = True
+            await say_to_caller(room, phrase("on_hold", room.state.locale), speech_model)
+            # The call can end while that line plays (CallRoom.end takes its own lock).
+            if room.state.mode == "bridged" and room.state.on_hold:
+                _start_hold_reassurance(room, speech_model)
             status_event = {"type": "status", "status": "on_hold"}
             await _send_to_caller(room, status_event)
             hub.publish_call(call_id, "hold", {"on": True})
@@ -336,6 +345,7 @@ async def hold(call_id: str, officer_id: str, on: bool) -> dict[str, Any]:
             if not getattr(room.state, "on_hold", False):
                 return {"hold": False, "call_id": call_id, "hold_total_s": room.state.hold_total_s}
             room.state.on_hold = False
+            _stop_hold_reassurance(room)
             held_s = now - (room.state.hold_started_at or now)
             room.state.hold_total_s = (room.state.hold_total_s or 0.0) + max(0.0, held_s)
             room.state.hold_started_at = None
@@ -387,6 +397,7 @@ async def transfer(
             room.state.hold_total_s = (room.state.hold_total_s or 0.0) + max(0.0, held_s)
             room.state.on_hold = False
             room.state.hold_started_at = None
+            _stop_hold_reassurance(room)
 
         from_officer = room.state.officer_name or officer_display_name(officer_id)
         begin_wait(room)
@@ -459,6 +470,36 @@ def _start_countdown(room: CallRoom) -> None:
     """
     if room.brain is not None:
         room.brain.start_queue_countdown(room.state.ticket_id or "")
+
+
+def _start_hold_reassurance(room: CallRoom, speech_model: Any) -> None:
+    _stop_hold_reassurance(room)
+    every = get_hold_update_s()
+    if every:
+        room.hold_timer = asyncio.create_task(_reassure_while_held(room, speech_model, every))
+
+
+def _stop_hold_reassurance(room: CallRoom) -> None:
+    timer, room.hold_timer = room.hold_timer, None
+    if timer is not None and not timer.done() and timer is not asyncio.current_task():
+        timer.cancel()
+
+
+async def _reassure_while_held(room: CallRoom, speech_model: Any, every: float) -> None:
+    """While the officer holds the call, the caller hears they have not been forgotten.
+
+    A line that cannot be spoken is logged and the next one tried: ending the
+    loop on it would leave the rest of the hold silent, the failure this exists
+    to prevent.
+    """
+    while True:
+        await asyncio.sleep(every)
+        if room.state.mode != "bridged" or not room.state.on_hold:
+            return
+        try:
+            await say_to_caller(room, phrase("officer_hold_update", room.state.locale), speech_model)
+        except Exception:  # noqa: BLE001 — cancellation is not an Exception, so it still ends the loop
+            logger.warning("Hold reassurance for call %s could not be spoken", room.call_id, exc_info=True)
 
 
 def _caller_satisfaction(score: Any, status: str | None) -> tuple[str, int | None] | None:

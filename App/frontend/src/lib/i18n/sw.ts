@@ -305,6 +305,8 @@ export const sw: Partial<Dictionary> = {
   'call.mute': 'Zima maikrofoni',
   'call.unmute': 'Washa maikrofoni',
   'call.talkOfficer': 'Ongea na afisa',
+  'call.callMeBack': 'Nipigie simu baadaye',
+  'call.queuePosition': 'Nafasi kwenye foleni: {position}',
   'call.hangup': 'Kata simu',
   'call.transferring': 'Inakuunganisha na afisa wa URA…',
   'call.onHold': 'Uko kwenye kusubiri',

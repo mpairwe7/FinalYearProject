@@ -17,6 +17,11 @@ from app.receptionist.store import init_receptionist_schema, list_turns
 
 class CallerIdleTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        # An officer is on shift: these tests are about the wait, not about nobody being
+        # there to take the call (that is test_receptionist_queue_experience, G180).
+        staffed = patch("app.receptionist.transfer.is_staff_available", return_value=True)
+        staffed.start()
+        self.addCleanup(staffed.stop)
         db.init_db()
         init_receptionist_schema()
         self.call_id = f"call_idle_{uuid.uuid4().hex[:8]}"

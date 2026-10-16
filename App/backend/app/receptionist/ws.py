@@ -110,11 +110,13 @@ async def _forward_control(task: Any, data: dict[str, Any]) -> None:
     The WebSocket transport reads the same messages in ``BrowserCallSerializer``;
     both take the call's language through :func:`config.call_language`.
     """
-    from .serializer import RequestOfficerFrame, SetLanguageFrame
+    from .serializer import RequestCallbackFrame, RequestOfficerFrame, SetLanguageFrame
 
     message_type = data.get("type")
     if message_type == "request_officer":
         await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
+    elif message_type == "request_callback":
+        await task.queue_frame(RequestCallbackFrame())
     elif message_type == "set_language":
         language = call_language(data.get("language"))
         if language is not None:

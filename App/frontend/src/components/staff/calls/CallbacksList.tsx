@@ -46,6 +46,12 @@ export function CallbacksList({
     switch (reason) {
       case 'no_officer_available':
         return 'Timed out waiting for officer';
+      case 'no_officer_online':
+        return 'No officer was signed in';
+      case 'outside_working_hours':
+        return "Called outside officers' hours";
+      case 'caller_requested_callback':
+        return 'Caller asked to be called back';
       case 'caller_left_waiting':
         return 'Caller disconnected while waiting';
       case 'officer_outcome':

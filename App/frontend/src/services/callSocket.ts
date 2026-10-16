@@ -114,6 +114,13 @@ export class CallSocket {
     }
   }
 
+  /** The waiting caller would rather be called back by an officer than hold. */
+  requestCallback(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'request_callback' }));
+    }
+  }
+
   /** The caller chose the call's language on screen; it holds for the rest of the call. */
   setLanguage(language: string): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
