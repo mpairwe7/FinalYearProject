@@ -152,17 +152,39 @@ class EscalateToHumanTool(Tool):
             else f"Officers work {hours['hours']}; an officer will review this "
             f"{officer_hours.next_shift_phrase(hours['next_on_duty'])}."
         )
+        after_hours = not hours["on_duty"]
+        next_open_eat = ""
+        close_time_eat = ""
+        use_cxp_bh = flags.is_enabled("cxp_business_hours")
+        if use_cxp_bh:
+            from ..escalation_policy import evaluate_cxp_schedule  # noqa: PLC0415
+
+            sched = evaluate_cxp_schedule(check_presence=True)
+            after_hours = sched.after_hours
+            next_open_eat = sched.next_open_label if after_hours else ""
+            close_time_eat = sched.close_time_eat if after_hours else ""
+
+        msg = (
+            f"Ticket {ticket.get('id', '')[:8]} created at priority "
+            f"{priority}. {review} You may "
+            f"also contact URA directly at https://ura.go.ug."
+        )
+        if use_cxp_bh and after_hours:
+            msg = (
+                f"Ticket {ticket.get('id', '')[:8]} queued at priority {priority}. "
+                f"Live URA CXP officer operations close at {close_time_eat} and reopen at "
+                f"{next_open_eat}; an officer will review your case first thing when "
+                f"operations resume, while the 24/7 AI assistant remains available now."
+            )
         return {
             "ok": True,
             "ticket_id": ticket.get("id", ""),
             "status": "open",
             "priority": ticket.get("priority", priority),
             "officer_hours": hours,
-            "message": (
-                f"Ticket {ticket.get('id', '')[:8]} created at priority "
-                f"{priority}. {review} You may "
-                f"also contact URA directly at https://ura.go.ug."
-            ),
+            "after_hours": after_hours,
+            "next_open_eat": next_open_eat,
+            "message": msg,
         }
 
 

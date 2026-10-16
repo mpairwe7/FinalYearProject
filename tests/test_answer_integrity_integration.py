@@ -375,6 +375,28 @@ class TestTaxpayerEscalationEndpoint:
         finally:
             flags.clear("ticket_queue")
 
+    def test_cxp_business_hours_flag_after_hours_escalation_message(self, client, monkeypatch):
+        """When cxp_business_hours is enabled after 11:00 PM EAT, /v1/escalate returns after_hours=True and 5-locale CXP notice."""
+        monkeypatch.setenv("CXP_OPEN_HOUR", "7")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "23")
+        monkeypatch.setenv("CXP_FORCE_AFTER_HOURS", "true")
+        flags.set("ticket_queue", True)
+        flags.set("cxp_business_hours", True)
+        try:
+            conversation_id = _conversation_id()
+            resp = client.post(
+                "/v1/escalate",
+                json={"conversation_id": conversation_id, "locale": "lg"},
+            ).json()
+            assert resp["ok"] is True
+            assert resp["after_hours"] is True
+            assert "07:00 EAT" in resp["next_open_eat"]
+            assert "11:00 PM EAT" in resp["message"]
+            assert "7:00 AM EAT" in resp["message"]
+        finally:
+            flags.clear("cxp_business_hours")
+            flags.clear("ticket_queue")
+
     def test_the_queue_being_off_is_said_plainly(self, client):
         flags.set("ticket_queue", False)
         try:

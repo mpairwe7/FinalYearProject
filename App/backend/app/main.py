@@ -2882,25 +2882,47 @@ def request_human_officer(
     # Set on the handoff by _maybe_create_ticket, with the ticket.
     hours = handoff.get("officer_hours") or {}
     off_duty = hours.get("on_duty") is False
-    metrics.inc(
-        "escalation_requested_total",
-        labels={"outcome": ("reused" if reused else "created") + ("_off_duty" if off_duty else "")},
-    )
-    if off_duty:
-        template = _ESCALATION_REUSED_OFF_DUTY_MESSAGE if reused else _ESCALATION_OFF_DUTY_MESSAGE
-        # The next shift can be days away (a weekend, a holiday): name it.
-        text = template.format(
-            hours=hours.get("hours") or "",
-            when=officer_hours.next_shift_phrase(hours.get("next_on_duty")),
+    is_after_hours = off_duty
+    next_open_eat = ""
+    use_cxp_bh = flags.is_enabled("cxp_business_hours", subject=ctx.user_id or None)
+    if use_cxp_bh:
+        cxp_sched = handoff.get("cxp_schedule") or {}
+        if handoff.get("after_hours") is True or cxp_sched.get("after_hours") is True:
+            is_after_hours = True
+            next_open_eat = str(cxp_sched.get("next_open_label") or handoff.get("next_open_eat") or "")
+
+    if use_cxp_bh and is_after_hours:
+        metrics.inc(
+            "escalation_requested_total",
+            labels={"outcome": "reused_off_duty" if reused else "after_hours_queued"},
         )
+        from .escalation_policy import after_hours_escalation_message
+
+        final_msg = after_hours_escalation_message(locale, reused=reused)
     else:
-        text = _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE
+        metrics.inc(
+            "escalation_requested_total",
+            labels={"outcome": ("reused" if reused else "created") + ("_off_duty" if off_duty else "")},
+        )
+        if off_duty:
+            template = _ESCALATION_REUSED_OFF_DUTY_MESSAGE if reused else _ESCALATION_OFF_DUTY_MESSAGE
+            # The next shift can be days away (a weekend, a holiday): name it.
+            text = template.format(
+                hours=hours.get("hours") or "",
+                when=officer_hours.next_shift_phrase(hours.get("next_on_duty")),
+            )
+        else:
+            text = _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE
+        final_msg = localize_reply(text, locale)
+
     return EscalationResponse(
         ok=True,
         ticket_id=ticket_id,
         status="open",
         reused_existing=reused,
-        message=localize_reply(text, locale),
+        after_hours=is_after_hours,
+        next_open_eat=next_open_eat,
+        message=final_msg,
         officer_hours=OfficerHoursStatus(**hours) if hours else None,
     )
 

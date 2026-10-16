@@ -2472,6 +2472,19 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     full_reply = localized
                     yield ("revision", full_reply)
 
+            if ticket_id and flags.is_enabled("cxp_business_hours", subject=user_id or None):
+                from .escalation_policy import (
+                    after_hours_escalation_notice,
+                    evaluate_cxp_schedule,
+                )
+
+                sched = evaluate_cxp_schedule(check_presence=True)
+                if sched.after_hours:
+                    notice = after_hours_escalation_notice(locale or "en", schedule=sched)
+                    if notice.strip() not in full_reply:
+                        full_reply = f"{full_reply.rstrip()}{notice}"
+                        yield ("revision", full_reply)
+
             result["handoff"] = handoff
             result["response_judge"] = response_judge
             result["ticket_id"] = ticket_id
@@ -7222,6 +7235,13 @@ class ChatModel:
                 handoff["reused_existing_ticket"] = True
                 # Whether a person can pick this up now (G196): with the ticket, never before it.
                 handoff["officer_hours"] = officer_hours.status()
+                if flags.is_enabled("cxp_business_hours", subject=user_id or None):
+                    from .escalation_policy import evaluate_cxp_schedule
+
+                    sched = evaluate_cxp_schedule(check_presence=True)
+                    handoff["cxp_schedule"] = sched.to_dict()
+                    handoff["after_hours"] = sched.after_hours
+                    handoff["next_open_eat"] = sched.next_open_label if sched.after_hours else ""
             return ticket_id
 
         # One handoff for every path: how the taxpayer feels and what is at
@@ -9484,6 +9504,18 @@ class ChatModel:
                     result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
                 if "workflow" in result and isinstance(result["workflow"], dict):
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
+            if result.get("ticket_id") and flags.is_enabled("cxp_business_hours", subject=user_id or None):
+                from .escalation_policy import (
+                    after_hours_escalation_notice,
+                    evaluate_cxp_schedule,
+                )
+
+                sched = evaluate_cxp_schedule(check_presence=True)
+                if sched.after_hours:
+                    notice = after_hours_escalation_notice(effective or "en", schedule=sched)
+                    cur_reply = str(result.get("reply") or "")
+                    if notice.strip() not in cur_reply:
+                        result["reply"] = f"{cur_reply.rstrip()}{notice}"
         _record_turn_case(message, result, user_id=user_id, tenant_id=tenant_id, channel=channel)
         pending = _PENDING_TURN_AUDIT.get()
         _PENDING_TURN_AUDIT.set(None)

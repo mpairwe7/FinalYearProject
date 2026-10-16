@@ -437,6 +437,14 @@ class EscalationResponse(BaseModel):
     reused_existing: bool = Field(
         False, description="True when this conversation already had an open ticket"
     )
+    after_hours: bool = Field(
+        False,
+        description="True when escalated after CXP operating hours (after 11:00 PM EAT) and queued for priority morning review",
+    )
+    next_open_eat: str = Field(
+        "",
+        description="When live CXP officer operations next reopen in East Africa Time",
+    )
     message: str = Field(..., description="What happens next, in the taxpayer's language")
     officer_hours: OfficerHoursStatus | None = Field(
         None, description="Whether officers are on duty, so the chat can say when they will reply (G196)"

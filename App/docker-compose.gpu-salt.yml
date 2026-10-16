@@ -71,6 +71,7 @@ services:
       - FLAG_STRUCTURED_TEXT_HANDOFF=${FLAG_STRUCTURED_TEXT_HANDOFF:-true}
       - FLAG_WORKFLOW_EMOTIONAL_OFFRAMP=${FLAG_WORKFLOW_EMOTIONAL_OFFRAMP:-true}
       - FLAG_WELLBEING_CHECKIN=${FLAG_WELLBEING_CHECKIN:-true}
+      - FLAG_CXP_BUSINESS_HOURS=${FLAG_CXP_BUSINESS_HOURS:-true}
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.
