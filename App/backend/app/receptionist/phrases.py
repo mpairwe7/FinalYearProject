@@ -86,6 +86,7 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Emergency: 999 or 112. Free counselling, Mental Health Uganda: 0800 21 21 21 "
             "(Monday to Friday, 8:30am to 5pm)."
         ),
+        "crisis_waiting": "I've asked for an officer to come to you first. Please stay on the line.",
         # Call Desk: an officer joins the call, holds it, reconnects, and ends it.
         "officer_joining": "You're now connected to {name}.",
         "officer_reconnecting": "Please hold, I'm reconnecting you.",
@@ -103,6 +104,14 @@ _PHRASES: dict[str, dict[str, str]] = {
         "review_thanks_end": "Thank you for your feedback. Goodbye.",
         "review_ask_transfer": "I'm connecting you to a URA officer now. While you wait, were my answers helpful so far?",
         "review_thanks_transfer": "Thank you. Please stay on the line; an officer will be with you shortly.",
+        # A spoken confirmation (voice_agentic_workflows): asked again when the yes was unclear;
+        # "done" only when the action's executor reported success, never otherwise.
+        "confirm_reprompt": "Please confirm clearly once more: should I proceed with this action?",
+        "confirm_done": "Thank you. That is confirmed and done.",
+        "confirm_not_done": (
+            "I'm sorry, I couldn't complete that on this call. "
+            "Would you like to speak to an officer about it?"
+        ),
     },
     "lg": {
         "greeting": (
@@ -152,6 +161,7 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Obuyambi obw'amangu: 999 oba 112. Okuweebwa amagezi ku bwereere, Mental Health "
             "Uganda: 0800 21 21 21 (Balaza okutuuka ku Lwakutaano, 8:30–17:00)."
         ),
+        "crisis_waiting": "Nsabye omukozi wa URA akusooke. Sigala ku ssimu; omukozi ajja kukwogerako mangu.",
         "officer_joining": "Kati oyogera ne {name}.",
         "officer_reconnecting": "Nsaba olindeko, nkyakukwataganya n'omukozi.",
         "on_hold": "Nsaba olindeko.",
@@ -164,6 +174,12 @@ _PHRASES: dict[str, dict[str, str]] = {
         "review_thanks_end": "Webale okutugamba. Weeraba.",
         "review_ask_transfer": "Kati nkuyunga ku mukozi wa URA. Nga olindirira, by'okuddamu byange bikuyambye?",
         "review_thanks_transfer": "Webale. Sigala ku ssimu; omukozi ajja kukwogerako mangu.",
+        "confirm_reprompt": "Nsaba oddemu okukakasa nga oyogera bulungi: oyagala tukomekkereze ekikolwa kino?",
+        "confirm_done": "Webale, ekikolwa kikakasiddwa era kiwedde.",
+        "confirm_not_done": (
+            "Nsonyiwa, ekyo sisobodde kukimaliriza ku ssimu eno. "
+            "Wandiyagadde okwogera n'omukozi ku nsonga eno?"
+        ),
     },
     "sw": {
         "greeting": (
@@ -213,6 +229,7 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Dharura: 999 au 112. Ushauri nasaha bila malipo, Mental Health Uganda: 0800 21 21 21 "
             "(Jumatatu hadi Ijumaa, 8:30–17:00)."
         ),
+        "crisis_waiting": "Nimeomba afisa wa URA akuhudumie kwanza. Tafadhali endelea kusubiri; afisa atakuhudumia hivi punde.",
         "officer_joining": "Sasa umeunganishwa na {name}.",
         "officer_reconnecting": "Tafadhali subiri, ninaendelea kukuunganisha na afisa.",
         "on_hold": "Tafadhali subiri.",
@@ -225,6 +242,12 @@ _PHRASES: dict[str, dict[str, str]] = {
         "review_thanks_end": "Asante kwa maoni yako. Kwaheri.",
         "review_ask_transfer": "Ninakuunganisha na afisa wa URA sasa. Unaposubiri, je, majibu yangu yamekusaidia hadi sasa?",
         "review_thanks_transfer": "Asante. Tafadhali endelea kusubiri; afisa atakuhudumia hivi punde.",
+        "confirm_reprompt": "Tafadhali thibitisha tena kwa sauti wazi: je, tuendelee na hatua hii?",
+        "confirm_done": "Asante, hatua imethibitishwa na kukamilika.",
+        "confirm_not_done": (
+            "Samahani, sikuweza kukamilisha hilo kwenye simu hii. "
+            "Je, ungependa kuzungumza na afisa kuhusu hili?"
+        ),
     },
     "nyn": {
         "greeting": (
@@ -274,6 +297,7 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Obuhwezi bw'ahonaaho: 999 nari 112. Obuhabuzi bw'obusha, Mental Health "
             "Uganda: 0800 21 21 21 (Orwokubanza kuhika Orwakataano, 8:30–17:00)."
         ),
+        "crisis_waiting": "Naashaba omukozi wa URA akubanze. Guma aha simu; omukozi naija kukugambaho ahonaaho.",
         "officer_joining": "Hati nookwatanisibwa na {name}.",
         "officer_reconnecting": "Ninkushaba orindeho, ninkyakukwatanisa n'omukozi.",
         "on_hold": "Ninkushaba orindeho.",
@@ -286,6 +310,12 @@ _PHRASES: dict[str, dict[str, str]] = {
         "review_thanks_end": "Webare kutugambira. Ogumeho.",
         "review_ask_transfer": "Hati ninkukwatanisa n'omukozi wa URA. Waaba otetegyereize, eby'okugarukamu byangye bikuhwereire?",
         "review_thanks_transfer": "Webare. Guma aha simu; omukozi naija kukugambaho ahonaaho.",
+        "confirm_reprompt": "Ninkushaba ogarukemu ohamye omu iraka eririkuhurirwa gye: tugumizemu n'ekikorwa eki?",
+        "confirm_done": "Webare, ekikorwa kihamiibwe kandi kyaheza kukorwa.",
+        "confirm_not_done": (
+            "Nsaasira, tinkibaasize kukiheza aha simu egi. "
+            "Nooyenda kugamba n'omukozi ahari enshonga egi?"
+        ),
     },
     "ach": {
         "greeting": (
@@ -335,6 +365,7 @@ _PHRASES: dict[str, dict[str, str]] = {
             "Kony me oyot: 999 onyo 112. Miyo tam me nono, Mental Health "
             "Uganda: 0800 21 21 21 (Ceng Baraja naka Ceng Abic, 8:30–17:00)."
         ),
+        "crisis_waiting": "Apenyo latic me URA ni obin boti mukwongo. Bed i cim; latic biloko kwedi oyot.",
         "officer_joining": "Kombedi ikube ki {name}.",
         "officer_reconnecting": "Tim ber ikur, pud atye ka kubi ki latic.",
         "on_hold": "Tim ber ikur.",
@@ -347,6 +378,12 @@ _PHRASES: dict[str, dict[str, str]] = {
         "review_thanks_end": "Apwoyo pi tam ni. Wabineno.",
         "review_ask_transfer": "Atye ka kubi ki latic me URA kombedi. Ka itye ka kuro, lagam na okonyi?",
         "review_thanks_transfer": "Apwoyo. Bed i cim; latic biloko kwedi oyot.",
+        "confirm_reprompt": "Tim ber imok doki ki dwon maleng: wamede ki tic man?",
+        "confirm_done": "Apwoyo, tic dong kimoko dok otum.",
+        "confirm_not_done": (
+            "Kica, pe atwero tyeko man i cim man. "
+            "Imito loko ki latic me URA i kom lok man?"
+        ),
     },
 }
 

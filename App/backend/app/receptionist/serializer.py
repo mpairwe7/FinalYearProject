@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from .config import KNOWN_LANGUAGES
+from .config import call_language
 
 logger = logging.getLogger(__name__)
 
@@ -147,10 +147,8 @@ class BrowserCallSerializer(FrameSerializer):
                 return RequestOfficerFrame(reason=msg.get("reason", "caller_requested"))
 
             if msg_type == "set_language":
-                language = str(msg.get("language", "")).strip().lower()
-                if language in KNOWN_LANGUAGES:
-                    return SetLanguageFrame(language=language)
-                return None
+                language = call_language(msg.get("language"))
+                return SetLanguageFrame(language=language) if language else None
 
             if msg_type == "hangup":
                 if self.room and hasattr(self.room, "end"):

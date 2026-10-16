@@ -341,7 +341,8 @@ def test_spoken_confirmation_and_officer_voice_copilot(tmp_db):
     state = CallState(call_id="call-2026", conversation_id="conv-2026", user_id="1000777888", locale="lg")
     sample_challenge_id = "chal-2026-1"
     state.pending_confirm_challenge = sample_challenge_id
-    state.pending_confirm_action = {"description": "TIN registration submission"}
+    # "Done" is said only when the action's executor reports success (G177).
+    state.pending_confirm_action = {"description": "TIN registration submission", "execute": lambda: {"ok": True}}
     room = CallRoom(call_id="call-2026", state=state)
     chat_model = MagicMock()
     brain = UraReceptionistBrain(room=room, chat_model=chat_model)

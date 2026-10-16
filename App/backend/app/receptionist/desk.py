@@ -50,6 +50,7 @@ from .store import (
 from .store import (
     mark_callback_done as store_callback_done,
 )
+from .transfer import begin_wait, end_wait
 from .tts import synthesize_pcm16
 
 logger = logging.getLogger(__name__)
@@ -225,6 +226,7 @@ async def bridge(room: CallRoom, officer_leg: Any, officer_id: str, speech_model
         room.state.reconnecting_officer = None
         room.officer = officer_leg
         room.state.mode = "bridged"
+        end_wait(room)  # the AI's countdown must not outlive the wait it timed
         room.state.officer_id = officer_id
         room.state.officer_name = name
         room.state.bridged_at = now
@@ -288,12 +290,10 @@ async def end(call_id: str, officer_id: str, speech_model: Any) -> dict[str, Any
             raise DeskError(403, "Another officer has claimed this call", claimed_by=holder,
                             officer_name=_holder_name(room, holder))
         # Waiting for an officer, and nobody else has it: terminate it.
-        now = time.time()
-        room.state.mode = "ended"
-        if room.state.officer_id:
-            presence.clear_officer(room.state.officer_id)
+        # CallRoom.end() (through hang_up_caller) does the teardown — the
+        # countdown, the media room, the pipeline and the row's status. Marking
+        # the room ended first, as this once did, made it skip all of that (G176).
         await hang_up_caller(room, "officer_terminated_waiting")
-        update_call(call_id, status="ended", end_reason="officer_terminated_waiting", ended_at=now)
         hub.publish_lobby("call.ended", {"call_id": call_id, "reason": "officer_terminated_waiting"})
         asyncio.create_task(_save_draft_wrapup(call_id))
         return {"ended": True, "call_id": call_id}
@@ -389,7 +389,7 @@ async def transfer(
             room.state.hold_started_at = None
 
         from_officer = room.state.officer_name or officer_display_name(officer_id)
-        room.state.mode = "transferring"
+        begin_wait(room)
         room.state.transfer_reason = "officer_transfer"
         room.state.target_team = team
         room.state.transfer_requested_at = now
@@ -447,7 +447,18 @@ async def transfer(
                 "from_officer": from_officer,
             },
         )
+        _start_countdown(room)
         return {"transferred": True, "call_id": call_id, "target_team": team}
+
+
+def _start_countdown(room: CallRoom) -> None:
+    """A call back in the queue gets the waiting caller's countdown: hold lines, then a callback.
+
+    Without it a call an officer passed on, or whose officer dropped, waited in
+    silence until the call's ceiling (G179).
+    """
+    if room.brain is not None:
+        room.brain.start_queue_countdown(room.state.ticket_id or "")
 
 
 def _caller_satisfaction(score: Any, status: str | None) -> tuple[str, int | None] | None:
@@ -666,7 +677,7 @@ async def handle_officer_disconnect(room: CallRoom, officer_id: str, speech_mode
         if room.state.mode != "bridged" or room.state.officer_id != officer_id:
             return
         logger.info("Officer %s disconnected from call %s; starting %.0fs grace period", officer_id, room.call_id, grace_s)
-        room.state.mode = "transferring"
+        begin_wait(room)
         room.state.reconnecting_officer = officer_id
         room.officer = None
         try:
@@ -702,6 +713,10 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
             return
         logger.info("Reconnect grace period expired for %s on %s; releasing to queue", officer_id, room.call_id)
         room.state.reconnecting_officer = None
+        # The lapsed officer is off the call: nobody may treat them as its
+        # officer any more (the desk's terminate path once crashed on it, G176).
+        room.state.officer_id = None
+        room.state.officer_name = None
         # The lapsed officer's media identity would otherwise stay on the
         # allowlist and refuse the next officer's audio (4409): the call sat
         # in the queue unanswerable.
@@ -709,6 +724,7 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
         room.state.livekit_officer_identity = ""
         room.state.livekit_officer_route_active = False
         await _release_locked(room, "officer_disconnected")
+        begin_wait(room)
         room.state.turn_seq += 1
         turn = create_turn(
             call_id=room.call_id,
@@ -732,6 +748,12 @@ async def _expire_reconnect_grace(room: CallRoom, officer_id: str, grace_s: floa
                 "attempt": room.state.transfer_attempts,
             },
         )
+        _start_countdown(room)
+    # Their presence still said on_call for a call they had left.
+    try:
+        presence.finish_wrap_up(officer_id)
+    except Exception:
+        logger.warning("Could not restore the presence of officer %s", officer_id, exc_info=True)
     # Outside the lock: a slow LiveKit API must not hold up the next claim.
     await revoke_media(room, stale_identity)
 

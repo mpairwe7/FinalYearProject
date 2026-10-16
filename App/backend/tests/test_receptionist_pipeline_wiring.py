@@ -64,6 +64,31 @@ class MultilingualPipelineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brain.on_switch_interrupt, router.switch_passed)
         self.assertIsNotNone(router.interrupt)
         self.assertIsNotNone(router.barge_in)
+        self.assertIs(room.brain, brain)
+
+
+class SingleEnginePipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        db.init_db()
+        init_receptionist_schema()
+
+    async def test_an_officer_call_outlives_the_pipeline_idle_timeout(self):
+        """G193: while bridged, caller audio goes to the officer, so the pipeline sees no speech.
+
+        Pipecat cancels an idle task after 300 s by default, which ended every officer call
+        longer than five minutes (recorded as the caller hanging up).
+        """
+        from app.flags import flags
+        from app.receptionist.pipeline import build_call_pipeline
+
+        room = _room()
+        with (
+            patch.dict(os.environ, {"RECEPTIONIST_MEDIA_TRANSPORT": "websocket"}),
+            patch.object(flags, "is_enabled", return_value=False),  # no language detection: one engine
+        ):
+            task, _transport, brain = build_call_pipeline(room, MagicMock())
+        self.assertFalse(task._cancel_on_idle_timeout)
+        self.assertIs(room.brain, brain)
 
 
 if __name__ == "__main__":
