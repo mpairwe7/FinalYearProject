@@ -1694,6 +1694,29 @@ class UraReceptionistBrain(LLMService):
             handoff=handoff,
             priority="urgent" if reason == "safety_concern" else "",
         )
+        # 3b. Phase 40 (G174): After CXP operating hours (after 11:00 PM EAT) when no
+        # officer is online, do not place the caller on a dead hold queue — log the
+        # priority callback immediately, announce CXP hours, and keep the AI active.
+        if flags.is_enabled("cxp_business_hours", subject=self.room.state.user_id or None):
+            from ..escalation_policy import evaluate_cxp_schedule
+
+            sched = evaluate_cxp_schedule(check_presence=True)
+            if sched.after_hours:
+                after_event = close_transfer_on_timeout(
+                    self.room,
+                    tid or "",
+                    callback_reason="after_hours_cxp_closed",
+                )
+                if after_event is not None:
+                    await self.push_frame(
+                        OutputTransportMessageFrame(after_event), FrameDirection.DOWNSTREAM
+                    )
+                await self._say_and_record(phrase("after_hours_callback", self.language), kind="notice")
+                if tid:
+                    reference = phrase("reference_screen", self.language, ref=case_reference(tid))
+                    await self._say_and_record(reference, kind="notice", speak=False)
+                return
+
         if not staffed:
             # Nobody is signed in to take it (G91, G180): no hold for nobody. The
             # ticket stays for the officers, and the callback is owed at once —

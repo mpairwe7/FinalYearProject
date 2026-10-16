@@ -82,6 +82,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         "queue_next": "You're next in line.",
         # While an officer has put the caller on hold (G187).
         "officer_hold_update": "Thank you for holding. Your officer will be back with you shortly.",
+        "after_hours_callback": (
+            "Our live URA officers operate until eleven at night and reopen at seven in the morning. "
+            "I have logged your case for a priority callback as soon as our officers return, "
+            "and I can still help you with tax questions right now."
+        ),
         "reference_screen": "Your reference: {ref}",
         "clarify_term": "Excuse me, did you say {term}?",
         "clarify_confirm": "So if I got it right, you're asking about {highlight} — is that right?",
@@ -176,6 +181,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         ),
         "queue_next": "Ggwe addako.",
         "officer_hold_update": "Webale okulinda. Omukozi wo ajja kudda gy'oli mangu.",
+        "after_hours_callback": (
+            "Abakozi ba URA ab'oku ssimu bakola okutuuka ssaawa ttaano ez'ekiro ne baddamu ku ssaawa emu ey'oku makya. "
+            "Mwandiise ensonga yo bakukubire essimu mu bwangu nga bwe banaddamu, "
+            "era nkyasobola okukuyamba ku bibuuzo ebirala kati."
+        ),
         "reference_screen": "Namba yo ey'okujuliza: {ref}",
         "clarify_term": "Nsonyiwa, ogambye {term}?",
         "clarify_confirm": "Kale, obuuza ku {highlight} — kituufu?",
@@ -258,6 +268,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         ),
         "queue_next": "Wewe ndiye unayefuata.",
         "officer_hold_update": "Asante kwa kusubiri. Afisa wako atarudi kwako hivi punde.",
+        "after_hours_callback": (
+            "Maafisa wetu wa URA wanafanya kazi hadi saa tano usiku na kufungua tena saa moja asubuhi. "
+            "Nimesajili suala lako ili upigiwe simu kwa kipaumbele pindi wanaporudi, "
+            "na bado ninaweza kukusaidia na maswali mengine sasa hivi."
+        ),
         "reference_screen": "Nambari yako ya kumbukumbu: {ref}",
         "clarify_term": "Samahani, ulisema {term}?",
         "clarify_confirm": "Kwa hiyo, kama nimeelewa vizuri, unauliza kuhusu {highlight} — ni sahihi?",
@@ -342,6 +357,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         ),
         "queue_next": "Niiwe orikukurataho.",
         "officer_hold_update": "Webare kurinda. Omukozi waawe naija kugaruka ahari iwe ahonaaho.",
+        "after_hours_callback": (
+            "Abakozi baitu ba URA nibakora kuhika shaaha itaano z'ekiro kandi bagarukaho shaaha emwe y'akasheeshe. "
+            "Naahandiika enshonga yaawe ngu bakuteerere esimu ahonaaho baagarukaho, "
+            "kandi nimbaasa kugumizamu kukuhwera hati."
+        ),
         "reference_screen": "Enamba yaawe y'okujuriza: {ref}",
         "clarify_term": "Nsaasira, waagamba {term}?",
         "clarify_confirm": "Nahabwekyo, naaba nkyetegyereize gye, noobuuza ahari {highlight} — kihikire?",
@@ -425,6 +445,11 @@ _PHRASES: dict[str, dict[str, str]] = {
         ),
         "queue_next": "In aye ilubo.",
         "officer_hold_update": "Apwoyo kuro. Latic ni bidwogo boti oyot.",
+        "after_hours_callback": (
+            "Lutic wa me URA gitiyo naka cawa abic me dyewor dok giyabo cawa acel me odiko. "
+            "Acoo lokki wek gigony boti cim oyot-oyot ka gudwogo, "
+            "dok pud atwero konyi ki lapeny mukene kombedi."
+        ),
         "reference_screen": "Namba ni me ngec: {ref}",
         "clarify_term": "Kica, iwaco {term}?",
         "clarify_confirm": "Pi meno, ka aniang maber, itye ka penyo i kom {highlight} — tye kakare?",

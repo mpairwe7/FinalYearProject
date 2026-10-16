@@ -315,11 +315,12 @@ def open_transfer(
 
 #: Why a waiting call became a callback: nobody answered in time, nobody was
 #: signed in to answer (G180) — outside working hours, nobody could be (G195) —
-#: or the caller asked to be called back (G186).
+#: CXP was closed after hours (G174), or the caller asked to be called back (G186).
 CALLBACK_REASONS = (
     "no_officer_available",
     "no_officer_online",
     "outside_working_hours",
+    "after_hours_cxp_closed",
     "caller_requested_callback",
 )
 

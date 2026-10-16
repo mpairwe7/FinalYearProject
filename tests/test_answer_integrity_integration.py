@@ -300,6 +300,18 @@ class TestAContradictedFigureIsNotPrinted:
 # The taxpayer's own escalation
 # ---------------------------------------------------------------------------
 class TestTaxpayerEscalationEndpoint:
+    @pytest.fixture(autouse=True)
+    def desk_always_open(self, monkeypatch):
+        """Officers on duty whatever the hour the suite runs at.
+
+        Outside working hours the endpoint words its reply differently (G196),
+        so wording asserted here would fail every run after 23:00 Kampala time.
+        """
+        for name in ("CXP_TIMEZONE", "CXP_WORKING_DAYS", "CXP_CLOSED_DATES", "CXP_FORCE_AFTER_HOURS"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("CXP_OPEN_HOUR", "0")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "24")
+
     def test_it_queues_a_real_ticket_and_returns_its_reference(self, client):
         flags.set("ticket_queue", True)
         try:
@@ -341,6 +353,48 @@ class TestTaxpayerEscalationEndpoint:
             assert second["reused_existing"] is True
             assert "already looking at this conversation" in second["message"]
         finally:
+            flags.clear("ticket_queue")
+
+    def test_at_night_asking_again_says_it_is_already_with_the_officers(self, client, monkeypatch):
+        """The real funnel and endpoint off duty: today closed, so the next shift is named."""
+        import datetime as dt
+
+        today = dt.datetime.now(dt.timezone(dt.timedelta(hours=3))).date().isoformat()
+        monkeypatch.setenv("CXP_OPEN_HOUR", "7")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "23")
+        monkeypatch.setenv("CXP_CLOSED_DATES", today)
+        flags.set("ticket_queue", True)
+        try:
+            conversation_id = _conversation_id()
+            first = client.post("/v1/escalate", json={"conversation_id": conversation_id}).json()
+            second = client.post("/v1/escalate", json={"conversation_id": conversation_id}).json()
+            assert first["officer_hours"]["on_duty"] is False
+            assert "when they are next on duty, from" in first["message"]
+            assert second["reused_existing"] is True
+            assert "already with URA's officers" in second["message"]
+        finally:
+            flags.clear("ticket_queue")
+
+    def test_cxp_business_hours_flag_after_hours_escalation_message(self, client, monkeypatch):
+        """When cxp_business_hours is enabled after 11:00 PM EAT, /v1/escalate returns after_hours=True and 5-locale CXP notice."""
+        monkeypatch.setenv("CXP_OPEN_HOUR", "7")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "23")
+        monkeypatch.setenv("CXP_FORCE_AFTER_HOURS", "true")
+        flags.set("ticket_queue", True)
+        flags.set("cxp_business_hours", True)
+        try:
+            conversation_id = _conversation_id()
+            resp = client.post(
+                "/v1/escalate",
+                json={"conversation_id": conversation_id, "locale": "lg"},
+            ).json()
+            assert resp["ok"] is True
+            assert resp["after_hours"] is True
+            assert "07:00 EAT" in resp["next_open_eat"]
+            assert "11:00 PM EAT" in resp["message"]
+            assert "7:00 AM EAT" in resp["message"]
+        finally:
+            flags.clear("cxp_business_hours")
             flags.clear("ticket_queue")
 
     def test_the_queue_being_off_is_said_plainly(self, client):

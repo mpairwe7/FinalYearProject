@@ -32,6 +32,7 @@ from .escalation_policy import (
     TIER_PRIORITY,
     EscalationAssessment,
     assess_escalation,
+    evaluate_cxp_schedule,
     higher_priority,
 )
 from .flags import flags
@@ -199,6 +200,15 @@ def enrich_handoff(
     assessment = None
     history = [h for h in (str(turn.get("user_message") or "") for turn in list(transcript)[:-1]) if h]
     try:
+        if flags.is_enabled("cxp_business_hours", subject=subject):
+            schedule = evaluate_cxp_schedule(check_presence=True)
+            handoff["cxp_schedule"] = schedule.to_dict()
+            handoff["after_hours"] = schedule.after_hours
+            handoff["routing_mode"] = "async_priority_queue" if schedule.after_hours else "live_queue"
+    except Exception:
+        logger.debug("cxp schedule enrichment skipped", exc_info=True)
+
+    try:
         if flags.is_enabled("eq_stakes_escalation", subject=subject):
             assessment = strongest_assessment(user_query, history)
             handoff["escalation"] = assessment.to_dict()
@@ -258,6 +268,16 @@ def enrich_handoff(
             envelope_dict = _names_only(envelope.to_dict())
             if assessment is not None:
                 envelope_dict.setdefault("sla", {})["target_response_seconds"] = assessment.sla_seconds
+            if flags.is_enabled("cxp_business_hours", subject=subject):
+                schedule = evaluate_cxp_schedule(check_presence=True)
+                handoff["cxp_schedule"] = schedule.to_dict()
+                handoff["after_hours"] = schedule.after_hours
+                handoff["routing_mode"] = "async_priority_queue" if schedule.after_hours else "live_queue"
+                sla_block = envelope_dict.setdefault("sla", {})
+                sla_block["paused"] = schedule.sla_paused
+                sla_block["pause_reason"] = schedule.sla_pause_reason
+                sla_block["resume_at"] = schedule.next_open_timestamp
+                sla_block["next_open_eat"] = schedule.next_open_label
             handoff["envelope"] = envelope_dict
             handoff["completeness"] = envelope.completeness_ratio()
             handoff["zero_repetition_score"] = envelope.zero_repetition_score()

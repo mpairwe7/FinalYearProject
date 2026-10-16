@@ -1464,6 +1464,7 @@ def test_phase38_nyn_and_ach_full_2026_ttt_tts_stt_parity(monkeypatch):
     assert resolve_turn_locale("Walok Leb Acoli", requested_locale="en", locale_explicit=True).locale == "ach"
 
     # Pre-warmed canonical MT cache hits
+    monkeypatch.setattr(mt, "cache", mt._TranslationCache(mt.MT_CACHE_SIZE))
     assert mt.cache.get("nyn", "en", nyn_q) == "How do I register to get a TIN?"
     assert mt.cache.get("ach", "en", ach_q) == "How do I register to get a TIN?"
     assert english_retrieval_query(nyn_q, "nyn") == "How do I register to get a TIN?"
@@ -1883,7 +1884,7 @@ def test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrai
         assert res_h.allowed is False and "harmful_intent" in res_h.flags, f"Missed harmful intent: {harm}"
 
 
-def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss():
+def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss(monkeypatch):
     from app.agents.graphs.main_graph import _is_reasoning_miss
     from app.agents.graphs.state import AgentGraphState
     from app.claim_verifier import verify_claims
@@ -1901,6 +1902,9 @@ def test_phase42_claim_verifier_disclaimers_and_langgraph_reasoning_miss():
         assert len(report["unsupported_claims"]) == 0
 
     # 2. _is_reasoning_miss translates pre-warmed vernacular queries to English before token-overlap check
+    from app import mt
+
+    monkeypatch.setattr(mt, "cache", mt._TranslationCache(mt.MT_CACHE_SIZE))
     state_nyn = AgentGraphState(
         query="Nimbaasa kwehandiikisa nta kutunga TIN?",
         rewritten_query="Nimbaasa kwehandiikisa nta kutunga TIN?",
@@ -2003,8 +2007,107 @@ def test_phase43_voice_picker_orpheus_speaker_forwarding_and_receptionist_parity
 
     assert entity_mishear("efurisi") == "efris"
     assert entity_mishear("viati") == "vat"
+    monkeypatch.setattr(mt, "cache", mt._TranslationCache(mt.MT_CACHE_SIZE))
     assert mt.cache.get("nyn", "en", normalize_call_query("Nimbaasa kwehandiikisa nta kutunga TIN?", "nyn")) == "How do I register to get a TIN?"
     assert mt.cache.get("ach", "en", normalize_call_query("Atwero coyo nyinga nining me nongo TIN?", "ach")) == "How do I register to get a TIN?"
+
+
+def test_phase44_cxp_after_hours_escalation_and_sla_pause(monkeypatch):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+
+    from app.database import compose_sla_stats
+    from app.escalation_policy import (
+        after_hours_escalation_message,
+        after_hours_escalation_notice,
+        business_hours_elapsed_seconds,
+        evaluate_cxp_schedule,
+    )
+    from app.flags import flags
+    from app.officer_handoff import enrich_handoff
+    from app.receptionist.phrases import phrase
+
+    tz = ZoneInfo("Africa/Kampala")
+    # 11:30 PM EAT (23:30) — after CXP operations stop at 11:00 PM (23:00)
+    ts_after_hours = dt.datetime(2026, 10, 16, 23, 30, 0, tzinfo=tz).timestamp()
+    # 2:00 PM EAT (14:00) — during CXP operating hours (07:00-23:00)
+    ts_open = dt.datetime(2026, 10, 16, 14, 0, 0, tzinfo=tz).timestamp()
+
+    sched_closed = evaluate_cxp_schedule(ts_after_hours)
+    assert sched_closed.within_operating_hours is False
+    assert sched_closed.after_hours is True
+    assert sched_closed.sla_paused is True
+    assert sched_closed.close_time_eat == "23:00 EAT"
+    assert sched_closed.open_time_eat == "07:00 EAT"
+    assert "07:00 EAT" in sched_closed.next_open_label
+
+    sched_open = evaluate_cxp_schedule(ts_open)
+    assert sched_open.within_operating_hours is True
+    assert sched_open.after_hours is False
+    assert sched_open.sla_paused is False
+
+    # SLA business-hours elapsed time: 23:00 EAT -> 08:00 EAT next morning (9 wall hours, only 1 business hour 07:00-08:00)
+    t_2300 = dt.datetime(2026, 10, 16, 23, 0, 0, tzinfo=tz).timestamp()
+    t_0800 = dt.datetime(2026, 10, 17, 8, 0, 0, tzinfo=tz).timestamp()
+    assert abs(business_hours_elapsed_seconds(t_2300, t_0800) - 3600.0) < 1.0
+
+    # 5-locale after-hours text notices and spoken receptionist callback phrases
+    for loc in ("en", "lg", "sw", "nyn", "ach"):
+        notice = after_hours_escalation_notice(loc)
+        assert "11:00 PM EAT" in notice
+        assert "7:00 AM EAT" in notice
+        spoken_cb = phrase("after_hours_callback", loc)
+        assert len(spoken_cb) > 40
+
+    # Handoff enrichment and SLA stats with cxp_business_hours enabled
+    monkeypatch.setenv("CXP_FORCE_AFTER_HOURS", "true")
+    monkeypatch.setattr(
+        flags,
+        "is_enabled",
+        lambda name, **kw: name in ("cxp_business_hours", "eq_stakes_escalation", "structured_text_handoff"),
+    )
+    handoff: dict = {"topic": "objection_or_dispute", "priority": "high", "required_details": []}
+    enrich_handoff(
+        handoff,
+        user_query="I want to appeal my VAT assessment",
+        transcript=[{"user_message": "I want to appeal my VAT assessment", "bot_reply": ""}],
+        conversation_id="conv-ah-1",
+    )
+    assert handoff["after_hours"] is True
+    assert handoff["routing_mode"] == "async_priority_queue"
+    assert handoff["envelope"]["sla"]["paused"] is True
+    assert handoff["envelope"]["sla"]["pause_reason"] == "after_hours_cxp_closed_2300_to_0700_eat"
+
+    # A ticket opened at 22:00 EAT evaluated 26 wall-hours later (00:00 EAT two nights later)
+    # has only 17 business hours elapsed (1h day 1 + 16h day 2 < 24h SLA), so it does not breach!
+    t_open_ticket = dt.datetime(2026, 10, 16, 22, 0, 0, tzinfo=tz).timestamp()
+    t_eval = t_open_ticket + 26 * 3600
+    stats = compose_sla_stats(
+        period_rows=[],
+        open_rows=[{"created_at": t_open_ticket, "first_response_at": 0, "reply_at": 0, "status": "open"}],
+        days=30,
+        now=t_eval,
+    )
+    assert stats["breaching_first_response"] == 0
+    assert stats["after_hours_paused"] == 1
+    assert stats["sla_paused"] is True
+
+    # Dual-check availability gating: an online officer overrides off-hours when CXP_FORCE_AFTER_HOURS is unset
+    monkeypatch.delenv("CXP_FORCE_AFTER_HOURS", raising=False)
+    monkeypatch.setattr("app.receptionist.presence.count_active_officers", lambda *a, **k: 2)
+    sched_with_officer = evaluate_cxp_schedule(ts_after_hours, check_presence=True)
+    assert sched_with_officer.live_officer_online is True
+    assert sched_with_officer.within_operating_hours is True
+    assert sched_with_officer.after_hours is False
+
+    # 5-locale deterministic after_hours_escalation_message for POST /v1/escalate
+    for loc in ("en", "lg", "sw", "nyn", "ach"):
+        msg = after_hours_escalation_message(loc)
+        assert "11:00 PM EAT" in msg
+        assert "7:00 AM EAT" in msg
+        assert "24/7" in msg
+
+
 
 
 

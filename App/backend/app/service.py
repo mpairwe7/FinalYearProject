@@ -1711,6 +1711,12 @@ def _apply_output_guards(
             user_id=user_id,
             tenant_id=tenant_id or "default",
         )
+    if ticket_id and flags.is_enabled("cxp_business_hours", subject=user_id or None):
+        from .escalation_policy import after_hours_escalation_notice, evaluate_cxp_schedule
+
+        if evaluate_cxp_schedule(check_presence=True).after_hours and "11:00 PM EAT" not in reply:
+            reply = f"{reply.rstrip()}{after_hours_escalation_notice('en')}"
+            revised = True
 
     return {
         "reply": reply,
@@ -5986,6 +5992,11 @@ class ChatModel:
         if ack and ack not in out["reply"]:
             out["reply"] = f"{ack}\n\n{out['reply']}".strip()
         locale = str(out.get("locale") or "en")
+        if out.get("ticket_id") and flags.is_enabled("cxp_business_hours"):
+            from .escalation_policy import after_hours_escalation_notice, evaluate_cxp_schedule
+
+            if evaluate_cxp_schedule(check_presence=True).after_hours and "11:00 PM EAT" not in out["reply"]:
+                out["reply"] = f"{out['reply'].rstrip()}{after_hours_escalation_notice('en')}"
         if locale not in ("", "en"):
             if "next_actions" in out and isinstance(out["next_actions"], list):
                 out["next_actions"] = self._localize_next_actions(out["next_actions"], locale)
@@ -11252,6 +11263,14 @@ class ChatModel:
             )
             if ticket_id:
                 trace_ctx["ticket_id"] = ticket_id
+                if flags.is_enabled("cxp_business_hours", subject=user_id or None):
+                    from .escalation_policy import (
+                        after_hours_escalation_notice,
+                        evaluate_cxp_schedule,
+                    )
+
+                    if evaluate_cxp_schedule(check_presence=True).after_hours and "11:00 PM EAT" not in reply:
+                        reply = f"{reply.rstrip()}{after_hours_escalation_notice('en')}"
 
             trace_ctx["num_sources"] = len(sources)
             trace_ctx["locale"] = locale

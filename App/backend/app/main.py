@@ -857,6 +857,13 @@ _ESCALATION_CREATED_MESSAGE = (
     "here in this conversation, so you do not need to start again. You can "
     "also call URA toll-free on 0800 117 000 or 0800 217 000."
 )
+_ESCALATION_AFTER_HOURS_MESSAGE = (
+    "A URA officer has been asked to look at this, and your case is queued for "
+    "priority review. Live CXP officer operations close at 11:00 PM EAT and "
+    "reopen at 7:00 AM EAT — their reply will appear here in this conversation "
+    "as soon as operations resume, so you do not need to start again. Meanwhile, "
+    "this AI assistant remains available 24/7 to help you."
+)
 _ESCALATION_REUSED_MESSAGE = (
     "A URA officer is already looking at this conversation. Their reply will "
     "appear here, so there is no need to ask again. You can also call URA "
@@ -2880,25 +2887,48 @@ def request_human_officer(
     # Set on the handoff by _maybe_create_ticket, with the ticket.
     hours = handoff.get("officer_hours") or {}
     off_duty = hours.get("on_duty") is False
-    metrics.inc(
-        "escalation_requested_total",
-        labels={"outcome": ("reused" if reused else "created") + ("_off_duty" if off_duty else "")},
-    )
-    if off_duty:
-        template = _ESCALATION_REUSED_OFF_DUTY_MESSAGE if reused else _ESCALATION_OFF_DUTY_MESSAGE
-        # The next shift can be days away (a weekend, a holiday): name it.
-        text = template.format(
-            hours=hours.get("hours") or "",
-            when=officer_hours.next_shift_phrase(hours.get("next_on_duty")),
-        )
+    is_after_hours = off_duty
+    next_open_eat = ""
+    use_cxp_bh = flags.is_enabled("cxp_business_hours", subject=ctx.user_id or None)
+    if use_cxp_bh:
+        from .escalation_policy import after_hours_escalation_message, evaluate_cxp_schedule
+
+        sched = evaluate_cxp_schedule(check_presence=True)
+        if sched.after_hours:
+            is_after_hours = True
+            next_open_eat = sched.next_open_label
+            handoff["after_hours"] = True
+            handoff["next_open_eat"] = next_open_eat
+
+    if use_cxp_bh and is_after_hours and not reused:
+        metrics.inc("escalation_requested_total", labels={"outcome": "after_hours_queued"})
+        from .escalation_policy import after_hours_escalation_message
+
+        final_msg = after_hours_escalation_message(locale)
     else:
-        text = _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE
+        metrics.inc(
+            "escalation_requested_total",
+            labels={"outcome": ("reused" if reused else "created") + ("_off_duty" if off_duty else "")},
+        )
+        if off_duty:
+            template = _ESCALATION_REUSED_OFF_DUTY_MESSAGE if reused else _ESCALATION_OFF_DUTY_MESSAGE
+            # The next shift can be days away (a weekend, a holiday): name it.
+            text = template.format(
+                hours=hours.get("hours") or "",
+                when=officer_hours.next_shift_phrase(hours.get("next_on_duty")),
+            )
+        else:
+            text = _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE
+        final_msg = localize_reply(text, locale)
+
     return EscalationResponse(
         ok=True,
         ticket_id=ticket_id,
         status="open",
         reused_existing=reused,
-        message=localize_reply(text, locale),
+        after_hours=is_after_hours,
+        next_open_eat=next_open_eat,
+        message=final_msg,
         officer_hours=OfficerHoursStatus(**hours) if hours else None,
     )
 

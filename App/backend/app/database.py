@@ -2273,10 +2273,25 @@ def compose_sla_stats(
     breaching_next = 0
     awaiting_next = 0
     unassigned = 0
+    after_hours_paused = 0
+    use_bh = False
+    schedule_paused = False
+    try:
+        from .escalation_policy import business_hours_elapsed_seconds, evaluate_cxp_schedule
+        from .flags import flags
+
+        if flags.is_enabled("cxp_business_hours"):
+            use_bh = True
+            schedule_paused = evaluate_cxp_schedule(now).sla_paused
+    except Exception:
+        use_bh = False
+
     for r in open_rows:
         created = _get(r, "created_at", 0)
         first = _get(r, "first_response_at", 1)
         reply = _get(r, "reply_at", 2)
+        if schedule_paused:
+            after_hours_paused += 1
         # "Waiting to be claimed" belongs with the other live counts rather
         # than in ticket_stats: it is a property of the queue right now, not
         # of what was raised in a window, and the overview reads it beside
@@ -2284,15 +2299,25 @@ def compose_sla_stats(
         if not _get_text(r, "assignee", 4):
             unassigned += 1
         if not first:
-            if officer_hours.working_seconds(created, now, hours) >= SLA_BREACH_SECONDS:
+            elapsed_first = (
+                business_hours_elapsed_seconds(created, now)
+                if use_bh
+                else officer_hours.working_seconds(created, now, hours)
+            )
+            if elapsed_first >= SLA_BREACH_SECONDS:
                 breaching_first += 1
             continue
         awaiting_next += 1
         last_touch = reply or first
-        if officer_hours.working_seconds(last_touch, now, hours) >= SLA_BREACH_SECONDS:
+        elapsed_next = (
+            business_hours_elapsed_seconds(last_touch, now)
+            if use_bh
+            else officer_hours.working_seconds(last_touch, now, hours)
+        )
+        if elapsed_next >= SLA_BREACH_SECONDS:
             breaching_next += 1
 
-    return {
+    out_stats: dict[str, Any] = {
         "period_days": days,
         "tickets": len(period_rows),
         "responded": len(response),
@@ -2310,6 +2335,10 @@ def compose_sla_stats(
         "sla_clock": "officer_hours",
         "officer_hours": hours.label(now),
     }
+    if use_bh:
+        out_stats["after_hours_paused"] = after_hours_paused
+        out_stats["sla_paused"] = schedule_paused
+    return out_stats
 
 
 def sla_stats(days: int = 30) -> dict[str, Any]:

@@ -293,6 +293,8 @@ class RegistryIntegrityTests(unittest.TestCase):
             # Phase 39: guided flows that listen; the hopelessness check-in.
             "workflow_emotional_offramp",
             "wellbeing_checkin",
+            # Phase 40: CXP business-hours-aware escalation & SLA pause/resume (07:00-23:00 EAT).
+            "cxp_business_hours",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)
