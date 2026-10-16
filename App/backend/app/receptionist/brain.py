@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import re
@@ -36,7 +37,13 @@ from .hub import hub
 from .lexicon import normalize_call_query
 from .phrases import fillers, phrase, pick_filler
 from .store import create_turn, get_call, update_call
-from .transfer import case_reference, close_transfer_on_timeout, open_transfer
+from .transfer import (
+    case_reference,
+    close_transfer_on_timeout,
+    open_transfer,
+    raise_waiting_priority,
+    stop_countdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +241,29 @@ def _offer_question(offer: str, reason: str) -> str:
     if offer == "more":
         return "more_detail"
     return "crisis_offer" if reason == "safety_concern" else "officer_offer"
+
+
+def _grounding(result: dict[str, Any]) -> tuple[float | None, str]:
+    """How well an answer is grounded: its confidence when the result has one, and the judge's band.
+
+    Most chat results carry no ``confidence`` (calculator and guidance paths
+    set ``1.0``); their grounding is the response judge's ``confidence_band``.
+    A missing confidence is ``None`` — never the caller's word probability,
+    which measures how well they were heard, not how well the answer is
+    supported (G181).
+    """
+    raw = result.get("confidence")
+    confidence = float(raw) if isinstance(raw, int | float) and not isinstance(raw, bool) else None
+    judge = result.get("response_judge")
+    band = str(judge.get("confidence_band") or "") if isinstance(judge, dict) else ""
+    return confidence, band
+
+
+def _executor_succeeded(outcome: Any) -> bool:
+    """Only an explicit success counts: ``True``, or a tool result with ``ok: True``."""
+    if isinstance(outcome, dict):
+        return outcome.get("ok") is True
+    return outcome is True
 
 #: In-call controls are whole requests, not words inside a question: "I said
 #: goodbye to my employer — how do I file PAYE?" must be answered, not hung up.
@@ -599,13 +629,12 @@ class UraReceptionistBrain(LLMService):
         )
         hub.publish_call(self.room.call_id, "turn", caller_turn)
 
-        # Dispatch based on current mode
-        if self.room.state.mode in ("bridged", "transferring", "ended"):
-            # Transcript recorded; no bot reply generated — except the thanks
-            # for answering the review asked as the transfer began.
-            if review_answer and self.room.state.mode == "transferring" and self.room.state.review_state == "asking_transfer":
-                call_review.record(self.room, user_text, language)
-                await self._say_and_record(phrase("review_thanks_transfer", language), kind="notice")
+        # Dispatch based on current mode. Bridged: the officer hears the caller;
+        # ended: nobody does. Either way the transcript is all there is to do.
+        if self.room.state.mode in ("bridged", "ended"):
+            return
+        if self.room.state.mode == "transferring":
+            await self._while_waiting(user_text, language, review_answer)
             return
 
         # Mode is "ai"
@@ -669,40 +698,9 @@ class UraReceptionistBrain(LLMService):
                 return
             if _OFFER_ACCEPT_RE.search(user_text):
                 if mean_prob is not None and mean_prob < min_conf:
-                    reprompt = {
-                        "lg": "Nsaba oddemu okukakasa nga oyogera bulungi: oyagala tukomekkereze ekikolwa kino?",
-                        "sw": "Tafadhali thibitisha tena kwa sauti wazi: je, tuendelee na hatua hii?",
-                        "nyn": "Ninkushaba ogarukemu ohamye omu iraka eririkuhurirwa gye: tugumizemu n'ekikorwa eki?",
-                        "ach": "Tim ber imok doki ki dwon maleng: wamede ki tic man?",
-                        "en": "Please confirm clearly once more: should I proceed with this action?",
-                    }.get(language, "Please confirm clearly once more: should I proceed with this action?")
-                    await self._say_and_record(reprompt, kind="confirm")
+                    await self._say_and_record(phrase("confirm_reprompt", language), kind="confirm")
                     return
-                action_desc = str(self.room.state.pending_confirm_action.get("description") or "requested tax action")
-                self.room.state.pending_confirm_challenge = ""
-                self.room.state.pending_confirm_action = {}
-                confirmed_msg = {
-                    "lg": f"Webale, ekikolwa ({action_desc}) kikakasiddwa era kiwedde.",
-                    "sw": f"Asante, hatua ({action_desc}) imethibitishwa na kukamilika.",
-                    "nyn": f"Webare, ekikorwa ({action_desc}) kihamiibwe kandi kyaheza kukorwa.",
-                    "ach": f"Apwoyo, tic ({action_desc}) dong kimoko dok otum.",
-                    "en": f"Thank you, your {action_desc} has been confirmed and completed.",
-                }.get(language, f"Thank you, your {action_desc} has been confirmed and completed.")
-                try:
-                    from ..analytics import metrics
-
-                    metrics.inc(
-                        "autonomous_resolution_total",
-                        labels={
-                            "channel": "voice_call",
-                            "flow": "workflow",
-                            "locale": language,
-                            "outcome": "resolved",
-                        },
-                    )
-                except Exception:
-                    logger.debug("Spoken confirm resolution metric skipped", exc_info=True)
-                await self._say_and_record(confirmed_msg, kind="answer")
+                await self._complete_confirmed_action(language)
                 return
 
         # 1. Explicit Human Request
@@ -803,6 +801,67 @@ class UraReceptionistBrain(LLMService):
         # 4. Standard Answer Generation
         await self._answer_question(user_text, mean_word_prob=mean_prob)
 
+    async def _while_waiting(self, user_text: str, language: str, review_answer: bool) -> None:
+        """A caller's turn while they wait for an officer, when nobody is listening yet.
+
+        A crisis is answered at once, before any officer can be, and puts the call at
+        the front of the queue (G175). The answer to the review asked as the transfer
+        began is thanked. Anything else waits for the officer: it is in the transcript
+        they read first.
+        """
+        if detect_crisis(user_text):
+            await self._support_crisis_waiting()
+            return
+        if review_answer and self.room.state.review_state == "asking_transfer":
+            call_review.record(self.room, user_text, language)
+            await self._say_and_record(phrase("review_thanks_transfer", language), kind="notice")
+
+    async def _complete_confirmed_action(self, language: str) -> None:
+        """The caller clearly said yes to the action they were asked to confirm.
+
+        It is reported done only when its executor (``pending_confirm_action
+        ["execute"]``) ran and reported success. With no executor, or a failure,
+        the caller hears that it could not be completed on the call and is offered
+        an officer: a voice line must never claim an action nobody performed
+        (G177, OWASP ASI09).
+        """
+        action = self.room.state.pending_confirm_action or {}
+        self.room.state.pending_confirm_challenge = ""
+        self.room.state.pending_confirm_action = {}
+        execute = action.get("execute")
+        done = False
+        if callable(execute):
+            try:
+                outcome = execute()
+                if inspect.isawaitable(outcome):
+                    outcome = await outcome
+                done = _executor_succeeded(outcome)
+            except Exception:
+                logger.exception("Confirmed action failed on call %s", self.room.call_id)
+        if not done:
+            self._offer("officer", reason="offer_accepted")
+            await self._say_and_record(phrase("confirm_not_done", language), kind="answer")
+            return
+        try:
+            from ..analytics import metrics
+
+            metrics.inc(
+                "autonomous_resolution_total",
+                labels={"channel": "voice_call", "flow": "workflow", "locale": language, "outcome": "resolved"},
+            )
+        except Exception:
+            logger.debug("Spoken confirm resolution metric skipped", exc_info=True)
+        await self._say_and_record(phrase("confirm_done", language), kind="answer")
+
+    async def _support_crisis_waiting(self) -> None:
+        """The crisis lines for a caller already waiting, then the call raised to urgent."""
+        language = self.language
+        spoken = f"{phrase('crisis_support', language)} {phrase('crisis_waiting', language)}"
+        await self._say_and_record(spoken, kind="answer")
+        await self._say_and_record(phrase("crisis_screen", language), kind="notice", speak=False)
+        if raise_waiting_priority(self.room, reason="safety_concern"):
+            logger.warning("Call %s raised to urgent in the queue (safety_concern)", self.room.call_id)
+
     def _earlier_in_call(self, exchanges: int = 2) -> str:
         """The call so far, in English: what the chat carried over and the last exchanges."""
         lines: list[str] = []
@@ -893,10 +952,12 @@ class UraReceptionistBrain(LLMService):
         return ""
 
     async def _generate_luganda_answer(self, question: str, *, memory_write: bool = True) -> dict[str, Any]:
-        """Fast cross-lingual RAG bridge: local Sunflower first, Gemini only if it is down.
+        """Fast cross-lingual RAG bridge on the local Sunflower model.
 
         Replaces the slow 4-hop MT pipeline with direct cross-lingual understanding,
         English URA knowledge base retrieval, and direct Luganda synthesis in a single pass.
+        The English answer's grounding (confidence, judge band, faithfulness) is passed
+        through unchanged, never defaulted, so the call's officer offer reads the real thing.
         """
         # A Luganda calculation is answered by the same MCP calculator as chat,
         # before retrieval can substitute a nearby tax fact.
@@ -949,8 +1010,10 @@ class UraReceptionistBrain(LLMService):
         english_reply = (rag_result.get("reply", "") or rag_result.get("text", "")).strip()
         sources = rag_result.get("sources", [])
 
-        # Hard failure: zero retrieval hits & no reply
-        if not english_reply and not sources:
+        # Hard failure: no English answer to put into Luganda. (Speaking the
+        # "let me connect you" line here, as this once did, promised an officer
+        # nobody called.)
+        if not english_reply:
             return {
                 "reply": "",
                 "sources": [],
@@ -962,9 +1025,7 @@ class UraReceptionistBrain(LLMService):
             }
 
         # Assemble grounding context
-        passages: list[str] = []
-        if english_reply:
-            passages.append(english_reply)
+        passages: list[str] = [english_reply]
         for s in sources:
             if isinstance(s, dict) and s.get("text"):
                 passages.append(s["text"])
@@ -976,36 +1037,30 @@ class UraReceptionistBrain(LLMService):
         from .. import mt
 
         luganda_reply = await asyncio.to_thread(self._synthesize_luganda_reply, context_text, question)
-        if luganda_reply and english_reply:
-            if not (
-                mt.figures_survived(english_reply, luganda_reply, locale="lg")
-                and mt.units_survived(english_reply, luganda_reply)
-            ):
-                logger.info("Direct Luganda call synthesis failed figure/unit check; falling back to sentinel-guarded _localize_reply")
-                luganda_reply = ""
+        if luganda_reply and not (
+            mt.figures_survived(english_reply, luganda_reply, locale="lg")
+            and mt.units_survived(english_reply, luganda_reply)
+        ):
+            logger.info("Direct Luganda call synthesis failed the figure/unit check; using the guarded _localize_reply")
+            luganda_reply = ""
         if not luganda_reply:
-            if english_reply:
-                loc_fn = getattr(self.chat_model, "_localize_reply", None)
-                if callable(loc_fn):
-                    try:
-                        localized = loc_fn(english_reply, "lg")
-                        if isinstance(localized, str) and localized.strip():
-                            luganda_reply = localized.strip()
-                        else:
-                            luganda_reply = english_reply
-                    except Exception:
-                        luganda_reply = english_reply
-                else:
-                    luganda_reply = english_reply
-            else:
-                luganda_reply = phrase("error_transfer", "lg")
+            luganda_reply = english_reply
+            loc_fn = getattr(self.chat_model, "_localize_reply", None)
+            if callable(loc_fn):
+                try:
+                    localized = loc_fn(english_reply, "lg")
+                    if isinstance(localized, str) and localized.strip():
+                        luganda_reply = localized.strip()
+                except Exception:
+                    logger.debug("Luganda localisation failed; serving English", exc_info=True)
 
         return {
             "reply": str(luganda_reply),
             "sources": sources,
             "citations": rag_result.get("citations", []),
-            "faithfulness_score": rag_result.get("faithfulness_score", 0.95),
-            "confidence": rag_result.get("confidence") or rag_result.get("retrieval_confidence", 0.8),
+            "faithfulness_score": rag_result.get("faithfulness_score"),
+            "confidence": rag_result.get("confidence"),
+            "response_judge": rag_result.get("response_judge"),
             "escalation_required": rag_result.get("escalation_required", False),
             "escalation_reason": rag_result.get("escalation_reason", ""),
             "ticket_id": rag_result.get("ticket_id"),
@@ -1283,20 +1338,24 @@ class UraReceptionistBrain(LLMService):
         except Exception:
             logger.debug("Failed logging conversation turn to DB", exc_info=True)
 
-        # Voice-Calibrated Escalation Policy (Pillar 2)
+        # Voice-Calibrated Escalation Policy (Pillar 2). Whether a person is
+        # offered depends on how well the answer is grounded (see _grounding);
+        # how well the caller was heard is the clarify gate's and the risk
+        # monitor's concern.
         escalation_required = bool(result.get("escalation_required"))
         ticket_id = result.get("ticket_id")
         esc_reason = str(result.get("escalation_reason", "") or "rule_triggered")
         sources = result.get("sources", [])
-        confidence = float(result.get("confidence") or mean_word_prob or 1.0)
+        confidence, judge_band = _grounding(result)
 
         # 1. Hard escalation: Explicit human request
         if is_human_request(question) or esc_reason in ("user_requested", "caller_requested", "human_requested"):
             await self._transfer("caller_requested", ticket_id=ticket_id, handoff=result.get("handoff"))
             return
 
-        # 2. Hard escalation: Hard failure / zero retrieval hits
-        if not bot_reply or (not sources and confidence < 0.35):
+        # 2. Hard escalation: Hard failure / zero retrieval hits. A reply with no
+        # passages and no score (a courtesy, calculator or workflow line) is not one.
+        if not bot_reply or (not sources and confidence is not None and confidence < 0.35):
             await self._transfer(
                 esc_reason if esc_reason != "rule_triggered" else "no_knowledge_match",
                 ticket_id=ticket_id,
@@ -1313,10 +1372,14 @@ class UraReceptionistBrain(LLMService):
             )
             return
 
-        # 4. Moderate retrieval confidence (0.35–0.50), a soft abstain, or a
-        # call going badly: the best statutory answer, and an officer offered
-        # rather than imposed.
-        uncertain = escalation_required or (0.35 <= confidence < 0.50)
+        # 4. Moderate confidence (0.35–0.50), a weakly grounded answer (the
+        # judge's low band), a soft abstain, or a call going badly: the best
+        # statutory answer, and an officer offered rather than imposed.
+        uncertain = (
+            escalation_required
+            or judge_band == "low"
+            or (confidence is not None and 0.35 <= confidence < 0.50)
+        )
         at_risk = not uncertain and self._call_at_risk()
         reply_for_speech = bot_reply
         if flags.is_enabled("emotion_aware_prosody", subject=self.room.state.user_id or None):
@@ -1547,6 +1610,12 @@ class UraReceptionistBrain(LLMService):
         handoff: dict[str, Any] | None = None,
     ) -> None:
         """Transfer caller to human officer, enforcing ticket_queue invariant."""
+        if self.room.state.mode != "ai":
+            # Already waiting, or an officer has the call, or it ended: a second
+            # request (a double tap, a stale screen, a crafted message) must not
+            # reopen the transfer under them (G178).
+            logger.info("Ignoring a transfer (%s) on call %s: it is %s", reason, self.room.call_id, self.room.state.mode)
+            return
         # Whatever the AI last asked is settled by the transfer: after a
         # timeout, a "yes" must not answer a question from before it.
         self._take_offer()
@@ -1583,12 +1652,22 @@ class UraReceptionistBrain(LLMService):
         )
 
         # 6. Start transfer timeout timer
-        timeout_s = get_transfer_timeout_s()
+        self.start_queue_countdown(tid or "")
+
+    def start_queue_countdown(self, ticket_ref: str) -> None:
+        """Keep the waiting caller told, and time the wait out to a callback.
+
+        Started for every wait: the AI's own transfer, and — through
+        ``room.brain`` — a call an officer passed on, or whose officer dropped
+        and did not come back. Any earlier countdown stops; this one acts only
+        while the call is still in the wait it was started for (G179).
+        """
+        stop_countdown(self.room)
         self.room.state.transfer_timer_task = asyncio.create_task(
-            self._transfer_timeout_countdown(timeout_s, tid or "")
+            self._transfer_timeout_countdown(get_transfer_timeout_s(), ticket_ref, epoch=self.room.state.queue_epoch)
         )
 
-    async def _transfer_timeout_countdown(self, timeout_s: float, ticket_ref: str) -> None:
+    async def _transfer_timeout_countdown(self, timeout_s: float, ticket_ref: str, *, epoch: int | None = None) -> None:
         """Keep a waiting caller told; hand the call back when no officer joins in time.
 
         Every ``RECEPTIONIST_HOLD_UPDATE_S`` a "thank you for holding" line,
@@ -1599,18 +1678,31 @@ class UraReceptionistBrain(LLMService):
         never said to a caller an officer is about to greet. Then the
         callback: the reference goes on the caller's screen, short and in the
         form the chat's support cases use, never read out as a ticket UUID.
+
+        *epoch* is the wait this countdown belongs to (the current one when
+        omitted). Once the call leaves that wait — an officer joined, passed it
+        on, or dropped — it says and does nothing more.
         """
         state = self.room.state
+        wait: int = state.queue_epoch if epoch is None else epoch
+
+        def waiting() -> bool:
+            return bool(state.mode == "transferring" and state.queue_epoch == wait)
+
         every = get_hold_update_s()
         waited = 0.0
         while every and waited + every < timeout_s:
             await asyncio.sleep(every)
             waited += every
-            if state.mode == "transferring" and not state.claimed_by and not state.reconnecting_officer:
+            if not waiting():
+                return
+            if not state.claimed_by and not state.reconnecting_officer:
                 await self._say_and_record(phrase("still_holding", self.language), kind="notice")
         await asyncio.sleep(timeout_s - waited)
-        while state.mode == "transferring" and state.claimed_by:
+        while waiting() and state.claimed_by:
             await asyncio.sleep(0.5)
+        if not waiting():
+            return
         status_event = close_transfer_on_timeout(self.room, ticket_ref)
         if status_event is None:
             return

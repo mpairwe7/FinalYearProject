@@ -120,6 +120,10 @@ export function useCallLive(callId?: string | null) {
             setCall((prev) => (prev ? { ...prev, status: msg.data.status } : null));
           } else if (msg.type === 'language' && typeof msg.data?.language === 'string') {
             setCall((prev) => (prev ? { ...prev, locale: msg.data.language } : null));
+          } else if (msg.type === 'priority' && typeof msg.data?.priority === 'string') {
+            setCall((prev) =>
+              prev ? { ...prev, priority: msg.data.priority, transfer_reason: msg.data.reason || prev.transfer_reason } : null,
+            );
           }
         } catch {}
       };

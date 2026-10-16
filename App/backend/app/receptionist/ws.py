@@ -26,6 +26,7 @@ from . import desk, livekit, risk
 from .brain import UraReceptionistBrain
 from .carryover import chat_carryover, seed_call_topic
 from .config import (
+    call_language,
     get_default_language,
     get_languages,
     get_max_call_s,
@@ -101,6 +102,23 @@ async def _stop_pipeline(room: Any, task: Any) -> None:
         raise
     except Exception:
         logger.debug("Pipeline runner for %s ended with an error", room.call_id, exc_info=True)
+
+
+async def _forward_control(task: Any, data: dict[str, Any]) -> None:
+    """A caller's control message on the LiveKit call socket, as a frame for the pipeline.
+
+    The WebSocket transport reads the same messages in ``BrowserCallSerializer``;
+    both take the call's language through :func:`config.call_language`.
+    """
+    from .serializer import RequestOfficerFrame, SetLanguageFrame
+
+    message_type = data.get("type")
+    if message_type == "request_officer":
+        await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
+    elif message_type == "set_language":
+        language = call_language(data.get("language"))
+        if language is not None:
+            await task.queue_frame(SetLanguageFrame(language=language))
 
 
 async def _refuse_officer(websocket: WebSocket, detail: str) -> None:
@@ -435,8 +453,6 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                         await desk.handle_officer_disconnect(room, room.state.officer_id, None)
 
                 room.pipeline_runner_task = asyncio.create_task(runner.run(task))
-                from .serializer import RequestOfficerFrame, SetLanguageFrame
-
                 max_call_s = get_max_call_s()
                 # A dropped control socket raises out of receive_text(), and
                 # CallRoom.end() does not own the Pipecat runner: without this
@@ -461,12 +477,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
                         if message_type == "hangup":
                             await room.end("caller_hangup")
                             break
-                        if message_type == "request_officer":
-                            await task.queue_frame(RequestOfficerFrame(reason=str(data.get("reason") or "caller_requested")))
-                        elif message_type == "set_language":
-                            language = str(data.get("language") or "").strip().lower()
-                            if language in ("en", "sw", "lg"):
-                                await task.queue_frame(SetLanguageFrame(language=language))
+                        await _forward_control(task, data)
                 finally:
                     await _stop_pipeline(room, task)
             else:
@@ -488,6 +499,7 @@ async def call_stream_endpoint(websocket: WebSocket) -> None:
             from ..main import app
             chat_model = getattr(getattr(app, "state", None), "model", None)
             brain = UraReceptionistBrain(room=room, chat_model=chat_model)
+            room.brain = brain
             await brain.say_greeting()
 
             while room.state.mode != "ended":

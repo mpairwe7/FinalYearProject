@@ -17,6 +17,7 @@ never transcript text or a brief. Content goes out on the per-call channel.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -48,6 +49,68 @@ def _topic_and_priority(packet: dict[str, Any] | None) -> tuple[str, str]:
     topic = str(packet.get("topic") or "").strip() or DEFAULT_TOPIC
     priority = str(packet.get("priority") or "").strip().lower()
     return topic, priority if priority in PRIORITIES else "normal"
+
+
+def begin_wait(room: Any) -> int:
+    """The call starts a new wait for an officer: ``transferring``, under a new queue epoch.
+
+    Every way into the queue goes through here — the AI's transfer, an officer
+    passing the call on, an officer's audio dropping — so a countdown started for
+    an earlier wait sees the epoch change and never acts on this one.
+    """
+    room.state.mode = "transferring"
+    room.state.queue_epoch += 1
+    epoch: int = room.state.queue_epoch
+    return epoch
+
+
+def end_wait(room: Any) -> None:
+    """The wait is over (an officer joined): its countdown stops and can no longer act."""
+    room.state.queue_epoch += 1
+    stop_countdown(room)
+
+
+def stop_countdown(room: Any) -> None:
+    """Cancel the waiting caller's countdown, unless it is the task asking."""
+    task, room.state.transfer_timer_task = room.state.transfer_timer_task, None
+    if task is not None and not task.done() and task is not asyncio.current_task():
+        task.cancel()
+
+
+def raise_waiting_priority(room: Any, *, reason: str, priority: str = "urgent") -> bool:
+    """A caller already waiting needs a person sooner: raise the call and its ticket.
+
+    The lobby gets ``call.priority_raised`` (metadata only), which re-sorts the
+    queue and brings back an alert an officer dismissed. It is not
+    ``call.transfer_requested``: that resets the queue row's claim and wait, and
+    a call an officer has taken — joining, or in their reconnect grace — must
+    not look free to the others. The call's own channel gets ``priority`` too,
+    so the officer taking it sees why. Returns False, changing nothing, when
+    the call is not waiting or is already at *priority* or above.
+    """
+    state = room.state
+    if state.mode != "transferring" or priority not in PRIORITIES:
+        return False
+    current = state.priority if state.priority in PRIORITIES else "normal"
+    if PRIORITIES.index(current) >= PRIORITIES.index(priority):
+        return False
+    state.priority = priority
+    state.transfer_reason = reason
+    update_call(room.call_id, priority=priority, transfer_reason=reason)
+    if state.ticket_id:
+        _update_ticket_priority(state.ticket_id, priority)
+    hub.publish_lobby("call.priority_raised", {"call_id": room.call_id, "priority": priority, "reason": reason})
+    hub.publish_call(room.call_id, "priority", {"priority": priority, "reason": reason})
+    return True
+
+
+def _update_ticket_priority(ticket_id: str, priority: str) -> None:
+    try:
+        from .. import database as db
+
+        db.update_ticket(ticket_id, priority=priority)
+    except Exception:
+        logger.warning("Could not raise ticket %s to %s", ticket_id, priority, exc_info=True)
 
 
 def is_staff_available(target_team: str = "") -> bool:
@@ -113,8 +176,12 @@ def open_transfer(
     # A reused ticket has no packet to carry the override.
     priority = priority if priority in PRIORITIES else packet_priority
     waiting_since = time.time()
-    state.mode = "transferring"
+    begin_wait(room)
     state.ticket_id = tid or None
+    # Kept on the call: an officer who passes it on, or whose audio drops,
+    # puts it back in the queue with the same topic and priority.
+    state.topic = topic
+    state.priority = priority
     state.transfer_reason = reason
     state.transfer_requested_at = waiting_since
     state.transfer_attempts += 1

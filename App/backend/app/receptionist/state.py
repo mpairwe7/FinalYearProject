@@ -58,6 +58,10 @@ class CallState:
     # Times this call has been put in the officers' queue: the AI's transfer
     # is the first; an officer passing it on (Call Desk, Phase 2) adds one.
     transfer_attempts: int = 0
+    # Which wait for an officer this is. It changes whenever a wait begins or
+    # ends (transfer.begin_wait / end_wait); a countdown acts only on the wait
+    # it was started for, so an old timer can never time out a newer wait.
+    queue_epoch: int = 0
     generation_id: int = 0
     barge_in_count: int = 0
     caller_turns_count: int = 0
@@ -149,6 +153,9 @@ class CallRoom:
         self.transport: Any | None = None
         self.pipeline_task: Any | None = None
         self.pipeline_runner_task: asyncio.Task[Any] | None = None
+        # The call's UraReceptionistBrain, so the officer desk can start the
+        # waiting caller's countdown when it puts a call back in the queue.
+        self.brain: Any | None = None
         self.caller_reconnect_task: asyncio.Task[Any] | None = None
         self.participant_joined: dict[str, asyncio.Event] = {}
         self.worker: Any | None = None

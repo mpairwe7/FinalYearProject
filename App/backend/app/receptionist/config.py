@@ -155,6 +155,18 @@ def get_languages() -> tuple[str, ...]:
     return langs
 
 
+def call_language(value: object) -> str | None:
+    """*value* as a language this deployment's calls can be held in, or ``None``.
+
+    The one rule for a caller pinning the call's language from the screen,
+    on the WebSocket path and the LiveKit control socket alike: the LiveKit
+    loop once accepted only en/sw/lg, so Runyankole and Acholi callers'
+    choices were dropped there (G182).
+    """
+    language = str(value or "").strip().lower()
+    return language if language in get_languages() else None
+
+
 def get_lid_method() -> str:
     """How the sentinel votes: ``salt_token`` (default), ``fusion`` or ``keyword``."""
     method = os.getenv("RECEPTIONIST_LID_METHOD", "salt_token").strip().lower()

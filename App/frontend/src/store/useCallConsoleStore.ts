@@ -211,6 +211,17 @@ export const useCallConsoleStore = create<CallConsoleState>((set) => ({
             dismissed,
           };
         }
+        case 'call.priority_raised': {
+          // A waiting caller needs a person sooner (a crisis said in the queue):
+          // new priority and reason, and the alert comes back — but the claim and
+          // the wait stay as they are, so a call being joined never looks free.
+          const dismissed = { ...state.dismissed };
+          delete dismissed[id];
+          return {
+            ...put({ priority: str(data.priority, current.priority), reason: str(data.reason, current.reason) }),
+            dismissed,
+          };
+        }
         case 'call.brief_ready':
           return put({
             topic: str(data.topic) || current.topic,

@@ -150,6 +150,8 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
   const topic = callTopicLabel(lobby?.topic || call.topic) || brief?.topic || 'Tax question';
   const language = callLanguageName(lobby?.language || call.locale);
   const priority = lobby?.priority || call.priority;
+  // A crisis said before an officer was on the line: whoever takes the call must know first.
+  const safetyConcern = (lobby?.reason || call.transfer_reason) === 'safety_concern';
   const officerName = lobby?.officer_name || lobby?.claimed_name || call.officer_id || 'an officer';
 
   const header = (() => {
@@ -219,6 +221,12 @@ export function CallWorkspace({ callId, role }: { callId: string; role: string }
           )}
         </div>
       </header>
+
+      {safetyConcern && (
+        <p className="cw-safety" role="alert" data-testid="call-safety-concern">
+          Safety concern: crisis lines given. Take this call first, and start with how they are.
+        </p>
+      )}
 
       {state === 'waiting' && (
         <>

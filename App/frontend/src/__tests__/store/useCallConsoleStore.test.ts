@@ -66,6 +66,20 @@ describe('useCallConsoleStore', () => {
     expect(alertCalls(store()).map((c) => c.call_id)).toEqual(['c2']);
   });
 
+  it('a crisis said in the queue raises the call and alerts again, keeping its claim and wait (G175)', () => {
+    event('call.transfer_requested', { call_id: 'c1', priority: 'normal', waiting_since: 5, reason: 'caller_requested' });
+    event('call.claimed', { call_id: 'c1', officer_id: 'nakato', officer_name: 'Officer Nakato' });
+    store().dismissAlert('c1');
+    event('call.priority_raised', { call_id: 'c1', priority: 'urgent', reason: 'safety_concern' });
+    expect(store().calls.c1).toMatchObject({
+      priority: 'urgent',
+      reason: 'safety_concern',
+      claimed_by: 'nakato', // still being joined: never shown as free
+      waiting_since: 5, // not a new wait
+    });
+    expect(store().dismissed.c1).toBeUndefined();
+  });
+
   it('a new transfer of a dismissed call alerts again', () => {
     event('call.transfer_requested', { call_id: 'c1', waiting_since: 1 });
     store().dismissAlert('c1');

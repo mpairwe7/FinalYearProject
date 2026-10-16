@@ -147,7 +147,7 @@ All switches and thresholds are configured via environment variables:
 | `RECEPTIONIST_ALLOW_EDGE_STANDIN_LG` | `false` | Allow an English edge-tts voice to read a Luganda line on a call |
 | `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
 | `FLAG_HYBRID_SPEECH_S2S` | `false` | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`) |
-| `FLAG_VOICE_AGENTIC_WORKFLOWS` | `false` | Spoken confirmation token binding & guided workflows on live calls |
+| `FLAG_VOICE_AGENTIC_WORKFLOWS` | `false` | Spoken confirmation token binding & guided workflows on live calls. A confirmed action is reported done only when its executor reports success (fail-closed, G177) |
 | `FLAG_EMOTION_AWARE_PROSODY` | `false` | Acoustic prosody & caller affect conditioning (`receptionist/prosody.py`). Affect needs the caller's words: loudness or pace alone names nothing (see `conversational-safety-and-eq.md`) |
 | `PROSODY_ACOUSTIC_ONLY_AFFECT` | `false` | Restores affect labels from loudness or pace alone — for a validation study only |
 | `FLAG_SPOKEN_FIGURE_GUARD` | `false` | Dictation pauses & spoken figure verification (`receptionist/spoken_figure_guard.py`) |
@@ -164,7 +164,10 @@ All switches and thresholds are configured via environment variables:
 | `FLAG_OFFICER_PREFERENCE_CAPTURE` | `false` | Captures PII-redacted edit diffs between AI co-pilot drafts and final officer replies for DPO/ORPO export |
 
 Every call runs up to `RECEPTIONIST_MAX_CALL_S` whatever its language: no stage has a
-provider session window any more. See Pipecat's
+provider session window any more, and Pipecat's own idle cancel (300 s without speech
+or transcripts in the pipeline) is off in both pipelines — while an officer has the
+call its audio bypasses the pipeline, and the single-language one once cut every
+officer call at five minutes, recorded as a caller hang-up (G193). See Pipecat's
 [transport selection guide](https://docs.pipecat.ai/client/concepts/choosing-a-transport)
 before designing a production rollout. The current browser WebSocket audio path
 is demo-only; Pipecat recommends WebRTC for client-to-server voice, while
@@ -372,8 +375,9 @@ caller hears the AI first.
 | A dispute, objection, appeal or legal question | Transferred at once | `tax_dispute` (or the chat's reason) |
 | Nothing in the knowledge base, or the lookup fails or takes over 25 s | Transferred at once | `no_knowledge_match`, `system_error`, `timeout` |
 | Clarification fails `RECEPTIONIST_MAX_CLARIFY_ATTEMPTS` times | Transferred | `clarification_failed` |
-| An uncertain answer (confidence 0.35–0.50), a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
+| A weakly grounded answer — the chat's response judge rates it `low`, or the result's own confidence is 0.35–0.50 — a soft abstain, or the first answer after the risk monitor marks the call **at risk** (distress, repeated question…). How clearly the caller was *heard* is not part of this (the clarify gate and the risk monitor handle that; G181) | Answered, then *"Would you like to speak to an officer about this?"*: yes transfers, no keeps the AI on the call, anything else is a new question and the offer lapses. An at-risk call is offered once | `offer_accepted` |
 | The caller speaks of ending their life (English, *okwetta*, *kujiua*) | Before anything else, and never read as a goodbye: the crisis lines in full, with the emergency numbers in words, the counselling line on screen (0800 21 21 21), then *"Would you like me to connect you to a URA officer as well?"*. On yes, or at once if they also asked for a person, an **urgent** transfer; on no, the numbers stay on screen and the AI stays with them. The ticket carries no crisis text | `safety_concern` |
+| The same, said **while waiting for an officer** | The crisis lines at once (numbers on screen) and *"I've asked for an officer to come to you first. Please stay on the line."* The call and its ticket go to **urgent**; the lobby gets `call.priority_raised`, which puts the call first and brings back a dismissed alert without touching its wait or an officer's claim, and the call's own channel gets `priority`, so the workspace of whoever takes it shows *"Safety concern: crisis lines given…"*. Before G175 the line was recorded and nothing was said | `safety_concern` |
 
 Nobody takes a call the AI is still handling: the claim API answers 403 and
 the console offers no **Take over**. Only officers (`ura_staff`) work calls at
@@ -383,6 +387,12 @@ question in its turn, so "yes" can only mean one thing. A "yes" or "okay" said
 over an answer, before its question was heard, is a backchannel: the question
 is asked again, and nothing is acted on. An at-risk caller who talked over the
 officer offer and moved on is offered again with the next answer.
+
+A second request for a person while the call is already waiting, or while an officer
+has it, changes nothing: one ticket, one alert, one countdown (G178). The
+spoken-confirmation step behind `FLAG_VOICE_AGENTIC_WORKFLOWS` tells the caller an
+action is done only when the action's executor reported success; otherwise it says it
+could not be completed on the call and offers an officer (G177).
 
 ### Step 4: Transfer to Human Officer
 1. Caller says: *"I want to talk to an officer."* (or clicks **Talk to an officer**).
@@ -409,6 +419,12 @@ officer offer and moved on is offered again with the next answer.
    call at the last moment is waited for; the caller is not told everyone is busy while
    an officer is joining. Replay check: `scripts/replay_call_audio.py --only 11_officer`
    (about 2 minutes).
+   The same countdown runs for **every** wait, not only the AI's transfer: when an officer
+   passes the call on, or their audio drops and does not come back within
+   `RECEPTIONIST_OFFICER_RECONNECT_GRACE_S`, the call goes back in the queue with its topic
+   and priority, and the caller gets the same hold lines and, in the end, the callback.
+   Each wait has its own countdown (`CallState.queue_epoch`): an officer joining stops it,
+   and an old one can never time out a newer wait (G179, G192).
 6. With `FLAG_TICKET_QUEUE` off nothing is promised: the caller is told to call the
    toll-free line, and the number appears on screen.
 
@@ -537,7 +553,7 @@ local way: "Vati" and "tiini" are VAT and TIN.
 | client → server | `call_start.parent_conversation_id`, `call_start.chat_session` | the chat the call was started from, and (signed out) the chat session that owns it — see *Calls started from the chat* below |
 | server → client | `call_ready.language_detection`, `.languages`, `.language` | show the language chip; the opening language |
 | server → client | `{"type":"language","language":"lg","source":"auto"\|"explicit"\|"override","confidence":0.93}` | the call's language is now … |
-| client → server | `{"type":"set_language","language":"sw"}` | pin the call to a language |
+| client → server | `{"type":"set_language","language":"sw"}` | pin the call to a language — any of `RECEPTIONIST_LANGUAGES` (en, sw, lg, nyn, ach by default), on the WebSocket and LiveKit paths alike (`config.call_language`; the LiveKit loop once dropped nyn/ach, G182) |
 
 **Calls started from the chat (G122).** A call started from the chat sends the chat's
 conversation id. The server carries that chat's task and a short English account of it
@@ -615,4 +631,4 @@ check them, and have 3–5 Luganda speakers rate the Orpheus samples blind
 | A Swahili or Luganda answer arrives in English | api log `reply localization to sw collapsed the answer; serving English` (or `failed`): the translation came back short or empty, so the English answer was served. Replies are translated one paragraph at a time; a paragraph that still comes back cut short fails the whole reply rather than shipping a fragment |
 | Caller cannot talk over the assistant | api log `Caller talking over the assistant` (the sentinel's VAD stopped it); if absent, the caller's speech never reached the server over the playback: try headphones (the browser's echo canceller can mute a caller while the speaker plays) |
 | Assistant cuts itself off mid-sentence | its own voice leaking from speaker to mic: `RECEPTIONIST_LOCAL_BARGE_IN=false`, or raise `RECEPTIONIST_BARGE_IN_MIN_S` |
-| Stale or unjoined call stuck in queue | In `/calls`, staff or administrators can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`), which cleans up the unbridged or stale room, releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`), and refreshes the live lobby board |
+| Stale or unjoined call stuck in queue | In `/calls`, an officer (`ura_staff`; administrators are refused desk actions) can click **Terminate call** (`POST /v1/admin/calls/{call_id}/end`). It ends the call through `CallRoom.end()` — countdown cancelled, media room closed, pipeline stopped, row `ended` — releases queue locks (`end_reason="officer_terminated_waiting"` or `officer_terminated_stale`) and refreshes the live lobby board. Before G176 it answered 500 on a call whose officer had dropped off, and skipped that teardown |

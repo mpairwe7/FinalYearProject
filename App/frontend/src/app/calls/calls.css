@@ -201,6 +201,18 @@
   border-color: var(--ops-bad-line);
 }
 
+/* A crisis said before an officer was on the line (G175): the officer taking
+   the call reads it before anything else. Same palette as the urgent chip. */
+.cw-safety {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  color: var(--ops-bad-ink);
+  background: var(--ops-bad-fill);
+  border: 1px solid var(--ops-bad-line);
+  border-radius: var(--radius-lg, 0.75rem);
+  font-weight: 600;
+}
+
 .call-chip--high,
 .call-chip--callback {
   color: var(--ops-warn-ink);

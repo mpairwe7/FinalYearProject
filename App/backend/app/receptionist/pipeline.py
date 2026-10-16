@@ -123,6 +123,7 @@ def build_cascaded_branch(room: Any, speech_model: Any, chat_model: Any) -> tupl
     # shape instead of waiting for the segmented recognizer to close the turn.
     partial_tap = LivePartialTranscriptTap(room=room, speech_model=speech_model, language=initial)
     brain = UraReceptionistBrain(room=room, chat_model=chat_model, speech_model=speech_model)
+    room.brain = brain  # the desk restarts a waiting caller's countdown through it
     tts = UraSpeechTTS(speech_model=speech_model, language=initial, room=room)
 
     @context_aggregator.user().event_handler("on_user_turn_idle")
@@ -184,6 +185,12 @@ def build_call_pipeline(room: Any, websocket: Any) -> Any:
             audio_out_sample_rate=16000,
             enable_metrics=True,
         ),
+        # While an officer has the call the caller's audio goes to them, not
+        # through this pipeline, so it sees neither speech nor transcripts.
+        # Pipecat's default idle cancel (300 s) then ended every officer call
+        # longer than five minutes as a caller hang-up (G193). The call's own
+        # limits govern instead: silence handling, the ceiling, hang-up.
+        cancel_on_idle_timeout=False,
     )
 
     return task, transport, brain

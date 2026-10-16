@@ -175,6 +175,14 @@ SCENARIOS = [
              forbid_status="transferring", reply_languages=["en", "en"],
              expect_reply={"en_yes": ("Would you like to speak to an officer",)},
              note="Talking over an answer never answers the question at its end."),
+    # G175: speech while waiting for an officer used to be recorded and dropped,
+    # a crisis included. Nobody is listening yet, so the AI answers it.
+    Scenario("18_crisis_while_waiting", ["en_officer", "en_crisis"], None, expect_status="transferring",
+             expect_status_on="en_officer", reply_languages=["en", "en"], forbid_status="ai",
+             expect_reply={"en_crisis": ("nine nine nine, or one one two", "0800 21 21 21",
+                                         "come to you first")},
+             note="A caller in the queue who speaks of ending their life hears the crisis lines at once "
+                  "and stays first in the queue (urgent); the call never falls back to the AI."),
 ]
 
 
