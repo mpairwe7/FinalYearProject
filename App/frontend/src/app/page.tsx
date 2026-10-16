@@ -1590,7 +1590,12 @@ export default function Page() {
               voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
               sessionId: getChatSessionId(),
             });
-            if (r.error && !r.transcript) { addTurns([createTurn('assistant', t('voice.turnFailed'))]); trackErrorOccurred('voice_chat_failed'); return; }
+            if (r.error && !r.transcript) {
+              // Hearing nothing is not an outage: say so, in the reader's language (G201).
+              addTurns([createTurn('assistant', t(r.error_code === 'no_speech' ? 'voice.didNotCatch' : 'voice.turnFailed'))]);
+              trackErrorOccurred('voice_chat_failed');
+              return;
+            }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
             if (r.reply) {
               addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);

@@ -1539,11 +1539,15 @@ X-Session-ID: <session-id>
   "asr_backend": "mock",
   "tts_backend": "mock",
   "mt_backend": "",
-  "error": null
+  "error": null,
+  "error_code": null
 }
 ```
 
-**Error handling:** The `error` field is `null` on success. On partial
+**Error handling:** The `error` field is `null` on success. With no transcript,
+`error_code` says why, for the client to word in the user's language rather
+than show the English `error`: `no_speech` (recognition ran and heard nothing —
+the chat says "Didn't catch that") or `asr_failed`. On partial
 failure (e.g. MT unavailable but LLM still works), it contains a
 semicolon-separated list of per-stage errors such as
 `"MT(lg->en): unavailable; TTS: circuit open"`. The `transcript` and

@@ -62,6 +62,8 @@ export interface TranslateResult {
 
 export interface VoiceChatResult {
   transcript: string;
+  /** Why there is no transcript: it heard nothing, or recognition failed. */
+  error_code?: 'no_speech' | 'asr_failed' | null;
   transcript_language: string | null;
   conversation_id?: string | null;
   reply: string;

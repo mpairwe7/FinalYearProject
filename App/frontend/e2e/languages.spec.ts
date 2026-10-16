@@ -28,6 +28,9 @@
  * environments, and a language regression should not be invisible there.
  * The tests that capture audio are chromium-gated on browserName.
  */
+import { en } from "../src/lib/i18n/en";
+import { lg } from "../src/lib/i18n/lg";
+import { sw } from "../src/lib/i18n/sw";
 import { expect, test, type Page } from "@playwright/test";
 
 import {
@@ -40,6 +43,12 @@ import {
 } from "./helpers";
 
 /** Mirrors src/lib/locales.ts — kept here so a silent edit there fails a test. */
+/** The Listen control's name, in the language the page is in (G201). */
+const LISTEN_IN: Record<string, string> = Object.fromEntries(
+  Object.entries({ en, lg, sw }).map(([code, dict]) => [code, String(dict["message.listenIn"] ?? en["message.listenIn"])]),
+);
+const listenName = (locale: string, label: string) => LISTEN_IN[locale].replace("{language}", label);
+
 const LOCALES = [
   { value: "en", label: "English", native: "English", speechLang: "en-US", dictation: "browser" },
   { value: "lg", label: "Luganda", native: "Oluganda", speechLang: "lg-UG", dictation: "server" },
@@ -139,8 +148,9 @@ test.describe("Every configured language, through the UI", () => {
       await sendMessage(page, "What is the VAT rate?");
       await expect(page.locator(".message-row-assistant").last()).toBeVisible();
 
-      // The Listen control names the language, so it says what it will do.
-      const listen = page.getByRole("button", { name: `Listen in ${locale.label}` }).last();
+      // The Listen control names the language, so it says what it will do —
+      // in the language the page is in.
+      const listen = page.getByRole("button", { name: listenName(locale.value, locale.label) }).last();
       await expect(listen).toBeVisible();
       await listen.click();
 
@@ -201,14 +211,14 @@ test.describe("Every configured language, through the UI", () => {
     // Narrating in Luganda sends the chosen speaker...
     await chooseLanguage(page, "Luganda");
     await sendMessage(page, "VAT?");
-    await page.getByRole("button", { name: "Listen in Luganda" }).last().click();
+    await page.getByRole("button", { name: listenName("lg", "Luganda") }).last().click();
     await expect.poll(() => ttsBodies.length, { timeout: 10_000 }).toBeGreaterThan(0);
     expect(ttsBodies[0].voice).toBe("waxal_lug_0002");
     expect(ttsBodies[0].language).toBe("lg");
 
     // ...and switching to Swahili does not carry it over.
     await chooseLanguage(page, "Swahili");
-    await page.getByRole("button", { name: "Listen in Swahili" }).last().click();
+    await page.getByRole("button", { name: listenName("sw", "Swahili") }).last().click();
     await expect.poll(() => ttsBodies.length, { timeout: 10_000 }).toBeGreaterThan(1);
     const sw = ttsBodies[ttsBodies.length - 1];
     expect(sw.language).toBe("sw");
