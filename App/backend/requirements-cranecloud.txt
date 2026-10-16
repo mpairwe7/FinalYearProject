@@ -23,7 +23,7 @@ psycopg-pool>=3.2.0
 
 # Data loading
 pandas>=3.0.5
-numpy>=1.26,<3
+numpy>=2.5.2,<3
 
 # Document attachment analysis (POST /v1/documents/analyze) — pure-Python
 # (plus lxml wheel) extractors for DOCX/XLSX, PyMuPDF for PDF text, and

@@ -3,6 +3,6 @@
 fastapi>=0.141.1,<0.142
 uvicorn[standard]>=0.52.4,<0.53
 httpx>=0.28.1,<0.29
-numpy>=2.4.4,<3
+numpy>=2.5.2,<3
 Pillow>=10.4
 easyocr>=1.7.2,<2
