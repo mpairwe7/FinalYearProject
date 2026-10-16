@@ -55,6 +55,18 @@ labels, for a validation study only.
 Callers are told before the call starts (`call.preConsentTone` on the pre-call screen): the
 assistant may notice the tone and pace of their voice, together with their words.
 
+## Suggested actions (chips)
+
+Every `next_actions` entry is a chip, and tapping it sends its text — so each is something a
+taxpayer would say: "Talk to an officer", "Continue Return Filing", "How can I pay my tax in
+instalments?". Never an instruction ("Reply with…", "Send 'cancel' if…"). An active flow
+shows no chips (its stepper carries the choices and "Cancel workflow"); a parked flow offers
+`_continue_flow_action(name)`, which `_maybe_handle_workflow` accepts as a resume. An
+`offer`-tier escalation adds "Talk to an officer" when missing and never moves one already
+placed; `priority` moves it first. In the web chat, `lib/turnMeta.applyTurnMeta` applies every
+frame's metadata (until 2026-10-16 the metadata-line branch dropped `next_actions` and no chip
+ever showed — G173).
+
 ## Disclosure that it is an AI
 
 The composer footer (`composer.disclaimer`) and the greeting (`text_signals.GREETING_REPLY*`)

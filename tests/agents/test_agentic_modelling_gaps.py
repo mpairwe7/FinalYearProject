@@ -482,9 +482,13 @@ class TestWorkflowResumptionNextActions:
             "What is the VAT rate in Uganda?",
             conversation_id=thread_id,
         )
-        # Next actions should provide a resumption cue
+        # Next actions carry a resumption cue a tap can act on (G173): the
+        # chip's text is what the tap sends, and it is accepted as a resume.
+        from app.workflows.registry import WorkflowRegistry
+
+        name = WorkflowRegistry.get("tin_procedure_help").name
         actions = result.get("next_actions", [])
-        assert any("Resume" in a for a in actions)
+        assert f"Continue {name}" in actions
 
     def test_workflow_resume_keyword_triggers_prompt_recap(
         self, fresh_registry, clean_flags, monkeypatch, tmp_db
@@ -526,24 +530,25 @@ class TestWorkflowResumptionNextActions:
         res = check_false_premise("What is the PSF levy in Uganda?", hits=hits)
         assert res.is_false_premise is False
 
-    def test_default_next_actions_prepends_resume_and_keeps_base_actions(self):
+    def test_default_next_actions_are_chips_a_tap_can_act_on(self):
+        # A tap sends the chip's text, so an instruction ("Reply with the
+        # missing detail…") would be sent as the taxpayer's answer (G173).
         model = ChatModel()
-        actions_handoff = model._default_next_actions(
-            agent_role="rag_answerer",
-            handoff={"summary": "help"},
-            suspended_workflow="TIN Application",
-        )
-        assert len(actions_handoff) >= 2
-        assert "Resume TIN Application" in actions_handoff[0]
-        assert any("officer" in a for a in actions_handoff[1:])
-
-        actions_clarify = model._default_next_actions(
+        parked = model._default_next_actions(
             agent_role="clarification_agent",
             suspended_workflow="PAYE Filing",
         )
-        assert len(actions_clarify) == 2
-        assert "Resume PAYE Filing" in actions_clarify[0]
-        assert "Reply with the missing detail" in actions_clarify[1]
+        assert parked == ["Continue PAYE Filing"]
+
+        escalated = model._default_next_actions(
+            agent_role="rag_answerer",
+            escalation_required=True,
+            suspended_workflow="TIN Application",
+        )
+        assert escalated == ["Continue TIN Application", "Talk to an officer"]
+
+        # An active flow's stepper carries its choices and "Cancel workflow".
+        assert model._default_next_actions(agent_role="workflow_guide", workflow={"status": "active"}) == []
 
     def test_langgraph_errored_fails_over_to_standard_retrieval(self, clean_flags, monkeypatch, tmp_db):
         from unittest.mock import MagicMock

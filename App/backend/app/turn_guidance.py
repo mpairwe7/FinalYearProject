@@ -153,11 +153,13 @@ def _offer_person(
     assessment = assess_escalation(text, history=list(prior_messages), result=result)
     if not assessment.offers_person:
         return
-    if HANDOFF_ACTION in actions:
-        actions.remove(HANDOFF_ACTION)
     if assessment.tier == TIER_PRIORITY:
+        if HANDOFF_ACTION in actions:
+            actions.remove(HANDOFF_ACTION)
         actions.insert(0, HANDOFF_ACTION)
-    else:
+    elif HANDOFF_ACTION not in actions:
+        # An offer adds the action; it never demotes one an earlier decision
+        # put first (a paused guided flow leads with the officer, Phase 39).
         actions.append(HANDOFF_ACTION)
     try:
         from .analytics import metrics  # noqa: PLC0415

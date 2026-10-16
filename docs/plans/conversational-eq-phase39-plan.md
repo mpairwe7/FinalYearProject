@@ -2,7 +2,7 @@
 
 Status: **Phase 39 implemented** (§5; delivery log in §9); Phases 40–41 proposed.
 Written 2026-10-16 against `dev` @ `e658b0e1b7` (after Phase 38, #578). Tracking issue: #441.
-Gap register rows: G165–G172.
+Gap register rows: G165–G173.
 
 Roles taken for this audit: QA engineer (does it behave), auditor (does it meet the
 reference standards) and reviewer (is the code the right shape). Method: code inspection of
@@ -23,6 +23,7 @@ in §2. Every finding below was reproduced in code or in a test before it was wr
 | Voice EQ | Loudness or pace alone labelled a caller "frustrated" (slow speech: "confused"), which changed what was said to them ("I understand this can be frustrating…") and raised the call's at-risk distress signal — on acoustic signals never validated for Ugandan speakers, with no notice. | High (fairness, transparency) |
 | Transparency | The chat never said it was an AI ("URA Assistant can make mistakes"; greeting "URA Digital Assistant"). | Medium (compliance) |
 | Memory | Workflow-engine state (`_tangent_count`) could reach the officer's "Already given" list and the consented slot bank. | Low |
+| Structuring | **No suggested action ever reached the web chat.** The SSE handler's metadata-line branch dropped `next_actions`, so the guided-steps offer, Phase 38's officer offer and the crisis reply's "Talk to an officer" were invisible, though every API response carried them; and the default actions were instructions ("Reply with the requested detail…") that a tap would have sent as the answer. Found by the browser check. | High |
 | Empathy calibration, clarification, evaluation | See §6: open, Phase 40. | — |
 
 ## 2. Reference standards and research (verified 2026-10-16)
@@ -59,6 +60,14 @@ in §2. Every finding below was reproduced in code or in a test before it was wr
 * **G170** — `composer.disclaimer` and `GREETING_REPLY` never said "AI".
 * **G171** — `officer_handoff.given_slot_names` and `ResolutionLedger.store_verified_slots`
   copied every slot key, including `_`-prefixed engine state.
+* **G173** — `page.tsx` handled turn metadata in three hand-copied blocks; the one for
+  metadata lines (which every streamed metadata frame is) copied citations, mode, workflow and
+  resources but not `next_actions`, then returned before the branch that did. The browser check
+  showed no chip at all, not even "Guide me step by step through Return Filing". With chips
+  visible, `_default_next_actions` and two resume paths turned out to emit instructions.
+* **Interaction** — Phase 38's `turn_guidance._offer_person` moved an existing "Talk to an
+  officer" to the end for an `offer`-tier turn, demoting the officer the off-ramp had put first
+  (found live with both phases on).
 
 ## 4. Principles kept
 
@@ -80,6 +89,8 @@ in the code. Offers stay offers: nothing escalates by itself.
 | 6 | **Voice affect needs words.** Loudness, energy and pace intensify what the words say; alone they name nothing (`PROSODY_ACOUSTIC_ONLY_AFFECT=true` restores it for a validation study). The pre-call screen tells callers the assistant may notice their voice's tone and pace (en, sw; lg/nyn/ach fall back to English until a native translation lands). | — (fairness) |
 | 7 | **AI disclosure.** "URA's AI assistant can make mistakes…" and "I'm the URA Digital Assistant — an AI, not a person." ("(AI)" in lg/sw/nyn/ach). | — (copy) |
 | 8 | **Engine state stays out of memory.** `_`-prefixed slot keys never reach the officer's brief or the slot bank. | — (fix) |
+| 9 | **Suggested actions reach the web chat.** One helper, `lib/turnMeta.applyTurnMeta`, applies a turn's metadata for every SSE frame (it replaces three drifting copies); every chip is tappable: no instruction defaults, an active flow's choices stay in its stepper, a parked flow offers "Continue <flow>" (`_continue_flow_action`, accepted as a resume). | — (fix) |
+| 10 | **Offers never demote.** An `offer`-tier turn adds "Talk to an officer" when it is missing and leaves it where an earlier decision put it; `priority` still moves it first. | — (fix) |
 
 ## 6. Phase 40 — proposed next
 
@@ -118,6 +129,13 @@ check that oversight works).
 
 - PR: _filled in when opened_.
 - Runbook: [`docs/runbooks/conversational-safety-and-eq.md`](../runbooks/conversational-safety-and-eq.md).
+- Live verification (2026-10-16): an isolated stack built from this branch — its own Sunflower
+  vLLM (GPU 7) and api (GPU 4), private analytics DB, the shared Qdrant and connectors — with
+  Phase 38 and 39 flags on. 25/25 API checks over REST and SSE, including the check-in
+  translated into Luganda and Kiswahili with 0800 21 21 21 and 999 intact; and a production
+  build of the frontend in a real browser: the AI footer, the tone notice on the pre-call
+  screen, the paused flow with its four chips and no step buttons, and an ordinary answer's
+  chip. The run found G173 and the offer-demotion interaction; both are fixed here.
 - Tests: `App/backend/tests/test_phase39_signals.py`; root
   `tests/test_phase39_conversational_eq_integration.py` (REST and SSE through the real app);
   frontend `CallScreen.test.tsx`, `ChatInput.test.tsx`.

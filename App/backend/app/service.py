@@ -324,6 +324,11 @@ _WORKFLOW_RESUME_WORDS = {
 }
 #: What a paused guided flow offers (Phase 39); "Continue the steps" resumes it.
 _WORKFLOW_CONTINUE_ACTION = "Continue the steps"
+
+
+def _continue_flow_action(name: str) -> str:
+    """The chip that resumes a parked flow; ``_maybe_handle_workflow`` accepts it as a resume."""
+    return f"Continue {name}"
 _WORKFLOW_CANCEL_ACTION = "Cancel"
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
 #: Slot specs that accept any string, so validation cannot tell a slot answer
@@ -4465,29 +4470,16 @@ class ChatModel:
         escalation_required: bool = False,
         suspended_workflow: str | None = None,
     ) -> list[str]:
+        # Every action is a chip the taxpayer taps, and a tap sends its text. The
+        # old defaults were instructions ("Reply with the requested detail…",
+        # "Send 'cancel' if…") that would have been sent as answers; nobody saw
+        # them only because no chip reached the web chat (G173, Phase 39).
         if workflow and workflow.get("status") == "active":
-            return [
-                "Reply with the requested detail to continue the guided process.",
-                "Send 'cancel' if you want to leave this workflow and ask a different question.",
-            ]
-        base_actions: list[str] = []
-        if handoff:
-            base_actions = [
-                "Prepare the listed reference details before speaking to a URA officer.",
-                "Use the URA Contact Centre if you need immediate human assistance.",
-            ]
-        elif agent_role == "clarification_agent":
-            base_actions = ["Reply with the missing detail so I can answer more precisely."]
-        elif escalation_required:
-            base_actions = [
-                "Review the cited URA sources before acting on this answer.",
-                "Ask for human support if your case is account-specific or time-sensitive.",
-            ]
-
+            # The stepper carries the step's choices and "Cancel workflow".
+            return []
+        base_actions: list[str] = [HANDOFF_ACTION] if escalation_required and not handoff else []
         if suspended_workflow:
-            return [
-                f"Resume {suspended_workflow} workflow or continue asking general tax questions."
-            ] + base_actions
+            return [_continue_flow_action(suspended_workflow), *base_actions]
         return base_actions
 
     def _get_suspended_workflow_name(self, thread_id: str) -> str | None:
@@ -5309,25 +5301,9 @@ class ChatModel:
         ("Speak to a URA officer", "sw"): "Ongea na afisa wa URA",
         ("Talk to an officer", "lg"): "Yogera n'omukozi",
         ("Talk to an officer", "sw"): "Ongea na afisa",
-        ("Ask for human support if your case is account-specific or time-sensitive.", "lg"): "Saba obuyambi bw'omuntu singa ensonga yo ekwata ku akawunti yo oba ng'eyanguwa.",
-        ("Ask for human support if your case is account-specific or time-sensitive.", "sw"): "Omba usaidizi wa binadamu ikiwa suala lako linahusu akaunti mahususi au ni la dharura.",
-        ("Prepare the listed reference details before speaking to a URA officer.", "lg"): "Tegeka ebirukwataho ebijuliziddwa nga tonnayogera n'omukozi wa URA.",
-        ("Prepare the listed reference details before speaking to a URA officer.", "sw"): "Andaa maelezo ya marejeleo yaliyoorodheshwa kabla ya kuongea na afisa wa URA.",
-        ("Use the URA Contact Centre if you need immediate human assistance.", "lg"): "Kozesa URA Contact Centre bw'oba weetaaga obuyambi bw'amangu obw'omukozi.",
-        ("Use the URA Contact Centre if you need immediate human assistance.", "sw"): "Tumia Kituo cha Mawasiliano cha URA ikiwa unahitaji usaidizi wa haraka wa binadamu.",
         # Guidance / Workflow
         ("Would you like step-by-step guidance on this?", "lg"): "Wandiyagadde obuyambi obw'odaala ku daala ku kino?",
         ("Would you like step-by-step guidance on this?", "sw"): "Je, ungependa mwongozo wa hatua kwa hatua kuhusu hili?",
-        ("Reply with the requested detail to continue the guided process.", "lg"): "Ddamu n'obubaka obwetaagibwa okweyongerayo n'enkola ekulemberwa.",
-        ("Reply with the requested detail to continue the guided process.", "sw"): "Jibu kwa kutoa maelezo yanayohitajika ili kuendelea na mchakato unaoongozwa.",
-        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "lg"): "Weereza 'cancel' bw'oba oyagala okuva mu nkola eno obuuze ekibuuzo ekirala.",
-        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "sw"): "Tuma 'cancel' ikiwa unataka kutoka kwenye mchakato huu na kuuliza swali tofauti.",
-        ("Reply with the missing detail so I can answer more precisely.", "lg"): "Ddamu n'ebikwataho ebibuze nsobole okukuddamu mu bujjuvu.",
-        ("Reply with the missing detail so I can answer more precisely.", "sw"): "Jibu kwa kutoa maelezo yaliyokosekana ili niweze kujibu kwa usahihi zaidi.",
-        ("Review the cited URA sources before acting on this answer.", "lg"): "Kebera ebiwandiiko bya URA ebijuliziddwa nga tonnakola ku kuddamu kuno.",
-        ("Review the cited URA sources before acting on this answer.", "sw"): "Pitia vyanzo vya URA vilivyotajwa kabla ya kuchukua hatua kuhusu jibu hili.",
-        ("Rephrase your question about a URA service — I'm glad to help.", "lg"): "Ddamu obuulize ekibuuzo kyo ku buweereza bwa URA — nze nneeteeseteese okukuyamba.",
-        ("Rephrase your question about a URA service — I'm glad to help.", "sw"): "Eleza upya swali lako kuhusu huduma ya URA — niko tayari kukusaidia.",
         ("Ask how to register for a TIN", "lg"): "Buuza ku kwewandiisa ku TIN",
         ("Ask how to register for a TIN", "sw"): "Uliza jinsi ya kujisajili kwa TIN",
         ("Ask about filing deadlines", "lg"): "Buuza ku bisanjiro by'okuwaayo emisolo",
@@ -5341,15 +5317,7 @@ class ChatModel:
         # Runyankole (nyn)
         ("Speak to a URA officer", "nyn"): "Gamba n'omukozi wa URA",
         ("Talk to an officer", "nyn"): "Gamba n'omukozi",
-        ("Ask for human support if your case is account-specific or time-sensitive.", "nyn"): "Shaba obuhwezi bw'omukozi waaba enshonga yaawe eri ey'akawunti yaawe nari erikwetenga obuhwezi bw'ahonaaho.",
-        ("Prepare the listed reference details before speaking to a URA officer.", "nyn"): "Tebeekanisa ebikwatiraine n'enshonga ebyorekirwe otakagambire n'omukozi wa URA.",
-        ("Use the URA Contact Centre if you need immediate human assistance.", "nyn"): "Koresa URA Contact Centre waaba nooyetenga obuhwezi bw'ahonaaho obw'omukozi.",
         ("Would you like step-by-step guidance on this?", "nyn"): "Nooyenda obuhabuzi bw'idaara aha rindi ahari eki?",
-        ("Reply with the requested detail to continue the guided process.", "nyn"): "Garukamu n'ekirikwetengyesa kugumizamu n'entebeekanisa egi.",
-        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "nyn"): "Sindika 'cancel' waaba nooyenda kuruga omu ntebeekanisa egi obuuze ekibuuzo ekindi.",
-        ("Reply with the missing detail so I can answer more precisely.", "nyn"): "Garukamu n'amakuru agaburire mbaase kukugarukamu gye.",
-        ("Review the cited URA sources before acting on this answer.", "nyn"): "Shwijuma ebihandiiko bya URA ebijuriziibwe otakakozire aha kugarukamu oku.",
-        ("Rephrase your question about a URA service — I'm glad to help.", "nyn"): "Garukamu obuuze ekibuuzo kyawe aha buhereza bwa URA — nyeteekateekire kukuhwera.",
         ("Ask how to register for a TIN", "nyn"): "Buuza aha kwehandiikisa TIN",
         ("Ask about filing deadlines", "nyn"): "Buuza aha biro by'okuheereza emishoro",
         ("Ask about TIN registration", "nyn"): "Buuza aha kwehandiikisa TIN",
@@ -5361,15 +5329,7 @@ class ChatModel:
         # Acholi (ach)
         ("Speak to a URA officer", "ach"): "Lok ki latic me URA",
         ("Talk to an officer", "ach"): "Lok ki latic",
-        ("Ask for human support if your case is account-specific or time-sensitive.", "ach"): "Peny pi kony pa latic ka lok ni dok i kom akaunt ni onyo mito kony me oyot.",
-        ("Prepare the listed reference details before speaking to a URA officer.", "ach"): "Yub ngec ma kicoyo ma peya iloko ki latic me URA.",
-        ("Use the URA Contact Centre if you need immediate human assistance.", "ach"): "Ti ki URA Contact Centre ka imito kony pa latic oyot-oyot.",
         ("Would you like step-by-step guidance on this?", "ach"): "Imito tela me rwom ki rwom i kom lok man?",
-        ("Reply with the requested detail to continue the guided process.", "ach"): "Gam ki ngec ma kimito me mede ki yoo me tela man.",
-        ("Send 'cancel' if you want to leave this workflow and ask a different question.", "ach"): "Cwal 'cancel' ka imito weko yoo man ci ipeny lapeny mukene.",
-        ("Reply with the missing detail so I can answer more precisely.", "ach"): "Gam ki ngec ma orem wek agam maber.",
-        ("Review the cited URA sources before acting on this answer.", "ach"): "Ngi buk me URA ma kicimo ma peya itiyo ki lagam man.",
-        ("Rephrase your question about a URA service — I'm glad to help.", "ach"): "Nwo penyo lapeny ni i kom tic me URA — atye atera me konyi.",
         ("Ask how to register for a TIN", "ach"): "Peny i kom coyo nying pi TIN",
         ("Ask about filing deadlines", "ach"): "Peny i kom nino me cwalo ripot",
         ("Ask about TIN registration", "ach"): "Peny i kom coyo nying pi TIN",
@@ -7926,7 +7886,7 @@ class ChatModel:
         actions = list(next_actions)
         suspended = self._get_suspended_workflow_name(thread_id)
         if suspended:
-            actions.insert(0, f"Resume {suspended} workflow or continue asking general tax questions.")
+            actions.insert(0, _continue_flow_action(suspended))
         final_reply = self._finalize_reply(f"{reply_text}\n\n{CONTACT_FOOTER}")
         if locale not in ("", "en"):
             final_reply = localize_reply(final_reply, locale)
@@ -8625,7 +8585,7 @@ class ChatModel:
                 "confidence_band": "high",
             },
             "next_actions": (
-                [f"Resume {suspended} workflow or continue asking general tax questions."]
+                [_continue_flow_action(suspended)]
                 if (suspended := self._get_suspended_workflow_name(thread_id))
                 else []
             )
@@ -9112,10 +9072,10 @@ class ChatModel:
                     "escalation_reason": "",
                     "agent_role": "workflow_guide",
                     "workflow": workflow,
-                    "next_actions": ["Ask a new question or restart the guided process later."],
+                    "next_actions": [],
                 }
 
-            if user_input.lower() in _WORKFLOW_RESUME_WORDS:
+            if user_input.lower() in _WORKFLOW_RESUME_WORDS or user_input.lower() == _continue_flow_action(wf.name).lower():
                 turn, _tool_messages = self._advance_workflow(session, "", thread_id, record=False)
                 prompt = turn.question or ""
                 workflow = self._workflow_view(
@@ -9929,7 +9889,7 @@ class ChatModel:
                     "escalation_required": False,
                     "escalation_reason": "",
                     "agent_role": "safety_guard",
-                    "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
+                    "next_actions": [],
                 }
                 self._audit_turn(
                     message=message, result=blocked, session_id=session_id, trace_ctx=trace_ctx
@@ -11630,7 +11590,7 @@ class ChatModel:
                 "escalation_required": False,
                 "escalation_reason": "",
                 "agent_role": "safety_guard",
-                "next_actions": ["Rephrase your question about a URA service — I'm glad to help."],
+                "next_actions": [],
                 "_hits": [],
                 "_history": [],
             }

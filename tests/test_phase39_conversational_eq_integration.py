@@ -67,6 +67,9 @@ def client():
 def _phase39(monkeypatch: pytest.MonkeyPatch) -> None:
     """Both Phase 39 flags on; a test that needs one off sets it after this runs."""
     monkeypatch.setenv("FLAG_WORKFLOWS", "true")
+    # Phase 38's offer logic runs over these results in production; it must
+    # not demote the officer the off-ramp puts first (found live, 2026-10-16).
+    monkeypatch.setenv("FLAG_EQ_STAKES_ESCALATION", "true")
     monkeypatch.setenv("FLAG_WORKFLOW_EMOTIONAL_OFFRAMP", "true")
     monkeypatch.setenv("FLAG_WELLBEING_CHECKIN", "true")
 
