@@ -219,6 +219,8 @@ export const lg: Partial<Dictionary> = {
   'message.contactUra': 'Oba tuukirira URA:',
   'message.officersOffDuty':
     'Abakozi bakola {hours}. Ekibuuzo kyo kiterekeddwa, era omukozi ajja kukuddamu wano nga bakomyewo ku mulimu.',
+  'message.officersNextShift':
+    'Abakozi bakola {hours}. Ekibuuzo kyo kiterekeddwa, era omukozi ajja kukuddamu wano okuva {next}.',
   'handoff.ask': 'Yogera n’omukozi wa URA',
   'handoff.requesting': 'Nsaba omukozi…',
   'handoff.reference': 'Namba y’ekiwandiiko',

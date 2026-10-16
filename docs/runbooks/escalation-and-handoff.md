@@ -25,12 +25,14 @@ The AI answers all night; officers work the desk's hours — `CXP_TIMEZONE`,
 receptionist uses the same settings). Outside them:
 
 * **Every escalation** — the taxpayer's button, auto-escalation, the
-  `escalate_to_human` tool — still opens (or reuses) the ticket.
-  `ChatModel._maybe_create_ticket` puts `officer_hours` on the handoff, and the
+  `escalate_to_human` tool — still opens (or reuses) the ticket. A turn with a
+  saved ticket carries `officer_hours` (top level, and on the handoff), and the
   chat's escalation banner adds *"Officers work 07:00–23:00 EAT. Your question
-  is queued, and an officer will reply here when they are next on duty."* in the
-  reader's language (en, lg, sw, nyn, ach). The banner itself is translated now;
-  it was English in every locale (G199).
+  is queued, and an officer will reply here from Saturday 17 October, 07:00 EAT."*
+  — the next shift by name, in the reader's language and time zone (en, lg, sw,
+  nyn, ach) — and drops the toll-free numbers while the desk that answers them is
+  closed. A ticket that failed to save gets no such line. The banner itself is
+  translated now; it was English in every locale (G199).
 * **`POST /v1/escalate`** answers with the off-duty message (no toll-free line —
   the same desk answers it) and the `officer_hours` object.
 * **SLA** — breaches count only officers' working seconds

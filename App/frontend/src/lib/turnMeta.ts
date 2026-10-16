@@ -14,6 +14,30 @@ export interface OfficerHours {
 }
 
 /**
+ * When officers are next on duty, for the reader: weekday, date and time in
+ * their own time zone (with its abbreviation) and language — the next shift can
+ * be days away, which the hours alone do not say. Null when unreadable.
+ */
+export function formatNextShift(iso: string, locale: string, timeZone?: string): string | null {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return null;
+  try {
+    return new Intl.DateTimeFormat([locale, 'en-UG'], {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZoneName: 'short',
+      ...(timeZone ? { timeZone } : {}),
+    }).format(when);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The desk's hours from a frame: `officer_hours` on the handoff the server
  * attaches to every escalation (both chat paths carry `handoff`), or at the
  * top level (a restored turn). Anything malformed is no information.

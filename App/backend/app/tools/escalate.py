@@ -149,7 +149,8 @@ class EscalateToHumanTool(Tool):
         review = (
             "A URA officer will review this."
             if hours["on_duty"]
-            else f"Officers work {hours['hours']}; an officer will review this when they are next on duty."
+            else f"Officers work {hours['hours']}; an officer will review this "
+            f"{officer_hours.next_shift_phrase(hours['next_on_duty'])}."
         )
         return {
             "ok": True,

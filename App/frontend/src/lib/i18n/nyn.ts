@@ -214,6 +214,8 @@ export const nyn: Partial<Dictionary> = {
   'message.contactUra': 'Nari teera URA:',
   'message.officersOffDuty':
     'Abakozi nibakora {hours}. Ekibuuzo kyawe kiteirwe omu murongo, kandi omukozi naija kukugarukamu aha baagaruka aha murimo.',
+  'message.officersNextShift':
+    'Abakozi nibakora {hours}. Ekibuuzo kyawe kiteirwe omu murongo, kandi omukozi naija kukugarukamu aha kuruga {next}.',
   'handoff.ask': 'Gamba n’omukozi wa URA',
   'handoff.requesting': 'Ninshaba omukozi…',
   'handoff.reference': 'Enamba y’ekihandiiko',

@@ -105,7 +105,7 @@ class EscalationEndpointTest(unittest.TestCase):
         body = client.post("/v1/escalate", json={"conversation_id": "conv-night", "reason": "Help"}).json()
         self.assertTrue(body["ok"])
         self.assertIn("Officers work 07:00–23:00 EAT", body["message"])
-        self.assertIn("when they are next on duty", body["message"])
+        self.assertIn("when they are next on duty, from Saturday 17 October at 07:00", body["message"])
         self.assertIn("Their reply will appear here", body["message"])
         self.assertNotIn("0800 117 000", body["message"])  # the same desk answers the phone
         self.assertEqual(body["officer_hours"], OFF_DUTY)
@@ -134,7 +134,7 @@ class EscalationEndpointTest(unittest.TestCase):
         with mock.patch("app.officer_hours.status", return_value=OFF_DUTY):
             result = EscalateToHumanTool().execute(reason="Disputed assessment", summary="Disputes the notice")
         self.assertTrue(result["ok"])
-        self.assertIn("when they are next on duty", result["message"])
+        self.assertIn("when they are next on duty, from Saturday 17 October at 07:00", result["message"])
         self.assertEqual(result["officer_hours"], OFF_DUTY)
 
     def test_an_empty_reason_still_says_what_happened(self):

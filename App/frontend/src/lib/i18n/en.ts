@@ -236,6 +236,8 @@ export const en = {
   'message.contactUra': 'Or contact URA:',
   'message.officersOffDuty':
     'Officers work {hours}. Your question is queued, and an officer will reply here when they are next on duty.',
+  'message.officersNextShift':
+    'Officers work {hours}. Your question is queued, and an officer will reply here from {next}.',
   'handoff.ask': 'Talk to a URA officer',
   'handoff.requesting': 'Asking an officer…',
   'handoff.reference': 'Reference',

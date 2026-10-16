@@ -164,6 +164,26 @@ class TestRoutingIsAppliedAtEscalation:
         assert closed["officer_hours"]["on_duty"] is False
         assert closed["officer_hours"]["next_on_duty"]
 
+    def test_a_ticket_that_failed_to_save_is_not_said_to_be_queued(self, tmp_db, monkeypatch):
+        """``officer_hours`` on a handoff tells the chat it is queued: never without the ticket."""
+        from app import database
+        from app.service import ChatModel
+
+        def fail(**_kw):
+            raise RuntimeError("database down")
+
+        monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
+        monkeypatch.setattr(database, "create_ticket", fail)
+        model = ChatModel.__new__(ChatModel)
+        handoff = {"topic": "objection_or_dispute", "priority": "high"}
+        ticket_id = ChatModel._maybe_create_ticket(
+            model, reason="dispute", user_query="I dispute this", bot_reply="", session_id="s3",
+            conversation_id="c-hours-failed", handoff=handoff,
+        )
+        assert ticket_id == ""
+        assert handoff.get("ticket_persisted") is False
+        assert "officer_hours" not in handoff
+
     def test_an_unclassified_handoff_still_gets_a_team(self, tmp_db, monkeypatch):
         from app.service import ChatModel
 

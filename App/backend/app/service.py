@@ -46,6 +46,7 @@ from . import database as db
 from . import documents as documents_module
 from . import llm as llm_module
 from . import mt
+from . import officer_hours
 from .agents import AgentRoute, supervisor
 from .agents.evaluator import RevisionBudget, evaluate
 from .analytics import metrics
@@ -2272,7 +2273,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             yield ("token", full_reply)
             yield (
                 "grounding",
-                {
+                officer_hours.attach_status({
                     "faithfulness_score": None,
                     "escalation_required": escalate,
                     "escalation_reason": esc_reason,
@@ -2281,7 +2282,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     "response_judge": response_judge,
                     "next_actions": result.get("next_actions", []),
                     "ticket_id": ticket_id,
-                },
+                }),
             )
             yield ("done", "")
             yield (
@@ -2478,7 +2479,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
             yield (
                 "grounding",
-                {
+                officer_hours.attach_status({
                     "faithfulness_score": faith,
                     "escalation_required": escalate,
                     "escalation_reason": esc_reason,
@@ -2487,7 +2488,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     "response_judge": response_judge,
                     "next_actions": result.get("next_actions", []),
                     "ticket_id": ticket_id,
-                },
+                }),
             )
 
             try:
@@ -7150,14 +7151,6 @@ class ChatModel:
             if final_decision != "escalate":
                 return ""
 
-        # Whether a person can pick this up now travels with the handoff the
-        # taxpayer's chat receives: outside officers' working hours it says when
-        # they are next on duty, rather than implying someone is reading (G196).
-        if isinstance(handoff, dict):
-            from . import officer_hours
-
-            handoff["officer_hours"] = officer_hours.status()
-
         # Determine taxpayer locale (either passed in, from handoff, or detected)
         eff_locale = (locale or (handoff or {}).get("locale") or "").lower().strip()
         if not eff_locale:
@@ -7227,6 +7220,8 @@ class ChatModel:
             if handoff is not None and ticket_id:
                 handoff["ticket_id"] = ticket_id
                 handoff["reused_existing_ticket"] = True
+                # Whether a person can pick this up now (G196): with the ticket, never before it.
+                handoff["officer_hours"] = officer_hours.status()
             return ticket_id
 
         # One handoff for every path: how the taxpayer feels and what is at
@@ -7282,6 +7277,7 @@ class ChatModel:
             ticket_id = ticket.get("id", "")
             if handoff is not None and ticket_id:
                 handoff["ticket_id"] = ticket_id
+                handoff["officer_hours"] = officer_hours.status()
         except Exception:
             # The taxpayer is about to be told a human will follow up.
             # Say so loudly enough that someone notices nobody will:

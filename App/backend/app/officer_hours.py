@@ -27,6 +27,7 @@ import os
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -187,3 +188,36 @@ def status(at: float | None = None, hours: OfficerHours | None = None) -> dict[s
         "hours": hours.label(now),
         "next_on_duty": dt.datetime.fromtimestamp(nxt, hours.zone).isoformat() if nxt is not None else None,
     }
+
+
+def next_shift_phrase(next_on_duty: str | None, hours: OfficerHours | None = None) -> str:
+    """"when they are next on duty, from Saturday 17 October at 07:00 EAT" — English, for a reply.
+
+    The next shift can be days away (a weekend, a public holiday), which the
+    hours alone do not say. Without one, or unreadable: "when they are next on duty".
+    """
+    if not next_on_duty:
+        return "when they are next on duty"
+    try:
+        start = dt.datetime.fromisoformat(next_on_duty)
+    except ValueError:
+        return "when they are next on duty"
+    local = start.astimezone((hours or officer_hours()).zone)
+    stamp = f"{local:%A} {local.day} {local:%B} at {local:%H:%M} {local.tzname() or ''}".rstrip()
+    return f"when they are next on duty, from {stamp}"
+
+
+def attach_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """Put :func:`status` on a chat turn that queued a ticket, as ``officer_hours`` (G196).
+
+    At the top level, beside ``handoff``: an escalation raised without handoff
+    summaries has no handoff, and a cached turn's handoff dates from when it was
+    first answered, so the status is read at serve time. Only a turn with a
+    ticket gets it — the chat then says the question is queued, which a ticket
+    that failed to save is not.
+    """
+    if payload.get("ticket_id"):
+        payload["officer_hours"] = status()
+    else:
+        payload.pop("officer_hours", None)
+    return payload

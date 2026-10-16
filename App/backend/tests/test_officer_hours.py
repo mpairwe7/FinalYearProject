@@ -107,5 +107,30 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(off["next_on_duty"], dt.datetime(2026, 10, 17, 7, tzinfo=KAMPALA).isoformat())
 
 
+class NextShiftTests(unittest.TestCase):
+    """The next shift by name: it can be days away (CodeRabbit on #583)."""
+
+    def test_named_in_the_desks_time_zone(self):
+        with patch.dict(os.environ, desk_env(), clear=True):
+            said = oh.next_shift_phrase("2026-10-17T07:00:00+03:00")
+        self.assertEqual(said, "when they are next on duty, from Saturday 17 October at 07:00 EAT")
+
+    def test_without_one_it_says_less_not_wrong(self):
+        self.assertEqual(oh.next_shift_phrase(None), "when they are next on duty")
+        self.assertEqual(oh.next_shift_phrase("soon"), "when they are next on duty")
+
+
+class AttachStatusTests(unittest.TestCase):
+    """Only a turn whose ticket was saved (or reused) is told it is queued."""
+
+    def test_a_turn_with_a_ticket(self):
+        with patch.dict(os.environ, desk_env(CXP_OPEN_HOUR="0", CXP_CLOSE_HOUR="24"), clear=True):
+            queued = oh.attach_status({"ticket_id": "T1"})
+        self.assertTrue(queued["officer_hours"]["on_duty"])
+
+    def test_a_turn_without_one(self):
+        self.assertNotIn("officer_hours", oh.attach_status({"ticket_id": "", "officer_hours": {"on_duty": False}}))
+
+
 if __name__ == "__main__":
     unittest.main()

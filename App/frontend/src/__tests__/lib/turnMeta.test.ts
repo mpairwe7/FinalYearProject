@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { applyTurnMeta, officerHoursFrom } from '../../lib/turnMeta';
+import { applyTurnMeta, formatNextShift, officerHoursFrom } from '../../lib/turnMeta';
 import type { ChatTurn } from '../../store/useChatStore';
 
 const turn = (over: Partial<ChatTurn> = {}): ChatTurn =>
@@ -50,6 +50,14 @@ describe('applyTurnMeta', () => {
     });
     expect(officerHoursFrom({ handoff: { officer_hours: { on_duty: 'no', hours: 7 } } })).toBeUndefined();
     expect(officerHoursFrom({ handoff: null })).toBeUndefined();
+  });
+
+  it('names the next shift: weekday, date and time', () => {
+    const label = formatNextShift('2026-10-17T07:00:00+03:00', 'en', 'Africa/Kampala');
+    expect(label).toContain('Saturday');
+    expect(label).toContain('17');
+    expect(label).toContain('07:00');
+    expect(formatNextShift('soon', 'en')).toBeNull();
   });
 
   it('keeps what the frame does not carry', () => {

@@ -3,6 +3,7 @@ import { ChatAttachment, ChatTurn, Citation } from '../store/useChatStore';
 import { URA_CONTACTS, citationHref, sourceLabel, telDigits } from '../lib/uraContacts';
 import { formatDocType, stripStepPrefix } from '../lib/attachments';
 import { stripCitationMarkers } from '../lib/answerText';
+import { formatNextShift } from '../lib/turnMeta';
 import { localeLabel } from '../lib/locales';
 import { useTranslation, type TranslationKey } from '../lib/i18n';
 import type { ConnectorNotice, ConnectorOutcome, ConnectorSkipReason, ConnectorUse } from '../lib/connectors';
@@ -196,6 +197,10 @@ function ChatMessageInner({
   // are rated on their own service, not with the answer thumbs.
   const isOfficerReply = turn.retrievalMode === 'officer_reply';
   const t = useTranslation();
+  // Outside officers' working hours, and when they are next on duty (G196).
+  const offDuty = turn.officerHours?.onDuty === false;
+  const nextShift =
+    offDuty && turn.officerHours?.nextOnDuty ? formatNextShift(turn.officerHours.nextOnDuty, locale) : null;
   const deadlineEvent = useMemo(
     () => (isAssistant && !isGreeting ? detectDeadlineInMessage(turn.content) : null),
     [isAssistant, isGreeting, turn.content]
@@ -338,21 +343,26 @@ function ChatMessageInner({
           <div className="escalation-banner" role="alert">
             <span aria-hidden="true">!</span> {t('message.humanReview')}
             {turn.escalationReason ? ` — ${turn.escalationReason}` : ''}
-            {turn.officerHours && !turn.officerHours.onDuty && (
-              // Outside officers' working hours nobody is reading yet (G196).
+            {offDuty && turn.officerHours && (
+              // Outside officers' working hours nobody is reading yet: say when
+              // someone will be, which can be days away (G196).
               <p className="escalation-hours" data-testid="escalation-off-duty">
-                {t('message.officersOffDuty', { hours: turn.officerHours.hours })}
+                {nextShift
+                  ? t('message.officersNextShift', { hours: turn.officerHours.hours, next: nextShift })
+                  : t('message.officersOffDuty', { hours: turn.officerHours.hours })}
               </p>
             )}
             <div className="escalation-contacts">
               {t('message.contactUra')}{' '}
-              {URA_CONTACTS.tollFree.map((n, idx) => (
-                <React.Fragment key={n}>
-                  {idx > 0 && ' / '}
-                  <a className="md-link" href={`tel:${telDigits(n)}`}>{n}</a>
-                </React.Fragment>
-              ))}
-              {' · WhatsApp '}
+              {/* The toll-free lines are answered by the same desk: not offered while it is closed. */}
+              {!offDuty &&
+                URA_CONTACTS.tollFree.map((n, idx) => (
+                  <React.Fragment key={n}>
+                    {idx > 0 && ' / '}
+                    <a className="md-link" href={`tel:${telDigits(n)}`}>{n}</a>
+                  </React.Fragment>
+                ))}
+              {offDuty ? 'WhatsApp ' : ' · WhatsApp '}
               <a className="md-link" href={`tel:${telDigits(URA_CONTACTS.whatsapp)}`}>
                 {URA_CONTACTS.whatsapp}
               </a>
@@ -600,6 +610,9 @@ const ChatMessage = memo(ChatMessageInner, (prev, next) => {
     prev.turn.retrievalMode === next.turn.retrievalMode &&
     prev.turn.escalationRequired === next.turn.escalationRequired &&
     prev.turn.escalationReason === next.turn.escalationReason &&
+    prev.turn.officerHours?.onDuty === next.turn.officerHours?.onDuty &&
+    prev.turn.officerHours?.hours === next.turn.officerHours?.hours &&
+    prev.turn.officerHours?.nextOnDuty === next.turn.officerHours?.nextOnDuty &&
     prev.turn.workflow?.status === next.turn.workflow?.status &&
     prev.turn.workflow?.step_index === next.turn.workflow?.step_index &&
     actionsSignature(prev.turn.nextActions) === actionsSignature(next.turn.nextActions) &&

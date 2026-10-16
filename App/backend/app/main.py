@@ -45,6 +45,7 @@ from pydantic import BaseModel, Field
 
 from . import database as db
 from . import documents
+from . import officer_hours
 from .analytics import METRICS_CONTENT_TYPE, AnalyticsMiddleware, metrics, record_chat_turn, route_label
 from .security_events import record_http_security_event
 from .tracing import current_traceresponse
@@ -866,13 +867,13 @@ _ESCALATION_REUSED_MESSAGE = (
 # which the same officers answer (G196). Same single localization path.
 _ESCALATION_OFF_DUTY_MESSAGE = (
     "A URA officer has been asked to look at this. Officers work {hours}, so it "
-    "will be picked up when they are next on duty. Their reply will appear here "
-    "in this conversation, so you do not need to start again. Meanwhile, I can "
-    "still help with other questions."
+    "will be picked up {when}. Their reply will appear here in this "
+    "conversation, so you do not need to start again. Meanwhile, I can still "
+    "help with other questions."
 )
 _ESCALATION_REUSED_OFF_DUTY_MESSAGE = (
     "Your question is already with URA's officers. They work {hours}, so their "
-    "reply will appear here when they are next on duty. There is no need to ask again."
+    "reply will appear here {when}. There is no need to ask again."
 )
 _ESCALATION_QUEUE_OFF_MESSAGE = (
     "This assistant cannot pass your question to an officer right now. "
@@ -1284,7 +1285,10 @@ def chat(
             except Exception:
                 logger.debug("Escalation event tracking failed", exc_info=True)
 
-    return ChatResponse(**{**result, "turn_id": turn_id, "connector_notices": connector_notices})
+    # With a ticket, whether officers are on duty now and when they are next (G196).
+    # A fresh dict: the result may be the answer cache's own.
+    served = officer_hours.attach_status({**result, "turn_id": turn_id, "connector_notices": connector_notices})
+    return ChatResponse(**served)
 
 
 # ---------------------------------------------------------------------------
@@ -2882,7 +2886,11 @@ def request_human_officer(
     )
     if off_duty:
         template = _ESCALATION_REUSED_OFF_DUTY_MESSAGE if reused else _ESCALATION_OFF_DUTY_MESSAGE
-        text = template.format(hours=hours.get("hours") or "")
+        # The next shift can be days away (a weekend, a holiday): name it.
+        text = template.format(
+            hours=hours.get("hours") or "",
+            when=officer_hours.next_shift_phrase(hours.get("next_on_duty")),
+        )
     else:
         text = _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE
     return EscalationResponse(

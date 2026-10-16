@@ -87,6 +87,16 @@ class ConnectorNotice(BaseModel):
     )
 
 
+class OfficerHoursStatus(BaseModel):
+    """Whether a URA officer can pick a handoff up now (``app.officer_hours.status``)."""
+
+    on_duty: bool = Field(..., description="True while officers are on duty")
+    hours: str = Field(..., description='Officers\' working hours, e.g. "07:00–23:00 EAT"')
+    next_on_duty: str | None = Field(
+        None, description="ISO 8601 time officers are next on duty (now, when on duty)"
+    )
+
+
 class ChatResponse(BaseModel):
     reply: str
     sources: list[str] = Field(default_factory=list)
@@ -147,6 +157,10 @@ class ChatResponse(BaseModel):
     # display "ticket 1234abcd" to the user.  Empty string when no
     # ticket was created.
     ticket_id: str = Field("", description="Escalation ticket id, if one was created")
+    officer_hours: OfficerHoursStatus | None = Field(
+        None,
+        description="With a ticket: whether officers are on duty, their hours and the next shift (G196)",
+    )
     current_topic: str = Field(
         "",
         description="Persisted conversation task id (G6), empty when none is active",
@@ -414,16 +428,6 @@ class EscalationRequest(BaseModel):
     modality: str = Field("text", description="Input modality: text or voice")
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
-
-
-class OfficerHoursStatus(BaseModel):
-    """Whether a URA officer can pick a handoff up now (``app.officer_hours.status``)."""
-
-    on_duty: bool = Field(..., description="True while officers are on duty")
-    hours: str = Field(..., description='Officers\' working hours, e.g. "07:00–23:00 EAT"')
-    next_on_duty: str | None = Field(
-        None, description="ISO 8601 time officers are next on duty (now, when on duty)"
-    )
 
 
 class EscalationResponse(BaseModel):
