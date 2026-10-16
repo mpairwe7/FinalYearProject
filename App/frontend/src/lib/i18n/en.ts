@@ -232,6 +232,22 @@ export const en = {
 
   // Human handoff. The taxpayer's own way into the officer queue — every
   // other route into it is a judgement the system makes for them.
+  'narration.region': 'Read-aloud controls',
+  'narration.loading': 'Getting the audio…',
+  'narration.reading': 'Reading the reply aloud',
+  'narration.paused': 'Paused',
+  'narration.pause': 'Pause reading',
+  'narration.resume': 'Resume reading',
+  'narration.stop': 'Stop reading',
+  'narration.failed': 'Couldn’t read this aloud. The answer is on screen.',
+  'narration.retry': 'Try again',
+  'narration.dismiss': 'Dismiss',
+  'message.stopListening': 'Stop listening',
+  'voice.micDidNotOpen': 'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+  'voice.micBlocked': 'Microphone access is blocked. Allow it in your browser’s address bar, or type instead.',
+  'voice.recognitionUnavailable': 'Speech recognition is unavailable right now — you can type instead.',
+  'voice.didNotCatch': 'Didn’t catch that. Try again, or type your question.',
+  'voice.turnFailed': 'I couldn’t process your voice. Please try again, or type.',
   'handoff.ask': 'Talk to a URA officer',
   'handoff.requesting': 'Asking an officer…',
   'handoff.reference': 'Reference',

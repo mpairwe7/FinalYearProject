@@ -337,6 +337,66 @@ export class AudioRecorder {
 let _playbackCtx: AudioContext | null = null;
 let _currentSource: AudioBufferSourceNode | null = null;
 
+// ---------------------------------------------------------------------------
+// What is being read aloud, for the controls that pause and stop it (G200)
+// ---------------------------------------------------------------------------
+
+/** A read-aloud as its controls see it. */
+export interface NarrationSnapshot {
+  /** Audio is playing, paused, or still arriving. */
+  active: boolean;
+  paused: boolean;
+  /** The sentence being read, where the server said which (a streamed reply); else ''. */
+  sentence: string;
+}
+
+/** The sentence each scheduled piece of a streamed reply voices. */
+const _pieceText = new Map<AudioBufferSourceNode, string>();
+const _narrationListeners = new Set<() => void>();
+let _narrationPaused = false;
+let _narration: NarrationSnapshot = { active: false, paused: false, sentence: '' };
+
+function notifyNarration(): void {
+  const active = isPlaying();
+  if (!active) _narrationPaused = false;
+  // The oldest source still scheduled is the one being heard.
+  const first = _streamSources.values().next();
+  const sentence = first.done ? '' : (_pieceText.get(first.value) ?? '');
+  const paused = active && _narrationPaused;
+  if (active === _narration.active && paused === _narration.paused && sentence === _narration.sentence) return;
+  _narration = { active, paused, sentence };
+  for (const listener of _narrationListeners) listener();
+}
+
+/** The current read-aloud state; the same object until it changes (for useSyncExternalStore). */
+export function narrationSnapshot(): NarrationSnapshot {
+  return _narration;
+}
+
+/** Be told whenever the read-aloud state changes; returns the unsubscribe. */
+export function subscribeNarration(listener: () => void): () => void {
+  _narrationListeners.add(listener);
+  return () => {
+    _narrationListeners.delete(listener);
+  };
+}
+
+/** Pause what is being read aloud. Every piece already queued waits with it. */
+export async function pausePlayback(): Promise<void> {
+  if (!_playbackCtx || !isPlaying() || _narrationPaused) return;
+  _narrationPaused = true;
+  notifyNarration();
+  await _playbackCtx.suspend().catch(() => {});
+}
+
+/** Carry on reading from where it was paused. */
+export async function resumePlayback(): Promise<void> {
+  if (!_narrationPaused) return;
+  _narrationPaused = false;
+  notifyNarration();
+  if (_playbackCtx && _playbackCtx.state === 'suspended') await _playbackCtx.resume().catch(() => {});
+}
+
 function getPlaybackContext(): AudioContext {
   if (!_playbackCtx || _playbackCtx.state === 'closed') {
     _playbackCtx = new AudioContext();
@@ -366,9 +426,11 @@ export async function playAudioBase64(base64: string): Promise<void> {
   return new Promise<void>((resolve) => {
     source.onended = () => {
       _currentSource = null;
+      notifyNarration();
       resolve();
     };
     source.start(0);
+    notifyNarration();
   });
 }
 
@@ -383,6 +445,11 @@ export function closePlaybackContext(): void {
 
 /** Stop any currently playing audio, including a streamed reply and what it has queued. */
 export function stopPlayback(): void {
+  if (_narrationPaused && _playbackCtx && _playbackCtx.state === 'suspended') {
+    // A stopped read-aloud is not a paused one: the next starts playing.
+    _playbackCtx.resume().catch(() => {});
+  }
+  _narrationPaused = false;
   if (_currentSource) {
     try {
       _currentSource.stop();
@@ -403,6 +470,8 @@ export function stopPlayback(): void {
     }
   }
   _streamSources.clear();
+  _pieceText.clear();
+  notifyNarration();
 }
 
 /** Returns true if audio is currently playing (or a streamed reply is still arriving). */
@@ -507,6 +576,7 @@ export async function speakStreamed(
   stopPlayback();
   const controller = new AbortController();
   _speechStream = controller;
+  notifyNarration();
   const ctx = getPlaybackContext();
   if (ctx.state === 'suspended') await ctx.resume();
   const started = performance.now();
@@ -545,9 +615,13 @@ export async function speakStreamed(
       nextStart = startAt + buffer.duration;
       pieces += 1;
       _streamSources.add(source);
+      _pieceText.set(source, piece.text ?? '');
+      notifyNarration();
       lastEnded = new Promise<void>((resolve) => {
         source.onended = () => {
           _streamSources.delete(source);
+          _pieceText.delete(source);
+          notifyNarration();
           resolve();
         };
       });
@@ -559,6 +633,7 @@ export async function speakStreamed(
   } catch (err) {
     if (pieces === 0 && !(controller.signal.aborted && !stalled)) {
       if (_speechStream === controller) _speechStream = null;
+      notifyNarration();
       throw err;
     }
   } finally {
@@ -566,6 +641,7 @@ export async function speakStreamed(
   }
   const stopped = controller.signal.aborted && !stalled;
   if (_speechStream === controller) _speechStream = null;
+  notifyNarration();
   if (pieces === 0 && !stopped) throw new Error(failed ? 'No piece of the reply could be voiced' : 'Empty speech stream');
   if (!stopped) await lastEnded;
   return { firstAudioMs, pieces, failed, stopped };

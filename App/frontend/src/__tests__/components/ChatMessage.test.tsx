@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import ChatMessage from "../../components/ChatMessage";
-import type { ChatTurn } from "../../store/useChatStore";
+import { useChatStore, type ChatTurn } from "../../store/useChatStore";
 
 function renderMsg(turn: ChatTurn, overrides = {}) {
   return render(
@@ -145,6 +145,17 @@ describe("ChatMessage", () => {
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Human review recommended");
     expect(alert).toHaveTextContent("low confidence");
+  });
+
+  it("names its Listen button in the reader's language (G201)", () => {
+    try {
+      useChatStore.setState({ locale: "sw" });
+      renderMsg(assistantTurn, { locale: "sw" });
+      const listen = screen.getByRole("button", { name: /^Sikiliza kwa / });
+      expect(listen).toHaveTextContent("Sikiliza");
+    } finally {
+      useChatStore.setState({ locale: "en" });
+    }
   });
 
   it("does NOT show escalation banner on greeting", () => {
