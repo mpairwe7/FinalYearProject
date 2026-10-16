@@ -388,8 +388,8 @@ A chat turn that queued a ticket (saved, or an open one reused) carries the same
 object at the top level: the `/v1/chat` response and the stream's `grounding` event, read when the
 turn is served — with or without handoff summaries. A turn whose ticket failed to save carries
 none, so the chat never says such a question is queued. The off-duty `message` names the next
-shift ("…when they are next on duty, from Saturday 17 October at 07:00 EAT"), which can be days
-away (`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES`).
+shift — for example "…when they are next on duty, from Saturday 17 October at 07:00 EAT" — which
+can be days away (`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES`).
 
 Honours the `ticket_queue` flag. With it off the endpoint answers `ok: false`
 and gives the contact-centre numbers rather than promising a handoff that will
