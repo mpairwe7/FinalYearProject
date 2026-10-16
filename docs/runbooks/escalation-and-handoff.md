@@ -17,6 +17,34 @@ gap rows G156–G164 in
 The flags are independent. `structured_text_handoff` without
 `eq_stakes_escalation` briefs the officer but leaves priority as it was.
 
+## Outside officers' working hours (no flag)
+
+The AI answers all night; officers work the desk's hours — `CXP_TIMEZONE`,
+`CXP_OPEN_HOUR`/`CXP_CLOSE_HOUR` (default 07:00–23:00 `Africa/Kampala`),
+`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES` (`app/officer_hours.py`; the call
+receptionist uses the same settings). Outside them:
+
+* **Every escalation** — the taxpayer's button, auto-escalation, the
+  `escalate_to_human` tool — still tries to open (or reuse) the ticket, at any
+  hour. When the ticket is saved, the turn carries `officer_hours` (top level,
+  and on the handoff), and the chat's escalation banner adds *"Officers work
+  {hours}. Your question is queued, and an officer will reply here from
+  {next shift}."* — the next shift's weekday, date and time in the reader's
+  language and time zone (en, lg, sw, nyn, ach) — and drops the toll-free
+  numbers while the desk that answers them is closed. When the ticket cannot be
+  saved, the turn carries no officer hours and nothing says the question is
+  queued. The banner itself is translated now; it was English in every locale
+  (G199).
+* **`POST /v1/escalate`** answers with the off-duty message (no toll-free line —
+  the same desk answers it) and the `officer_hours` object.
+* **SLA** — breaches count only officers' working seconds
+  (`officer_hours.working_seconds`): a handoff raised at 23:15 has waited for
+  nobody until 07:00. `sla_stats` says so (`sla_clock: "officer_hours"`, with the
+  hours). The medians stay wall-clock: they are what the taxpayer waited.
+
+Check: set `CXP_CLOSED_DATES` to today on a test instance and press **Talk to a
+URA officer** — the reply names the hours and the next shift.
+
 ## Ramp
 
 Flags are addressable (see "Addressable rollout" in

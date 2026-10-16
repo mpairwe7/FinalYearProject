@@ -210,6 +210,12 @@ export const nyn: Partial<Dictionary> = {
   'resource.action.guide': 'Iguraho obuhabuzi',
   'resource.source': 'Obukomooko: {domain}',
 
+  'message.humanReview': 'Nikirungi omukozi wa URA ashwijume eki',
+  'message.contactUra': 'Nari teera URA:',
+  'message.officersOffDuty':
+    'Abakozi nibakora {hours}. Ekibuuzo kyawe kiteirwe omu murongo, kandi omukozi naija kukugarukamu aha baagaruka aha murimo.',
+  'message.officersNextShift':
+    'Abakozi nibakora {hours}. Ekibuuzo kyawe kiteirwe omu murongo, kandi omukozi naija kukugarukamu aha kuruga {next}.',
   'handoff.ask': 'Gamba n’omukozi wa URA',
   'handoff.requesting': 'Ninshaba omukozi…',
   'handoff.reference': 'Enamba y’ekihandiiko',

@@ -27,6 +27,7 @@ import os
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ class OfficerHours:
     def label(self, at: float | None = None) -> str:
         """``07:00–23:00 EAT`` — for screens and messages, never for the voice."""
         stamp = dt.datetime.fromtimestamp(time.time() if at is None else at, self.zone)
-        return f"{self.open_hour:02d}:00–{self.close_hour % 24:02d}:00 {stamp.strftime('%Z')}".strip()
+        return f"{self.open_hour:02d}:00–{self.close_hour:02d}:00 {stamp.strftime('%Z')}".strip()
 
 
 def _hour(name: str, default: int, low: int, high: int) -> int:
@@ -170,3 +171,53 @@ def working_seconds(start: float, end: float, hours: OfficerHours | None = None)
         if overlap > 0:
             total += overlap
     return total
+
+
+def status(at: float | None = None, hours: OfficerHours | None = None) -> dict[str, object]:
+    """Whether officers are on duty now, their hours, and when they are next on duty — for an API.
+
+    ``next_on_duty`` is an ISO 8601 time with its offset (``None`` when no
+    shift starts within a month). The chat shows the notice in the reader's
+    language from these fields; nothing here is prose to translate.
+    """
+    hours = hours or officer_hours()
+    now = time.time() if at is None else at
+    nxt = next_on_duty(now, hours)
+    return {
+        "on_duty": on_duty(now, hours),
+        "hours": hours.label(now),
+        "next_on_duty": dt.datetime.fromtimestamp(nxt, hours.zone).isoformat() if nxt is not None else None,
+    }
+
+
+def next_shift_phrase(next_on_duty: str | None, hours: OfficerHours | None = None) -> str:
+    """"when they are next on duty, from Saturday 17 October at 07:00 EAT" — English, for a reply.
+
+    The next shift can be days away (a weekend, a public holiday), which the
+    hours alone do not say. Without one, or unreadable: "when they are next on duty".
+    """
+    if not next_on_duty:
+        return "when they are next on duty"
+    try:
+        start = dt.datetime.fromisoformat(next_on_duty)
+    except ValueError:
+        return "when they are next on duty"
+    local = start.astimezone((hours or officer_hours()).zone)
+    stamp = f"{local:%A} {local.day} {local:%B} at {local:%H:%M} {local.tzname() or ''}".rstrip()
+    return f"when they are next on duty, from {stamp}"
+
+
+def attach_status(payload: dict[str, Any]) -> dict[str, Any]:
+    """Put :func:`status` on a chat turn that queued a ticket, as ``officer_hours`` (G196).
+
+    At the top level, beside ``handoff``: an escalation raised without handoff
+    summaries has no handoff, and a cached turn's handoff dates from when it was
+    first answered, so the status is read at serve time. Only a turn with a
+    ticket gets it — the chat then says the question is queued, which a ticket
+    that failed to save is not.
+    """
+    if payload.get("ticket_id"):
+        payload["officer_hours"] = status()
+    else:
+        payload.pop("officer_hours", None)
+    return payload

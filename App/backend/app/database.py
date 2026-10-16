@@ -2188,7 +2188,9 @@ def mark_reply_delivered(ticket_id: str) -> bool:
         return False
 
 
-#: First-response and next-reply clocks use the same public-sector day.
+#: First-response and next-reply clocks use the same public-sector day — 24
+#: hours of officers' working time (app.officer_hours): the clock stops while
+#: the desk is closed, as a service desk's business-hours SLA calendar does (G197).
 SLA_BREACH_SECONDS = 24 * 3600
 PRESENCE_TTL_SECONDS = 45
 
@@ -2205,8 +2207,15 @@ def compose_sla_stats(
     Medians stay period-scoped. Breach / awaiting-next counts use the
     live open+assigned population so a 20-row queue sample cannot
     under-count.
+
+    Breaches count officers' working seconds only (``officer_hours.working_seconds``):
+    a handoff raised at 23:15 has not waited for anyone until the desk opens.
+    The medians stay wall-clock — they are what the taxpayer waited.
     """
+    from . import officer_hours
+
     now = now if now is not None else time.time()
+    hours = officer_hours.officer_hours()
 
     def _get(row: Any, key: str, index: int) -> float:
         if isinstance(row, dict):
@@ -2275,12 +2284,12 @@ def compose_sla_stats(
         if not _get_text(r, "assignee", 4):
             unassigned += 1
         if not first:
-            if now - created >= SLA_BREACH_SECONDS:
+            if officer_hours.working_seconds(created, now, hours) >= SLA_BREACH_SECONDS:
                 breaching_first += 1
             continue
         awaiting_next += 1
         last_touch = reply or first
-        if now - last_touch >= SLA_BREACH_SECONDS:
+        if officer_hours.working_seconds(last_touch, now, hours) >= SLA_BREACH_SECONDS:
             breaching_next += 1
 
     return {
@@ -2297,6 +2306,9 @@ def compose_sla_stats(
         "breaching_first_response": breaching_first,
         "breaching_next_reply": breaching_next,
         "breaching": breaching_first + breaching_next,
+        # How the breach clock runs, for the overview to say so.
+        "sla_clock": "officer_hours",
+        "officer_hours": hours.label(now),
     }
 
 

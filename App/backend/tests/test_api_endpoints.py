@@ -139,6 +139,24 @@ class ChatEndpoints(_Base):
         body = c.post("/v1/chat", json={"message": "I dispute my assessment"}).json()
         self.assertTrue(body["escalation_required"])
 
+    def test_a_queued_escalation_says_whether_officers_are_on_duty(self):
+        """G196: with or without handoff summaries (no handoff here), the chat learns when it will be read."""
+        c = _client()
+        c.app.state.model.generate.return_value = _chat_result(
+            escalation_required=True, escalation_reason="dispute", ticket_id="T1"
+        )
+        desk = {"CXP_OPEN_HOUR": "0", "CXP_CLOSE_HOUR": "24", "CXP_WORKING_DAYS": "mon,tue,wed,thu,fri,sat,sun", "CXP_CLOSED_DATES": ""}
+        with mock.patch.dict(os.environ, desk):
+            body = c.post("/v1/chat", json={"message": "I dispute my assessment"}).json()
+        self.assertTrue(body["officer_hours"]["on_duty"])
+        self.assertTrue(body["officer_hours"]["hours"].startswith("00:00–24:00"))
+
+    def test_without_a_ticket_nothing_is_said_to_be_queued(self):
+        c = _client()
+        c.app.state.model.generate.return_value = _chat_result(escalation_required=True, ticket_id="")
+        body = c.post("/v1/chat", json={"message": "I dispute my assessment"}).json()
+        self.assertIsNone(body["officer_hours"])
+
 
 # ---------------------------------------------------------------------------
 # Classification + knowledge (public)

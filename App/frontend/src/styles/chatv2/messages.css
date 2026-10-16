@@ -239,6 +239,9 @@
 .chatv2 .escalation-contacts {
   color: var(--text-1);
 }
+.chatv2 .escalation-hours {
+  color: var(--text-0);
+}
 
 /* A URA officer's message in a live chat: a person, so a person's roundel in
    the officer green and their name above the text. */

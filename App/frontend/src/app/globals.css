@@ -1037,6 +1037,14 @@ main {
 }
 .escalation-contacts .md-link { white-space: nowrap; }
 
+/* Outside officers' working hours: when the handoff will be read (G196). */
+.escalation-hours {
+  flex-basis: 100%;
+  margin: 0.3rem 0 0;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
 /* -----------------------------------------------------------------------------
    Human handoff — "Talk to a URA officer"
 
