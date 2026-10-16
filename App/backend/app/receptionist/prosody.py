@@ -9,6 +9,7 @@ and empathy guidance.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Final
@@ -94,18 +95,23 @@ def analyze_utterance_prosody(
     has_frustration = bool(_FRUSTRATION_CUES_RE.search(clean_text))
     has_confusion = bool(_CONFUSION_CUES_RE.search(clean_text)) or clarifications_asked >= 2
     high_arousal = rms >= 0.18 and (energy_var >= 0.08 or wps >= 3.8)
+    # Loudness, energy and pace alone do not name a feeling (Phase 39): a noisy
+    # line, a loud voice or a fast talker read as "frustrated", a slow one as
+    # "confused", on signals never validated for Ugandan speakers or languages.
+    # They intensify what the words say; on their own they change nothing.
+    acoustic_labels = _acoustic_only_affect()
 
     if has_frustration and high_arousal:
         affect = "urgent_distress"
         rate = 0.88
         tag = "<calm_reassuring>"
         pause_ms = 240
-    elif has_frustration or high_arousal:
+    elif has_frustration or (high_arousal and acoustic_labels):
         affect = "frustrated"
         rate = 0.92
         tag = "<empathetic_steady>"
         pause_ms = 200
-    elif has_confusion or (0.0 < wps < 1.1 and words >= 2):
+    elif has_confusion or (acoustic_labels and 0.0 < wps < 1.1 and words >= 2):
         affect = "confused"
         rate = 0.92
         tag = "<patient_clear>"
@@ -126,6 +132,16 @@ def analyze_utterance_prosody(
         prosody_tag=tag,
         dictation_pause_ms=pause_ms,
     )
+
+
+def _acoustic_only_affect() -> bool:
+    """Whether loudness or pace alone may name a caller's affect (off unless opted in).
+
+    ``PROSODY_ACOUSTIC_ONLY_AFFECT=true`` restores it for a validation study;
+    the EU AI Act treats inferring emotion from voice as emotion recognition
+    (Art. 3(39)), and callers are told on the call screen.
+    """
+    return os.getenv("PROSODY_ACOUSTIC_ONLY_AFFECT", "false").strip().lower() in ("1", "true", "yes", "on")
 
 
 def empathetic_opening_for(affect: str, locale: str = "en") -> str:

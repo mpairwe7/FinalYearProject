@@ -63,6 +63,9 @@ describe('CallScreen component', () => {
     expect(
       screen.getByText('Calls are transcribed so an officer can pick up with full context.'),
     ).toBeDefined();
+    // Inferring emotion from a voice is emotion recognition (EU AI Act Art. 3(39)):
+    // the caller is told before the call starts, not after.
+    expect(screen.getByTestId('call-tone-notice').textContent).toMatch(/tone and pace of your voice/);
     // Decline sits on the left of Call URA, so the safe choice is the one the
     // thumb reaches first rather than the one it lands on by accident.
     const actions = screen.getByText('Decline').parentElement;

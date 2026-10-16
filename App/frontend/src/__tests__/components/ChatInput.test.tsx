@@ -524,7 +524,8 @@ describe("ChatInput attachments", () => {
     it("shows a dictation result in place of the standing disclaimer", () => {
       const { rerender } = render(<ChatInput {...defaults} />);
       // Nothing to report yet — the usual footer.
-      expect(screen.getByText(/can make mistakes/)).toBeInTheDocument();
+      // It says it is an AI, not only that it can be wrong (EU AI Act Art. 50(1)).
+      expect(screen.getByText(/AI assistant can make mistakes/)).toBeInTheDocument();
 
       // Dictation heard nothing. Before this the composer just sat there empty
       // with no explanation, which reads as the button being broken.

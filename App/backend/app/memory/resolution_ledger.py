@@ -550,7 +550,8 @@ class ResolutionLedger:
             existing = db.get_working_memory(user_id, tenant_id=tenant) or {}
             bank = dict(existing.get("verified_slot_bank") or {})
             for k, v in slots.items():
-                if k and v not in ("", None):
+                # "_"-prefixed keys are workflow-engine state, not something the taxpayer gave.
+                if k and v not in ("", None) and not str(k).startswith("_"):
                     bank[str(k)] = v
             return db.upsert_working_memory(
                 user_id,

@@ -187,9 +187,15 @@ from .text_signals import (
     REPAIR_NEXT_ACTIONS,
     REPAIR_QUESTION,
     REPAIR_REPEAT_REPLY,
+    WELLBEING_CHECKIN_ACTIONS,
     ack_already_given,
+    checkin_already_given,
     crisis_support_reply,
     detect_crisis,
+    detect_high_stakes,
+    needs_wellbeing_checkin,
+    strip_stakes,
+    wellbeing_checkin_reply,
     repair_reply,
     detect_user_distress,
     empathy_ack,
@@ -214,7 +220,7 @@ from .tracing import (
     turn_usage_scope,
     usage_summary,
 )
-from .turn_guidance import apply_turn_guidance, finalize_turn_actions, turns_from_history
+from .turn_guidance import HANDOFF_ACTION, apply_turn_guidance, finalize_turn_actions, turns_from_history
 from .verified_resources import resources_for_turn
 from .workflows.registry import WorkflowRegistry, WorkflowSession, WorkflowTurn, auto_load_flows
 from .workflows.slots import validate_slot
@@ -313,7 +319,12 @@ SELF_REFLECT_ENABLED = os.getenv("SELF_REFLECT_ENABLED", "false").lower() == "tr
 SELF_REFLECT_THRESHOLD = float(os.getenv("SELF_REFLECT_THRESHOLD", "0.4"))
 _WORKFLOW_FLOWS_DIR = Path(__file__).resolve().parent / "workflows" / "flows"
 _WORKFLOW_CANCEL_WORDS = {"cancel", "stop", "quit", "exit", "nevermind", "never mind"}
-_WORKFLOW_RESUME_WORDS = {"resume", "continue", "resume workflow", "continue workflow", "resume process"}
+_WORKFLOW_RESUME_WORDS = {
+    "resume", "continue", "resume workflow", "continue workflow", "resume process", "continue the steps",
+}
+#: What a paused guided flow offers (Phase 39); "Continue the steps" resumes it.
+_WORKFLOW_CONTINUE_ACTION = "Continue the steps"
+_WORKFLOW_CANCEL_ACTION = "Cancel"
 _WORKFLOW_SENSITIVE_SLOTS = {"nin", "company_reg", "ngo_reg", "phone", "email"}
 #: Slot specs that accept any string, so validation cannot tell a slot answer
 #: from a new question. Mirrors :func:`app.workflows.slots.validate_slot`'s own
@@ -7028,6 +7039,133 @@ class ChatModel:
             "next_actions": ["Talk to an officer"],
         }
 
+    @staticmethod
+    def _needs_wellbeing_checkin(
+        message: str, alternates: tuple[str, ...], history: Any, *, user_id: str | None
+    ) -> bool:
+        """Hopelessness amid hardship, in the taxpayer's words or their English rewrite (Phase 39).
+
+        Once per conversation: the second time it reads as a script, and the
+        officer offer that every later turn carries is enough.
+        """
+        if not flags.is_enabled("wellbeing_checkin", subject=user_id or None):
+            return False
+        turns = turns_from_history(history or [])
+        if checkin_already_given([t["bot_reply"] for t in turns]):
+            return False
+        prior = [t["user_message"] for t in turns]
+        return any(needs_wellbeing_checkin(text, prior) for text in (message, *alternates) if text)
+
+    def _wellbeing_checkin_result(self, *, thread_id: str, locale: str) -> dict[str, Any]:
+        """Turn result for hopelessness said amid hardship (Phase 39): check in first.
+
+        Like the crisis result it carries no tax content and opens no ticket.
+        Unlike it, the remedy is one tap away — the hardship is still a tax
+        problem — and so is a person.
+        """
+        try:
+            from .analytics import metrics  # noqa: PLC0415
+
+            metrics.inc("wellbeing_checkin_total", labels={"locale": locale or "en"})
+        except Exception:  # noqa: BLE001 - a counter never changes the turn
+            logger.debug("wellbeing check-in metric skipped", exc_info=True)
+        return {
+            "reply": wellbeing_checkin_reply(),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "wellbeing_checkin",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "safety_guard",
+            "next_actions": list(WELLBEING_CHECKIN_ACTIONS),
+        }
+
+    def _workflow_offramp(
+        self,
+        *,
+        wf: Any,
+        session: WorkflowSession,
+        user_input: str,
+        signal_text: str,
+        thread_id: str,
+        locale: str,
+        user_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Pause a guided flow when the answer is distress or enforcement news, not a slot (Phase 39).
+
+        A taxpayer who writes "URA froze my account and I can't pay my
+        staff" in the middle of a return was answered with "Please answer yes
+        or no." and the same question. A real answer is never paused, whatever
+        its mood: only input the step cannot accept, and on a free-text step
+        (which accepts anything) only a sentence carrying hardship or
+        enforcement. The flow stays active at the same step; nothing is stored.
+        """
+        if not flags.is_enabled("workflow_emotional_offramp", subject=user_id or None):
+            return None
+        if _reads_as_question(user_input):
+            # A question is answered from the corpus (the change-of-subject
+            # rule), with an officer offered when it is serious.
+            return None
+        step = WorkflowRegistry.pending_step(session)
+        if step is None or not step.slot:
+            return None
+        stakes = detect_high_stakes(signal_text)
+        kind = detect_user_distress(strip_stakes(signal_text) if "enforcement" in stakes else signal_text)
+        serious = kind == "hardship" or "enforcement" in stakes or "deadline_today" in stakes
+        if step.validator and step.validator != "text":
+            accepted, _, _ = validate_slot(user_input, step.validator, None)
+            if accepted or not (serious or kind in ("frustration", "anxiety")):
+                return None
+        elif not serious or len(user_input.split()) < 6:
+            return None
+
+        if serious:
+            opener = "That matters more than this form."
+            help_line = (
+                "An officer can look at it with you now, or I can explain your options, "
+                "such as paying in instalments."
+            )
+            actions = [HANDOFF_ACTION, WELLBEING_CHECKIN_ACTIONS[1], _WORKFLOW_CONTINUE_ACTION, _WORKFLOW_CANCEL_ACTION]
+        else:
+            # Competence first, no mirroring: an empathic echo from a chatbot reads as
+            # reactance-provoking, a step forward does not (USF / MIS Quarterly, 2026).
+            opener = "Let's sort this out first."
+            help_line = "Tell me what isn't working, or an officer can help."
+            actions = [_WORKFLOW_CONTINUE_ACTION, HANDOFF_ACTION, _WORKFLOW_CANCEL_ACTION]
+        try:
+            from .analytics import metrics  # noqa: PLC0415
+
+            metrics.inc(
+                "workflow_offramp_total",
+                labels={"workflow_id": wf.id, "reason": "stakes" if stakes else (kind or "other")},
+            )
+        except Exception:  # noqa: BLE001 - a counter never changes the turn
+            logger.debug("workflow off-ramp metric skipped", exc_info=True)
+        workflow = self._workflow_view(session, name=wf.name, status="active", pending_slot=step.slot)
+        workflow["options"] = []  # no answer buttons under a pause
+        workflow["paused"] = True
+        return {
+            "reply": (
+                f"{opener} I've paused the {wf.name} steps, and your answers so far are kept.\n\n{help_line}"
+            ),
+            "sources": [],
+            "citations": [],
+            "faithfulness_score": None,
+            "retrieval_mode": "workflow",
+            "model": self.name,
+            "conversation_id": thread_id,
+            "locale": locale,
+            "escalation_required": False,
+            "escalation_reason": "",
+            "agent_role": "workflow_guide",
+            "workflow": workflow,
+            "next_actions": actions,
+        }
+
     def _maybe_create_ticket(
         self,
         *,
@@ -9026,6 +9164,23 @@ class ChatModel:
             # The taxpayer asked something else. Hand the turn back so it is
             # answered from the corpus; the session stays active, so a later
             # slot-shaped reply resumes the flow where it left off.
+            # Before the change-of-subject rule: that rule sends a statement an
+            # enum step cannot accept to retrieval, which has nothing to say to
+            # "URA closed my shop" and abstained; a yes/no step answered it with
+            # "Please answer yes or no."
+            paused = self._workflow_offramp(
+                wf=wf,
+                session=session,
+                user_input=user_input,
+                # The taxpayer's own words carry the vernacular cues, the rewrite the English ones.
+                signal_text="\n".join(t for t in (raw_message, message, rewritten) if t),
+                thread_id=thread_id,
+                locale=locale,
+                user_id=user_id,
+            )
+            if paused is not None:
+                return paused
+
             if self._workflow_input_changes_subject(session, user_input):
                 return None
 
@@ -9071,6 +9226,17 @@ class ChatModel:
             prompt = turn.question or persisted.get("last_prompt", "") or f"Let's continue the {wf.name} workflow."
             if tool_messages:
                 prompt = "\n\n".join(tool_messages + [prompt]).strip()
+            # A step answered wrongly again and again is a loop, not a dialogue
+            # (Phase 39): from the second miss a person and a way out are on
+            # offer; from the third, say so.
+            stuck = turn.failed_attempts >= 2 and flags.is_enabled(
+                "workflow_emotional_offramp", subject=user_id or None
+            )
+            if stuck and turn.failed_attempts >= 3:
+                prompt = (
+                    "This step may not fit your situation. You can answer it, talk to an officer, "
+                    f"or cancel the guided steps.\n\n{prompt}"
+                )
             if status == "completed":
                 db.upsert_workflow_session(
                     state_thread_id,
@@ -9113,7 +9279,9 @@ class ChatModel:
                 "escalation_reason": "",
                 "agent_role": "workflow_guide",
                 "workflow": workflow,
-                "next_actions": self._default_next_actions(
+                "next_actions": [HANDOFF_ACTION, _WORKFLOW_CANCEL_ACTION]
+                if stuck
+                else self._default_next_actions(
                     agent_role="workflow_guide",
                     workflow=workflow,
                 ),
@@ -9774,6 +9942,13 @@ class ChatModel:
                     message=message, result=crisis, session_id=session_id, trace_ctx=trace_ctx
                 )
                 return crisis
+
+            if self._needs_wellbeing_checkin(message, (router_message,), conversation_history, user_id=user_id):
+                checkin = self._wellbeing_checkin_result(thread_id=thread_id, locale=locale)
+                self._audit_turn(
+                    message=message, result=checkin, session_id=session_id, trace_ctx=trace_ctx
+                )
+                return checkin
 
             # Direct transactional PRN generation when payment amount is explicitly provided
             if connector_intent is None and re.search(
@@ -11463,6 +11638,14 @@ class ChatModel:
         if detect_crisis(message) or detect_crisis(rewritten) or detect_crisis(router_message):
             return {
                 **self._crisis_support_result(thread_id=thread_id, locale=locale),
+                "_hits": [],
+                "_history": [],
+                "_short_circuit": True,
+            }
+
+        if self._needs_wellbeing_checkin(message, (rewritten, router_message), conversation_history, user_id=user_id):
+            return {
+                **self._wellbeing_checkin_result(thread_id=thread_id, locale=locale),
                 "_hits": [],
                 "_history": [],
                 "_short_circuit": True,

@@ -587,6 +587,20 @@ _REGISTRY: dict[str, Flag] = {
             "taxpayer's own request): affect, SLA, and the details to ask for pruned against "
             "what the taxpayer already gave. Slot names only, never values.",
         ),
+        Flag(
+            "workflow_emotional_offramp",
+            False,
+            "Phase 39: a guided workflow does not answer distress or enforcement news with a "
+            "validation error — it pauses (answers kept) and offers to continue, an officer or "
+            "cancel; and after repeated invalid answers it says what is accepted, then offers a way out.",
+        ),
+        Flag(
+            "wellbeing_checkin",
+            False,
+            "Phase 39: hopelessness said amid hardship or enforcement (this or the last two "
+            "messages) gets a check-in with the crisis lines before the tax answer, once per "
+            "conversation. Explicit statements keep the crisis path.",
+        ),
     ]
 }
 
@@ -767,6 +781,8 @@ class FeatureFlags:
                 "officer_preference_capture",
                 "eq_stakes_escalation",
                 "structured_text_handoff",
+                "workflow_emotional_offramp",
+                "wellbeing_checkin",
             )
         }
 

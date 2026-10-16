@@ -395,7 +395,7 @@ App/backend/app/
 ├── analytics.py         # Prometheus-compatible metrics middleware
 ├── database.py          # SQLite WAL store (11 tables, retention TTLs, migrations)
 ├── postgres.py          # PostgreSQL backend (opt-in, drop-in substitute for database.py)
-├── flags.py             # Feature flag registry (79 flags, env-backed, cohort rollout)
+├── flags.py             # Feature flag registry (81 flags, env-backed, cohort rollout)
 ├── resilience.py        # Circuit breaker (exponential backoff, CLOSED→OPEN→HALF_OPEN)
 ├── pdf_export.py        # Branded PDF conversation/tax summary export
 ├── evaluation.py        # RAG evaluation harness (8 metrics)
@@ -701,7 +701,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `voice_agentic_workflows` | off | Guided multi-step workflows, calculator MCP tools, and spoken confirmation tokens inside live `/v1/calls/stream` voice calls |
 | `multi_agent_dag` | off | Multi-specialist DAG chaining (`CUSTOMS_SPECIALIST` + `TAX_SPECIALIST` + `TOOLS`) with `HandoffEnvelope` v2 verification in `agents/graphs/main_graph.py` |
 | `continuous_relationship_memory` | off | Longitudinal `ResolutionCase` persistence (`memory/resolution_ledger.py`), bidirectional `Voice <-> Web` carryover, and background `mcp_tasks` continuation |
-| `emotion_aware_prosody` | off | Acoustic prosody extraction (`receptionist/prosody.py`) in `CallerAudioTap` and dynamic empathy/pacing conditioning in TTS |
+| `emotion_aware_prosody` | off | Acoustic prosody extraction (`receptionist/prosody.py`) in `CallerAudioTap` and dynamic empathy/pacing conditioning in TTS. Affect needs the caller's words: loudness or pace alone names nothing (Phase 39; `PROSODY_ACOUSTIC_ONLY_AFFECT=true` for a validation study) |
 | `spoken_figure_guard` | off | Acoustic & lexical digit verification (`receptionist/spoken_figure_guard.py`) and dictation pauses on synthesized TTS audio containing statutory figures, TINs, or PRNs |
 | `officer_voice_copilot` | off | Streams live ASR transcripts, English router views, and statutory rate cards to the officer desk while a voice call is bridged to `ura_staff` |
 | `eq_adaptive_retrieval` | off | Stage 0c/0b2 EQ assessment (`tools/empathy.py`, `query.py`) boosting statutory relief/instalment/waiver passages (`TPCA s.39, s.66`) on hardship/anxiety |
@@ -723,9 +723,11 @@ All major subsystems are behind feature flags for progressive rollout:
 | `officer_preference_capture` | off | Captures PII-redacted edit diffs between AI co-pilot drafts and final officer replies in `officer_chat.py` for offline DPO/ORPO preference alignment |
 | `eq_stakes_escalation` | off | Phase 38: `escalation_policy.assess_escalation` weighs affect, stakes (`text_signals.detect_high_stakes`: enforcement, a deadline today, a large amount), effort and confidence; text chat offers an officer (first when `priority`), and every ticket path takes its priority and SLA. Offers only — never escalates by itself |
 | `structured_text_handoff` | off | Phase 38: text-chat tickets (auto-escalations and `POST /v1/escalate`) carry `HandoffEnvelope` v2.1 via `officer_handoff.enrich_handoff`; details to ask for are pruned against what the taxpayer already gave (slot names only, never values) |
+| `workflow_emotional_offramp` | off | Phase 39: a guided flow pauses (answers kept) instead of answering distress or enforcement news with a validation error, offering an officer, the instalments question, "Continue the steps" and "Cancel"; after repeated invalid answers it offers a way out (`WorkflowTurn.failed_attempts`) |
+| `wellbeing_checkin` | off | Phase 39: hopelessness said amid hardship or enforcement (this or the last two messages) gets a check-in with the crisis lines before the tax answer, once per conversation, on REST and stream alike |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**79** in total, including the per-phase switches for voice, offline and
+**81** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).

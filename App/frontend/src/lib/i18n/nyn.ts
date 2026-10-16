@@ -118,7 +118,7 @@ export const nyn: Partial<Dictionary> = {
   'composer.sendRecording': 'Sindika eiraka',
   'composer.analysing': 'Nshwijuma fayiro...',
   'composer.disclaimer':
-    'Omuhwezi wa URA naabaasa kushobya. Hamya amakuru makuru ag’omushoro aha ura.go.ug.',
+    'Omuhwezi wa URA (AI) naabaasa kushobya. Hamya amakuru makuru ag’omushoro aha ura.go.ug.',
 
   'rail.newChat': 'Ekiganiro kisya',
   'rail.chats': 'Ebiganiro',

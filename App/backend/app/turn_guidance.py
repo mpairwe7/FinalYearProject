@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 #: supervisor's "talk to … officer" escalation rule, so a click routes
 #: straight to the ticket queue.
 HANDOFF_ACTION = "Talk to an officer"
+#: Replies about the taxpayer's safety; turn guidance leaves them as they are.
+SAFETY_MODES = frozenset({"crisis_support", "wellbeing_checkin"})
 
 #: Prefix of every guided-mode offer; the flow's name follows it.
 GUIDE_PREFIX = "Guide me step by step through "
@@ -188,6 +190,10 @@ def apply_turn_guidance(
     taxpayer's id) addresses flag rollouts.
     """
     if not isinstance(result, dict):
+        return result
+    if str(result.get("retrieval_mode") or "") in SAFETY_MODES:
+        # A safety reply carries no tax content: no guided-steps offer, no
+        # filing-deadline nudge under "you don't have to face this alone".
         return result
     prior_replies = [str(t.get("bot_reply") or "") for t in recent_turns]
     prior_messages = [str(t.get("user_message") or "") for t in recent_turns]

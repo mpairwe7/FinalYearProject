@@ -124,7 +124,7 @@ export const en = {
   'composer.sendRecording': 'Send recording',
   'composer.analysing': 'Analysing attachment...',
   'composer.disclaimer':
-    'URA Assistant can make mistakes. Verify important tax information at ura.go.ug.',
+    "URA's AI assistant can make mistakes. Verify important tax information at ura.go.ug.",
 
   // Conversation rail -----------------------------------------------------
   'rail.newChat': 'New chat',
@@ -335,6 +335,10 @@ export const en = {
   'call.preTitle': 'Call URA',
   'call.preSubtitle': '0800 117 000 · Toll-free',
   'call.preConsent': 'Calls are transcribed so an officer can pick up with full context.',
+  // EU AI Act Art. 50(3) as the reference standard: inferring emotion from a
+  // voice is emotion recognition, and the person must be told before it runs.
+  'call.preConsentTone':
+    'The AI assistant may also notice the tone and pace of your voice, together with your words, to adjust how it responds.',
   'call.jumpToLatest': 'Jump to latest',
   'call.bridgeActive': 'Live audio bridge active',
   'call.consentTitle': 'Call Recording & Transcription Consent',

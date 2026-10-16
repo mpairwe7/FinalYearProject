@@ -118,7 +118,7 @@ export const ach: Partial<Dictionary> = {
   'composer.sendRecording': 'Cwal dwon',
   'composer.analysing': 'Atye ka ngiyo fayil...',
   'composer.disclaimer':
-    'Lakony me URA romo timo roc. Mok ngec ma pire tek me mucoro i ura.go.ug.',
+    'Lakony me URA (AI) romo timo roc. Mok ngec ma pire tek me mucoro i ura.go.ug.',
 
   'rail.newChat': 'Lok manyen',
   'rail.chats': 'Lok',

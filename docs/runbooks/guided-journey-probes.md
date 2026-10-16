@@ -166,9 +166,11 @@ governance decision, documented in
 
 ## Crisis lines
 
-`text_signals.crisis_support_reply` names 999/112 (Uganda Police Force,
+`text_signals.CRISIS_LINES` — used by both `crisis_support_reply` and the Phase 39
+check-in (`wellbeing_checkin_reply`) — names 999/112 (Uganda Police Force,
 upf.go.ug) and Mental Health Uganda's 0800 21 21 21 (Mon–Fri 8:30–17:00), checked
-on `CRISIS_LINES_VERIFIED_ON`. Re-check both sources before changing that date,
+on `CRISIS_LINES_VERIFIED_ON`. The safety tiers are described in
+[`conversational-safety-and-eq.md`](conversational-safety-and-eq.md). Re-check both sources before changing that date,
 and at least every quarter.
 
 ## Committing
