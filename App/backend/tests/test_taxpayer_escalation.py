@@ -151,6 +151,31 @@ class EscalationEndpointTest(unittest.TestCase):
         )
         self.assertEqual(model._maybe_create_ticket.call_args.kwargs["priority"], "normal")
 
+    def test_the_ticket_is_the_callers_not_the_default_tenants(self):
+        """The chat turns logged the conversation, and its guided workflow,
+        under the caller's tenant; the ticket and the workflow it reads must
+        be that tenant's too."""
+        from app.auth.dependencies import AuthContext, optional_user
+        from app.auth.models import AuthUser
+
+        flags.set("ticket_queue", True)
+        client, model = _client()
+        user = AuthUser(user_id="tenant-b-taxpayer", role="verified_taxpayer", tenant_id="tenant-b")
+        app.dependency_overrides[optional_user] = lambda: AuthContext(authenticated=True, user=user)
+        try:
+            client.post("/v1/escalate", json={"conversation_id": "conv-7"})
+        finally:
+            app.dependency_overrides.pop(optional_user, None)
+        kwargs = model._maybe_create_ticket.call_args.kwargs
+        self.assertEqual(kwargs["tenant_id"], "tenant-b")
+        self.assertEqual(kwargs["user_id"], "tenant-b-taxpayer")
+
+    def test_an_anonymous_taxpayer_is_the_default_tenant(self):
+        flags.set("ticket_queue", True)
+        client, model = _client()
+        client.post("/v1/escalate", json={"conversation_id": "conv-8"})
+        self.assertEqual(model._maybe_create_ticket.call_args.kwargs["tenant_id"], "default")
+
     def test_an_oversized_reason_is_rejected_rather_than_stored(self):
         flags.set("ticket_queue", True)
         client, _ = _client()

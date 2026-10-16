@@ -107,6 +107,18 @@ export interface TicketQueueItem {
     /** False when the ticket could not be persisted — treat as unqueued. */
     ticket_persisted?: boolean;
     delivery_warning?: string;
+    /** Why the ticket is prioritised: the escalation policy's tier, reasons (codes) and SLA. */
+    escalation?: {
+      tier?: string;
+      priority?: string;
+      sla_seconds?: number;
+      affect?: string;
+      reasons?: string[];
+    };
+    /** What the taxpayer already gave in this conversation (slot names) — not to be asked again. */
+    already_given?: string[];
+    /** Share of the structured handoff that is filled in, 0–1. */
+    completeness?: number;
   };
   response_judge?: {
     decision?: string;

@@ -5,7 +5,7 @@
 > `feat/agentic-workflows` branch actually *ships* (Phases A-D of
 > the broader Phase 14 work).
 
-Most capabilities below are **gated behind a feature flag** (`flags.py`, 77 flags total).
+Most capabilities below are **gated behind a feature flag** (`flags.py`, 79 flags total).
 `FLAG_TOOL_USE` defaults OFF; `FLAG_TICKET_QUEUE` defaults ON (`true`).
 `FLAG_AGENTIC_MODE` defaults ON after the English routing golden set
 holds ≥ 0.95 (`agentic_mode_gate`, currently `36/36`).
@@ -369,6 +369,21 @@ default than drop it.  Invalid statuses on `update_ticket`
    triggered by escalation rule patterns.  This only persists when
    `FLAG_TICKET_QUEUE` is on; otherwise the escalation marker is
    returned without a DB write (Phase 1-13 behaviour preserved).
+
+Every ticket — these two, an answer the guards doubted, and the taxpayer's
+own **Talk to an officer** (`POST /v1/escalate`) — is written by
+`ChatModel._maybe_create_ticket`, and Phase 38 enriches it there once
+(`app/officer_handoff.py`): with `eq_stakes_escalation` the escalation
+policy (`app/escalation_policy.py`) sets priority and SLA from affect,
+stakes, effort and confidence, reading the last three messages so the
+button's own empty message does not erase what was said before it; with
+`structured_text_handoff` the ticket carries `HandoffEnvelope` v2.1 and the
+details to ask for are pruned against what the taxpayer already gave
+(names only, read under the workflow's owner-scoped state key); the button's
+placeholder hand-off takes its topic, team and details from the conversation.
+In the conversation itself, the same policy decides when
+**Talk to an officer** is offered, and puts it first when urgent.
+See `docs/plans/agentic-cx-phase38-plan.md`.
 
 ### Admin endpoints
 

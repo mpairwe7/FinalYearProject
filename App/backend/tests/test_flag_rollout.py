@@ -287,9 +287,18 @@ class RegistryIntegrityTests(unittest.TestCase):
             "risk_tiered_autonomy_gates",
             "quality_circuit_breaker",
             "verifiable_decision_receipts",
+            # Phase 38: offered officers and structured text handoffs ramp by cohort.
+            "eq_stakes_escalation",
+            "structured_text_handoff",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)
+
+    def test_phase38_variants_are_logged_for_evaluation(self) -> None:
+        """A percentage ramp can only be evaluated by variant if the variant is persisted."""
+        variants = FeatureFlags().logged_variants(subject="taxpayer-38")
+        self.assertIn("eq_stakes_escalation", variants)
+        self.assertIn("structured_text_handoff", variants)
 
     def test_no_registered_flag_ships_a_live_rollout(self) -> None:
         """Rollouts are an operational decision, not a code default."""

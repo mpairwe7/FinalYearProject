@@ -67,6 +67,8 @@ services:
       - FLAG_RISK_TIERED_AUTONOMY_GATES=${FLAG_RISK_TIERED_AUTONOMY_GATES:-true}
       - FLAG_QUALITY_CIRCUIT_BREAKER=${FLAG_QUALITY_CIRCUIT_BREAKER:-true}
       - FLAG_VERIFIABLE_DECISION_RECEIPTS=${FLAG_VERIFIABLE_DECISION_RECEIPTS:-true}
+      - FLAG_EQ_STAKES_ESCALATION=${FLAG_EQ_STAKES_ESCALATION:-true}
+      - FLAG_STRUCTURED_TEXT_HANDOFF=${FLAG_STRUCTURED_TEXT_HANDOFF:-true}
       # cuda:0 — the container sees exactly one card (device_ids below), so
       # index 0 inside is GPU_ID outside. Same convention the base file's
       # RETRIEVER_DENSE_DEVICE already uses.

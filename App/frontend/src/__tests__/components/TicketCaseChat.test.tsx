@@ -153,3 +153,40 @@ describe("TicketCase — live chat", () => {
     expect(screen.queryByRole("button", { name: "End chat" })).not.toBeInTheDocument();
   });
 });
+
+describe("TicketCase — the handoff brief (Phase 38)", () => {
+  it("says why the ticket is prioritised, how fast to answer, and what not to ask again", () => {
+    vi.spyOn(analyticsApi, "heartbeatPresence").mockResolvedValue({} as never);
+    renderCase({
+      ...LIVE,
+      priority: "urgent",
+      handoff: {
+        summary: "User needs human help with account specific.",
+        required_details: ["any reference number shown in the URA portal"],
+        escalation: {
+          tier: "priority",
+          priority: "urgent",
+          sla_seconds: 30,
+          affect: "hardship",
+          reasons: ["affect:hardship", "stakes:enforcement"],
+        },
+        already_given: ["tax type", "filing period"],
+      },
+    } as TicketDetail);
+
+    const why = screen.getByTestId("handoff-escalation");
+    expect(why).toHaveTextContent("Prioritised: in hardship · enforcement action (account, goods or premises)");
+    expect(why).toHaveTextContent("respond within 30 s");
+    expect(screen.getByTestId("handoff-already-given")).toHaveTextContent(
+      "Already given — do not ask again: tax type, filing period",
+    );
+    expect(screen.getByText("any reference number shown in the URA portal")).toBeInTheDocument();
+  });
+
+  it("shows nothing extra on a ticket raised before the policy existed", () => {
+    vi.spyOn(analyticsApi, "heartbeatPresence").mockResolvedValue({} as never);
+    renderCase({ ...LIVE, handoff: { summary: "Needs help." } } as TicketDetail);
+    expect(screen.queryByTestId("handoff-escalation")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("handoff-already-given")).not.toBeInTheDocument();
+  });
+});

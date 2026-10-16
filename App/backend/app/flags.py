@@ -571,6 +571,22 @@ _REGISTRY: dict[str, Flag] = {
             "Capture PII-redacted edit diffs between AI co-pilot drafts and final officer "
             "replies in officer_chat for offline DPO/ORPO preference export.",
         ),
+        # Phase 38 (October 2026) — the relationship, EQ and handoff primitives
+        # reach the text channel. See docs/plans/agentic-cx-phase38-plan.md.
+        Flag(
+            "eq_stakes_escalation",
+            False,
+            "Weigh affect, stakes (enforcement, a deadline today, a large amount), effort and "
+            "confidence to offer an officer in text chat (first, when urgent) and to set ticket "
+            "priority and SLA on every path to an officer. Offers only; never escalates by itself.",
+        ),
+        Flag(
+            "structured_text_handoff",
+            False,
+            "Attach HandoffEnvelope v2.1 to text-chat tickets (auto-escalations and the "
+            "taxpayer's own request): affect, SLA, and the details to ask for pruned against "
+            "what the taxpayer already gave. Slot names only, never values.",
+        ),
     ]
 }
 
@@ -749,6 +765,8 @@ class FeatureFlags:
                 "workflow_tangent_resume",
                 "autonomous_outcome_verification",
                 "officer_preference_capture",
+                "eq_stakes_escalation",
+                "structured_text_handoff",
             )
         }
 

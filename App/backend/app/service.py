@@ -52,6 +52,7 @@ from .analytics import metrics
 from .connector_intent import ConnectorIntent, detect_connector_intent
 from .connector_outcome import classify_all as classify_connector_outcomes
 from .connector_outcome import compose as compose_connector_reply
+from .connector_outcome import connectors_used as _outcome_connectors_used
 from .escalation_notify import notify_ticket_created, team_for_topic
 from .agents.patterns.ach import (
     _FAREWELL_PHRASES as _ACH_FAREWELL_PHRASES,
@@ -1313,6 +1314,59 @@ def _stream_local_then_cloud(
         return
 
 
+def _connectors_used(tool_calls: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """The services a turn's tool calls consulted (names, mode, outcome kind)."""
+    from .mcp.chat_connectors import connector_label  # noqa: PLC0415
+
+    return _outcome_connectors_used(tool_calls, label_for=connector_label)
+
+
+#: Transports, as the case ledger names its channels: every text transport is
+#: "web", and the two voice entry points keep the names carryover uses.
+_CASE_CHANNELS = {"rest": "web", "sse": "web", "ws": "web", "web": "web", "voice": "voice_ws", "call": "voice_call"}
+
+
+def _record_turn_case(
+    message: str,
+    result: dict[str, Any] | None,
+    *,
+    user_id: str | None,
+    tenant_id: str | None,
+    channel: str,
+) -> None:
+    """Open or move the taxpayer's case when a text turn did something (Phase 38).
+
+    Web chat used to only *read* the case ledger, so a taxpayer's VAT
+    registration started in chat was nowhere when they came back or called.
+    A workflow step, a service lookup, a calculation or a hand-off now opens
+    or updates the case for that domain (``case_update_for_turn``); a plain
+    answer does not. Consent-gated by the ledger; never raises.
+    """
+    if not user_id or not isinstance(result, dict):
+        return
+    if not flags.is_enabled("continuous_relationship_memory", subject=user_id):
+        return
+    try:
+        from .memory import get_memory_service  # noqa: PLC0415
+        from .memory.resolution_ledger import case_update_for_turn  # noqa: PLC0415
+
+        update = case_update_for_turn(message, result)
+        if update is None:
+            return
+        get_memory_service().resolution_ledger.upsert_turn_case(
+            user_id,
+            domain_tag=update.domain_tag,
+            channel=_CASE_CHANNELS.get(channel, "other"),
+            step=update.step,
+            status=update.status,
+            locale=str(result.get("reply_locale") or result.get("locale") or "en"),
+            thread_id=str(result.get("conversation_id") or ""),
+            tenant_id=tenant_id or "default",
+        )
+    except Exception:
+        logger.debug("turn case update skipped", exc_info=True)
+
+
 def _with_connector_outcomes(result: dict[str, Any] | None) -> dict[str, Any] | None:
     """Word a turn's connector lookups from what the services answered.
 
@@ -1736,6 +1790,9 @@ def _finish_streamed_turn(
 
     result = log_payload.get("result") or {}
     served = {**result, "reply": str(log_payload.get("full_reply") or "")}
+    if log_payload.get("english_reply"):
+        # The answer before localisation, for checks written in English.
+        served["_english_reply"] = str(log_payload["english_reply"])
     try:
         record_chat_turn(
             served,
@@ -1762,6 +1819,8 @@ def _finish_streamed_turn(
                 personalization={"consent_granted": True},
                 workflow=result.get("workflow") if isinstance(result.get("workflow"), dict) else None,
             )
+    if not failed:
+        _record_turn_case(message, result, user_id=user_id, tenant_id=tenant_id, channel=channel)
     record = getattr(model, "record_turn_audit", None)
     if failed or not callable(record):
         return
@@ -1930,6 +1989,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             result,
             rewritten=str(result.get("_rewritten") or ""),
             recent_turns=history_turns,
+            subject=user_id or None,
         )
         if locale not in ("", "en"):
             if result.get("resources"):
@@ -2058,6 +2118,9 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     continue
                 if event[0] == "_used_tools":
                     agentic_used_tools = bool(event[1])
+                    continue
+                if event[0] == "_connectors_used":
+                    result["connectors_used"] = list(event[1])
                     continue
                 yield event
 
@@ -2569,6 +2632,9 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
         yield ("_full_reply", sanitized)
         if (agentic or {}).get("tool_calls"):
             yield ("_used_tools", True)
+            used = _connectors_used(agentic["tool_calls"])
+            if used:
+                yield ("_connectors_used", used)
 
 
 def _metadata_payload(result: dict[str, Any], *, include_short_circuit: bool) -> dict[str, Any]:
@@ -4438,7 +4504,7 @@ class ChatModel:
         return bool(re.search(r"\[\d+\]", reply))
 
     def _load_personalization_state(
-        self, user_id: str | None, tenant_id: str = "default"
+        self, user_id: str | None, tenant_id: str = "default", message: str = ""
     ) -> dict[str, Any] | None:
         """Return consent-gated profile + memory context for personalization."""
         if not user_id or not flags.is_enabled("memory_enabled"):
@@ -4522,16 +4588,14 @@ class ChatModel:
                 for sk, sv in slot_bank.items():
                     if sk and sv not in ("", None) and sk not in prefill_slots:
                         prefill_slots[str(sk)] = sv
-        raw_case = working.get("active_resolution_case")
-        if (
-            isinstance(raw_case, dict)
-            and flags.is_enabled("continuous_relationship_memory", subject=user_id)
-        ):
+        if flags.is_enabled("continuous_relationship_memory", subject=user_id):
             try:
-                from .memory.resolution_ledger import ResolutionCase, build_resumption_prompt
+                from .memory.resolution_ledger import build_resumption_prompt, case_for_prompt
 
-                case = ResolutionCase.from_dict(raw_case)
-                resumption_note = build_resumption_prompt(case, target_locale="en")
+                # The open case this question is about (its domain's, else the
+                # newest), not merely the last one written.
+                case = case_for_prompt(working, message)
+                resumption_note = build_resumption_prompt(case, target_locale="en") if case else ""
                 if resumption_note:
                     lines.append(f"- {resumption_note}")
             except Exception:
@@ -7059,6 +7123,36 @@ class ChatModel:
                 handoff["reused_existing_ticket"] = True
             return ticket_id
 
+        # One handoff for every path: how the taxpayer feels and what is at
+        # stake set the priority, and what they already gave is not asked
+        # again (Phase 38; both behind flags, see app.officer_handoff).
+        from .officer_handoff import enrich_handoff
+
+        # The workflow engine keys a conversation's state by its owner. A chat
+        # turn has the verified key in context; "Talk to an officer" arrives
+        # outside one, so derive it from the same owner the chat used.
+        workflow_state_key = _ACTIVE_CONVERSATION_STATE.get() or (
+            db.conversation_state_key(
+                conversation_id, session_id=session_id, user_id=user_id or None, tenant_id=effective_tenant
+            )
+            if conversation_id
+            else ""
+        )
+        priority = enrich_handoff(
+            handoff,
+            user_query=user_query,
+            transcript=transcript,
+            conversation_id=conversation_id,
+            workflow_state_key=workflow_state_key,
+            classify_topic=self._handoff_topic,
+            details_for_topic=self._handoff_required_details,
+            user_id=user_id,
+            tenant_id=effective_tenant,
+            locale=eff_locale,
+            modality=modality,
+            priority=priority,
+        )
+
         try:
             ticket = db.create_ticket(
                 reason=reason,
@@ -9226,6 +9320,7 @@ class ChatModel:
                 result,
                 rewritten=str(result.get("_rewritten") or ""),
                 recent_turns=_recent_turns_for_guidance(result, user_id, tenant_id or "default"),
+                subject=user_id or None,
             )
             # reply_locale is the language the reply is actually in: when
             # translation fails, localize_reply hands back the English, and a
@@ -9257,6 +9352,7 @@ class ChatModel:
                     result["resources"] = [self._localize_resource(r, effective) for r in result["resources"]]
                 if "workflow" in result and isinstance(result["workflow"], dict):
                     result["workflow"] = self._localize_workflow(result["workflow"], effective)
+        _record_turn_case(message, result, user_id=user_id, tenant_id=tenant_id, channel=channel)
         pending = _PENDING_TURN_AUDIT.get()
         _PENDING_TURN_AUDIT.set(None)
         if pending is not None and isinstance(result, dict):
@@ -9538,7 +9634,7 @@ class ChatModel:
             # 0c. The answer language is conversation state, not a per-message
             #     guess (app.language_state). The profile's saved language is
             #     consent-gated personalization, so that loads first.
-            personalization = self._load_personalization_state(user_id, tenant_id or "default")
+            personalization = self._load_personalization_state(user_id, tenant_id or "default", message)
             with trace_stage("lang_detect", timings=timings):
                 language = self._resolve_turn_language(
                     message,
@@ -10535,6 +10631,7 @@ class ChatModel:
                         tc.get("name") for tc in agentic["tool_calls"]
                     ]
                     trace_ctx["tool_iterations"] = agentic.get("iterations", 0)
+                    trace_ctx["connectors_used"] = _connectors_used(agentic["tool_calls"])
 
             # 4b. Calibrated abstention — refuse to answer when confidence too low
             with trace_stage("abstention_check", timings=timings):
@@ -11130,6 +11227,8 @@ class ChatModel:
         """
         trace_ctx = trace_ctx or {}
         result["current_topic"] = str(trace_ctx.get("current_topic") or "")
+        if trace_ctx.get("connectors_used"):
+            result.setdefault("connectors_used", list(trace_ctx["connectors_used"]))
         _PENDING_TURN_AUDIT.set(
             {
                 "session_id": session_id,
@@ -11269,7 +11368,7 @@ class ChatModel:
         # The answer language, decided the same way generate() decides it
         # (app.language_state); the profile's saved language is consented
         # personalization, so that loads first.
-        personalization = self._load_personalization_state(user_id, tenant_id or "default")
+        personalization = self._load_personalization_state(user_id, tenant_id or "default", message)
         language = self._resolve_turn_language(
             message,
             requested_locale,

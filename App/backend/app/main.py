@@ -2842,6 +2842,9 @@ def request_human_officer(
         priority="normal",
         handoff=handoff,
         user_id=ctx.user_id or "",
+        # The chat turns logged this conversation (and its workflow) under the
+        # caller's tenant; without it the ticket fell back to "default".
+        tenant_id=ctx.tenant_id or None,
         locale=locale,
         modality=modality,
     )
