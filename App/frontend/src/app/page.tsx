@@ -26,6 +26,8 @@ import {
   voiceChat,
 } from '../services/voiceService';
 import { watchEndOfTurn, type TurnEvent } from '../services/endOfTurn';
+import NarrationBar from '../components/NarrationBar';
+import { useVoiceEscape } from '../hooks/useVoiceEscape';
 import { authHeaders, clearAuthToken, getAuthToken } from '../lib/authSession';
 import { getChatSessionId } from '../lib/chatSession';
 import {
@@ -134,6 +136,8 @@ type TurnPhase = 'thinking' | 'searching' | 'churning' | 'translating';
  * slow phone, short enough that an unanswered prompt does not leave the
  * composer claiming to be listening.
  */
+/** How long "Couldn't read this aloud" stays on the narration bar. */
+const NARRATION_NOTICE_MS = 8000;
 const MIC_ARM_TIMEOUT_MS = 8000;
 
 const PHASE_UI: Record<TurnPhase, { label: TranslationKey; variant: string }> = {
@@ -268,12 +272,12 @@ export default function Page() {
         if (useChatStore.getState().speechState !== 'starting') return;
         onOpenFailed();
         setDictationNotice(
-          'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+          t('voice.micDidNotOpen'),
         );
         setSpeechState('idle');
       }, MIC_ARM_TIMEOUT_MS);
     },
-    [disarmMic, setSpeechState],
+    [disarmMic, setSpeechState, t],
   );
   const sessionIdRef = useRef<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -773,8 +777,8 @@ export default function Page() {
       // and a mic that is simply red.
       setDictationNotice(
         event.error === 'not-allowed' || event.error === 'service-not-allowed'
-          ? 'Microphone access is blocked. Allow it in your browser’s address bar, or type instead.'
-          : 'Speech recognition is unavailable right now — you can type instead.',
+          ? t('voice.micBlocked')
+          : t('voice.recognitionUnavailable'),
       );
       setSpeechState('error');
     };
@@ -820,7 +824,16 @@ export default function Page() {
       dictationActiveRef.current = false;
       recog.abort();
     };
-  }, [locale, hasMediaRecorder, setSpeechState, setMessage, disarmMic]);
+  }, [locale, hasMediaRecorder, setSpeechState, setMessage, disarmMic, t]);
+
+  // A reply that could not be read aloud at all: said on the narration bar,
+  // with a retry, instead of a Listen tap that silently did nothing (G202).
+  const [narrationFailed, setNarrationFailed] = useState<{ turnId: string; text: string } | null>(null);
+  useEffect(() => {
+    if (!narrationFailed) return;
+    const timer = window.setTimeout(() => setNarrationFailed(null), NARRATION_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, [narrationFailed]);
 
   // Auto-narrate new assistant messages
   const lastChatLength = useRef(chat.length);
@@ -843,6 +856,7 @@ export default function Page() {
     }
     const request = ++listenRequestRef.current;
     stopPlayback();
+    setNarrationFailed(null);
     setTtsLoading(turnId);
     try {
       const speechText = cleanMarkdownForSpeech(text);
@@ -873,14 +887,16 @@ export default function Page() {
       setTtsLoading(null);
       if (result.error || !result.audio_base64) {
         if (result.error) trackErrorOccurred('tts_failed');
+        setNarrationFailed({ turnId, text });
         return 'ended';
       }
       setPlayingTurnId(turnId);
       await playAudioBase64(result.audio_base64);
       return request === listenRequestRef.current ? 'ended' : 'stopped';
     } catch {
-      // TTS unavailable — degrade to text, but record it
+      // TTS unavailable — degrade to text, record it, and say so.
       trackErrorOccurred('tts_failed');
+      if (request === listenRequestRef.current) setNarrationFailed({ turnId, text });
       return 'ended';
     } finally {
       // A stale request leaves the loading state to the one that replaced it.
@@ -1575,7 +1591,13 @@ export default function Page() {
               voice: useVoiceStore.getState().voiceByLocale[locale] || undefined,
               sessionId: getChatSessionId(),
             });
-            if (r.error && !r.transcript) { addTurns([createTurn('assistant', `Voice error: ${r.error}`)]); trackErrorOccurred('voice_chat_failed'); return; }
+            if (r.error && !r.transcript) {
+              // Hearing nothing is not an outage: say so, in the reader's language (G201).
+              addTurns([createTurn('assistant', t(r.error_code === 'no_speech' ? 'voice.didNotCatch' : 'voice.turnFailed'))]);
+              // Silence is an expected outcome, not a failure to count.
+              if (r.error_code !== 'no_speech') trackErrorOccurred('voice_chat_failed');
+              return;
+            }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }
             if (r.reply) {
               addTurns([createTurn('assistant', r.reply, { citations: r.citations ?? [], faithfulnessScore: r.faithfulness_score ?? null, retrievalMode: r.retrieval_mode ?? 'keyword', thoughtForMs: Date.now() - t0 })]);
@@ -1587,7 +1609,7 @@ export default function Page() {
                 });
               }
             }
-          } catch { addTurns([createTurn('assistant', 'Sorry, I could not process your voice. Please try again or type.')]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
+          } catch { addTurns([createTurn('assistant', t('voice.turnFailed'))]); trackErrorOccurred('voice_recording_failed'); } finally { setIsLoading(false); setTurnPhase(null); saveCurrentSession(); }
         } else {
           // Start recording. `starting` and the watchdog for the same reason
           // the dictation path uses them: getUserMedia shows a permission
@@ -1620,7 +1642,7 @@ export default function Page() {
             recorderRef.current = null;
             audioSignifiers.playError();
             setDictationNotice(
-              'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+              t('voice.micDidNotOpen'),
             );
             setSpeechState('error');
           }
@@ -1710,13 +1732,13 @@ export default function Page() {
           // there empty with no explanation, which is what it used to do.
           setDictationNotice(
             r.error
-              ? 'Speech recognition is unavailable right now — you can type instead.'
-              : "Didn't catch that. Try again, or type your question.",
+              ? t('voice.recognitionUnavailable')
+              : t('voice.didNotCatch'),
           );
           setSpeechState('idle');
           if (r.error) trackErrorOccurred('dictation_unavailable');
         } catch {
-          setDictationNotice('Speech recognition is unavailable right now — you can type instead.');
+          setDictationNotice(t('voice.recognitionUnavailable'));
           setSpeechState('error');
           trackErrorOccurred('dictation_transcribe_failed');
         }
@@ -1746,7 +1768,7 @@ export default function Page() {
           recorderRef.current = null;
           audioSignifiers.playError();
           setDictationNotice(
-            'The microphone did not open. Check your browser’s microphone permission, or type instead.',
+            t('voice.micDidNotOpen'),
           );
           setSpeechState('error');
         }
@@ -1754,7 +1776,7 @@ export default function Page() {
     } finally {
       setIsTransitioning(false);
     }
-  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, stopReading, armMic, disarmMic]);
+  }, [isTransitioning, voiceMode, hasMediaRecorder, isRecording, locale, activeConversationId, autoNarrate, addTurns, ensureActiveConversationId, saveCurrentSession, speechState, setSpeechState, setMessage, handleListenToReply, stopReading, armMic, disarmMic, t]);
 
   const handleCancelRecording = useCallback(() => {
     if (recorderRef.current) {
@@ -1789,6 +1811,17 @@ export default function Page() {
       void handleMicClick();
     };
   }, [handleCancelRecording, handleMicClick, t, voiceMode, silenceTimeout, isRecording]);
+
+  // Escape cancels the recording, stops dictation, or stops a reply being read
+  // aloud (G204) — not while a dialog that Escape belongs to is open.
+  useVoiceEscape({
+    recording: isRecording,
+    dictating: speechState === 'listening',
+    reading: Boolean(playingTurnId || ttsLoading),
+    onCancelRecording: handleCancelRecording,
+    onStopDictation: handleMicClick,
+    onStopReading: stopReading,
+  });
 
   // Leaving the page stops playback. That must not read as a reply that
   // ended: listen-again would then open the mic with no page to show it.
@@ -2218,6 +2251,16 @@ export default function Page() {
             )}
 
             <div ref={chatDockRef} className="chat-dock">
+              <NarrationBar
+                active={Boolean(playingTurnId || ttsLoading)}
+                loading={Boolean(ttsLoading) && !playingTurnId}
+                onStop={stopReading}
+                failed={narrationFailed !== null}
+                onRetry={() => {
+                  if (narrationFailed) void handleListenToReply(narrationFailed.turnId, narrationFailed.text);
+                }}
+                onDismiss={() => setNarrationFailed(null)}
+              />
               <ChatInput {...composerProps} />
             </div>
           </div>

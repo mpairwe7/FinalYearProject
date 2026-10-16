@@ -335,6 +335,36 @@ class TestVoiceChatBudget(unittest.TestCase):
         speech.synthesize.assert_called_once()
 
 
+    def test_hearing_nothing_gives_a_reason_the_client_can_word(self) -> None:
+        """G201: "no speech" is not an outage; the client says "didn't catch that" in the reader's language."""
+        speech, model = self._stub_speech(), self._stub_model()
+        speech.transcribe.return_value = TranscribeResult(
+            text="", language="en", duration_s=1.0, latency_s=0.1, backend="mock",
+        )
+        self.main.app.state.speech = speech
+        self.main.app.state.model = model
+        data = self._post().json()
+        self.assertEqual(data["error_code"], "no_speech")
+        model.generate.assert_not_called()
+
+    def test_a_failed_recognition_is_not_hearing_nothing(self) -> None:
+        speech, model = self._stub_speech(), self._stub_model()
+        speech.transcribe.return_value = TranscribeResult(
+            text="", language="en", latency_s=0.1, backend="mock", error="every ASR backend failed",
+        )
+        self.main.app.state.speech = speech
+        self.main.app.state.model = model
+        data = self._post().json()
+        self.assertEqual(data["error_code"], "asr_failed")
+
+    def test_a_heard_turn_has_no_error_code(self) -> None:
+        speech, model = self._stub_speech(), self._stub_model()
+        self.main.app.state.speech = speech
+        self.main.app.state.model = model
+        with patch.object(self.main, "VOICE_CHAT_BUDGET_S", 0.0):
+            data = self._post().json()
+        self.assertIsNone(data["error_code"])
+
 class TestVoiceChatReplyLanguage(unittest.TestCase):
     """/v1/voice/chat speaks the reply in the language it is written in."""
 

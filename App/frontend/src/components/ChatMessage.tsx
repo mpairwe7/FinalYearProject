@@ -547,11 +547,17 @@ function ChatMessageInner({
               disabled={isTransitioning}
               aria-label={
                 playingTurnId === turn.id || ttsLoading === turn.id
-                  ? 'Stop listening'
-                  : `Listen in ${localeLabel(locale)}`
+                  ? t('message.stopListening')
+                  : t('message.listenIn', { language: localeLabel(locale) })
               }
             >
-              {ttsLoading === turn.id ? <LoadingDots /> : playingTurnId === turn.id ? <><StopIcon /> Stop</> : <><SpeakerIcon /> Listen</>}
+              {ttsLoading === turn.id ? (
+                <LoadingDots />
+              ) : playingTurnId === turn.id ? (
+                <><StopIcon /> {t('message.stop')}</>
+              ) : (
+                <><SpeakerIcon /> {t('message.listen')}</>
+              )}
             </button>
             <CopyButton text={stripCitationMarkers(turn.content)} />
             {!isOfficerReply && (
