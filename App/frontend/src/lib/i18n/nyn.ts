@@ -226,6 +226,12 @@ export const nyn: Partial<Dictionary> = {
   'voice.recognitionUnavailable': 'Okwetegyereza eiraka tikuriho hati — nobaasa kuhandiika.',
   'voice.didNotCatch': 'Tinahurire gye. Ongere ogyezeho, nari ohandiike ekibuuzo kyawe.',
   'voice.turnFailed': 'Tinabaasize kukora aha iraka ryawe. Ongere ogyezeho, nari ohandiike.',
+  'message.humanReview': 'Nikirungi omukozi wa URA ashwijume eki',
+  'message.contactUra': 'Nari teera URA:',
+  'message.officersOffDuty':
+    'Abakozi nibakora {hours}. Ekibuuzo kyawe kiteirwe omu murongo, kandi omukozi naija kukugarukamu aha baagaruka aha murimo.',
+  'message.officersNextShift':
+    'Abakozi nibakora {hours}. Ekibuuzo kyawe kiteirwe omu murongo, kandi omukozi naija kukugarukamu aha kuruga {next}.',
   'handoff.ask': 'Gamba n’omukozi wa URA',
   'handoff.requesting': 'Ninshaba omukozi…',
   'handoff.reference': 'Enamba y’ekihandiiko',

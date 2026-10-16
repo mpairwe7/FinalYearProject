@@ -43,7 +43,11 @@ def setUpModule() -> None:
     db.init_db()
 
 
-def _client(ticket_id="ticket-abcdef123456", *, reused=False):
+#: What ChatModel._maybe_create_ticket puts on the handoff at night (app.officer_hours.status).
+OFF_DUTY = {"on_duty": False, "hours": "07:00–23:00 EAT", "next_on_duty": "2026-10-17T07:00:00+03:00"}
+
+
+def _client(ticket_id="ticket-abcdef123456", *, reused=False, hours=None):
     """A client whose model records the escalation call and hands back an id."""
     model = mock.MagicMock(name="stub_chat_model")
 
@@ -51,6 +55,8 @@ def _client(ticket_id="ticket-abcdef123456", *, reused=False):
         handoff = kwargs.get("handoff")
         if reused and handoff is not None:
             handoff["reused_existing_ticket"] = True
+        if hours is not None and handoff is not None:
+            handoff["officer_hours"] = dict(hours)
         return ticket_id
 
     model._maybe_create_ticket.side_effect = _create
@@ -91,6 +97,45 @@ class EscalationEndpointTest(unittest.TestCase):
         # Officers need to tell an answer the system doubted from a person who
         # asked for help; they need different first replies.
         self.assertEqual(kwargs["handoff"]["requested_by"], "taxpayer")
+
+    def test_outside_working_hours_the_reply_says_when_officers_return(self):
+        """G196: at night nobody is reading yet — say when they will be, and not to phone."""
+        flags.set("ticket_queue", True)
+        client, _model = _client(hours=OFF_DUTY)
+        body = client.post("/v1/escalate", json={"conversation_id": "conv-night", "reason": "Help"}).json()
+        self.assertTrue(body["ok"])
+        self.assertIn("Officers work 07:00–23:00 EAT", body["message"])
+        self.assertIn("when they are next on duty, from Saturday 17 October at 07:00", body["message"])
+        self.assertIn("Their reply will appear here", body["message"])
+        self.assertNotIn("0800 117 000", body["message"])  # the same desk answers the phone
+        self.assertEqual(body["officer_hours"], OFF_DUTY)
+
+    def test_asking_again_at_night_says_it_is_already_with_them(self):
+        flags.set("ticket_queue", True)
+        client, _model = _client(reused=True, hours=OFF_DUTY)
+        body = client.post("/v1/escalate", json={"conversation_id": "conv-night", "reason": "Help"}).json()
+        self.assertTrue(body["reused_existing"])
+        self.assertIn("already with URA's officers", body["message"])
+        self.assertIn("07:00–23:00 EAT", body["message"])
+
+    def test_during_working_hours_the_usual_reply(self):
+        flags.set("ticket_queue", True)
+        client, _model = _client(hours={**OFF_DUTY, "on_duty": True, "next_on_duty": "2026-10-16T12:00:00+03:00"})
+        body = client.post("/v1/escalate", json={"conversation_id": "conv-day", "reason": "Help"}).json()
+        self.assertIn("A URA officer has been asked to look at this.", body["message"])
+        self.assertNotIn("next on duty", body["message"])
+        self.assertTrue(body["officer_hours"]["on_duty"])
+
+    def test_the_escalate_tool_says_when_the_review_will_happen(self):
+        """The model's own route into the queue tells it the same."""
+        from app.tools.escalate import EscalateToHumanTool
+
+        flags.set("ticket_queue", True)
+        with mock.patch("app.officer_hours.status", return_value=OFF_DUTY):
+            result = EscalateToHumanTool().execute(reason="Disputed assessment", summary="Disputes the notice")
+        self.assertTrue(result["ok"])
+        self.assertIn("when they are next on duty, from Saturday 17 October at 07:00", result["message"])
+        self.assertEqual(result["officer_hours"], OFF_DUTY)
 
     def test_an_empty_reason_still_says_what_happened(self):
         flags.set("ticket_queue", True)

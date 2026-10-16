@@ -1,3 +1,4 @@
+import { officerHoursFrom, type OfficerHours } from '../lib/turnMeta';
 import { create } from 'zustand';
 import { conversationTtlMs, resetChatSession } from '../lib/chatSession';
 import { normalizeLocale } from '../lib/locales';
@@ -99,6 +100,8 @@ export interface ChatTurn {
   retrievalMode?: string;
   escalationRequired?: boolean;
   escalationReason?: string;
+  /** Whether officers were on duty when this turn's handoff was queued (G196). */
+  officerHours?: OfficerHours;
   /** Suggested follow-up action chips offered by the assistant */
   nextActions?: string[];
   /** Active multi-step workflow status and interactive stepper state */
@@ -328,6 +331,8 @@ function sanitizeTurn(value: unknown): ChatTurn | null {
   if (typeof value.officerName === 'string' && value.officerName) turn.officerName = value.officerName.slice(0, 128);
   if (typeof value.escalationRequired === 'boolean') turn.escalationRequired = value.escalationRequired;
   if (typeof value.escalationReason === 'string') turn.escalationReason = value.escalationReason;
+  const hours = officerHoursFrom({ officer_hours: value.officerHours });
+  if (hours) turn.officerHours = hours;
   if (typeof value.offlineMode === 'boolean') turn.offlineMode = value.offlineMode;
   if (typeof value.thoughtForMs === 'number' && Number.isFinite(value.thoughtForMs)) {
     turn.thoughtForMs = value.thoughtForMs;

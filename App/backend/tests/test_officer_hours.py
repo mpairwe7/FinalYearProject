@@ -69,6 +69,7 @@ class ConfiguredHoursTests(unittest.TestCase):
 
     def test_a_desk_that_never_closes(self):
         always = self.hours(CXP_OPEN_HOUR="0", CXP_CLOSE_HOUR="24")
+        self.assertTrue(always.label(at(16, 12)).startswith("00:00–24:00"))
         self.assertTrue(oh.on_duty(at(17, 3, 0), always))
         self.assertEqual(oh.working_seconds(at(16, 0, 0), at(17, 0, 0), always), 24 * 3600)
 
@@ -92,6 +93,43 @@ class ConfiguredHoursTests(unittest.TestCase):
                              CXP_TIMEZONE="Mars/Olympus", CXP_CLOSED_DATES="soon")
         self.assertEqual((bad.open_hour, bad.close_hour, bad.days, bad.closed_dates), (7, 23, frozenset(range(7)), frozenset()))
         self.assertTrue(oh.on_duty(at(16, 12, 0), bad))
+
+
+class StatusTests(unittest.TestCase):
+    """The payload the chat and the escalation endpoint receive (G196)."""
+
+    def test_on_and_off_duty(self):
+        with patch.dict(os.environ, desk_env(CXP_OPEN_HOUR="7", CXP_CLOSE_HOUR="23"), clear=True):
+            on = oh.status(at(16, 12))
+            off = oh.status(at(16, 23, 30))
+        self.assertEqual((on["on_duty"], off["on_duty"]), (True, False))
+        self.assertTrue(str(on["hours"]).startswith("07:00–23:00"))
+        self.assertEqual(off["next_on_duty"], dt.datetime(2026, 10, 17, 7, tzinfo=KAMPALA).isoformat())
+
+
+class NextShiftTests(unittest.TestCase):
+    """The next shift by name: it can be days away (CodeRabbit on #583)."""
+
+    def test_named_in_the_desks_time_zone(self):
+        with patch.dict(os.environ, desk_env(), clear=True):
+            said = oh.next_shift_phrase("2026-10-17T07:00:00+03:00")
+        self.assertEqual(said, "when they are next on duty, from Saturday 17 October at 07:00 EAT")
+
+    def test_without_one_it_says_less_not_wrong(self):
+        self.assertEqual(oh.next_shift_phrase(None), "when they are next on duty")
+        self.assertEqual(oh.next_shift_phrase("soon"), "when they are next on duty")
+
+
+class AttachStatusTests(unittest.TestCase):
+    """Only a turn whose ticket was saved (or reused) is told it is queued."""
+
+    def test_a_turn_with_a_ticket(self):
+        with patch.dict(os.environ, desk_env(CXP_OPEN_HOUR="0", CXP_CLOSE_HOUR="24"), clear=True):
+            queued = oh.attach_status({"ticket_id": "T1"})
+        self.assertTrue(queued["officer_hours"]["on_duty"])
+
+    def test_a_turn_without_one(self):
+        self.assertNotIn("officer_hours", oh.attach_status({"ticket_id": "", "officer_hours": {"on_duty": False}}))
 
 
 if __name__ == "__main__":

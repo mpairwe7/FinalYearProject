@@ -1,0 +1,306 @@
+{
+ "date": "2026-10-16",
+ "ws": "ws://127.0.0.1:8093/v1/calls/stream",
+ "passed": 3,
+ "scenarios": 5,
+ "first_audio_ms_p50": 1284.0,
+ "results": [
+  {
+   "name": "8_transfer_from_luganda",
+   "note": "Officer request in Luganda transfers; staff see a Luganda caller.",
+   "turns": [
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 1546,
+     "filler_caption_ms": 1271,
+     "answer_caption_ms": 19043,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Lindako katono.",
+      "Okumanya ssente z'osasula ku musolo ogw'okukozesa mu maaso, nkusaba okutegeera ekika ky'emmotoka yo nga weesigama ku mateeka gano wammanga:\nEmmotoka ezitwala abasaabaze (PSVs) ne bbaasi: Ojja kusasula shilingi twenty thousand buli kifo ky’omusaabaze.\nTirakita: Ojja kusasula shilingi fifty thousand buli tani y’obusobozi bw’okutikka. - Emmotoka ezitwala ebintu ezisukka ku bbiri tani: Ojja kusasula shilingi fifty thousand buli tani y’obusobozi bw’okutikka. Ku bikwata ku kigero ky’obusente ekirina okusasulwa nga oteekateeka okuwakanya mu Kkooti y’Obusolo bw’Omusolo (Tax Appeals Tribunal – Tax Appeals Tribunal), olina kusasula ebitundu amakumi asatu ku buli kikumi ku musolo ogwasaliddwa oba ekitundu ky’omusolo ekitali mu nsonga, ekisinga obunene. Oyagala okumanya ebisingawo?"
+     ],
+     "caller": [
+      "Vati yanga entya okugisasula era ebitundu bimeeka.",
+      "Kati yange ntya okugisasula era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_person",
+     "said": "Njagala okwogera n'omuntu, omukozi wa URA.",
+     "first_audio_ms": 3120,
+     "filler_caption_ms": 2845,
+     "answer_caption_ms": 11235,
+     "languages": [],
+     "assistant": [
+      "Ka nkebere.",
+      "Okusinziira ku bubaka obuweereddwa, wano waliwo okusasula omusolo ogw'omu maaso nga bwe kuli mu bibinja by'emmotoka:\nEmmotoka ezitambuza abasaabaze (PSVs) n’Obusolo: shilingi twenty thousand buli kifo ky’omusaabaze buli mwaka. - Obutimba bw’emigugu: shilingi fifty thousand buli tani buli mwaka. - Emmotoka z’ebyamaguzi/ebintu ebisukka ku bbiri tani: shilingi fifty thousand buli tani buli mwaka. Oyagala okumanya ebisingawo?"
+     ],
+     "caller": [
+      "Njye dara okwu ogera n'omu nto nkozwa URA."
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_f52736647008",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": false
+  },
+  {
+   "name": "11_officer_request_times_out",
+   "note": "The receptionist queues the call with the packet's topic (account) and priority (high), tells the caller every 30 s that they are still holding; nobody answers, so it returns to the AI owing a callback, with a short reference on screen.",
+   "turns": [
+    {
+     "utterance": "en_officer",
+     "said": "I would like to talk to an officer about my account balance, please.",
+     "first_audio_ms": 1801,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1800,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "I would like to talk to an officer about my account balance please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_b9de31469bd2",
+   "language_detection": true,
+   "after_linger": [
+    "ai"
+   ],
+   "said_while_lingering": [
+    "Thank you for holding. An officer will be with you shortly.",
+    "You're next in line.",
+    "Thank you for holding. An officer will be with you shortly.",
+    "All our officers are busy, so an officer will call you back. Meanwhile, I can still help with other questions.",
+    "Your reference: TIC-1896AE2F"
+   ],
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "13_officer_offer_accepted",
+   "note": "The answer ends on the officer offer alone; yes transfers the call.",
+   "turns": [
+    {
+     "utterance": "en_worried_tin",
+     "said": "I'm really worried about this. How do I register for a TIN number with URA?",
+     "first_audio_ms": 2318,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 2035,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.99
+      }
+     ],
+     "assistant": [
+      "I'm sorry you're feeling stressed about this. To register for a Team Number with ORA, you need to visit a U R A office or One Stop Centre near you, bring your valid identification, and fill out the application form with the necessary attachments. If you prefer, you can also call the toll-free number 0 800, 117, 0 0 0 or 0 800, 217, 0 0 0, or send an email to services at U R A dot go dot u g for assistance. Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "Im really worried about this; how do I register for a team number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_yes",
+     "said": "Yes, please.",
+     "first_audio_ms": 777,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 776,
+     "languages": [],
+     "assistant": [
+      "Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "Yes please."
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_e010e84de7c6",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": false
+  },
+  {
+   "name": "18_crisis_while_waiting",
+   "note": "A caller in the queue who speaks of ending their life hears the crisis lines at once and stays first in the queue (urgent); the call never falls back to the AI.",
+   "turns": [
+    {
+     "utterance": "en_officer",
+     "said": "I would like to talk to an officer about my account balance, please.",
+     "first_audio_ms": 1240,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1239,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "I would like to talk to an officer about my account balance please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_crisis",
+     "said": "I can't pay these taxes. I just want to end my life.",
+     "first_audio_ms": 893,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 615,
+     "languages": [],
+     "assistant": [
+      "I'm really sorry you're feeling this way. Your safety matters more than any tax matter. If you are in danger right now, please call nine nine nine, or one one two. The number for free counselling is on your screen. I've asked for an officer to come to you first. Please stay on the line.",
+      "Emergency: 999 or 112. Free counselling, Mental Health Uganda: 0800 21 21 21 (Monday to Friday, 8:30am to 5pm).",
+      "Thank you for holding. An officer will be with you shortly.",
+      "You're next in line."
+     ],
+     "caller": [
+      "I can't pay these taxes, I just want to end my life."
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_17a0fce2ba80",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  },
+  {
+   "name": "20_call_me_back_while_waiting",
+   "note": "The wait ends as a callback (caller_requested_callback); the AI stays on the line.",
+   "turns": [
+    {
+     "utterance": "en_officer",
+     "said": "I would like to talk to an officer about my account balance, please.",
+     "first_audio_ms": 1284,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1283,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "I'm connecting you to a URA officer, please hold."
+     ],
+     "caller": [
+      "I would like to talk to an officer about my account balance please."
+     ],
+     "status": [
+      "transferring"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_call_me_back",
+     "said": "Actually, can you just call me back instead?",
+     "first_audio_ms": 899,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 601,
+     "languages": [],
+     "assistant": [
+      "Of course. An officer will call you back; your reference is on your screen. Meanwhile, I can still help with other questions.",
+      "Your reference: TIC-48F3216B"
+     ],
+     "caller": [
+      "Actually.",
+      "Can you just call me back instead?"
+     ],
+     "status": [
+      "ai"
+     ],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_584f4191865e",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": true
+  }
+ ]
+}

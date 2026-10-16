@@ -229,6 +229,12 @@ export const sw: Partial<Dictionary> = {
   'voice.recognitionUnavailable': 'Utambuzi wa sauti haupatikani kwa sasa — unaweza kuandika badala yake.',
   'voice.didNotCatch': 'Sikusikia vizuri. Jaribu tena, au andika swali lako.',
   'voice.turnFailed': 'Sikuweza kuchakata sauti yako. Tafadhali jaribu tena, au andika.',
+  'message.humanReview': 'Inapendekezwa afisa wa URA aangalie hili',
+  'message.contactUra': 'Au wasiliana na URA:',
+  'message.officersOffDuty':
+    'Maafisa wanafanya kazi {hours}. Swali lako limewekwa kwenye foleni, na afisa atakujibu hapa watakaporudi kazini.',
+  'message.officersNextShift':
+    'Maafisa wanafanya kazi {hours}. Swali lako limewekwa kwenye foleni, na afisa atakujibu hapa kuanzia {next}.',
   'handoff.ask': 'Zungumza na afisa wa URA',
   'handoff.requesting': 'Ninaomba afisa…',
   'handoff.reference': 'Kumbukumbu',

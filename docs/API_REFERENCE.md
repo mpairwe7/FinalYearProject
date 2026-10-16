@@ -372,7 +372,8 @@ stops sorting anything — staff re-prioritise from the officer console.
   "ticket_id": "6f1c...",
   "status": "open",
   "reused_existing": false,
-  "message": "A URA officer has been asked to look at this. Their reply will appear here in this conversation..."
+  "message": "A URA officer has been asked to look at this. Their reply will appear here in this conversation...",
+  "officer_hours": {"on_duty": true, "hours": "07:00–23:00 EAT", "next_on_duty": "2026-10-16T14:05:00+03:00"}
 }
 ```
 
@@ -381,6 +382,14 @@ stops sorting anything — staff re-prioritise from the officer console.
 | `ok` | `false` when the queue is off or the write failed; `message` then says how to reach URA instead |
 | `status` | `open` · `queue_disabled` · `failed` |
 | `reused_existing` | `true` when this conversation already had an open ticket — one conversation, one officer |
+| `officer_hours` | Whether officers are on duty now (`app/officer_hours.py`, `CXP_*` settings), their hours for display, and the ISO start of the next shift. Outside working hours `message` says when the case will be picked up and leaves out the toll-free line, which the same desk answers (G196) |
+
+A chat turn that queued a ticket (saved, or an open one reused) carries the same `officer_hours`
+object at the top level: the `/v1/chat` response and the stream's `grounding` event, read when the
+turn is served — with or without handoff summaries. A turn whose ticket failed to save carries
+none, so the chat never says such a question is queued. The off-duty `message` names the next
+shift — for example "…when they are next on duty, from Saturday 17 October at 07:00 EAT" — which
+can be days away (`CXP_WORKING_DAYS`, `CXP_CLOSED_DATES`).
 
 Honours the `ticket_queue` flag. With it off the endpoint answers `ok: false`
 and gives the contact-centre numbers rather than promising a handoff that will

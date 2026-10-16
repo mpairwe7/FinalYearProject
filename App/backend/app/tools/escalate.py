@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from .. import officer_hours
 from . import Tool, ToolRegistry, ToolSchema
 
 logger = logging.getLogger(__name__)
@@ -142,14 +143,24 @@ class EscalateToHumanTool(Tool):
             logger.exception("escalate_to_human: ticket creation failed")
             return {"ok": False, "error": f"could not create ticket: {e}"}
 
+        # Outside officers' working hours, say when the review will happen
+        # rather than implying someone is looking now (G196).
+        hours = officer_hours.status()
+        review = (
+            "A URA officer will review this."
+            if hours["on_duty"]
+            else f"Officers work {hours['hours']}; an officer will review this "
+            f"{officer_hours.next_shift_phrase(hours['next_on_duty'])}."
+        )
         return {
             "ok": True,
             "ticket_id": ticket.get("id", ""),
             "status": "open",
             "priority": ticket.get("priority", priority),
+            "officer_hours": hours,
             "message": (
                 f"Ticket {ticket.get('id', '')[:8]} created at priority "
-                f"{priority}. A URA officer will review this. You may "
+                f"{priority}. {review} You may "
                 f"also contact URA directly at https://ura.go.ug."
             ),
         }

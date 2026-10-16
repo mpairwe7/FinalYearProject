@@ -231,6 +231,12 @@ export const lg: Partial<Dictionary> = {
   'voice.recognitionUnavailable': 'Okutegeera eddoboozi tekuliiwo kati — osobola okuwandiika.',
   'voice.didNotCatch': 'Siwulidde bulungi. Gezaako nate, oba wandiika ekibuuzo kyo.',
   'voice.turnFailed': 'Sisobodde kukola ku ddoboozi lyo. Gezaako nate, oba wandiika.',
+  'message.humanReview': 'Kirungi omukozi wa URA akyetegereze',
+  'message.contactUra': 'Oba tuukirira URA:',
+  'message.officersOffDuty':
+    'Abakozi bakola {hours}. Ekibuuzo kyo kiterekeddwa, era omukozi ajja kukuddamu wano nga bakomyewo ku mulimu.',
+  'message.officersNextShift':
+    'Abakozi bakola {hours}. Ekibuuzo kyo kiterekeddwa, era omukozi ajja kukuddamu wano okuva {next}.',
   'handoff.ask': 'Yogera n’omukozi wa URA',
   'handoff.requesting': 'Nsaba omukozi…',
   'handoff.reference': 'Namba y’ekiwandiiko',

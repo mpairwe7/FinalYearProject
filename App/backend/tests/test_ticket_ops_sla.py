@@ -10,6 +10,61 @@ import pytest
 from app.database import compose_sla_stats
 
 
+@pytest.fixture
+def desk_always_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A desk that never closes: working time is wall time, for tests about the population."""
+    monkeypatch.setenv("CXP_OPEN_HOUR", "0")
+    monkeypatch.setenv("CXP_CLOSE_HOUR", "24")
+    monkeypatch.delenv("CXP_WORKING_DAYS", raising=False)
+    monkeypatch.delenv("CXP_CLOSED_DATES", raising=False)
+
+
+@pytest.fixture
+def default_desk(monkeypatch: pytest.MonkeyPatch) -> None:
+    """07:00–23:00, every day, Kampala time."""
+    for name in ("CXP_OPEN_HOUR", "CXP_CLOSE_HOUR", "CXP_WORKING_DAYS", "CXP_CLOSED_DATES", "CXP_TIMEZONE"):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _kampala(day: int, hour: int) -> float:
+    """A moment in October 2026, Kampala time (UTC+3, no daylight saving)."""
+    import datetime as dt
+
+    return dt.datetime(2026, 10, day, hour, tzinfo=dt.timezone(dt.timedelta(hours=3))).timestamp()
+
+
+@pytest.mark.usefixtures("default_desk")
+def test_the_breach_clock_stops_while_the_desk_is_closed() -> None:
+    """G197: a handoff raised at 22:00 has had one hour of an officer's time by 08:00 — not ten."""
+    now = _kampala(17, 8)
+    opened = [
+        # Raised the evening before: 22:00–23:00 and 07:00–08:00 count, two hours.
+        {"created_at": _kampala(16, 22), "first_response_at": 0, "reply_at": 0, "status": "open"},
+        # Raised two days before: well over 24 working hours.
+        {"created_at": _kampala(15, 9), "first_response_at": 0, "reply_at": 0, "status": "open"},
+    ]
+    stats = compose_sla_stats(period_rows=[], open_rows=opened, days=30, now=now)
+    assert stats["breaching_first_response"] == 1
+    assert stats["sla_clock"] == "officer_hours"
+    assert stats["officer_hours"].startswith("07:00–23:00")
+
+
+@pytest.mark.usefixtures("default_desk")
+def test_the_next_reply_clock_stops_overnight_too() -> None:
+    now = _kampala(17, 8)
+    opened = [
+        {
+            "created_at": _kampala(16, 9),
+            "first_response_at": _kampala(16, 10),
+            "reply_at": _kampala(16, 22),  # the officer last wrote at 22:00
+            "status": "assigned",
+        },
+    ]
+    stats = compose_sla_stats(period_rows=[], open_rows=opened, days=30, now=now)
+    assert stats["breaching_next_reply"] == 0  # two working hours since, not ten
+
+
+@pytest.mark.usefixtures("desk_always_open")
 def test_breach_counts_use_the_open_population() -> None:
     now = 2_000_000.0
     period = [

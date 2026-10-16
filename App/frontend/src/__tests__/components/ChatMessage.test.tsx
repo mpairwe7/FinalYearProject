@@ -8,6 +8,9 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import ChatMessage from "../../components/ChatMessage";
 import { useChatStore, type ChatTurn } from "../../store/useChatStore";
+import { formatNextShift } from "../../lib/turnMeta";
+
+const OFF_DUTY = { onDuty: false, hours: "07:00–23:00 EAT", nextOnDuty: "2026-10-17T07:00:00+03:00" };
 
 function renderMsg(turn: ChatTurn, overrides = {}) {
   return render(
@@ -153,6 +156,68 @@ describe("ChatMessage", () => {
       renderMsg(assistantTurn, { locale: "sw" });
       const listen = screen.getByRole("button", { name: /^Sikiliza kwa / });
       expect(listen).toHaveTextContent("Sikiliza");
+    } finally {
+      useChatStore.setState({ locale: "en" });
+    }
+  });
+
+  it("outside officers' hours, says when the handoff will be read (G196)", () => {
+    renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: OFF_DUTY });
+    const notice = screen.getByTestId("escalation-off-duty");
+    expect(notice).toHaveTextContent("Officers work 07:00–23:00 EAT. Your question is queued");
+    // The next shift by name: it can be days away.
+    expect(notice).toHaveTextContent(`will reply here from ${formatNextShift(OFF_DUTY.nextOnDuty, "en")}`);
+  });
+
+  it("without a next shift, says when they are next on duty", () => {
+    renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: { ...OFF_DUTY, nextOnDuty: null } });
+    expect(screen.getByTestId("escalation-off-duty")).toHaveTextContent("when they are next on duty");
+  });
+
+  it("does not offer the closed desk's phone lines", () => {
+    renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: OFF_DUTY });
+    const alert = screen.getByRole("alert");
+    expect(alert).not.toHaveTextContent("0800 117 000");
+    expect(alert).toHaveTextContent("WhatsApp 0772 140 000");
+  });
+
+  it("shows the phone lines while officers are on duty", () => {
+    renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: { ...OFF_DUTY, onDuty: true } });
+    expect(screen.getByRole("alert")).toHaveTextContent("0800 117 000");
+  });
+
+  it("updates when only the officers' hours change", () => {
+    const props = {
+      userQuery: "What is VAT?",
+      locale: "en",
+      playingTurnId: null,
+      ttsLoading: null,
+      isTransitioning: false,
+      onListen: vi.fn(),
+      conversationId: "conv-1",
+    };
+    const onDuty = { ...assistantTurn, escalationRequired: true, officerHours: { ...OFF_DUTY, onDuty: true } };
+    const { rerender } = render(<ChatMessage turn={onDuty} {...props} />);
+    expect(screen.queryByTestId("escalation-off-duty")).toBeNull();
+    rerender(<ChatMessage turn={{ ...onDuty, officerHours: OFF_DUTY }} {...props} />);
+    expect(screen.getByTestId("escalation-off-duty")).toBeInTheDocument();
+  });
+
+  it("during officers' hours, adds nothing", () => {
+    renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: { ...OFF_DUTY, onDuty: true } });
+    expect(screen.queryByTestId("escalation-off-duty")).toBeNull();
+  });
+
+  it("speaks the reader's language, Runyankole and Acholi included", () => {
+    try {
+      useChatStore.setState({ locale: "sw" });
+      const { unmount } = renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: OFF_DUTY });
+      expect(screen.getByRole("alert")).toHaveTextContent("Inapendekezwa afisa wa URA aangalie hili");
+      expect(screen.getByTestId("escalation-off-duty")).toHaveTextContent("Maafisa wanafanya kazi 07:00–23:00 EAT.");
+      unmount();
+      useChatStore.setState({ locale: "ach" });
+      renderMsg({ ...assistantTurn, escalationRequired: true, officerHours: OFF_DUTY });
+      expect(screen.getByTestId("escalation-off-duty")).toHaveTextContent("Lutic gitiyo 07:00–23:00 EAT.");
     } finally {
       useChatStore.setState({ locale: "en" });
     }
