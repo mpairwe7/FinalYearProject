@@ -214,7 +214,7 @@ _OFFER_ACCEPT_RE: Final[re.Pattern[str]] = re.compile(
     re.IGNORECASE,
 )
 _OFFER_DECLINE_RE: Final[re.Pattern[str]] = re.compile(
-    r"^\W*(?:no|nope|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)|nedda|hapana|ngaaha|apana|pe|ku)"
+    r"^\W*(?:no|nope|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)|nedda|hapana|ngaaha|apana|pe)"
     r"(?:\W+(?:thanks|thank\s+you|not\s+now|i'?m\s+(?:fine|okay|ok)|that'?s\s+(?:all|enough|it)"
     r"|webale|asante|webare|apwoyo))*\W*$",
     re.IGNORECASE,
@@ -672,6 +672,8 @@ class UraReceptionistBrain(LLMService):
                     reprompt = {
                         "lg": "Nsaba oddemu okukakasa nga oyogera bulungi: oyagala tukomekkereze ekikolwa kino?",
                         "sw": "Tafadhali thibitisha tena kwa sauti wazi: je, tuendelee na hatua hii?",
+                        "nyn": "Ninkushaba ogarukemu ohamye omu iraka eririkuhurirwa gye: tugumizemu n'ekikorwa eki?",
+                        "ach": "Tim ber imok doki ki dwon maleng: wamede ki tic man?",
                         "en": "Please confirm clearly once more: should I proceed with this action?",
                     }.get(language, "Please confirm clearly once more: should I proceed with this action?")
                     await self._say_and_record(reprompt, kind="confirm")
@@ -682,6 +684,8 @@ class UraReceptionistBrain(LLMService):
                 confirmed_msg = {
                     "lg": f"Webale, ekikolwa ({action_desc}) kikakasiddwa era kiwedde.",
                     "sw": f"Asante, hatua ({action_desc}) imethibitishwa na kukamilika.",
+                    "nyn": f"Webare, ekikorwa ({action_desc}) kihamiibwe kandi kyaheza kukorwa.",
+                    "ach": f"Apwoyo, tic ({action_desc}) dong kimoko dok otum.",
                     "en": f"Thank you, your {action_desc} has been confirmed and completed.",
                 }.get(language, f"Thank you, your {action_desc} has been confirmed and completed.")
                 try:
@@ -714,6 +718,8 @@ class UraReceptionistBrain(LLMService):
                     "en": "Sure, let me repeat that: ",
                     "lg": "Kale, ka nkiddemu: ",
                     "sw": "Sawa, ngoja nirudie: ",
+                    "nyn": "Kare, ka nkigarukemu: ",
+                    "ach": "Ber, wek anwo: ",
                 }.get(language, "Sure, let me repeat that: ")
                 await self._say_and_record(f"{prefix}{last_ans}", kind="answer")
                 # A repeat is still the last answer (not "Sure, let me repeat
@@ -838,7 +844,7 @@ class UraReceptionistBrain(LLMService):
         # did not (G122).
         earlier = self._earlier_in_call()
         if not earlier:
-            cached_en = mt.cache.get("lg", "en", normalized)
+            cached_en = mt.cache.get("lg", "en", luganda_query) or mt.cache.get("lg", "en", normalized)
             if cached_en:
                 return cached_en
 

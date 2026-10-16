@@ -137,8 +137,12 @@ def in_cooldown() -> bool:
         return time.monotonic() < _down_until
 
 
-def speaker_for(language: str) -> str | None:
-    """The Orpheus speaker for *language* (ISO 639-1 or ISO 639-3), or ``None`` if unvoiced."""
+def speaker_for(language: str, voice: str | None = None) -> str | None:
+    """The Orpheus speaker for *language* (ISO 639-1 or ISO 639-3), or ``None`` if unvoiced.
+
+    When *voice* names a valid speaker for *language* in :data:`app.sunbird.TTS_VOICE_CATALOG`,
+    that speaker is returned; otherwise the locale's configured/default speaker is used.
+    """
     if not is_configured():
         return None
     norm = (language or "").strip().lower()
@@ -149,6 +153,15 @@ def speaker_for(language: str) -> str | None:
     if not any(code in enabled for code in equivalents):
         return None
     canonical = equivalents[0]
+    if voice:
+        try:
+            from . import sunbird
+
+            v_clean = voice.strip()
+            if v_clean and v_clean in sunbird.TTS_VOICE_CATALOG.get(canonical, ()):
+                return v_clean
+        except Exception:
+            pass
     return (
         os.getenv(f"ORPHEUS_TTS_SPEAKER_{canonical.upper()}", "").strip()
         or os.getenv(f"ORPHEUS_TTS_SPEAKER_{norm.upper()}", "").strip()
@@ -217,8 +230,14 @@ def reachability() -> str:
     return "up"
 
 
-def _request(text: str, language: str, response_format: str) -> tuple[str, dict[str, object]]:
-    speaker = speaker_for(language)
+def _request(
+    text: str,
+    language: str,
+    response_format: str,
+    *,
+    voice: str | None = None,
+) -> tuple[str, dict[str, object]]:
+    speaker = speaker_for(language, voice=voice)
     if speaker is None:
         raise OrpheusUnavailable(f"no Orpheus voice configured for {language!r}")
     _check_cooldown()
@@ -305,13 +324,13 @@ def pcm16_to_wav(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
     return wrap(pcm, sample_rate)
 
 
-def synthesize(text: str, language: str) -> bytes:
+def synthesize(text: str, language: str, *, voice: str | None = None) -> bytes:
     """Whole utterance as 24 kHz PCM16. Raises :class:`OrpheusUnavailable`.
 
     Longer text is voiced as :func:`split_for_voice` pieces, concurrently (the
     sidecar batches them), and joined in order.
     """
-    url, body = _request(text, language, "pcm")
+    url, body = _request(text, language, "pcm", voice=voice)
     pieces = split_for_voice(text)
     if len(pieces) == 1:
         return _post(url, body)
@@ -391,7 +410,7 @@ def _post(url: str, body: dict[str, object]) -> bytes:
     return resp.content[: len(resp.content) - len(resp.content) % 2]
 
 
-async def stream(text: str, language: str) -> AsyncIterator[bytes]:
+async def stream(text: str, language: str, *, voice: str | None = None) -> AsyncIterator[bytes]:
     """24 kHz PCM16 chunks as the sidecar decodes them.
 
     Raises :class:`OrpheusUnavailable` before the first chunk if the sidecar
@@ -404,7 +423,7 @@ async def stream(text: str, language: str) -> AsyncIterator[bytes]:
     """
     import httpx
 
-    url, body = _request(text, language, "pcm")
+    url, body = _request(text, language, "pcm", voice=voice)
     started = False
     try:
         async with httpx.AsyncClient(timeout=_timeout_s()) as client:

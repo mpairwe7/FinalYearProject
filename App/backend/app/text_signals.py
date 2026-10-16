@@ -159,9 +159,9 @@ _DISTRESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"worried|worry|worrying|scared|afraid|anxious|confus|stress"
             r"|don't know what|don't understand|do not understand"
-            r"|\b(?:ntidde|nnina\s+okutya|mweraliikirivu|nina\s+wasiwasi|naogopa|natishika"
-            r"|ntiire|nyine\s+obwoba|nyeraliikiriire"
-            r"|alworo|atye\s+ki\s+lworo|cwinyacwer|aparo)\b"
+            r"|\b(?:ntidde|neraliikiridde|nnina\s+okutya|mweraliikirivu|nina\s+(?:wasiwasi|hofu)|wasiwasi|naogopa|natishika"
+            r"|ntiire|ntiina|nyine\s+obwoba|nyeraliikiriire"
+            r"|alworo|atye\s+ki\s+lworo|cwinyacwer|cwinya\s+cwer|aparo)\b"
         ),
     ),
     (
@@ -214,8 +214,8 @@ _CONFUSION_RE = re.compile(
 
 _WORRY_RE = re.compile(
     r"\b(worried|worry|worrying|scared|afraid|anxious|stress\w*|panic\w*|nervous"
-    r"|ntidde|mweraliikirivu|nina\s+wasiwasi|naogopa"
-    r"|ntiire|nyine\s+obwoba|nyeraliikiriire|alworo|atye\s+ki\s+lworo|aparo)\b"
+    r"|ntidde|neraliikiridde|mweraliikirivu|nina\s+(?:wasiwasi|hofu)|wasiwasi|naogopa"
+    r"|ntiire|ntiina|nyine\s+obwoba|nyeraliikiriire|alworo|atye\s+ki\s+lworo|cwinya\s+cwer|aparo)\b"
 )
 
 _EMPATHY_ACKS: dict[str, str] = {
@@ -570,7 +570,7 @@ def empathy_ack(kind: str, locale: str = "en") -> str:
     Every returned string must satisfy ``is_courtesy_sentence`` so the
     acknowledgment never dilutes faithfulness or claim verification.
     """
-    loc = "nyn" if (locale or "en").strip().lower() == "nyk" else (locale or "en").strip().lower()
+    loc = (locale or "en").strip().lower()
     table = _EMPATHY_ACKS_BY_LOCALE.get(loc, _EMPATHY_ACKS)
     return table.get(kind, _EMPATHY_ACKS.get(kind, ""))
 
@@ -887,8 +887,6 @@ NEXT_ACTIONS_GREETING_BY_LOCALE: dict[str, list[str]] = {
 
 def _norm_courtesy_loc(locale: str = "en") -> str:
     raw = re.split(r"[-_]", (locale or "en").strip().lower())[0]
-    if raw == "nyk":
-        return "nyn"
     return raw
 
 

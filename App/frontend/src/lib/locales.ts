@@ -49,7 +49,6 @@ export function isSupportedLocale(value: unknown): value is string {
 
 /** Coerce a persisted or externally-supplied value to a known locale. */
 export function normalizeLocale(value: unknown): string {
-  if (typeof value === 'string' && value.toLowerCase() === 'nyk') return 'nyn';
   return isSupportedLocale(value) ? value : DEFAULT_LOCALE;
 }
 

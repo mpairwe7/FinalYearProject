@@ -305,6 +305,7 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\btimu\b", re.IGNORECASE), "TIN"),
     (re.compile(r"\bttini\b", re.IGNORECASE), "TIN"),
     (re.compile(r"\btti+n\b", re.IGNORECASE), "TIN"),
+    (re.compile(r"\b(?:t-i-n|t\s+i\s+n|ti\s+in)\b", re.IGNORECASE), "TIN"),
     (re.compile(r"\b(?:nnamba|namba)\s+ya\s+tiini\b", re.IGNORECASE), "TIN"),
     # Same frames as clarify._CONTEXT_MISHEARS. "era" alone is "and".
     # "ora" is the GPU Whisper-SALT hearing of URA on lg_tin.wav
@@ -331,8 +332,8 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     # PRN (Payment Registration Number) acoustic variants
     (re.compile(r"\b(?:nnamba\s+ya\s+prn|namba\s+ya\s+prn)\b", re.IGNORECASE), "PRN number"),
     (re.compile(r"\b(?:peera|pier\s*en|pi\s*ar\s*en|p-r-n|p\.r\.n\.)\b", re.IGNORECASE), "PRN"),
-    # EFRIS acoustic variants & telephony mishears (e-freeze, effris, afris, etc.)
-    (re.compile(r"\b(?:e-?freeze|efreeze|e\s+freeze|effris|efrisi|efurisi|afris|e-fris|e\s+fris)\b", re.IGNORECASE), "EFRIS"),
+    # EFRIS acoustic variants & telephony mishears (e-freeze, effris, afris, efu lisi, etc.)
+    (re.compile(r"\b(?:e-?freeze|efreeze|e\s+freeze|effris|efrisi|efurisi|efu\s+lisi|afris|e-fris|e\s+fris)\b", re.IGNORECASE), "EFRIS"),
     # WHT acoustic variants
     (re.compile(r"\b(?:w-h-t|w\.h\.t\.|dabulyu\s*ech\s*ti)\b", re.IGNORECASE), "WHT"),
     # English & telephony number mishears: "ten number" / "10 number" -> "TIN number"
@@ -345,7 +346,7 @@ _ASR_ENTITY_FIXES: Final[tuple[tuple[re.Pattern[str], str], ...]] = (
     (re.compile(r"\biuganda\b", re.IGNORECASE), "i Uganda"),
     # PAYE acoustic variants
     # Not "payee": that is an English word ("who is the payee on a PRN?").
-    (re.compile(r"\b(?:peeyi|p-a-y-e|p\.a\.y\.e\.)\b", re.IGNORECASE), "PAYE"),
+    (re.compile(r"\b(?:peeyi|pee\s+yi|p-a-y-e|p\.a\.y\.e\.|p\s+a\s+y\s+e)\b", re.IGNORECASE), "PAYE"),
     # TCC (Tax Clearance Certificate)
     (re.compile(r"\b(?:ebbaluwa|ebaluwa)\s+ya\s+(?:tic|tizi)\b", re.IGNORECASE), "ebbaluwa ya TCC"),
     (re.compile(r"\b(?:cheti|keti)\s+cha\s+(?:tic|tizi)\b", re.IGNORECASE), "cheti cha TCC"),
@@ -593,7 +594,7 @@ def normalize_codeswitched_query(text: str, language: str = "en") -> str:
         return normalize_luganda_tax_query(repaired)
     if language == "sw":
         return normalize_swahili_tax_query(repaired)
-    if language in ("nyn", "nyk"):
+    if language == "nyn":
         return normalize_runyankole_tax_query(repaired)
     if language == "ach":
         return normalize_acholi_tax_query(repaired)
@@ -623,7 +624,7 @@ def normalize_call_query(text: str, language: str) -> str:
     """
     if language == "sw":
         return normalize_swahili_tax_query(text)
-    if language in ("nyn", "nyk"):
+    if language == "nyn":
         return normalize_runyankole_tax_query(text)
     if language == "ach":
         return normalize_acholi_tax_query(text)

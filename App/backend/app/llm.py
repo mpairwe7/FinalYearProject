@@ -1803,7 +1803,6 @@ def translate_text(
         "sw": "Swahili",
         "swa": "Swahili",
         "nyn": "Runyankole",
-        "nyk": "Runyankole",
         "ach": "Acholi",
         "teo": "Ateso",
         "lgg": "Lugbara",

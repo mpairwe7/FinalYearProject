@@ -37,8 +37,8 @@ export const VOICE_SAMPLES: Record<string, string> = {
   en: "Welcome to URA. The standard VAT rate in Uganda is 18 percent.",
   lg: "Tukusanyukidde. Omusolo gwa VAT mu Uganda guli ku bitundu 18.",
   sw: "Karibu URA. Kiwango cha VAT nchini Uganda ni asilimia 18.",
-  nyn: "Tukwakiriza. Omusoro gwa VAT omuri Uganda ni ebicweka 18.",
-  ach: "Wabedo. Mucoro me VAT i Uganda tye i wi 18.",
+  nyn: "Tukwakira omu URA. Omushoro gwa VAT omuri Uganda guri aha bicweka 18 aha kikumi.",
+  ach: "Wajoli i URA. Wel mucoro me VAT i Uganda tye dul 18 i kom miya.",
 };
 
 export interface VoicePersona {
@@ -68,11 +68,29 @@ export const VOICE_PERSONAS: Record<string, VoicePersona> = {
     tone: "Polished, Measured & Articulate",
     avatar: "👩‍⚖️",
   },
+  "en-KE-AsiliaNeural": {
+    name: "Asilia",
+    role: "East African Regional Tax Specialist",
+    tone: "Warm, Clear & Regional",
+    avatar: "👩‍💼",
+  },
   "salt_eng_0001": {
     name: "Mugisha",
     role: "National Tax Education Officer",
     tone: "Ugandan Accent, Engaging & Natural",
     avatar: "👨‍🎓",
+  },
+  "salt_eng_0002": {
+    name: "Achieng",
+    role: "Domestic Taxes & PAYE Advisor",
+    tone: "Ugandan Accent, Warm & Reassuring",
+    avatar: "👩‍💼",
+  },
+  "salt_eng_0003": {
+    name: "Kizza",
+    role: "Customs & Excise Guidance Officer",
+    tone: "Ugandan Accent, Crisp & Steady",
+    avatar: "👨‍✈️",
   },
 
   // Luganda Personas
@@ -106,6 +124,24 @@ export const VOICE_PERSONAS: Record<string, VoicePersona> = {
     tone: "Mwangu era Omukakafu (Firm & Accurate)",
     avatar: "👨‍⚖️",
   },
+  "waxal_lug_0006": {
+    name: "Ssemakula",
+    role: "Omukugu w'Eby'oku Mwalo (Customs & Border Advisor)",
+    tone: "Muteefu era Mwesigwa (Steady & Reliable)",
+    avatar: "👨‍✈️",
+  },
+  "waxal_lug_0007": {
+    name: "Namukasa",
+    role: "Omukugu wa EFRIS ne VAT (Digital Invoicing Specialist)",
+    tone: "Mangu era Ntegeevu (Crisp & Clear)",
+    avatar: "👩‍💻",
+  },
+  "waxal_lug_0008": {
+    name: "Wasswa",
+    role: "Omuwabuzi w'Abasuubuzi Abato (Small Business Advisor)",
+    tone: "Wa Mukwano era Ayamba (Friendly & Supportive)",
+    avatar: "👨‍🎓",
+  },
 
   // Swahili Personas
   "waxal_swa_0006": {
@@ -128,6 +164,30 @@ export const VOICE_PERSONAS: Record<string, VoicePersona> = {
     tone: "Ow'oburinganiza (Clear & Accessible)",
     avatar: "👨‍💼",
   },
+  "waxal_nyn_0003": {
+    name: "Kyomugisha",
+    role: "Omuhabuzi w'Obushuubuzi n'Emishoro (Business Tax Advisor)",
+    tone: "Ow'embabazi kandi Orwanisa (Warm & Articulate)",
+    avatar: "👩‍💼",
+  },
+  "waxal_nyn_0004": {
+    name: "Mbabazi",
+    role: "Omukugu wa EFRIS na VAT (EFRIS & VAT Specialist)",
+    tone: "Orikushoboorora Gye (Crisp & Structured)",
+    avatar: "👩‍💻",
+  },
+  "waxal_nyn_0007": {
+    name: "Byaruhanga",
+    role: "Omuhabuzi w'Emishoro y'Ebyombeko (Rental & Property Advisor)",
+    tone: "Omuhami kandi Orikuhurikiza (Calm & Authoritative)",
+    avatar: "👨‍⚖️",
+  },
+  "waxal_nyn_0008": {
+    name: "Kansiime",
+    role: "Omuhwezi w'Abashasuzi b'Emishoro (Taxpayer Support Officer)",
+    tone: "Ow'omukago kandi Orahuka (Friendly & Responsive)",
+    avatar: "👩‍🎓",
+  },
 
   // Acholi Personas
   "salt_ach_0001": {
@@ -135,6 +195,30 @@ export const VOICE_PERSONAS: Record<string, VoicePersona> = {
     role: "Lapony me Culu Mucoro (Community Outreach)",
     tone: "Maber dok Maleng (Clear & Direct)",
     avatar: "👩‍🏫",
+  },
+  "waxal_ach_0001": {
+    name: "Okello",
+    role: "Lami Tam i kom Mucoro ki Biacara (Business Tax Officer)",
+    tone: "upore dok Gene (Steady & Trustworthy)",
+    avatar: "👨‍💼",
+  },
+  "waxal_ach_0005": {
+    name: "Akello",
+    role: "Ladiro Lok me EFRIS ki VAT (EFRIS & VAT Specialist)",
+    tone: "Maleng dok Oyot (Articulate & Prompt)",
+    avatar: "👩‍💻",
+  },
+  "waxal_ach_0006": {
+    name: "Odong",
+    role: "Latic me Mucoro me Wang Lobo (Customs & Border Officer)",
+    tone: "Matek dok Atir (Firm & Clear)",
+    avatar: "👨‍✈️",
+  },
+  "waxal_ach_0008": {
+    name: "Aber",
+    role: "Lakony Lutim Biacara Matino (Small Business Support)",
+    tone: "Kica dok Yomcwiny (Empathetic & Patient)",
+    avatar: "👩‍💼",
   },
 };
 

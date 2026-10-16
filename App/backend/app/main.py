@@ -2168,7 +2168,7 @@ async def voice_chat(
         chat_text = normalize_luganda_tax_query(transcript)
     elif detected_lang == "sw":
         chat_text = normalize_swahili_tax_query(transcript)
-    elif detected_lang in ("nyn", "nyk"):
+    elif detected_lang == "nyn":
         from .receptionist.lexicon import normalize_runyankole_tax_query
 
         chat_text = normalize_runyankole_tax_query(transcript)

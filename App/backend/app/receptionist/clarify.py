@@ -42,6 +42,8 @@ STOP_WORDS: frozenset[str] = frozenset({
 FILLERS: frozenset[str] = frozenset({
     "um", "uh", "er", "ah", "like", "hmm", "well", "okay", "ok",
     "oh", "actually", "basically", "you know", "please",
+    "nsaba", "tafadhali", "ninkushaba", "nyabura", "apwoyo", "webare",
+    "webale", "asante", "kale", "kare", "sawa", "eeh", "aah", "mmm",
 })
 
 _YES_RE = re.compile(
@@ -121,8 +123,11 @@ _SURE_MISHEARS: dict[str, str] = {
     "timu": "tin",
     "ttini": "tin",
     "efrisi": "efris",
+    "efurisi": "efris",
     "eifalisi": "efris",
     "ifalisi": "efris",
+    "viati": "vat",
+    "veyati": "vat",
 }
 # "era" is Luganda for "and". Only the preposition frame from the live
 # TIN calls ("okuva mu era") is URA.

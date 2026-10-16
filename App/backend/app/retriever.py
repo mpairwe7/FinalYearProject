@@ -1688,7 +1688,7 @@ class HybridRetriever:
         # BAAI/bge-m3 + BM25 on untranslated lg/nyn/ach against an English corpus yields ~0%
         # relevant top hits and _merge_translated_leg replaces them with en_hits anyway.
         # Translating once up front avoids a redundant GPU embedding + Qdrant + reranker pass.
-        if loc in ("lg", "nyn", "nyk", "ach") and flags.is_enabled("translate_retrieve"):
+        if loc in ("lg", "nyn", "ach") and flags.is_enabled("translate_retrieve"):
             english = english_retrieval_query(query, locale)
             if english and english.casefold() != (query or "").strip().casefold():
                 plan_en = plan_retrieval(english, history=history)
@@ -1816,7 +1816,7 @@ class HybridRetriever:
         # (lg, nyn, ach), bge-m3 cross-lingual dense + BM25 against English text
         # yields 0% relevant top hits; using en_hits directly prevents context
         # contamination. For Swahili, merge both legs.
-        if loc in ("lg", "nyn", "nyk", "ach") and en_hits:
+        if loc in ("lg", "nyn", "ach") and en_hits:
             merged = en_hits[:top_k]
         else:
             merged = merge_retrieval_hits([en_hits, hits], top_k=top_k)

@@ -100,7 +100,7 @@ def assess(
     across turns — instead of being guessed from one message.
     """
     text = message or ""
-    eff_locale = "nyn" if (locale or "").strip().lower() == "nyk" else (locale or "").strip().lower()
+    eff_locale = (locale or "").strip().lower()
     if not eff_locale:
         try:
             from ..query import detect_language

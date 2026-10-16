@@ -782,7 +782,7 @@ def _is_reasoning_miss(state: AgentGraphState) -> bool:
 
     raw_q = (state.rewritten_query or state.query or "").strip()
     q_for_tokens = raw_q
-    loc = "nyn" if (state.locale or "").strip().lower() == "nyk" else (state.locale or "").strip().lower()
+    loc = (state.locale or "").strip().lower()
     if loc not in ("", "en") and raw_q:
         cached = mt.cache.get(loc, "en", raw_q)
         q_for_tokens = cached if cached else normalize_codeswitched_query(raw_q, language=loc)

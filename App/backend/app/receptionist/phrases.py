@@ -408,7 +408,7 @@ _NO_WORDS: dict[str, tuple[str, ...]] = {
     "lg": ("nedda", "si kyo", "si kituufu", "ssi"),
     "sw": ("hapana", "sio", "si sahihi"),
     "nyn": ("ngaaha", "apana", "tikihikire", "tikyo"),
-    "ach": ("pe", "ku", "pe kakare"),
+    "ach": ("pe", "pe kakare"),
 }
 
 KEYS: tuple[str, ...] = tuple(_PHRASES["en"])

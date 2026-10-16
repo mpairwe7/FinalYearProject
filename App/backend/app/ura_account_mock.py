@@ -159,7 +159,7 @@ def format_prn_voucher_reply(voucher: dict[str, Any], locale: str = "en") -> str
             f"3. **Tovuti ya URA**: Lipa mtandaoni kwa kadi (Visa/Mastercard): https://ura.go.ug."
         )
 
-    if locale in ("nyn", "nyk"):
+    if locale == "nyn":
         return (
             f"### 🧾 Ekihandiiko ky'Okushashuriraho ekya PRN (Voucher)\n"
             f"*Embeera: Okugezesa kwa Sandbox (Simulated Voucher)*\n\n"
