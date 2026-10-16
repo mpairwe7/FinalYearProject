@@ -36,7 +36,7 @@ import {
   type ConnectorNotice,
   type ConnectorUse,
 } from '../lib/connectors';
-import { applyTurnMeta } from '../lib/turnMeta';
+import { applyTurnMeta, officerHoursFrom } from '../lib/turnMeta';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
@@ -1218,6 +1218,7 @@ export default function Page() {
         retrievalMode: d.retrieval_mode ?? 'keyword',
         escalationRequired: d.escalation_required ?? false,
         escalationReason: d.escalation_reason ?? '',
+        officerHours: officerHoursFrom(d),
         nextActions: d.next_actions ?? [],
         workflow: d.workflow ?? undefined,
         resources: d.resources ?? (d.workflow?.resources ?? []),

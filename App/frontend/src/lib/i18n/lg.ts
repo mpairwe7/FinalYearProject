@@ -215,6 +215,10 @@ export const lg: Partial<Dictionary> = {
   'resource.action.guide': 'Bikkula ekiragiro',
   'resource.source': 'Ensibuko: {domain}',
 
+  'message.humanReview': 'Kirungi omukozi wa URA akyetegereze',
+  'message.contactUra': 'Oba tuukirira URA:',
+  'message.officersOffDuty':
+    'Abakozi bakola {hours}. Ekibuuzo kyo kiterekeddwa, era omukozi ajja kukuddamu wano nga bakomyewo ku mulimu.',
   'handoff.ask': 'Yogera n’omukozi wa URA',
   'handoff.requesting': 'Nsaba omukozi…',
   'handoff.reference': 'Namba y’ekiwandiiko',

@@ -55,7 +55,7 @@ class OfficerHours:
     def label(self, at: float | None = None) -> str:
         """``07:00–23:00 EAT`` — for screens and messages, never for the voice."""
         stamp = dt.datetime.fromtimestamp(time.time() if at is None else at, self.zone)
-        return f"{self.open_hour:02d}:00–{self.close_hour % 24:02d}:00 {stamp.strftime('%Z')}".strip()
+        return f"{self.open_hour:02d}:00–{self.close_hour:02d}:00 {stamp.strftime('%Z')}".strip()
 
 
 def _hour(name: str, default: int, low: int, high: int) -> int:
@@ -170,3 +170,20 @@ def working_seconds(start: float, end: float, hours: OfficerHours | None = None)
         if overlap > 0:
             total += overlap
     return total
+
+
+def status(at: float | None = None, hours: OfficerHours | None = None) -> dict[str, object]:
+    """Whether officers are on duty now, their hours, and when they are next on duty — for an API.
+
+    ``next_on_duty`` is an ISO 8601 time with its offset (``None`` when no
+    shift starts within a month). The chat shows the notice in the reader's
+    language from these fields; nothing here is prose to translate.
+    """
+    hours = hours or officer_hours()
+    now = time.time() if at is None else at
+    nxt = next_on_duty(now, hours)
+    return {
+        "on_duty": on_duty(now, hours),
+        "hours": hours.label(now),
+        "next_on_duty": dt.datetime.fromtimestamp(nxt, hours.zone).isoformat() if nxt is not None else None,
+    }

@@ -7150,6 +7150,14 @@ class ChatModel:
             if final_decision != "escalate":
                 return ""
 
+        # Whether a person can pick this up now travels with the handoff the
+        # taxpayer's chat receives: outside officers' working hours it says when
+        # they are next on duty, rather than implying someone is reading (G196).
+        if isinstance(handoff, dict):
+            from . import officer_hours
+
+            handoff["officer_hours"] = officer_hours.status()
+
         # Determine taxpayer locale (either passed in, from handoff, or detected)
         eff_locale = (locale or (handoff or {}).get("locale") or "").lower().strip()
         if not eff_locale:

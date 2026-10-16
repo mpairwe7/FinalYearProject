@@ -416,6 +416,16 @@ class EscalationRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
 
+class OfficerHoursStatus(BaseModel):
+    """Whether a URA officer can pick a handoff up now (``app.officer_hours.status``)."""
+
+    on_duty: bool = Field(..., description="True while officers are on duty")
+    hours: str = Field(..., description='Officers\' working hours, e.g. "07:00–23:00 EAT"')
+    next_on_duty: str | None = Field(
+        None, description="ISO 8601 time officers are next on duty (now, when on duty)"
+    )
+
+
 class EscalationResponse(BaseModel):
     ok: bool = Field(..., description="False when the queue is off; see `message`")
     ticket_id: str = Field("", description="Reference to quote when contacting URA")
@@ -424,6 +434,9 @@ class EscalationResponse(BaseModel):
         False, description="True when this conversation already had an open ticket"
     )
     message: str = Field(..., description="What happens next, in the taxpayer's language")
+    officer_hours: OfficerHoursStatus | None = Field(
+        None, description="Whether officers are on duty, so the chat can say when they will reply (G196)"
+    )
 
 
 class EscalationDetailResponse(BaseModel):

@@ -336,10 +336,16 @@ function ChatMessageInner({
 
         {isAssistant && !isGreeting && turn.escalationRequired && (
           <div className="escalation-banner" role="alert">
-            <span aria-hidden="true">!</span> Human review recommended
+            <span aria-hidden="true">!</span> {t('message.humanReview')}
             {turn.escalationReason ? ` — ${turn.escalationReason}` : ''}
+            {turn.officerHours && !turn.officerHours.onDuty && (
+              // Outside officers' working hours nobody is reading yet (G196).
+              <p className="escalation-hours" data-testid="escalation-off-duty">
+                {t('message.officersOffDuty', { hours: turn.officerHours.hours })}
+              </p>
+            )}
             <div className="escalation-contacts">
-              Or contact URA:{' '}
+              {t('message.contactUra')}{' '}
               {URA_CONTACTS.tollFree.map((n, idx) => (
                 <React.Fragment key={n}>
                   {idx > 0 && ' / '}

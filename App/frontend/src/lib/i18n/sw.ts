@@ -213,6 +213,10 @@ export const sw: Partial<Dictionary> = {
   'resource.action.guide': 'Fungua mwongozo',
   'resource.source': 'Chanzo: {domain}',
 
+  'message.humanReview': 'Inapendekezwa afisa wa URA aangalie hili',
+  'message.contactUra': 'Au wasiliana na URA:',
+  'message.officersOffDuty':
+    'Maafisa wanafanya kazi {hours}. Swali lako limewekwa kwenye foleni, na afisa atakujibu hapa watakaporudi kazini.',
   'handoff.ask': 'Zungumza na afisa wa URA',
   'handoff.requesting': 'Ninaomba afisa…',
   'handoff.reference': 'Kumbukumbu',

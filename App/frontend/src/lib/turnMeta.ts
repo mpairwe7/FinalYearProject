@@ -4,6 +4,33 @@ import type { ConnectorNotice } from './connectors';
 /** A turn's metadata as the server sends it (SSE `metadata`/`grounding`/`done`, or a metadata line). */
 export type TurnMeta = Record<string, unknown>;
 
+/** Whether officers were on duty when a handoff was queued (`app.officer_hours.status`). */
+export interface OfficerHours {
+  onDuty: boolean;
+  /** For display, e.g. "07:00–23:00 EAT". */
+  hours: string;
+  /** ISO 8601 start of the next shift, or null. */
+  nextOnDuty: string | null;
+}
+
+/**
+ * The desk's hours from a frame: `officer_hours` on the handoff the server
+ * attaches to every escalation (both chat paths carry `handoff`), or at the
+ * top level (a restored turn). Anything malformed is no information.
+ */
+export function officerHoursFrom(meta: TurnMeta): OfficerHours | undefined {
+  const handoff = meta.handoff as Record<string, unknown> | null | undefined;
+  const raw = (meta.officer_hours ?? (handoff && typeof handoff === 'object' ? handoff.officer_hours : undefined)) as
+    | Record<string, unknown>
+    | null
+    | undefined;
+  if (!raw || typeof raw !== 'object') return undefined;
+  const onDuty = raw.on_duty ?? raw.onDuty;
+  if (typeof onDuty !== 'boolean' || typeof raw.hours !== 'string') return undefined;
+  const next = raw.next_on_duty ?? raw.nextOnDuty;
+  return { onDuty, hours: raw.hours.slice(0, 64), nextOnDuty: typeof next === 'string' ? next : null };
+}
+
 function discrepancyFrom(value: unknown, fallback: ChatTurn['discrepancyReport']): ChatTurn['discrepancyReport'] {
   if (!value || typeof value !== 'object') return fallback;
   const d = value as Record<string, unknown>;
@@ -38,6 +65,7 @@ export function applyTurnMeta(turn: ChatTurn, meta: TurnMeta, notices: Connector
     retrievalMode: (meta.retrieval_mode as string | undefined) ?? turn.retrievalMode,
     escalationRequired: (meta.escalation_required as boolean | undefined) ?? turn.escalationRequired,
     escalationReason: (meta.escalation_reason as string | undefined) ?? turn.escalationReason,
+    officerHours: officerHoursFrom(meta) ?? turn.officerHours,
     nextActions,
     workflow,
     resources:

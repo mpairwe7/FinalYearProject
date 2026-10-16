@@ -210,6 +210,10 @@ export const ach: Partial<Dictionary> = {
   'resource.action.guide': 'Yab tela',
   'resource.source': 'Kama oa iye: {domain}',
 
+  'message.humanReview': 'Ber latic me URA onen lok man',
+  'message.contactUra': 'Onyo kube ki URA:',
+  'message.officersOffDuty':
+    'Lutic gitiyo {hours}. Lapeny ni dong tye i rek, dok latic bigamo kany ka gudwogo i tic.',
   'handoff.ask': 'Lok ki latic me URA',
   'handoff.requesting': 'Atye ka lego latic…',
   'handoff.reference': 'Namba me ngec',

@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { applyTurnMeta } from '../../lib/turnMeta';
+import { applyTurnMeta, officerHoursFrom } from '../../lib/turnMeta';
 import type { ChatTurn } from '../../store/useChatStore';
 
 const turn = (over: Partial<ChatTurn> = {}): ChatTurn =>
@@ -25,6 +25,31 @@ describe('applyTurnMeta', () => {
     expect(out.nextActions).toEqual(['Talk to an officer', 'Continue the steps', 'Cancel']);
     expect(out.retrievalMode).toBe('workflow');
     expect(out.workflow?.name).toBe('Return Filing');
+  });
+
+  it("takes the officers' hours from the handoff an escalation carries (G196)", () => {
+    const frame = {
+      escalation_required: true,
+      handoff: { topic: 'general', officer_hours: { on_duty: false, hours: '07:00–23:00 EAT', next_on_duty: '2026-10-17T07:00:00+03:00' } },
+    };
+    expect(applyTurnMeta(turn(), frame).officerHours).toEqual({
+      onDuty: false,
+      hours: '07:00–23:00 EAT',
+      nextOnDuty: '2026-10-17T07:00:00+03:00',
+    });
+    // A later frame without them keeps them.
+    const later = applyTurnMeta(applyTurnMeta(turn(), frame), { next_actions: [] });
+    expect(later.officerHours?.onDuty).toBe(false);
+  });
+
+  it('reads a restored turn and ignores malformed hours', () => {
+    expect(officerHoursFrom({ officer_hours: { onDuty: true, hours: '07:00–23:00 EAT', nextOnDuty: null } })).toEqual({
+      onDuty: true,
+      hours: '07:00–23:00 EAT',
+      nextOnDuty: null,
+    });
+    expect(officerHoursFrom({ handoff: { officer_hours: { on_duty: 'no', hours: 7 } } })).toBeUndefined();
+    expect(officerHoursFrom({ handoff: null })).toBeUndefined();
   });
 
   it('keeps what the frame does not carry', () => {

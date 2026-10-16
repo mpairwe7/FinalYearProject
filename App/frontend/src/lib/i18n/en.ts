@@ -232,6 +232,10 @@ export const en = {
 
   // Human handoff. The taxpayer's own way into the officer queue — every
   // other route into it is a judgement the system makes for them.
+  'message.humanReview': 'Human review recommended',
+  'message.contactUra': 'Or contact URA:',
+  'message.officersOffDuty':
+    'Officers work {hours}. Your question is queued, and an officer will reply here when they are next on duty.',
   'handoff.ask': 'Talk to a URA officer',
   'handoff.requesting': 'Asking an officer…',
   'handoff.reference': 'Reference',

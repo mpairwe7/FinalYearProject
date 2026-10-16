@@ -133,6 +133,37 @@ class TestRoutingIsAppliedAtEscalation:
         assert ticket_id
         assert tmp_db.get_ticket(ticket_id)["team"] == "disputes"
 
+    def test_the_handoff_says_whether_officers_are_on_duty(self, tmp_db, monkeypatch):
+        """G196: the chat reads from the handoff whether anyone can pick it up now."""
+        import datetime as dt
+
+        from app.service import ChatModel
+
+        monkeypatch.setenv("FLAG_TICKET_QUEUE", "true")
+        monkeypatch.setenv("CXP_OPEN_HOUR", "0")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "24")
+        model = ChatModel.__new__(ChatModel)
+        handoff = {"topic": "objection_or_dispute", "priority": "high"}
+        ChatModel._maybe_create_ticket(
+            model, reason="dispute", user_query="I dispute this", bot_reply="", session_id="s1",
+            conversation_id="c-hours-on", handoff=handoff,
+        )
+        assert handoff["officer_hours"]["on_duty"] is True
+        assert handoff["officer_hours"]["hours"].startswith("00:00–24:00")
+
+        # Today closed (a public holiday): off duty whatever the hour.
+        kampala_today = dt.datetime.now(dt.timezone(dt.timedelta(hours=3))).date().isoformat()
+        monkeypatch.setenv("CXP_OPEN_HOUR", "7")
+        monkeypatch.setenv("CXP_CLOSE_HOUR", "23")
+        monkeypatch.setenv("CXP_CLOSED_DATES", kampala_today)
+        closed = {"topic": "objection_or_dispute", "priority": "high"}
+        ChatModel._maybe_create_ticket(
+            model, reason="dispute", user_query="I dispute this", bot_reply="", session_id="s2",
+            conversation_id="c-hours-off", handoff=closed,
+        )
+        assert closed["officer_hours"]["on_duty"] is False
+        assert closed["officer_hours"]["next_on_duty"]
+
     def test_an_unclassified_handoff_still_gets_a_team(self, tmp_db, monkeypatch):
         from app.service import ChatModel
 

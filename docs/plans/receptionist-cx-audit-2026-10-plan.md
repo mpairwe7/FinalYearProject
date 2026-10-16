@@ -2,7 +2,7 @@
 
 Status: **R1 merged (#581); R2 in review** (delivery log in §8); R3–R5 proposed.
 Written 2026-10-16 against `dev` @ `73dbfe6eb7` (after Phase 39, #580). Tracking issue: #441.
-Gap register rows: G175–G198; G91 reopened, then fixed in R2. (G174 is left free: an uncommitted "CXP business hours" change
+Gap register rows: G175–G199; G91 reopened, then fixed in R2. (G174 is left free: an uncommitted "CXP business hours" change
 in the main checkout already uses it.)
 
 Roles taken for this audit: QA engineer (does the call behave), auditor (does it meet the
@@ -145,11 +145,11 @@ receptionist speaks or listens, and escalations and handoffs **outside officers'
 
 ### R3 — Chat handoffs outside working hours
 
-G196 (one hours-aware "what happens next" message for `POST /v1/escalate`, `escalate_to_human`
-and auto-escalated turns, written in English and localized in the one place replies are —
-`localize_reply` — so Runyankole and Acholi readers get it too), G197 (the SLA clock counts
-only working seconds, `officer_hours.working_seconds`), and the officers' view of what came in
-overnight.
+| Gap | Fix | Acceptance |
+|---|---|---|
+| G196 | `_maybe_create_ticket` puts `officer_hours` on every handoff (both chat paths carry `handoff`); the banner says when officers are next on duty; `/v1/escalate` and `escalate_to_human` word their reply for the hour — English source, localized once by `localize_reply`; no toll-free line when the desk is closed. | Root test: the funnel attaches hours on and off duty; endpoint and tool tests; banner tests in sw and ach. |
+| G197 | SLA breaches count `officer_hours.working_seconds`; `sla_clock` and the hours in the payload; medians stay wall-clock. | Unit: a 22:00 handoff at 08:00 is two working hours; population tests pinned to a desk that never closes. |
+| G199 | The escalation banner's text in all five locales. | Unit. |
 
 ### R4 — Dead air, time limits, degraded modes
 
@@ -196,4 +196,5 @@ shared state, see the runbook); LiveKit Cloud's adaptive interruption model.
 | Phase | PR | State |
 |---|---|---|
 | R1 | #581 | **Merged 2026-10-16** (`98c7c9e550`). Unit: 504 receptionist tests green on the CI interpreter. Live, isolated GPU stack (Sunflower vLLM, SunflowerASR, Orpheus): 14/18 replay scenarios, the new `18_crisis_while_waiting` and `11` (hold, then callback through the epoch-bound countdown) included (`evals/reports/call_replay_2026-10-16_r1_isolated.json`). The four failures (2, 8, 13, 14) fail the same way on pre-R1 `dev` on the same stack (`…_dev_baseline_ab.json`, 0/4): a Luganda answer over the 25 s cap, SunflowerASR mishearing the synthetic Luganda officer request, and G198. |
-| R2 | — | in review |
+| R2 | #582 | in review |
+| R3 | — | in review |

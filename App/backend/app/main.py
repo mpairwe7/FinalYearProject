@@ -95,6 +95,7 @@ from .models import (
     HealthResponse,
     JourneyFunnelResponse,
     OfficerChatThreadResponse,
+    OfficerHoursStatus,
     OfflineAdminStats,
     OfflineStatusResponse,
     OfflineSyncRequest,
@@ -859,6 +860,19 @@ _ESCALATION_REUSED_MESSAGE = (
     "A URA officer is already looking at this conversation. Their reply will "
     "appear here, so there is no need to ask again. You can also call URA "
     "toll-free on 0800 117 000 or 0800 217 000."
+)
+# Outside officers' working hours nobody is reading yet: say when they are back
+# rather than implying someone is looking now, and leave out the toll-free line,
+# which the same officers answer (G196). Same single localization path.
+_ESCALATION_OFF_DUTY_MESSAGE = (
+    "A URA officer has been asked to look at this. Officers work {hours}, so it "
+    "will be picked up when they are next on duty. Their reply will appear here "
+    "in this conversation, so you do not need to start again. Meanwhile, I can "
+    "still help with other questions."
+)
+_ESCALATION_REUSED_OFF_DUTY_MESSAGE = (
+    "Your question is already with URA's officers. They work {hours}, so their "
+    "reply will appear here when they are next on duty. There is no need to ask again."
 )
 _ESCALATION_QUEUE_OFF_MESSAGE = (
     "This assistant cannot pass your question to an officer right now. "
@@ -2859,19 +2873,25 @@ def request_human_officer(
         )
 
     reused = bool(handoff.get("reused_existing_ticket"))
+    # Set on the handoff by _maybe_create_ticket, with the ticket.
+    hours = handoff.get("officer_hours") or {}
+    off_duty = hours.get("on_duty") is False
     metrics.inc(
         "escalation_requested_total",
-        labels={"outcome": "reused" if reused else "created"},
+        labels={"outcome": ("reused" if reused else "created") + ("_off_duty" if off_duty else "")},
     )
+    if off_duty:
+        template = _ESCALATION_REUSED_OFF_DUTY_MESSAGE if reused else _ESCALATION_OFF_DUTY_MESSAGE
+        text = template.format(hours=hours.get("hours") or "")
+    else:
+        text = _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE
     return EscalationResponse(
         ok=True,
         ticket_id=ticket_id,
         status="open",
         reused_existing=reused,
-        message=localize_reply(
-            _ESCALATION_REUSED_MESSAGE if reused else _ESCALATION_CREATED_MESSAGE,
-            locale,
-        ),
+        message=localize_reply(text, locale),
+        officer_hours=OfficerHoursStatus(**hours) if hours else None,
     )
 
 
