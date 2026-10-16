@@ -1,0 +1,231 @@
+{
+ "date": "2026-10-16",
+ "ws": "ws://127.0.0.1:8093/v1/calls/stream",
+ "passed": 0,
+ "scenarios": 4,
+ "first_audio_ms_p50": 1935.0,
+ "results": [
+  {
+   "name": "2_selected_english_speaks_luganda",
+   "note": "First answer in Luganda, same question, not repeated.",
+   "turns": [
+    {
+     "utterance": "lg_tin",
+     "said": "Nnyinza ntya okwewandiisa okufuna TIN yange okuva mu URA?",
+     "first_audio_ms": 2529,
+     "filler_caption_ms": 2258,
+     "answer_caption_ms": 2202,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 0.97
+      }
+     ],
+     "assistant": [
+      "To get your Tax Identification Number (TIN), you must apply to the Commissioner and register with Uganda Revenue Authority (U R A). Your application is free of charge, and you will receive a 10-digit number that serves as your account with U R A. You must quote this number in all communications with U R A and business transactions. Would you like more detail?",
+      "Ka nkebere."
+     ],
+     "caller": [
+      "Ninza ndi okwewandisa okufuna team yange okuva muora.",
+      "Kiyinza ntya okwewandiisa okufuna ttiimu yange okuva mu era?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_f872cd3f4326",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": false
+  },
+  {
+   "name": "8_transfer_from_luganda",
+   "note": "Officer request in Luganda transfers; staff see a Luganda caller.",
+   "turns": [
+    {
+     "utterance": "lg_vat",
+     "said": "VAT yange ntya okugisasula, era ebitundu bimeka?",
+     "first_audio_ms": 2339,
+     "filler_caption_ms": 4680,
+     "answer_caption_ms": 10254,
+     "languages": [
+      {
+       "type": "language",
+       "language": "lg",
+       "source": "auto",
+       "confidence": 1.0
+      }
+     ],
+     "assistant": [
+      "Akaseera katono.",
+      "Okusasula omusolo ku musaala gwo, olina okukwata n’okutwalira buli mwezi Payee nga kkumi na ttaano mu mwezi oguddako ogw’omwezi ogwasooka okukwatibwa omusolo. Kino kikola eri abakozi abafuna ensimbi ezisukka ku Shs. two hundred and thirty-five thousand. Oyagala okumanya ebisingawo?"
+     ],
+     "caller": [
+      "Vati yanga entya okugisasula.",
+      "Era ebitundu bimeeka?",
+      "Ssati yange ntya okugisasula era ebitundu bimeeka?"
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "lg_person",
+     "said": "Njagala okwogera n'omuntu, omukozi wa URA.",
+     "first_audio_ms": 2790,
+     "filler_caption_ms": 2787,
+     "answer_caption_ms": 9936,
+     "languages": [],
+     "assistant": [
+      "Ka ndabe.",
+      "Okusasula omusolo ku musaala gwo, olina okukwata n’okutwalira buli mwezi Payee nga kkumi na ttaano mu mwezi oguddako ogw’omwezi ogwasooka okukwatibwa omusolo. Kino kikola eri abakozi abafuna ensimbi ezisukka ku Shs. two hundred and thirty-five thousand. Oyagala okumanya ebisingawo?"
+     ],
+     "caller": [
+      "Njye dara okwu oge la n'omu nto nkozwa URA."
+     ],
+     "status": [],
+     "reply_language": "lg",
+     "reply_language_expected": "lg",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_bba224755b29",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "lg"
+   ],
+   "passed": false
+  },
+  {
+   "name": "13_officer_offer_accepted",
+   "note": "The answer ends on the officer offer alone; yes transfers the call.",
+   "turns": [
+    {
+     "utterance": "en_worried_tin",
+     "said": "I'm really worried about this. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1935,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1662,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.99
+      }
+     ],
+     "assistant": [
+      "To register for a Team Number with U R A, you must visit a U R A office or One Stop Centre near you and fill out the application form with your company details and vehicle registration info. You should bring your company registration certificate, vehicle logbook, and other required documents to complete the process. If you face challenges during registration, you can reach out to U R A through their contact centre at 0 800, 117, 0 0 0 or 0 800, 217, 0 0 0, or via email at services at U R A dot go dot u g. Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "Im really worried about this; how do I register for a team number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_yes",
+     "said": "Yes, please.",
+     "first_audio_ms": 1087,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1086,
+     "languages": [],
+     "assistant": [
+      "Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "Yes please."
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    }
+   ],
+   "call_id": "call_f6bca3cda605",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": false
+  },
+  {
+   "name": "14_officer_offer_declined",
+   "note": "No keeps the AI on the call.",
+   "turns": [
+    {
+     "utterance": "en_worried_tin",
+     "said": "I'm really worried about this. How do I register for a TIN number with URA?",
+     "first_audio_ms": 1115,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 1112,
+     "languages": [
+      {
+       "type": "language",
+       "language": "en",
+       "source": "auto",
+       "confidence": 0.99
+      }
+     ],
+     "assistant": [
+      "To register for a Team Number with U R A, you must visit a U R A office or One Stop Centre near you and fill out the application form with your company details and vehicle registration info. You should bring your company registration certificate, vehicle logbook, and other required documents to complete the process. If you face challenges during registration, you can reach out to U R A through their contact centre at 0 800, 117, 0 0 0 or 0 800, 217, 0 0 0, or via email at services at U R A dot go dot u g. Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "Im really worried about this.",
+      "How do I register for a team number with ORA?"
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": []
+    },
+    {
+     "utterance": "en_no",
+     "said": "No, thank you.",
+     "first_audio_ms": 507,
+     "filler_caption_ms": null,
+     "answer_caption_ms": 506,
+     "languages": [],
+     "assistant": [
+      "Would you like to speak to an officer about this?"
+     ],
+     "caller": [
+      "No thank you."
+     ],
+     "status": [],
+     "reply_language": "en",
+     "reply_language_expected": "en",
+     "runaway": false,
+     "reply_missing": [
+      "What else can I help you with"
+     ]
+    }
+   ],
+   "call_id": "call_93812f267afe",
+   "language_detection": true,
+   "lingering_missing": [],
+   "language_sequence": [
+    "en"
+   ],
+   "passed": false
+  }
+ ]
+}

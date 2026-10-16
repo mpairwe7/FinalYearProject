@@ -1,8 +1,8 @@
 # Call receptionist: QA, CX and robustness audit, and Phases R1–R4
 
-Status: **R1 in review (#581); R2 in progress** (delivery log in §8); R3–R5 proposed.
+Status: **R1 merged (#581); R2 in review** (delivery log in §8); R3–R5 proposed.
 Written 2026-10-16 against `dev` @ `73dbfe6eb7` (after Phase 39, #580). Tracking issue: #441.
-Gap register rows: G175–G197; G91 reopened, then fixed in R2. (G174 is left free: an uncommitted "CXP business hours" change
+Gap register rows: G175–G198; G91 reopened, then fixed in R2. (G174 is left free: an uncommitted "CXP business hours" change
 in the main checkout already uses it.)
 
 Roles taken for this audit: QA engineer (does the call behave), auditor (does it meet the
@@ -108,6 +108,12 @@ receptionist speaks or listens, and escalations and handoffs **outside officers'
   `cancel_on_idle_timeout=False` (Pipecat 1.11: `idle_timeout_secs=300`, idle frames are bot
   speech, transcripts and user speech); `CallerAudioTap` swallows caller audio while bridged.
   The multilingual builder has disabled it since 2026-09-23.
+* **G198** *(live replay, reproduced on pre-R1 `dev` by A/B on the same stack)* — the yes/no
+  question that ends an answer can be voiced seconds after the answer's last sentence. In
+  scenario 14 the three sentences were synthesised at 09:48:27.7, :37.1 and :42.2 and "Would
+  you like to speak to an officer about this?" only at 09:49:00.6 — after the caller's "No thank
+  you" (09:49:00.4). A caller who answers in that pause is treated, correctly by the rule, as
+  having spoken over a question not yet heard, and is asked again.
 * **G194** — `pyproject.toml [tool.mypy]` exists; no workflow runs mypy. On `dev`:
   `desk.py: error: Module has no attribute "clear_officer"  [attr-defined]`.
 
@@ -152,7 +158,8 @@ G183 (progress cues at about 5 s and 12 s, in the call language, never repeating
 minute before the ceiling — more than the 20 s the criterion asks — and one simple action, a
 "yes" or a tap, extends it, at least ten times; a call an officer is on is not cut at the AI's
 ceiling at all), G185 (a spoken pointer to the screen when speech is withheld or
-fails), G191 if the live check confirms it.
+fails), G191 if the live check confirms it, G198 (find why the closing question waits, and voice it
+with the answer's last sentence).
 
 ### R5 — Honesty and observability
 
@@ -188,5 +195,5 @@ shared state, see the runbook); LiveKit Cloud's adaptive interruption model.
 
 | Phase | PR | State |
 |---|---|---|
-| R1 | #581 | in review |
-| R2 | — | in progress |
+| R1 | #581 | **Merged 2026-10-16** (`98c7c9e550`). Unit: 504 receptionist tests green on the CI interpreter. Live, isolated GPU stack (Sunflower vLLM, SunflowerASR, Orpheus): 14/18 replay scenarios, the new `18_crisis_while_waiting` and `11` (hold, then callback through the epoch-bound countdown) included (`evals/reports/call_replay_2026-10-16_r1_isolated.json`). The four failures (2, 8, 13, 14) fail the same way on pre-R1 `dev` on the same stack (`…_dev_baseline_ab.json`, 0/4): a Luganda answer over the 25 s cap, SunflowerASR mishearing the synthetic Luganda officer request, and G198. |
+| R2 | — | in review |

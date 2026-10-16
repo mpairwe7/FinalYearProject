@@ -192,8 +192,9 @@ SCENARIOS = [
     # G180: nobody signed in means a callback at once, not 90 s on hold for nobody.
     Scenario("19_no_officer_online_is_a_callback_at_once", ["en_officer"], None, expect_status="ai",
              expect_status_on="en_officer", forbid_status="transferring", reply_languages=["en"], staffed=False,
-             expect_reply={"en_officer": ("No officer is available", "Your reference: TIC-")},
-             note="The ticket is kept for the officers and the callback owed; the caller is told so at once."),
+             expect_reply={"en_officer": ("an officer will call you back", "Your reference: TIC-")},
+             note="The ticket is kept for the officers and the callback owed; the caller is told so at once — "
+                  "\"No officer is available…\" in working hours, \"Our officers are off duty…\" outside them (G195)."),
     # G186: a waiting caller can ask to be called back instead.
     Scenario("20_call_me_back_while_waiting", ["en_officer", "en_call_me_back"], None, expect_status="ai",
              expect_status_on="en_call_me_back", reply_languages=["en", "en"], staffed=True,

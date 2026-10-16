@@ -632,6 +632,7 @@ Run the test suite against the live WebSocket endpoint:
 python3 scripts/replay_call_audio.py --ws ws://127.0.0.1:8083/v1/calls/stream
 ```
 *Validated 2026-10-01 on GPU stack (`evals/reports/call_replay_2026-10-01.json`): 17/17 passed (100%), median first-audio latency ~1,320 ms, barge-in cutoff < 1,000 ms.*
+*Re-run 2026-10-16 on an isolated GPU stack with today's models (SunflowerASR-51, Sunflower-Qwen3.5-9B, Orpheus FP8): 14/18 on R1 (`evals/reports/call_replay_2026-10-16_r1_isolated.json`). Scenarios 2, 8, 13 and 14 fail the same way on the code before R1 (`…_dev_baseline_ab.json`): a Luganda answer over the 25 s cap, the synthetic Luganda officer request misheard, and the closing question voiced late (G198) — an environment that has moved since 2026-10-01, not a regression.*
 
 **Before any demo:** the Luganda and Swahili lines in `receptionist/phrases.py` and the
 call-screen strings in `lib/i18n/{lg,sw}.ts` are drafts. Have a native speaker of each
