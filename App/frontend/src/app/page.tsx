@@ -1594,7 +1594,8 @@ export default function Page() {
             if (r.error && !r.transcript) {
               // Hearing nothing is not an outage: say so, in the reader's language (G201).
               addTurns([createTurn('assistant', t(r.error_code === 'no_speech' ? 'voice.didNotCatch' : 'voice.turnFailed'))]);
-              trackErrorOccurred('voice_chat_failed');
+              // Silence is an expected outcome, not a failure to count.
+              if (r.error_code !== 'no_speech') trackErrorOccurred('voice_chat_failed');
               return;
             }
             if (r.transcript) { addTurns([createTurn('user', r.transcript)]); lastUserQueryRef.current = r.transcript; }

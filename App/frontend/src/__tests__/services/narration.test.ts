@@ -114,6 +114,23 @@ describe('narration controls', () => {
     expect(FakeAudioContext.last?.state).toBe('running');
   });
 
+  it('says it paused only once the audio really stopped, and resumed only once it runs', async () => {
+    const { spoken } = await startReading();
+    FakeAudioContext.last!.suspend.mockRejectedValueOnce(new Error('cannot suspend'));
+    expect(await pausePlayback()).toBe(false);
+    expect(narrationSnapshot().paused).toBe(false); // still playing: Pause is still offered
+
+    expect(await pausePlayback()).toBe(true);
+    FakeAudioContext.last!.resume.mockRejectedValueOnce(new Error('cannot resume'));
+    expect(await resumePlayback()).toBe(false);
+    expect(narrationSnapshot().paused).toBe(true); // still paused: Resume is still offered
+
+    expect(await resumePlayback()).toBe(true);
+    expect(narrationSnapshot().paused).toBe(false);
+    FakeSource.all.forEach((s) => s.onended?.());
+    await spoken;
+  });
+
   it('pausing with nothing playing does nothing', async () => {
     await pausePlayback();
     expect(FakeAudioContext.last?.suspend ?? vi.fn()).not.toHaveBeenCalled();

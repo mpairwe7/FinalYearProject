@@ -383,20 +383,41 @@ export function subscribeNarration(listener: () => void): () => void {
   };
 }
 
-/** Pause what is being read aloud. Every piece already queued waits with it. */
-export async function pausePlayback(): Promise<void> {
-  if (!_playbackCtx || !isPlaying() || _narrationPaused) return;
+/**
+ * Pause what is being read aloud; every piece already queued waits with it.
+ * The state changes only once the audio has actually stopped: a suspend that
+ * fails leaves it playing, and the controls go on offering Pause. Returns
+ * whether it paused.
+ */
+export async function pausePlayback(): Promise<boolean> {
+  if (!_playbackCtx || !isPlaying() || _narrationPaused) return false;
+  try {
+    await _playbackCtx.suspend();
+  } catch {
+    return false;
+  }
   _narrationPaused = true;
   notifyNarration();
-  await _playbackCtx.suspend().catch(() => {});
+  return true;
 }
 
-/** Carry on reading from where it was paused. */
-export async function resumePlayback(): Promise<void> {
-  if (!_narrationPaused) return;
+/**
+ * Carry on reading from where it was paused — once the audio is running again:
+ * a resume that fails leaves it paused, and the controls go on offering Resume.
+ * Returns whether it resumed.
+ */
+export async function resumePlayback(): Promise<boolean> {
+  if (!_narrationPaused) return false;
+  if (_playbackCtx && _playbackCtx.state === 'suspended') {
+    try {
+      await _playbackCtx.resume();
+    } catch {
+      return false;
+    }
+  }
   _narrationPaused = false;
   notifyNarration();
-  if (_playbackCtx && _playbackCtx.state === 'suspended') await _playbackCtx.resume().catch(() => {});
+  return true;
 }
 
 function getPlaybackContext(): AudioContext {

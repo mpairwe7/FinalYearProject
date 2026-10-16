@@ -523,7 +523,14 @@
 }
 
 @media (max-width: 480px) {
+  /* Phones: the sentence goes under the label and keeps the bar's width. */
+  .chatv2 .narration-text {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+  }
+
   .chatv2 .narration-sentence {
-    display: none;
+    max-width: 100%;
   }
 }
