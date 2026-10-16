@@ -133,7 +133,7 @@ class StreamingRouteParityTest(_Base):
         decision.clarification_question = ""
         decision.suggested_tools = []
         with mock.patch.object(self.service.supervisor, "classify", return_value=decision), \
-             mock.patch.object(self.service.flags, "is_enabled", side_effect=lambda name: name in {"agentic_mode", "query_rewrite"}), \
+             mock.patch.object(self.service.flags, "is_enabled", side_effect=lambda name, **_rollout: name in {"agentic_mode", "query_rewrite"}), \
              mock.patch.object(self.service.ChatModel, "_maybe_create_ticket", return_value="tic-1"):
             out = self._run(
                 self._patches(_maybe_handle_workflow=mock.Mock(return_value=None)),

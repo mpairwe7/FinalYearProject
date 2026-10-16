@@ -58,6 +58,9 @@ _NO_RESOURCE_MODES = frozenset(
         "clarification",
         "contact_channels",
         "conversational",
+        # A safety reply carries no tax content; forms under it read as the point.
+        "crisis_support",
+        "wellbeing_checkin",
         "escalated",
         "false_premise_rejected",
         "greeting",

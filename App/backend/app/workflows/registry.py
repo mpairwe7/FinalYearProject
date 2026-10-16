@@ -41,6 +41,8 @@ class WorkflowTurn:
     is_tangent: bool = False
     tangent_query: str = ""
     parked_step_prompt: str = ""
+    #: Consecutive answers to this step that failed validation (0 when accepted).
+    failed_attempts: int = 0
 
 
 @dataclass
@@ -142,6 +144,7 @@ def _make_turn(
     is_tangent: bool = False,
     tangent_query: str = "",
     parked_step_prompt: str = "",
+    failed_attempts: int = 0,
 ) -> WorkflowTurn:
     """A :class:`WorkflowTurn` carrying *step*'s stepper metadata and the progress track."""
     step_index, total_steps, all_steps = compute_workflow_progress(wf, session, step.id if step else "")
@@ -163,7 +166,26 @@ def _make_turn(
         is_tangent=is_tangent,
         tangent_query=tangent_query,
         parked_step_prompt=parked_step_prompt,
+        failed_attempts=failed_attempts,
     )
+
+
+def _record_invalid_answer(session: WorkflowSession, step_id: str) -> int:
+    """Count consecutive invalid answers to *step_id*; another step starts again at one.
+
+    Engine state, so ``_``-prefixed like ``_tangent_count``: never a slot the
+    taxpayer gave (the slot bank and the officer hand-off skip such keys).
+    """
+    if session.slots.get("_invalid_step") != step_id:
+        session.slots["_invalid_step"] = step_id
+        session.slots["_invalid_count"] = 0
+    session.slots["_invalid_count"] = int(session.slots.get("_invalid_count") or 0) + 1
+    return int(session.slots["_invalid_count"])
+
+
+def _clear_invalid_answers(session: WorkflowSession) -> None:
+    session.slots.pop("_invalid_step", None)
+    session.slots.pop("_invalid_count", None)
 
 
 #: The "-ing" forms people use for the task a trigger names. Triggers are
@@ -564,10 +586,13 @@ class WorkflowRegistry:
                     question=f"{error}\n\n{step.question}",
                     validation_error=error,
                     slot_name=step.slot,
+                    failed_attempts=_record_invalid_answer(session, step.id),
                 )
             session.slots[step.slot] = normalised
+            _clear_invalid_answers(session)
         elif step.slot:
             session.slots[step.slot] = user_input.strip()
+            _clear_invalid_answers(session)
 
         session.current_step_idx += 1
 

@@ -194,6 +194,9 @@ export function CallScreen() {
           <h3 className="call-pre-title">{t('call.preTitle')}</h3>
           <p className="call-pre-subtitle">{t('call.preSubtitle')}</p>
           <p className="call-pre-consent">{t('call.preConsent')}</p>
+          <p className="call-pre-consent" data-testid="call-tone-notice">
+            {t('call.preConsentTone')}
+          </p>
           <div className="call-pre-actions">
             <button type="button" className="call-btn call-btn--ghost" onClick={closeCall}>
               {t('call.consentDecline')}

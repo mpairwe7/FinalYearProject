@@ -290,6 +290,9 @@ class RegistryIntegrityTests(unittest.TestCase):
             # Phase 38: offered officers and structured text handoffs ramp by cohort.
             "eq_stakes_escalation",
             "structured_text_handoff",
+            # Phase 39: guided flows that listen; the hopelessness check-in.
+            "workflow_emotional_offramp",
+            "wellbeing_checkin",
         ):
             self.assertIn(name, _REGISTRY, name)
             self.assertFalse(_REGISTRY[name].default, name)

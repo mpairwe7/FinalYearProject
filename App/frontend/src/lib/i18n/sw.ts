@@ -121,7 +121,7 @@ export const sw: Partial<Dictionary> = {
   'composer.sendRecording': 'Tuma rekodi',
   'composer.analysing': 'Ninachambua kiambatisho...',
   'composer.disclaimer':
-    'Msaidizi wa URA anaweza kukosea. Thibitisha taarifa muhimu za kodi kwenye ura.go.ug.',
+    'Msaidizi wa URA (AI) anaweza kukosea. Thibitisha taarifa muhimu za kodi kwenye ura.go.ug.',
 
   'rail.newChat': 'Mazungumzo mapya',
   'rail.chats': 'Mazungumzo',
@@ -317,6 +317,8 @@ export const sw: Partial<Dictionary> = {
   'call.preTitle': 'Piga Simu URA',
   'call.preSubtitle': '0800 117 000 · Bila malipo',
   'call.preConsent': 'Simu hunakiliwa ili afisa aweze kuendelea akiwa na muktadha kamili.',
+  'call.preConsentTone':
+    'Msaidizi wa AI anaweza pia kuzingatia sauti na kasi ya usemi wako, pamoja na maneno yako, ili kurekebisha jinsi anavyojibu.',
   'call.jumpToLatest': 'Nenda kwa za hivi punde',
   'call.bridgeActive': 'Muunganisho wa sauti wa moja kwa moja unafanya kazi',
   'call.consentTitle': 'Idhini ya Kurekodi Simu',

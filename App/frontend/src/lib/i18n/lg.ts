@@ -123,7 +123,7 @@ export const lg: Partial<Dictionary> = {
   'composer.sendRecording': 'Sindika eddoboozi',
   'composer.analysing': 'Nkebera fayiro...',
   'composer.disclaimer':
-    'Omuyambi wa URA ayinza okukyamu. Kakasa amawulire g’omusolo ku ura.go.ug.',
+    'Omuyambi wa URA (AI) ayinza okukyamu. Kakasa amawulire g’omusolo ku ura.go.ug.',
 
   'rail.newChat': 'Emboozi empya',
   'rail.chats': 'Emboozi',

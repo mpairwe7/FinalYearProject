@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 #: supervisor's "talk to … officer" escalation rule, so a click routes
 #: straight to the ticket queue.
 HANDOFF_ACTION = "Talk to an officer"
+#: Replies about the taxpayer's safety; turn guidance leaves them as they are.
+SAFETY_MODES = frozenset({"crisis_support", "wellbeing_checkin"})
 
 #: Prefix of every guided-mode offer; the flow's name follows it.
 GUIDE_PREFIX = "Guide me step by step through "
@@ -151,11 +153,13 @@ def _offer_person(
     assessment = assess_escalation(text, history=list(prior_messages), result=result)
     if not assessment.offers_person:
         return
-    if HANDOFF_ACTION in actions:
-        actions.remove(HANDOFF_ACTION)
     if assessment.tier == TIER_PRIORITY:
+        if HANDOFF_ACTION in actions:
+            actions.remove(HANDOFF_ACTION)
         actions.insert(0, HANDOFF_ACTION)
-    else:
+    elif HANDOFF_ACTION not in actions:
+        # An offer adds the action; it never demotes one an earlier decision
+        # put first (a paused guided flow leads with the officer, Phase 39).
         actions.append(HANDOFF_ACTION)
     try:
         from .analytics import metrics  # noqa: PLC0415
@@ -188,6 +192,10 @@ def apply_turn_guidance(
     taxpayer's id) addresses flag rollouts.
     """
     if not isinstance(result, dict):
+        return result
+    if str(result.get("retrieval_mode") or "") in SAFETY_MODES:
+        # A safety reply carries no tax content: no guided-steps offer, no
+        # filing-deadline nudge under "you don't have to face this alone".
         return result
     prior_replies = [str(t.get("bot_reply") or "") for t in recent_turns]
     prior_messages = [str(t.get("user_message") or "") for t in recent_turns]

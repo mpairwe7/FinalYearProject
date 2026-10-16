@@ -36,6 +36,7 @@ import {
   type ConnectorNotice,
   type ConnectorUse,
 } from '../lib/connectors';
+import { applyTurnMeta } from '../lib/turnMeta';
 import { createRevealQueue, type RevealQueue } from '../lib/revealQueue';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import {
@@ -1336,27 +1337,9 @@ export default function Page() {
                 if (typeof p.reply === 'string' && p.reply.trim()) {
                   reveal.set(cleanResponse(p.reply));
                 }
-                const disc = p.discrepancy_report ?? p.discrepancyReport;
                 const notices = parseConnectorNotices(p.connector_notices);
                 if (notices.length) applyConnectorTurnState(notices);
-                updateLastTurn((t) => ({
-                  ...t,
-                  serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
-                  citations: p.citations ?? t.citations,
-                  faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-                  retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-                  escalationRequired: p.escalation_required ?? t.escalationRequired,
-                  escalationReason: p.escalation_reason ?? t.escalationReason,
-                  connectorNotices: notices.length ? notices : t.connectorNotices,
-                  workflow: p.workflow ?? t.workflow,
-                  resources: p.resources ?? (p.workflow?.resources ?? t.resources),
-                  discrepancyReport: disc && typeof disc === 'object' ? {
-                    id: String(disc.id || ''),
-                    status: String(disc.status || 'pending'),
-                    frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
-                    discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
-                  } : t.discrepancyReport,
-                }));
+                updateLastTurn((t) => applyTurnMeta(t, p, notices));
               }
             } catch {}
             continue;
@@ -1384,25 +1367,7 @@ export default function Page() {
               if (typeof p.reply === 'string' && p.reply.trim()) {
                 reveal.set(cleanResponse(p.reply));
               }
-              const disc = p.discrepancy_report ?? p.discrepancyReport;
-              updateLastTurn((t) => ({
-                ...t,
-                serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
-                citations: p.citations ?? t.citations,
-                faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-                retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-                escalationRequired: p.escalation_required ?? t.escalationRequired,
-                escalationReason: p.escalation_reason ?? t.escalationReason,
-                nextActions: p.next_actions ?? t.nextActions,
-                workflow: p.workflow ?? t.workflow,
-                resources: p.resources ?? (p.workflow?.resources ?? t.resources),
-                discrepancyReport: disc && typeof disc === 'object' ? {
-                  id: String(disc.id || ''),
-                  status: String(disc.status || 'pending'),
-                  frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
-                  discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
-                } : t.discrepancyReport,
-              }));
+              updateLastTurn((t) => applyTurnMeta(t, p));
             } catch {}
           }
           return;
@@ -1417,28 +1382,9 @@ export default function Page() {
             const p = JSON.parse(data);
             meta = { ...meta, ...p };
             if (p.conversation_id) sessionIdRef.current = p.conversation_id;
-            const disc = p.discrepancy_report ?? p.discrepancyReport;
             const notices = parseConnectorNotices(p.connector_notices);
             if (notices.length) applyConnectorTurnState(notices);
-            updateLastTurn((t) => ({
-              ...t,
-              serverTurnId: typeof p.turn_id === 'string' ? p.turn_id : t.serverTurnId,
-              connectorNotices: notices.length ? notices : t.connectorNotices,
-              citations: p.citations ?? t.citations,
-              faithfulnessScore: p.faithfulness_score ?? t.faithfulnessScore,
-              retrievalMode: p.retrieval_mode ?? t.retrievalMode,
-              escalationRequired: p.escalation_required ?? t.escalationRequired,
-              escalationReason: p.escalation_reason ?? t.escalationReason,
-              nextActions: p.next_actions ?? t.nextActions,
-              workflow: p.workflow ?? t.workflow,
-              resources: p.resources ?? (p.workflow?.resources ?? t.resources),
-              discrepancyReport: disc && typeof disc === 'object' ? {
-                id: String(disc.id || ''),
-                status: String(disc.status || 'pending'),
-                frequency_count: typeof disc.frequency_count === 'number' ? disc.frequency_count : 1,
-                discrepancy_type: typeof disc.discrepancy_type === 'string' ? disc.discrepancy_type : 'outdated_law',
-              } : t.discrepancyReport,
-            }));
+            updateLastTurn((t) => applyTurnMeta(t, p, notices));
           } catch {}
           return;
         }

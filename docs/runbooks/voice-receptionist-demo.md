@@ -148,7 +148,8 @@ All switches and thresholds are configured via environment variables:
 | `FLAG_RECEPTIONIST_LANGUAGE_DETECTION` | `false` | Multilingual calls — §6 |
 | `FLAG_HYBRID_SPEECH_S2S` | `false` | Hybrid S2S + Cascaded Speech Router (`receptionist/hybrid_s2s.py`) |
 | `FLAG_VOICE_AGENTIC_WORKFLOWS` | `false` | Spoken confirmation token binding & guided workflows on live calls |
-| `FLAG_EMOTION_AWARE_PROSODY` | `false` | Acoustic prosody & caller affect conditioning (`receptionist/prosody.py`) |
+| `FLAG_EMOTION_AWARE_PROSODY` | `false` | Acoustic prosody & caller affect conditioning (`receptionist/prosody.py`). Affect needs the caller's words: loudness or pace alone names nothing (see `conversational-safety-and-eq.md`) |
+| `PROSODY_ACOUSTIC_ONLY_AFFECT` | `false` | Restores affect labels from loudness or pace alone — for a validation study only |
 | `FLAG_SPOKEN_FIGURE_GUARD` | `false` | Dictation pauses & spoken figure verification (`receptionist/spoken_figure_guard.py`) |
 | `FLAG_OFFICER_VOICE_COPILOT` | `false` | Live ASR + English router view assist on the officer console during bridged calls |
 | `FLAG_CONTINUOUS_RELATIONSHIP_MEMORY` | `false` | Longitudinal `ResolutionCase` checkpointing & bidirectional `Voice <-> Web` carryover |

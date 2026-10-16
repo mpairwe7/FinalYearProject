@@ -741,7 +741,25 @@ _CRISIS_RE = re.compile(
     r"\b(?:kill(?:ing)?\s+myself|end\s+my\s+(?:own\s+)?life|end\s+it\s+all"
     r"|take\s+my\s+(?:own\s+)?life|suicid\w*|want\s+to\s+die|wish\s+i\s+(?:was|were)\s+dead"
     r"|better\s+off\s+dead|no\s+reason\s+to\s+live|harm\s+myself|hurt\s+myself"
+    # Passive ideation — a recognised warning sign, and how disclosure often
+    # starts: indirectly, before anything explicit (Phase 39).
+    r"|nothing\s+(?:left\s+)?to\s+live\s+for"
+    r"|(?:everyone|everybody|they|my\s+family|my\s+children|my\s+kids)\s+(?:would|will)\s+be\s+better\s+off\s+without\s+me"
+    r"|(?:don'?t|do\s+not)\s+want\s+to\s+(?:live|be\s+alive)\s+any\s*more"
+    r"|tired\s+of\s+(?:living|being\s+alive)|(?:can'?t|cannot)\s+go\s+on\s+living"
     r"|okwetta|kujiua|okweyita|kweyita|neko\s+koma)\b"
+)
+
+#: Hopelessness — "I can't cope", "I give up", "no way out". Alone it is often
+#: about a portal ("this site is hopeless"); said in the middle of hardship or
+#: enforcement it is the indirect disclosure crisis studies find chatbots miss.
+#: needs_wellbeing_checkin() requires both. Kiswahili forms only: the other
+#: languages reach it through the English rewrite (native cues are an open item).
+_HOPELESSNESS_RE = re.compile(
+    r"\b(?:(?:can'?t|cannot)\s+(?:take|bear|handle)\s+(?:it|this|any\s+of\s+this)\s+any\s*more"
+    r"|(?:can'?t|cannot)\s+cope|(?:can'?t|cannot)\s+go\s+on|i\s+give\s+up|no\s+way\s+out"
+    r"|at\s+the\s+end\s+of\s+my\s+(?:rope|tether)|lost\s+everything|no\s+hope|hopeless"
+    r"|nimechoka\s+na\s+maisha|sina\s+tumaini)\b"
 )
 
 #: Numbers checked on 2026-09-29: 999/112 on the Uganda Police Force emergency
@@ -833,16 +851,64 @@ def repair_reply(kind: str, *, repeated: bool) -> str:
     return f"{ack}\n\n{REPAIR_QUESTION}" if ack else REPAIR_QUESTION
 
 
+#: The crisis lines both support replies give (verified on CRISIS_LINES_VERIFIED_ON).
+CRISIS_LINES = (
+    "- If you are in danger right now, call **999** or **112**.\n"
+    "- To talk to a trained counsellor for free, call Mental Health Uganda on "
+    "**0800 21 21 21** (Monday to Friday, 8:30am to 5pm)."
+)
+
+
 def crisis_support_reply() -> str:
     """Supportive reply with Ugandan crisis lines. Never carries tax content."""
     return (
         "I'm really sorry you're feeling this way. You don't have to face this alone, "
         "and your safety matters more than any tax matter.\n\n"
-        "- If you are in danger right now, call **999** or **112**.\n"
-        "- To talk to a trained counsellor for free, call Mental Health Uganda on "
-        "**0800 21 21 21** (Monday to Friday, 8:30am to 5pm).\n\n"
+        f"{CRISIS_LINES}\n\n"
         "The tax side can wait. When you're ready, a URA officer can talk through "
         "your options with you, including paying in instalments."
+    )
+
+
+#: Offered with the check-in: a person, or the remedy question asked for them.
+WELLBEING_CHECKIN_ACTIONS = ("Talk to an officer", "How can I pay my tax in instalments?")
+
+
+def detect_hopelessness(message: str) -> bool:
+    """True when *message* says the taxpayer feels they cannot go on (see _HOPELESSNESS_RE)."""
+    return bool(_HOPELESSNESS_RE.search(_normalise(message)))
+
+
+def needs_wellbeing_checkin(message: str, history: Sequence[str] = ()) -> bool:
+    """Hopelessness in the middle of hardship or enforcement: check in before the tax answer.
+
+    Neither is enough alone — "I give up on this portal" is frustration, "I
+    can't afford the penalty" is hardship, and each has its own handling. Both,
+    in this message or across the last three, are the indirect disclosure that
+    the 2025–26 chatbot crisis studies found systems answer as a tax question.
+    An explicit statement goes to the crisis path instead.
+    """
+    if detect_crisis(message) or not detect_hopelessness(message):
+        return False
+    recent = [*[str(m or "") for m in list(history)[-2:]], message or ""]
+    return any(
+        detect_user_distress(text) == "hardship" or "enforcement" in detect_high_stakes(text) for text in recent
+    )
+
+
+def checkin_already_given(prior_replies: Sequence[str]) -> bool:
+    """Whether this conversation has already been given the crisis lines: once is a check-in, twice is a script."""
+    return any("0800 21 21 21" in (reply or "") for reply in prior_replies)
+
+
+def wellbeing_checkin_reply() -> str:
+    """A check-in before the tax answer: the crisis lines, and the remedy and the person on offer."""
+    return (
+        "That sounds like a lot to carry, so before the tax side: how are you doing? "
+        "If it ever feels like too much, you don't have to face it alone.\n\n"
+        f"{CRISIS_LINES}\n\n"
+        "When you're ready, I can go through your options with you, such as paying in "
+        "instalments, or a URA officer can talk them through with you."
     )
 
 
@@ -859,7 +925,7 @@ def tone_hint_for(kind: str) -> str:
 # must recognise it can never drift apart (test_text_signals pins each one).
 
 GREETING_REPLY = (
-    "Hello, and welcome! I'm the URA Digital Assistant. I can help you with "
+    "Hello, and welcome! I'm the URA Digital Assistant — an AI, not a person. I can help you with "
     "tax registration, filing returns, payments, customs, and more — how can "
     "I help you today?"
 )
@@ -867,22 +933,22 @@ GREETING_REPLY = (
 GREETING_REPLY_BY_LOCALE: dict[str, str] = {
     "en": GREETING_REPLY,
     "sw": (
-        "Habari, na karibu! Mimi ni Msaidizi wa Kidijitali wa URA. Ninaweza kukusaidia "
+        "Habari, na karibu! Mimi ni Msaidizi wa Kidijitali wa URA (AI). Ninaweza kukusaidia "
         "kuhusu usajili wa kodi, kuwasilisha marejesho, malipo, forodha, na zaidi — "
         "ninawezaje kukusaidia leo?"
     ),
     "lg": (
-        "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA. Nnyinza okukuyamba "
+        "Nkulamusizza, era nkwanirizza! Nze Muyambi wa Digito owa URA (AI). Nnyinza okukuyamba "
         "ku by'okwewandiisa ku musolo, okuwaayo alipoota z'omusolo, okusasula, eby'omusolo "
         "gw'oku mwalo, n'ebirala — nnyinza kukuyamba ntya leero?"
     ),
     "nyn": (
-        "Agandi, kandi nyakiiriza! Ndi Omuhwezi wa Digito owa URA. Nimbaasa kukuhwera "
+        "Agandi, kandi nyakiiriza! Ndi Omuhwezi wa Digito owa URA (AI). Nimbaasa kukuhwera "
         "aha by'okwehandiikisa aha mushoro, okuheereza ebihandiiko by'omushoro, okushashura, "
         "eby'omushoro gw'ensharo, n'ebindi — nimbaasa kukuhwera nta erizooba?"
     ),
     "ach": (
-        "Kopango, dok ajoli! An Lakony me Dijitol me URA. Atwero konyi "
+        "Kopango, dok ajoli! An Lakony me Dijitol me URA (AI). Atwero konyi "
         "i kom coyo nying pi mucoro, cwalo ripot me mucoro, culu mucoro, mucoro "
         "me wang lobo, ki mukene — atwero konyi nining tin?"
     ),

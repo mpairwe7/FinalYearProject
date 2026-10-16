@@ -125,12 +125,16 @@ def workflow_session(state_key: str, *, tenant_id: str = "default") -> Mapping[s
 def given_slot_names(session: Mapping[str, Any], *, tenant_id: str = "default", user_id: str = "") -> list[str]:
     """Names of what the taxpayer has already given: the workflow *session*'s
     answered slots, plus their consented slot bank. Names only."""
-    names: set[str] = {k for k, v in (session.get("slots") or {}).items() if v not in ("", None)}
+    # "_"-prefixed keys are the engine's own state (_tangent_count, _invalid_count).
+    names: set[str] = {
+        k for k, v in (session.get("slots") or {}).items() if v not in ("", None) and not str(k).startswith("_")
+    }
     if user_id:
         try:
             from .memory import get_memory_service  # noqa: PLC0415
 
-            names.update(get_memory_service().resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id))
+            banked = get_memory_service().resolution_ledger.get_verified_slots(user_id, tenant_id=tenant_id)
+            names.update(k for k in banked if not str(k).startswith("_"))
         except Exception:
             logger.debug("slot bank unavailable for handoff", exc_info=True)
     return sorted(names)
