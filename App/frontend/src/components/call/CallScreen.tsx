@@ -362,26 +362,17 @@ export function CallScreen() {
               <CallOrb active={live} />
 
               <div className="call-dock-side call-dock-side--end">
-                {status === 'ai' && (
+                {(status === 'ai' || status === 'transferring') && (
+                  // One button that changes its job when the wait starts, so a
+                  // keyboard user who asked for an officer keeps their focus.
                   <button
                     type="button"
                     className="call-ctl"
-                    onClick={requestOfficer}
-                    aria-label={t('call.talkOfficer')}
-                    title={t('call.talkOfficer')}
+                    onClick={status === 'ai' ? requestOfficer : requestCallback}
+                    aria-label={status === 'ai' ? t('call.talkOfficer') : t('call.callMeBack')}
+                    title={status === 'ai' ? t('call.talkOfficer') : t('call.callMeBack')}
                   >
-                    <UserIcon />
-                  </button>
-                )}
-                {status === 'transferring' && (
-                  <button
-                    type="button"
-                    className="call-ctl"
-                    onClick={requestCallback}
-                    aria-label={t('call.callMeBack')}
-                    title={t('call.callMeBack')}
-                  >
-                    <PhoneIcon size={20} />
+                    {status === 'ai' ? <UserIcon /> : <PhoneIcon size={20} />}
                   </button>
                 )}
                 <button

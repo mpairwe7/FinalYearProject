@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app import database as db
 from app.flags import flags
+from app.receptionist import brain as brain_mod
 from app.receptionist import desk, presence
 from app.receptionist import transfer as transfer_mod
 from app.receptionist.brain import UraReceptionistBrain
@@ -130,6 +131,15 @@ class NobodyOnlineTests(QueueCase):
         self.assertNotIn(hours_line, self.voiced())  # never read out
         row = get_call(self.call_id)
         self.assertEqual((row["needs_callback"], row["callback_reason"]), (1, "outside_working_hours"))
+
+    async def test_no_hours_line_for_a_wait_that_had_already_ended(self):
+        """The hours follow the callback line, never a wait that ended some other way."""
+        self.staffed.return_value = False
+        with patch("app.officer_hours.on_duty", return_value=False), \
+                patch.object(brain_mod, "close_transfer_on_timeout", return_value=None):
+            await self.brain.process_frame(RequestOfficerFrame())
+        self.assertFalse(any(t.startswith("Officers' hours: ") for t in self.texts()))
+        self.assertNotIn(phrase("officers_off_duty", "en"), self.voiced())
 
     async def test_an_officer_working_late_still_takes_the_call(self):
         with patch("app.officer_hours.on_duty", return_value=False):
@@ -270,6 +280,33 @@ class OfficerHoldTests(unittest.IsolatedAsyncioTestCase):
         updates = self.texts().count(phrase("officer_hold_update", "en"))
         await asyncio.sleep(0.12)
         self.assertEqual(self.texts().count(phrase("officer_hold_update", "en")), updates)
+
+    async def test_a_line_that_cannot_be_spoken_does_not_silence_the_rest(self):
+        update = phrase("officer_hold_update", "en")
+        spoken: list[str] = []
+
+        async def flaky(room: CallRoom, text: str, speech_model: object) -> float:
+            spoken.append(text)
+            if text == update and spoken.count(update) == 1:
+                raise RuntimeError("synthesis failed")
+            return 0.0
+
+        with patch.dict(os.environ, {"RECEPTIONIST_HOLD_UPDATE_S": "0.05"}), \
+                patch.object(desk, "say_to_caller", new=flaky), \
+                self.assertLogs("app.receptionist.desk", level="WARNING"):
+            await desk.hold(self.call_id, "officer_okello", on=True)
+            await asyncio.sleep(0.25)
+        self.assertGreaterEqual(spoken.count(update), 2)
+        self.assertFalse(self.room.hold_timer.done())
+
+    async def test_a_call_that_ends_during_the_hold_line_gets_no_reassurance(self):
+        async def ended_meanwhile(room: CallRoom, text: str, speech_model: object) -> float:
+            room.state.mode = "ended"  # what CallRoom.end does, under its own lock
+            return 0.0
+
+        with patch.object(desk, "say_to_caller", new=ended_meanwhile):
+            await desk.hold(self.call_id, "officer_okello", on=True)
+        self.assertIsNone(self.room.hold_timer)
 
     async def test_ending_the_call_stops_the_reassurance(self):
         await desk.hold(self.call_id, "officer_okello", on=True)

@@ -332,7 +332,9 @@ async def hold(call_id: str, officer_id: str, on: bool, speech_model: Any = None
             if room.officer is not None:
                 room.officer.on_hold = True
             await say_to_caller(room, phrase("on_hold", room.state.locale), speech_model)
-            _start_hold_reassurance(room, speech_model)
+            # The call can end while that line plays (CallRoom.end takes its own lock).
+            if room.state.mode == "bridged" and room.state.on_hold:
+                _start_hold_reassurance(room, speech_model)
             status_event = {"type": "status", "status": "on_hold"}
             await _send_to_caller(room, status_event)
             hub.publish_call(call_id, "hold", {"on": True})
@@ -484,12 +486,20 @@ def _stop_hold_reassurance(room: CallRoom) -> None:
 
 
 async def _reassure_while_held(room: CallRoom, speech_model: Any, every: float) -> None:
-    """While the officer holds the call, the caller hears they have not been forgotten."""
+    """While the officer holds the call, the caller hears they have not been forgotten.
+
+    A line that cannot be spoken is logged and the next one tried: ending the
+    loop on it would leave the rest of the hold silent, the failure this exists
+    to prevent.
+    """
     while True:
         await asyncio.sleep(every)
         if room.state.mode != "bridged" or not room.state.on_hold:
             return
-        await say_to_caller(room, phrase("officer_hold_update", room.state.locale), speech_model)
+        try:
+            await say_to_caller(room, phrase("officer_hold_update", room.state.locale), speech_model)
+        except Exception:  # noqa: BLE001 — cancellation is not an Exception, so it still ends the loop
+            logger.warning("Hold reassurance for call %s could not be spoken", room.call_id, exc_info=True)
 
 
 def _caller_satisfaction(score: Any, status: str | None) -> tuple[str, int | None] | None:

@@ -885,16 +885,17 @@ class UraReceptionistBrain(LLMService):
             self.room.state.ticket_id or "", reason="caller_requested_callback", line="callback_confirmed"
         )
 
-    async def _end_wait_with_callback(self, ticket_ref: str, *, reason: str, line: str) -> None:
+    async def _end_wait_with_callback(self, ticket_ref: str, *, reason: str, line: str) -> bool:
         """End the wait as a callback: the caller is told why, with the reference on screen.
 
         Shared by the three ways a wait becomes a callback: nobody answered in
         time, nobody was signed in to answer, or the caller asked for one.
+        False when the call was no longer waiting, and nothing was said.
         """
         stop_countdown(self.room)
         status_event = close_transfer_on_timeout(self.room, ticket_ref, callback_reason=reason)
         if status_event is None:
-            return
+            return False
         # Nobody came: a review asked as the transfer began is now unanswered.
         if self.room.state.review_state == "asking_transfer":
             call_review.settle(self.room)
@@ -903,6 +904,7 @@ class UraReceptionistBrain(LLMService):
         if ticket_ref:
             reference = phrase("reference_screen", self.language, ref=case_reference(ticket_ref))
             await self._say_and_record(reference, kind="notice", speak=False)
+        return True
 
     async def _support_crisis_waiting(self) -> None:
         """The crisis lines for a caller already waiting, then the call raised to urgent."""
@@ -1698,8 +1700,7 @@ class UraReceptionistBrain(LLMService):
             # outside their working hours, for when they are next on duty (G195).
             if officer_hours.on_duty():
                 await self._end_wait_with_callback(tid or "", reason="no_officer_online", line="officers_unavailable")
-            else:
-                await self._end_wait_with_callback(tid or "", reason="outside_working_hours", line="officers_off_duty")
+            elif await self._end_wait_with_callback(tid or "", reason="outside_working_hours", line="officers_off_duty"):
                 hours = phrase("officer_hours_screen", self.language, hours=officer_hours.officer_hours().label())
                 await self._say_and_record(hours, kind="notice", speak=False)
             return

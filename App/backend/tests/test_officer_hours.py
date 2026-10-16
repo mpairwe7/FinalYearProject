@@ -9,7 +9,14 @@ from unittest.mock import patch
 
 from app import officer_hours as oh
 
-KAMPALA = oh.officer_hours().zone  # Africa/Kampala, or fixed EAT without zone data
+
+def desk_env(**env: str) -> dict[str, str]:
+    """The environment with no CXP_ setting but *env*: no test reads the host's desk."""
+    return {**{k: v for k, v in os.environ.items() if not k.startswith("CXP_")}, **env}
+
+
+with patch.dict(os.environ, desk_env(), clear=True):
+    KAMPALA = oh.officer_hours().zone  # Africa/Kampala, or fixed EAT without zone data
 
 
 def at(day: int, hour: int, minute: int = 0, month: int = 10) -> float:
@@ -21,8 +28,7 @@ class DefaultHoursTests(unittest.TestCase):
     """07:00–23:00 every day: the CXP desk closes at 11 PM."""
 
     def setUp(self) -> None:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("CXP_")}
-        patcher = patch.dict(os.environ, env, clear=True)
+        patcher = patch.dict(os.environ, desk_env(), clear=True)
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -51,7 +57,7 @@ class DefaultHoursTests(unittest.TestCase):
 
 class ConfiguredHoursTests(unittest.TestCase):
     def hours(self, **env: str) -> oh.OfficerHours:
-        with patch.dict(os.environ, env):
+        with patch.dict(os.environ, desk_env(**env), clear=True):
             return oh.officer_hours()
 
     def test_a_night_shift_runs_past_midnight(self):

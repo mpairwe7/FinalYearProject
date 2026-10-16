@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import { CallScreen } from '@/components/call/CallScreen';
 import { useCallStore } from '@/store/useCallStore';
 
@@ -170,6 +170,20 @@ describe('CallScreen component', () => {
     expect(screen.queryByTestId('call-queue-position')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Call me back instead' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Talk to an officer' })).toBeDefined();
+  });
+
+  it('keeps keyboard focus when the officer button becomes the call-back', () => {
+    useCallStore.getState().openCall();
+    useCallStore.getState().setStatus('ai');
+
+    render(<CallScreen />);
+    const button = screen.getByRole('button', { name: 'Talk to an officer' });
+    button.focus();
+    act(() => useCallStore.getState().setStatus('transferring'));
+
+    const callback = screen.getByRole('button', { name: 'Call me back instead' });
+    expect(callback).toBe(button);
+    expect(document.activeElement).toBe(callback);
   });
 
   it('displays bridged officer state when officer joins', () => {
