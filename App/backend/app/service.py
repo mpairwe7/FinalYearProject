@@ -9904,7 +9904,9 @@ class ChatModel:
                 return crisis
 
             if self._needs_wellbeing_checkin(message, (router_message,), conversation_history, user_id=user_id):
-                checkin = self._wellbeing_checkin_result(thread_id=thread_id, locale=locale)
+                checkin = _with_discrepancy(
+                    self._wellbeing_checkin_result(thread_id=thread_id, locale=locale)
+                )
                 self._audit_turn(
                     message=message, result=checkin, session_id=session_id, trace_ctx=trace_ctx
                 )

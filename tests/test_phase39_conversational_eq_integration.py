@@ -188,3 +188,34 @@ class TestSafetyRepliesCarryNoTaxContent:
         assert reply["retrieval_mode"] == "crisis_support"
         assert reply.get("resources") in (None, [])
         assert not any("deadline" in str(action).lower() for action in reply["next_actions"])
+
+
+class TestVoiceAffectGateAndSlotHygiene:
+    def test_prosody_acoustic_only_affect_requires_opt_in(self, monkeypatch) -> None:
+        import struct
+        from app.receptionist.prosody import analyze_utterance_prosody
+
+        pcm = struct.pack("<" + "h" * 16000, *([18000] * 16000))
+        text = "one two three four five six seven eight"
+        monkeypatch.delenv("PROSODY_ACOUSTIC_ONLY_AFFECT", raising=False)
+        assert analyze_utterance_prosody(pcm, text=text).caller_affect == "calm"
+        monkeypatch.setenv("PROSODY_ACOUSTIC_ONLY_AFFECT", "true")
+        assert analyze_utterance_prosody(pcm, text=text).caller_affect == "frustrated"
+
+    def test_underscore_prefixed_engine_slots_are_filtered(self, monkeypatch) -> None:
+        from app.memory.resolution_ledger import ResolutionLedger
+        from app.officer_handoff import given_slot_names
+
+        assert given_slot_names({"slots": {"tax_type": "vat", "_tangent_count": 1, "_invalid_count": 2}}) == [
+            "tax_type"
+        ]
+        written: dict = {}
+        monkeypatch.setattr("app.database.has_active_consent", lambda *a, **k: True)
+        monkeypatch.setattr("app.database.get_working_memory", lambda *a, **k: {})
+        monkeypatch.setattr(
+            "app.database.upsert_working_memory",
+            lambda user_id, tenant, fields, ttl_seconds=0: written.update(fields) or True,
+        )
+        ResolutionLedger().store_verified_slots("u-1", {"tax_type": "vat", "_invalid_step": "collect_period"})
+        assert written["verified_slot_bank"] == {"tax_type": "vat"}
+

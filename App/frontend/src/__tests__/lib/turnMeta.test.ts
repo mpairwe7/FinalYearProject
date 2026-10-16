@@ -55,5 +55,12 @@ describe('applyTurnMeta', () => {
     const notices = [{ namespace: 'efris', label: 'EFRIS', reason: 'unavailable', message: 'down' }];
     const kept = applyTurnMeta(turn({ connectorNotices: notices as ChatTurn['connectorNotices'] }), {});
     expect(kept.connectorNotices).toEqual(notices);
+    const fresh = [{ namespace: 'ura', label: 'URA', reason: 'unavailable', message: 'down' }];
+    const replaced = applyTurnMeta(
+      turn({ connectorNotices: notices as ChatTurn['connectorNotices'] }),
+      {},
+      fresh as ChatTurn['connectorNotices'],
+    );
+    expect(replaced.connectorNotices).toEqual(fresh);
   });
 });
