@@ -773,20 +773,6 @@ class MCPClient:
                     cached, ok=bool(cached.get("ok", True)), risk=risk, namespace=namespace, replayed=True
                 )
 
-        breaker = self._breaker_for(namespace)
-        if not breaker.allow_request():
-            return finish(
-                {
-                    "ok": False,
-                    "error": f"{namespace} tools are temporarily unavailable (circuit open)",
-                    "retryable": True,
-                    "policy": policy,
-                },
-                ok=False,
-                risk=risk,
-                namespace=namespace,
-            )
-
         meta = request_meta(
             tenant_id=tenant_id, user_id=user_id, user_role=user_role, call_id=call_id
         )
@@ -808,6 +794,20 @@ class MCPClient:
                     risk=risk,
                     namespace=namespace,
                 )
+
+        breaker = self._breaker_for(namespace)
+        if not breaker.allow_request():
+            return finish(
+                {
+                    "ok": False,
+                    "error": f"{namespace} tools are temporarily unavailable (circuit open)",
+                    "retryable": True,
+                    "policy": policy,
+                },
+                ok=False,
+                risk=risk,
+                namespace=namespace,
+            )
 
         try:
             declared_args = set((input_schema.get("properties") or {}).keys())
@@ -887,10 +887,9 @@ class MCPClient:
                 else:
                     raw = scrub_prompt_overrides_in_result(raw)
         ok = bool(raw.get("ok", True))
-        if ok:
-            breaker.record_success()
-        # Tool-level ok=false (bad args, missing figures, schema drift) is
-        # not a sick dependency. Only transport exceptions trip the breaker.
+        # Transport completed without raising; finalize any HALF_OPEN probe and
+        # keep the circuit closed (tool-level ok=false is not a transport fault).
+        breaker.record_success()
 
         if replay_key is not None and ok:
             self._replay_store(replay_key, raw)
