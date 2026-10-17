@@ -12,8 +12,8 @@
 | Contender | Hugging Face Repo | Commit SHA | Checkpoint Size & Format | Licence | Serving Notes |
 | --- | --- | --- | --- | --- | --- |
 | **A (Baseline T1)** | `Sunbird/Sunflower-Qwen3.5-9B` | `live-gpu4` | 9B BF16 served with `--quantization fp8` | Apache-2.0 | Reused live `ura-app-vllm-sunflower` read-only on GPU 4 (`127.0.0.1:8011/v1`). |
-| **B (Preferred T3)** | `Qwen/Qwen3.8-27B-FP8` | `017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` | 28.77 GiB (81 files, pre-quantised FP8 E4M3) | Apache-2.0 | Served out-of-the-box by stock `vllm/vllm-openai:v0.17.1` on GPU 7 (`12.32 GiB` free KV cache = `100,352` tokens, `5.35×` concurrency at `65,536` max context). |
-| **C (Ugandan 27B)** | `Sunbird/Sunflower-Qwen3.8-27B` | `42774a09a1893c5c83c5cb1cb521386eaa104fcd` | 50.97 GiB (11 files, BF16, gated) | Apache-2.0 | Unquantised 51 GiB BF16 exceeds 48 GB VRAM; stock `--quantization fp8` fails on Ampere in `gptq_marlin_repack` (`size_n = 96` on `linear_attn.in_proj_ba` not divisible by `tile_n_size = 64`). Evaluated on GPU 7 by mounting a 1-line `fp8.py` skip for `in_proj_ba`/`mlp.gate` (`12.74 GiB` KV cache = `103,488` tokens, `5.54×` concurrency at `65,536` context). |
+| **B (Preferred T3)** | `Qwen/Qwen3.8-27B-FP8` | `017b9c7af6b5689d5dd426a76e0bc077eb5ca20a` | 28.77 GiB (81 files, pre-quantised FP8 E4M3) | Apache-2.0 | Served out-of-the-box by stock `vllm/vllm-openai:v0.17.1` on GPU 7 (`12.32 GiB` free KV cache = `100,352` full-attention KV tokens; `1.53×` naive `100,352 / 65,536` ratio, or `5.35×` max concurrency reported by vLLM's hybrid 16-attention / 48-linear-attention allocator at `65,536` max context per request). |
+| **C (Ugandan 27B)** | `Sunbird/Sunflower-Qwen3.8-27B` | `42774a09a1893c5c83c5cb1cb521386eaa104fcd` | 50.97 GiB (11 files, BF16, gated) | Apache-2.0 | Unquantised 51 GiB BF16 exceeds 48 GB VRAM; stock `--quantization fp8` fails on Ampere in `gptq_marlin_repack` (`size_n = 96` on `linear_attn.in_proj_ba` not divisible by `tile_n_size = 64`). Evaluated on GPU 7 by mounting a 1-line `fp8.py` skip for `in_proj_ba`/`mlp.gate` (`12.74 GiB` KV cache = `103,488` full-attention KV tokens; `1.58×` naive ratio, or `5.54×` hybrid allocator concurrency at `65,536` tokens per request). |
 
 ### Exclusions (per §4.B.1)
 
@@ -68,7 +68,7 @@
 4. **B (`Qwen/Qwen3.8-27B-FP8`) vs C (`Sunbird/Sunflower-Qwen3.8-27B`):**
    - `B-nothink` leads `C-nothink` on overall score (`73.23` vs `71.60`), facts recall (`93.98%` vs `87.04%`), premise-challenge rate (`85.71%` vs `78.57%`), and figure survival (`91.67%` vs `83.33%`).
    - Crucially, `B` (`Qwen/Qwen3.8-27B-FP8`) is a pre-quantised 28.77 GiB FP8 checkpoint whose `config.json` already lists the GatedDeltaNet `in_proj_ba` (`size_n = 96`) layers under `modules_to_not_convert`, so it loads **cleanly on stock `vllm/vllm-openai:v0.17.1`** with zero image patches.
-   - `C` (`Sunbird/Sunflower-Qwen3.8-27B`) is within 1.63 points of `B` on English and faster on average output length (`p95 = 28.76 s`), making it a strong candidate for future single-model consolidation once exported as an offline FP8 checkpoint with `modules_to_not_convert` populated.
+   - `C` (`Sunbird/Sunflower-Qwen3.8-27B`) is within 1.63 points of `B` on English and has lower total latency (`p50 = 13.05 s`, `p95 = 28.76 s` vs `B`'s `p50 = 22.15 s`, `p95 = 45.98 s`), making it a strong candidate for future single-model consolidation once exported as an offline FP8 checkpoint with `modules_to_not_convert` populated.
    - **Decision:** Select **`Qwen/Qwen3.8-27B-FP8` (`enable_thinking=False`)** as the T3 reasoning model on GPU 7, and record single-model consolidation with `Sunbird/Sunflower-Qwen3.8-27B` in the gap register (`docs/GAPS_AND_AGENTIC_ROADMAP.md`).
 
 ---

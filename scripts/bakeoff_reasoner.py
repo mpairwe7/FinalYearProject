@@ -214,6 +214,11 @@ def strip_thinking(text: str) -> tuple[str, str]:
     for m in re.finditer(r"<think>(.*?)</think>", text, flags=re.DOTALL | re.IGNORECASE):
         thoughts.append(m.group(1).strip())
     cleaned = _THINK_BLOCK_RE.sub("", text).strip()
+    lower = cleaned.lower()
+    if "</think>" in lower and "<think>" not in lower:
+        head, _, tail = re.split(r"(</think>)", cleaned, maxsplit=1, flags=re.IGNORECASE)
+        thoughts.append(head.strip())
+        cleaned = tail.strip()
     if "<think>" in cleaned.lower() and "</think>" not in cleaned.lower():
         parts = re.split(r"<think>", cleaned, maxsplit=1, flags=re.IGNORECASE)
         cleaned = parts[0].strip()
@@ -512,14 +517,16 @@ def evaluate_frozen_dev(
     }
 
 
-def _parse_inline_tool_call(content: str) -> tuple[str | None, dict[str, Any]]:
+def _parse_inline_tool_call(
+    content: str,
+) -> tuple[str | None, dict[str, Any], str]:
     """Parse either JSON <tool_call> or Qwen3.5/3.8 XML <function=...><parameter=...> blocks."""
     # 1. JSON <tool_call>{"name": ..., "arguments": ...}</tool_call>
     m_json = re.search(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", content, re.DOTALL)
     if m_json:
         try:
             parsed_tc = json.loads(m_json.group(1))
-            return parsed_tc.get("name"), parsed_tc.get("arguments") or {}
+            return parsed_tc.get("name"), parsed_tc.get("arguments") or {}, "inline_json"
         except Exception:
             pass
     # 2. Qwen3.5/3.8 <tool_call><function=NAME><parameter=KEY>VAL</parameter>...</function></tool_call>
@@ -549,8 +556,10 @@ def _parse_inline_tool_call(content: str) -> tuple[str | None, dict[str, Any]]:
                         args[k] = json.loads(raw_v)
                     except Exception:
                         args[k] = raw_v
-        return fn_name, args
-    return None, {}
+        return fn_name, args, "inline_xml"
+    return None, {}, "none"
+
+
 def evaluate_tool_fidelity(
     endpoint: str,
     model: str,
@@ -567,7 +576,8 @@ def evaluate_tool_fidelity(
         if t.schema.namespace == "tax_calculator"
     ]
     base = _validate_endpoint(endpoint)
-    hits = 0
+    format_hits = 0
+    production_hits = 0
     details: list[dict[str, Any]] = []
 
     with httpx.Client(timeout=120.0) as client:
@@ -597,6 +607,7 @@ def evaluate_tool_fidelity(
             called_name = None
             called_args: dict[str, Any] = {}
             err_str = ""
+            parsed_from = "none"
             try:
                 resp = client.post(f"{base}/chat/completions", json=body)
                 resp.raise_for_status()
@@ -604,8 +615,11 @@ def evaluate_tool_fidelity(
                 msg = (data.get("choices") or [{}])[0].get("message") or {}
                 tcalls = msg.get("tool_calls") or []
                 if not tcalls and msg.get("content"):
-                    called_name, called_args = _parse_inline_tool_call(msg["content"])
+                    called_name, called_args, parsed_from = _parse_inline_tool_call(
+                        msg["content"]
+                    )
                 elif tcalls:
+                    parsed_from = "tool_calls"
                     fn = tcalls[0].get("function") or {}
                     called_name = fn.get("name")
                     raw_args = fn.get("arguments") or "{}"
@@ -628,7 +642,9 @@ def evaluate_tool_fidelity(
                 err_str = f"{type(exc).__name__}: {exc}"
 
             if ok:
-                hits += 1
+                format_hits += 1
+                if parsed_from in {"tool_calls", "inline_json"}:
+                    production_hits += 1
             details.append(
                 {
                     "id": item["id"],
@@ -636,14 +652,19 @@ def evaluate_tool_fidelity(
                     "called_tool": called_name,
                     "called_args": called_args,
                     "ok": ok,
+                    "production_ok": ok and parsed_from in {"tool_calls", "inline_json"},
+                    "parsed_from": parsed_from,
                     "error": err_str,
                 }
             )
 
     return {
         "total": len(TOOL_FIDELITY_PROMPTS),
-        "hits": hits,
-        "fidelity_pct": round(100.0 * hits / len(TOOL_FIDELITY_PROMPTS), 2),
+        "hits": production_hits,
+        "fidelity_pct": round(
+            100.0 * production_hits / len(TOOL_FIDELITY_PROMPTS), 2
+        ),
+        "format_hits": format_hits,
         "details": details,
     }
 

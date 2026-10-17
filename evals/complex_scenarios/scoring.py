@@ -481,8 +481,11 @@ def _is_working_or_subsidiary_amount(
     ):
         return True
     # 3. Subsidiary headroom figure when the spec is not asking for headroom
-    if field_name != "headroom" and re.search(r"\bheadroom\b", prefix, re.IGNORECASE):
-        return True
+    if field_name != "headroom":
+        near = prefix[-40:]
+        near = re.split(r"[,;:]|\d", near)[-1]
+        if re.search(r"\bheadroom\b", near, re.IGNORECASE):
+            return True
     # 4. Per-unit rate (e.g. "UGX 20,000 per passenger seat", "UGX 50,000/tonne") when expecting a total
     if abs(expected_val) >= 100_000.0 and re.match(
         r"^\s*(?:/|\bper\b)\s*(?:passenger\s+)?(?:seat|tonne|ton|litre|liter|kg|bag|unit)\b",
