@@ -724,7 +724,10 @@ def remote_url_problem(url: str) -> str:
     A bearer token is sent to this address on every request, so outside
     development it has to be an address that TLS can vouch for.
     """
-    parts = urllib.parse.urlsplit(url)
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "it is not a valid URL"
     if parts.scheme not in ("http", "https") or not parts.netloc:
         return "it is not an http(s) URL"
     if parts.username or parts.password:
