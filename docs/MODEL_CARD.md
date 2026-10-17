@@ -9,11 +9,11 @@
 | Field | Value |
 |-------|-------|
 | **Name** | URA Chatbot RAG Pipeline |
-| **Version** | 1.4.0 |
-| **Date** | 2026-04-29 |
+| **Version** | 2.0.0 |
+| **Date** | 2026-10-17 |
 | **Type** | Retrieval-Augmented Generation (RAG) with agentic tool-calling |
 | **Task** | Tax domain question answering (Uganda Revenue Authority) |
-| **Languages** | English (primary), Luganda, Swahili, Runyankole, Acholi, Ateso (LLM natively supports 31 Ugandan languages; MT/localization coverage above is narrower — see Sunbird MT support notes) |
+| **Languages** | English (`en`, primary), Luganda (`lg`), Kiswahili (`sw`), Runyankole (`nyn`), Acholi (`ach`), plus Ateso (LLM natively supports 31 Ugandan languages; 5 locales active across UI, TTT, TTS, STT & Call Receptionist) |
 | **Developer** | Mpairwe Landwind (Makerere University) |
 | **License** | Apache-2.0 (code), Gemma TOU (mobile model) |
 
@@ -21,19 +21,19 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Sunbird/Sunflower-14B-FP8 (via vLLM) | 14.8B (FP8 quantized) | Answer generation + tool-calling (Apache-2.0, Qwen3-14B arch, 131K YaRN context window configured [32K native → 131K with YaRN], natively multilingual across 31 Ugandan languages + English, min-p=0.08 and presence_penalty=0.05 dynamic sampling, repetition_penalty=1.1, prefix caching + chunked prefill enabled, gated on HF); Qwen/Qwen3-8B is the simple local-Transformers fallback (see docs/MODEL_SWAP_GUIDE.md) |
+| **LLM (server)** | Sunbird/Sunflower-Qwen3.5-9B (via vLLM) | 9B (FP8 weights + FP8 KV cache) | Answer generation + tool-calling (Apache-2.0, Qwen3.5-9B arch, 262,144 native context window without YaRN, natively multilingual across 31 Ugandan languages + English, prefix caching + chunked prefill enabled); Sunbird/Sunflower-14B-FP8 and Qwen/Qwen3-8B remain supported (see docs/MODEL_SWAP_GUIDE.md) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
 | **Reranker** | mixedbread-ai/mxbai-rerank-base-v2 | 500M | Passage reranking (BEIR 55.6, Apache-2.0) |
-| **ASR (server)** | Sunbird/asr-whisper-large-v3-salt | 1.5B | Speech-to-text (5 languages, one checkpoint; on by default — see docs/runbooks/salt-speech-backends.md); Whisper Small + LoRA adapters is the fallback tier |
-| **TTS (server)** | Sunbird/spark-tts-salt + BiCodec (opt-in, verified) / Piper native voices (fallback) | 0.5B + 0.6B | Text-to-speech (4-5 languages; local-first, Sunbird cloud and edge-tts as fallbacks) |
-| **MT (server)** | Sunflower-14B-FP8 prompted / ONNX | varies | Machine translation (en ↔ lg/sw/nyn/ach); non-Sunbird languages (e.g. sw) route through this LLM-prompted tier |
+| **ASR (server)** | Sunbird/SunflowerASR-51-african-languages (`whisper_salt`) | 1.5B | Speech-to-text across `en`, `lg`, `sw`, `nyn`, `ach` (on by default — see docs/runbooks/salt-speech-backends.md); Whisper Small + LoRA adapters is the fallback tier |
+| **TTS (server)** | Sunbird/orpheus-3b-tts-multilingual (primary FP8 sidecar) + Sunbird/spark-tts-salt / Piper / edge-tts (fallbacks) | 3B (FP8) + 0.5B | Text-to-speech across `en`, `lg`, `sw`, `nyn`, `ach` with catalog speaker selection (`orpheus_tts.speaker_for`) |
+| **MT (server)** | Sunflower-Qwen3.5-9B prompted local MT (`#NMBR...#` sentinel figure guard) | varies | Machine translation (`en` ↔ `lg`/`sw`/`nyn`/`ach`) with `mt.protect_figures` and `mt.figures_survived` |
 | **Speech cloud** | Sunbird AI API | N/A (cloud) | Fallback ASR/TTS/MT for Ugandan languages |
 | **ASR (mobile)** | Whisper Small INT8 | 244M (quantised) | On-device speech recognition |
 | **TTS (mobile)** | MMS-TTS VITS | ~40M per locale | On-device speech synthesis |
 | **Supervisor** | Rule-based + LLM fallback | N/A | Query routing (7 routes) |
-| **Tool Registry** | 27 tools across 9 namespaces | N/A | Tax calculators, rates, deadlines, KB search, memory operations, DMZ system connectors |
+| **Tool Registry** | 54 tools across 18 namespaces | N/A | Tax calculators, rates, deadlines, KB search, memory operations, DMZ system connectors |
 | **Memory** | 4-Tier Cognitive Hierarchy | N/A | Working (entities/session), Episodic, Semantic (fact triplets), Procedural (statutory SOP exemplars) |
 | **VAD** | Energy-based (numpy) | N/A | Voice Activity Detection with hysteresis |
 | **Accent Detector** | Prosodic features + SVM | ~1M | Ugandan accent classification (5 profiles) |
@@ -137,7 +137,7 @@ The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), incl
 - **Database**: SQLite WAL (default) or PostgreSQL (opt-in), 11 tables
 - **Auth**: JWT (HS256 dev / RS256 OIDC prod), 5 RBAC roles
 - **Container**: Docker (non-root, read-only filesystem)
-- **Feature flags**: 18 env-backed flags for progressive rollout
+- **Feature flags**: 82 env-backed flags for progressive rollout
 
 ### Performance (SLO Targets)
 - p95 latency: < 2s for /v1/chat
@@ -146,7 +146,7 @@ The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), incl
 - Faithfulness p50: > 0.7
 
 ### Security
-- OWASP LLM Top 10 (2025) controls implemented
+- OWASP LLM Top 10 (2025/2026 crosswalk) + OWASP Top 10 for Agentic Applications 2026 (`ASI01`–`ASI10`) controls implemented (`governance/ai_risk_manifest.yaml`)
 - Input guardrails: 11 prompt injection patterns + harmful intent detection
 - Output guardrails: PII redaction (7 Uganda-specific patterns), HTML sanitization, system prompt leakage detection, indirect injection scanning
 - Supply chain: `trust_remote_code=False`, SHA-pinned GitHub Actions, Trivy scanning, model revision pinning

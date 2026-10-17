@@ -14,11 +14,14 @@ Complete documentation for the URA Chatbot MLOps project.
 | **Application** |
 | [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
 | [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
+| [Agent Architecture](AGENT_ARCHITECTURE.md) | Supervisor routing, LangGraph runtime, tool-calling loop, and 82-flag registry |
+| [Architecture Decision Records (MADR 4.0)](adr/README.md) | Canonical ADR catalog (`ADR-0001`, `ADR-0002`) governing monorepo layer boundaries, 5-locale stack, and CXP hours |
 | [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | Local connector simulators, safe staff controls, guide-only customer journeys, and their production boundary |
 | [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
 | [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
 | **Data & Evaluation** |
 | [Data Schema & Evaluation](data-schema-and-eval.md) | Database models, RAG pipeline, and evaluation criteria |
+| [40,000-Scenario 5-Locale Multimodal Benchmark](Reports/MULTILINGUAL_40000_CX_MULTIMODAL_NGROK_REPORT_2026-10-17.md) | 40,000 CX scenarios (`TTT`, `STT`, `TTS` across `en`, `lg`, `sw`, `nyn`, `ach`) + 166-probe live ngrok load evaluation |
 | **Operations & Deployment** |
 | [Deployment Guide](DEPLOYMENT.md) | Production deployment, TLS, scaling, rollback, SLOs |
 | [Production gates](PRODUCTION_GATES.md) | When remaining prototype gaps become start blockers |
@@ -37,13 +40,16 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Multilingual figure fidelity runbook](runbooks/multilingual-figure-fidelity.md) | Figure masking before translation, unprotected retry, decoding parameters per path, and what the localization metrics mean |
 | [Audit trail runbook](runbooks/audit-trail.md) | Separation of duties by role, what the tamper-evident trail records, verifying it, exporting evidence |
 | [Guided-journey probes runbook](runbooks/guided-journey-probes.md) | Live canary for journey routing, guided-mode offers, escalation, crisis and repair replies; branch builds on the local GPU stack; reading the journey funnel |
+| [Escalation & handoff runbook](runbooks/escalation-and-handoff.md) | Phase 38–40 emotion/stakes escalation, `HandoffEnvelope` v2.1, CXP operating hours (`07:00–23:00 EAT`), and business-hours SLA clock |
+| [Conversational safety & EQ runbook](runbooks/conversational-safety-and-eq.md) | Phase 39 mid-workflow emotional off-ramp, wellbeing check-in, and voice affect consent |
+| [Voice receptionist demo runbook](runbooks/voice-receptionist-demo.md) | 5-locale WebSocket/LiveKit receptionist, queue position, callback, and officer desk operations |
 | **Security** |
 | [Security Policy](../SECURITY.md) | Vulnerability reporting, secret scanning, OWASP LLM Top 10 controls |
 | [AI Red Team](../scripts/ai_red_team.py) | 50 adversarial prompts across 10 NIST AI 600-1 categories |
 | [Incident Response Sim](../scripts/incident_response_sim.py) | Automated playbook validation (3 AI-specific scenarios) |
 | **Governance & Compliance** |
-| [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM, EU AI Act risk register |
-| [Compliance Gate](../governance/compliance_check.py) | CI gate script (20 files + 36 keywords) |
+| [AI Risk Manifest](../governance/ai_risk_manifest.yaml) | NIST AI RMF, ISO 42001, OWASP LLM 2025/2026, OWASP Agentic Top 10 2026 (`ASI01`–`ASI10`), CycloneDX 1.6 AIBOM, EU AI Act |
+| [Compliance Gate](../governance/compliance_check.py) | CI gate script verifying required files, manifest controls, and runnable `verified_by` test references |
 | [Model Card](MODEL_CARD.md) | EU AI Act Article 53 model card (components, eval, ethics, limitations) |
 | [Privacy Impact Assessment](capstone/PIA.md) | NDPA 2019 §28 PIA (7 risks, compliance matrix, audit trail) |
 | [Bias & Fairness Audit](../scripts/bias_fairness_audit.py) | Language parity + taxpayer type parity evaluation |

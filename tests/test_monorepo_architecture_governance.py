@@ -150,3 +150,26 @@ def test_owasp_agentic_2026_asi_top10_aibom_and_compliance_gate() -> None:
     } <= aibom_models
 
     assert run_compliance_check() is True
+
+
+def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:
+    """Every ADR in docs/adr/README.md exists and follows MADR 4.0 structure, and the living-docs skill is present."""
+    adr_readme = (REPO_ROOT / "docs" / "adr" / "README.md").read_text(encoding="utf-8")
+    adr_links = re.findall(r"\[ADR-\d+\]\(([^)]+\.md)\)", adr_readme)
+    assert len(adr_links) >= 2, f"Expected >= 2 ADRs in docs/adr/README.md, found {adr_links}"
+    required_sections = (
+        "## Context and Problem Statement",
+        "## Decision Outcome",
+        "## Consequences",
+        "## Confirmation",
+    )
+    for rel_link in adr_links:
+        adr_file = REPO_ROOT / "docs" / "adr" / rel_link
+        assert adr_file.is_file(), f"ADR file missing: {adr_file}"
+        body = adr_file.read_text(encoding="utf-8")
+        for section in required_sections:
+            assert section in body, f"{rel_link} missing MADR 4.0 section: {section}"
+
+    skill_file = REPO_ROOT / ".claude" / "skills" / "living-docs-adr-runbooks-traceability" / "SKILL.md"
+    assert skill_file.is_file()
+    assert skill_file.stat().st_size > 200

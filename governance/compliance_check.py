@@ -74,6 +74,10 @@ REQUIRED_FILES = [
     "threat-model/AGENTS.md",
     "plugins/AGENTS.md",
     "tests/test_monorepo_architecture_governance.py",
+    "docs/adr/README.md",
+    "docs/adr/0001-monorepo-layer-dag-and-agent-governance.md",
+    "docs/adr/0002-five-locale-multimodal-rag-and-cxp-operating-hours.md",
+    ".claude/skills/living-docs-adr-runbooks-traceability/SKILL.md",
 ]
 
 # Content keywords that MUST appear in specific files.
