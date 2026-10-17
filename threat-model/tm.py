@@ -152,13 +152,19 @@ qdrant.protocol = "gRPC/HTTP"
 qdrant.isEncrypted = False
 qdrant.OS = "Linux"
 
-retriever = Server("Hybrid Retriever (Dense+BM25+Reranker)")
+retriever = Server("Hybrid Retriever (bge-m3 + BM25 + mxbai-rerank-base-v2)")
 retriever.inBoundary = backend_container
 retriever.isEncrypted = False
 
-llm_inference = Server("LLM Inference (Qwen2.5-3B)")
+llm_inference = Server("LLM Inference (Sunbird/Sunflower-Qwen3.5-9B vLLM FP8)")
 llm_inference.inBoundary = backend_container
 llm_inference.isEncrypted = False
+
+mcp_integrity_gate = Server("MCP Client & Descriptor Integrity Gate (OWASP MCP01-10)")
+mcp_integrity_gate.inBoundary = backend_container
+mcp_integrity_gate.sanitizesInput = True
+mcp_integrity_gate.encodesOutput = True
+mcp_integrity_gate.hasAccessControl = True
 
 pdf_guards = Server("PDF / document guards")
 pdf_guards.inBoundary = backend_container
@@ -174,14 +180,14 @@ ocr_sidecar.sanitizesInput = True
 # =============================================================================
 # Datastores
 # =============================================================================
-faq_csv = Datastore("FAQ CSVs (41 files)")
+faq_csv = Datastore("FAQ CSVs (45 files)")
 faq_csv.inBoundary = data_layer
 faq_csv.isEncrypted = False
 faq_csv.isSQL = False
 faq_csv.storesLogData = False
 faq_csv.storesPII = False
 
-ura_pdfs = Datastore("URA PDF Handbooks (45 files)")
+ura_pdfs = Datastore("URA/URSB/UNBS Statutory PDFs (169 files)")
 ura_pdfs.inBoundary = data_layer
 ura_pdfs.isEncrypted = False
 ura_pdfs.storesPII = False
@@ -347,7 +353,10 @@ spool_to_retriever = Dataflow(document_spool, retriever, "Attachment passages (L
 spool_to_retriever.sanitizesInput = True
 
 # --- Enterprise Systems & Connectors ---
-api_to_orchestrator = Dataflow(fastapi, orchestrator_server, "Agent tool dispatch & connector queries")
+api_to_mcp_gate = Dataflow(fastapi, mcp_integrity_gate, "MCP tool call + verified _meta identity")
+api_to_mcp_gate.sanitizesInput = True
+mcp_gate_to_orchestrator = Dataflow(mcp_integrity_gate, orchestrator_server, "Schema-validated & descriptor-pinned tool dispatch")
+mcp_gate_to_orchestrator.sanitizesInput = True
 orchestrator_to_db = Dataflow(orchestrator_server, enterprise_db, "Scoped CRUD operations on isolated DBs")
 orchestrator_to_remote = Dataflow(orchestrator_server, remote_connector_endpoint, "Validated MCP proxy call (HTTPS only)")
 orchestrator_to_remote.protocol = "HTTPS"

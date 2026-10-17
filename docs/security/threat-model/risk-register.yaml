@@ -280,6 +280,66 @@ risks:
     cwe: "CWE-200"
     owasp_llm: "LLM08"
 
+  - id: M-AGT-04
+    element: MCP Client & Registry
+    framework: MAESTRO
+    stride_category: T
+    threat: MCP tool poisoning, full-schema poisoning, or post-approval rug-pull descriptor mutation (SAFE-MCP SAF-T1001/SAF-T1201)
+    severity: High
+    cvss: "8.8"
+    existing_controls: Canonical SHA-256 descriptor fingerprinting (compute_descriptor_sha256), inspect_descriptor_integrity prompt-override & bidi scan, and TTL/version-scoped descriptor pinning in MCPClient
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-345"
+    owasp_llm: "LLM03"
+    mitre_atlas: "AML.T0110"
+
+  - id: M-AGT-05
+    element: MCP Client & Transports
+    framework: MAESTRO
+    stride_category: E
+    threat: Cross-server MCP tool shadowing and namespace hijacking by a remote MCP server (SAFE-MCP SAF-T1301)
+    severity: High
+    cvss: "8.5"
+    existing_controls: MCPClient._check_cross_namespace_shadowing enforces canonical ToolRegistry namespace ownership and blocks cross-tool shadowing directives
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-290"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0073"
+
+  - id: M-AGT-06
+    element: MCP Output Boundary
+    framework: MAESTRO
+    stride_category: I
+    threat: Indirect prompt injection, Unicode control smuggling, and credential harvesting via MCP tool responses (SAFE-MCP SAF-T1102/SAF-T1504)
+    severity: High
+    cvss: "8.6"
+    existing_controls: screen_tool_result normalizes zero-width/bidi characters, quarantines chat-template control tokens and raw JWT/API secrets, and scrubs prompt-override directives
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-74"
+    owasp_llm: "LLM01"
+    mitre_atlas: "AML.T0098"
+
+  - id: M-AGT-07
+    element: Cognitive Memory Tools
+    framework: MAESTRO
+    stride_category: T
+    threat: Confused-deputy persistent memory implant and cross-tenant fact poisoning via tool arguments (SAFE-MCP SAF-T1204/SAF-T1307)
+    severity: High
+    cvss: "8.4"
+    existing_controls: memory_store and memory_discard require personalization consent or verified role; ToolRegistry.call strips argument-supplied user_id/tenant_id and injects only verified caller identity from _meta
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-863"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0080"
+
   # ===========================================================================
   # 6. Privacy & Data Protection (LINDDUN Framework)
   # ===========================================================================

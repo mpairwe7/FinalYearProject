@@ -77,8 +77,6 @@ _DISPLAY_NAMES: dict[str, str] = {
     "passenger_baggage_allowance_usd": "Passenger baggage duty-free allowance (USD)",
     "withholding_insurance_agent_commission": "WHT on insurance agent commission (final tax - 10%)",
     "withholding_payment_service_provider_commission": "WHT on payment service provider / banking agent commission (10%)",
-    "excise_duty_fuel_petrol_per_litre_act_2026": "Excise duty on petrol under Excise Duty (Amendment) Act 2026 (UGX per litre)",
-    "excise_duty_fuel_diesel_per_litre_act_2026": "Excise duty on diesel under Excise Duty (Amendment) Act 2026 (UGX per litre)",
     "excise_duty_cement_per_50kg": "Excise duty on cement, adhesives, grout, white cement or lime (UGX per 50 kg)",
     "excise_duty_sugar_per_kg": "Excise duty on cane or beet sugar (UGX per kg)",
     "excise_duty_cooking_oil_per_litre": "Excise duty on cooking oil (UGX per litre)",
@@ -168,6 +166,8 @@ def _scalar_row(key: str, value: float) -> dict[str, Any]:
             or key.endswith("_points")
         ):
             row["formatted"] = f"{val:,.0f}"
+        elif key == "unbs_pvoc_exemption_fob_usd":
+            row["formatted"] = f"USD {val:,.0f}"
         else:
             row["formatted"] = f"UGX {val:,.0f}"
     else:

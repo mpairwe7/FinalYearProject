@@ -26,8 +26,10 @@ business_overview:
 technical_overview:
   description: >
     Next.js 16 frontend + FastAPI backend service containerized on Crane Cloud,
-    Qdrant vector database for hybrid semantic search, vLLM / HuggingFace
-    inference engine (Sunbird Sunflower-14B / Qwen3-8B-AWQ), SQLite/PostgreSQL
+    Qdrant vector database for hybrid semantic search (BAAI/bge-m3 + BM25 +
+    mixedbread-ai/mxbai-rerank-base-v2), vLLM inference engine
+    (Sunbird/Sunflower-Qwen3.5-9B FP8 + Sunbird/orpheus-3b-tts-multilingual +
+    Sunbird/SunflowerASR-51-african-languages), SQLite/PostgreSQL
     for analytics & audit logging, Redis for caching & rate limiting,
     and Cloudflare CDN/Tunnel edge proxy.
   images: []

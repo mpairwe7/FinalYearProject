@@ -402,12 +402,18 @@ class ToolRegistry:
                 sig = inspect.signature(tool.execute)
                 params = sig.parameters
                 declared_props = set((tool.schema.parameters.get("properties") or {}).keys())
-                if "user_id" in params and ("user_id" not in declared_props or user_id):
-                    if resolved_user_id:
-                        exec_kwargs["user_id"] = resolved_user_id
-                if "tenant_id" in params and ("tenant_id" not in declared_props or (tenant_id and tenant_id != "default")):
-                    if resolved_tenant_id:
-                        exec_kwargs["tenant_id"] = resolved_tenant_id
+                if "user_id" in params and "user_id" not in declared_props:
+                    exec_kwargs.pop("user_id", None)
+                    if user_id:
+                        exec_kwargs["user_id"] = str(user_id)
+                elif "user_id" in params and user_id:
+                    exec_kwargs["user_id"] = str(user_id)
+                if "tenant_id" in params and "tenant_id" not in declared_props:
+                    exec_kwargs.pop("tenant_id", None)
+                    if tenant_id:
+                        exec_kwargs["tenant_id"] = str(tenant_id)
+                elif "tenant_id" in params and tenant_id and tenant_id != "default":
+                    exec_kwargs["tenant_id"] = str(tenant_id)
             except Exception:
                 logger.debug("Signature inspection skipped for %s", name, exc_info=True)
             result = tool.execute(**exec_kwargs)

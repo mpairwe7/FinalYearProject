@@ -259,8 +259,8 @@ class Statutory2024To2027CorpusAndRatesTests(unittest.TestCase):
 
     def test_2026_statutory_amendment_rates_and_supersession_comparisons(self) -> None:
         t26 = tables.get_table("FY2026-27")
-        self.assertEqual(t26["excise_duty_fuel_petrol_per_litre_act_2026"], 1750)
-        self.assertEqual(t26["excise_duty_fuel_diesel_per_litre_act_2026"], 1430)
+        self.assertEqual(t26["excise_duty_fuel_petrol_per_litre"], 1750)
+        self.assertEqual(t26["excise_duty_fuel_diesel_per_litre"], 1430)
         self.assertEqual(t26["excise_duty_cement_per_50kg"], 750)
         self.assertEqual(t26["excise_duty_sugar_per_kg"], 200)
         self.assertEqual(t26["excise_duty_cooking_oil_per_litre"], 400)
@@ -273,6 +273,13 @@ class Statutory2024To2027CorpusAndRatesTests(unittest.TestCase):
         self.assertEqual(t26["gaming_and_betting_tax_rate"], 0.30)
         self.assertEqual(t26["ursb_company_registration_min_fee_ugx"], 105_000)
         self.assertEqual(t26["unbs_pvoc_evasion_surcharge_rate"], 0.15)
+
+        usd_lookup = ToolRegistry.call(
+            "lookup_rate",
+            {"tax_type": "unbs_pvoc_exemption_fob_usd", "fiscal_year": "FY2026-27"},
+        )
+        self.assertTrue(usd_lookup["ok"])
+        self.assertEqual(usd_lookup["formatted"], "USD 2,000")
 
         diff = tables.compare(
             "efris_e_receipt_refund_qualifying_threshold_ugx",

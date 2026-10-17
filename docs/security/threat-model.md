@@ -114,6 +114,14 @@
   - *Mitigation*: Allowlisted HTTPS domains only; RFC 1918 private ranges blocked.
 - **M-AGT-03 (Information Disclosure)**: Subagent leaking context across conversation sessions.
   - *Mitigation*: Ephemeral session sandboxing and memory isolation.
+- **M-AGT-04 (Tampering / Tool Poisoning & Rug Pull — `SAFE-MCP SAF-T1001/SAF-T1201`, `AML.T0110/AML.T0081`)**: Malicious prompt-override instructions embedded in tool schemas or post-approval descriptor mutations.
+  - *Mitigation*: Canonical SHA-256 descriptor fingerprinting (`compute_descriptor_sha256`), `inspect_descriptor_integrity` poisoning/bidi scan, and TTL/version-scoped `_pinned_descriptors` in `MCPClient`.
+- **M-AGT-05 (Elevation of Privilege / Cross-Server Tool Shadowing — `SAFE-MCP SAF-T1301`, `AML.T0073`)**: Remote MCP server advertises a tool name owned by another canonical namespace.
+  - *Mitigation*: `MCPClient._check_cross_namespace_shadowing` enforces canonical `ToolRegistry` namespace ownership and blocks cross-tool shadowing directives.
+- **M-AGT-06 (Information Disclosure & Indirect Injection — `SAFE-MCP SAF-T1102/SAF-T1504`, `AML.T0098`)**: Indirect prompt injection, zero-width/bidi control smuggling, or leaked credentials in tool outputs.
+  - *Mitigation*: `screen_tool_result` normalizes Unicode controls, quarantines chat-template tokens and JWT/API secret leaks, and scrubs natural-language override directives.
+- **M-AGT-07 (Tampering / Confused-Deputy Memory Implant — `SAFE-MCP SAF-T1204/SAF-T1307`, `AML.T0080`)**: Prompt-injected LLM spoofs `user_id`/`tenant_id` in memory tool calls to poison another taxpayer's semantic memory.
+  - *Mitigation*: `memory_store` and `memory_discard` require `personalization` consent or verified role; `ToolRegistry.call` strips argument-supplied `user_id`/`tenant_id` and injects only verified caller identity from `_meta`.
 
 ---
 

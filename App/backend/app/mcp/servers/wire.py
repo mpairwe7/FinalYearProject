@@ -298,17 +298,15 @@ class StatelessMCPServer:
             if control not in declared_properties:
                 validation_args.pop(control, None)
         arg_errors = validate_arguments(input_schema, validation_args)
-        structural_errors = [
-            err
-            for err in arg_errors
-            if "less than the minimum" not in err and "greater than the maximum" not in err
-        ]
-        if structural_errors:
+        if arg_errors:
+            err_msg = f"Invalid arguments for {name}: " + "; ".join(arg_errors)
+            if any("less than the minimum of 0" in e for e in arg_errors):
+                err_msg += " (must be non-negative)"
             return call_result(
                 {
                     "ok": False,
-                    "error": f"Invalid arguments for {name}: " + "; ".join(structural_errors),
-                    "validation_errors": structural_errors,
+                    "error": err_msg,
+                    "validation_errors": arg_errors,
                     "expected": input_schema,
                 },
                 is_error=True,
@@ -322,16 +320,6 @@ class StatelessMCPServer:
             channel="mcp",
             caller_confirmed=bool((params.get("_meta") or {}).get("confirmed", False)),
         )
-        if arg_errors and result.get("ok", True):
-            return call_result(
-                {
-                    "ok": False,
-                    "error": f"Invalid arguments for {name}: " + "; ".join(arg_errors),
-                    "validation_errors": arg_errors,
-                    "expected": input_schema,
-                },
-                is_error=True,
-            )
         drift = result_matches_schema(tool.schema.output_schema, result)
         if drift:
             result = {

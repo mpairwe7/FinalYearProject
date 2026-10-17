@@ -144,6 +144,9 @@ def result_matches_schema(schema: dict[str, Any] | None, result: Any) -> list[st
 # ---------------------------------------------------------------------------
 # OWASP MCP Top 10 (2026) / CSA CTMS / AISVS 10.4 Descriptor & Output Guards
 # ---------------------------------------------------------------------------
+_UNICODE_CONTROL_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+_BIDI_OVERRIDE_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+
 _TOOL_POISONING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "prompt_override_directive",
@@ -162,6 +165,14 @@ _TOOL_POISONING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"(?:\b(?:do\s+not\s+tell\s+the\s+user|hide\s+this\s+from\s+the\s+user|"
             r"silently\s+(?:exfiltrate|forward|send))\b|\[SYSTEM\s+OVERRIDE\])",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "cross_tool_shadowing_directive",
+        re.compile(
+            r"\b(?:instead\s+of\s+calling\s+\w+|always\s+call\s+this\s+tool\s+before\s+\w+|"
+            r"override\s+tool\s+\w+|shadow\s+tool\s+\w+)\b",
             re.IGNORECASE,
         ),
     ),
@@ -231,8 +242,11 @@ def inspect_descriptor_integrity(descriptor: dict[str, Any]) -> list[str]:
 
     for field_name in ("description", "inputSchema", "outputSchema", "annotations"):
         for path, text in _iter_strings(descriptor.get(field_name), f"$.{field_name}"):
+            if _BIDI_OVERRIDE_RE.search(text):
+                violations.append(f"tool_poisoning:bidi_control_smuggling@{path}")
+            normalized_text = _UNICODE_CONTROL_RE.sub("", text)
             for label, pattern in _TOOL_POISONING_PATTERNS:
-                if pattern.search(text):
+                if pattern.search(normalized_text):
                     violations.append(f"tool_poisoning:{label}@{path}")
     return violations
 
@@ -241,11 +255,17 @@ def screen_tool_result(result: Any) -> list[str]:
     """Screen MCP tool output for indirect prompt injection and raw credential leaks."""
     violations: list[str] = []
     for path, text in _iter_strings(result):
+        if _BIDI_OVERRIDE_RE.search(text):
+            violations.append(f"indirect_prompt_injection:bidi_control_smuggling@{path}")
+        normalized_text = _UNICODE_CONTROL_RE.sub("", text)
         for label, pattern in _TOOL_POISONING_PATTERNS:
-            if pattern.search(text):
-                violations.append(f"indirect_prompt_injection:{label}@{path}")
+            if pattern.search(normalized_text):
+                if normalized_text != text and label == "prompt_override_directive":
+                    violations.append(f"indirect_prompt_injection:unicode_obfuscated_override@{path}")
+                else:
+                    violations.append(f"indirect_prompt_injection:{label}@{path}")
         for label, pattern in _CREDENTIAL_LEAK_PATTERNS:
-            if pattern.search(text):
+            if pattern.search(normalized_text):
                 violations.append(f"credential_leak:{label}@{path}")
     return violations
 
