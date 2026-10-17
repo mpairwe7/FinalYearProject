@@ -7,14 +7,14 @@
   "turn_count": 40,
   "reviewed_scenarios": 0,
   "unreviewed_scenarios": 30,
-  "overall_score_100": 47.99,
+  "overall_score_100": 49.57,
   "metrics": {
-    "mean_scenario_score_100": 47.99,
+    "mean_scenario_score_100": 49.57,
     "critical_forbidden_hits": 1,
-    "figure_accuracy_all_pct": 15.38,
-    "figure_accuracy_tool_covered_pct": 25.0,
+    "figure_accuracy_all_pct": 19.23,
+    "figure_accuracy_tool_covered_pct": 31.25,
     "premise_challenge_rate_pct": 50.0,
-    "route_correctness_pct": 57.5,
+    "route_correctness_pct": 65.0,
     "truncated_turns": 0,
     "truncation_rate_pct": 0.0,
     "sector_guide_citation_rate_non_sector_pct": 35.29,
@@ -29,18 +29,18 @@
     },
     "capital_gains": {
       "count": 1,
-      "mean_score_100": 75.44,
-      "min_score_100": 75.44
+      "mean_score_100": 96.03,
+      "min_score_100": 96.03
     },
     "corporation": {
       "count": 2,
-      "mean_score_100": 75.0,
-      "min_score_100": 55.0
+      "mean_score_100": 80.0,
+      "min_score_100": 65.0
     },
     "customs": {
       "count": 2,
-      "mean_score_100": 38.75,
-      "min_score_100": 37.5
+      "mean_score_100": 43.75,
+      "min_score_100": 40.0
     },
     "digital_services": {
       "count": 2,
@@ -64,12 +64,12 @@
     },
     "objections": {
       "count": 2,
-      "mean_score_100": 64.41,
+      "mean_score_100": 69.41,
       "min_score_100": 58.82
     },
     "paye": {
       "count": 6,
-      "mean_score_100": 25.91,
+      "mean_score_100": 22.48,
       "min_score_100": 0.0
     },
     "penalties": {
@@ -94,8 +94,8 @@
     },
     "vat": {
       "count": 2,
-      "mean_score_100": 38.75,
-      "min_score_100": 22.5
+      "mean_score_100": 47.5,
+      "min_score_100": 40.0
     },
     "withholding": {
       "count": 1,
@@ -355,26 +355,26 @@
       "id": "dev_paye_resident_vs_nonresident_22m_04",
       "tax_head": "paye",
       "difficulty": "hard",
-      "score": 0.441176,
-      "score_100": 44.12,
+      "score": 0.235294,
+      "score_100": 23.53,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.441176,
+          "score": 0.235294,
           "route_ok": false,
           "expected_route": "rag",
           "actual_route": "calculator",
-          "figures": 0.5,
+          "figures": 0.0,
           "figure_details": [
             {
               "tool": "calculate_paye",
               "field": "paye",
-              "status": "hit",
+              "status": "miss",
               "expected": 7688250.0,
-              "matched_value": 7725500.0,
+              "matched_value": null,
               "required": true,
-              "reason": "Matched asserted figure in claim clause"
+              "reason": "Conflicting amount asserted in claim clause"
             },
             {
               "tool": "calculate_paye",
@@ -654,26 +654,26 @@
       "id": "dev_vat_threshold_and_apportionment_08",
       "tax_head": "vat",
       "difficulty": "medium",
-      "score": 0.225,
-      "score_100": 22.5,
+      "score": 0.4,
+      "score_100": 40.0,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.45,
+          "score": 0.8,
           "route_ok": false,
           "expected_route": "rag",
           "actual_route": "calculator",
-          "figures": 0.0,
+          "figures": 1.0,
           "figure_details": [
             {
               "tool": "check_vat_registration",
               "field": "threshold",
-              "status": "miss",
+              "status": "hit",
               "expected": 300000000.0,
               "matched_value": 300000000.0,
               "required": true,
-              "reason": "Conflicting amount asserted in claim clause"
+              "reason": "Matched asserted figure in claim clause"
             }
           ],
           "facts": 1.0,
@@ -1156,14 +1156,14 @@
       "id": "dev_corporation_presumptive_regime_15",
       "tax_head": "corporation",
       "difficulty": "medium",
-      "score": 0.55,
-      "score_100": 55.0,
+      "score": 0.65,
+      "score_100": 65.0,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.55,
-          "route_ok": false,
+          "score": 0.65,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": 0.0,
@@ -1214,26 +1214,26 @@
       "id": "dev_capital_gains_commercial_building_16",
       "tax_head": "capital_gains",
       "difficulty": "medium",
-      "score": 0.754412,
-      "score_100": 75.44,
+      "score": 0.960294,
+      "score_100": 96.03,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.558824,
+          "score": 0.970588,
           "route_ok": true,
           "expected_route": "rag",
           "actual_route": "hybrid",
-          "figures": 0.0,
+          "figures": 1.0,
           "figure_details": [
             {
               "tool": "calculate_capital_gains",
               "field": "tax",
-              "status": "miss",
+              "status": "hit",
               "expected": 54000000.0,
               "matched_value": 54000000.0,
               "required": true,
-              "reason": "Conflicting amount asserted in claim clause"
+              "reason": "Matched asserted figure in claim clause"
             }
           ],
           "facts": 1.0,
@@ -1309,14 +1309,14 @@
       "id": "dev_customs_used_vehicle_over_8_years_17",
       "tax_head": "customs",
       "difficulty": "hard",
-      "score": 0.375,
-      "score_100": 37.5,
+      "score": 0.475,
+      "score_100": 47.5,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.375,
-          "route_ok": false,
+          "score": 0.475,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": 0.0,
@@ -1688,8 +1688,8 @@
       "id": "dev_objections_tat_deadline_and_adr_22",
       "tax_head": "objections",
       "difficulty": "medium",
-      "score": 0.7,
-      "score_100": 70.0,
+      "score": 0.8,
+      "score_100": 80.0,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
@@ -1733,8 +1733,8 @@
           "sources_count": 0
         },
         {
-          "score": 0.8,
-          "route_ok": false,
+          "score": 1.0,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": null,

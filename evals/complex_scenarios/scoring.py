@@ -229,6 +229,8 @@ _DANGLING_END_RE = re.compile(
 
 @dataclass
 class ParsedAmount:
+    """A numeric or monetary expression parsed from a reply clause."""
+
     value: float
     raw: str
     start: int
@@ -236,10 +238,13 @@ class ParsedAmount:
     is_percent: bool
     is_money: bool
     negated: bool
+    rounded: bool = False
 
 
 @dataclass
 class FigureScore:
+    """Evaluation outcome for a single tool-backed figure specification."""
+
     tool: str
     field: str
     status: str  # "hit" | "miss" | "tool_missing" | "fx_unavailable"
@@ -251,6 +256,8 @@ class FigureScore:
 
 @dataclass
 class TurnScore:
+    """Deterministic component and composite scores for a single conversation turn."""
+
     score: float
     route_ok: bool | None
     expected_route: str | None
@@ -270,6 +277,7 @@ class TurnScore:
     latency_s: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the turn score dataclass into a plain dictionary."""
         return asdict(self)
 
 
@@ -285,6 +293,7 @@ def default_tool_runner(tool_name: str, params: dict[str, Any]) -> dict[str, Any
 
 
 def _lookup_field(payload: dict[str, Any], field_path: str) -> Any:
+    """Resolve a dotted field path inside a calculator tool output dictionary."""
     cur: Any = payload
     for part in field_path.split("."):
         if isinstance(cur, dict) and part in cur:
@@ -320,7 +329,7 @@ def _split_into_claim_clauses(text: str) -> list[str]:
 
 
 def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
-    """Extract numeric/money/percentage amounts from a clause with negation flags."""
+    """Extract numeric/money/percentage amounts from a clause with negation and rounding flags."""
     results: list[ParsedAmount] = []
     for m in _AMOUNT_TOKEN_RE.finditer(clause):
         raw_num = m.group("num").replace(",", "")
@@ -329,7 +338,8 @@ def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
         except ValueError:
             continue
         mult_key = (m.group("mult") or "").lower()
-        if mult_key in _MULTIPLIERS:
+        is_rounded = mult_key in _MULTIPLIERS
+        if is_rounded:
             val *= _MULTIPLIERS[mult_key]
 
         is_pct = bool(m.group("pct"))
@@ -338,7 +348,7 @@ def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
         is_money = (
             has_prefix
             or suffix in ("ugx", "ush", "ushs", "shs", "shs.", "shilling", "shillings", "/=", "/=-")
-            or mult_key in _MULTIPLIERS
+            or is_rounded
             or ("," in m.group("num") and val >= 1000)
         )
 
@@ -364,7 +374,6 @@ def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
 
         # Check negation in the immediate preceding window within the same sub-clause
         neg_window = clause[max(0, m.start() - 45) : m.start()]
-        # Stop at clause punctuation if any
         last_punct = max(neg_window.rfind(","), neg_window.rfind(":"), neg_window.rfind("("))
         if last_punct != -1:
             neg_window = neg_window[last_punct + 1 :]
@@ -379,20 +388,19 @@ def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
                 is_percent=is_pct,
                 is_money=is_money,
                 negated=negated,
+                rounded=is_rounded,
             )
         )
     return results
 
 
 def _values_match(expected: float, candidate: ParsedAmount) -> bool:
-    """Compare expected numeric value against a parsed candidate within ±0.5% or ±1 UGX."""
-    # Rate / fraction comparison (e.g., expected=0.18 vs candidate=18% or 0.18)
+    """Compare expected numeric value against a parsed candidate (±0.5% when rounded, ±1 UGX when exact)."""
     if 0 < abs(expected) < 1.0:
         cand_val = candidate.value / 100.0 if candidate.is_percent and candidate.value >= 1.0 else candidate.value
         tol = max(abs(expected) * 0.005, 1e-4)
         return abs(cand_val - expected) <= tol
 
-    # Percentage expressed as 0-100 in expected vs candidate
     if candidate.is_percent and 1.0 <= abs(expected) <= 100.0:
         tol = max(abs(expected) * 0.005, 0.05)
         return abs(candidate.value - expected) <= tol
@@ -400,8 +408,32 @@ def _values_match(expected: float, candidate: ParsedAmount) -> bool:
     if candidate.is_percent and abs(expected) > 100.0:
         return False
 
-    tol = max(abs(expected) * 0.005, 1.0)
+    tol = max(abs(expected) * 0.005, 1.0) if candidate.rounded else 1.0
     return abs(candidate.value - expected) <= tol
+
+
+def _is_working_or_subsidiary_amount(
+    clause: str,
+    amt: ParsedAmount,
+    field_name: str,
+) -> bool:
+    """Return True when ``amt`` is inside parenthesised working math, an arithmetic expression, or a headroom note."""
+    prefix = clause[: amt.start]
+    suffix = clause[amt.end :]
+    # 1. Parenthesised working figure, e.g. "(180m × 30%)" or "(headroom UGX 60,000,000)"
+    if prefix.count("(") > prefix.count(")") and ")" in suffix:
+        return True
+    # 2. Arithmetic operand adjacent to ×, ÷, or single * (excluding Markdown **)
+    if re.search(r"(?:[×÷]|(?<!\*)\*(?!\*))\s*$", prefix) or re.match(
+        r"^\s*(?:[×÷]|(?<!\*)\*(?!\*))", suffix
+    ):
+        return True
+    # 3. Subsidiary headroom figure when the spec is not asking for headroom
+    if field_name != "headroom" and re.search(
+        r"\bheadroom\b[^,;:.]{0,20}$", prefix, re.IGNORECASE
+    ):
+        return True
+    return False
 
 
 def _resolve_params(
@@ -430,6 +462,7 @@ def _score_single_figure(
     reply: str,
     tool_runner: ToolRunner,
 ) -> FigureScore:
+    """Evaluate a single figure specification against ``reply`` using ``tool_runner``."""
     tool_name = str(spec["tool"])
     field_name = str(spec.get("field", "tax"))
     required = bool(spec.get("required", True))
@@ -467,9 +500,6 @@ def _score_single_figure(
         )
     expected_val = float(raw_expected)
 
-    # Collect known input parameter numbers so mentioning the user's input in the
-    # same sentence ("On a gross salary of UGX 22,000,000, PAYE is UGX 7,688,250")
-    # is not treated as a conflicting output figure.
     input_values: list[float] = [
         float(v)
         for v in resolved_params.values()
@@ -484,8 +514,11 @@ def _score_single_figure(
     clauses = _split_into_claim_clauses(reply)
     matching_clauses: list[tuple[str, int]] = []
     for clause in clauses:
-        lower_clause = clause.lower()
-        cue_positions = [lower_clause.find(c.lower()) for c in cues if c.lower() in lower_clause]
+        cue_positions: list[int] = []
+        for c in cues:
+            m = re.search(rf"\b{re.escape(c)}\b", clause, re.IGNORECASE)
+            if m:
+                cue_positions.append(m.start())
         if cue_positions:
             matching_clauses.append((clause, min(cue_positions)))
 
@@ -511,25 +544,23 @@ def _score_single_figure(
         if not amounts:
             continue
 
-        # If a single clause still contains multiple comma-separated "Label: Amount"
-        # pairs, keep amounts that are not attached to a later unrelated label.
-        relevant_amounts: list[ParsedAmount] = []
+        direct_assertions: list[ParsedAmount] = []
         for amt in amounts:
-            # Skip input echo if it appears before the cue or matches an input param
             is_input_echo = any(
                 _values_match(inp, amt) and not _values_match(expected_val, amt)
                 for inp in input_values
             )
             if is_input_echo:
                 continue
-            # Filter by compatible kind (rate vs money vs integer count)
+            if _is_working_or_subsidiary_amount(clause, amt, field_name):
+                continue
             if expect_is_rate and not amt.is_percent and amt.value >= 1.0:
                 continue
             if expect_is_money and (amt.is_percent or amt.value < 100.0):
                 continue
-            relevant_amounts.append(amt)
+            direct_assertions.append(amt)
 
-        for amt in relevant_amounts:
+        for amt in direct_assertions:
             if _values_match(expected_val, amt):
                 if amt.negated:
                     saw_negated_match = True
@@ -537,9 +568,7 @@ def _score_single_figure(
                     matched_val = amt.value
             else:
                 if not amt.negated:
-                    # Check whether this other number is before the cue while another
-                    # number is after the cue
-                    after_cue = [a for a in relevant_amounts if a.start >= cue_pos and not a.negated]
+                    after_cue = [a for a in direct_assertions if a.start >= cue_pos and not a.negated]
                     if amt.start < cue_pos and any(_values_match(expected_val, a) for a in after_cue):
                         continue
                     saw_conflicting = True
@@ -574,6 +603,7 @@ def _score_single_figure(
 
 
 def _check_completeness(reply: str, response: dict[str, Any]) -> tuple[bool, str | None]:
+    """Check whether a reply is complete and not truncated mid-sentence or by token limit."""
     debug = response.get("debug") or {}
     finish_reason = debug.get("finish_reason") or response.get("finish_reason")
     if finish_reason == "length":
@@ -597,6 +627,7 @@ def _score_sources_relevant(
     response: dict[str, Any],
     context_text: str,
 ) -> tuple[float | None, list[str]]:
+    """Compute share of cited sources that do not cite unrelated sector guides."""
     if expect_route in ("calculator", "workflow", "declined"):
         return None, []
 

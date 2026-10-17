@@ -8,6 +8,7 @@ from evals.complex_scenarios.scoring import score_scenario, score_turn
 
 
 def _paye_expect(*, include_net_claim: bool = False) -> dict[str, Any]:
+    """Build a representative PAYE turn expectation dictionary."""
     figures = [
         {
             "tool": "calculate_paye",
@@ -36,6 +37,7 @@ def _paye_expect(*, include_net_claim: bool = False) -> dict[str, Any]:
 
 
 def test_correct_claim_figure_hits_against_live_rate_table() -> None:
+    """Verify that a matching full-digit or rounded figure in a claim clause scores a hit."""
     expect = _paye_expect()
     response = {
         "reply": (
@@ -53,6 +55,115 @@ def test_correct_claim_figure_hits_against_live_rate_table() -> None:
     assert ts.sources_relevant == 1.0
     assert ts.complete is True
     assert ts.score == 1.0
+
+
+def test_non_resident_paye_does_not_match_resident_paye_in_full_digits() -> None:
+    """Verify full-digit amounts use ±1 UGX tolerance so non-resident PAYE (7,725,500) misses resident PAYE (7,688,250)."""
+    expect = _paye_expect()
+    response = {
+        "reply": (
+            "For a resident employee earning UGX 22,000,000, "
+            "your monthly PAYE is UGX 7,725,500."
+        ),
+        "retrieval_mode": "hybrid",
+        "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
+    }
+    ts = score_turn(expect, response)
+    assert ts.figures == 0.0
+    assert ts.figure_details[0].status == "miss"
+
+    # Rounded shorthand ("UGX 7.69 million") still uses ±0.5% tolerance and hits
+    resp_rounded = {
+        "reply": (
+            "For a resident employee earning UGX 22,000,000, "
+            "your monthly PAYE is about UGX 7.69 million."
+        ),
+        "retrieval_mode": "hybrid",
+        "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
+    }
+    ts_rounded = score_turn(expect, resp_rounded)
+    assert ts_rounded.figures == 1.0
+    assert ts_rounded.figure_details[0].status == "hit"
+
+
+def test_parenthesised_working_math_and_vat_headroom_do_not_cause_false_conflict() -> None:
+    """Verify parenthesised arithmetic working values and headroom notes are ignored when scoring direct claim assertions."""
+    cgt_expect = {
+        "route": "rag",
+        "figures": [
+            {
+                "tool": "calculate_capital_gains",
+                "params": {"sale_price": 500_000_000, "cost_base": 320_000_000},
+                "field": "tax",
+                "claim": {"label_cues": {"any": ["CGT", "capital gains tax", "tax"]}},
+                "required": True,
+            }
+        ],
+    }
+    cgt_resp = {
+        "reply": (
+            "- **Cost Base:** UGX 320 million (including improvements).\n"
+            "- **Sale Price:** UGX 500 million.\n"
+            "- **Taxable Gain:** UGX 180 million (500m - 320m).\n"
+            "- **Tax Rate:** 30%.\n"
+            "- **Capital Gains Tax:** UGX 54 million (180m × 30%)."
+        ),
+        "retrieval_mode": "hybrid",
+        "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
+    }
+    cgt_ts = score_turn(cgt_expect, cgt_resp)
+    assert cgt_ts.figures == 1.0
+    assert cgt_ts.figure_details[0].status == "hit"
+
+    vat_expect = {
+        "route": "rag",
+        "figures": [
+            {
+                "tool": "check_vat_registration",
+                "params": {"annual_turnover": 240_000_000},
+                "field": "threshold",
+                "claim": {"label_cues": {"any": ["threshold", "registration"]}},
+                "required": True,
+            }
+        ],
+    }
+    vat_resp = {
+        "reply": (
+            "- Annual turnover: UGX 240,000,000\n"
+            "- Registration threshold: UGX 300,000,000 per year\n"
+            "- **Registration is not compulsory** — you are below the threshold (headroom UGX 60,000,000)."
+        ),
+        "retrieval_mode": "calculator",
+        "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
+    }
+    vat_ts = score_turn(vat_expect, vat_resp)
+    assert vat_ts.figures == 1.0
+    assert vat_ts.figure_details[0].status == "hit"
+
+
+def test_contradictory_same_claim_assertions_across_clauses_miss() -> None:
+    """Verify contradictory direct assertions for the same claim across separate clauses score as a conflict."""
+    cgt_expect = {
+        "route": "rag",
+        "figures": [
+            {
+                "tool": "calculate_capital_gains",
+                "params": {"sale_price": 500_000_000, "cost_base": 320_000_000},
+                "field": "tax",
+                "claim": {"label_cues": {"any": ["CGT", "capital gains tax"]}},
+                "required": True,
+            }
+        ],
+    }
+    resp = {
+        "reply": "Capital Gains Tax is UGX 54 million. Capital Gains Tax is UGX 60 million.",
+        "retrieval_mode": "hybrid",
+        "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
+    }
+    ts = score_turn(cgt_expect, resp)
+    assert ts.figures == 0.0
+    assert ts.figure_details[0].status == "miss"
+    assert "Conflicting" in ts.figure_details[0].reason
 
 
 def test_figure_appearing_only_in_negation_misses() -> None:
@@ -78,7 +189,7 @@ def test_figure_in_unrelated_sentence_while_claim_states_different_amount_misses
     expect = _paye_expect()
     response = {
         "reply": (
-            "Suppose aresident company has a balance of UGX 7,688,250 in its account. "
+            "Suppose a resident company has a balance of UGX 7,688,250 in its account. "
             "However, your monthly PAYE is UGX 5,200,000 under the 30% bracket."
         ),
         "retrieval_mode": "hybrid",
@@ -93,8 +204,6 @@ def test_figure_in_unrelated_sentence_while_claim_states_different_amount_misses
 def test_two_claims_with_swapped_amounts_both_miss() -> None:
     """Fixture 3: two claims with swapped amounts."""
     expect = _paye_expect(include_net_claim=True)
-    # Resident PAYE on 22M is 7,688,250 and net_take_home is 14,311,750.
-    # Here the reply swaps them!
     response = {
         "reply": (
             "For a resident earning UGX 22,000,000, your monthly PAYE is UGX 14,311,750, "
@@ -170,6 +279,7 @@ def test_empty_sources_on_rag_scores_zero_but_calculator_route_is_none() -> None
 
 
 def test_sector_guide_penalized_only_on_non_sector_questions() -> None:
+    """Verify sector guides reduce sources_relevant only when the scenario does not mention that sector."""
     expect = {
         "route": "rag",
         "must_include": [{"any": ["PAYE"]}],
@@ -201,6 +311,7 @@ def test_sector_guide_penalized_only_on_non_sector_questions() -> None:
 
 
 def test_truncation_via_finish_reason_or_mid_word_halves_score() -> None:
+    """Verify finish_reason='length' or mid-word truncation marks complete=False and halves the turn score."""
     expect = {
         "route": "rag",
         "must_include": [{"any": ["183 days"]}],
@@ -227,6 +338,7 @@ def test_truncation_via_finish_reason_or_mid_word_halves_score() -> None:
 
 
 def test_missing_tool_and_optional_fx_placeholder() -> None:
+    """Verify optional FX placeholders are skipped when convert_currency is absent while missing tools count as misses."""
     expect = {
         "route": "rag",
         "must_include": [{"any": ["benefit in kind"]}],
@@ -252,10 +364,10 @@ def test_missing_tool_and_optional_fx_placeholder() -> None:
         "retrieval_mode": "hybrid",
         "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
     }
-    # Force convert_currency to be unavailable so we test the fx_unavailable skip path
     from evals.complex_scenarios.scoring import default_tool_runner
 
     def _no_fx_runner(name: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Stub tool runner that reports convert_currency as missing."""
         if name == "convert_currency":
             return {"ok": False, "error": "tool_missing", "tool_missing": True}
         return default_tool_runner(name, params)
@@ -263,11 +375,11 @@ def test_missing_tool_and_optional_fx_placeholder() -> None:
     ts = score_turn(expect, response, tool_runner=_no_fx_runner)
     assert ts.figure_details[0].status == "fx_unavailable"
     assert ts.figure_details[1].status == "tool_missing"
-    # Only the second figure spec is active (since the first has required=False and fx_unavailable)
     assert ts.figures == 0.0
 
 
 def test_score_scenario_aggregates_turns() -> None:
+    """Verify score_scenario averages turn scores and tracks critical_fail and truncated_turns."""
     scenario = {
         "id": "demo_scen",
         "tax_head": "paye",

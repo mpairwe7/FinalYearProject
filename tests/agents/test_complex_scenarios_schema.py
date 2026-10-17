@@ -45,6 +45,7 @@ _HARDCODED_MONEY_RE = re.compile(
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
+    """Load and parse a non-empty JSONL scenario file."""
     assert path.exists(), f"Missing scenario file: {path}"
     rows = [
         json.loads(line)
@@ -56,6 +57,7 @@ def _load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def test_heldout_sha256_matches_recorded_digest() -> None:
+    """Verify that heldout.jsonl matches the SHA-256 recorded in HELDOUT.sha256."""
     assert SHA_PATH.exists(), "Missing HELDOUT.sha256"
     recorded = SHA_PATH.read_text(encoding="utf-8").strip().split()[0]
     actual = hashlib.sha256(HELDOUT_PATH.read_bytes()).hexdigest()
@@ -63,6 +65,7 @@ def test_heldout_sha256_matches_recorded_digest() -> None:
 
 
 def test_unique_ids_across_dev_and_heldout() -> None:
+    """Ensure every scenario ID is globally unique across dev and heldout splits."""
     dev_rows = _load_jsonl(DEV_PATH)
     ho_rows = _load_jsonl(HELDOUT_PATH)
     all_ids = [r["id"] for r in dev_rows] + [r["id"] for r in ho_rows]
@@ -70,6 +73,7 @@ def test_unique_ids_across_dev_and_heldout() -> None:
 
 
 def test_scenario_schema_and_basis_completeness() -> None:
+    """Validate scenario structure, basis citations, and absence of hardcoded money figures."""
     for expected_split, path in (("dev", DEV_PATH), ("heldout", HELDOUT_PATH)):
         rows = _load_jsonl(path)
         for row in rows:
@@ -133,6 +137,7 @@ def test_scenario_schema_and_basis_completeness() -> None:
 
 
 def test_coverage_distribution_dev_and_heldout() -> None:
+    """Verify minimum per-tax-head counts, multi-turn share (>=25%), and premise share (>=30%)."""
     dev_rows = _load_jsonl(DEV_PATH)
     ho_rows = _load_jsonl(HELDOUT_PATH)
 

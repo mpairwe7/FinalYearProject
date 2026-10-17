@@ -25,12 +25,13 @@ import json
 import statistics
 import sys
 import time
-import urllib.error
-import urllib.request
+import urllib.parse
 import uuid
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "App" / "backend"))
@@ -44,6 +45,7 @@ DEFAULT_BASE_URL = "https://struttingly-nongeological-briella.ngrok-free.dev"
 
 
 def file_sha256(path: Path) -> str:
+    """Compute the lowercase hex SHA-256 digest of a file."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -52,10 +54,12 @@ def file_sha256(path: Path) -> str:
 
 
 def _norm_sha(digest: str | None) -> str:
+    """Normalize a SHA-256 digest string by stripping prefix and hyphens."""
     return (digest or "").strip().removeprefix("sha256:").replace("-", "").lower()
 
 
 def _format_sha(digest: str) -> str:
+    """Format a SHA-256 hex digest with scheme prefix and 8-char groups."""
     raw = _norm_sha(digest)
     grouped = "-".join(raw[i : i + 8] for i in range(0, len(raw), 8))
     return f"sha256:{grouped}"
@@ -67,6 +71,7 @@ def verify_heldout_digest(
     label: str,
     baseline_report_path: Path | None,
 ) -> str:
+    """Verify ``heldout.jsonl`` against ``HELDOUT.sha256`` and the baseline report."""
     if not sha_file.exists():
         raise RuntimeError(f"Missing held-out digest file: {sha_file}")
     recorded_txt = _norm_sha(sha_file.read_text(encoding="utf-8").strip().split()[0])
@@ -94,6 +99,14 @@ def verify_heldout_digest(
     return _format_sha(current_digest)
 
 
+def _validate_base_url(base_url: str) -> str:
+    """Ensure ``base_url`` uses http or https scheme and return stripped base URL."""
+    parsed = urllib.parse.urlsplit(base_url.strip())
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise ValueError(f"base_url must be an http(s) URL, got {base_url!r}")
+    return base_url.strip().rstrip("/")
+
+
 def _post_chat_turn(
     base_url: str,
     conversation_id: str,
@@ -101,13 +114,12 @@ def _post_chat_turn(
     message: str,
     timeout: float = 240.0,
 ) -> dict[str, Any]:
-    base = base_url.rstrip("/")
-    payload = json.dumps(
-        {
-            "message": message,
-            "conversation_id": conversation_id,
-        }
-    ).encode("utf-8")
+    """Send a single chat turn over HTTP(S) to ``/api/v1/chat`` or ``/v1/chat``."""
+    base = _validate_base_url(base_url)
+    body = {
+        "message": message,
+        "conversation_id": conversation_id,
+    }
     headers = {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -118,41 +130,34 @@ def _post_chat_turn(
 
     paths = ("/api/v1/chat", "/v1/chat")
     last_err: Exception | None = None
-    for idx, path in enumerate(paths):
-        url = f"{base}{path}"
-        started = time.perf_counter()
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8")
+    with httpx.Client(timeout=timeout) as client:
+        for idx, path in enumerate(paths):
+            url = f"{base}{path}"
+            started = time.perf_counter()
+            try:
+                resp = client.post(url, json=body, headers=headers)
                 elapsed = round(time.perf_counter() - started, 3)
-                data = json.loads(raw) if raw else {}
+                if resp.status_code == 404 and idx == 0:
+                    continue
+                if resp.status_code >= 400:
+                    return {
+                        "reply": "",
+                        "retrieval_mode": "http_error",
+                        "error": f"HTTP {resp.status_code}: {resp.text[:400]}",
+                        "latency_s": elapsed,
+                    }
+                data = resp.json() if resp.content else {}
                 data["latency_s"] = elapsed
                 return data
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404 and idx == 0:
-                continue
-            elapsed = round(time.perf_counter() - started, 3)
-            body_text = ""
-            try:
-                body_text = exc.read().decode("utf-8", errors="replace")[:400]
-            except Exception:
-                pass
-            return {
-                "reply": "",
-                "retrieval_mode": "http_error",
-                "error": f"HTTP {exc.code}: {body_text}",
-                "latency_s": elapsed,
-            }
-        except Exception as exc:
-            last_err = exc
-            elapsed = round(time.perf_counter() - started, 3)
-            return {
-                "reply": "",
-                "retrieval_mode": "request_error",
-                "error": f"{type(exc).__name__}: {exc}",
-                "latency_s": elapsed,
-            }
+            except Exception as exc:
+                last_err = exc
+                elapsed = round(time.perf_counter() - started, 3)
+                return {
+                    "reply": "",
+                    "retrieval_mode": "request_error",
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "latency_s": elapsed,
+                }
     return {
         "reply": "",
         "retrieval_mode": "request_error",
@@ -162,6 +167,7 @@ def _post_chat_turn(
 
 
 def _execute_scenario(base_url: str, scenario: dict[str, Any]) -> dict[str, Any]:
+    """Execute all turns of ``scenario`` against ``base_url`` and score the replies."""
     conv_id = f"cs-{scenario['id'][:24]}-{uuid.uuid4().hex[:8]}"
     sess_id = f"sess-{uuid.uuid4().hex[:12]}"
     responses: list[dict[str, Any]] = []
@@ -186,6 +192,7 @@ def _execute_scenario(base_url: str, scenario: dict[str, Any]) -> dict[str, Any]
 
 
 def _percentile(sorted_vals: list[float], pct: float) -> float:
+    """Compute linear-interpolated percentile ``pct`` from a sorted list of floats."""
     if not sorted_vals:
         return 0.0
     if len(sorted_vals) == 1:
@@ -207,6 +214,7 @@ def build_report(
     results: list[dict[str, Any]],
     heldout_sha256: str | None,
 ) -> dict[str, Any]:
+    """Aggregate per-scenario scores into a structured benchmark evaluation report."""
     by_head: dict[str, list[float]] = defaultdict(list)
     latencies: list[float] = []
     total_turns = 0
@@ -336,6 +344,7 @@ def build_report(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for the complex tax scenario benchmark runner."""
     parser = argparse.ArgumentParser(description="Run complex tax scenarios against a live API.")
     parser.add_argument(
         "--base-url",
@@ -405,7 +414,21 @@ def main(argv: list[str] | None = None) -> int:
         }
         for fut in concurrent.futures.as_completed(future_map):
             idx = future_map[fut]
-            res = fut.result()
+            try:
+                res = fut.result()
+            except Exception as exc:  # keep the run and the report intact
+                scen = scenarios[idx]
+                res = {
+                    "id": scen.get("id"),
+                    "tax_head": scen.get("tax_head"),
+                    "difficulty": scen.get("difficulty"),
+                    "score": 0.0,
+                    "score_100": 0.0,
+                    "critical_fail": False,
+                    "truncated_turns": 0,
+                    "turns": [],
+                    "runner_error": f"{type(exc).__name__}: {exc}",
+                }
             results_by_idx[idx] = res
             print(
                 f"[{len(results_by_idx)}/{len(scenarios)}] {res['id']} "

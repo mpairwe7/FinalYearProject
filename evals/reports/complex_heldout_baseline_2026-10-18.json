@@ -7,14 +7,14 @@
   "turn_count": 102,
   "reviewed_scenarios": 0,
   "unreviewed_scenarios": 75,
-  "overall_score_100": 60.1,
+  "overall_score_100": 60.75,
   "metrics": {
-    "mean_scenario_score_100": 60.1,
+    "mean_scenario_score_100": 60.75,
     "critical_forbidden_hits": 1,
     "figure_accuracy_all_pct": 41.94,
     "figure_accuracy_tool_covered_pct": 53.06,
     "premise_challenge_rate_pct": 53.85,
-    "route_correctness_pct": 64.71,
+    "route_correctness_pct": 68.63,
     "truncated_turns": 1,
     "truncation_rate_pct": 0.98,
     "sector_guide_citation_rate_non_sector_pct": 24.66,
@@ -34,7 +34,7 @@
     },
     "corporation": {
       "count": 5,
-      "mean_score_100": 50.0,
+      "mean_score_100": 53.07,
       "min_score_100": 29.86
     },
     "customs": {
@@ -79,7 +79,7 @@
     },
     "procedures": {
       "count": 3,
-      "mean_score_100": 41.92,
+      "mean_score_100": 47.82,
       "min_score_100": 0.0
     },
     "rental": {
@@ -94,7 +94,7 @@
     },
     "vat": {
       "count": 7,
-      "mean_score_100": 27.49,
+      "mean_score_100": 29.68,
       "min_score_100": 0.0
     },
     "withholding": {
@@ -1193,14 +1193,14 @@
       "id": "ho_vat_return_and_payment_deadline_16",
       "tax_head": "vat",
       "difficulty": "easy",
-      "score": 0.230769,
-      "score_100": 23.08,
+      "score": 0.384615,
+      "score_100": 38.46,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.230769,
-          "route_ok": false,
+          "score": 0.384615,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": null,
@@ -1886,7 +1886,7 @@
               "expected": 5661600.0,
               "matched_value": null,
               "required": true,
-              "reason": "Conflicting amount asserted in claim clause"
+              "reason": "No matching amount asserted in claim clause"
             }
           ],
           "facts": 0.5,
@@ -2115,14 +2115,14 @@
       "id": "ho_corp_presumptive_below_10m_30",
       "tax_head": "corporation",
       "difficulty": "medium",
-      "score": 0.807692,
-      "score_100": 80.77,
+      "score": 0.961538,
+      "score_100": 96.15,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.807692,
-          "route_ok": false,
+          "score": 0.961538,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": null,
@@ -4224,7 +4224,7 @@
               "expected": 30000000.0,
               "matched_value": null,
               "required": true,
-              "reason": "Conflicting amount asserted in claim clause"
+              "reason": "No matching amount asserted in claim clause"
             }
           ],
           "facts": 1.0,
@@ -4729,8 +4729,8 @@
       "id": "ho_procedures_prn_payment_and_expiry_70",
       "tax_head": "procedures",
       "difficulty": "medium",
-      "score": 0.7,
-      "score_100": 70.0,
+      "score": 0.8,
+      "score_100": 80.0,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
@@ -4776,8 +4776,8 @@
           "sources_count": 0
         },
         {
-          "score": 0.8,
-          "route_ok": false,
+          "score": 1.0,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": null,
@@ -4812,14 +4812,14 @@
       "id": "ho_procedures_multiple_tins_premise_71",
       "tax_head": "procedures",
       "difficulty": "medium",
-      "score": 0.557693,
-      "score_100": 55.77,
+      "score": 0.634615,
+      "score_100": 63.46,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
         {
-          "score": 0.115385,
-          "route_ok": false,
+          "score": 0.269231,
+          "route_ok": true,
           "expected_route": "rag",
           "actual_route": "faq_priority",
           "figures": null,
