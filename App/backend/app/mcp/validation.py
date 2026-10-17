@@ -160,8 +160,8 @@ _TOOL_POISONING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "covert_exfiltration_instruction",
         re.compile(
-            r"\b(?:do\s+not\s+tell\s+the\s+user|hide\s+this\s+from\s+the\s+user|"
-            r"silently\s+(?:exfiltrate|forward|send)|\[SYSTEM\s+OVERRIDE\])\b",
+            r"(?:\b(?:do\s+not\s+tell\s+the\s+user|hide\s+this\s+from\s+the\s+user|"
+            r"silently\s+(?:exfiltrate|forward|send))\b|\[SYSTEM\s+OVERRIDE\])",
             re.IGNORECASE,
         ),
     ),
@@ -248,3 +248,15 @@ def screen_tool_result(result: Any) -> list[str]:
             if pattern.search(text):
                 violations.append(f"credential_leak:{label}@{path}")
     return violations
+
+
+def scrub_prompt_overrides_in_result(value: Any) -> Any:
+    """Replace natural-language prompt override phrases with ``[REDACTED_INSTRUCTION]``."""
+    override_pattern = _TOOL_POISONING_PATTERNS[0][1]
+    if isinstance(value, str):
+        return override_pattern.sub("[REDACTED_INSTRUCTION]", value)
+    if isinstance(value, dict):
+        return {k: scrub_prompt_overrides_in_result(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub_prompt_overrides_in_result(item) for item in value]
+    return value

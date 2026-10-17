@@ -50,6 +50,7 @@ from .validation import (
     inspect_descriptor_integrity,
     result_matches_schema,
     screen_tool_result,
+    scrub_prompt_overrides_in_result,
     validate_arguments,
 )
 
@@ -791,17 +792,25 @@ class MCPClient:
         else:
             output_violations = screen_tool_result(raw)
             if output_violations:
-                logger.warning(
-                    "MCP result for %s blocked by indirect prompt injection / credential screen: %s",
-                    name,
-                    output_violations[:3],
-                )
-                raw = {
-                    "ok": False,
-                    "error": "untrusted_tool_output",
-                    "violations": output_violations[:8],
-                    "policy": policy,
-                }
+                hard_violations = [
+                    v
+                    for v in output_violations
+                    if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
+                ]
+                if hard_violations:
+                    logger.warning(
+                        "MCP result for %s blocked by output safety screen: %s",
+                        name,
+                        hard_violations[:3],
+                    )
+                    raw = {
+                        "ok": False,
+                        "error": "untrusted_tool_output",
+                        "violations": hard_violations[:8],
+                        "policy": policy,
+                    }
+                else:
+                    raw = scrub_prompt_overrides_in_result(raw)
         ok = bool(raw.get("ok", True))
         if ok:
             breaker.record_success()
