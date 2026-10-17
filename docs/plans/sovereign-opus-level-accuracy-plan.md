@@ -95,7 +95,7 @@ On 2026-10-18 the live system was probed with a realistic expatriate-payroll cas
 | D1 | Turn 2 was hijacked by the PAYE **calculator wizard** ("What is your gross monthly salary?") in 0.5 s, with no retrieval and no sources. The same happens when turn 2 is asked on its own. | `calculator_router.plan_calculation`: `_CALC_VERB_RE` matches "calculating", `detect_calculator_intent` → `paye`, no amount → `missing=["monthly_gross"]` → `service._maybe_handle_calculator` starts workflow `calc_paye`. `_LEGAL_INQUIRY_RE` does not cover "how (exactly) does URA determine/value/treat". |
 | D2 | The wizard ignored the conversation: it assumed **resident** although turn 1 said non-resident, and re-asked the salary turn 1 had given ($6,000). | `plan_calculation(message)` sees only the current message; there is no per-conversation **case-facts** state. |
 | D3 | Turn 1 never computed PAYE, although `calculate_paye` supports `residency="non_resident"` and answers in 0.6 s. The $ amount was never converted. Benefits in kind were ignored. | The RAG path never composes tools. `extract_amounts` does not parse USD. There is no FX source. |
-| D4 | It never questioned the "non-resident" premise. **8 months ≈ 240 days ≥ 183 days ⇒ almost certainly resident.** When asked directly, the bot answered: *"Since the specialist is visiting for only 8 months, they do not meet the 183-day requirement… non-resident"* — wrong arithmetic, although its own citation [5] stated the ≥183-day rule correctly. | 9B generator (`Sunbird/Sunflower-Qwen3.5-9B`) failing multi-step reasoning. No code-owned residency test. |
+| D4 | It never questioned the "non-resident" premise. **If the specialist is physically present for most of an 8-month contract (≈ 240 days ≥ 183), they are resident, and the non-resident table would not apply.** Contract length is not the same as days present, so a correct answer flags this as *likely resident* and asks for the expected days in Uganda. When asked directly, the bot answered: *"Since the specialist is visiting for only 8 months, they do not meet the 183-day requirement… non-resident"* — wrong arithmetic, although its own citation [5] stated the ≥183-day rule correctly. | 9B generator (`Sunbird/Sunflower-Qwen3.5-9B`) failing multi-step reasoning. No code-owned residency test. |
 | D5 | Made-up comparisons: *"resident individuals use a simplified flat rate"*, *"Next 665,000 UGX"* (that band is 75,000 wide). | 9B generator. Nothing locks figures or claims to tool output. |
 | D6 | Housing benefit answer: *"This value is **subtracted** from the employee's gross salary"* — backwards (the benefit is **added** to employment income). **Faithfulness scored it 1.0.** | `retriever.compute_faithfulness` counts token overlap ≥ 50 % per sentence and is polarity-blind. `claim_verifier.verify_claims` is overlap-based (`deterministic_overlap_v1`). |
 | D7 | Turn 1 cited the **agriculture** and **hotel** sector guides for an employment question. | `retriever.apply_preference_boost` boosts tax type/FY only; sector guides are never demoted for non-sector questions. |
@@ -127,7 +127,7 @@ taxpayer message (+ conversation id)
 [3] Scenario planner (code): CaseFacts + question → list of applicable deterministic tools
         (residency test, BIK valuers, PAYE with benefits, residency comparison, FX, VAT, WHT, rental, …)
         → run them → "Verified Statutory Facts & Calculations" block (+ legal_basis strings)
-        → premise/contradiction findings (e.g. "user says non-resident but 240 days ≥ 183")
+        → premise/contradiction findings (e.g. "user says non-resident but stated presence ≥ 183 days"; or, with only a contract length, "likely resident — confirm days present")
         ▼
 [4] Retrieval (hybrid, with sector-guide demotion + topic-section boost)
         ▼
@@ -168,7 +168,7 @@ Create `evals/complex_scenarios/` containing:
 - `README.md` — purpose, schema, how to run, the held-out rule, the review status.
 - `dev.jsonl` — **~30 scenarios** you may look at and tune on.
 - `heldout.jsonl` — **~75 scenarios** you may run **only twice**: once at baseline (Phase A.5) and once at the end (Phase H). Never tune on it.
-- `HELDOUT.sha256` — `sha256sum heldout.jsonl > HELDOUT.sha256`, committed in the same PR. If the held-out file changes after the baseline run, the comparison is void; you must say so in the final report.
+- `HELDOUT.sha256` — `sha256sum heldout.jsonl > HELDOUT.sha256`, committed in the same PR. The runner **also writes the digest into every report** (`heldout_sha256`). The baseline report is the authority: the final run must match the digest recorded in the committed baseline report, not just the current `HELDOUT.sha256` (both files could be edited together). If the held-out file changes after the baseline run, the comparison is void; you must say so in the final report.
 
 **Coverage.** At least these tax heads, each with ≥ 3 held-out and ≥ 1 dev scenario. At least 25 % must be multi-turn (2–4 turns that depend on earlier facts), and at least 30 % must contain a false or questionable premise.
 
@@ -204,12 +204,12 @@ Create `evals/complex_scenarios/` containing:
 1. `evals/complex_scenarios/scoring.py` — a pure, deterministic scorer, importable by tests, with no network and no LLM:
    - `score_turn(expect, response, tool_runner) -> TurnScore` with these components:
      - `route_ok`: the expected route (`calculator` / `workflow` / `rag` / `declined`) matches `response["retrieval_mode"]` or `agent_role` (mapping documented in the README).
-     - `figures`: for each figure spec, run the tool through `tool_runner` (`ToolRegistry.call` in-process, against the current rate table), extract the expected value, and search the reply for it (tolerance ±0.5 % and ±1 UGX; accept "UGX 7,725,500", "7.73 million", "Shs 7,725,500"). Score = hits / specs. If the tool is missing → `tool_missing` (counts as a miss).
+     - `figures`: for each figure spec, run the tool through `tool_runner` (`ToolRegistry.call` in-process, against the current rate table) to get the expected value. Then score it **against the claim it belongs to, not by substring presence**. Each spec carries a `claim` with `label_cues` (e.g. `{"any": ["PAYE", "tax payable", "monthly tax"]}`). Split the reply into sentences / table rows. Find those containing a label cue and a money amount, and parse the amount(s) asserted there (formats: "UGX 7,725,500", "7.73 million", "Shs 7,725,500"; tolerance ±0.5 % and ±1 UGX). **Hit** = an asserted amount for that claim matches. **Miss** = no amount is asserted for the claim, *or* a conflicting amount is asserted for it (even if the correct value appears elsewhere), *or* the only match sits in a negated/rejected context ("not UGX …", "instead of UGX …", "rather than"). Score = hits / specs. If the tool is missing → `tool_missing` (counts as a miss). Fixtures: the correct value appearing only in a negation; the correct value appearing in an unrelated sentence while the PAYE line states a different amount; and two claims with swapped amounts.
      - `facts`: recall over `must_include` groups.
      - `forbidden`: count of `must_not_include` hits. **Any hit on a `severity: critical` item fails the turn.**
      - `premise`: when `expect.premise_flag` is true, the reply must challenge the premise (keywords from the scenario's `premise_cues`).
      - `complete`: the reply is not truncated. Use `finish_reason` when exposed (Phase E adds `response.debug.finish_reason` behind `EVAL_DEBUG=1`); otherwise the reply must end with terminal punctuation and must not end mid-word.
-     - `sources_relevant`: share of cited sources whose filename does not match `GUIDE-TO-TAXATION-OF-THE-.*-SECTOR` / `Hotel-and-Accomodation` unless the scenario names that sector.
+     - `sources_relevant`: share of cited sources whose filename does not match `GUIDE-TO-TAXATION-OF-THE-.*-SECTOR` / `Hotel-and-Accomodation` unless the scenario names that sector. **Empty source list:** not applicable (`None`) when the expected route is `calculator`, `workflow` or `declined` (deterministic replies cite no passages), and its weight is redistributed. For an expected `rag` route, an empty list scores **0** (an ungrounded answer). Fixtures cover both cases.
      - `latency_s`.
    - Turn score = 0.35·figures + 0.30·facts + 0.15·premise(if applicable) + 0.10·route_ok + 0.10·sources_relevant. Then 0 if any critical forbidden hit, ×0.5 if incomplete. When no figure spec exists, its weight is redistributed proportionally. Scenario score = mean over turns.
    - Unit tests: `tests/agents/test_complex_scenarios_scoring.py` (fixture replies covering each component, including the D6 "subtracted" reply → critical fail).
@@ -217,7 +217,7 @@ Create `evals/complex_scenarios/` containing:
    - Args: `--base-url` (default the ngrok URL), `--split dev|heldout`, `--out evals/reports/complex_<split>_<label>_<date>.json`, `--concurrency 2`, `--label`.
    - One fresh `conversation_id` per scenario. Turns are sent in order on `/api/v1/chat` (non-streaming; Phase E keeps REST and streaming at parity).
    - Outputs a per-scenario JSON, a per-tax-head table, an overall score, a "critical errors" list, latency p50/p95, and a truncation rate.
-   - When `--split heldout` is used, it refuses to run unless `sha256sum` matches `HELDOUT.sha256`.
+   - When `--split heldout` is used, it records the file's sha256 in the report. With `--baseline-report <path>` (required for any held-out run after the baseline), it refuses to run unless the current digest equals that report's `heldout_sha256`. The baseline run itself refuses unless the digest equals `HELDOUT.sha256`.
 3. `tests/agents/test_complex_scenarios_schema.py` — validates both JSONL files: schema, unique ids, coverage table satisfied, every legal fact has `basis`, held-out hash matches.
 
 ### A.5 Baseline runs (the "before" numbers)
@@ -422,7 +422,8 @@ Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` 
   @dataclass
   class CaseFacts:
       residency_claim: Literal["resident","non_resident"] | None   # what the user SAID
-      days_in_uganda: int | None          # derived from "8-month contract", "240 days", dates
+      days_in_uganda: int | None          # ONLY from stated physical-presence day counts or presence dates ("240 days", "in Uganda from March to October")
+      contract_months: int | None         # "8-month contract" — NOT presence; used only to flag "likely resident, confirm days present"
       period_start: date | None; period_end: date | None
       permanent_home_in_uganda: bool | None
       gov_employee_posted_abroad: bool | None
@@ -435,7 +436,7 @@ Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` 
       provenance: dict[str, int]           # field → turn index it came from
   def extract_case_facts(message: str, prior: CaseFacts | None) -> CaseFacts  # merge; later explicit statements override earlier ones
   ```
-- Parsing must handle `$6,000`, `USD 6k`, `6,000 dollars`, `UGX 1.5m`, `1.5 million shillings`, `Shs 900,000`, "per month/monthly/a month", "per year/annual", "8-month contract", "for 8 months", "240 days", "from March to October 2026". Reuse `calculator_router.extract_amounts` / `parse_ugx_amount` for UGX; add currency detection beside them, not a second UGX parser.
+- Parsing must handle `$6,000`, `USD 6k`, `6,000 dollars`, `UGX 1.5m`, `1.5 million shillings`, `Shs 900,000`, "per month/monthly/a month", "per year/annual", "8-month contract" (→ `contract_months`), "in Uganda for 8 months" / "240 days" / "from March to October 2026" (→ `days_in_uganda` only when the phrase states presence in Uganda). Reuse `calculator_router.extract_amounts` / `parse_ugx_amount` for UGX; add currency detection beside them, not a second UGX parser.
 - Persistence: store per conversation the same way `calculator_router.remember_calculation` does (Redis via `_redis_store()`, with TTL, falling back to in-process). Key: `case_facts:{conversation_id}`, tenant-scoped like existing workflow keys. Clear on the existing conversation-reset paths.
 - Privacy: CaseFacts are conversation-scoped working data. Include them in the existing `/v1/me` export/erasure (see memory `account-management-ids`: export/erasure cover chat history + memory), and redact them from logs (amounts are fine, names/TINs are not).
 - Tests: `tests/agents/test_case_facts.py` — parsing table (≥ 40 phrasings across en, plus the lg/sw amount words already handled by `number_words.py`), cross-turn merge, override, provenance.
@@ -446,17 +447,17 @@ Read first: `app/calculator_router.py` (whole file), `app/tools/calculators.py` 
 - Tests (`tests/test_calculator_router.py`): turn 2 of §1 verbatim → `None`; ≥ 15 paraphrased explanation questions across PAYE/VAT/WHT/rental/customs → `None`; ≥ 15 genuine calculation asks (with and without amounts) still plan.
 
 ### F.3 Wizard reads CaseFacts (fixes D2)
-- In `_maybe_handle_calculator`, before deciding `missing`, fill the plan's params from CaseFacts (salary → `monthly_gross` after FX, residency → from the **residency tool's result** when the days are known, else the user's claim). Only ask for what is still missing. When residency comes from CaseFacts, the assumption line must say so ("using the 8-month contract you mentioned → resident").
+- In `_maybe_handle_calculator`, before deciding `missing`, fill the plan's params from CaseFacts (salary → `monthly_gross` after FX, residency → from the **residency tool's result** when presence days are known; otherwise the user's claim, plus an explicit caveat when `contract_months` suggests ≥ 183 days). Only ask for what is still missing. When residency comes from CaseFacts, the assumption line must say so ("you said they'll be in Uganda ~240 days → resident"). With only a contract length: "I've used non-resident as you said, but if they're physically in Uganda 183+ days they are resident — how many days will they be here?"
 - Feed CaseFacts into the existing `zero_effort_slot_prefill` path too, where it applies; keep that flag's semantics.
 
 ### F.4 New deterministic tools (each a `CalculatorTool` subclass in `app/tools/calculators.py`, registered in `CALCULATOR_TOOLS`, exposed via the `tax_calculator` MCP namespace automatically)
 
 All parameters, percentages and thresholds come from the rate table (`_require_scalar` / new `_require_rule`). **No literals in code.** Every result carries `rate_keys` and the `legal_basis` text, like the existing calculators.
 
-1. **`determine_residency`** — inputs: `days_in_uganda` (in the relevant 12-month window), `permanent_home` (bool|None), `avg_days_current_and_two_prior` (number|None), `gov_employee_posted_abroad` (bool|None), optional `period_start`/`period_end` to explain the July–June year-of-income span. Output: `status` (`resident`/`non_resident`/`undetermined`), `tests` (each test with pass/fail/unknown and its threshold), `missing_facts`, `years_of_income_affected`. Rule data in the table: `residency_days_threshold` = 183, `residency_avg_days_threshold` = 122, `year_of_income_end` = "06-30". Legal basis: §12.1(a).
+1. **`determine_residency`** — inputs: `days_in_uganda` (physical presence in the relevant 12-month window), `contract_months` (optional; only yields `likely_resident`, never a definitive status), `permanent_home` (bool|None), `avg_days_current_and_two_prior` (number|None), `gov_employee_posted_abroad` (bool|None), optional `period_start`/`period_end` to explain the July–June year-of-income span. Output: `status` (`resident`/`non_resident`/`undetermined`), `tests` (each test with pass/fail/unknown and its threshold), `missing_facts`, `years_of_income_affected`. Rule data in the table: `residency_days_threshold` = 183, `residency_avg_days_threshold` = 122, `year_of_income_end` = "06-30". Legal basis: §12.1(a).
 2. **`value_benefit_in_kind`** — `kind` ∈ {car, housing, domestic_staff, meals, utilities, low_interest_loan, debt_waiver, property_or_services, other}. Rules per §12.1(b):
    - car: `20% × A × B/C − D`, where A = market value when first provided, **depreciated at 35 % reducing balance for each subsequent year** (input `years_since_first_provided`), B = days available for private use in the year of income, C = days in the year of income, D = employee payment. The tool returns the annual value and a per-month value for PAYE.
-   - housing: lesser of (a) market rent − employee payment, (b) 15 % of employment income for the year (the handbook says "including the amount referred to in paragraph (a)"). **Implement exactly as the handbook text reads, put the full quoted text in `notes`, and add the key to the table's `unverified` list** until a human confirms the interpretation. While unverified, the tool must say so in its output (the table loader already surfaces `unverified` keys).
+   - housing: lesser of (a) market rent − employee payment, (b) 15 % of employment income for the year (the handbook says, "including the amount referred to in paragraph (a)"). **Implement exactly as the handbook text reads, put the full quoted text in `notes`, and add the key to the table's `unverified` list** until a human confirms the interpretation. While unverified: the tool returns `verified: false`, and **its value must not enter any figure presented as verified**. `calculate_paye` must return two results when an unverified benefit is supplied: `paye_verified` (excluding unverified benefits) and `paye_conditional` (including them, labelled conditional, with the list of unverified inputs). The verified-facts block shows the conditional total only under a "conditional on unverified rule" label. The figure lock (G.2) treats conditional figures as allowed only when the reply labels them conditional.
    - domestic staff: total employment income paid to the assistants − employee payment
    - meals/refreshment/entertainment: cost to employer − employee payment
    - utilities: cost to employer − employee payment
@@ -483,7 +484,7 @@ Tests: `tests/test_tax_calculators.py` — every formula with hand-computed expe
 
 ### F.6 Scenario planner + verified-facts block (fixes D3, generalises D1/D4)
 - New `app/scenario_planner.py`: `plan_tools(question: str, facts: CaseFacts) -> list[ToolCallSpec]`. Use declarative rules (a table of `when(facts, question) -> tool spec`):
-  - days known or residency mentioned → `determine_residency`
+  - presence days known, or residency mentioned → `determine_residency` (with only `contract_months`, the tool returns `undetermined` + `likely_resident: true` when months × 30 ≥ 183, and `missing_facts: ["days physically present"]`)
   - a salary is known and PAYE is mentioned or implied → `convert_currency` (if not UGX) → for each benefit `value_benefit_in_kind` → `calculate_paye(benefits, residency from the tool, compare_residency=True when residency is asked about)`
   - rental amounts → `calculate_rental_tax` (reuse the existing pooling logic **moved out of** `_evaluate_calculation_context` into this planner, then delete the duplicate)
   - turnover + VAT → `check_vat_registration`; imported services → `wht_non_resident_service` + VAT reverse-charge rule, … (one rule per tool from F.4)
@@ -491,10 +492,11 @@ Tests: `tests/test_tax_calculators.py` — every formula with hand-computed expe
 - `service` integration: replace `_evaluate_calculation_context(query)` with `build_verified_facts(question, facts)`. It runs the plan through `get_client().call_tool(...)` (the MCP path used today) and renders one block:
   ```
   ## Verified Statutory Facts & Calculations (tool ground truth — use these figures verbatim)
-  - Residency: RESIDENT — present ~240 days ≥ 183-day test (basis: …). User premise "non-resident" is contradicted.
+  - Residency: LIKELY RESIDENT — an 8-month contract means ≥ 183 days if they are physically present most of it (183-day test, basis: …). Confirm days present. User premise "non-resident" may be wrong.
   - Car benefit: UGX … / month (20% × A × B/C − D; A=…, B=…, C=…, D=0) (basis: …)
   - Housing benefit: UGX … / month (lesser of market rent … and 15% of employment income …) [interpretation unverified]
-  - PAYE (resident, FY2026-27): UGX … / month on chargeable UGX …; non-resident would be UGX … (difference UGX …)
+  - PAYE verified (resident, FY2026-27, salary + car): UGX … / month on chargeable UGX …; non-resident would be UGX … (difference UGX …)
+  - PAYE conditional on unverified housing rule: UGX … / month (includes housing benefit of UGX …)
   - Still needed for an exact figure: market value of the car; market rent of the house; exchange rate on payment date.
   ```
   Inject it wherever `_evaluate_calculation_context` output is injected today (REST and streaming), **before** the passages.
@@ -659,6 +661,7 @@ Benefits are **added** to employment income (`ura_employment_income_faqs.csv`: e
 - ✗ "Non-residents are taxed 10 % on the first UGX 4,020,000" — the 4,020,000 figure is the **annual resident** nil threshold (335,000 × 12); the non-resident first band is 10 % on 0–335,000 **per month**.
 - ✗ "BIK valuation is in the Fifth Schedule" — use the handbook §12.2.3 / ITA employment-income provisions as cited by the corpus.
 - ✗ "8 months is less than 183 days."
+- ✗ Treating a contract length as days physically present. The 183-day test counts **presence in Uganda**. A contract length only supports "likely resident — confirm days present".
 - ✗ "Housing benefit is subtracted from gross salary."
 - ✗ "Residents use a simplified flat rate."
 - ✗ "Route hard questions to Gemini / Cloudflare Llama-70B / any hosted model" (forbidden, §0.2).
@@ -679,7 +682,7 @@ Benefits are **added** to employment income (`ura_employment_income_faqs.csv`: e
       "expect": {
         "route": "rag",
         "premise_flag": true,
-        "premise_cues": [{"any": ["resident", "183"]}],
+        "premise_cues": [{"any": ["183"]}, {"any": ["days", "physically present", "how long"]}],
         "must_include": [
           {"any": ["183 days", "183-day"]},
           {"any": ["benefit in kind", "benefits in kind", "BIK"]},
@@ -690,7 +693,7 @@ Benefits are **added** to employment income (`ura_employment_income_faqs.csv`: e
           {"text": "less than 183", "severity": "critical"}
         ],
         "figures": [
-          {"tool": "calculate_paye", "params": {"monthly_gross": "${FX:USD:6000}", "residency": "resident"}, "field": "paye", "required": false}
+          {"tool": "calculate_paye", "params": {"monthly_gross": "${FX:USD:6000}", "residency": "resident"}, "field": "paye", "claim": {"label_cues": {"any": ["PAYE", "tax payable", "monthly tax"]}}, "required": false}
         ],
         "basis": ["TAXATION-HANDBOOK-FY-2025-26-1 › definitions › resident individual"]
       }
@@ -739,6 +742,6 @@ docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' ura-app-api | cut 
 ### 12.6 Definition of done (whole plan)
 - All 11 PRs merged to `dev` with green CI and resolved CodeRabbit comments.
 - The held-out acceptance bar (§10.3) passes, or the report states exactly which lines fail and why.
-- The §1 conversation, replayed live, gives: "likely resident (≈240 days ≥ 183)"; PAYE computed for resident with the non-resident comparison (difference UGX 37,250/month above 485k); the car and housing benefit rules with their direction (added); an explicit request for the car's market value, the house's market rent and the exchange rate (or the BoU rate used, with its date); no truncation; no sector-guide citations; and turn 2 answered as an explanation, not a wizard.
+- The §1 conversation, replayed live, gives: "likely resident if physically present ≥ 183 days — how many days will they be in Uganda?"; PAYE computed for resident with the non-resident comparison (difference UGX 37,250/month above 485k); the car and housing benefit rules with their direction (added); an explicit request for the car's market value, the house's market rent and the exchange rate (or the BoU rate used, with its date); no truncation; no sector-guide citations; and turn 2 answered as an explanation, not a wizard.
 - No commercial AI endpoint is reachable from a `SOVEREIGN_MODE=true` deployment.
 - Docs, ADR, runbook, model card, gap register and risk manifest are updated; experiment GPUs are released.
