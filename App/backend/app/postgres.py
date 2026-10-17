@@ -26,6 +26,7 @@ import hashlib
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from typing import Any
@@ -51,34 +52,52 @@ _TICKET_TTL_DAYS = int(os.getenv("TICKET_TTL_DAYS", "90"))
 _WORKFLOW_SESSION_TTL_DAYS = max(1, int(os.getenv("WORKFLOW_SESSION_TTL_DAYS", "365")))
 
 _pool: Any = None
+_pool_lock = threading.Lock()
 
 
 def _get_pool() -> Any:
-    """Lazy-init a psycopg ConnectionPool.  Returns None if unavailable."""
+    """Lazy-init a thread-safe psycopg ConnectionPool. Returns None if unavailable."""
     global _pool
     if _pool is not None:
         return _pool
     if not POSTGRES_DSN:
         logger.warning("POSTGRES_DSN is empty; postgres backend disabled")
         return None
-    try:
-        from psycopg_pool import ConnectionPool  # type: ignore
+    with _pool_lock:
+        if _pool is not None:
+            return _pool
+        try:
+            from psycopg_pool import ConnectionPool  # type: ignore
 
-        _pool = ConnectionPool(
-            conninfo=POSTGRES_DSN,
-            min_size=POOL_MIN,
-            max_size=POOL_MAX,
-            open=True,
-            kwargs={"autocommit": False},
-        )
-        logger.info("Postgres pool ready (min=%d max=%d)", POOL_MIN, POOL_MAX)
-        return _pool
-    except ImportError:
-        logger.warning("psycopg / psycopg_pool not installed; postgres disabled")
-        return None
-    except Exception:
-        logger.exception("Postgres pool init failed")
-        return None
+            _pool = ConnectionPool(
+                conninfo=POSTGRES_DSN,
+                min_size=POOL_MIN,
+                max_size=POOL_MAX,
+                timeout=10.0,
+                open=True,
+                kwargs={"autocommit": False},
+            )
+            logger.info("Postgres pool ready (min=%d max=%d)", POOL_MIN, POOL_MAX)
+            return _pool
+        except ImportError:
+            logger.warning("psycopg / psycopg_pool not installed; postgres disabled")
+            return None
+        except Exception:
+            logger.exception("Postgres pool init failed")
+            return None
+
+
+def close_pool() -> None:
+    """Drain and close the Postgres connection pool on application shutdown."""
+    global _pool
+    with _pool_lock:
+        if _pool is not None:
+            try:
+                _pool.close()
+            except Exception:
+                logger.debug("Postgres pool close ignored", exc_info=True)
+            finally:
+                _pool = None
 
 
 def init_db() -> None:

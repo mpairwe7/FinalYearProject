@@ -46,6 +46,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self._opened_at: float = 0.0
         self._current_timeout = reset_timeout
+        self._half_open_probe_in_flight = False
         self._lock = threading.Lock()
 
     @property
@@ -56,13 +57,26 @@ class CircuitBreaker:
                 and time.monotonic() - self._opened_at >= self._current_timeout
             ):
                 self._state = CircuitState.HALF_OPEN
+                self._half_open_probe_in_flight = False
                 logger.info("Circuit breaker %s → HALF_OPEN (testing)", self.name)
             return self._state
 
     def allow_request(self) -> bool:
-        """Return True if the request should proceed."""
-        s = self.state
-        return s in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
+        """Return True if the request should proceed (single probe in HALF_OPEN)."""
+        with self._lock:
+            if (
+                self._state == CircuitState.OPEN
+                and time.monotonic() - self._opened_at >= self._current_timeout
+            ):
+                self._state = CircuitState.HALF_OPEN
+                self._half_open_probe_in_flight = False
+                logger.info("Circuit breaker %s → HALF_OPEN (testing)", self.name)
+            if self._state == CircuitState.CLOSED:
+                return True
+            if self._state == CircuitState.HALF_OPEN and not self._half_open_probe_in_flight:
+                self._half_open_probe_in_flight = True
+                return True
+            return False
 
     def record_success(self) -> None:
         """Call after a successful operation."""
@@ -72,12 +86,14 @@ class CircuitBreaker:
             self._failures = 0
             self._state = CircuitState.CLOSED
             self._current_timeout = self._base_timeout
+            self._half_open_probe_in_flight = False
 
     def record_failure(self) -> None:
         """Call after a failed operation."""
         with self._lock:
             self._failures += 1
             was_half_open = self._state == CircuitState.HALF_OPEN
+            self._half_open_probe_in_flight = False
             if self._failures >= self.failure_threshold or was_half_open:
                 self._state = CircuitState.OPEN
                 self._opened_at = time.monotonic()

@@ -248,3 +248,54 @@ def test_mcp_mrtr_production_signing_transport_bounds_and_5_locale_tool_rag(monk
     assert "calculate_paye" in nyn_sel.tool_names
     ach_sel = selector.select("kwano mucoro me otwel", eligible, k=3)
     assert "calculate_rental_tax" in ach_sel.tool_names
+
+
+def test_backend_circuit_breaker_half_open_single_probe_and_security_headers(monkeypatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app import database as db
+    from app.main import app
+    from app.production_readiness import _mcp_security_errors
+    from app.resilience import CircuitBreaker
+
+    # 1. CircuitBreaker admits only 1 probe in HALF_OPEN
+    br = CircuitBreaker(name="probe-test", failure_threshold=2, reset_timeout=0.01)
+    br.record_failure()
+    br.record_failure()
+    import time
+
+    time.sleep(0.02)
+    assert br.allow_request() is True
+    assert br.allow_request() is False  # second concurrent probe blocked
+    br.record_success()
+    assert br.allow_request() is True
+
+    # 2. OWASP REST security headers and 413 JSON payload cap on FastAPI app
+    client = TestClient(app)
+    health_res = client.get("/health")
+    assert health_res.status_code == 200
+    assert health_res.headers.get("Cross-Origin-Opener-Policy") == "same-origin"
+    assert "frame-ancestors 'none'" in (health_res.headers.get("Content-Security-Policy") or "")
+
+    fresh_res = client.get("/v1/index/freshness")
+    assert fresh_res.status_code == 200
+    assert fresh_res.headers.get("Cache-Control") == "no-store"
+
+    oversized = client.post(
+        "/v1/chat",
+        content=b'{"message":"hi"}',
+        headers={"Content-Type": "application/json", "Content-Length": str(10 * 1024 * 1024)},
+    )
+    assert oversized.status_code == 413
+
+    # 3. SQLite pragmas and production_readiness MCP gate
+    conn = db._get_connection()
+    fk_on = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+    assert fk_on == 1
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "short")
+    monkeypatch.setenv("MCP_SERVER_URL_EFRIS", "http://127.0.0.1:8933")
+    mcp_errs = _mcp_security_errors()
+    assert any("MCP_REQUEST_STATE_SECRET" in e for e in mcp_errs)
+    assert any("MCP (efris)" in e for e in mcp_errs)

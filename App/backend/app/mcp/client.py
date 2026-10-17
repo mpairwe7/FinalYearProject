@@ -198,6 +198,16 @@ class MCPClient:
                 self._pinned_descriptors.pop(k, None)
             return len(keys)
 
+    def close(self) -> None:
+        """Close all bound remote HTTP transports on shutdown."""
+        for transport in set(self._transports.values()):
+            close_fn = getattr(transport, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    logger.debug("MCP transport close ignored", exc_info=True)
+
     @staticmethod
     def _check_cross_namespace_shadowing(name: str, namespace: str) -> str | None:
         """Block a remote namespace from shadowing a tool owned by another namespace (OWASP MCP09)."""
