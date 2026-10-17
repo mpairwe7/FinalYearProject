@@ -340,6 +340,36 @@ risks:
     owasp_llm: "LLM06"
     mitre_atlas: "AML.T0080"
 
+  - id: M-AGT-08
+    element: MCP Multi Round-Trip State (MRTR)
+    framework: MAESTRO
+    stride_category: T
+    threat: Unsigned alg=none or stripped-signature requestState forgery across multi-turn MCP elicitations (OWASP MCP07, RFC 8725)
+    severity: High
+    cvss: "8.2"
+    existing_controls: mrtr.py refuses alg=none and requires >=32-char HMAC-SHA256 secret in production; MCPClient enforces unwrap_request_state on all non-null requestState payloads
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-347"
+    owasp_llm: "LLM06"
+    mitre_atlas: "AML.T0053"
+
+  - id: M-AGT-09
+    element: MCP HTTP Transport
+    framework: MAESTRO
+    stride_category: D
+    threat: Remote MCP server oversized response memory exhaustion, unbounded ttlMs cache pinning, or link-local metadata SSRF in production (MAESTRO L4)
+    severity: High
+    cvss: "7.8"
+    existing_controls: HttpTransport enforces MAX_MCP_RESPONSE_BYTES (2 MiB), clamps _cache_seconds to 86400s, and blocks loopback/link-local metadata IPs in production
+    status: Mitigated
+    mitigation_target: Shipped
+    owner: backend-team
+    cwe: "CWE-400"
+    owasp_llm: "LLM10"
+    mitre_atlas: "AML.T0029"
+
   # ===========================================================================
   # 6. Privacy & Data Protection (LINDDUN Framework)
   # ===========================================================================

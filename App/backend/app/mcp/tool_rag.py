@@ -69,6 +69,22 @@ _MULTILINGUAL_TAX_SYNONYMS: dict[str, tuple[str, ...]] = {
     "mapato": ("income", "corporation"),
     "ongezeko": ("value", "added", "vat"),
     "zuio": ("withholding", "tax"),
+    # Runyankole (nyn)
+    "omushoro": ("tax",),
+    "emishoro": ("tax", "taxes"),
+    "okushashura": ("calculate", "pay"),
+    "shashura": ("calculate", "pay"),
+    "okubara": ("calculate",),
+    "omushahara": ("salary", "paye"),
+    "emishahara": ("salary", "paye"),
+    "ebyensharo": ("customs", "duty"),
+    # Acholi (ach)
+    "mucoro": ("tax", "taxes"),
+    "culu": ("calculate", "pay"),
+    "kwano": ("calculate",),
+    "mucara": ("salary", "paye"),
+    "otwel": ("rental", "tax"),
+    "biacara": ("corporation", "business", "tax"),
 }
 
 

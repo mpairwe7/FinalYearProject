@@ -4,7 +4,7 @@
   "serialNumber": "urn:uuid:a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "version": 2,
   "metadata": {
-    "timestamp": "2026-04-13T00:00:00Z",
+    "timestamp": "2026-10-17T00:00:00Z",
     "tools": {
       "components": [
         {
@@ -25,12 +25,12 @@
       "type": "application",
       "bom-ref": "ura-chatbot",
       "name": "ura-chatbot",
-      "version": "1.1.0",
-      "description": "MLOps Pipeline for URA Chat Bot \u2013 AI-powered customer-service chatbot for Uganda Revenue Authority",
+      "version": "2.0.0",
+      "description": "Sovereign 5-Locale Multimodal RAG & Agentic AI Platform for Uganda Revenue Authority (URA)",
       "licenses": [
         { "license": { "id": "Apache-2.0" } }
       ],
-      "purl": "pkg:github/mpairweLandwind/ura-chatbot@1.1.0"
+      "purl": "pkg:github/mpairwe7/FinalYearProject@2.0.0"
     }
   },
   "components": [
@@ -243,26 +243,38 @@
     },
     {
       "type": "machine-learning-model",
-      "bom-ref": "qwen3-8b",
-      "name": "Qwen3-8B",
+      "bom-ref": "sunflower-qwen3.5-9b",
+      "name": "Sunbird/Sunflower-Qwen3.5-9B",
       "version": "1.0",
-      "purl": "pkg:huggingface/Qwen/Qwen3-8B@1.0",
-      "description": "Qwen 3 8B model used for RAG generation and agentic tool-calling",
+      "purl": "pkg:huggingface/Sunbird/Sunflower-Qwen3.5-9B@1.0",
+      "description": "Primary 5-locale (en, lg, sw, nyn, ach) RAG generation and agentic tool-calling LLM (FP8, 262k context)",
       "licenses": [{"license": {"id": "Apache-2.0"}}],
       "supplier": {
-        "name": "Alibaba Qwen Team"
+        "name": "Sunbird AI"
       }
     },
     {
       "type": "machine-learning-model",
-      "bom-ref": "gemma-2b-gguf",
-      "name": "gemma-2-2b-it-q4_k_m",
-      "version": "2.0",
-      "purl": "pkg:huggingface/google/gemma-2-2b-it-GGUF@2.0",
-      "description": "Gemma 2 2B IT GGUF quantised model for on-device mobile inference via MediaPipe",
-      "licenses": [{"license": {"name": "Gemma Terms of Use"}}],
+      "bom-ref": "orpheus-3b-tts-multilingual",
+      "name": "Sunbird/orpheus-3b-tts-multilingual",
+      "version": "1.0",
+      "purl": "pkg:huggingface/Sunbird/orpheus-3b-tts-multilingual@1.0",
+      "description": "Primary 5-locale neural text-to-speech synthesis model (FP8 sidecar)",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
       "supplier": {
-        "name": "Google DeepMind"
+        "name": "Sunbird AI"
+      }
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "sunflowerasr-51-african-languages",
+      "name": "Sunbird/SunflowerASR-51-african-languages",
+      "version": "1.0",
+      "purl": "pkg:huggingface/Sunbird/SunflowerASR-51-african-languages@1.0",
+      "description": "Primary 5-locale African speech-to-text ASR model (Whisper-SALT)",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "supplier": {
+        "name": "Sunbird AI"
       }
     },
     {
@@ -275,6 +287,18 @@
       "licenses": [{"license": {"id": "MIT"}}],
       "supplier": {
         "name": "BAAI"
+      }
+    },
+    {
+      "type": "machine-learning-model",
+      "bom-ref": "mxbai-rerank-base-v2",
+      "name": "mixedbread-ai/mxbai-rerank-base-v2",
+      "version": "2.0",
+      "purl": "pkg:huggingface/mixedbread-ai/mxbai-rerank-base-v2@2.0",
+      "description": "Cross-encoder passage reranker for hybrid RAG retrieval",
+      "licenses": [{"license": {"id": "Apache-2.0"}}],
+      "supplier": {
+        "name": "Mixedbread AI"
       }
     }
   ],
@@ -301,9 +325,11 @@
         "pkg:npm/react-dom@19.2.0",
         "pkg:npm/zustand@5.0.5",
         "pkg:npm/@tanstack/react-query@5.99.0",
-        "qwen2.5-3b-instruct",
-        "gemma-2b-gguf",
+        "sunflower-qwen3.5-9b",
+        "orpheus-3b-tts-multilingual",
+        "sunflowerasr-51-african-languages",
         "bge-m3",
+        "mxbai-rerank-base-v2",
         "pkg:pypi/bitsandbytes@0.45.5",
         "pkg:pypi/ruff@0.11.7",
         "pkg:pypi/mypy@1.15.0",

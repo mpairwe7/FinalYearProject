@@ -780,21 +780,24 @@ class MCPClient:
         meta = request_meta(
             tenant_id=tenant_id, user_id=user_id, user_role=user_role, call_id=call_id
         )
-        if (
-            isinstance(request_state, dict)
-            and ("alg" in request_state or "sig" in request_state)
-            and unwrap_request_state(request_state) is None
+        require_signed_state = bool(os.getenv("MCP_REQUEST_STATE_SECRET")) or (
+            os.getenv("APP_ENV", "development").lower() == "production"
+        )
+        if request_state is not None and (
+            require_signed_state
+            or (isinstance(request_state, dict) and ("alg" in request_state or "sig" in request_state))
         ):
-            return finish(
-                {
-                    "ok": False,
-                    "error": "requestState integrity check failed",
-                    "policy": policy,
-                },
-                ok=False,
-                risk=risk,
-                namespace=namespace,
-            )
+            if unwrap_request_state(request_state) is None:
+                return finish(
+                    {
+                        "ok": False,
+                        "error": "requestState integrity check failed",
+                        "policy": policy,
+                    },
+                    ok=False,
+                    risk=risk,
+                    namespace=namespace,
+                )
 
         try:
             declared_args = set((input_schema.get("properties") or {}).keys())

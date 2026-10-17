@@ -20,10 +20,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _ALG = "hmac-sha256"
+MIN_STATE_SECRET_CHARS = 32
+
+
+def _is_production() -> bool:
+    return os.getenv("APP_ENV", "development").lower() == "production"
 
 
 def _secret() -> bytes:
-    return (os.getenv("MCP_REQUEST_STATE_SECRET") or "").encode()
+    raw = (os.getenv("MCP_REQUEST_STATE_SECRET") or "").strip()
+    if _is_production() and len(raw) < MIN_STATE_SECRET_CHARS:
+        return b""
+    return raw.encode()
 
 
 def wrap_request_state(payload: dict[str, Any]) -> dict[str, Any]:
@@ -31,6 +39,8 @@ def wrap_request_state(payload: dict[str, Any]) -> dict[str, Any]:
     body = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     secret = _secret()
     if not secret:
+        if _is_production():
+            raise RuntimeError("MCP_REQUEST_STATE_SECRET (>=32 chars) is required in production")
         return {"payload": payload, "alg": "none"}
     sig = hmac.new(secret, body.encode(), hashlib.sha256).hexdigest()
     return {"payload": payload, "alg": _ALG, "sig": sig}
@@ -46,6 +56,8 @@ def unwrap_request_state(wrapped: Any) -> dict[str, Any] | None:
     secret = _secret()
     alg = str(wrapped.get("alg") or "none")
     if not secret:
+        if _is_production():
+            return None
         return payload if alg == "none" else None
     if alg != _ALG or not wrapped.get("sig"):
         return None
