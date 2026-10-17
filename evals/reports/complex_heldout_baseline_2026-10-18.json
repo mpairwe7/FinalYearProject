@@ -1,0 +1,5067 @@
+{
+  "split": "heldout",
+  "label": "baseline",
+  "timestamp_utc": "2026-10-17T19:28:24.231288+00:00",
+  "base_url": "https://struttingly-nongeological-briella.ngrok-free.dev",
+  "scenario_count": 75,
+  "turn_count": 102,
+  "reviewed_scenarios": 0,
+  "unreviewed_scenarios": 75,
+  "overall_score_100": 60.75,
+  "metrics": {
+    "mean_scenario_score_100": 60.75,
+    "critical_forbidden_hits": 1,
+    "figure_accuracy_all_pct": 41.94,
+    "figure_accuracy_tool_covered_pct": 53.06,
+    "premise_challenge_rate_pct": 53.85,
+    "route_correctness_pct": 68.63,
+    "truncated_turns": 1,
+    "truncation_rate_pct": 0.98,
+    "sector_guide_citation_rate_non_sector_pct": 24.66,
+    "latency_p50_s": 0.675,
+    "latency_p95_s": 9.179
+  },
+  "per_tax_head": {
+    "advance_tax": {
+      "count": 3,
+      "mean_score_100": 79.41,
+      "min_score_100": 58.82
+    },
+    "capital_gains": {
+      "count": 4,
+      "mean_score_100": 65.0,
+      "min_score_100": 0.0
+    },
+    "corporation": {
+      "count": 5,
+      "mean_score_100": 53.07,
+      "min_score_100": 29.86
+    },
+    "customs": {
+      "count": 6,
+      "mean_score_100": 84.15,
+      "min_score_100": 55.88
+    },
+    "digital_services": {
+      "count": 3,
+      "mean_score_100": 54.78,
+      "min_score_100": 40.52
+    },
+    "excise": {
+      "count": 5,
+      "mean_score_100": 79.11,
+      "min_score_100": 20.0
+    },
+    "gaming_betting": {
+      "count": 3,
+      "mean_score_100": 93.14,
+      "min_score_100": 79.41
+    },
+    "jurisdiction": {
+      "count": 3,
+      "mean_score_100": 91.67,
+      "min_score_100": 75.0
+    },
+    "objections": {
+      "count": 5,
+      "mean_score_100": 70.31,
+      "min_score_100": 0.0
+    },
+    "paye": {
+      "count": 9,
+      "mean_score_100": 66.03,
+      "min_score_100": 0.0
+    },
+    "penalties": {
+      "count": 4,
+      "mean_score_100": 30.0,
+      "min_score_100": 0.0
+    },
+    "procedures": {
+      "count": 3,
+      "mean_score_100": 47.82,
+      "min_score_100": 0.0
+    },
+    "rental": {
+      "count": 5,
+      "mean_score_100": 42.5,
+      "min_score_100": 22.22
+    },
+    "stamp_duty": {
+      "count": 4,
+      "mean_score_100": 53.1,
+      "min_score_100": 11.76
+    },
+    "vat": {
+      "count": 7,
+      "mean_score_100": 29.68,
+      "min_score_100": 0.0
+    },
+    "withholding": {
+      "count": 6,
+      "mean_score_100": 55.24,
+      "min_score_100": 0.0
+    }
+  },
+  "critical_errors": [
+    {
+      "scenario_id": "ho_paye_housing_bik_formula_and_calc_04",
+      "tax_head": "paye",
+      "turn": 1,
+      "forbidden_hits": [
+        {
+          "text": "deducted from",
+          "severity": "critical"
+        }
+      ],
+      "reply_preview": "Here's the most relevant guidance I found in official URA sources:\n\nPAYE is a monthly return furnished by an employer for an amount withheld from their employees who earn employment income or an associate as tax. Employment refers to a;\n\n- "
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "ho_paye_residency_122_day_avg_01",
+      "tax_head": "paye",
+      "difficulty": "hard",
+      "score": 0.788461,
+      "score_100": 78.85,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.576923,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.333333,
+          "fact_details": [
+            {
+              "any": [
+                "122 days",
+                "122"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "two preceding",
+                "preceding years",
+                "average"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "resident"
+              ],
+              "ok": true,
+              "matched": "resident"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.5,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 4.984,
+          "reply_preview": "**No**: you are likely treated as a **non-resident**.\n\nUnder the Income Tax Act, a resident individual requires spending **183 days or more** in Uganda in a single year. Since you spent only 130 days in the current year, you do not meet the threshold for residence. Therefore, you are classified as a non-resident for tax purposes. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_paye",
+              "field": "paye",
+              "status": "hit",
+              "expected": 2288250.0,
+              "matched_value": 2288250.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.604,
+          "reply_preview": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 8,000,000\n- PAYE due (28.6% effective): **UGX 2,288,250** per month\n- Net take-home: **UGX 5,711,750**\n- Band applied: 30% marginal (UGX 485,000–UGX 10,000,000)\n- _This is net of PAYE only — NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_permanent_home_residency_02",
+      "tax_head": "paye",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "permanent home"
+              ],
+              "ok": true,
+              "matched": "permanent home"
+            },
+            {
+              "any": [
+                "resident"
+              ],
+              "ok": true,
+              "matched": "resident"
+            },
+            {
+              "any": [
+                "worldwide",
+                "183"
+              ],
+              "ok": true,
+              "matched": "worldwide"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 5.684,
+          "reply_preview": "**Yes**: you are likely a tax resident despite spending only 95 days in Uganda. Under the Income Tax Act, a resident individual is defined by having a permanent home in Uganda, not just by the number of days spent there. Since your family home is in Mbarara, you meet this criterion and are subject to tax on your worldwide income.\n\nYou should consult a tax advisor or contact the URA Contact Centre at 0800 117 000 to confirm your specific residency status and tax obligations. [1]\n\nIf you get stuck",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_paye",
+              "field": "paye",
+              "status": "hit",
+              "expected": 1838250.0,
+              "matched_value": 1838250.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.592,
+          "reply_preview": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 6,500,000\n- PAYE due (28.3% effective): **UGX 1,838,250** per month\n- Net take-home: **UGX 4,661,750**\n- Band applied: 30% marginal (UGX 485,000–UGX 10,000,000)\n- _This is net of PAYE only — NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_gov_official_posted_abroad_03",
+      "tax_head": "paye",
+      "difficulty": "medium",
+      "score": 0.653846,
+      "score_100": 65.38,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.653846,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.5,
+          "fact_details": [
+            {
+              "any": [
+                "resident"
+              ],
+              "ok": true,
+              "matched": "resident"
+            },
+            {
+              "any": [
+                "posted abroad",
+                "government"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.5,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 5.769,
+          "reply_preview": "Your sister is likely correct that she is a non-resident for tax purposes because she spent zero days in Uganda during the year. Under the **Income Tax Act**, a resident individual requires spending at least 183 days in Uganda in a 12-month period, or averaging 122 days in the two previous years. Since she worked entirely abroad, she does not meet the residency threshold and is therefore treated as a non-resident, subject to tax only on income derived from Uganda. [1]\n\nIf you get stuck at any st",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_housing_bik_formula_and_calc_04",
+      "tax_head": "paye",
+      "difficulty": "hard",
+      "score": 0.5,
+      "score_100": 50.0,
+      "critical_fail": true,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.25,
+          "fact_details": [
+            {
+              "any": [
+                "lesser of",
+                "lower of"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "15%"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "market rent"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "added",
+                "included",
+                "part of"
+              ],
+              "ok": true,
+              "matched": "added"
+            }
+          ],
+          "forbidden_hits": [
+            {
+              "text": "deducted from",
+              "severity": "critical"
+            }
+          ],
+          "critical_fail": true,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.25,
+          "sector_guide_hits": [
+            "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf",
+            "TAX-OBLIGATIONS-FOR-NGOs-2023-24.pdf",
+            "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf"
+          ],
+          "latency_s": 11.655,
+          "reply_preview": "Here's the most relevant guidance I found in official URA sources:\n\nPAYE is a monthly return furnished by an employer for an amount withheld from their employees who earn employment income or an associate as tax. Employment refers to a;\n\n- Position of an individual in employment of another Person,\n\n- Directorship of a company, a position entitling the holder to a fixed or ascertainable remuneration.\n\n- Holding or acting in a public office.\n\nAll traders that employ staff that are paid monthly sal",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_paye",
+              "field": "paye",
+              "status": "hit",
+              "expected": 3688250.0,
+              "matched_value": 3688250.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.564,
+          "reply_preview": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 12,000,000\n- PAYE due (30.7% effective): **UGX 3,688,250** per month\n- Net take-home: **UGX 8,311,750**\n- Band applied: 40% marginal (above UGX 10,000,000)\n- _This is net of PAYE only — NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_domestic_staff_and_utilities_bik_05",
+      "tax_head": "paye",
+      "difficulty": "hard",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "domestic",
+                "cost",
+                "employment income paid"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "payment",
+                "reduced by",
+                "less"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "non-cash",
+                "exempt",
+                "excluded",
+                "relief"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.59,
+          "reply_preview": "**PAYE rates for resident employees (FY2026-27, monthly income):**\n\n- UGX 0 – UGX 335,000: **0%**\n- UGX 335,000 – UGX 410,000: **20%**\n- UGX 410,000 – UGX 485,000: **25%**\n- UGX 485,000 – UGX 10,000,000: **30%**\n- Above UGX 10,000,000: **40%** (top band)\n\nNon-resident employees are taxed from 10% on the first band.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_low_interest_loan_and_debt_waiver_06",
+      "tax_head": "paye",
+      "difficulty": "hard",
+      "score": 0.65,
+      "score_100": 65.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.65,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "value_benefit_in_kind",
+              "field": "annual_value",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'value_benefit_in_kind' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "statutory",
+                "Bank of Uganda",
+                "discount rate"
+              ],
+              "ok": true,
+              "matched": "statutory"
+            },
+            {
+              "any": [
+                "waived",
+                "debt waiver",
+                "amount of the debt"
+              ],
+              "ok": true,
+              "matched": "debt waiver"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 6.345,
+          "reply_preview": "**Yes**: the interest-free salary loan of UGX 800,000 creates a taxable benefit in kind. Under the Income Tax Act, loans above UGX 1,000,000 attract a benefit equal to the difference between the statutory interest rate (Bank of Uganda discount rate at the year's start) and the actual interest paid. Since this loan is interest-free, the entire principal amount is treated as a benefit in kind subject to taxation.\n\nRegarding the debt waiver of UGX 5,000,000: No, the employee is incorrect. Waiving a",
+          "sources_count": 3
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_nssf_deductibility_premise_07",
+      "tax_head": "paye",
+      "difficulty": "medium",
+      "score": 0.8,
+      "score_100": 80.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.8,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_paye",
+              "field": "paye",
+              "status": "hit",
+              "expected": 788250.0,
+              "matched_value": 788250.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            },
+            {
+              "tool": "calculate_paye",
+              "field": "net_take_home",
+              "status": "hit",
+              "expected": 2061750.0,
+              "matched_value": 2061750.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "NSSF"
+              ],
+              "ok": true,
+              "matched": "NSSF"
+            },
+            {
+              "any": [
+                "gross",
+                "not deductible"
+              ],
+              "ok": true,
+              "matched": "gross"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.582,
+          "reply_preview": "**PAYE calculation (FY2026-27)**\n\n- Gross monthly salary: UGX 3,000,000\n- PAYE due (26.3% effective): **UGX 788,250** per month\n- NSSF employee contribution: UGX 150,000 (5% of gross)\n- Total statutory deductions (31.3%): **UGX 938,250**\n- Net take-home: **UGX 2,061,750**\n- Band applied: 30% marginal (UGX 485,000–UGX 10,000,000)\n- _Local Service Tax and any voluntary deductions are not included._\n- Statutory Basis: Income Tax Act\n\n_Assumptions: includes 5% employee NSSF deduction._\n\nFigures use ",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_disability_exemption_threshold_08",
+      "tax_head": "paye",
+      "difficulty": "medium",
+      "score": 0.6,
+      "score_100": 60.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "disability",
+                "disabled",
+                "s.21"
+              ],
+              "ok": true,
+              "matched": "disability"
+            },
+            {
+              "any": [
+                "threshold",
+                "exempt",
+                "monthly"
+              ],
+              "ok": true,
+              "matched": "threshold"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.588,
+          "reply_preview": "**Under Section 21(1)(v) of the Income Tax Act, the employment income of a Person with Disability (PWD / abaliko obulemu / watu wenye ulemavu) is exempt from income tax (omusolo / msamaha wa kodi) up to UGX 1,460,000 per month (omusaala gwa buli mwezi)** (FY2026-27). Employment income earned above this threshold is subject to progressive PAYE.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.g",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_paye_non_resident_first_band_15m_09",
+      "tax_head": "paye",
+      "difficulty": "hard",
+      "score": 0.95,
+      "score_100": 95.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.9,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "10%"
+              ],
+              "ok": true,
+              "matched": "10%"
+            },
+            {
+              "any": [
+                "nil",
+                "0%",
+                "tax-free",
+                "threshold"
+              ],
+              "ok": true,
+              "matched": "nil"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.5,
+          "sector_guide_hits": [
+            "A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR-FINAL.pdf",
+            "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf"
+          ],
+          "latency_s": 29.721,
+          "reply_preview": "A non-resident employee pays more PAYE because the tax rate increases sharply after the first threshold, whereas a resident employee faces a lower rate on the same income level.\n\nAccording to the URA guidelines, residents are taxed on worldwide income, while non-residents are taxed only on income derived from sources in Uganda. The tax brackets differ significantly:\n\n- **Resident Employees:** The rate starts at 10% after the first threshold of UGX 235,000 and rises to 20% after UGX 335,000.\n- **",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_paye",
+              "field": "paye",
+              "status": "hit",
+              "expected": 4925500.0,
+              "matched_value": 4925500.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.609,
+          "reply_preview": "**PAYE calculation — non-resident (FY2026-27)**\n\n- Gross monthly salary: UGX 15,000,000\n- PAYE due (32.8% effective): **UGX 4,925,500** per month\n- Net take-home: **UGX 10,074,500**\n- Band applied: 40% marginal (above UGX 10,000,000)\n- _This is net of PAYE only — NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n- Statutory Basis: Income Tax Act\n\n_Assumptions: non-resident employee tax rates applied._\n\nFigures u",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_registration_compulsory_360m_10",
+      "tax_head": "vat",
+      "difficulty": "medium",
+      "score": 0.805555,
+      "score_100": 80.56,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "check_vat_registration",
+              "field": "threshold",
+              "status": "hit",
+              "expected": 300000000.0,
+              "matched_value": 300000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "compulsory",
+                "must register",
+                "required"
+              ],
+              "ok": true,
+              "matched": "compulsory"
+            },
+            {
+              "any": [
+                "threshold"
+              ],
+              "ok": true,
+              "matched": "threshold"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 4.645,
+          "reply_preview": "**Yes**: your company must register for Value Added Tax (VAT). According to the Value Added Tax Act, the compulsory annual registration threshold is UGX 300,000,000. Since your annual taxable turnover of UGX 360,000,000 exceeds this threshold, you are legally required to register for VAT to comply with the law. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou migh",
+          "sources_count": 3
+        },
+        {
+          "score": 0.611111,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 0.5,
+          "figure_details": [
+            {
+              "tool": "calculate_vat",
+              "field": "vat",
+              "status": "miss",
+              "expected": 4500000.0,
+              "matched_value": 4500000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            },
+            {
+              "tool": "calculate_vat",
+              "field": "gross",
+              "status": "hit",
+              "expected": 29500000.0,
+              "matched_value": 29500000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.597,
+          "reply_preview": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 25,000,000\n- VAT at 18%: **UGX 4,500,000**\n- Gross (VAT-inclusive): **UGX 29,500,000**\n- Statutory Basis: Value Added Tax Act\n\n_Assumptions: adding 18% VAT to a net amount (say “VAT-inclusive” to extract instead)._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_exports_zero_rated_vs_exempt_11",
+      "tax_head": "vat",
+      "difficulty": "hard",
+      "score": 0.111111,
+      "score_100": 11.11,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "zero-rated",
+                "zero rated",
+                "0%"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "input",
+                "claim",
+                "refund"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.573,
+          "reply_preview": "**The standard rate of Value Added Tax (VAT / omusolo gwa VAT / ushuru wa VAT) is 18% (18%)** (FY2026-27). Value Added Tax is charged at 18% on taxable supplies of goods and services; VAT-registered businesses collect it from customers and remit it to URA.\n\n- Statutory Basis: Value Added Tax Act\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000,",
+          "sources_count": 0
+        },
+        {
+          "score": 0.222222,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_vat",
+              "field": "vat",
+              "status": "miss",
+              "expected": 2160000.0,
+              "matched_value": 2160000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.552,
+          "reply_preview": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 12,000,000\n- VAT at 18%: **UGX 2,160,000**\n- Gross (VAT-inclusive): **UGX 14,160,000**\n- Statutory Basis: Value Added Tax Act\n\n_Assumptions: adding 18% VAT to a net amount (say “VAT-inclusive” to extract instead)._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_extract_from_inclusive_59m_12",
+      "tax_head": "vat",
+      "difficulty": "medium",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "workflow",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_vat",
+              "field": "vat",
+              "status": "miss",
+              "expected": 9000000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            },
+            {
+              "tool": "calculate_vat",
+              "field": "net",
+              "status": "miss",
+              "expected": 50000000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No sentence/clause matched claim label_cues"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "18%"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "inclusive",
+                "net"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.569,
+          "reply_preview": "I can work that out for you — I just need a detail or two.\n\nWhat is the **amount** in UGX? (e.g. 1,000,000 or 1m — tell me if it already includes VAT)",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_imported_services_reverse_charge_13",
+      "tax_head": "vat",
+      "difficulty": "hard",
+      "score": 0.176471,
+      "score_100": 17.65,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.176471,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_vat",
+              "field": "vat",
+              "status": "miss",
+              "expected": 14400000.0,
+              "matched_value": 14400000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": 0.5,
+          "fact_details": [
+            {
+              "any": [
+                "18%"
+              ],
+              "ok": true,
+              "matched": "18%"
+            },
+            {
+              "any": [
+                "imported service",
+                "reverse",
+                "recipient",
+                "account for"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.561,
+          "reply_preview": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 80,000,000\n- VAT at 18%: **UGX 14,400,000**\n- Gross (VAT-inclusive): **UGX 94,400,000**\n- Statutory Basis: Value Added Tax Act\n\n_Assumptions: adding 18% VAT to a net amount (say “VAT-inclusive” to extract instead)._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_efris_ereceipt_refund_threshold_14",
+      "tax_head": "vat",
+      "difficulty": "medium",
+      "score": 0.6,
+      "score_100": 60.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.6,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "document_audit",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.333333,
+          "fact_details": [
+            {
+              "any": [
+                "5%"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "30",
+                "thirty",
+                "consecutive days"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "e-receipt",
+                "e-invoice",
+                "EFRIS"
+              ],
+              "ok": true,
+              "matched": "e-receipt"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.568,
+          "reply_preview": "### 🧾 Tax Document & EFRIS Invoice Audit\n\n- **Compliance Status**: Compliant (18% VAT arithmetic reconciled)\n- **Taxable Subtotal**: Not stated\n- **VAT Amount (18%)**: Not stated\n- **Grand Total**: Not stated\n- **Supplier / Taxpayer TIN**: Not detected in text\n- **EFRIS Fiscal Document Number (FDN)**: Not detected in text\n\n**Verification & Statutory Guidelines**:\n1. **EFRIS Fiscalization**: All VAT-registered businesses in Uganda must issue e-receipts/e-invoices through EFRIS with a valid Fiscal",
+          "sources_count": 1
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_deemed_supply_business_use_15",
+      "tax_head": "vat",
+      "difficulty": "medium",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_vat",
+              "field": "vat",
+              "status": "miss",
+              "expected": 1800000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "taxable",
+                "deemed",
+                "output",
+                "18%",
+                "self-supply",
+                "personal use"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.571,
+          "reply_preview": "**VAT registration check (FY2026-27)**\n\n- Annual turnover: UGX 10,000,000\n- Registration threshold: UGX 300,000,000 per year\n- **Registration is not compulsory** — you are below the threshold (headroom UGX 290,000,000). Voluntary registration is still available.\n\n- Statutory Basis: Value Added Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_vat_return_and_payment_deadline_16",
+      "tax_head": "vat",
+      "difficulty": "easy",
+      "score": 0.384615,
+      "score_100": 38.46,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.384615,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "faq_priority",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.333333,
+          "fact_details": [
+            {
+              "any": [
+                "15th",
+                "15",
+                "fifteenth"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "following month",
+                "month"
+              ],
+              "ok": true,
+              "matched": "month"
+            },
+            {
+              "any": [
+                "nil",
+                "still file",
+                "must file"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.5,
+          "sector_guide_hits": [
+            "TAXATION-OF-THE-EDUCATION-SECTOR.pdf",
+            "A-guide-to-taxation-of-the-Hotel-and-Accomodation-Sector-2025-26.pdf",
+            "A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR-FINAL.pdf"
+          ],
+          "latency_s": 0.988,
+          "reply_preview": "To file your annual tax return:\n\n1. Login ura.go.ug with TIN/password → e-services → e-returns → select return type and download template\n2. Enable macros, fill without renaming or copy/paste\n3. Validate to generate upload file\n4. Back to e-returns upload file with return period and captcha\n5. Submit\n6. E-acknowledgment is issued (also emailed/portal)\n\n**Due date:** Final returns are due within 6 months after the end of the financial year (31st December for standard fiscal year).\n\nIf you get stu",
+          "sources_count": 6
+        }
+      ]
+    },
+    {
+      "id": "ho_wht_domestic_services_and_exemption_17",
+      "tax_head": "withholding",
+      "difficulty": "medium",
+      "score": 0.579412,
+      "score_100": 57.94,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.558824,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "miss",
+              "expected": 2700000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            },
+            {
+              "tool": "calculate_withholding",
+              "field": "net_payable",
+              "status": "miss",
+              "expected": 42300000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No sentence/clause matched claim label_cues"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "6%"
+              ],
+              "ok": true,
+              "matched": "6%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "TAX-OBLIGATIONS-FOR-NGOs-2023-24.pdf"
+          ],
+          "latency_s": 4.529,
+          "reply_preview": "For payments exceeding UGX 1,000,000 to a designated withholding agent, the rate is **6%** [1]. We withhold **UGX 2,700,000** from the total payment of UGX 45,000,000 [2].\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: How does the designated withholding agent mandate apply to government agencies in Uganda?",
+          "sources_count": 4
+        },
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "exempt",
+                "not withhold",
+                "do not deduct",
+                "verify"
+              ],
+              "ok": true,
+              "matched": "exempt"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.578,
+          "reply_preview": "**Under Section 119(5) of the Income Tax Act**, a taxpayer qualifies for a Withholding Tax Exemption Certificate if they have a compliant tax filing history, maintain audited financial statements, have no outstanding tax arrears, and are up to date with returns.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_wht_dividends_and_royalties_18",
+      "tax_head": "withholding",
+      "difficulty": "medium",
+      "score": 0.970588,
+      "score_100": 97.06,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.941176,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "hit",
+              "expected": 9000000.0,
+              "matched_value": 9000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "15%"
+              ],
+              "ok": true,
+              "matched": "15%"
+            },
+            {
+              "any": [
+                "dividend"
+              ],
+              "ok": true,
+              "matched": "dividend"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.5,
+          "sector_guide_hits": [
+            "TAXATION-OF-THE-EDUCATION-SECTOR.pdf",
+            "A-GUIDE-TO-TAXATION-OF-THE-MANUFACTURING-SECTOR-FINAL.pdf"
+          ],
+          "latency_s": 4.129,
+          "reply_preview": "For a dividend of UGX 60,000,000 to a resident shareholder, the withholding tax rate is **15%** (unless the dividend is exempt). This results in a withholding tax of **UGX 9,000,000**.\n\n*Note: The royalty payment is subject to a different rate depending on whether it is a management fee or other service.* [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "hit",
+              "expected": 2700000.0,
+              "matched_value": 2700000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.563,
+          "reply_preview": "**Withholding tax — royalty (FY2026-27)**\n\n- Gross payment: UGX 18,000,000\n- WHT at 15%: **UGX 2,700,000**\n- Net payable to payee: UGX 15,300,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_wht_telecom_and_insurance_commission_19",
+      "tax_head": "withholding",
+      "difficulty": "medium",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "false_premise_rejected",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "miss",
+              "expected": 800000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "10%"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 1.033,
+          "reply_preview": "Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, there is no official \"Much Tax\". The URA does not administer or impose such a tax or levy.\n\nLegitimate statutory tax heads administered by the URA include Income Tax (**PAYE**, Corporate Income Tax, Presumptive Tax), Value Added Tax (**VAT**), Withholding Tax (**WHT**), Rental Tax, Stamp Duty, and Customs and Excise Duties. Please consult official URA guidelines or an authorized tax officer for statutory requirements.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_wht_public_entertainer_20",
+      "tax_head": "withholding",
+      "difficulty": "medium",
+      "score": 0.764706,
+      "score_100": 76.47,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.764706,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "hit",
+              "expected": 1500000.0,
+              "matched_value": 1500000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "6%"
+              ],
+              "ok": true,
+              "matched": "6%"
+            },
+            {
+              "any": [
+                "entertainer",
+                "performance"
+              ],
+              "ok": true,
+              "matched": "entertainer"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.614,
+          "reply_preview": "**Withholding tax — public entertainer (FY2026-27)**\n\n- Gross payment: UGX 25,000,000\n- WHT at 6%: **UGX 1,500,000**\n- Net payable to payee: UGX 23,500,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_wht_foreign_debenture_interest_21",
+      "tax_head": "withholding",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "hit",
+              "expected": 5000000.0,
+              "matched_value": 5000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.562,
+          "reply_preview": "**Withholding tax — foreign interest (FY2026-27)**\n\n- Gross payment: UGX 100,000,000\n- WHT at 5%: **UGX 5,000,000**\n- Net payable to payee: UGX 95,000,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_wht_final_vs_creditable_22",
+      "tax_head": "withholding",
+      "difficulty": "easy",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "final"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "credit",
+                "creditable"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "does not claim",
+                "cannot claim",
+                "discharge",
+                "satisfies"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.667,
+          "reply_preview": "**Withholding tax (WHT) rates (FY2026-27):**\n\n- Services: **6%**\n- Goods: **6%**\n- Management fees: **15%**\n- Dividends: **15%**\n- Royalties: **15%**\n- Payments to public entertainers: **6%**\n- Betting winnings: **15%**\n- Interest paid to non-resident lenders: **5%**\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_rental_individual_multiple_thresholds_premise_23",
+      "tax_head": "rental",
+      "difficulty": "hard",
+      "score": 0.5,
+      "score_100": 50.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_rental_tax",
+              "field": "tax",
+              "status": "hit",
+              "expected": 6861600.0,
+              "matched_value": 6861600.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "12%"
+              ],
+              "ok": true,
+              "matched": "12%"
+            },
+            {
+              "any": [
+                "once",
+                "total",
+                "aggregate",
+                "combined"
+              ],
+              "ok": true,
+              "matched": "once"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 6.157,
+          "reply_preview": "**No**: You cannot deduct the UGX 2,820,000 threshold three separate times.\n\nUnder the Income Tax Act (Section 5(3)), all rental income from residential and commercial properties is pooled into a single total annual gross rent. The UGX 2,820,000 threshold applies **once** across the entire combined rent, not per building or per stream.\n\nFor your scenario:\n- **Total Gross Rent:** UGX 60,000,000\n- **Tax-Free Threshold:** UGX 2,820,000\n- **Taxable Amount:** UGX 57,180,000\n- **Tax Rate:** 12%\n- **Ta",
+          "sources_count": 4
+        },
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "calculator",
+          "actual_route": "workflow",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_rental_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 12000000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No sentence/clause matched claim label_cues"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.686,
+          "reply_preview": "I can work that out for you — I just need a detail or two.\n\nWhat is the **total gross rental income for the year** in UGX? (e.g. 12,000,000 or 12m)",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_rental_individual_below_threshold_24",
+      "tax_head": "rental",
+      "difficulty": "easy",
+      "score": 0.222222,
+      "score_100": 22.22,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.222222,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_rental_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 0.0,
+              "matched_value": 0.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.564,
+          "reply_preview": "**Rental income tax — individual (FY2026-27)**\n\n- Gross annual rent: UGX 2,400,000\n- Tax-free threshold: UGX 2,820,000 per year\n- Taxable amount: UGX 0\n- Tax at 12%: **UGX 0**\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_rental_company_within_50pct_cap_25",
+      "tax_head": "rental",
+      "difficulty": "medium",
+      "score": 0.7,
+      "score_100": 70.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.4,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.666667,
+          "fact_details": [
+            {
+              "any": [
+                "12%"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "30%"
+              ],
+              "ok": true,
+              "matched": "30%"
+            },
+            {
+              "any": [
+                "50%",
+                "expenses"
+              ],
+              "ok": true,
+              "matched": "50%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.578,
+          "reply_preview": "**Company rental income is taxed at 30%** (FY2026-27) on chargeable income, with expenses deductible up to 50% of gross rent.\n\n- Statutory Basis: Income Tax Act\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_rental_tax",
+              "field": "tax",
+              "status": "hit",
+              "expected": 21000000.0,
+              "matched_value": 21000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.557,
+          "reply_preview": "**Rental income tax — company (FY2026-27)**\n\n- Gross annual rent: UGX 100,000,000\n- Deductible expenses (≤50% of gross): UGX 30,000,000\n- Chargeable income: UGX 70,000,000\n- Tax at 30%: **UGX 21,000,000**\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_rental_separate_tax_ringfenced_26",
+      "tax_head": "rental",
+      "difficulty": "medium",
+      "score": 0.35,
+      "score_100": 35.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.35,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_rental_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 5661600.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            }
+          ],
+          "facts": 0.5,
+          "fact_details": [
+            {
+              "any": [
+                "separate",
+                "separately"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "12%"
+              ],
+              "ok": true,
+              "matched": "12%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 9.194,
+          "reply_preview": "**Yes**: you can offset your hardware shop loss against your rental income. Under the Income Tax Act, all rental income from residential and commercial properties is pooled together into a single total annual gross rent. The UGX 2,820,000 threshold applies ONCE across the total combined rent, not per property or per stream.\n\nYour calculated tax liability for FY2026-27 is:\n\n| Step | Calculation | Result |\n| :-- | :-- | :-- |\n| **Total Rent** | UGX 85,000,000 | UGX 85,000,000 |\n| **Threshold** | U",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_rental_provisional_monthly_return_2026_27",
+      "tax_head": "rental",
+      "difficulty": "medium",
+      "score": 0.352941,
+      "score_100": 35.29,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.352941,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_rental_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 3600000.0,
+              "matched_value": 3600000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "12%"
+              ],
+              "ok": true,
+              "matched": "12%"
+            },
+            {
+              "any": [
+                "threshold",
+                "annual"
+              ],
+              "ok": true,
+              "matched": "threshold"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.586,
+          "reply_preview": "**Rental income tax — individual (FY2026-27)**\n\n- Gross annual rent: UGX 32,820,000\n- Tax-free threshold: UGX 2,820,000 per year\n- Taxable amount: UGX 30,000,000\n- Tax at 12%: **UGX 3,600,000**\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_corp_standard_30pct_and_branch_repatriation_28",
+      "tax_head": "corporation",
+      "difficulty": "hard",
+      "score": 0.411111,
+      "score_100": 41.11,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.222222,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_corporation_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 75000000.0,
+              "matched_value": 75000000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.683,
+          "reply_preview": "**Corporation tax calculation (FY2026-27)**\n\n- Chargeable income: UGX 250,000,000\n- Tax at 30%: **UGX 75,000,000**\n- After-tax income: UGX 175,000,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        },
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "15%"
+              ],
+              "ok": true,
+              "matched": "15%"
+            },
+            {
+              "any": [
+                "repatriat",
+                "branch"
+              ],
+              "ok": true,
+              "matched": "repatriat"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 1.281,
+          "reply_preview": "**A tax of 15% is charged on the repatriated income of a non-resident company branch** in Uganda under Section 82 of the Income Tax Act (FY2026-27), payable in addition to standard 30% corporate income tax.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_corp_agro_processing_raw_material_ratio_29",
+      "tax_head": "corporation",
+      "difficulty": "medium",
+      "score": 0.6,
+      "score_100": 60.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "agro-processing",
+                "agricultural",
+                "exempt"
+              ],
+              "ok": true,
+              "matched": "agro-processing"
+            },
+            {
+              "any": [
+                "80%",
+                "local",
+                "Uganda",
+                "TIN",
+                "certificate"
+              ],
+              "ok": true,
+              "matched": "80%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 1.398,
+          "reply_preview": "**Under Section 21(1)(y) of the Income Tax Act, agro-processing enterprises qualify for a 10-year income tax holiday provided at least 80% of raw materials used are locally produced** in Uganda (FY2026-27). If local sourcing drops below 80% (e.g. to 70%), the enterprise does not meet statutory eligibility and standard corporate income tax (30%) applies for that year.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_corp_presumptive_below_10m_30",
+      "tax_head": "corporation",
+      "difficulty": "medium",
+      "score": 0.961538,
+      "score_100": 96.15,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.961538,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "faq_priority",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "presumptive"
+              ],
+              "ok": true,
+              "matched": "presumptive"
+            },
+            {
+              "any": [
+                "below",
+                "no tax",
+                "not liable",
+                "nil",
+                "threshold"
+              ],
+              "ok": true,
+              "matched": "not liable"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "ura_wholesale_and_retail_sector_faqs.csv"
+          ],
+          "latency_s": 4.436,
+          "reply_preview": "**No**: your business is not liable for presumptive tax. According to URA guidelines, a small business taxpayer must have gross annual turnover between UGX 10,000,000 and UGX 150,000,000 to qualify for the simplified regime. Since your sales are only UGX 7,500,000, you fall into the category where gross turnover does not exceed UGX 10,000,000, meaning you pay Nil tax on your business income. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.u",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_corp_non_resident_company_rate_premise_31",
+      "tax_head": "corporation",
+      "difficulty": "medium",
+      "score": 0.298611,
+      "score_100": 29.86,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.375,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_corporation_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 27000000.0,
+              "matched_value": 27000000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "30%"
+              ],
+              "ok": true,
+              "matched": "30%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.5,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.574,
+          "reply_preview": "**Corporation tax calculation (FY2026-27)**\n\n- Chargeable income: UGX 90,000,000\n- Tax at 30%: **UGX 27,000,000**\n- After-tax income: UGX 63,000,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        },
+        {
+          "score": 0.222222,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_corporation_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 45000000.0,
+              "matched_value": 45000000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.606,
+          "reply_preview": "**Corporation tax calculation (FY2026-27)**\n\n- Chargeable income: UGX 150,000,000\n- Tax at 30%: **UGX 45,000,000**\n- After-tax income: UGX 105,000,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_corp_citizen_startup_qualifying_32",
+      "tax_head": "corporation",
+      "difficulty": "medium",
+      "score": 0.382353,
+      "score_100": 38.24,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.382353,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_presumptive_or_startup_tax",
+              "field": "startup_capital_cap",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_presumptive_or_startup_tax' is not registered"
+            }
+          ],
+          "facts": 0.5,
+          "fact_details": [
+            {
+              "any": [
+                "3 years",
+                "three years",
+                "3-year"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "citizen"
+              ],
+              "ok": true,
+              "matched": "citizen"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "ura.go.ug-A-GUIDE-TO-TAXATION-OF-THE-AGRICULTURAL-SECTOR-VOL-1-ISSUE-4-FY-2025-2026.pdf"
+          ],
+          "latency_s": 3.824,
+          "reply_preview": "Under the 2025 Income Tax Amendment Act, a new citizen-owned start-up business qualifies for a **three-year income tax exemption**. To qualify, the business must be registered with an investment capital not exceeding **UGX 500 million**, and the citizen owner or associate must not have previously benefited from the exemption. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_cgt_corporate_share_sale_gain_33",
+      "tax_head": "capital_gains",
+      "difficulty": "medium",
+      "score": 0.975,
+      "score_100": 97.5,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.95,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "business asset",
+                "shares",
+                "land",
+                "building"
+              ],
+              "ok": true,
+              "matched": "business asset"
+            },
+            {
+              "any": [
+                "sold",
+                "exchanged",
+                "disposed",
+                "transferred"
+              ],
+              "ok": true,
+              "matched": "sold"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf"
+          ],
+          "latency_s": 3.051,
+          "reply_preview": "Under Ugandan capital gains tax, a **business asset** is defined as any asset that is not a depreciable asset, such as land and buildings.\n\nA **disposal** occurs when an asset is sold, exchanged, redeemed, distributed, transferred by way of gift, destroyed, or lost by the taxpayer. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: Is there ",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_capital_gains",
+              "field": "tax",
+              "status": "hit",
+              "expected": 45000000.0,
+              "matched_value": 45000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.573,
+          "reply_preview": "**Capital gains calculation (FY2026-27)**\n\n- Sale price: UGX 400,000,000\n- Cost base: UGX 250,000,000\n- Gain: UGX 150,000,000\n- Tax at 30%: **UGX 45,000,000**\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_cgt_capital_loss_no_tax_34",
+      "tax_head": "capital_gains",
+      "difficulty": "easy",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 1,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "calculator",
+          "actual_route": "http_error",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_capital_gains",
+              "field": "tax",
+              "status": "miss",
+              "expected": 0.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No sentence/clause matched claim label_cues"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "no capital gain",
+                "loss",
+                "no CGT",
+                "0"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": false,
+          "truncation_reason": "empty_reply",
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.572,
+          "reply_preview": "",
+          "sources_count": 0,
+          "http_error": "HTTP 500: Internal Server Error"
+        }
+      ]
+    },
+    {
+      "id": "ho_cgt_cost_base_improvements_35",
+      "tax_head": "capital_gains",
+      "difficulty": "medium",
+      "score": 0.725,
+      "score_100": 72.5,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.45,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_capital_gains",
+              "field": "tax",
+              "status": "miss",
+              "expected": 60000000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "30%"
+              ],
+              "ok": true,
+              "matched": "30%"
+            },
+            {
+              "any": [
+                "cost base",
+                "improvement"
+              ],
+              "ok": true,
+              "matched": "cost base"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.587,
+          "reply_preview": "**Capital gains calculation (FY2026-27)**\n\n- Sale price: UGX 600,000,000\n- Cost base: UGX 300,000,000\n- Gain: UGX 300,000,000\n- Tax at 30%: **UGX 90,000,000**\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_capital_gains",
+              "field": "tax",
+              "status": "hit",
+              "expected": 15000000.0,
+              "matched_value": 15000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.597,
+          "reply_preview": "**Capital gains calculation (FY2026-27)**\n\n- Sale price: UGX 450,000,000\n- Cost base: UGX 400,000,000\n- Gain: UGX 50,000,000\n- Tax at 30%: **UGX 15,000,000**\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_cgt_involuntary_disposal_reinvestment_36",
+      "tax_head": "capital_gains",
+      "difficulty": "medium",
+      "score": 0.9,
+      "score_100": 90.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.9,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "involuntary",
+                "reinvest",
+                "replacement",
+                "no gain",
+                "exempt",
+                "rollover"
+              ],
+              "ok": true,
+              "matched": "reinvest"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.5,
+          "sector_guide_hits": [
+            "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
+            "ura.go.ug-Overview of the Health and Medical Sector.pdf"
+          ],
+          "latency_s": 13.116,
+          "reply_preview": "**Revised Response:**\n\nUnder Uganda's capital gains rules, a voluntary disposal of a business asset by fire triggers a capital gain if the cost base exceeds the consideration received. Since the insurance compensation is reinvested in a replacement asset within one year, the gain is treated as a loss carried forward under **Section 18(1)(a)** of the **Income Tax Act**. This loss can be claimed against future business income, effectively neutralizing the initial gain without triggering immediate ",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_customs_used_vehicle_5_to_8_years_37",
+      "tax_head": "customs",
+      "difficulty": "hard",
+      "score": 0.82353,
+      "score_100": 82.35,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.647059,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_customs_duty",
+              "field": "landed_cost",
+              "status": "hit",
+              "expected": 75520000.0,
+              "matched_value": 75520000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": 0.666667,
+          "fact_details": [
+            {
+              "any": [
+                "35%"
+              ],
+              "ok": true,
+              "matched": "35%"
+            },
+            {
+              "any": [
+                "25%"
+              ],
+              "ok": true,
+              "matched": "25%"
+            },
+            {
+              "any": [
+                "18%"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.687,
+          "reply_preview": "**Customs duty estimate (FY2026-27)**\n\n- CIF value: UGX 40,000,000\n- Duty at 25%: **UGX 10,000,000**\n- Environmental levy at 35% of CIF (used vehicle 5 to 8 years): UGX 14,000,000\n- VAT on (CIF + duty + levy): UGX 11,520,000\n- Estimated landed cost: **UGX 75,520,000**\n- Statutory Basis: East African Community Customs Management Act (EACCMA)\n\n_Assumptions: used motor vehicle 5-8 years: 35% environmental levy._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_customs_duty",
+              "field": "landed_cost",
+              "status": "hit",
+              "expected": 82600000.0,
+              "matched_value": 82600000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.598,
+          "reply_preview": "**Customs duty estimate (FY2026-27)**\n\n- CIF value: UGX 40,000,000\n- Duty at 25%: **UGX 10,000,000**\n- Environmental levy at 50% of CIF (used vehicle over 8 years): UGX 20,000,000\n- VAT on (CIF + duty + levy): UGX 12,600,000\n- Estimated landed cost: **UGX 82,600,000**\n- Statutory Basis: East African Community Customs Management Act (EACCMA)\n\n_Assumptions: used motor vehicle 8-15 years: 50% environmental levy (vehicles >15 yrs prohibited)._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_customs_raw_materials_0pct_duty_38",
+      "tax_head": "customs",
+      "difficulty": "medium",
+      "score": 0.974359,
+      "score_100": 97.44,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.948718,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "0%",
+                "zero"
+              ],
+              "ok": true,
+              "matched": "0%"
+            },
+            {
+              "any": [
+                "raw material"
+              ],
+              "ok": true,
+              "matched": "raw material"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.666667,
+          "sector_guide_hits": [
+            "ura_wholesale_and_retail_sector_faqs.csv"
+          ],
+          "latency_s": 4.414,
+          "reply_preview": "**Yes**: that is correct. Under the EAC Common External Tariff (CET), raw materials are subject to a 0% customs duty rate.\n\nYour clearing agent is right: no customs duty is charged on these imports. However, remember that Value Added Tax (VAT) of 18% still applies to the full CIF value, including any potential import costs or fees. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 07",
+          "sources_count": 3
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_customs_duty",
+              "field": "landed_cost",
+              "status": "hit",
+              "expected": 118000000.0,
+              "matched_value": 118000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.611,
+          "reply_preview": "**Customs duty estimate (FY2026-27)**\n\n- CIF value: UGX 100,000,000\n- Duty at 0%: **UGX 0**\n- VAT on (CIF + duty + levy): UGX 18,000,000\n- Estimated landed cost: **UGX 118,000,000**\n- Statutory Basis: East African Community Customs Management Act (EACCMA)\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_customs_commercial_import_wht_and_infra_levy_39",
+      "tax_head": "customs",
+      "difficulty": "hard",
+      "score": 0.558824,
+      "score_100": 55.88,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.558824,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_customs_duty",
+              "field": "landed_cost",
+              "status": "miss",
+              "expected": 76750000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "6%"
+              ],
+              "ok": true,
+              "matched": "6%"
+            },
+            {
+              "any": [
+                "1.5%"
+              ],
+              "ok": true,
+              "matched": "1.5%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "ura_wholesale_and_retail_sector_faqs.csv"
+          ],
+          "latency_s": 6.409,
+          "reply_preview": "For finished consumer goods, the withholding tax rate is 6%, and the infrastructure development levy rate is 1.5%. The landed cost is UGX 59,750,000.\n\n**Breakdown:**\n- **Withholding Tax:** 6% of UGX 50,000,000 = UGX 3,000,000\n- **Infrastructure Levy:** 1.5% of UGX 50,000,000 = UGX 750,000\n- **Total Land Cost:** UGX 50,000,000 + UGX 2,312,500 (Duty) + UGX 3,000,000 (WHT) + UGX 750,000 (Infra) = UGX 59,750,000 [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email ",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_customs_used_clothing_environmental_levy_40",
+      "tax_head": "customs",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_customs_duty",
+              "field": "landed_cost",
+              "status": "hit",
+              "expected": 36580000.0,
+              "matched_value": 36580000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.606,
+          "reply_preview": "**Customs duty estimate (FY2026-27)**\n\n- CIF value: UGX 20,000,000\n- Duty at 25%: **UGX 5,000,000**\n- Environmental levy at 30% of CIF (used clothing): UGX 6,000,000\n- VAT on (CIF + duty + levy): UGX 5,580,000\n- Estimated landed cost: **UGX 36,580,000**\n- Statutory Basis: East African Community Customs Management Act (EACCMA)\n\n_Assumptions: used clothing includes 30% environmental levy on CIF._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_customs_unbs_pvoc_surcharge_and_exemption_41",
+      "tax_head": "customs",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "PVoC",
+                "Pre-Export Verification",
+                "UNBS"
+              ],
+              "ok": true,
+              "matched": "PVoC"
+            },
+            {
+              "any": [
+                "15%",
+                "surcharge",
+                "inspection"
+              ],
+              "ok": true,
+              "matched": "surcharge"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 5.724,
+          "reply_preview": "UNBS PVoC is mandatory for most commercial shipments entering Uganda, except for specific exemptions like health insurance, life insurance, petroleum fuels, social welfare services, educational services, financial services, passenger transportation, and certain strategic investment projects.\n\nThere is no direct \"surcharge\" solely for bypassing PVoC in the standard import regulations. However, failing to comply can lead to penalties, fines, and potential cancellation of the import license by Cust",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_customs_deductive_computed_method_swap_42",
+      "tax_head": "customs",
+      "difficulty": "medium",
+      "score": 0.692308,
+      "score_100": 69.23,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.692308,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "sequential",
+                "sequentially",
+                "order"
+              ],
+              "ok": true,
+              "matched": "sequential"
+            },
+            {
+              "any": [
+                "transaction value"
+              ],
+              "ok": true,
+              "matched": "transaction value"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.598,
+          "reply_preview": "**Customs valuation follows a strict sequential hierarchy of 6 methods** under the Fourth Schedule of the East African Community Customs Management Act (EACCMA): Method 1 (Transaction Value), Method 2 (Identical Goods), Method 3 (Similar Goods), Method 4 (Deductive Value), Method 5 (Computed Value), and Method 6 (Fallback Method). Customs officers cannot skip or jump ahead to Method 6 without sequentially exhausting earlier methods.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_excise_diesel_and_kerosene_43",
+      "tax_head": "excise",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_excise_duty",
+              "field": "excise_duty",
+              "status": "hit",
+              "expected": 7150000.0,
+              "matched_value": 7150000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.568,
+          "reply_preview": "**Excise duty — fuel diesel (FY2026-27)**\n\n- Base: 5,000 litres\n- Statutory rate: UGX 1,430/litre\n- Excise duty payable: **UGX 7,150,000**\n- Statutory Basis: Excise Duty Act 2014 (as amended)\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_excise_duty",
+              "field": "excise_duty",
+              "status": "hit",
+              "expected": 600000.0,
+              "matched_value": 600000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.58,
+          "reply_preview": "**Excise duty — fuel kerosene (FY2026-27)**\n\n- Base: 3,000 litres\n- Statutory rate: UGX 200/litre\n- Excise duty payable: **UGX 600,000**\n- Statutory Basis: Excise Duty Act 2014 (as amended)\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_excise_telecom_airtime_and_data_44",
+      "tax_head": "excise",
+      "difficulty": "medium",
+      "score": 0.794118,
+      "score_100": 79.41,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_excise_duty",
+              "field": "excise_duty",
+              "status": "miss",
+              "expected": 1200000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "12%"
+              ],
+              "ok": true,
+              "matched": "12%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 7.144,
+          "reply_preview": "Based on the Excise Duty Act 2014, the rate for telecom voice airtime is **12%** and for data services is **12%** (both applied to the gross value of the service).\n\nFor **UGX 10,000,000** of telecom voice usage, the excise duty would be calculated as follows:\n\n- **Calculation:** $10,000,000 \\times 12\\% = \\text{UGX } 1,200,000$\n- **Total Amount Due:** $\\text{UGX } 10,000,000 + \\text{UGX } 1,200,000 = \\text{UGX } 11,200,000$\n\n**Note:** This assumes the voice airtime is classified as an excisable s",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_excise_duty",
+              "field": "excise_duty",
+              "status": "hit",
+              "expected": 3000000.0,
+              "matched_value": 3000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.584,
+          "reply_preview": "**Excise duty — telecom data (FY2026-27)**\n\n- Base: UGX 25,000,000\n- Statutory rate: 12.0%\n- Excise duty payable: **UGX 3,000,000**\n- Statutory Basis: Excise Duty Act 2014 (as amended)\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_excise_malt_beer_60pct_45",
+      "tax_head": "excise",
+      "difficulty": "easy",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_excise_duty",
+              "field": "excise_duty",
+              "status": "hit",
+              "expected": 30000000.0,
+              "matched_value": 30000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.884,
+          "reply_preview": "**Excise duty — beer malt (FY2026-27)**\n\n- Base: UGX 50,000,000\n- Statutory rate: 60.0%\n- Excise duty payable: **UGX 30,000,000**\n- Statutory Basis: Excise Duty Act 2014 (as amended)\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_excise_cement_and_sugar_2026_46",
+      "tax_head": "excise",
+      "difficulty": "medium",
+      "score": 0.2,
+      "score_100": 20.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.2,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.333333,
+          "fact_details": [
+            {
+              "any": [
+                "cement",
+                "50 kg",
+                "50kg"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "sugar",
+                "kg"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "15th",
+                "15",
+                "fifteenth"
+              ],
+              "ok": true,
+              "matched": "15th"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.586,
+          "reply_preview": "**PAYE, VAT, and monthly returns (alipoota z'omusolo eza buli mwezi) and payments are due by the 15th day (15) of each month (omwezi)** following the tax period under the Tax Procedures Code Act and Income Tax Act (FY2026-27).\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_excise_mobile_money_deposit_premise_47",
+      "tax_head": "excise",
+      "difficulty": "medium",
+      "score": 0.961538,
+      "score_100": 96.15,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.961538,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "0.5%"
+              ],
+              "ok": true,
+              "matched": "0.5%"
+            },
+            {
+              "any": [
+                "withdrawal"
+              ],
+              "ok": true,
+              "matched": "withdrawal"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "ura.go.ug-Petroleum Sector Q and A - Uganda Revenue Authority.pdf"
+          ],
+          "latency_s": 5.275,
+          "reply_preview": "**No**: Uganda Revenue Authority does not charge 0.5% mobile money excise duty on deposits made into a mobile money wallet.\n\nAccording to the Excise Duty Act 2014, the 0.5% levy applies specifically to **mobile money cash withdrawals**. Since you are making a deposit (inflow) rather than a withdrawal (outflow), no excise duty is charged on that transaction.\n\nFor reference, the 0.5% rate applies to:\n\n- Mobile money cash withdrawals\n- Telecommunications airtime and data services\n- Other designated",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_stamp_duty_property_transfer_80m_48",
+      "tax_head": "stamp_duty",
+      "difficulty": "medium",
+      "score": 0.581373,
+      "score_100": 58.14,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.633333,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.5,
+          "fact_details": [
+            {
+              "any": [
+                "drawing",
+                "making",
+                "executing",
+                "signing",
+                "transferee",
+                "buyer"
+              ],
+              "ok": true,
+              "matched": "drawing"
+            },
+            {
+              "any": [
+                "proof",
+                "registry",
+                "Ministry of Lands",
+                "URSB",
+                "assessment"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.666667,
+          "sector_guide_hits": [
+            "TAXATION-OF-THE-EDUCATION-SECTOR.pdf"
+          ],
+          "latency_s": 7.997,
+          "reply_preview": "**Who is legally responsible for paying stamp duty?**\nUnder **Section 3 of the Stamps Duty Act**, anyone executing or receiving a Schedule 2 instrument in Uganda is legally responsible for paying stamp duty. This includes the person drawing, making, or executing the instrument, such as hotel owners granting powers of attorney.\n\n**How do land registries enforce compliance?**\nLand registries enforce compliance by requiring the person drawing, making, or executing the instrument to pay the fee befo",
+          "sources_count": 3
+        },
+        {
+          "score": 0.529412,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_stamp_duty",
+              "field": "stamp_duty",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_stamp_duty' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "1%"
+              ],
+              "ok": true,
+              "matched": "1%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.5,
+          "sector_guide_hits": [
+            "ura_real_estate_sector_faqs.csv",
+            "ura.go.ug-Petroleum Sector Q and A - Uganda Revenue Authority-1.pdf"
+          ],
+          "latency_s": 4.665,
+          "reply_preview": "For a transfer of land valued at **UGX 80,000,000**, the 1% stamp duty is calculated as follows:\n\n- **Calculation**: $80,000,000 \\times 1\\% = 800,000$\n- **Amount Due**: **UGX 800,000**\n\nThis applies under **Section 3 of the Stamps Duty Act**, where property transfers are charged at **1%** of the market value determined by the Chief Government Valuer. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 ",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_stamp_duty_motorcycle_vs_vehicle_2026_49",
+      "tax_head": "stamp_duty",
+      "difficulty": "medium",
+      "score": 0.117647,
+      "score_100": 11.76,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.117647,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "education",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_stamp_duty",
+              "field": "stamp_duty",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_stamp_duty' is not registered"
+            },
+            {
+              "tool": "calculate_stamp_duty",
+              "field": "stamp_duty",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_stamp_duty' is not registered"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "motorcycle",
+                "tricycle"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "motor vehicle",
+                "vehicle"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.565,
+          "reply_preview": "### 📚 Taxpayer Education: Stamp Duty\n\nStamp duty is an indirect tax charged on legal and commercial instruments (documents) specified in Schedule 2 of the Stamp Duty Act 2014. Common instruments include land and property transfers (1% of the value), leases, mortgage deeds, powers of attorney, and company share allotments. Stamping legalises the document, making it legally enforceable and admissible in a court of law.\n\n**💡 Why It Matters:**\nAn unstamped legal instrument cannot be registered at th",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_stamp_duty_nominal_vs_chief_valuer_premise_50",
+      "tax_head": "stamp_duty",
+      "difficulty": "medium",
+      "score": 0.625,
+      "score_100": 62.5,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.625,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_stamp_duty",
+              "field": "stamp_duty",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_stamp_duty' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "1%"
+              ],
+              "ok": true,
+              "matched": "1%"
+            },
+            {
+              "any": [
+                "Valuer",
+                "market value",
+                "valuation"
+              ],
+              "ok": true,
+              "matched": "Valuer"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "ura_real_estate_sector_faqs.csv"
+          ],
+          "latency_s": 5.005,
+          "reply_preview": "**No**: URA will not charge stamp duty based on the lower agreed price. Under the Stamp Duty Act, 2014, the duty is calculated on the **market value** determined by the Chief Government Valuer (CGV), not the price written in the agreement. Since the CGV assessed the land at UGX 100,000,000, the ad valorem duty of 1% applies to that value, resulting in a duty of UGX 1,000,000. The fixed duty of UGX 15,000 does not apply here because the transaction involves a transfer of land and property, which ",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_stamp_duty_what_is_instrument_51",
+      "tax_head": "stamp_duty",
+      "difficulty": "easy",
+      "score": 0.8,
+      "score_100": 80.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.8,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "education",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "instrument",
+                "document",
+                "Schedule 2"
+              ],
+              "ok": true,
+              "matched": "instrument"
+            },
+            {
+              "any": [
+                "executed",
+                "received in Uganda",
+                "property",
+                "matter or thing"
+              ],
+              "ok": true,
+              "matched": "property"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.748,
+          "reply_preview": "### 📚 Taxpayer Education: Stamp Duty\n\nStamp duty is an indirect tax charged on legal and commercial instruments (documents) specified in Schedule 2 of the Stamp Duty Act 2014. Common instruments include land and property transfers (1% of the value), leases, mortgage deeds, powers of attorney, and company share allotments. Stamping legalises the document, making it legally enforceable and admissible in a court of law.\n\n**💡 Why It Matters:**\nAn unstamped legal instrument cannot be registered at th",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_objections_late_after_90_days_premise_52",
+      "tax_head": "objections",
+      "difficulty": "hard",
+      "score": 0.846154,
+      "score_100": 84.62,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.846154,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "education",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "45 days",
+                "45-day"
+              ],
+              "ok": true,
+              "matched": "45 days"
+            },
+            {
+              "any": [
+                "extension",
+                "Commissioner General"
+              ],
+              "ok": true,
+              "matched": "extension"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.616,
+          "reply_preview": "### 📚 Taxpayer Education: Tax Objections and Dispute Resolution\n\nIf you disagree with an assessment or tax decision issued by URA, the law gives you the right to challenge it. Under Section 24 of the Tax Procedures Code Act, you must lodge a formal written objection within 45 days from the date of service of the assessment notice. The Commissioner General has 90 days to render an objection decision.\n\nIf you remain aggrieved, you may appeal to the Tax Appeals Tribunal (TAT) within 30 days upon de",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_objections_30pct_deposit_on_80m_53",
+      "tax_head": "objections",
+      "difficulty": "hard",
+      "score": 0.769117,
+      "score_100": 76.91,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "objection_requirements",
+              "field": "deposit_amount",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'objection_requirements' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "30%"
+              ],
+              "ok": true,
+              "matched": "30%"
+            },
+            {
+              "any": [
+                "Tax Appeals Tribunal",
+                "TAT"
+              ],
+              "ok": true,
+              "matched": "Tax Appeals Tribunal"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 3.019,
+          "reply_preview": "To appeal a disputed income tax assessment of UGX 80,000,000 to the Tax Appeals Tribunal, you must pay **30%** of the disputed tax amount pending resolution. That deposit amount is **UGX 24,000,000**. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What is THE TAX APPEALS TRIBUNALS ACT and what is the 30% tax deposit rule?",
+          "sources_count": 4
+        },
+        {
+          "score": 0.95,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "High Court",
+                "Court of Appeal"
+              ],
+              "ok": true,
+              "matched": "High Court"
+            },
+            {
+              "any": [
+                "law",
+                "question of law",
+                "appeal"
+              ],
+              "ok": true,
+              "matched": "law"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "A-GUIDE-TO-TAXATION-OF-AGRICULTURAL-SECTOR.pdf"
+          ],
+          "latency_s": 5.34,
+          "reply_preview": "If you lose at the Tax Appeals Tribunal, you can appeal to the **High Court of Uganda** on questions of law only. [1]\n\nYou must file this appeal within 30 days of being served with a notice of the Tribunal’s decision. [2]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What is THE TAX APPEALS TRIBUNALS ACT and what is the 30% tax deposit rule",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_objections_valid_form_and_grounds_54",
+      "tax_head": "objections",
+      "difficulty": "medium",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "false_premise_rejected",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "45 days",
+                "45-day"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "grounds",
+                "reasons"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "supporting documents",
+                "evidence",
+                "portal",
+                "written"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 1.153,
+          "reply_preview": "Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, there is no official \"Valid Tax\". The URA does not administer or impose such a tax or levy.\n\nLegitimate statutory tax heads administered by the URA include Income Tax (**PAYE**, Corporate Income Tax, Presumptive Tax), Value Added Tax (**VAT**), Withholding Tax (**WHT**), Rental Tax, Stamp Duty, and Customs and Excise Duties. Please consult official URA guidelines or an authorized tax officer for statutory requirements",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_objections_burden_of_proof_55",
+      "tax_head": "objections",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "taxpayer",
+                "person objecting",
+                "appellant"
+              ],
+              "ok": true,
+              "matched": "taxpayer"
+            },
+            {
+              "any": [
+                "burden of proof",
+                "prove",
+                "excessive",
+                "erroneous"
+              ],
+              "ok": true,
+              "matched": "burden of proof"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 3.405,
+          "reply_preview": "**No**: that is incorrect. Under Ugandan tax law, the burden of proof lies with the taxpayer to show the assessment is wrong.\n\nFor a tax assessment, the burden is on the taxpayer to prove the assessment is incorrect. For any other tax decision, the burden is on the person objecting to prove the decision should have been made differently.\n\nYou can find this rule in the Tax Procedures Code Act and the Tax Appeals Tribunal Act. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_objections_elect_treated_as_allowed_56",
+      "tax_head": "objections",
+      "difficulty": "hard",
+      "score": 0.9,
+      "score_100": 90.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.9,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "90 days",
+                "ninety days",
+                "days"
+              ],
+              "ok": true,
+              "matched": "90 days"
+            },
+            {
+              "any": [
+                "elect",
+                "allowed",
+                "notice",
+                "Commissioner"
+              ],
+              "ok": true,
+              "matched": "elect"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.5,
+          "sector_guide_hits": [
+            "TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf",
+            "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf"
+          ],
+          "latency_s": 2.694,
+          "reply_preview": "If the Commissioner General does not serve an objection decision within 90 days, the taxpayer can consider the Commissioner as having allowed the objection. This process is called \"electing,\" and the taxpayer is treated as served with the decision on the date they lodged the election. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: What d",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_penalties_late_filing_large_tax_57",
+      "tax_head": "penalties",
+      "difficulty": "hard",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "workflow",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "penalty_late_filing",
+              "field": "penal_tax",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'penalty_late_filing' is not registered"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "2%"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "whichever is greater",
+                "whichever is higher",
+                "greater"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.598,
+          "reply_preview": "I can work that out for you — I just need a detail or two.\n\n_I'll assume: resident employee (say “non-resident” if not) — correct me if that's wrong._\n\nWhat is your **gross monthly salary** in UGX? (e.g. 1,500,000 or 1.5m)",
+          "sources_count": 0
+        },
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "workflow",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "penalty_late_filing",
+              "field": "penal_tax",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'penalty_late_filing' is not registered"
+            }
+          ],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "2%",
+                "month"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.569,
+          "reply_preview": "On a gross of UGX 50,000,000.00, the applicable band is 40% above UGX 10,000,000.00. After PAYE UGX 18,888,250.00, net pay = UGX 31,111,750.00. This is net of PAYE only — NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure.\n\nThose figures use the official URA PAYE bands for the fiscal year shown above. If your salary changes, just ask me to recalculate — I'm happy to help.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_penalties_efris_non_issuance_2026_58",
+      "tax_head": "penalties",
+      "difficulty": "medium",
+      "score": 0.3,
+      "score_100": 30.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.3,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.5,
+          "fact_details": [
+            {
+              "any": [
+                "double",
+                "twice",
+                "10 currency points",
+                "currency points"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "24",
+                "24 hours",
+                "twenty-four"
+              ],
+              "ok": true,
+              "matched": "24"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.618,
+          "reply_preview": "**Under URA EFRIS regulations, offline transactions must be synchronized within 24 hours** (FY2026-27) once network connectivity is restored. Businesses operating in areas without internet may generate offline fiscal receipts but must upload them to URA within this mandatory 24-hour window.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or W",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_penalties_voluntary_disclosure_waiver_59",
+      "tax_head": "penalties",
+      "difficulty": "medium",
+      "score": 0.6,
+      "score_100": 60.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "voluntary disclosure"
+              ],
+              "ok": true,
+              "matched": "voluntary disclosure"
+            },
+            {
+              "any": [
+                "waive",
+                "remit",
+                "forgive",
+                "no penal",
+                "principal tax"
+              ],
+              "ok": true,
+              "matched": "waive"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.598,
+          "reply_preview": "**Under Section 66 of the Tax Procedures Code Act, the procedure for the Voluntary Disclosure Programme (VDP / utaratibu wa VDP) grants a 100% waiver of penal tax, penalty (penalties), and interest** if a taxpayer voluntarily discloses previously undisclosed tax liabilities before a URA audit or investigation begins, provided the principal tax is paid.\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email servi",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_penalties_late_payment_interest_rate_60",
+      "tax_head": "penalties",
+      "difficulty": "medium",
+      "score": 0.3,
+      "score_100": 30.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "2%"
+              ],
+              "ok": true,
+              "matched": "2%"
+            },
+            {
+              "any": [
+                "month",
+                "monthly"
+              ],
+              "ok": true,
+              "matched": "month"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.564,
+          "reply_preview": "**Interest on late payment of tax is 2% per month** (simple interest) on the unpaid tax balance under Section 39 of the Tax Procedures Code Act (FY2026-27).\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        },
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "waiver",
+                "hardship",
+                "good cause",
+                "Commissioner",
+                "Minister"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.558,
+          "reply_preview": "**Withholding tax (WHT) rates (FY2026-27):**\n\n- Services: **6%**\n- Goods: **6%**\n- Management fees: **15%**\n- Dividends: **15%**\n- Royalties: **15%**\n- Payments to public entertainers: **6%**\n- Betting winnings: **15%**\n- Interest paid to non-resident lenders: **5%**\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_dst_non_resident_ride_hailing_platform_61",
+      "tax_head": "digital_services",
+      "difficulty": "medium",
+      "score": 0.588235,
+      "score_100": 58.82,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_digital_services_tax",
+              "field": "dst_tax",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_digital_services_tax' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "5%"
+              ],
+              "ok": true,
+              "matched": "5%"
+            },
+            {
+              "any": [
+                "gross",
+                "non-resident",
+                "digital"
+              ],
+              "ok": true,
+              "matched": "gross"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 5.215,
+          "reply_preview": "Under Section 86A of the Income Tax Act, the Digital Services Tax rate is **5%** on gross revenue derived from supplying digital services to individuals in Uganda.\n\nFor a gross revenue of **UGX 200,000,000**, the payable Digital Services Tax is **UGX 10,000,000**.\n\n*Note: This applies to non-resident digital service providers earning revenue from customers in Uganda.* [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 1",
+          "sources_count": 3
+        }
+      ]
+    },
+    {
+      "id": "ho_dst_resident_software_company_premise_62",
+      "tax_head": "digital_services",
+      "difficulty": "medium",
+      "score": 0.65,
+      "score_100": 65.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.65,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_corporation_tax",
+              "field": "tax",
+              "status": "miss",
+              "expected": 30000000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "non-resident"
+              ],
+              "ok": true,
+              "matched": "non-resident"
+            },
+            {
+              "any": [
+                "30%"
+              ],
+              "ok": true,
+              "matched": "30%"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 6.319,
+          "reply_preview": "**No**: you cannot opt for Digital Services Tax instead of Corporation Tax.\n\nYour company is a Ugandan-incorporated entity, so you are subject to **Corporation Tax** at the standard rate of **30%** on your chargeable income.\n\nDigital Services Tax (DST) applies only to **non-resident persons** providing digital services to customers in Uganda. Since your company is resident in Kampala, DST does not apply to you. You must declare and pay the 30% corporation tax on your UGX 100,000,000 profit.\n\nFor",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_dst_software_royalty_and_vat_2turn_63",
+      "tax_head": "digital_services",
+      "difficulty": "hard",
+      "score": 0.405228,
+      "score_100": 40.52,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "miss",
+              "expected": 7500000.0,
+              "matched_value": null,
+              "required": true,
+              "reason": "No matching amount asserted in claim clause"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "15%"
+              ],
+              "ok": true,
+              "matched": "15%"
+            },
+            {
+              "any": [
+                "royalty",
+                "software"
+              ],
+              "ok": true,
+              "matched": "software"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 3.826,
+          "reply_preview": "Under the 2026–27 tax reforms, payments for software are treated as royalties. Therefore, the Ugandan bank must withhold 15% withholding tax (**WHT**) on the gross amount of the $50,000,000 payment to the non-resident vendor. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: How is a tax-exempt NGO treated for withholding tax?",
+          "sources_count": 1
+        },
+        {
+          "score": 0.222222,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_vat",
+              "field": "vat",
+              "status": "miss",
+              "expected": 9000000.0,
+              "matched_value": 9000000.0,
+              "required": true,
+              "reason": "Conflicting amount asserted in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.59,
+          "reply_preview": "**VAT calculation (FY2026-27)**\n\n- Net amount: UGX 50,000,000\n- VAT at 18%: **UGX 9,000,000**\n- Gross (VAT-inclusive): **UGX 59,000,000**\n- Statutory Basis: Value Added Tax Act\n\n_Assumptions: adding 18% VAT to a net amount (say “VAT-inclusive” to extract instead)._\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_gaming_operator_tax_on_net_stakes_64",
+      "tax_head": "gaming_betting",
+      "difficulty": "hard",
+      "score": 0.794118,
+      "score_100": 79.41,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_gaming_tax",
+              "field": "operator_gaming_tax",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_gaming_tax' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "30%"
+              ],
+              "ok": true,
+              "matched": "30%"
+            },
+            {
+              "any": [
+                "staked",
+                "stakes",
+                "payouts"
+              ],
+              "ok": true,
+              "matched": "stakes"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 4.487,
+          "reply_preview": "To calculate the 30% gaming tax on net stakes, subtract the payouts from the total stakes:\n\n- **Net Stakes:** UGX 800,000,000 − UGX 500,000,000 = UGX 300,000,000\n- **Tax Calculation:** UGX 300,000,000 × 30% = UGX 90,000,000\n\nThe casino owes **UGX 90,000,000** in gaming tax. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 3
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "hit",
+              "expected": 750000.0,
+              "matched_value": 750000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.771,
+          "reply_preview": "**Withholding tax — betting winnings (FY2026-27)**\n\n- Gross payment: UGX 5,000,000\n- WHT at 15%: **UGX 750,000**\n- Net payable to payee: UGX 4,250,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_gaming_wht_on_winnings_20m_65",
+      "tax_head": "gaming_betting",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "calculator",
+          "actual_route": "calculator",
+          "figures": 1.0,
+          "figure_details": [
+            {
+              "tool": "calculate_withholding",
+              "field": "withholding_tax",
+              "status": "hit",
+              "expected": 3000000.0,
+              "matched_value": 3000000.0,
+              "required": true,
+              "reason": "Matched asserted figure in claim clause"
+            }
+          ],
+          "facts": null,
+          "fact_details": [],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.613,
+          "reply_preview": "**Withholding tax — betting winnings (FY2026-27)**\n\n- Gross payment: UGX 20,000,000\n- WHT at 15%: **UGX 3,000,000**\n- Net payable to payee: UGX 17,000,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_gaming_registration_and_scope_66",
+      "tax_head": "gaming_betting",
+      "difficulty": "easy",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "casino",
+                "sports betting",
+                "lottery",
+                "pool betting",
+                "bingo"
+              ],
+              "ok": true,
+              "matched": "casino"
+            },
+            {
+              "any": [
+                "URSB",
+                "TIN",
+                "Lotteries and Gaming Regulatory Board",
+                "LGRB"
+              ],
+              "ok": true,
+              "matched": "URSB"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 3.372,
+          "reply_preview": "Under Uganda law, gaming and pool betting activities include national lotteries, public lotteries (like Powerball and Bingo), sports betting, casino games (blackjack, roulette, poker), virtual gaming, and electronic betting terminals. To register legally, an operator must register the business with **URSB**, get a Tax Identification Number from URA, acquire a license from the National Lotteries and Gaming Regulatory Board, and secure local authority trading licenses and other permits. [1]\n\nIf yo",
+          "sources_count": 2
+        }
+      ]
+    },
+    {
+      "id": "ho_advance_tax_passenger_bus_60_seats_67",
+      "tax_head": "advance_tax",
+      "difficulty": "medium",
+      "score": 0.588235,
+      "score_100": 58.82,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_advance_vehicle_tax",
+              "field": "annual_advance_tax",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_advance_vehicle_tax' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "seat",
+                "per seat"
+              ],
+              "ok": true,
+              "matched": "seat"
+            },
+            {
+              "any": [
+                "advance"
+              ],
+              "ok": true,
+              "matched": "advance"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 8.89,
+          "reply_preview": "For a 60-seater commercial passenger bus in Uganda, the annual advance income tax is calculated by multiplying the number of seats by the rate of UGX 20,000 per seat.\n\n**Calculation:**\n- **Per seat:** UGX 20,000\n- **Total for 60 seats:** 60 × 20,000 = **GX 1,200,000** [1]\n\n**Official Grounding Passages:**\n[1] Question: How much advance tax do I pay by vehicle type?\nAnswer: Passenger vehicles (PSVs) and buses: UGX 20,000 per passenger seat per year.\n\n[2] Question: Can I verify an advance income t",
+          "sources_count": 3
+        }
+      ]
+    },
+    {
+      "id": "ho_advance_tax_goods_truck_20_tonnes_68",
+      "tax_head": "advance_tax",
+      "difficulty": "medium",
+      "score": 0.794118,
+      "score_100": 79.41,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.588235,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": 0.0,
+          "figure_details": [
+            {
+              "tool": "calculate_advance_vehicle_tax",
+              "field": "annual_advance_tax",
+              "status": "tool_missing",
+              "expected": null,
+              "matched_value": null,
+              "required": true,
+              "reason": "Tool 'calculate_advance_vehicle_tax' is not registered"
+            }
+          ],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "gross weight",
+                "net weight",
+                "logbook"
+              ],
+              "ok": true,
+              "matched": "gross weight"
+            },
+            {
+              "any": [
+                "tonne",
+                "per tonne"
+              ],
+              "ok": true,
+              "matched": "tonne"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 15.06,
+          "reply_preview": "To determine the loading capacity in tonnes, subtract the net weight from the gross weight recorded in the logbook: **Gross weight – Net weight = Loading capacity**.\n\nFor a 20-tonne truck, the annual advance tax is calculated as follows:\n- **Loading Capacity:** 20 tonnes\n- **Statutory Rate:** UGX 50,000 per tonne\n- **Total Advance Tax:** 20 × 50,000 = **GX 1,000,000**\n\nThis tax is payable by the vehicle owner and is 100% creditable against final annual income tax liability.\n\n**Official Grounding",
+          "sources_count": 3
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "credit",
+                "credited",
+                "advance",
+                "not a final",
+                "offset"
+              ],
+              "ok": true,
+              "matched": "credit"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 18.802,
+          "reply_preview": "Advance tax paid on a commercial vehicle is **not a final tax**. It is an advance payment that is credited against the owner's annual income tax liability.\n\nUnder the creditable withholding tax system, the advance tax is fully deducted from the final tax due when filing the annual income tax return (Form DT-1001 for companies). The owner does not need to file a separate return for the income covered by the advance tax, but they must report the income and pay the difference between the advance ta",
+          "sources_count": 3
+        }
+      ]
+    },
+    {
+      "id": "ho_advance_tax_driver_vs_owner_premise_69",
+      "tax_head": "advance_tax",
+      "difficulty": "medium",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "owner",
+                "vehicle owner"
+              ],
+              "ok": true,
+              "matched": "owner"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 1.0,
+          "premise_ok": true,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 4.195,
+          "reply_preview": "**No**: the hired driver is not legally responsible for the vehicle's advance income tax. Under Ugandan law, the vehicle owner is solely responsible for paying the advance income tax, even if the driver operates the vehicle daily.\n\nFor your specific case, since your commercial truck carries a loading capacity above 2 tonnes, you should calculate the tax based on the gross weight minus the net weight of the vehicle. You can find the official guide at [https://ura.go.ug/en/advance-tax-on-the-trans",
+          "sources_count": 3
+        }
+      ]
+    },
+    {
+      "id": "ho_procedures_prn_payment_and_expiry_70",
+      "tax_head": "procedures",
+      "difficulty": "medium",
+      "score": 0.8,
+      "score_100": 80.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.6,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "calculator",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "PRN",
+                "Payment Registration"
+              ],
+              "ok": true,
+              "matched": "PRN"
+            },
+            {
+              "any": [
+                "bank",
+                "mobile money",
+                "Visa",
+                "Mastercard",
+                "portal"
+              ],
+              "ok": true,
+              "matched": "bank"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.615,
+          "reply_preview": "**To pay taxes using a Payment Registration Number (PRN)**, generate the PRN on the URA portal (ura.go.ug). You can complete payment at any commercial bank branch (benki) or via mobile money on your phone (simu) using MTN *165# or Airtel *185#. PRNs remain valid for 21 days (FY2026-27).\n\nThat comes from the official URA FY2026-27 rate table.\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or Whats",
+          "sources_count": 0
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "faq_priority",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "21",
+                "21 days",
+                "twenty-one"
+              ],
+              "ok": true,
+              "matched": "21"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 2.301,
+          "reply_preview": "A standard URA PRN is valid for **21 days** from the date of generation. If it expires before payment, you can reactivate it on the portal without needing a new declaration. [1]\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.\n\nYou might also want to know: How long is a PRN valid and how do I reactivate it if expired?",
+          "sources_count": 2
+        }
+      ]
+    },
+    {
+      "id": "ho_procedures_multiple_tins_premise_71",
+      "tax_head": "procedures",
+      "difficulty": "medium",
+      "score": 0.634615,
+      "score_100": 63.46,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.269231,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "faq_priority",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "one TIN",
+                "single",
+                "amend",
+                "add"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.75,
+          "sector_guide_hits": [
+            "Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf"
+          ],
+          "latency_s": 1.187,
+          "reply_preview": "To register for an **instant TIN** as an individual:\n\n1. Go to ura.go.ug\n2. Click **Get a TIN**\n3. Choose **Instant TIN**\n4. Select **Individual**\n5. Enter your NIN and personal details\n6. Confirm you are not a robot\n7. Submit\n\nIf you get stuck at any step, URA is happy to help: visit https://ura.go.ug, email services@ura.go.ug, call toll-free 0800 117 000 / 0800 217 000, or WhatsApp 0772 140 000.",
+          "sources_count": 4
+        },
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "rag",
+          "actual_route": "hybrid",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "amend",
+                "registration",
+                "portal",
+                "ura.go.ug",
+                "login",
+                "e-Services"
+              ],
+              "ok": true,
+              "matched": "amend"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 1.0,
+          "sector_guide_hits": [],
+          "latency_s": 5.151,
+          "reply_preview": "To update your existing TIN profile on the URA portal to add a new business income source:\n\n1. Log in to your URA web account at [ura.go.ug](https://ura.go.ug)\n2. Go to **Registration** > **Amend Registration** > **Individual**\n3. Navigate to the **Contact Details** tab and update your mobile phone number or email address\n4. Validate the change via OTP sent to the new contact and upload a copy of your National ID\n5. Submit the amendment. Once approved, your TIN profile updates instantly.\n\nIf you",
+          "sources_count": 4
+        }
+      ]
+    },
+    {
+      "id": "ho_procedures_business_records_retention_72",
+      "tax_head": "procedures",
+      "difficulty": "easy",
+      "score": 0.0,
+      "score_100": 0.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.0,
+          "route_ok": false,
+          "expected_route": "rag",
+          "actual_route": "false_premise_rejected",
+          "figures": null,
+          "figure_details": [],
+          "facts": 0.0,
+          "fact_details": [
+            {
+              "any": [
+                "5 years",
+                "five years",
+                "5-year"
+              ],
+              "ok": false,
+              "matched": null
+            },
+            {
+              "any": [
+                "English"
+              ],
+              "ok": false,
+              "matched": null
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": 0.0,
+          "premise_ok": false,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": 0.0,
+          "sector_guide_hits": [],
+          "latency_s": 0.847,
+          "reply_preview": "Under current Ugandan tax laws and Uganda Revenue Authority (URA) regulations, there is no official \"Retain Tax\". The URA does not administer or impose such a tax or levy.\n\nLegitimate statutory tax heads administered by the URA include Income Tax (**PAYE**, Corporate Income Tax, Presumptive Tax), Value Added Tax (**VAT**), Withholding Tax (**WHT**), Rental Tax, Stamp Duty, and Customs and Excise Duties. Please consult official URA guidelines or an authorized tax officer for statutory requirement",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_jurisdiction_kenya_kra_etims_73",
+      "tax_head": "jurisdiction",
+      "difficulty": "easy",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "declined",
+          "actual_route": "out_of_jurisdiction",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "Uganda",
+                "URA",
+                "Uganda Revenue Authority"
+              ],
+              "ok": true,
+              "matched": "Uganda"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.561,
+          "reply_preview": "I can only help with taxes administered by the Uganda Revenue Authority. I don't hold Kenya's tax rates, and quoting Uganda's figures for Kenya would be misleading.\n\nFor Kenya you'll need that country's own revenue authority. If you meant Uganda, ask again without naming Kenya and I'll answer from the official URA rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_jurisdiction_tanzania_tra_tin_zanzibar_74",
+      "tax_head": "jurisdiction",
+      "difficulty": "easy",
+      "score": 1.0,
+      "score_100": 100.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 1.0,
+          "route_ok": true,
+          "expected_route": "declined",
+          "actual_route": "out_of_jurisdiction",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "Uganda",
+                "URA",
+                "Uganda Revenue Authority"
+              ],
+              "ok": true,
+              "matched": "Uganda"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.589,
+          "reply_preview": "I can only help with taxes administered by the Uganda Revenue Authority. I don't hold Tanzania's tax rates, and quoting Uganda's figures for Tanzania would be misleading.\n\nFor Tanzania you'll need that country's own revenue authority. If you meant Uganda, ask again without naming Tanzania and I'll answer from the official URA rate table.",
+          "sources_count": 0
+        }
+      ]
+    },
+    {
+      "id": "ho_jurisdiction_rwanda_rra_ebm_kigali_75",
+      "tax_head": "jurisdiction",
+      "difficulty": "easy",
+      "score": 0.75,
+      "score_100": 75.0,
+      "critical_fail": false,
+      "truncated_turns": 0,
+      "turns": [
+        {
+          "score": 0.75,
+          "route_ok": false,
+          "expected_route": "declined",
+          "actual_route": "education",
+          "figures": null,
+          "figure_details": [],
+          "facts": 1.0,
+          "fact_details": [
+            {
+              "any": [
+                "Uganda",
+                "URA",
+                "Uganda Revenue Authority"
+              ],
+              "ok": true,
+              "matched": "Uganda"
+            }
+          ],
+          "forbidden_hits": [],
+          "critical_fail": false,
+          "premise": null,
+          "premise_ok": null,
+          "complete": true,
+          "truncation_reason": null,
+          "sources_relevant": null,
+          "sector_guide_hits": [],
+          "latency_s": 0.613,
+          "reply_preview": "### 📚 Taxpayer Education: PAYE — Pay As You Earn\n\nPAYE is income tax on employment income, deducted by the employer from each month's pay and remitted to URA. The employee does not pay it separately; it is already gone by payday. It is charged on progressive monthly bands, and residents and non-residents use different band tables — a non-resident is taxed from the first shilling, with no nil-rate band.\n\n**💡 Why It Matters:**\nIt is the tax most Ugandans meet first, and it is the employer's legal ",
+          "sources_count": 0
+        }
+      ]
+    }
+  ],
+  "heldout_sha256": "sha256:4e993908-35e17872-299593d4-3697cd99-f085730c-bb78e5b5-b7e16dba-478cf4b3"
+}

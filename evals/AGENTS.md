@@ -14,6 +14,7 @@ Deterministic gates. Do not call a hosted LLM from these jobs.
 | Orpheus Luganda voice | `evals/orpheus_tts/` + `scripts/bench_orpheus_tts.py` | receptionist Phase 0B — latency here, naturalness by listeners |
 | Trilingual multi-turn | `evals/multiturn_trilingual/scenarios.jsonl` | `test_multiturn_trilingual_eval.py` — answer language, English replay, scrubbed history, facts (deterministic); `scripts/eval_multiturn_trilingual.py` measures the GPU stack |
 | Trilingual retrieval | `evals/retrieval_multilingual/` + `scripts/eval_retrieval_multilingual.py` | measurement on the GPU stack, **not a gate**: part of the set is machine-translated (see its README); Hit@1/nDCG per leg, abstention, latency |
+| Complex tax scenarios | `evals/complex_scenarios/{dev,heldout}.jsonl` + `scoring.py` | `test_complex_scenarios_schema.py` + `test_complex_scenarios_scoring.py` (deterministic); `scripts/eval_complex_scenarios.py` measures live stack (`HELDOUT.sha256` two-run rule) |
 
 `FLAG_HYDE` / `FLAG_GRAPH_FUSION` stay off until an unseen multi-hop set exists.
 
