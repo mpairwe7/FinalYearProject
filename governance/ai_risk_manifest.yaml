@@ -430,6 +430,7 @@ owasp_agentic_2026:
       controls: "Pinned model and dependency manifests (aibom_inventory), Mcp-Name verification, disabled dynamic remote MCP registration, and SLSA/Trivy CI gates"
       verified_by:
         - "App/backend/tests/test_mcp_hardening.py"
+        - "tests/agents/test_mcp_2026_october_audit.py"
     - id: "ASI05"
       name: "Unexpected Code Execution (RCE)"
       status: "mitigated"
@@ -444,6 +445,7 @@ owasp_agentic_2026:
       controls: "Tenant- and user-scoped 4-tier cognitive memory, low-ASR-confidence memory write suppression, and _-prefixed internal workflow state exclusion (G171)"
       verified_by:
         - "App/backend/tests/test_memory_lifecycle.py"
+        - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
     - id: "ASI07"
       name: "Insecure Inter-Agent Communication"
       status: "mitigated"
@@ -497,3 +499,68 @@ aibom_inventory:
       role: "Cross-encoder passage reranker"
       locales: ["en", "lg", "sw", "nyn", "ach"]
       runtime: "sentence-transformers CrossEncoder"
+
+owasp_mcp_top10_2026:
+  edition: "OWASP Top 10 for Model Context Protocol (MCP) & SAFE-MCP (2026)"
+  risks:
+    - id: "MCP01"
+      name: "Token Mismanagement & Secret Exposure"
+      status: "mitigated"
+      controls: "AES-256-GCM TokenVault, audience-bound OAuth 2.1 RS256 / constant-time shared tokens, and screen_tool_result credential-leak quarantine"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP02"
+      name: "Privilege Escalation via Scope Creep & Confused Deputy"
+      status: "mitigated"
+      controls: "Deny-by-default authorize_tool_call policy, personalization consent on memory_store/memory_discard, and strict verified _meta identity injection in ToolRegistry.call"
+      verified_by:
+        - "App/backend/tests/test_mcp_policy.py"
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP03"
+      name: "Tool Poisoning & Full-Schema Poisoning (SAF-T1001/SAF-T1501)"
+      status: "mitigated"
+      controls: "inspect_descriptor_integrity scans descriptions, schemas, and annotations with Unicode zero-width/bidi normalization"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP04"
+      name: "Software Supply Chain Attacks & Dependency Tampering"
+      status: "mitigated"
+      controls: "Canonical SHA-256 descriptor fingerprinting (ug.go.ura.chatbot/descriptorSha256), Trivy/pip-audit SCA, and disabled runtime connector registration (410 Gone)"
+      verified_by:
+        - "App/backend/tests/test_mcp_hardening.py"
+    - id: "MCP05"
+      name: "Command Injection & Unvalidated Argument Execution"
+      status: "mitigated"
+      controls: "JSON Schema 2020-12 validate_arguments with additionalProperties=False enforced on both MCPClient and StatelessMCPServer before ToolRegistry.call"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP06"
+      name: "Intent Flow Subversion via Indirect Prompt Injection (SAF-T1102)"
+      status: "mitigated"
+      controls: "screen_tool_result and scrub_prompt_overrides_in_result quarantine control tokens/bidi smuggling and redact prompt overrides in tool outputs"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP07"
+      name: "Insufficient Authentication & Authorization"
+      status: "mitigated"
+      controls: "Per-namespace OAuth 2.1 RS256 / shared token auth, HeaderMismatch (-32020) verification, and trusted_identity gating on StatelessMCPServer"
+      verified_by:
+        - "App/backend/tests/test_mcp_wire_conformance.py"
+    - id: "MCP08"
+      name: "Rug Pull / Post-Approval Descriptor Mutation (SAF-T1201)"
+      status: "mitigated"
+      controls: "TTL and serverVersion-scoped _pinned_descriptors in MCPClient with staff-only clear_descriptor_pins rotation"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP09"
+      name: "Shadow MCP Servers & Cross-Server Tool Shadowing (SAF-T1301)"
+      status: "mitigated"
+      controls: "MCPClient._check_cross_namespace_shadowing enforces canonical ToolRegistry namespace ownership and blocks cross-tool shadowing directives"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MCP10"
+      name: "Context Injection & Cross-Tenant Memory Over-Sharing (SAF-T1204)"
+      status: "mitigated"
+      controls: "Tenant-scoped SQL isolation on user_facts and tasks, replay cache keyed by tenant_id, and verified _meta identity binding"
+      verified_by:
+        - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"

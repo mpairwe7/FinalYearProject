@@ -45,7 +45,14 @@ from .transport import (
     build_transports,
     request_meta,
 )
-from .validation import result_matches_schema, validate_arguments
+from .validation import (
+    compute_descriptor_sha256,
+    inspect_descriptor_integrity,
+    result_matches_schema,
+    screen_tool_result,
+    scrub_prompt_overrides_in_result,
+    validate_arguments,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,8 @@ DEFAULT_TIMEOUT_S = 15.0
 _IDEMPOTENCY_CACHE_SIZE = 512
 _IDEMPOTENCY_REDIS_PREFIX = "mcp:idem:"
 _IDEMPOTENCY_REDIS_TTL_S = int(os.getenv("MCP_IDEMPOTENCY_TTL_S", "86400"))
+#: TTL (seconds) for pinned tool descriptors before legitimate redeploy re-pins.
+MCP_DESCRIPTOR_PIN_TTL_S = int(os.getenv("MCP_DESCRIPTOR_PIN_TTL_S", "3600"))
 _redis = None
 _redis_tried = False
 
@@ -168,7 +177,84 @@ class MCPClient:
         self._transports = transports if transports is not None else build_transports()
         self._breakers: dict[str, CircuitBreaker] = {}
         self._idempotency: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        # Scoped by (namespace, tool_name) -> (sha256_digest, expires_at_monotonic, server_version)
+        self._pinned_descriptors: dict[tuple[str, str], tuple[str, float, str]] = {}
+        self._pin_rejections_count: int = 0
         self._lock = threading.Lock()
+
+    def clear_descriptor_pins(
+        self, namespace: str | None = None, *, user_role: str = "ura_admin"
+    ) -> int:
+        """Staff/admin control to clear pinned tool descriptors after a verified redeploy."""
+        if user_role not in {"ura_staff", "ura_admin"}:
+            raise PermissionError("Only ura_staff or ura_admin may clear MCP descriptor pins")
+        with self._lock:
+            if namespace is None:
+                cleared = len(self._pinned_descriptors)
+                self._pinned_descriptors.clear()
+                return cleared
+            keys = [k for k in self._pinned_descriptors if k[0] == namespace]
+            for k in keys:
+                self._pinned_descriptors.pop(k, None)
+            return len(keys)
+
+    @staticmethod
+    def _check_cross_namespace_shadowing(name: str, namespace: str) -> str | None:
+        """Block a remote namespace from shadowing a tool owned by another namespace (OWASP MCP09)."""
+        if not name or not namespace:
+            return None
+        from ..tools import ToolRegistry
+
+        registered = ToolRegistry.get(name)
+        if registered is not None and registered.schema.namespace != namespace:
+            return (
+                f"cross_namespace_tool_shadowing:{name}:"
+                f"canonical={registered.schema.namespace}!=transport={namespace}"
+            )
+        return None
+
+    def _verify_and_pin_descriptor(
+        self, descriptor: dict[str, Any], *, server_version: str = ""
+    ) -> list[str]:
+        """Verify tool descriptor integrity, namespace ownership, and TTL/version-scoped rug-pull pinning."""
+        violations = inspect_descriptor_integrity(descriptor)
+        if violations:
+            with self._lock:
+                self._pin_rejections_count += 1
+            return violations
+        name = str(descriptor.get("name", ""))
+        if not name:
+            return ["missing_tool_name"]
+        namespace = str(_meta_of(descriptor, "namespace", "core"))
+        shadow_err = self._check_cross_namespace_shadowing(name, namespace)
+        if shadow_err:
+            with self._lock:
+                self._pin_rejections_count += 1
+            return [shadow_err]
+        digest = compute_descriptor_sha256(descriptor)
+        version = str(
+            server_version
+            or (descriptor.get("_meta") or {}).get("io.modelcontextprotocol/serverVersion", "")
+            or ""
+        )
+        now = time.monotonic()
+        pin_key = (namespace, name)
+        with self._lock:
+            existing = self._pinned_descriptors.get(pin_key)
+            if existing is not None:
+                prev_digest, expires_at, prev_version = existing
+                # Legitimate redeploy with a new server_version or expired TTL refreshes the pin
+                if now < expires_at and (not version or version == prev_version) and prev_digest != digest:
+                    self._pin_rejections_count += 1
+                    logger.warning(
+                        "MCP descriptor pin rejected namespace=%s tool=%s rejections=%d",
+                        namespace,
+                        name,
+                        self._pin_rejections_count,
+                    )
+                    return [f"rug_pull_detected:{namespace}:{name}:expected={prev_digest[:12]}..got={digest[:12]}"]
+            self._pinned_descriptors[pin_key] = (digest, now + MCP_DESCRIPTOR_PIN_TTL_S, version)
+        return []
 
     # -- Routing -------------------------------------------------------
     def _unique_transports(self) -> list[ToolTransport]:
@@ -265,6 +351,15 @@ class MCPClient:
                 descriptor = self._with_transport_namespace(raw_descriptor, namespace)
                 name = str(descriptor.get("name", ""))
                 if not name:
+                    continue
+                integrity_errors = self._verify_and_pin_descriptor(descriptor)
+                if integrity_errors:
+                    logger.warning(
+                        "MCP tool discovery rejected descriptor name=%s namespace=%s errors=%s",
+                        name,
+                        namespace or "local",
+                        integrity_errors,
+                    )
                     continue
                 owner = self._transports.get(str(_meta_of(descriptor, "namespace", "core")))
                 if name not in seen or owner is transport:
@@ -573,6 +668,19 @@ class MCPClient:
         risk = str(_meta_of(descriptor, "risk", "low"))
         namespace = str(_meta_of(descriptor, "namespace", "core"))
 
+        integrity_errors = self._verify_and_pin_descriptor(descriptor)
+        if integrity_errors:
+            return finish(
+                {
+                    "ok": False,
+                    "error": "descriptor_integrity_failed",
+                    "violations": integrity_errors,
+                },
+                ok=False,
+                risk=risk,
+                namespace=namespace,
+            )
+
         requires_confirmation = bool(
             _meta_of(descriptor, "requiresConfirmation", False)
         )
@@ -743,6 +851,28 @@ class MCPClient:
                 "validation_errors": drift[:8],
                 "policy": policy,
             }
+        else:
+            output_violations = screen_tool_result(raw)
+            if output_violations:
+                hard_violations = [
+                    v
+                    for v in output_violations
+                    if not v.startswith("indirect_prompt_injection:prompt_override_directive@")
+                ]
+                if hard_violations:
+                    logger.warning(
+                        "MCP result for %s blocked by output safety screen: %s",
+                        name,
+                        hard_violations[:3],
+                    )
+                    raw = {
+                        "ok": False,
+                        "error": "untrusted_tool_output",
+                        "violations": hard_violations[:8],
+                        "policy": policy,
+                    }
+                else:
+                    raw = scrub_prompt_overrides_in_result(raw)
         ok = bool(raw.get("ok", True))
         if ok:
             breaker.record_success()

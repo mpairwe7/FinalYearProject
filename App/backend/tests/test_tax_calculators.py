@@ -479,13 +479,19 @@ class ExciseDutyTests(unittest.TestCase):
             "calculate_excise_duty",
             {"excise_type": "fuel_petrol", "amount": 50, "fiscal_year": FY26},
         )
-        self.assertEqual(petrol["excise_duty"], 72_500.0)  # 50 * 1450
+        self.assertEqual(petrol["excise_duty"], 87_500.0)  # 50 * 1750 (FY2026-27)
 
         diesel = ToolRegistry.call(
             "calculate_excise_duty",
             {"excise_type": "fuel_diesel", "amount": 100, "fiscal_year": FY26},
         )
-        self.assertEqual(diesel["excise_duty"], 113_000.0)  # 100 * 1130
+        self.assertEqual(diesel["excise_duty"], 143_000.0)  # 100 * 1430 (FY2026-27)
+
+        petrol_prev = ToolRegistry.call(
+            "calculate_excise_duty",
+            {"excise_type": "fuel_petrol", "amount": 50, "fiscal_year": "FY2025-26"},
+        )
+        self.assertEqual(petrol_prev["excise_duty"], 72_500.0)  # 50 * 1450 (FY2025-26)
 
     def test_beer_malt(self) -> None:
         result = ToolRegistry.call(

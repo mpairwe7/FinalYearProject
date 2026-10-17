@@ -8,6 +8,8 @@ This directory contains **Markdown Architectural Decision Records (MADR 4.0)** g
 | :--- | :--- | :---: | :---: | :--- |
 | [ADR-0001](0001-monorepo-layer-dag-and-agent-governance.md) | Unidirectional Monorepo Layer DAG, Hierarchical `AGENTS.md` & OWASP ASI 2026 + CycloneDX AIBOM Gate | Accepted | 2026-10-17 | `tests/test_monorepo_architecture_governance.py`, `governance/compliance_check.py` |
 | [ADR-0002](0002-five-locale-multimodal-rag-and-cxp-operating-hours.md) | 5-Locale (`en`, `lg`, `sw`, `nyn`, `ach`) Multimodal Speech/RAG Parity & CXP Operating Hours (`07:00–23:00 EAT`) SLA Calendar | Accepted | 2026-10-17 | `tests/agents/test_agentic_voice_2026_enhancements.py`, `App/backend/tests/test_officer_hours.py` |
+| [ADR-0003](0003-mcp-tool-integrity-and-2026-statutory-corpus.md) | MCP Tool Descriptor Integrity, Rug-Pull Pinning & 2024–2027 Statutory Corpus Integration | Accepted | 2026-10-17 | `App/backend/tests/test_mcp_2026_october_audit_and_corpus.py`, `tests/agents/test_mcp_2026_october_audit.py` |
+| [ADR-0004](0004-mcp-security-threat-model-and-ai-governance-2026.md) | MCP Security (OWASP MCP01–10 / SAFE-MCP), MITRE ATLAS v5.x Threat Modeling & AI Governance Synchronization | Accepted | 2026-10-17 | `threat-model/validate_threats.py`, `scripts/validate-risk-register.py`, `governance/compliance_check.py` |
 
 ## Rules
 

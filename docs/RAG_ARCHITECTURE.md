@@ -725,7 +725,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `structured_text_handoff` | off | Phase 38: text-chat tickets (auto-escalations and `POST /v1/escalate`) carry `HandoffEnvelope` v2.1 via `officer_handoff.enrich_handoff`; details to ask for are pruned against what the taxpayer already gave (slot names only, never values) |
 | `workflow_emotional_offramp` | off | Phase 39: a guided flow pauses (answers kept) instead of answering distress or enforcement news with a validation error, offering an officer, the instalments question, "Continue the steps" and "Cancel"; after repeated invalid answers it offers a way out (`WorkflowTurn.failed_attempts`) |
 | `wellbeing_checkin` | off | Phase 39: hopelessness said amid hardship or enforcement (this or the last two messages) gets a check-in with the crisis lines before the tax answer, once per conversation, on REST and stream alike |
-| `cxp_business_hours` | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
+| `cxp_business_hours` (`FLAG_CXP_BUSINESS_HOURS`) | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
 **82** in total, including the per-phase switches for voice, offline and

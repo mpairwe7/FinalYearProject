@@ -15,8 +15,13 @@ down.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import re
 from typing import Any
+
+from .protocol import META_DESCRIPTOR_SHA256
 
 logger = logging.getLogger(__name__)
 
@@ -134,3 +139,144 @@ def result_matches_schema(schema: dict[str, Any] | None, result: Any) -> list[st
         f"{'.'.join(str(p) for p in e.path) or '(root)'}: {e.message}"
         for e in sorted(validator.iter_errors(result), key=lambda e: list(e.path))
     ]
+
+
+# ---------------------------------------------------------------------------
+# OWASP MCP Top 10 (2026) / CSA CTMS / AISVS 10.4 Descriptor & Output Guards
+# ---------------------------------------------------------------------------
+_UNICODE_CONTROL_RE = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+_BIDI_OVERRIDE_RE = re.compile(r"[\u202a-\u202e\u2066-\u2069]")
+
+_TOOL_POISONING_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "prompt_override_directive",
+        re.compile(
+            r"\b(?:ignore|disregard|forget)\s+(?:all\s+|any\s+)?(?:previous|prior|above|system)\s+"
+            r"(?:instructions|prompts|rules|guardrails)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "chat_template_control_token",
+        re.compile(r"(?:<\|im_start\|>|<\|im_end\|>|\[INST\]|\[/INST\]|<<SYS>>|<\|endoftext\|>)", re.IGNORECASE),
+    ),
+    (
+        "covert_exfiltration_instruction",
+        re.compile(
+            r"(?:\b(?:do\s+not\s+tell\s+the\s+user|hide\s+this\s+from\s+the\s+user|"
+            r"silently\s+(?:exfiltrate|forward|send))\b|\[SYSTEM\s+OVERRIDE\])",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "cross_tool_shadowing_directive",
+        re.compile(
+            r"\b(?:instead\s+of\s+calling\s+\w+|always\s+call\s+this\s+tool\s+before\s+\w+|"
+            r"override\s+tool\s+\w+|shadow\s+tool\s+\w+)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+_CREDENTIAL_LEAK_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("bearer_jwt_leak", re.compile(r"\bBearer\s+eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}")),
+    ("api_secret_key_leak", re.compile(r"\b(?:sk-[A-Za-z0-9]{24,}|AKIA[0-9A-Z]{16})\b")),
+)
+
+
+def compute_descriptor_sha256(descriptor: dict[str, Any]) -> str:
+    """Compute canonical SHA-256 over a tool descriptor's security-relevant fields.
+
+    Follows the 2026 OWASP MCP Security Cheat Sheet & CSA Canonical Tool
+    Metadata Schema (CTMS): hashes ``name``, ``description``, ``inputSchema``,
+    ``outputSchema``, ``annotations`` (``readOnlyHint``, ``destructiveHint``,
+    ``idempotentHint``, ``openWorldHint``), and security ``_meta`` fields so
+    neither description poisoning nor a silent annotation flip can pass
+    unnoticed.
+    """
+    raw_meta = descriptor.get("_meta")
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    canonical_payload = {
+        "name": str(descriptor.get("name", "")),
+        "description": str(descriptor.get("description", "")),
+        "inputSchema": descriptor.get("inputSchema") or {},
+        "outputSchema": descriptor.get("outputSchema"),
+        "annotations": descriptor.get("annotations") or {},
+        "securityMeta": {
+            "risk": meta.get("ug.go.ura.chatbot/risk", "low"),
+            "requiredScopes": list(meta.get("ug.go.ura.chatbot/requiredScopes") or []),
+            "allowedRoles": list(meta.get("ug.go.ura.chatbot/allowedRoles") or []),
+            "scopeExemptRoles": list(meta.get("ug.go.ura.chatbot/scopeExemptRoles") or []),
+            "requiresConfirmation": bool(meta.get("ug.go.ura.chatbot/requiresConfirmation", False)),
+        },
+    }
+    encoded = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _iter_strings(value: Any, path: str = "$") -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    if isinstance(value, str):
+        found.append((path, value))
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            found.extend(_iter_strings(v, f"{path}.{k}"))
+    elif isinstance(value, list | tuple):
+        for idx, item in enumerate(value):
+            found.extend(_iter_strings(item, f"{path}[{idx}]"))
+    return found
+
+
+def inspect_descriptor_integrity(descriptor: dict[str, Any]) -> list[str]:
+    """Verify tool descriptor hash integrity and scan for tool-poisoning payloads."""
+    if not isinstance(descriptor, dict):
+        return ["descriptor_not_an_object"]
+    violations: list[str] = []
+    raw_meta = descriptor.get("_meta")
+    meta = raw_meta if isinstance(raw_meta, dict) else {}
+    declared_hash = meta.get(META_DESCRIPTOR_SHA256)
+    if declared_hash is not None:
+        expected_hash = compute_descriptor_sha256(descriptor)
+        if not isinstance(declared_hash, str) or declared_hash != expected_hash:
+            violations.append("descriptor_sha256_mismatch")
+
+    for field_name in ("description", "inputSchema", "outputSchema", "annotations"):
+        for path, text in _iter_strings(descriptor.get(field_name), f"$.{field_name}"):
+            if _BIDI_OVERRIDE_RE.search(text):
+                violations.append(f"tool_poisoning:bidi_control_smuggling@{path}")
+            normalized_text = _UNICODE_CONTROL_RE.sub("", text)
+            for label, pattern in _TOOL_POISONING_PATTERNS:
+                if pattern.search(normalized_text):
+                    violations.append(f"tool_poisoning:{label}@{path}")
+    return violations
+
+
+def screen_tool_result(result: Any) -> list[str]:
+    """Screen MCP tool output for indirect prompt injection and raw credential leaks."""
+    violations: list[str] = []
+    for path, text in _iter_strings(result):
+        if _BIDI_OVERRIDE_RE.search(text):
+            violations.append(f"indirect_prompt_injection:bidi_control_smuggling@{path}")
+        normalized_text = _UNICODE_CONTROL_RE.sub("", text)
+        for label, pattern in _TOOL_POISONING_PATTERNS:
+            if pattern.search(normalized_text):
+                if normalized_text != text and label == "prompt_override_directive":
+                    violations.append(f"indirect_prompt_injection:unicode_obfuscated_override@{path}")
+                else:
+                    violations.append(f"indirect_prompt_injection:{label}@{path}")
+        for label, pattern in _CREDENTIAL_LEAK_PATTERNS:
+            if pattern.search(normalized_text):
+                violations.append(f"credential_leak:{label}@{path}")
+    return violations
+
+
+def scrub_prompt_overrides_in_result(value: Any) -> Any:
+    """Replace natural-language prompt override phrases with ``[REDACTED_INSTRUCTION]``."""
+    override_pattern = _TOOL_POISONING_PATTERNS[0][1]
+    if isinstance(value, str):
+        return override_pattern.sub("[REDACTED_INSTRUCTION]", value)
+    if isinstance(value, dict):
+        return {k: scrub_prompt_overrides_in_result(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub_prompt_overrides_in_result(item) for item in value]
+    return value

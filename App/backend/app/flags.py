@@ -604,7 +604,7 @@ _REGISTRY: dict[str, Flag] = {
         Flag(
             "cxp_business_hours",
             False,
-            "Phase 40 (G174): timezone-aware CXP operating hours (07:00-23:00 EAT / 11 PM close). "
+            "Phase 40 (G174, FLAG_CXP_BUSINESS_HOURS): timezone-aware CXP operating hours (07:00-23:00 EAT / 11 PM close). "
             "Escalations after 11 PM when no live officer is online queue for priority morning "
             "review/callback with SLA pause/resume and transparent 5-locale after-hours disclosure.",
         ),

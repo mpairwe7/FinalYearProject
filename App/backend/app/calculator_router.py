@@ -2071,12 +2071,12 @@ def format_rate_reply(plan: RatePlan, table: RateTable) -> tuple[str, list[str]]
             "under the Excise Duty Act 2014."
         ),
         "excise_duty_fuel_petrol_per_litre": (
-            "**The excise duty on petrol is UGX {petrol:,.0f} per litre** ({fy}) "
-            "under the Excise Duty Act 2014 (Schedule 2)."
+            "**The excise duty on petrol is UGX {petrol:,.0f} per litre** ({fy}, revised from UGX 1,450 per litre) "
+            "under the Excise Duty Act (Schedule 2)."
         ),
         "excise_duty_fuel_diesel_per_litre": (
-            "**The excise duty on diesel (gas oil) is UGX {diesel:,.0f} per litre** ({fy}) "
-            "under the Excise Duty Act 2014 (Schedule 2)."
+            "**The excise duty on diesel (gas oil) is UGX {diesel:,.0f} per litre** ({fy}, revised from UGX 1,130 per litre) "
+            "under the Excise Duty Act (Schedule 2)."
         ),
         "excise_duty_fuel_kerosene_per_litre": (
             "**The excise duty on illuminating kerosene is UGX {kerosene:,.0f} per litre** ({fy}) "

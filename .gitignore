@@ -147,6 +147,9 @@ data_store/
 # it. Ignored so a local clone here cannot be staged again.
 CosyVoice/
 Model/static_index.npz
+missfont.log
+.antigravitycli/
+.agents/
 
 # HuggingFace model weights (App/Model/*/ contains downloaded LLM shards)
 App/Model/*/

@@ -86,8 +86,8 @@
     "excise_duty_telecom_data": 0.12,
     "excise_duty_telecom_voice": 0.12,
     "excise_duty_beer_malt": 0.6,
-    "excise_duty_fuel_petrol_per_litre": 1450,
-    "excise_duty_fuel_diesel_per_litre": 1130,
+    "excise_duty_fuel_petrol_per_litre": 1750,
+    "excise_duty_fuel_diesel_per_litre": 1430,
     "excise_duty_fuel_kerosene_per_litre": 200,
     "excise_due_date_monthly": 15,
     "presumptive_tax_lower_threshold": 10000000,
@@ -113,7 +113,31 @@
     "disability_income_tax_threshold_monthly": 1460000,
     "branch_repatriation_tax_rate": 0.15,
     "vat_quarterly_registration_threshold": 37500000,
-    "tax_appeals_tribunal_deadline_days": 30
+    "tax_appeals_tribunal_deadline_days": 30,
+    "withholding_insurance_agent_commission": 0.1,
+    "withholding_payment_service_provider_commission": 0.1,
+    "excise_duty_cement_per_50kg": 750,
+    "excise_duty_sugar_per_kg": 200,
+    "excise_duty_cooking_oil_per_litre": 400,
+    "excise_duty_cooking_fat_per_kg": 500,
+    "excise_duty_motorcycle_first_registration_ugx": 500000,
+    "efris_e_receipt_refund_qualifying_threshold_ugx": 2000000,
+    "efris_e_receipt_refund_rate": 0.05,
+    "efris_penal_tax_minimum_currency_points": 10,
+    "efris_penal_tax_minimum_ugx": 200000,
+    "dts_unstamped_goods_penal_tax_minimum_currency_points": 100,
+    "dts_unstamped_goods_penal_tax_minimum_ugx": 2000000,
+    "stamp_duty_motor_vehicle_transfer_ugx": 200000,
+    "stamp_duty_motorcycle_transfer_ugx": 30000,
+    "gaming_and_betting_tax_rate": 0.3,
+    "startup_citizen_exemption_capital_cap_ugx": 500000000,
+    "startup_citizen_exemption_years": 3,
+    "ursb_company_registration_min_fee_ugx": 105000,
+    "ursb_business_name_registration_fee_ugx": 55000,
+    "ursb_name_reservation_fee_ugx": 35000,
+    "ursb_company_annual_return_fee_ugx": 55000,
+    "unbs_pvoc_evasion_surcharge_rate": 0.15,
+    "unbs_pvoc_exemption_fob_usd": 2000
   },
   "unverified": [
     "vat_registration_threshold_annual",
@@ -155,8 +179,8 @@
     "excise_duty_telecom_data": "Excise Duty Act 2014, Schedule 2 - 12% on internet data",
     "excise_duty_telecom_voice": "Excise Duty Act 2014, Schedule 2 - 12% on airtime and telecommunication voice services",
     "excise_duty_beer_malt": "Excise Duty Act 2014, Schedule 2 - 60% on malt beer",
-    "excise_duty_fuel_petrol_per_litre": "Excise Duty Act 2014, Schedule 2 - UGX 1,450 per litre on petrol",
-    "excise_duty_fuel_diesel_per_litre": "Excise Duty Act 2014, Schedule 2 - UGX 1,130 per litre on diesel",
+    "excise_duty_fuel_petrol_per_litre": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), s.2 amending Schedule 2 item 8(a) - UGX 1,750 per litre on motor spirit (gasoline)",
+    "excise_duty_fuel_diesel_per_litre": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), s.2 amending Schedule 2 item 8(b) - UGX 1,430 per litre on automotive gas oil (diesel)",
     "excise_duty_fuel_kerosene_per_litre": "Excise Duty Act 2014, Schedule 2 - UGX 200 per litre on kerosene",
     "excise_due_date_monthly": "Excise Duty Act 2014, s.16 - monthly returns due by 15th of the following month",
     "presumptive_tax_lower_threshold": "Income Tax Act (Cap 338), s.4(5) and Second Schedule",
@@ -171,7 +195,31 @@
     "disability_income_tax_threshold_monthly": "Income Tax Act (Cap 338), s.21(1)(v)",
     "branch_repatriation_tax_rate": "Income Tax Act (Cap 338), s.82",
     "vat_quarterly_registration_threshold": "Value Added Tax Act (Cap 349), s.7",
-    "tax_appeals_tribunal_deadline_days": "Tax Appeals Tribunal Act (Cap 345), s.16"
+    "tax_appeals_tribunal_deadline_days": "Tax Appeals Tribunal Act (Cap 345), s.16",
+    "withholding_insurance_agent_commission": "Income Tax (Amendment) Act 2026 (Act 21 of 2026), s.17 amending s.139 - 10% WHT under s.134 made a final tax",
+    "withholding_payment_service_provider_commission": "Income Tax (Amendment) Act 2024, s.10 inserting s.118I and Schedule 4 Part XIV - 10% WHT on banking and payment service provider commissions",
+    "excise_duty_cement_per_50kg": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), s.2(b) substituting Schedule 2 item 7 - UGX 750 per 50 kg on cement, adhesives, grout, white cement or lime",
+    "excise_duty_sugar_per_kg": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), s.2(d) substituting Schedule 2 item 9 - UGX 200 per kg on cane or beet sugar",
+    "excise_duty_cooking_oil_per_litre": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), s.2(f) substituting Schedule 2 item 19 - UGX 400 per litre on cooking oil",
+    "excise_duty_cooking_fat_per_kg": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), s.2(g) inserting Schedule 2 item 29 - UGX 500 per litre or kg on cooking fat",
+    "excise_duty_motorcycle_first_registration_ugx": "Excise Duty (Amendment) Act 2026 (Act 22 of 2026), Schedule 2 - UGX 500,000 on motorcycles at first registration",
+    "efris_e_receipt_refund_qualifying_threshold_ugx": "Value Added Tax (Amendment) Act 2026, s.7 amending s.38 of Value Added Tax Act (Cap 349) - qualifying e-invoice/e-receipt threshold within 30 consecutive days reduced from UGX 5,000,000 to UGX 2,000,000",
+    "efris_e_receipt_refund_rate": "Value Added Tax Act (Cap 349), s.38 as amended by Value Added Tax (Amendment) Act 2026 - 5% refund of tax paid on e-receipts/e-invoices",
+    "efris_penal_tax_minimum_currency_points": "Tax Procedures Code (Amendment) Act 2026, s.4 substituting s.93(1)-(2) - double tax due or 10 currency points, whichever is higher",
+    "efris_penal_tax_minimum_ugx": "Tax Procedures Code (Amendment) Act 2026, s.4 substituting s.93(1)-(2) - 10 currency points (UGX 200,000) or double the tax due, whichever is higher",
+    "dts_unstamped_goods_penal_tax_minimum_currency_points": "Tax Procedures Code (Amendment) Act 2026, s.2 amending s.21(3) - double tax due or 100 currency points, whichever is higher",
+    "dts_unstamped_goods_penal_tax_minimum_ugx": "Tax Procedures Code (Amendment) Act 2026, s.2 amending s.21(3) - 100 currency points (UGX 2,000,000) or double the tax due, whichever is higher",
+    "stamp_duty_motor_vehicle_transfer_ugx": "Stamp Duty (Amendment) Act 2026 (Act 16 of 2026), s.4 amending Schedule 2 - UGX 200,000 on registration or transfer of a motor vehicle",
+    "stamp_duty_motorcycle_transfer_ugx": "Stamp Duty (Amendment) Act 2026 (Act 16 of 2026), s.4 amending Schedule 2 - UGX 30,000 on registration or transfer of a motorcycle, tricycle or quadricycle",
+    "gaming_and_betting_tax_rate": "Lotteries and Gaming (Amendment) Act 2026 (Act 12 of 2026), s.2 substituting Schedule 4 - 30% of total money staked less payouts",
+    "startup_citizen_exemption_capital_cap_ugx": "Income Tax (Amendment) Act 2025 (Act 13 of 2025), s.2(b) inserting s.21(1)(za) - 3-year income tax holiday for citizen startups with investment capital up to UGX 500,000,000",
+    "startup_citizen_exemption_years": "Income Tax (Amendment) Act 2025 (Act 13 of 2025), s.2(b) inserting s.21(1)(za)",
+    "ursb_company_registration_min_fee_ugx": "Companies (Fees) Regulations 2024, First Schedule item 2 - UGX 105,000 for nominal share capital up to UGX 5,000,000",
+    "ursb_business_name_registration_fee_ugx": "Business Names Registration (Amendment) Rules 2024 (S.I. 2024 No. 43), First Schedule item 2",
+    "ursb_name_reservation_fee_ugx": "Business Names Registration (Amendment) Rules 2024 (S.I. 2024 No. 43), First Schedule item 1",
+    "ursb_company_annual_return_fee_ugx": "Companies (Fees) Regulations 2024, First Schedule item 7 - UGX 55,000 for private company limited by shares",
+    "unbs_pvoc_evasion_surcharge_rate": "UNBS (Inspection and Clearance of Imports) Regulations 2022 & UNBS E-Portal Notice 2025/2026 - 15% CIF surcharge on consignments bypassing PVoC",
+    "unbs_pvoc_exemption_fob_usd": "UNBS Pre-Export Verification of Conformity (PVoC) Scheme - shipments below USD 2,000 FOB are exempt from mandatory PVoC"
   },
   "notes": {
     "excise_duty_mobile_money_withdrawal": "Excise duty of 0.5% applies to cash withdrawals from mobile money. Transfers and deposits are not charged this 0.5% withdrawal duty.",
@@ -204,6 +252,36 @@
       "title": "Uganda: Tax amendments based on 2026/2027 budget passed by Parliament",
       "publisher": "KPMG TaxNewsFlash",
       "url": "https://kpmg.com/us/en/taxnewsflash/news/2026/06/uganda-tax-amendments-2026-2027-budget.html"
+    },
+    {
+      "id": "ulii-ita-act-21-2026",
+      "title": "Income Tax (Amendment) Act, 2026 (Act 21 of 2026) - Assented 20 August 2026, Published in Acts Supplement No. 9 on 28 August 2026, Commenced 1 July 2026",
+      "publisher": "Uganda Legal Information Institute (ULII) / UPPC",
+      "url": "https://ulii.org/en/akn/ug/act/2026/21/eng@2026-08-28"
+    },
+    {
+      "id": "ulii-excise-act-22-2026",
+      "title": "Excise Duty (Amendment) Act, 2026 (Act 22 of 2026) - Assented 20 August 2026, Published in Acts Supplement No. 9 on 28 August 2026, Commenced 1 July 2026",
+      "publisher": "Uganda Legal Information Institute (ULII) / UPPC",
+      "url": "https://ulii.org/en/akn/ug/act/2026/22/eng@2026-08-28"
+    },
+    {
+      "id": "ura-tax-amendments-fy2026-27",
+      "title": "Tax Amendments FY (2026-2027) & Effective Date Public Notice (23 September 2026)",
+      "publisher": "Uganda Revenue Authority (URA)",
+      "url": "https://ura.go.ug/en/tax-amendments-for-fy-2026-2027/"
+    },
+    {
+      "id": "ursb-fees-and-bo-2024-2026",
+      "title": "Companies (Fees) Regulations 2024, Business Names Registration (Amendment) Rules 2024 (S.I. 2024 No. 43), and Beneficial Owner (Amendment) Regulations 2024",
+      "publisher": "Uganda Registration Services Bureau (URSB)",
+      "url": "https://ursb.go.ug/business-company-and-document-registration-fees/"
+    },
+    {
+      "id": "unbs-eportal-and-ln14-2025-2026",
+      "title": "UNBS Imports E-Portal Integrated with URA ASYCUDA World & Legal Notice No. 14 of 2025 (Compulsory Uganda Standards Effective 1 January 2026)",
+      "publisher": "Uganda National Bureau of Standards (UNBS)",
+      "url": "https://eportal.unbs.go.ug/"
     }
   ]
 }

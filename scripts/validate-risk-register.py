@@ -78,6 +78,18 @@ def validate(risks: list[dict]) -> list[str]:
             if "accepted_by" not in r:
                 errors.append(f"{loc}: accepted risk missing 'accepted_by'")
 
+    accepted_path = Path("docs/security/threat-model/accepted-risks.yaml")
+    if accepted_path.exists():
+        with open(accepted_path) as af:
+            accepted_entries = yaml.safe_load(af) or []
+        accepted_in_file = {entry.get("risk_id") for entry in accepted_entries if isinstance(entry, dict)}
+        accepted_in_register = {r.get("id") for r in risks if r.get("status") == "Accepted"}
+        if accepted_in_file != accepted_in_register:
+            errors.append(
+                f"accepted-risks.yaml ({sorted(accepted_in_file)}) out of sync with "
+                f"risk-register.yaml Accepted risks ({sorted(accepted_in_register)})"
+            )
+
     return errors
 
 

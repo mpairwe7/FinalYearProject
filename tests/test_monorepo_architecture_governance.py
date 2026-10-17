@@ -105,8 +105,20 @@ def test_unidirectional_layer_dag_across_monorepo_packages() -> None:
 
 
 def test_workspace_hygiene_no_retired_mobile_or_case_colliding_plugin_symlinks() -> None:
-    """Retired MobileApp/.dart_tool cache and case-colliding plugin symlinks stay absent."""
-    assert not (REPO_ROOT / "MobileApp").exists(), "Retired MobileApp/ directory must not exist"
+    """Retired MobileApp/.dart_tool cache, superseded root docs, and case-colliding plugin symlinks stay absent."""
+    retired_paths = (
+        "MobileApp",
+        ".antigravitycli",
+        ".agents",
+        "MIGRATION-PLAN.md",
+        "UI-MIGRATION-NOTES.md",
+        "QUICKSTART.md",
+        "docs/MOBILE_ARCHITECTURE.md",
+        "docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md",
+        "docs/URA_Chatbot_Roadmap_2026_Enhanced.md",
+    )
+    for rel in retired_paths:
+        assert not (REPO_ROOT / rel).exists(), f"Retired/superseded path must not exist: {rel}"
     canonical_plugins = {
         "__init__.py",
         "__pycache__",
@@ -149,7 +161,28 @@ def test_owasp_agentic_2026_asi_top10_aibom_and_compliance_gate() -> None:
         "mixedbread-ai/mxbai-rerank-base-v2",
     } <= aibom_models
 
+    mcp_risks = manifest["owasp_mcp_top10_2026"]["risks"]
+    assert [r["id"] for r in mcp_risks] == [f"MCP{i:02d}" for i in range(1, 11)]
+    assert all(r.get("status") == "mitigated" and r.get("verified_by") for r in mcp_risks)
+
     assert run_compliance_check() is True
+
+    import importlib.util
+
+    tm_spec = importlib.util.spec_from_file_location("validate_threats", REPO_ROOT / "threat-model" / "validate_threats.py")
+    assert tm_spec and tm_spec.loader
+    tm_mod = importlib.util.module_from_spec(tm_spec)
+    tm_spec.loader.exec_module(tm_mod)
+    assert tm_mod.validate() is True
+    assert len(tm_mod.THREAT_REGISTRY) >= 38
+
+    rr_spec = importlib.util.spec_from_file_location("validate_rr", REPO_ROOT / "scripts" / "validate-risk-register.py")
+    assert rr_spec and rr_spec.loader
+    rr_mod = importlib.util.module_from_spec(rr_spec)
+    rr_spec.loader.exec_module(rr_mod)
+    risks = rr_mod.load_register(REPO_ROOT / "docs" / "security" / "threat-model" / "risk-register.yaml")
+    assert rr_mod.validate(risks) == []
+    assert rr_mod.check_expired_reviews(risks) == []
 
 
 def test_madr_40_adr_catalog_and_living_docs_skill_integrity() -> None:

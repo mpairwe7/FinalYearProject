@@ -250,7 +250,15 @@ class InProcessTransport:
     ) -> dict[str, Any]:
         from ..tools import ToolRegistry
 
-        return ToolRegistry.call(tool_name, arguments)
+        meta_dict = meta if isinstance(meta, dict) else {}
+        return ToolRegistry.call(
+            tool_name,
+            arguments,
+            user_id=str(meta_dict.get("ug.go.ura.chatbot/userId") or ""),
+            tenant_id=str(meta_dict.get("ug.go.ura.chatbot/tenantId") or "default"),
+            channel="mcp",
+            caller_confirmed=bool(meta_dict.get("confirmed", False)),
+        )
 
     def list_resources(self) -> list[dict[str, Any]]:
         resources: list[dict[str, Any]] = [

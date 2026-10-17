@@ -128,6 +128,8 @@ _SUBTYPE_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("withholding_royalty", re.compile(r"\broyalt(?:y|ies)\b", re.I)),
     ("withholding_betting_winnings", re.compile(r"\b(betting|winnings?|gaming)\b", re.I)),
     ("withholding_telecom_commission", re.compile(r"\b(telecom|mobile[-\s]?money)\s+commission\b", re.I)),
+    ("withholding_insurance_agent_commission", re.compile(r"\binsurance\s+agents?\b", re.I)),
+    ("withholding_payment_service_provider_commission", re.compile(r"\b(payment\s+service\s+providers?|banking\s+agents?)\b", re.I)),
     ("withholding_public_entertainer", re.compile(r"\b(entertainer|performer|artiste)\b", re.I)),
     ("withholding_foreign_interest", re.compile(r"\b(debenture|foreign\s+interest)\b", re.I)),
     ("withholding_goods", re.compile(r"\b(goods|supplies|supply\s+of\s+goods)\b", re.I)),

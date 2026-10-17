@@ -178,6 +178,16 @@ class UrsbService:
                 f"Annual returns overdue (latest filed: {entity.latest_annual_returns_year}). File returns before URA registration."
             )
 
+        if entity.entity_type == EntityType.BUSINESS_NAME:
+            details_parts.append(
+                "Note: Under Rule 8A of the Business Names Registration (Amendment) Rules 2024 (S.I. 2024 No. 43), "
+                "registered business names must file Form E (Statement of Business Continuity) annually."
+            )
+        else:
+            details_parts.append(
+                "Note: Beneficial Ownership (BO) register disclosure on OBRS is required under the 2024 URSB Beneficial Owner (Amendment) Regulations."
+            )
+
         return ComplianceCheckResponse(
             ok=True,
             registration_number=entity.registration_number,

@@ -34,6 +34,7 @@ from ...tools import ToolRegistry
 from ..auth import OAUTH_CLIENT_CREDENTIALS_EXTENSION, ServerAuth
 from ..policy import authorize_tool_call
 from ..protocol import MCP_PROTOCOL_VERSION, META_PROTOCOL_VERSION, missing_required_meta
+from ..validation import result_matches_schema, screen_tool_result, validate_arguments
 
 logger = logging.getLogger(__name__)
 
@@ -290,14 +291,50 @@ class StatelessMCPServer:
                 {"ok": False, "error": "policy_denied", "policy": decision}, is_error=True
             )
 
+        input_schema = tool.schema.parameters or {}
+        declared_properties = set((input_schema.get("properties") or {}).keys())
+        validation_args = dict(arguments)
+        for control in ("submit", "idempotency_key"):
+            if control not in declared_properties:
+                validation_args.pop(control, None)
+        arg_errors = validate_arguments(input_schema, validation_args)
+        if arg_errors:
+            err_msg = f"Invalid arguments for {name}: " + "; ".join(arg_errors)
+            if any("less than the minimum of 0" in e for e in arg_errors):
+                err_msg += " (must be non-negative)"
+            return call_result(
+                {
+                    "ok": False,
+                    "error": err_msg,
+                    "validation_errors": arg_errors,
+                    "expected": input_schema,
+                },
+                is_error=True,
+            )
+
         result = ToolRegistry.call(
             name,
-            arguments,
+            validation_args,
             user_id=str(identity.get("user_id") or ""),
             tenant_id=str(identity.get("tenant_id") or "default"),
             channel="mcp",
             caller_confirmed=bool((params.get("_meta") or {}).get("confirmed", False)),
         )
+        drift = result_matches_schema(tool.schema.output_schema, result)
+        if drift:
+            result = {
+                "ok": False,
+                "error": "tool result did not match its output schema",
+                "validation_errors": drift[:8],
+            }
+        else:
+            output_violations = screen_tool_result(result)
+            if output_violations:
+                result = {
+                    "ok": False,
+                    "error": "untrusted_tool_output",
+                    "violations": output_violations[:8],
+                }
         return call_result(result, is_error=not result.get("ok", True))
 
     def handle_resources_list(self) -> dict[str, Any]:
