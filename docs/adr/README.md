@@ -11,6 +11,7 @@ This directory contains **Markdown Architectural Decision Records (MADR 4.0)** g
 | [ADR-0003](0003-mcp-tool-integrity-and-2026-statutory-corpus.md) | MCP Tool Descriptor Integrity, Rug-Pull Pinning & 2024–2027 Statutory Corpus Integration | Accepted | 2026-10-17 | `App/backend/tests/test_mcp_2026_october_audit_and_corpus.py`, `tests/agents/test_mcp_2026_october_audit.py` |
 | [ADR-0004](0004-mcp-security-threat-model-and-ai-governance-2026.md) | MCP Security (OWASP MCP01–10 / SAFE-MCP), MITRE ATLAS v5.x Threat Modeling & AI Governance Synchronization | Accepted | 2026-10-17 | `threat-model/validate_threats.py`, `scripts/validate-risk-register.py`, `governance/compliance_check.py` |
 | [ADR-0005](0005-mcp-mrtr-transport-hardening-and-csa-aicm-maestro.md) | MCP Multi Round-Trip State (MRTR) & HTTP Transport Hardening, 5-Locale Tool-RAG Parity, and CSA AICM v1.1 + MAESTRO 7-Layer Governance | Accepted | 2026-10-17 | `tests/agents/test_mcp_2026_october_audit.py`, `tests/test_monorepo_architecture_governance.py` |
+| [ADR-0006](0006-backend-resilience-security-headers-and-pool-hardening.md) | Backend Setup Hardening — CircuitBreaker Single-Probe HALF_OPEN, Global JSON Payload Ceiling, OWASP REST Security Headers & Graceful Pool Shutdown | Accepted | 2026-10-17 | `App/backend/tests/test_resilience.py`, `tests/agents/test_mcp_2026_october_audit.py` |
 
 ## Rules
 

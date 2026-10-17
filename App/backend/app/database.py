@@ -166,9 +166,26 @@ def _get_connection() -> sqlite3.Connection:
                 conn = sqlite3.connect(str(_DB_PATH), timeout=10)
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA foreign_keys=ON")
                 conn.execute("PRAGMA busy_timeout=5000")
                 _local.conn = conn
     return conn
+
+
+def close_db() -> None:
+    """Close thread-local SQLite connection and active Postgres pool on shutdown."""
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            logger.debug("SQLite connection close ignored", exc_info=True)
+        finally:
+            _local.conn = None
+    pg = _pg_module()
+    if pg is not None and hasattr(pg, "close_pool"):
+        pg.close_pool()
 
 
 # ---------------------------------------------------------------------------

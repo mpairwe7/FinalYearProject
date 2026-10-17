@@ -233,6 +233,24 @@ def _cross_border_errors() -> list[str]:
     return errors
 
 
+def _mcp_security_errors() -> list[str]:
+    """Validate optional remote MCP server URLs and MRTR state secret in production."""
+    from .mcp.transport import URL_ENV_PREFIX, remote_url_problem
+
+    errors: list[str] = []
+    state_secret = (os.getenv("MCP_REQUEST_STATE_SECRET") or "").strip()
+    if state_secret and len(state_secret) < 32:
+        errors.append("MCP: MCP_REQUEST_STATE_SECRET must be at least 32 characters in production.")
+    for key, value in sorted(os.environ.items()):
+        if not key.startswith(URL_ENV_PREFIX) or not value.strip():
+            continue
+        namespace = key[len(URL_ENV_PREFIX) :].lower()
+        problem = remote_url_problem(value.strip())
+        if problem:
+            errors.append(f"MCP ({namespace}): {problem}.")
+    return errors
+
+
 def gap_gate_errors() -> list[str]:
     """Production-only errors for remaining prototype features. Empty in development."""
     if not is_production():
@@ -248,6 +266,7 @@ def gap_gate_errors() -> list[str]:
     errors.extend(_receptionist_errors())
     errors.extend(_privacy_governance_errors())
     errors.extend(_cross_border_errors())
+    errors.extend(_mcp_security_errors())
     return errors
 
 

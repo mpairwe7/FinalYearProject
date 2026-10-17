@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Path, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -834,6 +834,12 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.warning("SpeechModel close raised", exc_info=True)
         app.state.speech = None
+        with contextlib.suppress(Exception):
+            from .mcp import get_client
+
+            get_client().close()
+        with contextlib.suppress(Exception):
+            db.close_db()
         logger.info("ChatModel shut down.")
 
 
@@ -1028,8 +1034,11 @@ if _HAS_PROXY_MIDDLEWARE:
 
 
 # ---------------------------------------------------------------------------
-# Security headers middleware (OWASP, NIST SSDF PW.6)
+# Security headers & request payload ceiling middleware (OWASP API4/API8, NIST SSDF PW.6)
 # ---------------------------------------------------------------------------
+MAX_JSON_BODY_BYTES = int(os.getenv("MAX_JSON_BODY_BYTES", str(5 * 1024 * 1024)))
+
+
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
     # Validate X-Request-ID to prevent log injection (OWASP LLM05)
@@ -1041,8 +1050,29 @@ async def security_headers(request: Request, call_next):
     # (logging_config.RequestContextFilter). Inbound W3C traceparent is
     # handled by the OpenTelemetry FastAPI instrumentation when tracing is on.
     request_id_token = REQUEST_ID.set(request_id)
+    traceresponse: str | None = None
     try:
-        response: Response = await call_next(request)
+        path = request.url.path
+        if request.method in ("POST", "PUT", "PATCH") and not path.startswith(("/v1/documents/", "/v1/voice/", "/api/v1/voice/")):
+            raw_cl = request.headers.get("content-length")
+            if raw_cl:
+                try:
+                    cl_val = int(raw_cl)
+                except ValueError:
+                    cl_val = -1
+                if cl_val > MAX_JSON_BODY_BYTES:
+                    response = JSONResponse(
+                        status_code=413,
+                        content={"detail": f"Request body exceeds the {MAX_JSON_BODY_BYTES // (1024 * 1024)} MiB limit"},
+                    )
+                    route = route_label(request)
+                    record_http_security_event(request, 413, route)
+                else:
+                    response = await call_next(request)
+            else:
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
         traceresponse = current_traceresponse()
         # The route template, not request.url.path: the decoded path can carry
         # CR/LF (log injection) and the ids a template folds away.
@@ -1059,6 +1089,10 @@ async def security_headers(request: Request, call_next):
     response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
     response.headers["X-Request-ID"] = request_id
     response.headers["Permissions-Policy"] = "camera=(), microphone=(self), geolocation=()"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    if request.url.path.startswith(("/v1/", "/api/v1/")):
+        response.headers.setdefault("Cache-Control", "no-store")
     if traceresponse:
         # W3C Trace Context Level 2: lets a client quote the trace of this request.
         response.headers["traceresponse"] = traceresponse

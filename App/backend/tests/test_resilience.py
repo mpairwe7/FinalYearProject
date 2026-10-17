@@ -65,6 +65,7 @@ class CircuitBreakerStateMachineTest(unittest.TestCase):
         clock.t += 0.2  # past reset_timeout
         self.assertIs(br.state, CircuitState.HALF_OPEN)
         self.assertTrue(br.allow_request())  # exactly one probe is let through
+        self.assertFalse(br.allow_request())  # concurrent stampede blocked while probe is in flight
 
     def test_half_open_success_closes_and_resets_backoff(self):
         br, clock = self._breaker()
