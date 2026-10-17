@@ -292,6 +292,20 @@ def default_tool_runner(tool_name: str, params: dict[str, Any]) -> dict[str, Any
     return ToolRegistry.call(tool_name, params)
 
 
+def _collect_nested_numbers(obj: Any) -> list[float]:
+    """Recursively collect numeric values from a tool output payload (e.g. band bounds)."""
+    vals: list[float] = []
+    if isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        vals.append(float(obj))
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            vals.extend(_collect_nested_numbers(v))
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            vals.extend(_collect_nested_numbers(item))
+    return vals
+
+
 def _lookup_field(payload: dict[str, Any], field_path: str) -> Any:
     """Resolve a dotted field path inside a calculator tool output dictionary."""
     cur: Any = payload
@@ -304,19 +318,43 @@ def _lookup_field(payload: dict[str, Any], field_path: str) -> Any:
 
 
 def _split_into_claim_clauses(text: str) -> list[str]:
-    """Split reply text into sentences, table rows, and coordinate sub-clauses."""
+    """Split reply text into sentences, Markdown table row/cell claims, and coordinate sub-clauses."""
     if not text:
         return []
     lines: list[str] = []
-    for raw_line in text.splitlines():
+    raw_lines = text.splitlines()
+    table_headers: list[str] = []
+
+    for raw_line in raw_lines:
         stripped = raw_line.strip()
         if not stripped:
+            table_headers = []
             continue
+
+        # Handle Markdown table rows without destroying row-to-cell associations
+        if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            # Separator row like | :--- | :--- |
+            if all(re.match(r"^:?-{2,}:?$", c) for c in cells if c):
+                continue
+            if not table_headers:
+                table_headers = cells
+                lines.append(" ".join(c for c in cells if c))
+                continue
+            row_label = cells[0] if cells else ""
+            lines.append(" ".join(c for c in cells if c))
+            for idx, cell in enumerate(cells[1:], 1):
+                hdr = table_headers[idx] if idx < len(table_headers) else ""
+                if cell:
+                    lines.append(f"{row_label} {hdr}: {cell}".strip())
+            continue
+
+        table_headers = []
         # Split coordinate clauses where distinct claims often appear side by side
         sents = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9*(\-\[])", stripped)
         for sent in sents:
             subclauses = re.split(
-                r"\s*(?:;|\||—|–|\b(?:whereas|while|compared\s+to|versus|vs\.?)\b"
+                r"\s*(?:;|—|–|\b(?:whereas|while|compared\s+to|versus|vs\.?)\b"
                 r"|,\s+(?:and|but|while|whereas)\s+"
                 r"|(?<=\d),\s+(?=[A-Za-z]))\s*",
                 sent,
@@ -328,10 +366,17 @@ def _split_into_claim_clauses(text: str) -> list[str]:
     return lines
 
 
+_URA_HOTLINES_RE = re.compile(
+    r"\b(?:0800\s*117\s*000|0800\s*217\s*000|0772\s*140\s*000)\b"
+)
+
+
 def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
     """Extract numeric/money/percentage amounts from a clause with negation and rounding flags."""
     results: list[ParsedAmount] = []
-    for m in _AMOUNT_TOKEN_RE.finditer(clause):
+    # Mask URA toll-free / WhatsApp hotlines so phone digits are never parsed as amounts
+    masked_clause = _URA_HOTLINES_RE.sub(lambda m: " " * len(m.group(0)), clause)
+    for m in _AMOUNT_TOKEN_RE.finditer(masked_clause):
         raw_num = m.group("num").replace(",", "")
         try:
             val = float(raw_num)
@@ -416,21 +461,33 @@ def _is_working_or_subsidiary_amount(
     clause: str,
     amt: ParsedAmount,
     field_name: str,
+    expected_val: float = 0.0,
 ) -> bool:
     """Return True when ``amt`` is inside parenthesised working math, an arithmetic expression, or a headroom note."""
     prefix = clause[: amt.start]
     suffix = clause[amt.end :]
-    # 1. Parenthesised working figure, e.g. "(180m × 30%)" or "(headroom UGX 60,000,000)"
+    # 1. Parenthesised working figure, e.g. "(180m × 30%)" or "(headroom UGX 60,000,000)",
+    #    unless the number inside parentheses is the result after '=' (e.g. "(30% of 50m = UGX 15m)").
     if prefix.count("(") > prefix.count(")") and ")" in suffix:
-        return True
+        last_open = prefix.rfind("(")
+        inside_before = prefix[last_open + 1 :]
+        if "=" not in inside_before:
+            return True
+        if re.search(r"[×÷+\-]\s*$", inside_before) or re.match(r"^\s*[×÷+\-]", suffix):
+            return True
     # 2. Arithmetic operand adjacent to ×, ÷, or single * (excluding Markdown **)
     if re.search(r"(?:[×÷]|(?<!\*)\*(?!\*))\s*$", prefix) or re.match(
         r"^\s*(?:[×÷]|(?<!\*)\*(?!\*))", suffix
     ):
         return True
     # 3. Subsidiary headroom figure when the spec is not asking for headroom
-    if field_name != "headroom" and re.search(
-        r"\bheadroom\b[^,;:.]{0,20}$", prefix, re.IGNORECASE
+    if field_name != "headroom" and re.search(r"\bheadroom\b", prefix, re.IGNORECASE):
+        return True
+    # 4. Per-unit rate (e.g. "UGX 20,000 per passenger seat", "UGX 50,000/tonne") when expecting a total
+    if abs(expected_val) >= 100_000.0 and re.match(
+        r"^\s*(?:/|\bper\b)\s*(?:passenger\s+)?(?:seat|tonne|ton|litre|liter|kg|bag|unit)\b",
+        suffix,
+        re.IGNORECASE,
     ):
         return True
     return False
@@ -461,6 +518,7 @@ def _score_single_figure(
     spec: dict[str, Any],
     reply: str,
     tool_runner: ToolRunner,
+    extra_companion_values: list[float] | None = None,
 ) -> FigureScore:
     """Evaluate a single figure specification against ``reply`` using ``tool_runner``."""
     tool_name = str(spec["tool"])
@@ -505,6 +563,17 @@ def _score_single_figure(
         for v in resolved_params.values()
         if isinstance(v, (int, float)) and not isinstance(v, bool)
     ]
+    companion_values: list[float] = [
+        v
+        for k, sub in tool_out.items()
+        if k != field_name and k != "rate_basis"
+        for v in _collect_nested_numbers(sub)
+        if not _values_match(expected_val, ParsedAmount(v, str(v), 0, 0, False, True, False))
+    ]
+    if extra_companion_values:
+        for ev in extra_companion_values:
+            if abs(ev - expected_val) > 1.0:
+                companion_values.append(ev)
 
     cues_obj = (spec.get("claim") or {}).get("label_cues") or {}
     cues: list[str] = list(cues_obj.get("any") or [])
@@ -539,6 +608,7 @@ def _score_single_figure(
     saw_conflicting = False
     matched_val: float | None = None
 
+    clause_assertions: list[tuple[str, int, list[ParsedAmount]]] = []
     for clause, cue_pos in matching_clauses:
         amounts = parse_amounts_from_clause(clause)
         if not amounts:
@@ -552,14 +622,26 @@ def _score_single_figure(
             )
             if is_input_echo:
                 continue
-            if _is_working_or_subsidiary_amount(clause, amt, field_name):
+            if _is_working_or_subsidiary_amount(clause, amt, field_name, expected_val):
                 continue
             if expect_is_rate and not amt.is_percent and amt.value >= 1.0:
                 continue
-            if expect_is_money and (amt.is_percent or amt.value < 100.0):
+            if expect_is_money and (amt.is_percent or not amt.is_money or amt.value < 1000.0):
                 continue
             direct_assertions.append(amt)
+        if direct_assertions:
+            clause_assertions.append((clause, cue_pos, direct_assertions))
 
+    any_clause_has_match = any(
+        _values_match(expected_val, a) and not a.negated
+        for _, _, das in clause_assertions
+        for a in das
+    )
+
+    for clause, cue_pos, direct_assertions in clause_assertions:
+        clause_has_match = any(
+            _values_match(expected_val, a) and not a.negated for a in direct_assertions
+        )
         for amt in direct_assertions:
             if _values_match(expected_val, amt):
                 if amt.negated:
@@ -568,6 +650,14 @@ def _score_single_figure(
                     matched_val = amt.value
             else:
                 if not amt.negated:
+                    # Historical baseline in "from <old> to <new>" when <new> matches expected_val
+                    if clause_has_match and re.search(
+                        r"\bfrom\s*$", clause[: amt.start], re.IGNORECASE
+                    ) and re.search(r"^\s*to\b", clause[amt.end :], re.IGNORECASE):
+                        continue
+                    is_companion = any(_values_match(cv, amt) for cv in companion_values)
+                    if is_companion and any_clause_has_match:
+                        continue
                     after_cue = [a for a in direct_assertions if a.start >= cue_pos and not a.negated]
                     if amt.start < cue_pos and any(_values_match(expected_val, a) for a in after_cue):
                         continue
@@ -606,12 +696,13 @@ def _check_completeness(reply: str, response: dict[str, Any]) -> tuple[bool, str
     """Check whether a reply is complete and not truncated mid-sentence or by token limit."""
     debug = response.get("debug") or {}
     finish_reason = debug.get("finish_reason") or response.get("finish_reason")
-    if finish_reason == "length":
-        return False, "finish_reason=length"
-
     stripped = (reply or "").strip()
     if not stripped:
         return False, "empty_reply"
+    if finish_reason is not None:
+        if finish_reason == "length":
+            return False, "finish_reason=length"
+        return True, None
 
     if _DANGLING_END_RE.search(stripped):
         return False, "dangling_ending"
@@ -628,7 +719,7 @@ def _score_sources_relevant(
     context_text: str,
 ) -> tuple[float | None, list[str]]:
     """Compute share of cited sources that do not cite unrelated sector guides."""
-    if expect_route in ("calculator", "workflow", "declined"):
+    if expect_route != "rag":
         return None, []
 
     raw_sources = response.get("sources") or response.get("citations") or []
@@ -687,9 +778,29 @@ def score_turn(
 
     # 2. Figures check
     figure_specs = list(expect.get("figures") or [])
+    sibling_expected: list[float] = []
+    if len(figure_specs) >= 2:
+        for spec in figure_specs:
+            rp, fx_e = _resolve_params(dict(spec.get("params") or {}), runner)
+            if fx_e is None and rp is not None:
+                tout = runner(str(spec["tool"]), rp)
+                if tout.get("ok"):
+                    rv = _lookup_field(tout, str(spec.get("field", "tax")))
+                    if isinstance(rv, (int, float)) and not isinstance(rv, bool):
+                        sibling_expected.append(float(rv))
+        if len(sibling_expected) >= 2:
+            sibling_expected.append(sum(sibling_expected))
+
     figure_details: list[FigureScore] = []
     for spec in figure_specs:
-        figure_details.append(_score_single_figure(spec, reply, runner))
+        figure_details.append(
+            _score_single_figure(
+                spec,
+                reply,
+                runner,
+                extra_companion_values=sibling_expected,
+            )
+        )
 
     active_figs = [
         f

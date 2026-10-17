@@ -24,6 +24,9 @@ wheels/
 .installed.cfg
 *.egg
 
+# Frozen LLM prompt contexts generated during model bake-offs
+evals/complex_scenarios/frozen_contexts_*.jsonl
+
 # Virtual environments
 .env
 .venv
