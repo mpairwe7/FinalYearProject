@@ -165,6 +165,19 @@ def test_owasp_agentic_2026_asi_top10_aibom_and_compliance_gate() -> None:
     assert [r["id"] for r in mcp_risks] == [f"MCP{i:02d}" for i in range(1, 11)]
     assert all(r.get("status") == "mitigated" and r.get("verified_by") for r in mcp_risks)
 
+    maestro_layers = manifest["csa_aicm_maestro_2026"]["layers"]
+    assert [l["id"] for l in maestro_layers] == [f"MAESTRO-L{i}" for i in range(1, 8)]
+    assert all(l.get("status") == "mitigated" and l.get("verified_by") for l in maestro_layers)
+
+    import json
+
+    sbom = json.loads((REPO_ROOT / "docs" / "capstone" / "sbom-cyclonedx.json").read_text(encoding="utf-8"))
+    comp_refs = {c["bom-ref"] for c in sbom["components"]} | {sbom["metadata"]["component"]["bom-ref"]}
+    for dep in sbom.get("dependencies", []):
+        assert dep["ref"] in comp_refs
+        for target in dep.get("dependsOn", []):
+            assert target in comp_refs, f"Broken CycloneDX bom-ref dependency: {target}"
+
     assert run_compliance_check() is True
 
     import importlib.util

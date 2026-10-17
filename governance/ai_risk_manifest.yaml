@@ -564,3 +564,56 @@ owasp_mcp_top10_2026:
       controls: "Tenant-scoped SQL isolation on user_facts and tasks, replay cache keyed by tenant_id, and verified _meta identity binding"
       verified_by:
         - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
+
+csa_aicm_maestro_2026:
+  edition: "CSA AI Controls Matrix (AICM v1.1) & MAESTRO 7-Layer Agentic Architecture (2026)"
+  layers:
+    - id: "MAESTRO-L1"
+      name: "Foundation Models"
+      aicm_domains: ["MS", "AIS"]
+      status: "mitigated"
+      controls: "InputGuard, OutputGuard, #NMBR...# sentinel figure-fidelity guard (mt.py), and NLI claim verification over Sunbird/Sunflower-Qwen3.5-9B"
+      verified_by:
+        - "tests/agents/test_agentic_voice_2026_enhancements.py::test_phase41_trase_grounding_single_pass_retrieval_and_multilingual_guardrails"
+    - id: "MAESTRO-L2"
+      name: "Data Operations"
+      aicm_domains: ["DSP", "STA"]
+      status: "mitigated"
+      controls: "Structural PDF guards (pdf_guards.py), SHA-256 corpus/freshness manifests, and tenant/consent-scoped 4-tier cognitive memory"
+      verified_by:
+        - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
+    - id: "MAESTRO-L3"
+      name: "Agent Frameworks"
+      aicm_domains: ["AA", "AIS"]
+      status: "mitigated"
+      controls: "Bounded ReAct/revision loops, 5-locale ToolRAGSelector, typed HandoffEnvelope v2.1, and HMAC-SHA256 MRTR requestState verification (mrtr.py)"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MAESTRO-L4"
+      name: "Deployment & Infrastructure"
+      aicm_domains: ["IVS", "BCR"]
+      status: "mitigated"
+      controls: "HttpTransport MAX_MCP_RESPONSE_BYTES (2 MiB), MAX_CACHE_TTL_S (24h), production loopback/link-local SSRF block, and non-root containers"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"
+    - id: "MAESTRO-L5"
+      name: "Evaluation & Observability"
+      aicm_domains: ["LOG", "A&A"]
+      status: "mitigated"
+      controls: "OpenTelemetry GenAI spans, Prometheus metrics, hash-chained turn/action audit ledger with RFC 3161 TSA seals"
+      verified_by:
+        - "App/backend/tests/test_audit_turns.py"
+    - id: "MAESTRO-L6"
+      name: "Security & Compliance"
+      aicm_domains: ["GRC", "CEK", "TVM"]
+      status: "mitigated"
+      controls: "Canonical SHA-256 tool descriptor pinning, screen_tool_result, validate_arguments, and automated CI threat-model/risk-register gates"
+      verified_by:
+        - "tests/test_monorepo_architecture_governance.py"
+    - id: "MAESTRO-L7"
+      name: "Agent Ecosystem"
+      aicm_domains: ["IAM", "SEF"]
+      status: "mitigated"
+      controls: "Cross-namespace tool shadowing block, OAuth 2.1 RFC 8707/9728 audience binding, simulation boundary (live=false), and CXP 07:00-23:00 EAT SLA"
+      verified_by:
+        - "tests/agents/test_mcp_2026_october_audit.py"

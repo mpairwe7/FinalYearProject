@@ -18,6 +18,7 @@ and a gateway can authorize without parsing the body.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import logging
 import os
@@ -62,6 +63,10 @@ DISCOVERY_RETRY_S = 15.0
 LIVENESS_TTL_S = 30.0
 #: Deadline for the reachability probe itself (``server/discover``).
 LIVENESS_TIMEOUT_S = 2.0
+#: Maximum cache TTL a remote MCP server may advertise (24h).
+MAX_CACHE_TTL_S = 86_400.0
+#: Maximum response payload bytes accepted from a remote MCP server (2 MiB).
+MAX_MCP_RESPONSE_BYTES = int(os.getenv("MCP_MAX_RESPONSE_BYTES", str(2 * 1024 * 1024)))
 #: Gateway answers that mean "nothing is behind this address right now".
 _UNREACHABLE_STATUSES = frozenset({502, 503, 504})
 
@@ -525,6 +530,12 @@ class HttpTransport:
             )
 
         content_type = str(response.headers.get("content-type", "")).lower()
+        raw_bytes = getattr(response, "content", None)
+        if isinstance(raw_bytes, bytes | bytearray) and len(raw_bytes) > MAX_MCP_RESPONSE_BYTES:
+            raise TransportError(
+                f"{method} to {self.base_url} exceeded maximum response size ({len(raw_bytes)} > {MAX_MCP_RESPONSE_BYTES} bytes)",
+                status=response.status_code,
+            )
         try:
             if content_type.startswith("text/event-stream"):
                 payload = _event_stream_message(response.text, request_id)
@@ -699,9 +710,10 @@ def _with_extension(meta: dict[str, Any], extension: str) -> dict[str, Any]:
 
 
 def _cache_seconds(ttl_ms: Any) -> float:
-    """How long a server said a cacheable result may be kept."""
+    """How long a server said a cacheable result may be kept, clamped to [1s, 24h]."""
     try:
-        return max(1.0, float(ttl_ms) / 1000.0) if ttl_ms is not None else 3600.0
+        raw = max(1.0, float(ttl_ms) / 1000.0) if ttl_ms is not None else 3600.0
+        return min(raw, MAX_CACHE_TTL_S)
     except (TypeError, ValueError):
         return 3600.0
 
@@ -717,8 +729,19 @@ def remote_url_problem(url: str) -> str:
         return "it is not an http(s) URL"
     if parts.username or parts.password:
         return "credentials belong in MCP_SERVER_TOKEN_<NAMESPACE>, not in the URL"
-    if parts.scheme != "https" and os.getenv("APP_ENV", "development").lower() == "production":
+    is_prod = os.getenv("APP_ENV", "development").lower() == "production"
+    if parts.scheme != "https" and is_prod:
         return "production requires https"
+    host = (parts.hostname or "").strip().lower()
+    if is_prod and host:
+        if host in {"localhost", "0.0.0.0"}:
+            return "production forbids loopback or unspecified MCP server hosts"
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+                return "production forbids loopback or link-local metadata MCP server IPs"
+        except ValueError:
+            pass
     return ""
 
 

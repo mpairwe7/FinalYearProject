@@ -211,3 +211,40 @@ def test_2024_2027_statutory_rates_graph_and_ursb_compliance_integration() -> No
     comp = ursb.check_compliance("URSB-CO-10001")
     assert comp.ok is True
     assert "Beneficial Ownership (BO)" in comp.details
+
+
+def test_mcp_mrtr_production_signing_transport_bounds_and_5_locale_tool_rag(monkeypatch) -> None:
+    from app.mcp.mrtr import unwrap_request_state, wrap_request_state
+    from app.mcp.tool_rag import ToolRAGSelector
+    from app.mcp.transport import MAX_CACHE_TTL_S, _cache_seconds, remote_url_problem
+
+    # 1. Production refuses alg=none and requires >=32-char secret
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("MCP_REQUEST_STATE_SECRET", raising=False)
+    assert unwrap_request_state({"payload": {"step": 1}, "alg": "none"}) is None
+
+    monkeypatch.setenv("MCP_REQUEST_STATE_SECRET", "s" * 32)
+    signed = wrap_request_state({"step": 1})
+    assert unwrap_request_state(signed) == {"step": 1}
+    # Stripped alg/sig is rejected by MCPClient when secret is configured
+    bad_call = get_client().call_tool(
+        "lookup_rate",
+        {"tax_type": "vat_standard"},
+        request_state={"payload": {"step": 1}},
+    )
+    assert bad_call.ok is False
+    assert bad_call.result["error"] == "requestState integrity check failed"
+
+    # 2. Transport cache TTL clamp and production SSRF loopback/metadata block
+    assert _cache_seconds(999_999_999_000) == MAX_CACHE_TTL_S
+    assert "loopback" in remote_url_problem("https://127.0.0.1:8931/mcp")
+    assert "loopback" in remote_url_problem("https://169.254.169.254/latest/meta-data")
+    assert remote_url_problem("https://mcp-efris.ura.go.ug/mcp") == ""
+
+    # 3. 5-locale (Runyankole & Acholi) token-overlap parity in ToolRAGSelector
+    selector = ToolRAGSelector(dense_model=None)
+    eligible = ["calculate_paye", "calculate_vat", "calculate_rental_tax", "search_ura_knowledge_base", "escalate_to_human"]
+    nyn_sel = selector.select("okubara omushoro gw'omushahara", eligible, k=3)
+    assert "calculate_paye" in nyn_sel.tool_names
+    ach_sel = selector.select("kwano mucoro me otwel", eligible, k=3)
+    assert "calculate_rental_tax" in ach_sel.tool_names

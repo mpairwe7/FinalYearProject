@@ -543,6 +543,33 @@ THREAT_REGISTRY: list[dict] = [
         ],
         "status": "mitigated",
     },
+    {
+        "id": "T39",
+        "category": "Tampering",
+        "description": "Unsigned or alg=none Multi Round-Trip Request (MRTR) state forgery or stripped-signature replay across MCP turns (OWASP MCP07, RFC 8725)",
+        "owasp_llm": "LLM06",
+        "mitre_atlas": "AML.T0053",
+        "mitigation": "mrtr.py refuses alg=none and requires MCP_REQUEST_STATE_SECRET (>=32 chars) in production; MCPClient._call_tool enforces unwrap_request_state on any non-None requestState when secret or production mode is active",
+        "evidence": [
+            "App/backend/app/mcp/mrtr.py",
+            "App/backend/app/mcp/client.py",
+            "tests/agents/test_mcp_2026_october_audit.py",
+        ],
+        "status": "mitigated",
+    },
+    {
+        "id": "T40",
+        "category": "Denial of Service",
+        "description": "Remote MCP server oversized response memory bomb, multi-year cache-TTL poisoning, or cloud-metadata/loopback SSRF in production (OWASP MCP10/LLM10, MAESTRO L4)",
+        "owasp_llm": "LLM10",
+        "mitre_atlas": "AML.T0029",
+        "mitigation": "HttpTransport enforces MAX_MCP_RESPONSE_BYTES (2 MiB), clamps _cache_seconds to MAX_CACHE_TTL_S (24h), and remote_url_problem rejects loopback/link-local/metadata IPs (127.0.0.1, ::1, 169.254.169.254) in production",
+        "evidence": [
+            "App/backend/app/mcp/transport.py",
+            "tests/agents/test_mcp_2026_october_audit.py",
+        ],
+        "status": "mitigated",
+    },
 ]
 
 

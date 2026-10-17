@@ -122,6 +122,10 @@
   - *Mitigation*: `screen_tool_result` normalizes Unicode controls, quarantines chat-template tokens and JWT/API secret leaks, and scrubs natural-language override directives.
 - **M-AGT-07 (Tampering / Confused-Deputy Memory Implant — `SAFE-MCP SAF-T1204/SAF-T1307`, `AML.T0080`)**: Prompt-injected LLM spoofs `user_id`/`tenant_id` in memory tool calls to poison another taxpayer's semantic memory.
   - *Mitigation*: `memory_store` and `memory_discard` require `personalization` consent or verified role; `ToolRegistry.call` strips argument-supplied `user_id`/`tenant_id` and injects only verified caller identity from `_meta`.
+- **M-AGT-08 (Tampering / MRTR State Forgery — `OWASP MCP07`, `RFC 8725`, `AML.T0053`)**: Adversary supplies an unsigned `alg: "none"` or stripped-signature `requestState` during multi-round-trip tool elicitation.
+  - *Mitigation*: `app/mcp/mrtr.py` refuses `alg: "none"` and requires a $\ge 32$-char `MCP_REQUEST_STATE_SECRET` in production; `MCPClient` validates `unwrap_request_state` on all non-null `request_state` objects.
+- **M-AGT-09 (Denial of Service & SSRF — `OWASP MCP10/LLM10`, `MAESTRO L4`, `AML.T0029`)**: Compromised remote MCP server returns an unbounded response body, advertises a multi-year `ttlMs`, or binds to a loopback/link-local metadata IP in production.
+  - *Mitigation*: `HttpTransport` caps responses at `MAX_MCP_RESPONSE_BYTES` (2 MiB), clamps `_cache_seconds` to `MAX_CACHE_TTL_S` (24h), and rejects loopback/link-local/unspecified IPs in production.
 
 ---
 
