@@ -75,6 +75,32 @@ _DISPLAY_NAMES: dict[str, str] = {
     "objection_timeline_days": "Objection notice statutory timeline (days)",
     "paye_due_date_monthly": "PAYE monthly filing due date (day of month)",
     "passenger_baggage_allowance_usd": "Passenger baggage duty-free allowance (USD)",
+    "withholding_insurance_agent_commission": "WHT on insurance agent commission (final tax - 10%)",
+    "withholding_payment_service_provider_commission": "WHT on payment service provider / banking agent commission (10%)",
+    "excise_duty_fuel_petrol_per_litre_act_2026": "Excise duty on petrol under Excise Duty (Amendment) Act 2026 (UGX per litre)",
+    "excise_duty_fuel_diesel_per_litre_act_2026": "Excise duty on diesel under Excise Duty (Amendment) Act 2026 (UGX per litre)",
+    "excise_duty_cement_per_50kg": "Excise duty on cement, adhesives, grout, white cement or lime (UGX per 50 kg)",
+    "excise_duty_sugar_per_kg": "Excise duty on cane or beet sugar (UGX per kg)",
+    "excise_duty_cooking_oil_per_litre": "Excise duty on cooking oil (UGX per litre)",
+    "excise_duty_cooking_fat_per_kg": "Excise duty on cooking fat (UGX per litre or kg)",
+    "excise_duty_motorcycle_first_registration_ugx": "Excise duty on motorcycles at first registration (UGX)",
+    "efris_e_receipt_refund_qualifying_threshold_ugx": "EFRIS 5% VAT refund qualifying e-receipt/e-invoice threshold within 30 days (UGX)",
+    "efris_e_receipt_refund_rate": "EFRIS VAT refund rate for non-taxable consumers using e-receipts/e-invoices (5%)",
+    "efris_penal_tax_minimum_currency_points": "EFRIS non-compliance penal tax minimum floor (currency points)",
+    "efris_penal_tax_minimum_ugx": "EFRIS non-compliance penal tax minimum floor (UGX)",
+    "dts_unstamped_goods_penal_tax_minimum_currency_points": "Digital Tax Stamps unstamped goods penal tax minimum floor (currency points)",
+    "dts_unstamped_goods_penal_tax_minimum_ugx": "Digital Tax Stamps unstamped goods penal tax minimum floor (UGX)",
+    "stamp_duty_motor_vehicle_transfer_ugx": "Stamp duty on registration or transfer of a motor vehicle (UGX)",
+    "stamp_duty_motorcycle_transfer_ugx": "Stamp duty on registration or transfer of a motorcycle, tricycle or quadricycle (UGX)",
+    "gaming_and_betting_tax_rate": "Gaming and betting tax rate on net stakes less payouts",
+    "startup_citizen_exemption_capital_cap_ugx": "Citizen startup 3-year income tax holiday maximum investment capital (UGX)",
+    "startup_citizen_exemption_years": "Citizen startup income tax exemption duration (years)",
+    "ursb_company_registration_min_fee_ugx": "URSB company registration fee for nominal capital up to UGX 5,000,000 (UGX)",
+    "ursb_business_name_registration_fee_ugx": "URSB business name registration fee (UGX)",
+    "ursb_name_reservation_fee_ugx": "URSB business or company name reservation fee (UGX)",
+    "ursb_company_annual_return_fee_ugx": "URSB annual return filing fee for private company limited by shares (UGX)",
+    "unbs_pvoc_evasion_surcharge_rate": "UNBS destination inspection surcharge for bypassing PVoC (% of CIF value)",
+    "unbs_pvoc_exemption_fob_usd": "UNBS PVoC mandatory inspection minimum consignment FOB threshold (USD)",
 }
 
 #: Keys that are money thresholds rather than rates — reporting these as
@@ -134,7 +160,13 @@ def _scalar_row(key: str, value: float) -> dict[str, Any]:
         "kind": "amount" if is_amount else "rate",
     }
     if is_amount:
-        if key.endswith("_days") or key.endswith("_hours") or key.endswith("_hierarchy"):
+        if (
+            key.endswith("_days")
+            or key.endswith("_hours")
+            or key.endswith("_hierarchy")
+            or key.endswith("_years")
+            or key.endswith("_points")
+        ):
             row["formatted"] = f"{val:,.0f}"
         else:
             row["formatted"] = f"UGX {val:,.0f}"

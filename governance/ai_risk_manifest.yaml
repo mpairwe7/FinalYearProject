@@ -430,6 +430,7 @@ owasp_agentic_2026:
       controls: "Pinned model and dependency manifests (aibom_inventory), Mcp-Name verification, disabled dynamic remote MCP registration, and SLSA/Trivy CI gates"
       verified_by:
         - "App/backend/tests/test_mcp_hardening.py"
+        - "tests/agents/test_mcp_2026_october_audit.py"
     - id: "ASI05"
       name: "Unexpected Code Execution (RCE)"
       status: "mitigated"
@@ -444,6 +445,7 @@ owasp_agentic_2026:
       controls: "Tenant- and user-scoped 4-tier cognitive memory, low-ASR-confidence memory write suppression, and _-prefixed internal workflow state exclusion (G171)"
       verified_by:
         - "App/backend/tests/test_memory_lifecycle.py"
+        - "App/backend/tests/test_mcp_2026_october_audit_and_corpus.py"
     - id: "ASI07"
       name: "Insecure Inter-Agent Communication"
       status: "mitigated"

@@ -158,8 +158,14 @@ class MemoryStoreTool(Tool):
             },
             "required": ["ok"],
         },
-        risk="low",
+        risk="medium",
         namespace="core",
+        required_scopes=("personalization",),
+        scope_exempt_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
+        read_only=False,
+        destructive=False,
+        idempotent=False,
+        open_world=False,
     )
 
     def execute(
@@ -239,8 +245,14 @@ class MemoryDiscardTool(Tool):
             },
             "required": ["ok"],
         },
-        risk="low",
+        risk="medium",
         namespace="core",
+        required_scopes=("personalization",),
+        scope_exempt_roles=("verified_taxpayer", "ura_staff", "ura_admin"),
+        read_only=False,
+        destructive=True,
+        idempotent=True,
+        open_world=False,
     )
 
     def execute(
@@ -260,8 +272,8 @@ class MemoryDiscardTool(Tool):
 
         try:
             db.execute(
-                "UPDATE user_facts SET superseded_by = 'discarded', invalidated_at = ? WHERE fact_id = ? AND user_id = ?",
-                (time.time(), fact_id, user_id),
+                "UPDATE user_facts SET superseded_by = 'discarded', invalidated_at = ? WHERE fact_id = ? AND user_id = ? AND tenant_id = ?",
+                (time.time(), fact_id, user_id, tenant_id or "default"),
             )
         except Exception as exc:
             logger.debug("memory_discard db error: %s", exc)

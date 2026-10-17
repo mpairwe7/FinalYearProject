@@ -243,6 +243,28 @@ def call_mcp_tool(
         tool_arguments.pop("submit", None)
 
     safe_tool_id = str(tool.schema.name)
+    if tool.schema.parameters.get("additionalProperties") is False:
+        unexpected = sorted(set(tool_arguments) - tool_properties)
+        if unexpected:
+            return {
+                "ok": False,
+                "tool_name": safe_tool_id,
+                "error": f"Unexpected arguments for {safe_tool_id}: {', '.join(unexpected)}",
+                "unexpected_arguments": unexpected,
+                "mode": "simulation",
+                "live": False,
+            }
+    missing_req = [req for req in (tool.schema.parameters.get("required") or []) if req not in tool_arguments]
+    if missing_req:
+        return {
+            "ok": False,
+            "tool_name": safe_tool_id,
+            "error": f"Missing required arguments for {safe_tool_id}: {', '.join(missing_req)}",
+            "missing_arguments": missing_req,
+            "mode": "simulation",
+            "live": False,
+        }
+
     replay_key = f"{safe_tool_id}:{body.idempotency_key.strip()}" if tool.schema.requires_confirmation else ""
     if replay_key:
         with _MCP_REPLAY_LOCK:

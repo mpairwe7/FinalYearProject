@@ -10,12 +10,11 @@ Complete documentation for the URA Chatbot MLOps project.
 |----------|-------------|
 | **Setup & Getting Started** |
 | [Project Setup](PROJECT_SETUP.md) | Complete installation and setup guide |
-| [Quick Start](../QUICKSTART.md) | 5-minute quick start guide |
 | **Application** |
 | [API Reference](API_REFERENCE.md) | REST API endpoints (sync + SSE streaming + WebSocket voice) and usage |
 | [RAG Architecture](RAG_ARCHITECTURE.md) | 12-stage production RAG pipeline + streaming voice engine (2026) |
 | [Agent Architecture](AGENT_ARCHITECTURE.md) | Supervisor routing, LangGraph runtime, tool-calling loop, and 82-flag registry |
-| [Architecture Decision Records (MADR 4.0)](adr/README.md) | Canonical ADR catalog (`ADR-0001`, `ADR-0002`) governing monorepo layer boundaries, 5-locale stack, and CXP hours |
+| [Architecture Decision Records (MADR 4.0)](adr/README.md) | Canonical ADR catalog (`ADR-0001`, `ADR-0002`, `ADR-0003`) governing monorepo layer boundaries, 5-locale stack, CXP hours, and MCP/corpus integrity |
 | [Enterprise Systems & Connectors](SYSTEM_CONNECTORS_AND_PLUGINS.md) | Local connector simulators, safe staff controls, guide-only customer journeys, and their production boundary |
 | [App Runtime](../App/README.md) | FastAPI, Next.js PWA, anonymous chat policy, Qwen/Whisper adapter runtime, and ngrok smoke flow |
 | [Agent repo map](../AGENTS.md) | 2026 layout (`apps/api`, `apps/web`, `agents/`, `evals/`) without moving `App/` |
@@ -27,7 +26,6 @@ Complete documentation for the URA Chatbot MLOps project.
 | [Production gates](PRODUCTION_GATES.md) | When remaining prototype gaps become start blockers |
 | [Traceability: 2026-08-18 gates](../App/docs/traceability/prototype-production-gates-2026-08-18.md) | Decision log — prototype gaps, production blockers, how to re-verify |
 | [Monitoring & Observability](MONITORING.md) | OpenTelemetry, Prometheus, Grafana, alerting, SLOs |
-| [Mobile Architecture](MOBILE_ARCHITECTURE.md) | Layered architecture, Riverpod 2.6 Notifier, go_router, design tokens, 7 ADRs |
 | **Testing & Quality** |
 | [Frontend Tests](../App/frontend/vitest.config.ts) | Vitest unit/component tests + coverage thresholds |
 | [E2E Tests](../App/frontend/e2e/) | Playwright smoke + axe-core WCAG 2.2 AA accessibility audit |
@@ -176,10 +174,10 @@ PRs intentionally skip registry publication, OWASP ZAP, OSSF Scorecard, and Triv
 
 | Variable | Purpose |
 |----------|---------|
-| `LLM_LOAD_IN_4BIT=true` | Load local Qwen3-8B with BitsAndBytes NF4 quantization |
-| `LORA_ADAPTER_LG/SW/NYN/ACH` | Mount and select Qwen LoRA adapters per locale |
-| `WHISPER_DEVICE=cpu` | Keep Whisper ASR off the Qwen GPU |
-| `WHISPER_ADAPTER_LG/SW/NYN/ACH` | Mount Whisper LoRA adapters for supported speech locales |
+| `VLLM_MODEL=Sunbird/Sunflower-Qwen3.5-9B` | Primary 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) LLM via vLLM (FP8 weights + FP8 KV cache, 262k native context) |
+| `ORPHEUS_TTS_MODEL=Sunbird/orpheus-3b-tts-multilingual` | Primary 5-locale neural TTS sidecar (`orpheus_tts.speaker_for`) |
+| `SALT_ASR_MODEL=Sunbird/SunflowerASR-51-african-languages` | Primary 5-locale speech-to-text ASR (`whisper_salt`) |
+| `FLAG_CXP_BUSINESS_HOURS` | CXP operating hours (`07:00–23:00 EAT` in `Africa/Kampala`) with business-hours SLA clock |
 | `FLAG_AUTH_REQUIRED` | Keep private routes fail-closed while public chat remains available via optional auth |
 
 ## Support

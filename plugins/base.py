@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -136,6 +138,22 @@ class Tool(ABC):
         }
         if s.output_schema is not None:
             descriptor["outputSchema"] = s.output_schema
+        canonical_payload = {
+            "name": str(descriptor.get("name", "")),
+            "description": str(descriptor.get("description", "")),
+            "inputSchema": descriptor.get("inputSchema") or {},
+            "outputSchema": descriptor.get("outputSchema"),
+            "annotations": descriptor.get("annotations") or {},
+            "securityMeta": {
+                "risk": s.risk,
+                "requiredScopes": list(s.required_scopes),
+                "allowedRoles": list(s.allowed_roles),
+                "scopeExemptRoles": list(s.scope_exempt_roles),
+                "requiresConfirmation": bool(s.requires_confirmation),
+            },
+        }
+        encoded = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        descriptor["_meta"]["ug.go.ura.chatbot/descriptorSha256"] = hashlib.sha256(encoded).hexdigest()
         return descriptor
 
 

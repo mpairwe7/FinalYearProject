@@ -22,6 +22,7 @@ unchanged from Phase 1-13.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import time
@@ -207,6 +208,10 @@ class Tool(ABC):
         }
         if s.output_schema is not None:
             descriptor["outputSchema"] = s.output_schema
+        from ..mcp.protocol import META_DESCRIPTOR_SHA256
+        from ..mcp.validation import compute_descriptor_sha256
+
+        descriptor["_meta"][META_DESCRIPTOR_SHA256] = compute_descriptor_sha256(descriptor)
         return descriptor
 
 
@@ -392,7 +397,20 @@ class ToolRegistry:
             logger.debug("Preventive autonomy gate check skipped for %s", name, exc_info=True)
 
         try:
-            result = tool.execute(**arg_dict)
+            exec_kwargs = dict(arg_dict)
+            try:
+                sig = inspect.signature(tool.execute)
+                params = sig.parameters
+                declared_props = set((tool.schema.parameters.get("properties") or {}).keys())
+                if "user_id" in params and ("user_id" not in declared_props or user_id):
+                    if resolved_user_id:
+                        exec_kwargs["user_id"] = resolved_user_id
+                if "tenant_id" in params and ("tenant_id" not in declared_props or (tenant_id and tenant_id != "default")):
+                    if resolved_tenant_id:
+                        exec_kwargs["tenant_id"] = resolved_tenant_id
+            except Exception:
+                logger.debug("Signature inspection skipped for %s", name, exc_info=True)
+            result = tool.execute(**exec_kwargs)
             if not isinstance(result, dict):
                 result = {"ok": True, "result": result}
             elif "ok" not in result:

@@ -63,7 +63,7 @@
 | Dataset | Source | Size | License |
 |---------|--------|------|---------|
 | URA FAQ CSV files | ura.go.ug (public) | 45 files | Public domain |
-| URA PDF handbooks | ura.go.ug (public) | 47 PDFs | Public domain |
+| URA PDF handbooks & statutory acts (2018–2027) | ura.go.ug, bills.parliament.ug, ulii.org, ursb.go.ug, unbs.go.ug | 169 PDFs (158 unique, 3,996 verified JSONL chunks) | Public domain |
 | Luganda academic corpus | Makerere University | ~50K sentences | CC-BY-4.0 |
 | Teacher-generated QA pairs | Domain experts | ~2K pairs | Apache-2.0 |
 

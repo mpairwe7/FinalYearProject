@@ -105,8 +105,20 @@ def test_unidirectional_layer_dag_across_monorepo_packages() -> None:
 
 
 def test_workspace_hygiene_no_retired_mobile_or_case_colliding_plugin_symlinks() -> None:
-    """Retired MobileApp/.dart_tool cache and case-colliding plugin symlinks stay absent."""
-    assert not (REPO_ROOT / "MobileApp").exists(), "Retired MobileApp/ directory must not exist"
+    """Retired MobileApp/.dart_tool cache, superseded root docs, and case-colliding plugin symlinks stay absent."""
+    retired_paths = (
+        "MobileApp",
+        ".antigravitycli",
+        ".agents",
+        "MIGRATION-PLAN.md",
+        "UI-MIGRATION-NOTES.md",
+        "QUICKSTART.md",
+        "docs/MOBILE_ARCHITECTURE.md",
+        "docs/NEXTGEN_ARCHITECTURE_PROPOSAL_2026.md",
+        "docs/URA_Chatbot_Roadmap_2026_Enhanced.md",
+    )
+    for rel in retired_paths:
+        assert not (REPO_ROOT / rel).exists(), f"Retired/superseded path must not exist: {rel}"
     canonical_plugins = {
         "__init__.py",
         "__pycache__",
