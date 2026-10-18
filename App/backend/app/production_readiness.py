@@ -13,10 +13,29 @@ CLI::
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
+import re
 from typing import Any
 from urllib.parse import urlparse
+
+COMMERCIAL_KEY_ENV_VARS: tuple[str, ...] = (
+    "GEMINI_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CF_AIG_TOKEN",
+    "CLOUDFLARE_API_TOKEN",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+
+_COMPOSE_SERVICE_HOST_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$", re.IGNORECASE)
+_RFC1918_NETWORKS: tuple[ipaddress.IPv4Network, ...] = (
+    ipaddress.IPv4Network("10.0.0.0/8"),
+    ipaddress.IPv4Network("172.16.0.0/12"),
+    ipaddress.IPv4Network("192.168.0.0/16"),
+)
 
 
 def _truthy(name: str, default: str = "") -> bool:
@@ -25,6 +44,83 @@ def _truthy(name: str, default: str = "") -> bool:
 
 def is_production() -> bool:
     return (os.getenv("APP_ENV") or "development").lower() == "production"
+
+
+def is_sovereign_mode() -> bool:
+    """Return True when SOVEREIGN_MODE is enabled for strict local-only data sovereignty."""
+    return _truthy("SOVEREIGN_MODE")
+
+
+def _is_allowed_sovereign_llm_host(hostname: str | None) -> bool:
+    """Return True if ``hostname`` is localhost, loopback, RFC 1918 private IP, or a compose service name."""
+    if not hostname:
+        return False
+    host = hostname.strip().lower()
+    if host in {"localhost", "host.docker.internal"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Must be a single-label Docker Compose service name (no dots / external domains)
+        return "." not in host and bool(_COMPOSE_SERVICE_HOST_RE.match(host))
+    if ip.is_loopback:
+        return True
+    if isinstance(ip, ipaddress.IPv4Address):
+        return any(ip in net for net in _RFC1918_NETWORKS)
+    return ip.is_private and not ip.is_link_local
+
+
+def sovereign_mode_errors() -> list[str]:
+    """Return startup validation errors when ``SOVEREIGN_MODE=true`` (empty when disabled)."""
+    if not is_sovereign_mode():
+        return []
+
+    from .flags import flags
+
+    errors: list[str] = []
+    if flags.is_enabled("cloudflare_fallback") or _truthy("FLAG_CLOUDFLARE_FALLBACK"):
+        errors.append("SOVEREIGN_MODE: cloudflare_fallback flag must be disabled.")
+
+    fallback_backend = (os.getenv("LLM_FALLBACK_BACKEND") or "").strip()
+    if fallback_backend:
+        errors.append("SOVEREIGN_MODE: LLM_FALLBACK_BACKEND must be empty.")
+
+    primary_backend = (os.getenv("LLM_PRIMARY_BACKEND") or "").strip().lower()
+    if primary_backend not in {"", "local", "vllm"}:
+        errors.append("SOVEREIGN_MODE: LLM_PRIMARY_BACKEND must be local ('local' or 'vllm').")
+
+    llm_backend = (os.getenv("LLM_BACKEND") or "local").strip().lower()
+    if llm_backend not in {"", "local", "vllm"}:
+        errors.append("SOVEREIGN_MODE: LLM_BACKEND must be local ('local' or 'vllm').")
+
+    for url_var in ("VLLM_BASE_URL", "REASONER_BASE_URL"):
+        raw_url = (os.getenv(url_var) or "").strip()
+        if not raw_url:
+            continue
+        parsed = urlparse(raw_url)
+        if parsed.scheme not in {"http", "https"} or not _is_allowed_sovereign_llm_host(parsed.hostname):
+            errors.append(
+                f"SOVEREIGN_MODE: {url_var} must resolve to a local compose service, localhost, or RFC 1918 private address."
+            )
+
+    for key_var in COMMERCIAL_KEY_ENV_VARS:
+        if (os.getenv(key_var) or "").strip():
+            # Log only the variable name, NEVER its value (§0.3 & §5.C.2)
+            errors.append(
+                f"SOVEREIGN_MODE: commercial API key environment variable {key_var} must not be set."
+            )
+
+    return errors
+
+
+def assert_sovereign_mode() -> None:
+    """Fail startup with SystemExit when SOVEREIGN_MODE=true and any commercial path is enabled."""
+    errors = sovereign_mode_errors()
+    if errors:
+        msg = "SOVEREIGN MODE CHECK FAILED — refusing to start.\n" + "\n".join(
+            f"  • {e}" for e in errors
+        )
+        raise SystemExit(msg)
 
 
 def _https_url(raw: str) -> bool:
@@ -252,10 +348,12 @@ def _mcp_security_errors() -> list[str]:
 
 
 def gap_gate_errors() -> list[str]:
-    """Production-only errors for remaining prototype features. Empty in development."""
-    if not is_production():
-        return []
+    """Production-only errors for remaining prototype features, plus sovereign-mode errors when SOVEREIGN_MODE=true."""
     errors: list[str] = []
+    if is_sovereign_mode():
+        errors.extend(sovereign_mode_errors())
+    if not is_production():
+        return errors
     errors.extend(_account_errors())
     errors.extend(_document_errors())
     errors.extend(_notify_errors())

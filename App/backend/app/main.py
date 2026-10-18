@@ -600,6 +600,12 @@ async def lifespan(app: FastAPI):
 
     _log_egress_reachability()
 
+    # Sovereign mode guard — blocks startup whenever SOVEREIGN_MODE=true and any
+    # commercial LLM fallback or API key is configured, regardless of APP_ENV.
+    from .production_readiness import assert_sovereign_mode
+
+    assert_sovereign_mode()
+
     # Production safety gate — blocks startup on insecure config
     _validate_production_env()
 

@@ -1,0 +1,73 @@
+# Local GPU overlay — Qwen/Qwen3.8-27B-FP8 reasoning tier (T3) via vLLM on GPU 7.
+#
+# Serves the sovereign local reasoning model selected in Phase B
+# (docs/Reports/reasoner-bakeoff-2026-10.md) alongside the T1 Sunflower-9B
+# service from docker-compose.local-sunflower.yml.
+#
+#   cd App && docker compose -f docker-compose.yml -f docker-compose.local-retrieval.yml \
+#     -f docker-compose.local-sunflower.yml -f docker-compose.reasoner.yml up -d
+services:
+  vllm-reasoner:
+    image: vllm/vllm-openai:v0.17.1
+    container_name: ura-app-vllm-reasoner
+    command:
+      - --model
+      - /model
+      - --served-model-name
+      - "${REASONER_MODEL:-Qwen/Qwen3.8-27B-FP8}"
+      - --kv-cache-dtype
+      - "${REASONER_KV_CACHE_DTYPE:-fp8}"
+      - --dtype
+      - "${REASONER_DTYPE:-auto}"
+      - --port
+      - "8001"
+      - --max-model-len
+      - "${REASONER_MAX_MODEL_LEN:-65536}"
+      - --gpu-memory-utilization
+      - "${REASONER_GPU_MEM_UTIL:-0.90}"
+      - --max-num-seqs
+      - "${REASONER_MAX_NUM_SEQS:-8}"
+      - --limit-mm-per-prompt
+      - '{"image": 0, "video": 0}'
+      - --enable-prefix-caching
+      - --enable-chunked-prefill
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_coder
+      - --reasoning-parser
+      - qwen3
+    ports:
+      - "127.0.0.1:8012:8001"
+    volumes:
+      - ${REASONER_LOCAL_MODEL_DIR:?Set REASONER_LOCAL_MODEL_DIR to the local Qwen3.8-27B-FP8 snapshot directory}:/model:ro
+    ipc: host
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${REASONER_GPU_ID:-7}
+      - HF_HUB_OFFLINE=1
+      - VLLM_NO_USAGE_STATS=1
+      - DO_NOT_TRACK=1
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/v1/models', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 8m
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["${REASONER_GPU_ID:-7}"]
+              capabilities: [gpu]
+    networks:
+      - app-network
+
+  api:
+    environment:
+      - REASONER_BASE_URL=http://vllm-reasoner:8001/v1
+      - REASONER_MODEL=${REASONER_MODEL:-Qwen/Qwen3.8-27B-FP8}
+      - FLAG_MODEL_TIERING=true
+    depends_on:
+      vllm-reasoner:
+        condition: service_healthy

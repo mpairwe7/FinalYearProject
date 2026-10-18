@@ -215,6 +215,10 @@ def workers_ai_chat(
     temperature: float = 0.2,
 ) -> str:
     """Chat-completion via a Workers AI text model; returns the reply string."""
+    from ..production_readiness import is_sovereign_mode
+
+    if is_sovereign_mode():
+        return ""
     with llm_call("chat", model, "cloudflare.workers_ai") as call:
         if get_cloud_settings().cf_relay_base_url.strip():
             from . import relay_client
@@ -337,6 +341,10 @@ def gemini_generate(
     Transport failures only. A 4xx/5xx is a real answer from the model API and
     retrying it on another host repeats the error and bills twice.
     """
+    from ..production_readiness import is_sovereign_mode
+
+    if is_sovereign_mode():
+        return ""
     s = get_cloud_settings()
     if locale is not None and not gemini_allowed_for(locale):
         raise RuntimeError(
