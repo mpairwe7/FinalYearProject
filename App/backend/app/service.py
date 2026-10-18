@@ -771,6 +771,10 @@ def _llm_cloud_fallback(
     other request behind them.  An in-flight HTTP call still runs to its own
     timeout; this only stops a *new* hop from starting once time is up.
     """
+    from .production_readiness import is_sovereign_mode
+
+    if is_sovereign_mode():
+        return ""
     if not flags.is_enabled("cloudflare_fallback"):
         return ""
     backend = os.getenv("LLM_FALLBACK_BACKEND", "").strip().lower()
@@ -4075,6 +4079,10 @@ def _judge_rescue(
         f"{i}. {c['question']} — {str(c.get('answer') or '')[:160]}"
         for i, c in enumerate(candidates, 1)
     )
+    from .production_readiness import is_sovereign_mode
+
+    if is_sovereign_mode():
+        return []
     try:
         raw = _gw.gemini_generate(
             _JUDGE_PROMPT.format(question=query, candidates=listing),
