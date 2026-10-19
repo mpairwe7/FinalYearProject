@@ -162,7 +162,9 @@ def _split_claims(reply: str) -> list[str]:
             continue
         if is_courtesy_sentence(sentence):
             continue
-        if re.search(r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|services@ura\.go\.ug|info@ura\.go\.ug|ura\.go\.ug", lowered):
+        if re.search(r"0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000|services@ura\.go\.ug|info@ura\.go\.ug", lowered):
+            continue
+        if "ura.go.ug" in lowered and not _numbers(sentence):
             continue
         if len(_tokens(sentence)) < 3:
             continue
@@ -286,7 +288,7 @@ def verify_claims(
         # When every number in the claim is backed by deterministic verified_facts,
         # do not let a stale passage (e.g. FY2023-24 235,000 vs FY2026-27 335,000)
         # falsely flag the verified figure as contradicted.
-        backed_by_verified_facts = bool(verified_facts) or bool(
+        backed_by_verified_facts = bool(
             verified_numbers and claim_numbers and claim_numbers <= (verified_numbers | query_numbers)
         )
         contradicted = (

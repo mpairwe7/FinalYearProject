@@ -243,11 +243,12 @@ def build_report(
             total_turns += 1
             lat = float(t.get("latency_s") or 0.0)
             dbg_tier = str((t.get("debug") or {}).get("model_tier") or "")
-            if dbg_tier in ("deep", "T3"):
+            is_t3 = dbg_tier in ("deep", "T3", "agentic", "T2")
+            if is_t3:
                 t3_turns += 1
             if lat > 0:
                 latencies.append(lat)
-                if dbg_tier in ("deep", "T3", "agentic", "T2"):
+                if is_t3:
                     latencies_t3.append(lat)
                 else:
                     latencies_t1.append(lat)

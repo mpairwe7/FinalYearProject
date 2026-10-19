@@ -389,19 +389,6 @@ def verify_figure_lock(
                     if isinstance(c_val, (int, float)) and abs(float(c_val)) >= MIN_VERIFIABLE_AMOUNT:
                         conditional_money.add(float(c_val))
 
-    if tool_outputs is None and (allowed_money or allowed_pcts or allowed_days or conditional_money):
-        # Include standard statutory rates and day counts from the rate table so valid
-        # legal references (e.g. 0% nil band, 100%, 7/15/30/45/90/183/365 days) are not flagged.
-        allowed_pcts |= {0.0, 0.5, 1.0, 1.5, 2.0, 5.0, 6.0, 10.0, 12.0, 15.0, 18.0, 20.0, 25.0, 30.0, 35.0, 40.0, 50.0, 100.0}
-        allowed_days |= {7, 14, 15, 30, 45, 60, 90, 122, 180, 183, 240, 365, 366}
-        allowed_money |= {
-            10_000.0, 15_000.0, 18_750.0, 20_000.0, 25_000.0, 33_500.0, 33_750.0,
-            37_250.0, 48_500.0, 50_000.0, 71_000.0, 75_000.0, 100_000.0, 200_000.0,
-            235_000.0, 250_000.0, 335_000.0, 410_000.0, 485_000.0, 1_000_000.0,
-            2_820_000.0, 2_854_500.0, 2_877_000.0, 2_888_250.0, 2_925_500.0,
-            10_000_000.0, 150_000_000.0, 300_000_000.0, 500_000_000.0,
-        }
-
     if not allowed_money and not allowed_pcts and not allowed_days and not conditional_money:
         return True, [], {"offending_figures": [], "skipped": "no reference figures in context"}
 
@@ -548,7 +535,7 @@ def evaluate(
     else:
         unverified.append("numerically_consistent")
 
-    if verified_facts or tool_outputs:
+    if verified_facts or passages or tool_outputs:
         lock_ok, offending_figs, lock_detail = verify_figure_lock(
             answer,
             query=query,

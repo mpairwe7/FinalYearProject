@@ -7099,10 +7099,23 @@ class ChatModel:
             elif claim_decision in ("escalate", "revise") and decision != "escalate":
                 # User-scenario mathematical calculations: intermediate and resulting figures
                 # computed from user amounts are valid arithmetic applications, not unsupported statutory claims.
-                if (has_money_amount(message) or bool(verified_facts)) and not contradicted_list:
+                from .claim_verifier import _numbers as _claim_nums
+
+                unsupported_items = claim_report.get("unsupported_claims") or []
+                vf_nums = _claim_nums(verified_facts) | _claim_nums(message) if verified_facts else set()
+                unsupported_backed_by_vf = bool(
+                    vf_nums
+                    and unsupported_items
+                    and all(
+                        (cn := _claim_nums(str(item.get("text", "") if isinstance(item, dict) else item)))
+                        and cn <= vf_nums
+                        for item in unsupported_items
+                    )
+                )
+                if (has_money_amount(message) or unsupported_backed_by_vf) and not contradicted_list:
                     decision = "approve"
                     reasons.append("approved user-scenario calculation draft")
-                elif claim_report.get("unsupported_claims"):
+                elif unsupported_items:
                     reasons.append("claim verification found weakly supported factual claims")
                     if float(claim_report.get("score") or 0.0) < 0.70:
                         decision = "revise"
@@ -8695,7 +8708,7 @@ class ChatModel:
             or (
                 any(k in text for k in ("fdn", "efris", "receipt", "invoice"))
                 and "subtotal" in text
-                and "total" in text
+                and re.search(r"(?<!sub)\btotal\b", text)
                 and re.search(r"\d+[\d,.]*", text)
             )
         ):
@@ -11005,14 +11018,11 @@ class ChatModel:
                     )
                     if was_corrected:
                         from .query import extract_retrieval_preferences
-                        from .retriever import is_sector_guide_source
+                        from .retriever import apply_preference_boost
 
-                        if extract_retrieval_preferences(retrieval_query).get("demote_sector_guides"):
-                            non_sec = [
-                                h for h in hits if not is_sector_guide_source(str(h.get("source") or ""))
-                            ]
-                            if non_sec:
-                                hits = non_sec
+                        hits = apply_preference_boost(
+                            hits, extract_retrieval_preferences(retrieval_query)
+                        )[:top_k]
                         retrieval_mode = (
                             f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
                         )
@@ -11038,17 +11048,7 @@ class ChatModel:
                 seen_texts = {h.get("text", "")[:80] for h in hits}
                 if _prepend_unique(hits, priority_hits, seen_texts):
                     retrieval_mode = "faq_priority"
-                from .query import extract_retrieval_preferences
-
-                demote_sector_kw = bool(
-                    extract_retrieval_preferences(retrieval_query).get("demote_sector_guides")
-                )
                 for h in kw_hits:
-                    if demote_sector_kw and hits:
-                        from .retriever import is_sector_guide_source
-
-                        if is_sector_guide_source(str(h.get("source") or "")):
-                            continue
                     h_loc = h.get("_matched_locale") or locale
                     q_val = (
                         h.get(f"question_{h_loc}")

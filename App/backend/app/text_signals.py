@@ -418,7 +418,7 @@ _FOREIGN_JURISDICTION_RES: tuple[tuple[str, re.Pattern[str]], ...] = tuple(
 _UGANDA_RE = re.compile(
     r"\bugandan?\b|\bura\b|\bkampala\b|\bennttebe\b|\bentebbe\b|\bbusia\b|\bmalaba\b|\bjinja\b|\bmbale\b|\bmbarara\b|\bgulu\b|\bmasaka\b|\bmutukula\b|\bkatuna\b|\belegu\b"
     r"|\bmukono\b|\bwakiso\b|\bkasese\b|\bfort\s+portal\b|\bkabale\b|\bhoima\b|\blira\b|\barua\b|\btororo\b|\bmasindi\b|\bsoroti\b"
-    r"|\befris\b|\bdts\b|\bkakasa\b|\bprn\b|\bursb\b|\bbwims\b|\bugx\b|\bshillings?\b",
+    r"|\btin\b|\bpaye\b|\befris\b|\bdts\b|\bkakasa\b|\bprn\b|\bursb\b|\bbwims\b|\bugx\b|\bshillings?\b",
     re.IGNORECASE,
 )
 

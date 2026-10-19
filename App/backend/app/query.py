@@ -1352,7 +1352,7 @@ _AND_QUESTION_RE = re.compile(
     re.I,
 )
 _ENUM_PREFIX_RE = re.compile(
-    r"^\s*(?:\(\d+\)|\([a-d]\)|\d+[.)]|[a-d]\))\s*",
+    r"^\s*(?:\(\d+\)|\([a-d]\)|\d{1,2}[.)](?=\s)|[a-d]\)(?=\s))\s*",
     re.I,
 )
 
@@ -1367,9 +1367,9 @@ _SECTOR_QUERY_RE = re.compile(
     r"hotel(?:s)?|accom+odation\s+sector|tourism|tourist|hospitality|lodge(?:s)?|guest\s*house|"
     r"mining|mineral(?:s)?|quarry|quarrying|gold|cobalt|limestone|"
     r"petroleum|oil\s+and\s+gas|upstream|midstream|pipeline|"
-    r"construction\s+(?:sector|company|business|industry)|building\s+contractor(?:s)?|civil\s+works|"
+    r"construction|building\s+contractor(?:s)?|civil\s+works|"
     r"ngo(?:s)?|non[-\s]?governmental|charity|charities|religious|church|mosque|"
-    r"transport(?:ation)?\s+sector|passenger\s+service|psv|goods\s+vehicle|haulage|freight|matatu|bus\s+operator|taxi\s+operator|advance\s+(?:income\s+)?tax\s+on\s+(?:the\s+)?transport|"
+    r"transport(?:ation)?|passenger\s+service|psv|goods\s+vehicle|haulage|freight|matatu|bus\s+operator|taxi\s+operator|"
     r"fishing|fish\s+processing|aquaculture|"
     r"manufactur(?:ing|er|ers)|factory|factories|pharmaceutical|"
     r"(?:wholesale|retail)\s+(?:sector|trade|business|shop)|wholesaler(?:s)?|retailer(?:s)?|supermarket\s+business|"

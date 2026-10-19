@@ -612,6 +612,10 @@ def apply_preference_boost(
                 boost += TOPIC_SECTION_BOOST
 
         if not boost:
+            if "_raw_score_norm" in hit or "_raw_score_rrf" in hit:
+                hit["score_norm"] = hit.get("_raw_score_norm")
+                hit["score_rrf"] = hit.get("_raw_score_rrf")
+                any_adjusted = True
             continue
         any_adjusted = True
         if "_raw_score_norm" not in hit:
@@ -1876,14 +1880,6 @@ class HybridRetriever:
                     )
                 if en_hits:
                     boosted_en = apply_preference_boost(en_hits, plan_en["prefer"])
-                    if demote_sector_en:
-                        non_sec_en = [
-                            h
-                            for h in boosted_en
-                            if not is_sector_guide_source(str(h.get("source") or ""))
-                        ]
-                        if non_sec_en:
-                            return non_sec_en[:top_k]
                     return boosted_en[:top_k]
 
         plan = plan_retrieval(query, history=history)
@@ -1916,15 +1912,7 @@ class HybridRetriever:
                 subject=subject,
                 locale=locale,
             )
-        hits = apply_preference_boost(hits, plan["prefer"])
-        if demote_sector and hits:
-            non_sector = [h for h in hits if not is_sector_guide_source(str(h.get("source") or ""))]
-            if non_sector:
-                hits = non_sector[:top_k]
-            else:
-                hits = hits[:top_k]
-        else:
-            hits = hits[:top_k]
+        hits = apply_preference_boost(hits, plan["prefer"])[:top_k]
         return self._merge_translated_leg(
             query,
             hits,
@@ -1992,14 +1980,7 @@ class HybridRetriever:
             merged = en_hits[:fetch_top_k_en]
         else:
             merged = merge_retrieval_hits([en_hits, hits], top_k=fetch_top_k_en)
-        merged = apply_preference_boost(merged, en_prefer)
-        if demote_sector_en and merged:
-            non_sec = [
-                h for h in merged if not is_sector_guide_source(str(h.get("source") or ""))
-            ]
-            merged = non_sec[:top_k] if non_sec else merged[:top_k]
-        else:
-            merged = merged[:top_k]
+        merged = apply_preference_boost(merged, en_prefer)[:top_k]
 
         def _best(rows: list[dict[str, Any]]) -> float:
             vals = [r for h in rows if (r := hit_relevance(h)) is not None]

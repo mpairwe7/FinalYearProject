@@ -589,13 +589,9 @@ def _score_single_figure(
             if abs(ev - expected_val) > 1.0:
                 companion_values.append(ev)
 
-    # Also include pairwise sums/differences and 12x, /12, /10, /4, /2 equivalents of input + companion + expected values
-    companion_values.append(20_000.0)  # 1 statutory currency point in Uganda = UGX 20,000
-    base_comp = [v for v in [*input_values, *companion_values, expected_val] if abs(v) >= 1000.0]
-    for a in list(base_comp):
-        for cand_v in (a * 12.0, a / 12.0, a / 10.0, a / 4.0, a / 2.0):
-            if cand_v >= 1000.0 and abs(cand_v - expected_val) > 1.0:
-                companion_values.append(cand_v)
+    # Only inputs and tool-derived values are legitimate companions; never
+    # derive scalings of expected_val, which would excuse wrong answers.
+    base_comp = [v for v in input_values if abs(v) >= 1000.0]
     for i_idx, a in enumerate(base_comp):
         for b in base_comp[i_idx + 1 :]:
             for cand_v in (a + b, abs(a - b)):
@@ -827,7 +823,7 @@ def score_turn(
         try:
             from app.scenario_planner import build_verified_facts
 
-            vf_text = build_verified_facts(scenario_context)
+            vf_text = build_verified_facts(scenario_context, tool_caller=runner)
             for pa in parse_amounts_from_clause(vf_text):
                 if pa.is_money and pa.value >= 1000.0:
                     context_companions.append(pa.value)
@@ -871,12 +867,11 @@ def score_turn(
 
         def _alt_in_reply(alt_val: Any) -> bool:
             low_alt = str(alt_val).lower()
-            if low_alt in lower_reply:
-                return True
-            m_pct = re.match(r"^(\d+)%$", low_alt)
+            m_pct = re.match(r"^(\d+(?:\.\d+)?)%$", low_alt)
             if m_pct:
-                return bool(re.search(rf"\b{m_pct.group(1)}(?:\.0+)?%", lower_reply))
-            return False
+                num = re.escape(m_pct.group(1))
+                return bool(re.search(rf"(?<![\d.]){num}(?:\.0+)?\s?%", lower_reply))
+            return low_alt in lower_reply
 
         for group in must_include:
             alternatives = group.get("any") if isinstance(group, dict) else [str(group)]

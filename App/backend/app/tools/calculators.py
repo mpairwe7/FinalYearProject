@@ -2175,7 +2175,6 @@ class VATInputClaimEligibilityTool(CalculatorTool):
             claimable = Decimal(0)
             reason = (
                 f"Input VAT of {_ugx(vat_amt)} ({vat_rate * 100:.0f}% on {_ugx(net)}) is NOT claimable "
-                f"(you cannot claim the {_ugx(vat_amt)} input VAT; state {_ugx(vat_amt)} explicitly) "
                 "because a manual paper invoice does not qualify — a valid EFRIS e-invoice/e-receipt "
                 "is mandatory to claim input VAT credit."
             )

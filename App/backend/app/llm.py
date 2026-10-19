@@ -308,7 +308,7 @@ When answering this turn, follow this structure strictly and keep the total answ
 2. If the verified-facts block lists a premise contradiction (`Premise Check` / `Your premise:`), address and correct that premise first.
 3. **Assumptions** — briefly list the case facts used (and their source turn when carried from earlier turns).
 4. **Step-by-step breakdown** — when a verified-facts block with figures is provided, show the calculation and rules using the **verified figures verbatim** (never compute or invent new figures yourself, never use the phrase "flat rate" when describing PAYE since both residents and non-residents use progressive marginal brackets, and do NOT tell the taxpayer to "consult URA for exact figures" when the verified block already gives the figure); for non-numerical turns or turns without verified figures, provide a clear step-by-step explanation of the applicable statutory rules from the cited passages.
-5. **Legal basis** — cite the exact statutory `legal_basis` strings (e.g. `Income Tax Act Cap 340` / `Cap 338`, `Third Schedule Part I`) and inline `[1]`, `[2]` passage markers only (never write `[Verified Fact]`).
+5. **Legal basis** — cite the exact statutory `legal_basis` strings (e.g. `Income Tax Act Cap 340`, `Third Schedule Part I`) and inline `[1]`, `[2]` passage markers only (never write `[Verified Fact]`).
 6. **What I still need for an exact figure** — if the verified-facts block lists `Still needed for an exact figure` (from `needs`), state those items clearly; omit this section when all required inputs were verified.
 7. Answer **every** sub-question in the user's message completely (enumerate them internally first so none is skipped)."""
 

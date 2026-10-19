@@ -1031,9 +1031,14 @@ def build_verified_facts(
     contradictions = check_fact_contradictions(eff_facts, tool_results)
     contradiction_lines = [f"- {c.format_bullet()}" for c in contradictions]
 
-    if re.search(r"\b(non[-\s]?business|personal\s+.*\bland\b|private\s+.*\bland\b)\b", text, re.IGNORECASE):
+    _low_text = text.lower()
+    if (
+        any(w in _low_text for w in ("personal", "private", "non-business", "non business"))
+        and re.search(r"\bland\b", _low_text)
+        and any(w in _low_text for w in ("sold", "sell", "selling", "dispos"))
+    ):
         bullet_lines.append(
-            "- Individual Non-Business Land Sale Rule: Under the Income Tax Act (Cap 338), s.21(1)(k), s.50, and s.118B, "
+            "- Individual Non-Business Land Sale Rule: Under the Income Tax Act (Cap 340), s.21(1)(k), s.50, and s.118B, "
             "capital gains tax applies only to the disposal of a business asset; a personal non-business piece of land sold "
             "by an individual is exempt from Capital Gains Tax (not a business asset), and the 6% withholding tax under s.118B "
             "applies to commercial/business asset transactions rather than a purely personal non-business land sale."
