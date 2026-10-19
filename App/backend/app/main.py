@@ -5154,6 +5154,7 @@ def me_withdraw_consent(
 def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
     """UDPA 2019 data-portability export — identity, profile, consents, chat
     history (+ escalation tickets), and personalization memory facts."""
+    from .case_facts import export_user_case_facts
     from .memory.service import get_memory_service
 
     row = db.upsert_user(
@@ -5172,6 +5173,9 @@ def me_export(ctx: AuthContext = Depends(require_user)) -> dict:
     data["episodic_memory"] = memory_export["episodic"]
     data["working_memory"] = memory_export["working"]
     data["documents"] = documents.export_user_documents(ctx.user.user_id)
+    data["case_facts"] = export_user_case_facts(
+        ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
     return data
 
 
@@ -5189,6 +5193,7 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
         email=ctx.user.email,
         role=ctx.role,
     )
+    from .case_facts import forget_user_case_facts
     from .memory.service import get_memory_service
 
     counts = db.delete_user_cascade(
@@ -5200,6 +5205,9 @@ def me_forget(ctx: AuthContext = Depends(require_user)) -> dict:
         ).values()
     )
     counts["documents"] = sum(documents.forget_user_documents(ctx.user.user_id).values())
+    counts["case_facts"] = forget_user_case_facts(
+        ctx.user.user_id, tenant_id=ctx.tenant_id or "default"
+    )
     return {"deleted": counts, "external_id": ctx.user.user_id}
 
 

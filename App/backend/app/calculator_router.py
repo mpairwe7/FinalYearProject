@@ -549,9 +549,15 @@ def recall_calculation(conversation_id: str) -> dict[str, Any] | None:
 
 
 def clear_calculation(conversation_id: str) -> None:
-    """Drop a remembered calculator. Tests use this; a new plan overwrites it."""
+    """Drop a remembered calculator and conversation CaseFacts. Tests use this; a new plan overwrites it."""
     with _calc_lock:
         _calc_memory.pop(conversation_id, None)
+    try:
+        from .case_facts import clear_case_facts
+
+        clear_case_facts(conversation_id)
+    except Exception:
+        pass
     store = _redis_store()
     if store is None:
         return
