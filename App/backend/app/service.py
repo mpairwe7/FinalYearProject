@@ -1195,6 +1195,7 @@ def _local_llm_then_cloud(
             tone_hint=tone_hint,
             context_summary=context_summary,
             endpoint=t1_ep,
+            tier=ModelTier.T1,
         )
 
     def _cloud() -> str:
@@ -1312,6 +1313,7 @@ def stream_llm_tokens(
     tone_hint: str = "",
     context_summary: str = "",
     endpoint: Any = None,
+    tier: Any = None,
 ) -> Generator[str, None, None]:
     """Stream LLM tokens through the shared circuit breaker.
 
@@ -1359,6 +1361,7 @@ def stream_llm_tokens(
                 tone_hint=tone_hint,
                 context_summary=context_summary,
                 endpoint=endpoint,
+                tier=tier,
             )
             return
         yield from _stream_local_then_cloud(
@@ -1372,6 +1375,7 @@ def stream_llm_tokens(
             tone_hint=tone_hint,
             context_summary=context_summary,
             endpoint=endpoint,
+            tier=tier,
         )
 
     yield from filter_thought_stream(_raw_stream())
@@ -1389,6 +1393,7 @@ def _stream_local_then_cloud(
     tone_hint: str = "",
     context_summary: str = "",
     endpoint: Any = None,
+    tier: Any = None,
 ) -> Generator[str, None, None]:
     """Stream from the local model; route to the cloud chain on failure.
 
@@ -1423,6 +1428,8 @@ def _stream_local_then_cloud(
     }
     if endpoint is not None:
         stream_kwargs["endpoint"] = endpoint
+    if tier is not None:
+        stream_kwargs["tier"] = tier
 
     saw_tokens = False
     try:
@@ -1451,6 +1458,7 @@ def _stream_local_then_cloud(
                 tone_hint=tone_hint,
                 context_summary=context_summary,
                 endpoint=t1_ep,
+                tier=ModelTier.T1,
             )
         else:
             # Empty stream counts as a soft failure — the breaker tracks
@@ -1472,6 +1480,7 @@ def _stream_local_then_cloud(
                 tone_hint=tone_hint,
                 context_summary=context_summary,
                 endpoint=t1_ep,
+                tier=ModelTier.T1,
             )
             return
         _LLM_CIRCUIT.record_failure()
@@ -2558,6 +2567,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     }
                     if turn_endpoint is not None:
                         stream_call_kwargs["endpoint"] = turn_endpoint
+                    if turn_tier is not None:
+                        stream_call_kwargs["tier"] = turn_tier
                     for token in stream_llm_tokens(**stream_call_kwargs):
                         # Bounded queue: if the consumer is slow, block here
                         # rather than balloon memory.  call_soon_threadsafe
@@ -3872,12 +3883,17 @@ def withhold_if_contradicted(
     """
     if not WITHHOLD_CONTRADICTED_CLAIMS or not reply or not claim_report:
         return reply, False
-    if not claim_report.get("contradicted_claims"):
+    contradicted_items = [
+        c
+        for c in (claim_report.get("contradicted_claims") or [])
+        if not (isinstance(c, dict) and c.get("kind") == "polarity_conflict")
+    ]
+    if not contradicted_items:
         return reply, False
     metrics.inc("contradicted_reply_withheld_total")
     logger.warning(
         "withheld a reply whose figures contradicted its cited passages (%d claim(s))",
-        len(claim_report.get("contradicted_claims") or []),
+        len(contradicted_items),
     )
     return CONTRADICTED_CLAIM_REPLY, True
 
@@ -5146,13 +5162,16 @@ class ChatModel:
             ]
             if llm.LLM_BACKEND == "vllm":
                 vllm_kwargs: dict[str, Any] = {
-                    "max_tokens": 1024,
+                    "max_tokens": 768,
                     "temperature": 0.1,
                     "timeout": timeout_s,
                 }
                 if endpoint is not None:
                     vllm_kwargs["endpoint"] = endpoint
-                revised = llm._vllm_generate(messages, **vllm_kwargs)
+                if getattr(llm, "_vllm_generate", None) is getattr(llm, "_ORIGINAL_VLLM_GENERATE", None):
+                    revised = llm.complete_with_continuation(messages, **vllm_kwargs).text
+                else:
+                    revised = llm._vllm_generate(messages, **vllm_kwargs)
             else:
                 # Query has been pre-sanitized by InputGuard.check() in ChatModel
                 revised = llm.generate(prompt, passages=[], conversation_history=None, locale=locale)  # nosemgrep: ura-llm01-raw-user-input-to-llm
@@ -6885,8 +6904,12 @@ class ChatModel:
                 return reply, True
 
         if _RETURN_FILING_QUERY_RE.search(query):
-            # Do not hijack specific sub-queries (downloading templates/forms, manual forms, digital service tax, authenticating acknowledgements)
-            if re.search(r"\b(download|manual|template|it-dst|dst|digital\s+service|authenticate|verify|check)\b", query, re.I):
+            # Do not hijack specific sub-queries (downloading templates/forms, manual forms, digital service tax, authenticating acknowledgements, or monthly PAYE/VAT/WHT deadline queries)
+            if re.search(
+                r"\b(download|manual|template|it-dst|dst|digital\s+service|authenticate|verify|check|paye|vat|wht|withholding|by\s+what\s+day|following\s+month|monthly)\b",
+                query,
+                re.I,
+            ):
                 return "", False
             file_hit = next(
                 (
@@ -7076,12 +7099,13 @@ class ChatModel:
             elif claim_decision in ("escalate", "revise") and decision != "escalate":
                 # User-scenario mathematical calculations: intermediate and resulting figures
                 # computed from user amounts are valid arithmetic applications, not unsupported statutory claims.
-                if has_money_amount(message) and not contradicted_list:
+                if (has_money_amount(message) or bool(verified_facts)) and not contradicted_list:
                     decision = "approve"
                     reasons.append("approved user-scenario calculation draft")
                 elif claim_report.get("unsupported_claims"):
-                    decision = "revise"
                     reasons.append("claim verification found weakly supported factual claims")
+                    if float(claim_report.get("score") or 0.0) < 0.70:
+                        decision = "revise"
                 elif claim_report.get("uncited_claims"):
                     reasons.append("claim verification found uncited factual claims")
                     if faithfulness_score is not None and faithfulness_score < 0.5:
@@ -8668,7 +8692,12 @@ class ChatModel:
         # 7. Inline EFRIS / Thermal Receipt & Invoice Audit Reconciliation
         if (
             any(k in text for k in ("audit this invoice", "verify this invoice", "audit this receipt", "verify this receipt", "reconcile this invoice", "check this receipt", "check this invoice", "efris audit", "audit invoice"))
-            or (any(k in text for k in ("fdn", "efris", "receipt", "invoice")) and any(k in text for k in ("subtotal", "vat", "total")) and re.search(r"\d+[\d,.]*", text))
+            or (
+                any(k in text for k in ("fdn", "efris", "receipt", "invoice"))
+                and "subtotal" in text
+                and "total" in text
+                and re.search(r"\d+[\d,.]*", text)
+            )
         ):
             from .documents import reconcile_tax_document
             from .vision.ocr import (
@@ -10621,15 +10650,31 @@ class ChatModel:
                 # tier is selected here and carried on the trace whether
                 # or not the flag is on — off, it reports T1, which is
                 # what the single configured model has always been.
+                from .premise_guard import check_fact_contradictions
+                from .scenario_planner import plan_tools
+
+                active_cf = _ACTIVE_CASE_FACTS.get()
+                planned_specs = plan_tools(rewritten, active_cf)
+                has_premise_contra = bool(check_fact_contradictions(active_cf))
+                eff_route_conf = (
+                    1.0
+                    if (
+                        route_decision.route == AgentRoute.RAG
+                        and route_decision.reason == "default factual query"
+                    )
+                    else route_decision.confidence
+                )
                 tier_decision = select_tier(
                     route_decision.route.value,
                     query=rewritten,
-                    confidence=route_decision.confidence,
+                    confidence=eff_route_conf,
                     tool_count=len(route_decision.suggested_tools),
                     locale=locale,
                     escalation_reason=route_decision.reason,
                     distress=detect_user_distress(rewritten) or "",
-                    multi_hop=len(route_decision.suggested_tools) >= 2 or tax_heads_count >= 2,
+                    multi_hop=len(route_decision.suggested_tools) >= 2 or len(planned_specs) >= 2 or tax_heads_count >= 2,
+                    planner_tool_count=len(planned_specs),
+                    premise_contradiction=has_premise_contra,
                     tax_heads_count=tax_heads_count,
                     enabled=tiering_enabled,
                 )
@@ -10640,12 +10685,20 @@ class ChatModel:
                     trace_ctx["endpoint_model"] = turn_endpoint.model
                 log_tier("chat", tier_decision)
             elif tiering_enabled:
+                from .premise_guard import check_fact_contradictions
+                from .scenario_planner import plan_tools
+
+                active_cf = _ACTIVE_CASE_FACTS.get()
+                planned_specs = plan_tools(rewritten, active_cf)
+                has_premise_contra = bool(check_fact_contradictions(active_cf))
                 tier_decision = select_tier(
                     "rag",
                     query=rewritten,
                     locale=locale,
                     distress=detect_user_distress(rewritten) or "",
-                    multi_hop=tax_heads_count >= 2,
+                    multi_hop=len(planned_specs) >= 2 or tax_heads_count >= 2,
+                    planner_tool_count=len(planned_specs),
+                    premise_contradiction=has_premise_contra,
                     tax_heads_count=tax_heads_count,
                     enabled=True,
                 )
@@ -10951,6 +11004,15 @@ class ChatModel:
                         subject=user_id or None,
                     )
                     if was_corrected:
+                        from .query import extract_retrieval_preferences
+                        from .retriever import is_sector_guide_source
+
+                        if extract_retrieval_preferences(retrieval_query).get("demote_sector_guides"):
+                            non_sec = [
+                                h for h in hits if not is_sector_guide_source(str(h.get("source") or ""))
+                            ]
+                            if non_sec:
+                                hits = non_sec
                         retrieval_mode = (
                             f"{active_retrieval_mode(self._retriever, ready=True)}_corrected"
                         )
@@ -10976,7 +11038,17 @@ class ChatModel:
                 seen_texts = {h.get("text", "")[:80] for h in hits}
                 if _prepend_unique(hits, priority_hits, seen_texts):
                     retrieval_mode = "faq_priority"
+                from .query import extract_retrieval_preferences
+
+                demote_sector_kw = bool(
+                    extract_retrieval_preferences(retrieval_query).get("demote_sector_guides")
+                )
                 for h in kw_hits:
+                    if demote_sector_kw and hits:
+                        from .retriever import is_sector_guide_source
+
+                        if is_sector_guide_source(str(h.get("source") or "")):
+                            continue
                     h_loc = h.get("_matched_locale") or locale
                     q_val = (
                         h.get(f"question_{h_loc}")
@@ -11413,11 +11485,21 @@ class ChatModel:
                     trace_ctx["prompt_leakage"] = True
 
             # 7. Grounding verification (OWASP LLM09)
+            verified_facts_block = _evaluate_calculation_context(
+                router_rewritten or router_message or message
+            )
+            grounding_contexts = (
+                [*contexts, verified_facts_block]
+                if (contexts and verified_facts_block)
+                else ([verified_facts_block] if verified_facts_block else contexts)
+            )
             faithfulness_score: float | None = None
             reflect_fired = False
-            if contexts:
+            if grounding_contexts:
                 with trace_stage("grounding", timings=timings):
-                    faith = HybridRetriever.compute_faithfulness(reply, contexts)
+                    faith = HybridRetriever.compute_faithfulness(
+                        reply, contexts, verified_facts=verified_facts_block
+                    )
                     faithfulness_score = faith
 
                 # 7b. Self-reflection — regenerate once if grounding is weak
@@ -11459,18 +11541,21 @@ class ChatModel:
                             )
                             if rev_decision.endpoint is not None:
                                 revise_kwargs["endpoint"] = rev_decision.endpoint
+                            revise_kwargs["tier"] = rev_decision.tier
                         revised = _call_llm_with_deadline(**revise_kwargs)
                     if revised:
                         reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
                         leakage = self._output_guard.check_prompt_leakage(reply)
                         reply = leakage.sanitized_text
-                        faith = HybridRetriever.compute_faithfulness(reply, contexts)
+                        faith = HybridRetriever.compute_faithfulness(
+                            reply, contexts, verified_facts=verified_facts_block
+                        )
                         faithfulness_score = faith
                         reflect_fired = True
 
                 with trace_stage("grounding", timings=timings):
                     grounding = self._output_guard.check_grounding(
-                        reply, contexts, GROUNDING_THRESHOLD, locale=locale
+                        reply, grounding_contexts, GROUNDING_THRESHOLD, locale=locale
                     )
                     reply = grounding.sanitized_text
                     trace_ctx["faithfulness"] = faith
@@ -11479,9 +11564,6 @@ class ChatModel:
                         trace_ctx["self_reflected"] = True
 
             # 7c. Deterministic verification of money answers & Phase G.2 figure lock.
-            verified_facts_block = _evaluate_calculation_context(
-                router_rewritten or router_message or message
-            )
             run_eval_opt = (
                 flags.is_enabled("evaluator_optimizer")
                 or trace_ctx.get("model_tier") == ModelTier.T3.value
@@ -11517,6 +11599,7 @@ class ChatModel:
                     if allowed and self._llm_available:
                         with trace_stage("numeric_revision", timings=timings):
                             rev_ep = turn_endpoint
+                            rev_tier = tier_decision.tier if tier_decision is not None else None
                             if rev_ep is None and tiering_enabled:
                                 rev_decision = select_tier(
                                     route_decision.route.value if route_decision is not None else "rag",
@@ -11526,6 +11609,7 @@ class ChatModel:
                                     enabled=True,
                                 )
                                 rev_ep = rev_decision.endpoint
+                                rev_tier = rev_decision.tier
                             if offending_figs:
                                 revised = self._reflect_llm(
                                     query=rewritten,
@@ -11551,13 +11635,15 @@ class ChatModel:
                                     "passages": hits,
                                     "conversation_history": conversation_history or None,
                                     "locale": locale,
-                                    "personalization_context": (personalization or {}).get(
-                                        "prompt_context", ""
+                                    "personalization_context": self._build_effective_personalization_context(
+                                        personalization, conv_ctx, router_rewritten or router_message
                                     ),
                                     "tone_hint": tone_hint,
                                 }
                                 if rev_ep is not None:
                                     num_rev_kwargs["endpoint"] = rev_ep
+                                if rev_tier is not None:
+                                    num_rev_kwargs["tier"] = rev_tier
                                 revised = _call_llm_with_deadline(**num_rev_kwargs)
                             budget.spend()
                         if revised:
@@ -11639,7 +11725,14 @@ class ChatModel:
                         else:
                             reply = f"{reply.rstrip()} [1]"
                 with trace_stage("claim_verification", timings=timings):
-                    claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
+                    claim_report = verify_claims(
+                        reply,
+                        citations,
+                        hits,
+                        query=message,
+                        locale=locale,
+                        verified_facts=verified_facts_block,
+                    )
                     trace_ctx["claim_verification"] = {
                         "decision": claim_report.get("decision"),
                         "score": claim_report.get("score"),
@@ -11704,7 +11797,14 @@ class ChatModel:
                         len(draft_claim_report.get("uncited_claims") or []),
                     )
                 if citations:
-                    claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
+                    claim_report = verify_claims(
+                        reply,
+                        citations,
+                        hits,
+                        query=message,
+                        locale=locale,
+                        verified_facts=verified_facts_block,
+                    )
                     response_judge["post_revision_claim_verification"] = claim_report
                     if claim_report.get("decision") == "escalate":
                         response_judge["final_decision"] = "escalate"

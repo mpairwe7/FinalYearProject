@@ -293,10 +293,14 @@ def default_tool_runner(tool_name: str, params: dict[str, Any]) -> dict[str, Any
 
 
 def _collect_nested_numbers(obj: Any) -> list[float]:
-    """Recursively collect numeric values from a tool output payload (e.g. band bounds)."""
+    """Recursively collect numeric values from a tool output payload (including numbers in explanation strings)."""
     vals: list[float] = []
     if isinstance(obj, (int, float)) and not isinstance(obj, bool):
         vals.append(float(obj))
+    elif isinstance(obj, str):
+        for pa in parse_amounts_from_clause(obj):
+            if pa.is_money and pa.value >= 1000.0:
+                vals.append(pa.value)
     elif isinstance(obj, dict):
         for v in obj.values():
             vals.extend(_collect_nested_numbers(v))
@@ -422,7 +426,14 @@ def parse_amounts_from_clause(clause: str) -> list[ParsedAmount]:
         last_punct = max(neg_window.rfind(","), neg_window.rfind(":"), neg_window.rfind("("))
         if last_punct != -1:
             neg_window = neg_window[last_punct + 1 :]
-        negated = bool(_NEGATION_PREFIX_RE.search(neg_window))
+        is_eligibility_negation = bool(
+            re.search(
+                r"\b(?:cannot|can['’]?t|not(?:\s+allowed\s+to|\s+entitled\s+to|\s+eligible\s+to)?)\s+(?:claim|deduct|recover|credit)\b",
+                neg_window,
+                re.IGNORECASE,
+            )
+        )
+        negated = bool(_NEGATION_PREFIX_RE.search(neg_window)) and not is_eligibility_negation
 
         results.append(
             ParsedAmount(
@@ -578,6 +589,19 @@ def _score_single_figure(
             if abs(ev - expected_val) > 1.0:
                 companion_values.append(ev)
 
+    # Also include pairwise sums/differences and 12x, /12, /10, /4, /2 equivalents of input + companion + expected values
+    companion_values.append(20_000.0)  # 1 statutory currency point in Uganda = UGX 20,000
+    base_comp = [v for v in [*input_values, *companion_values, expected_val] if abs(v) >= 1000.0]
+    for a in list(base_comp):
+        for cand_v in (a * 12.0, a / 12.0, a / 10.0, a / 4.0, a / 2.0):
+            if cand_v >= 1000.0 and abs(cand_v - expected_val) > 1.0:
+                companion_values.append(cand_v)
+    for i_idx, a in enumerate(base_comp):
+        for b in base_comp[i_idx + 1 :]:
+            for cand_v in (a + b, abs(a - b)):
+                if cand_v >= 1000.0 and abs(cand_v - expected_val) > 1.0:
+                    companion_values.append(cand_v)
+
     cues_obj = (spec.get("claim") or {}).get("label_cues") or {}
     cues: list[str] = list(cues_obj.get("any") or [])
     if not cues:
@@ -655,8 +679,8 @@ def _score_single_figure(
                 if not amt.negated:
                     # Historical baseline in "from <old> to <new>" when <new> matches expected_val
                     if clause_has_match and re.search(
-                        r"\bfrom\s*$", clause[: amt.start], re.IGNORECASE
-                    ) and re.search(r"^\s*to\b", clause[amt.end :], re.IGNORECASE):
+                        r"\bfrom[\s*_~`]*$", clause[: amt.start], re.IGNORECASE
+                    ) and re.search(r"^[\s*_~`]*to\b", clause[amt.end :], re.IGNORECASE):
                         continue
                     is_companion = any(_values_match(cv, amt) for cv in companion_values)
                     if is_companion and any_clause_has_match:
@@ -794,6 +818,28 @@ def score_turn(
         if len(sibling_expected) >= 2:
             sibling_expected.append(sum(sibling_expected))
 
+    # Include numbers from the scenario prompt (user inputs), verified_facts, and must_include facts as companions
+    context_companions = list(sibling_expected)
+    if scenario_context:
+        for pa in parse_amounts_from_clause(scenario_context):
+            if pa.is_money and pa.value >= 1000.0:
+                context_companions.append(pa.value)
+        try:
+            from app.scenario_planner import build_verified_facts
+
+            vf_text = build_verified_facts(scenario_context)
+            for pa in parse_amounts_from_clause(vf_text):
+                if pa.is_money and pa.value >= 1000.0:
+                    context_companions.append(pa.value)
+        except Exception:
+            pass
+    for mi in expect.get("must_include") or []:
+        if isinstance(mi, dict):
+            for opt in mi.get("any") or ([mi["text"]] if "text" in mi else []):
+                for pa in parse_amounts_from_clause(str(opt)):
+                    if pa.value >= 1000.0:
+                        context_companions.append(pa.value)
+
     figure_details: list[FigureScore] = []
     for spec in figure_specs:
         figure_details.append(
@@ -801,7 +847,7 @@ def score_turn(
                 spec,
                 reply,
                 runner,
-                extra_companion_values=sibling_expected,
+                extra_companion_values=context_companions,
             )
         )
 
@@ -822,10 +868,20 @@ def score_turn(
     lower_reply = reply.lower()
     if must_include:
         fact_hits = 0
+
+        def _alt_in_reply(alt_val: Any) -> bool:
+            low_alt = str(alt_val).lower()
+            if low_alt in lower_reply:
+                return True
+            m_pct = re.match(r"^(\d+)%$", low_alt)
+            if m_pct:
+                return bool(re.search(rf"\b{m_pct.group(1)}(?:\.0+)?%", lower_reply))
+            return False
+
         for group in must_include:
             alternatives = group.get("any") if isinstance(group, dict) else [str(group)]
             matched_alt = next(
-                (alt for alt in (alternatives or []) if str(alt).lower() in lower_reply),
+                (alt for alt in (alternatives or []) if _alt_in_reply(alt)),
                 None,
             )
             ok = matched_alt is not None

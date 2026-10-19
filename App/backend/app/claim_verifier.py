@@ -147,15 +147,15 @@ def _split_claims(reply: str) -> list[str]:
     claims: list[str] = []
     # Normalize glued citation markers like otherL1] or word[1] -> word [1]
     norm_reply = re.sub(r"(?<=[a-zA-Z])(?:L|\[)(\d+)\]", r" [\1]", reply or "")
-    # Protect decimal points before sentence splitting.  FAQ answers commonly
-    # contain figures such as ``37.5m``; treating that period as a sentence
-    # boundary creates two truncated, apparently unsupported claims.
+    # Protect decimal points and domain/abbreviation dots (e.g. ura.go.ug, s.12, p.a.)
+    # before sentence splitting so URLs and statute refs are not shattered into fragments.
     text = re.sub(r"(?<=\d)\.(?=\d)", "<decimal_point>", norm_reply)
+    text = re.sub(r"(?<=[a-zA-Z])\.(?=[a-zA-Z0-9])", "<dot>", text)
     text = re.sub(r"([.!?])\s+(\[\d{1,3}\])", r" \2\1", text)
     for raw in _SENTENCE_RE.findall(text):
         sentence = " ".join(raw.strip(" -\t\r\n").split())
-        sentence = sentence.replace("<decimal_point>", ".")
-        if len(sentence) < 10:
+        sentence = sentence.replace("<decimal_point>", ".").replace("<dot>", ".")
+        if len(sentence) < 10 or sentence.lstrip().startswith("#"):
             continue
         lowered = sentence.lower()
         if any(hint in lowered for hint in _NON_CLAIM_HINTS):
@@ -274,15 +274,26 @@ def verify_claims(
 
         claim_numbers = _numbers(clean_claim)
         context_numbers = _numbers(context_text)
+        verified_numbers = _numbers(verified_facts) if verified_facts else set()
         query_numbers = _numbers(query) if query else set()
         model_introduced_numbers = claim_numbers - query_numbers
-        if model_introduced_numbers and not model_introduced_numbers <= context_numbers:
+        if model_introduced_numbers and not model_introduced_numbers <= (context_numbers | verified_numbers):
             overlap = min(overlap, 0.25)
 
         # P1-8: a claim whose percentage conflicts with the cited context is a
         # hard contradiction (e.g. answer "20%" vs source "18%") — force it
         # unsupported so the response judge escalates rather than disclaiming.
-        contradicted = is_contradicted(clean_claim, contexts, user_query=query)
+        # When every number in the claim is backed by deterministic verified_facts,
+        # do not let a stale passage (e.g. FY2023-24 235,000 vs FY2026-27 335,000)
+        # falsely flag the verified figure as contradicted.
+        backed_by_verified_facts = bool(verified_facts) or bool(
+            verified_numbers and claim_numbers and claim_numbers <= (verified_numbers | query_numbers)
+        )
+        contradicted = (
+            False
+            if backed_by_verified_facts
+            else is_contradicted(clean_claim, contexts, user_query=query)
+        )
         if contradicted:
             saw_numeric_contradiction = True
             overlap = 0.0

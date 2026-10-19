@@ -26,8 +26,9 @@ User Query
   │
   ├─► Stage 0b2: Retrieval plan (query.py → plan_retrieval)
   │     ├── extract_retrieval_filters() — hard FY filter only on explicit FY2024-25
-  │     ├── extract_retrieval_preferences() — soft tax-type / current-FY boost
-  │     └── decompose_query() — multi-intent split  [FLAG_QUERY_DECOMPOSITION]
+  │     ├── extract_retrieval_preferences() — soft tax-type / current-FY boost,
+  │     │     sector-guide demotion (`demote_sector_guides`), and topic-section hints (`preferred_sections`)
+  │     └── decompose_query() — multi-intent split (up to 4 sub-queries, stripping enumeration prefixes)  [FLAG_QUERY_DECOMPOSITION]
   │
   ├─► Stage 0c: Answer language (language_state.py) — conversation state
   │     ├── typed request > picked language (locale_explicit) > stored thread
@@ -129,6 +130,7 @@ User Query
 | Sparse | BM25, encoded asymmetrically: documents carry term saturation, queries carry IDF, and their Qdrant dot product is the BM25 score. `bm25_state.json` stamps `encoding_version`; a state from an older index is queried its own way so an un-rebuilt collection keeps its ranking. |
 | Fusion | Distribution-Based Score Fusion (DBSF) via Qdrant query API by default (`HYBRID_FUSION=dbsf`, G127), outperforming RRF k=2 by +6 pts Luganda and +4 pts Swahili; falls back to RRF if configured. Graph leg continues to fuse via `rrf_fuse_ranked_lists` with `RRF_K=60`. |
 | Reranker | `mixedbread-ai/mxbai-rerank-base-v2` (500M, BEIR 55.6, Apache-2.0). Governed by `RERANK_ENABLED=true` and dynamically by `flags.is_enabled("reranker")`. GPU compose overlay (`docker-compose.local-sunflower.yml`) restores dense embeddings and reranking on GPU (`cuda:0`, G126). Outputs clean single-sigmoid probabilities (G129). |
+| Preference Boost (`apply_preference_boost`) | Idempotent post-retrieval soft ranking: boosts current FY (`+0.08`) and matched tax head / topic sections (`TOPIC_SECTION_BOOST = +0.05`, word-boundary matched via `TOPIC_SECTION_HINTS`) while soft-demoting sector-specific guides (`SECTOR_GUIDE_DEMOTION = -0.06`, `SECTOR_GUIDE_SOURCE_PATTERNS`) unless the query explicitly names a sector (`_SECTOR_QUERY_RE`). |
 | Circuit breaker | CLOSED → OPEN (on 3 failures) → HALF_OPEN (after backoff) → CLOSED (on success). Exponential backoff 10s→300s. |
 | Fallback | Keyword-overlap / BM25 search on in-memory FAQ index with domain phrase normalisation, synonym expansion retry, and closed-class stopword filtering |
 
@@ -160,6 +162,7 @@ User Query
 - Respond in user's language (en, lg, sw, nyn, ach)
 - Refuse tax evasion, fraud, forgery requests regardless of framing
 - Include URA contact details for procedural questions
+- Inject `COMPLEX_ANSWER_CONTRACT` (7-part structured response contract with premise-contradiction correction, assumptions, verbatim tool-verified figures, statutory `legal_basis`, and missing-inputs disclosure) when a deterministic verified-facts block (`_split_verified_facts_from_personalization`) is present or when routed to `ModelTier.T3` (`_is_t3_endpoint`)
 
 **Generation modes:**
 - **Standard**: `generate()` — sync single-pass with `enable_thinking=False` (Qwen3 hybrid mode)

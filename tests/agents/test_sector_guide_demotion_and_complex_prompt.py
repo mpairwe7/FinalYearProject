@@ -23,6 +23,13 @@ def test_sector_guide_source_patterns_match_sector_pdfs_and_spare_handbook() -> 
     assert is_sector_guide_source("Aguide-To-Taxation-Of-The-Wholesale-And-Retail-Sector22-23-1.pdf")
     assert is_sector_guide_source("CONSTRUCTION-SECTOR-2022-23-1.pdf")
     assert is_sector_guide_source("GUIDE-TO-TAXATION-OF-GOVERNMENT-AGENCIES-2023-24.pdf")
+    assert is_sector_guide_source("TAXATION-OF-THE-REAL-ESTATE-SECTOR-FY-2024-25.pdf")
+    assert is_sector_guide_source("TAXATION-OF-THE-EDUCATION-SECTOR.pdf")
+    assert is_sector_guide_source("ura.go.ug-Advance-Tax-on-Transport-ENGLISH-2024-25.pdf")
+    assert is_sector_guide_source("ura_hotel_and_hospitality_sector_faqs.csv")
+    assert is_sector_guide_source("ura_agriculture_sector_faqs.csv")
+    assert is_sector_guide_source("ura_government_agencies_faqs.csv")
+    assert is_sector_guide_source("ura_advance_tax_transport_faqs.csv")
     assert not is_sector_guide_source("808977692-Taxation-Handbook-FY-2024-25-1.pdf")
     assert not is_sector_guide_source("ura_employment_income_faqs.csv")
     assert not is_sector_guide_source("Income-Tax-Amendment-Act-2025-FY2025-26.pdf")
@@ -47,6 +54,20 @@ def test_extract_retrieval_preferences_demotes_sector_guides_unless_sector_named
     # Explicit agriculture query -> demote_sector_guides is NOT set
     pref_agri = extract_retrieval_preferences("Are agricultural inputs exempt from VAT for farmers?")
     assert not pref_agri.get("demote_sector_guides")
+
+    # Lexical collision guard: general BIK "accommodation" or general WHT "contractor"
+    # must still demote sector guides rather than mistaking them for Hotel or Construction sector queries.
+    pref_bik_accom = extract_retrieval_preferences(
+        "An employee is given free accommodation by his employer. How is the benefit in kind taxed?"
+    )
+    assert pref_bik_accom.get("demote_sector_guides") is True
+
+    pref_wht_contractor = extract_retrieval_preferences(
+        "What is the withholding tax rate on payments to a resident contractor?"
+    )
+    assert pref_wht_contractor.get("demote_sector_guides") is True
+    assert "employment income" not in pref_wht_contractor.get("preferred_sections", [])
+    assert "withholding tax" in pref_wht_contractor.get("preferred_sections", [])
 
 
 def test_apply_preference_boost_demotes_hotel_guide_below_handbook_on_bik_query() -> None:
@@ -90,16 +111,76 @@ def test_decompose_query_splits_multi_issue_numbered_and_auxiliary_questions() -
     )
     parts = decompose_query(q)
     assert len(parts) == 3
+    # Leading enumeration prefixes must be stripped from decomposed sub-queries
+    assert not parts[0].startswith("(1)")
+    assert not parts[1].startswith("(2)")
+    assert not parts[2].startswith("(3)")
 
     # Also handles "1) ...? 2) ...?" format
     q_paren = "1) What is VAT? 2) How is it paid?"
     assert len(decompose_query(q_paren)) == 2
+
+    # Handles period-delimited imperative numbered items and 4-part (a)-(d) queries
+    q_four = (
+        "(a) State whether he is a tax resident. "
+        "(b) Calculate the housing benefit. "
+        "(c) Compute the monthly PAYE. "
+        "(d) Explain the filing deadline."
+    )
+    parts_four = decompose_query(q_four)
+    assert len(parts_four) == 4
+    assert parts_four[0].lower().startswith("state whether")
+    assert parts_four[3].lower().startswith("explain the filing")
+
+
+def test_apply_preference_boost_idempotent_and_fy_does_not_rescue_demoted_guide() -> None:
+    hits = [
+        {
+            "source": "A-guide-to-taxation-of-the-Hotel-and-Accomodation-Sector-2025-26.pdf",
+            "section": "Hotel PAYE",
+            "text": "Hotel employees PAYE.",
+            "fiscal_year": "FY2025-26",
+            "score_norm": 0.70,
+            "score_rrf": 0.22,
+        },
+        {
+            "source": "ura_employment_income_faqs.csv",
+            "section": "Employment Income",
+            "text": "PAYE rates for employment income.",
+            "score_norm": 0.65,
+            "score_rrf": 0.20,
+        },
+    ]
+    prefer = {
+        "fiscal_year": "FY2025-26",
+        "demote_sector_guides": True,
+        "preferred_sections": ["employment income", "ura_employment_income_faqs.csv"],
+    }
+    first_pass = apply_preference_boost(hits, prefer)
+    assert first_pass[0]["source"] == "ura_employment_income_faqs.csv"
+    norm_after_first = first_pass[0]["score_norm"]
+    demoted_after_first = first_pass[1]["score_norm"]
+    assert abs(demoted_after_first - (0.70 + SECTOR_GUIDE_DEMOTION)) < 1e-6
+
+    # Calling apply_preference_boost a second time (e.g. via _merge_translated_leg) must be idempotent
+    second_pass = apply_preference_boost(first_pass, prefer)
+    assert abs(second_pass[0]["score_norm"] - norm_after_first) < 1e-6
+    assert abs(second_pass[1]["score_norm"] - demoted_after_first) < 1e-6
 
 
 def test_standalone_resident_and_token_boundary_and_rrf_rank_one_safeguard() -> None:
     # 1. Standalone "resident" / "non-resident" query triggers employment/resident preferred sections
     pref_res = extract_retrieval_preferences("Is he resident in Uganda for income tax?")
     assert "resident" in pref_res.get("preferred_sections", [])
+
+    # 1b. "resident" hint must NOT match substring "president" in sec_blob
+    hits_pres = [
+        {"text": "Assented to by the President of Uganda.", "source": "act.pdf", "score_norm": 0.60, "score_rrf": 0.20},
+        {"text": "A tax resident individual is taxed on worldwide income.", "source": "res.pdf", "score_norm": 0.58, "score_rrf": 0.18},
+    ]
+    ranked_pres = apply_preference_boost(hits_pres, {"preferred_sections": ["resident"]})
+    assert ranked_pres[0]["source"] == "res.pdf"
+    assert ranked_pres[1]["score_norm"] == 0.60  # "President" received no boost
 
     # 2. want_tax="vat" must not match substring "private"
     hits_sub = [
@@ -181,3 +262,44 @@ def test_complex_answer_contract_injected_only_when_verified_facts_or_t3() -> No
         tier=ModelTier.T3,
     )
     assert "## Complex-Answer Contract" in t3_tool_msgs[0]["content"]
+
+    # 5. _build_tool_messages with verified_ctx carries the full 5-point CRITICAL INSTRUCTIONS FOR THIS TURN
+    tool_verified_msgs = _build_tool_messages(
+        "Calculate his monthly PAYE.",
+        passages=None,
+        conversation_history=None,
+        locale="en",
+        personalization_context=verified_ctx,
+        tier=ModelTier.T2,
+    )
+    assert "## Complex-Answer Contract" in tool_verified_msgs[0]["content"]
+    assert "CRITICAL INSTRUCTIONS FOR THIS TURN:" in tool_verified_msgs[-1]["content"]
+    assert "If a `Premise Check` bullet appears above" in tool_verified_msgs[-1]["content"]
+
+    # 6. stream_llm_tokens threads tier into generate_stream so T2 streaming turns do not get COMPLEX_ANSWER_CONTRACT
+    from unittest.mock import patch
+    import app.llm as llm_mod
+    from app.service import stream_llm_tokens
+
+    captured_tiers: list[object] = []
+
+    def _fake_generate_stream(*args: object, **kwargs: object):
+        captured_tiers.append(kwargs.get("tier"))
+        yield "ok"
+
+    with (
+        patch.object(llm_mod, "is_available", return_value=True),
+        patch.object(llm_mod, "generate_stream", side_effect=_fake_generate_stream),
+    ):
+        tokens = list(
+            stream_llm_tokens(
+                "Explain VAT filing deadline.",
+                passages=[{"source": "ura_vat_faqs.csv", "text": "15th of following month."}],
+                conversation_history=None,
+                locale="en",
+                endpoint=ENDPOINTS[ModelTier.T2],
+                tier=ModelTier.T2,
+            )
+        )
+    assert "".join(tokens) == "ok"
+    assert captured_tiers == [ModelTier.T2]

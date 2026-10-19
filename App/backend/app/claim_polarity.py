@@ -63,8 +63,14 @@ DIRECTION_LEXICON: tuple[PolarityPair, ...] = (
             "increases taxable employment income",
         ),
         negative_cues=(
-            "subtracted from",
-            "deducted from",
+            "subtracted from gross",
+            "subtracted from the employee",
+            "subtracted from employment",
+            "subtracted from salary",
+            "deducted from gross",
+            "deducted from the employee",
+            "deducted from employment",
+            "deducted from salary",
             "reduces gross salary",
             "reduces taxable employment income",
         ),
@@ -328,6 +334,11 @@ def polarity_conflicts(
     for pair in DIRECTION_LEXICON:
         s_pole, s_cue = _sentence_pole(sent_low, pair)
         if s_pole is None or s_cue is None:
+            continue
+        if pair.name == "resident_vs_non_resident" and re.search(
+            r"^\s*(?:[-*•]\s*)?(?:if|where|whereas|when|for\s+a\s+(?:non[-\s]?)?resident)\b",
+            sent_low,
+        ):
             continue
 
         best_same = 0.0

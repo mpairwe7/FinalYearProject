@@ -217,6 +217,9 @@ def build_report(
     """Aggregate per-scenario scores into a structured benchmark evaluation report."""
     by_head: dict[str, list[float]] = defaultdict(list)
     latencies: list[float] = []
+    latencies_t1: list[float] = []
+    latencies_t3: list[float] = []
+    t3_turns = 0
     total_turns = 0
     truncated_turns = 0
     route_ok_turns = 0
@@ -239,8 +242,15 @@ def build_report(
         for t_idx, t in enumerate(res.get("turns") or [], 1):
             total_turns += 1
             lat = float(t.get("latency_s") or 0.0)
+            dbg_tier = str((t.get("debug") or {}).get("model_tier") or "")
+            if dbg_tier in ("deep", "T3"):
+                t3_turns += 1
             if lat > 0:
                 latencies.append(lat)
+                if dbg_tier in ("deep", "T3", "agentic", "T2"):
+                    latencies_t3.append(lat)
+                else:
+                    latencies_t1.append(lat)
             if not t.get("complete", True):
                 truncated_turns += 1
             if t.get("route_ok") is not None:
@@ -333,6 +343,9 @@ def build_report(
             ),
             "latency_p50_s": _percentile(sorted_lat, 50.0),
             "latency_p95_s": _percentile(sorted_lat, 95.0),
+            "latency_t1_p95_s": _percentile(sorted(latencies_t1), 95.0),
+            "latency_t3_p95_s": _percentile(sorted(latencies_t3), 95.0),
+            "t3_turn_share": round(t3_turns / total_turns, 4) if total_turns else 0.0,
         },
         "per_tax_head": per_tax_head,
         "critical_errors": critical_errors,

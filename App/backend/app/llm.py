@@ -303,12 +303,12 @@ Do not output anything outside the JSON object.
 
 COMPLEX_ANSWER_CONTRACT = """\
 ## Complex-Answer Contract
-When answering this turn, follow this structure strictly:
+When answering this turn, follow this structure strictly and keep the total answer concise (180–280 words maximum; use compact bullet points) so every section completes in a single fast pass:
 1. Start with a 1–2 sentence direct answer.
-2. If the verified-facts block lists a premise contradiction (`Premise Check`), address and correct that premise first.
-3. **Assumptions** — list the case facts used (and their source turn when carried from earlier turns).
-4. **Step-by-step breakdown** — when a verified-facts block with figures is provided, show the calculation and rules using the **verified figures verbatim** (never compute or invent new figures yourself, and do NOT tell the taxpayer to "consult URA for exact figures" when the verified block already gives the figure); for non-numerical turns or turns without verified figures, provide a clear step-by-step explanation of the applicable statutory rules from the cited passages.
-5. **Legal basis** — cite the exact statutory `legal_basis` strings (e.g. `Income Tax Act Cap 340`, `Third Schedule Part I`) and inline `[1]`, `[2]` passage markers.
+2. If the verified-facts block lists a premise contradiction (`Premise Check` / `Your premise:`), address and correct that premise first.
+3. **Assumptions** — briefly list the case facts used (and their source turn when carried from earlier turns).
+4. **Step-by-step breakdown** — when a verified-facts block with figures is provided, show the calculation and rules using the **verified figures verbatim** (never compute or invent new figures yourself, never use the phrase "flat rate" when describing PAYE since both residents and non-residents use progressive marginal brackets, and do NOT tell the taxpayer to "consult URA for exact figures" when the verified block already gives the figure); for non-numerical turns or turns without verified figures, provide a clear step-by-step explanation of the applicable statutory rules from the cited passages.
+5. **Legal basis** — cite the exact statutory `legal_basis` strings (e.g. `Income Tax Act Cap 340` / `Cap 338`, `Third Schedule Part I`) and inline `[1]`, `[2]` passage markers only (never write `[Verified Fact]`).
 6. **What I still need for an exact figure** — if the verified-facts block lists `Still needed for an exact figure` (from `needs`), state those items clearly; omit this section when all required inputs were verified.
 7. Answer **every** sub-question in the user's message completely (enumerate them internally first so none is skipped)."""
 
@@ -325,6 +325,20 @@ def _split_verified_facts_from_personalization(personalization_context: str) -> 
             head, tail = personalization_context.split(marker, 1)
             return head.strip(), (marker + tail).strip()
     return personalization_context.strip(), ""
+
+
+def _format_verified_scenario_ground_truth(calc_ground_truth: str) -> str:
+    """Format the pre-computed statutory ground-truth block and turn instructions."""
+    return (
+        "## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
+        f"{calc_ground_truth}\n\n"
+        "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
+        "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
+        "2. Use the exact pre-computed figures above in your answer verbatim; never compute new figures yourself or say 'consult URA for exact figures' when the verified block already gives the figure.\n"
+        "3. If a `Premise Check` bullet appears above, address and correct that premise first.\n"
+        "4. Address every specific sub-question the taxpayer asked, citing the `legal_basis` strings and `[1]`, `[2]` passage markers.\n"
+        "5. Format the computation clearly with a Markdown table or step-by-step breakdown."
+    )
 
 
 def _is_t3_endpoint(endpoint: Any, tier: Any = None) -> bool:
@@ -681,16 +695,7 @@ def _build_messages(
     parts.append("")
 
     if calc_ground_truth:
-        parts.append(
-            "## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
-            f"{calc_ground_truth}\n\n"
-            "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
-            "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
-            "2. Use the exact pre-computed figures above in your answer verbatim; never compute new figures yourself or say 'consult URA for exact figures' when the verified block already gives the figure.\n"
-            "3. If a `Premise Check` bullet appears above, address and correct that premise first.\n"
-            "4. Address every specific sub-question the taxpayer asked, citing the `legal_basis` strings and `[1]`, `[2]` passage markers.\n"
-            "5. Format the computation clearly with a Markdown table or step-by-step breakdown."
-        )
+        parts.append(_format_verified_scenario_ground_truth(calc_ground_truth))
         parts.append("")
 
     stat_params = extract_statutory_context(prepared_passages)
@@ -1652,7 +1657,7 @@ def complete_with_continuation(
     """
     if deadline is None:
         deadline = get_active_generation_deadline()
-    _, eff_model, _, _, _ = _resolve_vllm_endpoint_params(
+    _, eff_model, _, req_max_tokens, _ = _resolve_vllm_endpoint_params(
         endpoint, max_tokens=max_tokens, timeout=timeout
     )
     first = _vllm_generate_ex(
@@ -1677,15 +1682,21 @@ def complete_with_continuation(
     cur_finish = first.finish_reason
     merged_usage = first.usage
     rounds_used = 0
+    cont_max_tokens = min(req_max_tokens, 512)
+    eff_max_rounds = (
+        min(max_rounds, 1)
+        if (endpoint is not None and "27b" in eff_model.lower() and max_rounds == 2)
+        else max_rounds
+    )
 
-    for _ in range(max(0, max_rounds)):
+    for _ in range(max(0, eff_max_rounds)):
         if cur_finish != "length":
             break
-        if deadline is not None and time.monotonic() >= deadline:
+        if deadline is not None and (deadline - time.monotonic()) < 15.0:
             break
         rem_timeout = timeout
         if deadline is not None:
-            rem = max(1.0, deadline - time.monotonic())
+            rem = max(5.0, deadline - time.monotonic() - 2.0)
             rem_timeout = min(rem, timeout) if timeout is not None else rem
 
         cont_messages = [dict(m) for m in messages] + [
@@ -1695,7 +1706,7 @@ def complete_with_continuation(
             cont_messages,
             temperature=temperature,
             top_p=top_p,
-            max_tokens=max_tokens,
+            max_tokens=cont_max_tokens,
             timeout=rem_timeout,
             endpoint=endpoint,
             extra_body={
@@ -1714,7 +1725,7 @@ def complete_with_continuation(
                 fallback_messages,
                 temperature=temperature,
                 top_p=top_p,
-                max_tokens=max_tokens,
+                max_tokens=cont_max_tokens,
                 timeout=rem_timeout,
                 endpoint=endpoint,
             )
@@ -2215,6 +2226,8 @@ def generate(
         personalization_context=personalization_context,
         tone_hint=tone_hint,
         context_summary=context_summary,
+        endpoint=endpoint,
+        tier=tier,
     )
 
     try:
@@ -2675,6 +2688,8 @@ def generate_stream(
         personalization_context=personalization_context,
         tone_hint=tone_hint,
         context_summary=context_summary,
+        endpoint=endpoint,
+        tier=tier,
     )
 
     try:
@@ -2937,6 +2952,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     agent_role: str = "",
     context_summary: str = "",
     connector_note: str = "",
+    endpoint: Any = None,
     tier: Any = None,
 ) -> list[dict[str, str]]:
     """Build the initial message list for a tool-calling request.
@@ -2979,7 +2995,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
-    if calc_ground_truth or _is_t3_endpoint(None, tier=tier):
+    if calc_ground_truth or _is_t3_endpoint(endpoint, tier=tier):
         system_content += f"\n\n{COMPLEX_ANSWER_CONTRACT}"
     system_content = _inject_statutory_precedences(system_content)
     messages: list[dict[str, str]] = [
@@ -3014,15 +3030,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             parts.append("")
         parts.append(f"## User question\n{query}")
         if calc_ground_truth:
-            parts.append(
-                "\n## Verified Scenario Ground Truth (Pre-Computed from Official URA Rates)\n"
-                f"{calc_ground_truth}\n\n"
-                "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
-                "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
-                "2. Use the exact pre-computed figures above in your answer. Do NOT substitute generic FAQ example figures (like UGX 6M) when the taxpayer gave you specific figures.\n"
-                "3. Address every specific sub-question the taxpayer asked.\n"
-                "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
-            )
+            parts.append("\n" + _format_verified_scenario_ground_truth(calc_ground_truth))
         if locale != "en" and can_generate_in_locale(locale):
             parts.append(f"\n## Answer language\nWrite the answer in {locale}.")
         else:
@@ -3041,7 +3049,7 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
             else ""
         )
         calc_note = (
-            f"\n\n## Verified Scenario Ground Truth\n{calc_ground_truth}"
+            "\n\n" + _format_verified_scenario_ground_truth(calc_ground_truth)
             if calc_ground_truth else ""
         )
         messages.append(
@@ -3430,6 +3438,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         agent_role=agent_role,
         context_summary=context_summary,
         connector_note=_connector_turn_note(connector_tools),
+        endpoint=endpoint,
         tier=tier,
     )
     ep_base = str(getattr(endpoint, "base_url", "") or "").rstrip("/") if endpoint is not None else None

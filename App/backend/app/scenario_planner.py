@@ -433,15 +433,20 @@ def _rule_vat(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
                 )
             )
 
+    non_turnover_amounts = [
+        (v, s, e)
+        for v, s, e in amounts
+        if turnover_val is None or abs(v - turnover_val) > 1.0
+    ]
     purchase_amt = _amount_near_pattern(
-        amounts,
+        non_turnover_amounts or amounts,
         question,
         re.compile(r"\b(purchas\w*|stock|bought|pays?|paid|invoice|subscription|saas)\b", re.IGNORECASE),
+        before=28,
+        after=14,
     )
-    if purchase_amt is None and len(amounts) == 1 and (
-        facts.annual_turnover is None or abs(amounts[0][0] - float(facts.annual_turnover.amount)) > 1.0
-    ):
-        purchase_amt = amounts[0][0]
+    if purchase_amt is None and len(non_turnover_amounts) == 1:
+        purchase_amt = non_turnover_amounts[0][0]
 
     is_imported_srv = bool(
         re.search(
@@ -593,19 +598,34 @@ def _rule_customs(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
 
 
 def _rule_excise(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
-    if not re.search(r"\b(excise|mobile\s+money|withdraw\w*|petrol|diesel)\b", question, re.IGNORECASE):
+    if not re.search(r"\b(excise|mobile\s+money|withdraw\w*|petrol|diesel|kerosene)\b", question, re.IGNORECASE):
         return []
+    specs: list[ToolCallSpec] = []
+    m_fuel = re.search(
+        r"\b(\d[\d,]*(?:\.\d+)?)\s*litres?\s+(?:of\s+)?(petrol|diesel|kerosene)\b",
+        question,
+        re.IGNORECASE,
+    )
+    if m_fuel:
+        litres = float(m_fuel.group(1).replace(",", ""))
+        fuel_kind = m_fuel.group(2).lower()
+        specs.append(
+            ToolCallSpec(
+                "calculate_excise_duty",
+                params={"excise_type": f"fuel_{fuel_kind}", "amount": litres},
+                label=f"fuel_{fuel_kind}",
+            )
+        )
     amounts = _ugx_amounts_in_text(question)
-    if not amounts:
-        return []
-    if re.search(r"\b(mobile\s+money|withdraw\w*)\b", question, re.IGNORECASE):
-        return [
+    if amounts and re.search(r"\b(mobile\s+money|withdraw\w*)\b", question, re.IGNORECASE):
+        specs.append(
             ToolCallSpec(
                 "calculate_excise_duty",
                 params={"excise_type": "mobile_money_withdrawal", "amount": amounts[0][0]},
+                label="mobile_money_withdrawal",
             )
-        ]
-    return []
+        )
+    return specs
 
 
 def _rule_stamp_duty(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
@@ -876,12 +896,22 @@ def build_verified_facts(
                     res_tax_at_comp, _ = apply_bands(comp_threshold, res_b)
                     nonres_tax_at_comp, _ = apply_bands(comp_threshold, nonres_b)
                     diff_monthly = nonres_tax_at_comp - res_tax_at_comp
+
+                    def _fmt_bands(bands: tuple[tuple[int, int | None, float], ...]) -> str:
+                        parts_b: list[str] = []
+                        for lo, hi, rate in bands:
+                            pct = round(rate * 100, 2)
+                            if hi is not None:
+                                parts_b.append(f"UGX {lo:,}–{hi:,}: {pct:g}%")
+                            else:
+                                parts_b.append(f"Above UGX {lo:,}: {pct:g}% marginal")
+                        return "; ".join(parts_b)
+
                     bullet_lines.append(
-                        f"- PAYE Bands Comparison ({tbl.fiscal_year}): Resident monthly bands have a 0% "
-                        f"tax-free threshold up to UGX {nil_ceil:,.0f}, whereas non-resident monthly bands "
-                        f"have NO tax-free threshold and charge {nonres_first_pct:.0f}% on the first "
-                        f"UGX {nil_ceil:,.0f} — above UGX {float(comp_threshold):,.0f}/month a non-resident "
-                        f"pays exactly UGX {float(diff_monthly):,.0f}/month more than a resident."
+                        f"- PAYE Bands Comparison ({tbl.fiscal_year} — supersedes older FY2023-24/2024-25 UGX 235,000 tables; use ONLY these {tbl.fiscal_year} bands):\n"
+                        f"  * Resident monthly bands: {_fmt_bands(res_b)} (0% tax-free threshold up to UGX {nil_ceil:,.0f}).\n"
+                        f"  * Non-resident monthly bands: {_fmt_bands(nonres_b)} (NO tax-free threshold; {nonres_first_pct:.0f}% on the first UGX {nil_ceil:,.0f}).\n"
+                        f"  * Difference: above UGX {float(comp_threshold):,.0f}/month a non-resident pays exactly UGX {float(diff_monthly):,.0f}/month more than a resident."
                     )
                 except Exception:
                     pass
@@ -935,18 +965,47 @@ def build_verified_facts(
         elif spec.tool == "calculate_paye":
             fy = res.get("fiscal_year", "FY2026-27")
             r_mode = res.get("residency", "resident")
+            chg_m = float(res.get("chargeable_monthly", res.get("monthly_gross", 0)) or 0)
             line = (
                 f"- PAYE verified ({r_mode}, {fy}): UGX {res.get('paye_verified', res.get('paye', 0)):,.2f} / month "
-                f"(annual UGX {res.get('annual_paye', 0):,.2f}) on chargeable UGX {res.get('chargeable_monthly', res.get('monthly_gross', 0)):,.2f}"
+                f"(annual UGX {res.get('annual_paye', 0):,.2f}) on chargeable UGX {chg_m:,.2f}"
             )
             comp = res.get("comparison")
             if isinstance(comp, dict):
                 other_r = comp.get("other_residency", "non_resident")
                 line += (
-                    f"; {other_r} PAYE would be UGX {comp.get('other_paye', 0):,.2f} / month "
+                    f"; {other_r} PAYE is UGX {comp.get('other_paye', 0):,.2f} / month "
                     f"(difference UGX {comp.get('monthly_difference', 0):,.2f} / month)"
                 )
             bullet_lines.append(line)
+            try:
+                from decimal import Decimal
+                from .tax.money import apply_bands
+                from .tax.tables import get_table
+
+                tbl = get_table()
+                for b_label, b_key in (("Resident", "paye_bands_resident"), ("Non-resident", "paye_bands_non_resident")):
+                    if b_label == "Non-resident" and not isinstance(comp, dict) and r_mode != "non_resident":
+                        continue
+                    tot_b, b_rows = apply_bands(Decimal(str(chg_m)), tbl[b_key])
+                    row_strs: list[str] = []
+                    cum_tax = 0.0
+                    for br in b_rows:
+                        t_in = float(br.get("tax_in_band", 0))
+                        cum_tax += t_in
+                        up_b = br.get("upper")
+                        span_s = f"UGX {float(br.get('lower', 0)):,.0f}–{float(up_b):,.0f}" if up_b else f"Above UGX {float(br.get('lower', 0)):,.0f}"
+                        row_strs.append(
+                            f"{span_s} (taxable UGX {float(br.get('taxable_in_band', 0)):,.0f} @ {float(br.get('rate', 0)) * 100:g}%) = UGX {t_in:,.0f} (cumulative UGX {cum_tax:,.0f})"
+                        )
+                    bullet_lines.append(
+                        f"  * {b_label} PAYE band-by-band breakdown (use these exact band figures verbatim, total = UGX {float(tot_b):,.0f}): "
+                        + "; ".join(row_strs)
+                    )
+            except Exception:
+                paye_breakdown = format_calc_reply("calculate_paye", res, ["gross monthly salary"])
+                if paye_breakdown:
+                    bullet_lines.append(f"  {paye_breakdown}")
             if res.get("unverified_benefits"):
                 bullet_lines.append(
                     f"- PAYE conditional on unverified {', '.join(res['unverified_benefits'])} rule: "
@@ -971,6 +1030,14 @@ def build_verified_facts(
     # Run premise/fact contradiction checks and prepend them so the model addresses them first
     contradictions = check_fact_contradictions(eff_facts, tool_results)
     contradiction_lines = [f"- {c.format_bullet()}" for c in contradictions]
+
+    if re.search(r"\b(non[-\s]?business|personal\s+.*\bland\b|private\s+.*\bland\b)\b", text, re.IGNORECASE):
+        bullet_lines.append(
+            "- Individual Non-Business Land Sale Rule: Under the Income Tax Act (Cap 338), s.21(1)(k), s.50, and s.118B, "
+            "capital gains tax applies only to the disposal of a business asset; a personal non-business piece of land sold "
+            "by an individual is exempt from Capital Gains Tax (not a business asset), and the 6% withholding tax under s.118B "
+            "applies to commercial/business asset transactions rather than a purely personal non-business land sale."
+        )
 
     if still_needed:
         bullet_lines.append(f"- Still needed for an exact figure: {'; '.join(still_needed)}.")

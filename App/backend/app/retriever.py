@@ -462,15 +462,20 @@ def lexical_relevance(
 #: Filename patterns for sector-specific guides that are soft-demoted (-0.06)
 #: when the user's query does not name a sector (§9.G.3, fixes D7).
 SECTOR_GUIDE_SOURCE_PATTERNS: tuple[str, ...] = (
-    r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+(?:the[-_\s]+)?[a-z0-9_-]+[-_\s]+sector",
-    r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+agricultural[-_\s]+sector",
+    r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+(?:the[-_\s]+)?(?:[a-z0-9_-]+[-_\s]+){1,3}sector",
+    r"taxation[-_\s]+of[-_\s]+the[-_\s]+(?:[a-z0-9_-]+[-_\s]+){1,3}sector",
     r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+government[-_\s]+agencies",
     r"hotel[-_\s]+and[-_\s]+accom+odation",
     r"wholesale[-_\s]+and[-_\s]+retail[-_\s]+sector",
     r"construction[-_\s]+sector",
+    r"transport[-_\s]+sector",
     r"overview[-_\s]+of[-_\s]+the[-_\s]+(?:health|fishing)[a-z0-9_\s-]*sector",
     r"petroleum[-_\s]+sector[-_\s]+q[-_\s]+and[-_\s]+a",
-    r"advance[-_\s]+(?:income[-_\s]+)?tax[-_\s]+on[-_\s]+the[-_\s]+transport[-_\s]+sector",
+    r"advance[-_\s]+(?:income[-_\s]+)?tax[-_\s]+on[-_\s]+(?:the[-_\s]+)?transport(?:[-_\s]+sector)?",
+    r"tax[-_\s]+obligations[-_\s]+for[-_\s]+ngos",
+    r"religious[-_\s]+institution|taxation\s+of\s+religious\s+institutions",
+    r"ura_(?:agriculture|hotel_and_hospitality|manufacturing|wholesale_and_retail|construction|education|entertainment_events|real_estate|mining|fishing|health_and_medical|transport)_sector",
+    r"ura_(?:oil_and_gas_petroleum|tax_obligations_ngos|religious_institution|government_agencies|advance_tax_transport|gaming_pool_betting)",
 )
 _SECTOR_GUIDE_SOURCE_RE = re.compile("|".join(SECTOR_GUIDE_SOURCE_PATTERNS), re.IGNORECASE)
 SECTOR_GUIDE_DEMOTION: float = -0.06
@@ -528,6 +533,19 @@ def is_sector_guide_source(source: str) -> bool:
     return bool(source and _SECTOR_GUIDE_SOURCE_RE.search(source))
 
 
+def _hint_matches_blob(hint: str, blob: str) -> bool:
+    """Match a topic/section *hint* against *blob* on word boundaries.
+
+    Prevents single-word hints like ``"resident"`` from matching substrings
+    such as ``"president"`` or ``"non-resident"``.
+    """
+    if not hint or not blob:
+        return False
+    if "." in hint or "_" in hint:
+        return hint in blob
+    return bool(re.search(r"(?<![a-z0-9-])" + re.escape(hint) + r"(?![a-z0-9-])", blob))
+
+
 def apply_preference_boost(
     hits: list[dict[str, Any]],
     prefer: dict[str, Any] | None,
@@ -539,6 +557,10 @@ def apply_preference_boost(
     still surfaces the current FY / mentioned tax type / preferred section
     first, while soft-demoting sector-specific guides (-0.06) when the query
     does not mention a sector.
+
+    Idempotent across repeated invocations on the same hit dicts (e.g. when
+    ``_merge_translated_leg`` re-applies preferences after merging legs) by
+    anchoring adjustments to ``_raw_score_norm`` and ``_raw_score_rrf``.
     """
     if not hits or not prefer:
         return hits
@@ -559,10 +581,9 @@ def apply_preference_boost(
         if is_demoted_guide:
             boost += SECTOR_GUIDE_DEMOTION
 
-        if want_fy and str(hit.get("fiscal_year") or "") == want_fy:
-            boost += 0.08
-
         if not is_demoted_guide:
+            if want_fy and str(hit.get("fiscal_year") or "") == want_fy:
+                boost += 0.08
             matched_topic = False
             if want_tax:
                 hit_tax = str(hit.get("tax_type") or "").strip().lower()
@@ -585,7 +606,7 @@ def apply_preference_boost(
                         str(hit.get("text") or "")[:300],
                     ]
                 ).lower()
-                if any(hint in sec_blob for hint in preferred_sections):
+                if any(_hint_matches_blob(hint, sec_blob) for hint in preferred_sections):
                     matched_topic = True
             if matched_topic:
                 boost += TOPIC_SECTION_BOOST
@@ -593,15 +614,22 @@ def apply_preference_boost(
         if not boost:
             continue
         any_adjusted = True
-        if hit.get("score_norm") is not None:
+        if "_raw_score_norm" not in hit:
+            hit["_raw_score_norm"] = hit.get("score_norm")
+        if "_raw_score_rrf" not in hit:
+            hit["_raw_score_rrf"] = hit.get("score_rrf")
+
+        raw_norm = hit.get("_raw_score_norm")
+        if raw_norm is not None:
             with suppress(TypeError, ValueError):
-                hit["score_norm"] = max(0.0, min(1.0, float(hit["score_norm"]) + boost))
+                hit["score_norm"] = max(0.0, min(1.0, float(raw_norm) + boost))
         elif hit.get("score_rerank") is not None:
             with suppress(TypeError, ValueError):
                 base_norm = normalize_rerank_score(float(hit["score_rerank"]))
+                hit["_raw_score_norm"] = base_norm
                 hit["score_norm"] = max(0.0, min(1.0, base_norm + boost))
         try:
-            rrf_base = float(hit.get("score_rrf") or 0.0)
+            rrf_base = float(hit.get("_raw_score_rrf") or 0.0)
             # On raw Qdrant RRF scale (1/(60+rank) <= 0.05) without a calibrated score_norm,
             # scale the additive delta (boost * 0.01 = +0.0005 / -0.0006) so it breaks close
             # ties while a rank-5 hit (1/65 = 0.015385) never overtakes a rank-1 hit (1/61 = 0.016393).
@@ -1822,11 +1850,13 @@ class HybridRetriever:
                     if len(raw_subs) > 1:
                         subqueries_en = [english_retrieval_query(s, locale) or s for s in raw_subs]
                 use_decompose_en = flags.is_enabled("query_decomposition") and len(subqueries_en) > 1
+                demote_sector_en = bool(plan_en["prefer"].get("demote_sector_guides"))
+                fetch_top_k_en = max(top_k + 4, top_k * 2) if demote_sector_en else top_k
                 if use_decompose_en:
                     batches_en = [
                         self.search(
                             sub,
-                            top_k=top_k,
+                            top_k=fetch_top_k_en,
                             prefetch_limit=prefetch_limit,
                             filters=merged_filters_en or None,
                             subject=subject,
@@ -1834,30 +1864,41 @@ class HybridRetriever:
                         )
                         for sub in subqueries_en
                     ]
-                    en_hits = merge_retrieval_hits(batches_en, top_k=top_k)
+                    en_hits = merge_retrieval_hits(batches_en, top_k=fetch_top_k_en)
                 else:
                     en_hits = self.search(
                         english,
-                        top_k=top_k,
+                        top_k=fetch_top_k_en,
                         prefetch_limit=prefetch_limit,
                         filters=merged_filters_en or None,
                         subject=subject,
                         locale=locale,
                     )
                 if en_hits:
-                    return apply_preference_boost(en_hits[:top_k], plan_en["prefer"])
+                    boosted_en = apply_preference_boost(en_hits, plan_en["prefer"])
+                    if demote_sector_en:
+                        non_sec_en = [
+                            h
+                            for h in boosted_en
+                            if not is_sector_guide_source(str(h.get("source") or ""))
+                        ]
+                        if non_sec_en:
+                            return non_sec_en[:top_k]
+                    return boosted_en[:top_k]
 
         plan = plan_retrieval(query, history=history)
         merged_filters = {k: v for k, v in (filters or {}).items() if v not in (None, "", "any")}
         merged_filters.update(plan["filters"])
         subqueries = plan["subqueries"]
         use_decompose = flags.is_enabled("query_decomposition") and len(subqueries) > 1
+        demote_sector = bool(plan["prefer"].get("demote_sector_guides"))
+        fetch_top_k = max(top_k + 4, top_k * 2) if demote_sector else top_k
 
         if use_decompose:
             batches = [
                 self.search(
                     sub,
-                    top_k=top_k,
+                    top_k=fetch_top_k,
                     prefetch_limit=prefetch_limit,
                     filters=merged_filters or None,
                     subject=subject,
@@ -1865,17 +1906,25 @@ class HybridRetriever:
                 )
                 for sub in subqueries
             ]
-            hits = merge_retrieval_hits(batches, top_k=top_k)
+            hits = merge_retrieval_hits(batches, top_k=fetch_top_k)
         else:
             hits = self.search(
                 query,
-                top_k=top_k,
+                top_k=fetch_top_k,
                 prefetch_limit=prefetch_limit,
                 filters=merged_filters or None,
                 subject=subject,
                 locale=locale,
             )
         hits = apply_preference_boost(hits, plan["prefer"])
+        if demote_sector and hits:
+            non_sector = [h for h in hits if not is_sector_guide_source(str(h.get("source") or ""))]
+            if non_sector:
+                hits = non_sector[:top_k]
+            else:
+                hits = hits[:top_k]
+        else:
+            hits = hits[:top_k]
         return self._merge_translated_leg(
             query,
             hits,
@@ -1901,7 +1950,7 @@ class HybridRetriever:
     ) -> list[dict[str, Any]]:
         """Second hybrid pass on an English translation (G18). Never displaces a first pass that already worked well — merge only."""
         from .flags import flags
-        from .query import english_retrieval_query
+        from .query import english_retrieval_query, extract_retrieval_preferences
 
         loc = (locale or "en").strip().lower().split("-")[0]
         if not flags.is_enabled("translate_retrieve") or loc in ("", "en"):
@@ -1918,9 +1967,12 @@ class HybridRetriever:
                 locale, len(hits),
             )
             return hits
+        en_prefer = {**(prefer or {}), **extract_retrieval_preferences(english)}
+        demote_sector_en = bool(en_prefer.get("demote_sector_guides"))
+        fetch_top_k_en = max(top_k + 4, top_k * 2) if demote_sector_en else top_k
         en_hits = self.search(
             english,
-            top_k=top_k,
+            top_k=fetch_top_k_en,
             prefetch_limit=prefetch_limit,
             filters=filters,
             subject=subject,
@@ -1937,10 +1989,17 @@ class HybridRetriever:
         # yields 0% relevant top hits; using en_hits directly prevents context
         # contamination. For Swahili, merge both legs.
         if loc in ("lg", "nyn", "ach") and en_hits:
-            merged = en_hits[:top_k]
+            merged = en_hits[:fetch_top_k_en]
         else:
-            merged = merge_retrieval_hits([en_hits, hits], top_k=top_k)
-        merged = apply_preference_boost(merged, prefer)
+            merged = merge_retrieval_hits([en_hits, hits], top_k=fetch_top_k_en)
+        merged = apply_preference_boost(merged, en_prefer)
+        if demote_sector_en and merged:
+            non_sec = [
+                h for h in merged if not is_sector_guide_source(str(h.get("source") or ""))
+            ]
+            merged = non_sec[:top_k] if non_sec else merged[:top_k]
+        else:
+            merged = merged[:top_k]
 
         def _best(rows: list[dict[str, Any]]) -> float:
             vals = [r for h in rows if (r := hit_relevance(h)) is not None]
