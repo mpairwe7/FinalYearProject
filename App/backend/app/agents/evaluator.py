@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..calculator_router import plan_calculation
-from ..entailment import canonical_amounts, percentages
+from ..entailment import _AMOUNT_PREFIX_RE, _AMOUNT_SUFFIX, canonical_amounts, percentages
 
 logger = logging.getLogger(__name__)
 
@@ -247,12 +247,47 @@ _DAY_COUNT_RE = re.compile(r"\b(\d{1,3})[-\s]days?\b", re.IGNORECASE)
 _PHONE_SCRUB_RE = re.compile(r"\b(?:0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000)\b")
 _CONDITIONAL_LABEL_RE = re.compile(r"\b(?:conditional|unverified|provisional|if\s+confirmed)\b", re.IGNORECASE)
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+_FISCAL_YEAR_RE = re.compile(
+    r"\bfy\s*(?:19|20)\d{2}(?:\s*[-/]\s*(?:\d{2}|(?:19|20)\d{2}))?\b"
+    r"|\b(?:19|20)\d{2}\s*[-/]\s*(?:\d{2}|(?:19|20)\d{2})\b",
+    re.IGNORECASE,
+)
+_BARE_YEAR_RE = re.compile(r"\b(?:19\d{2}|20\d{2})\b")
+_CURRENCY_MARKER_TAIL_RE = re.compile(
+    r"(?:ugx|ug\s?shs?|shs|shillings?|ssente|ensimbi|esente|cente|shilingi|shiringi|cilingi|usd|eur|gbp|kes|\$)\s*$",
+    re.IGNORECASE,
+)
+_AMOUNT_SUFFIX_HEAD_RE = re.compile(
+    r"^\s*(?:" + "|".join(sorted((re.escape(k) for k in _AMOUNT_SUFFIX), key=len, reverse=True)) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_calendar_years(text: str) -> str:
+    """Remove calendar/fiscal-year tokens while preserving year-like numbers used as amounts."""
+    without_fy = _FISCAL_YEAR_RE.sub(" ", text or "")
+    prefix_spans = [m.span() for m in _AMOUNT_PREFIX_RE.finditer(without_fy)]
+
+    def _replace_year(match: re.Match[str]) -> str:
+        start, end = match.span()
+        if any(p_start <= start and end <= p_end for p_start, p_end in prefix_spans):
+            return match.group(0)
+        if _CURRENCY_MARKER_TAIL_RE.search(without_fy[:start]):
+            return match.group(0)
+        if _AMOUNT_SUFFIX_HEAD_RE.search(without_fy[end:]):
+            return match.group(0)
+        return " "
+
+    return _BARE_YEAR_RE.sub(_replace_year, without_fy)
 
 
 def _extract_locked_numbers(text: str) -> tuple[set[float], set[float], set[int]]:
     """Extract (money_or_band_amounts, percentages_as_0_to_100, day_counts) from *text*."""
     cleaned = _PHONE_SCRUB_RE.sub(" ", _CITATION_MARKER_RE.sub(" ", text or ""))
-    money_vals = {float(v) for v in canonical_amounts(cleaned) if abs(float(v)) >= MIN_VERIFIABLE_AMOUNT}
+    amount_ready = _strip_calendar_years(cleaned)
+    money_vals = {
+        float(v) for v in canonical_amounts(amount_ready) if abs(float(v)) >= MIN_VERIFIABLE_AMOUNT
+    }
     pct_vals: set[float] = set()
     for p in percentages(cleaned):
         try:

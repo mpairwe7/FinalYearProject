@@ -11475,8 +11475,8 @@ class ChatModel:
                         reply,
                         call_tool=self._recompute_for_verification,
                         faithfulness=faithfulness_score,
-                        verified_facts=verified_facts_block if flags.is_enabled("evaluator_optimizer") else "",
-                        passages=contexts if flags.is_enabled("evaluator_optimizer") else None,
+                        verified_facts=verified_facts_block,
+                        passages=contexts,
                     )
                 trace_ctx["numeric_verification"] = {
                     "accepted": verdict.accepted,
@@ -11554,8 +11554,8 @@ class ChatModel:
                                 candidate,
                                 call_tool=self._recompute_for_verification,
                                 faithfulness=faithfulness_score,
-                                verified_facts=verified_facts_block if flags.is_enabled("evaluator_optimizer") else "",
-                                passages=contexts if flags.is_enabled("evaluator_optimizer") else None,
+                                verified_facts=verified_facts_block,
+                                passages=contexts,
                             )
                             trace_ctx["numeric_revision"] = {
                                 "attempted": True,

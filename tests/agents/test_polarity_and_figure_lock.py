@@ -276,3 +276,47 @@ def test_reflect_llm_uses_same_tier_endpoint_and_60s_timeout(monkeypatch: pytest
     assert captured["timeout"] == 60.0
     assert "UGX 6,150,000" in captured["messages"][1]["content"]
     assert "PAYE verified: UGX 7,725,500" in captured["messages"][1]["content"]
+
+
+def test_mixed_passage_does_not_falsely_flag_unrelated_opposing_rule_and_retains_tie() -> None:
+    """Mixed passage with individual rental taxable + NGO rental exempt must not flag a correct individual claim."""
+    mixed_passage = (
+        "Individual rental income is taxable at 12% of gross annual rent above the threshold. "
+        "Rental income of an exempt charity or NGO is exempt from tax under Section 21."
+    )
+    correct_individual_claim = (
+        "Individual rental income is taxable at 12% of gross annual rent above the threshold."
+    )
+    assert polarity_conflicts(correct_individual_claim, [mixed_passage]) == []
+
+    # A genuine tied contradiction (where both same-pole and opposite-pole sentences have equal subject overlap)
+    # is still surfaced rather than suppressed.
+    tied_passage = (
+        "Cash allowances paid to an employee are taxable under PAYE. "
+        "Cash allowances paid to an employee are exempt from PAYE."
+    )
+    claim = "Cash allowances paid to an employee are exempt from PAYE."
+    conflicts = polarity_conflicts(claim, [tied_passage])
+    assert len(conflicts) == 1
+    assert conflicts[0].pair_name == "taxable_vs_exempt"
+
+
+def test_calendar_and_fiscal_years_excluded_while_year_like_amounts_preserved() -> None:
+    """Dates like '30 June 2025' or 'FY2026-27' are not treated as UGX 2,025, while UGX 2025 / milioni 2025 are."""
+    ok, offending, _ = verify_figure_lock(
+        "For FY2025-26 ending 30 June 2026, the monthly PAYE is UGX 7,725,500.",
+        query="What is my monthly PAYE?",
+        verified_facts="Monthly PAYE: UGX 7,725,500",
+    )
+    assert ok is True, f"Dated sentence should not fail figure lock: {offending}"
+
+    # Year-like numbers that ARE genuine currency/multiplier amounts must still be checked
+    ok_amt, offending_amt, _ = verify_figure_lock(
+        "The penalty is UGX 2025 and the turnover is milioni 2025.",
+        query="What is my monthly PAYE?",
+        verified_facts="Monthly PAYE: UGX 7,725,500",
+    )
+    assert ok_amt is False
+    assert "UGX 2,025" in offending_amt
+    assert "UGX 2,025,000,000" in offending_amt
+

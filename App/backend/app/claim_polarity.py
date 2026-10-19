@@ -322,31 +322,50 @@ def polarity_conflicts(
     conflicts: list[Conflict] = []
     seen_pairs: set[str] = set()
 
+    def _overlap(ref_subj: set[str]) -> float:
+        return len(sent_subj & ref_subj) / max(1, min(len(sent_subj), len(ref_subj)))
+
     for pair in DIRECTION_LEXICON:
         s_pole, s_cue = _sentence_pole(sent_low, pair)
         if s_pole is None or s_cue is None:
             continue
 
+        best_same = 0.0
+        best_opposite: tuple[float, str, str, list[str]] | None = None
+
         for ref in ref_sentences:
             ref_low = ref.lower()
             r_pole, r_cue = _sentence_pole(ref_low, pair)
-            if r_pole is None or r_cue is None or r_pole == s_pole:
+            if r_pole is None or r_cue is None:
                 continue
             ref_subj = _subject_tokens(ref)
+            score = _overlap(ref_subj)
+            if r_pole == s_pole:
+                best_same = max(best_same, score)
+                continue
             shared = sorted(sent_subj & ref_subj)
-            if len(shared) >= 2:
-                if pair.name not in seen_pairs:
-                    seen_pairs.add(pair.name)
-                    conflicts.append(
-                        Conflict(
-                            pair_name=pair.name,
-                            reply_sentence=sent_clean,
-                            supporting_sentence=ref,
-                            reply_cue=s_cue,
-                            supporting_cue=r_cue,
-                            shared_tokens=tuple(shared),
-                        )
-                    )
-                break
+            if len(shared) >= 2 and score >= 0.6 and (
+                best_opposite is None or score > best_opposite[0]
+            ):
+                best_opposite = (score, ref, r_cue, shared)
+
+        # Keep an opposing match when it ties or exceeds the best same-pole match.
+        if (
+            best_opposite
+            and best_opposite[0] >= best_same
+            and pair.name not in seen_pairs
+        ):
+            seen_pairs.add(pair.name)
+            _, ref, r_cue, shared = best_opposite
+            conflicts.append(
+                Conflict(
+                    pair_name=pair.name,
+                    reply_sentence=sent_clean,
+                    supporting_sentence=ref,
+                    reply_cue=s_cue,
+                    supporting_cue=r_cue,
+                    shared_tokens=tuple(shared),
+                )
+            )
 
     return conflicts
