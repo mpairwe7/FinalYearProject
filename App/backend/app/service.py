@@ -1254,22 +1254,42 @@ def _local_llm_then_cloud(
     if endpoint is not None:
         gen_kwargs["endpoint"] = endpoint
 
+    def _invoke_generate() -> tuple[str, dict[str, Any]]:
+        llm_module.clear_last_generation_meta()
+        # Input reaches _local_llm_then_cloud only after ChatModel.generate /
+        # generate_retrieval_only has checked InputGuard.check(message).
+        # nosemgrep: ura-llm01-raw-user-input-to-llm
+        out = llm_module.generate(**gen_kwargs)
+        return out, llm_module.get_last_generation_meta()
+
     # copy_context: the pool thread then sees this turn's trace span and its
     # token-usage tally (tracing.turn_usage_scope); a bare submit loses both.
     future = _LLM_EXECUTOR.submit(
         contextvars.copy_context().run,
-        llm_module.generate,
-        **gen_kwargs,
+        _invoke_generate,
     )
     try:
-        reply = future.result(timeout=effective_deadline)
+        raw_res = future.result(timeout=effective_deadline)
+        if isinstance(raw_res, tuple) and len(raw_res) == 2:
+            reply, gen_meta = raw_res
+        else:
+            reply, gen_meta = str(raw_res or ""), {}
+        llm_module.set_last_generation_meta(gen_meta)
         if reply and reply.strip():
             _LLM_CIRCUIT.record_success()
+            from .production_readiness import is_sovereign_mode
+
+            finish_reason = gen_meta.get("finish_reason")
+            # E.4: When finish_reason is available from vLLM, complete_with_continuation
+            # has already handled any finish_reason=="length" truncation; do NOT consult
+            # the punctuation heuristic _looks_truncated.
+            if finish_reason is not None:
+                return reply
+            if is_sovereign_mode():
+                return reply
             if not _looks_truncated(reply):
                 return reply
-            # Responded, so this isn't a breaker-worthy failure — but the
-            # reply looks cut off mid-stream, so try the cloud chain for a
-            # complete answer before settling for it.
+            # Fallback for non-vLLM backends without finish_reason when not in sovereign mode.
             logger.warning(
                 "LLM reply looks truncated (%d chars, no terminal punctuation) — "
                 "trying cloud fallback",
@@ -11638,6 +11658,19 @@ class ChatModel:
         if connector_intent is not None:
             # Read by resources_for_turn: no form links under a service's record.
             result["connector_lookup"] = True
+        if (os.getenv("EVAL_DEBUG") or "").strip().lower() in {"1", "true", "yes"}:
+            from .production_readiness import is_production
+
+            if not is_production():
+                gen_meta = llm_module.get_last_generation_meta()
+                result["debug"] = {
+                    "finish_reason": gen_meta.get("finish_reason") or "stop",
+                    "continuation_rounds": int(gen_meta.get("continuation_rounds") or 0),
+                    "model_tier": str(trace_ctx.get("model_tier") or ModelTier.T1.value),
+                    "endpoint_model": str(
+                        trace_ctx.get("endpoint_model") or gen_meta.get("model") or self.name
+                    ),
+                }
         result = self._finalize_result(result)
         reply = result["reply"]
 

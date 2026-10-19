@@ -180,6 +180,10 @@ class ChatResponse(BaseModel):
             "answered either way; nothing listed here was consulted."
         ),
     )
+    debug: dict[str, Any] | None = Field(
+        None,
+        description="Eval-only generation metadata when EVAL_DEBUG=1 (rejected in production)",
+    )
 
 
 

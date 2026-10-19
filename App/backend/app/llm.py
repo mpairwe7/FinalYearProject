@@ -37,7 +37,7 @@ Environment variables:
     LLM_TRUST_REMOTE_CODE   – "true" to allow model-defined Python (default: false)
     LLM_CONTEXT_WINDOW      – hard cap on prompt tokens (default: 8192; up to 262144 native on Sunflower-Qwen3.5-9B without YaRN)
     LLM_TEMPERATURE         – generation temperature (default: 0.2)
-    LLM_MAX_TOKENS          – max new tokens (default: 512)
+    LLM_MAX_TOKENS          – max new tokens (default: 768)
     LLM_REPETITION_PENALTY  – repetition penalty, both paths (default: 1.1)
     LLM_MIN_P               – min-p sampling floor, vLLM path only (default: 0.08)
     LLM_PRESENCE_PENALTY    – presence penalty, vLLM path only (default: 0.05)
@@ -54,6 +54,7 @@ Environment variables:
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import hashlib
 import logging
 import os
@@ -61,6 +62,7 @@ import re
 import threading
 import time
 from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final
 
 from .agents.loop_control import ToolCallBudget
@@ -109,7 +111,7 @@ def native_model_context_window(model_name: str | None = None) -> int:
         return 40_960
     return 32_768
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
-LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "512"))
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "768"))
 # vLLM defaults this to 1.0 (off). The local HF path has always passed 1.3,
 # so only the served path was unguarded — and it degenerates in exactly the
 # place a tax assistant can least afford it: Luganda hybrid answers, whose
@@ -1337,7 +1339,117 @@ def _resolve_vllm_endpoint_params(
     )
 
 
-def _vllm_generate(
+@dataclass(frozen=True)
+class Generation:
+    """Structured result of a vLLM chat completion (with optional continuation)."""
+
+    text: str
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
+    continuation_rounds: int = 0
+
+
+SHORTENED_CONTINUATION_NOTE: Final[str] = (
+    "_(This answer was shortened — ask me to continue for the rest.)_"
+)
+
+_LAST_GEN_META: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+    "_LAST_GEN_META", default={}
+)
+
+
+def clear_last_generation_meta() -> None:
+    """Reset the per-context generation metadata holder."""
+    _LAST_GEN_META.set({})
+
+
+def get_last_generation_meta() -> dict[str, Any]:
+    """Return a copy of the most recent generation metadata in this context."""
+    return dict(_LAST_GEN_META.get() or {})
+
+
+def set_last_generation_meta(meta: dict[str, Any]) -> None:
+    """Store generation metadata in the current context."""
+    _LAST_GEN_META.set(dict(meta or {}))
+
+
+_COMPLETE_SENTENCE_BOUNDARY_RE = re.compile(
+    r"(?:(?<!\d)[.!?](?:\s*\[[0-9,\s]+\])*(?:['\"\)\]])?(?=\s|$))",
+    re.MULTILINE,
+)
+
+
+def trim_to_complete_boundary(text: str) -> str:
+    """Trim *text* to the last complete sentence, list item, or table row.
+
+    Guarantees a truncated generation never ends mid-word or inside an
+    unfinished sentence/table row before appending the shortened note.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+
+    # 1. If the text already ends at a complete sentence, citation, or closed table row, keep it.
+    if re.search(r"(?:[.!?](?:\s*\[[0-9,\s]+\])*|\]|\|)\s*$", raw):
+        return raw
+
+    # 2. Check line-level boundaries (complete markdown table rows or complete bullet lines).
+    lines = raw.splitlines()
+    if len(lines) > 1:
+        for idx in range(len(lines) - 1, 0, -1):
+            candidate_line = lines[idx - 1].rstrip()
+            if not candidate_line:
+                continue
+            if candidate_line.endswith("|") or re.search(
+                r"(?:[.!?;]|\[[0-9,\s]+\])\s*$", candidate_line
+            ):
+                kept = "\n".join(lines[:idx]).strip()
+                if kept:
+                    # Also check if there is a sentence boundary inside the last dropped line
+                    last_line = lines[idx]
+                    m_last = list(_COMPLETE_SENTENCE_BOUNDARY_RE.finditer(last_line))
+                    if m_last:
+                        return (kept + "\n" + last_line[: m_last[-1].end()].rstrip()).strip()
+                    return kept
+
+    # 3. Last complete sentence boundary across the full text.
+    matches = list(_COMPLETE_SENTENCE_BOUNDARY_RE.finditer(raw))
+    if matches:
+        cut = matches[-1].end()
+        if cut > 0:
+            return raw[:cut].strip()
+
+    # 4. Last whitespace boundary so we never cut mid-word.
+    last_space = max(raw.rfind(" "), raw.rfind("\n"), raw.rfind("\t"))
+    if last_space > 0:
+        return raw[:last_space].rstrip(" ,;:-") + "."
+    return raw
+
+
+def _stitch_continuation(prefix: str, continuation: str) -> str:
+    """Concatenate *prefix* and *continuation* without duplicating boundary words or dropping spaces."""
+    if not prefix:
+        return continuation
+    if not continuation:
+        return prefix
+    if prefix[-1].isalnum() and continuation[0].isalnum():
+        return f"{prefix} {continuation}"
+    return f"{prefix}{continuation}"
+
+
+def _merge_usage(u1: dict[str, Any] | None, u2: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not u1 and not u2:
+        return None
+    merged: dict[str, Any] = dict(u1 or {})
+    for k, v in (u2 or {}).items():
+        if isinstance(v, int | float) and isinstance(merged.get(k), int | float):
+            merged[k] = merged[k] + v
+        else:
+            merged[k] = v
+    return merged
+
+
+def _vllm_generate_ex(
     messages: list[dict[str, str]],
     *,
     temperature: float | None = None,
@@ -1345,13 +1457,9 @@ def _vllm_generate(
     max_tokens: int | None = None,
     timeout: float | None = None,
     endpoint: Any = None,
-) -> str:
-    """Call a vLLM OpenAI-compatible /chat/completions endpoint.
-
-    The sampling overrides exist for subtasks whose ideal decoding differs
-    from chat's — translation wants greedy and reproducible, not the chat
-    defaults. Omitted values keep the chat settings.
-    """
+    extra_body: dict[str, Any] | None = None,
+) -> Generation:
+    """Call vLLM /chat/completions and return a :class:`Generation` with ``finish_reason`` and ``usage``."""
     try:
         import json as _json
         import urllib.request
@@ -1359,16 +1467,17 @@ def _vllm_generate(
         eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
             _resolve_vllm_endpoint_params(endpoint, max_tokens=max_tokens, timeout=timeout)
         )
+        work_messages = [dict(m) for m in messages]
         safe_max_tokens = _fit_to_context(
-            messages,
+            work_messages,
             req_max_tokens,
             base_url=eff_base_url if endpoint is not None else None,
             model=eff_model if endpoint is not None else None,
         )
 
-        body_dict = {
+        body_dict: dict[str, Any] = {
             "model": eff_model,
-            "messages": messages,
+            "messages": work_messages,
             "temperature": LLM_TEMPERATURE if temperature is None else temperature,
             "top_p": 0.95 if top_p is None else top_p,
             "min_p": LLM_MIN_P,
@@ -1378,6 +1487,8 @@ def _vllm_generate(
             "stream": False,
             "chat_template_kwargs": {"enable_thinking": eff_thinking},
         }
+        if extra_body:
+            body_dict.update(extra_body)
         body = _json.dumps(body_dict).encode("utf-8")
         url = f"{eff_base_url}/chat/completions"
 
@@ -1403,23 +1514,38 @@ def _vllm_generate(
                     payload = _json.loads(resp.read().decode("utf-8"))
             call.response(payload)
 
-        choices = payload.get("choices", [])
+        choices = payload.get("choices", []) if isinstance(payload, dict) else []
         if not choices:
-            return ""
-        msg = choices[0].get("message", {}) or {}
+            return Generation(text="", finish_reason=None, usage=None)
+        choice0 = choices[0] or {}
+        finish_reason = (
+            str(choice0.get("finish_reason"))
+            if choice0.get("finish_reason") is not None
+            else None
+        )
+        usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else None
+        msg = choice0.get("message", {}) or {}
         reasoning_content = msg.get("reasoning_content") or msg.get("reasoning")
         if reasoning_content:
             logger.debug("vLLM reasoning_content suppressed (%d chars)", len(str(reasoning_content)))
-        return strip_thought(
+        text = strip_thought(
             str(msg.get("content", "") or ""),
             preseeded_think=uses_native_long_context_without_yarn(),
         )
+        set_last_generation_meta(
+            {
+                "finish_reason": finish_reason,
+                "continuation_rounds": 0,
+                "model": eff_model,
+            }
+        )
+        return Generation(text=text, finish_reason=finish_reason, usage=usage, continuation_rounds=0)
     except Exception:
         logger.exception("vLLM HTTP generate failed")
-        return ""
+        return Generation(text="", finish_reason=None, usage=None)
 
 
-async def async_vllm_generate(
+def _vllm_generate(
     messages: list[dict[str, str]],
     *,
     temperature: float | None = None,
@@ -1428,17 +1554,153 @@ async def async_vllm_generate(
     timeout: float | None = None,
     endpoint: Any = None,
 ) -> str:
-    """Non-blocking asynchronous vLLM chat generation."""
+    """Call a vLLM OpenAI-compatible /chat/completions endpoint and return the text."""
+    return _vllm_generate_ex(
+        messages,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        endpoint=endpoint,
+    ).text
+
+
+_ORIGINAL_VLLM_GENERATE = _vllm_generate
+
+
+def complete_with_continuation(
+    messages: list[dict[str, str]],
+    endpoint: Any = None,
+    max_rounds: int = 2,
+    deadline: float | None = None,
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+) -> Generation:
+    """Generate a complete response, issuing up to *max_rounds* continuations on ``finish_reason == "length"``.
+
+    Uses vLLM's ``continue_final_message=True, add_generation_prompt=False`` so
+    decoding resumes seamlessly from the partial assistant message, falling back
+    to an explicit continuation user turn if a backend rejects those parameters.
+    If the output still ends with ``finish_reason == "length"`` after *max_rounds*,
+    trims to the last complete sentence/list item/table row and appends
+    :data:`SHORTENED_CONTINUATION_NOTE`.
+    """
+    _, eff_model, _, _, _ = _resolve_vllm_endpoint_params(
+        endpoint, max_tokens=max_tokens, timeout=timeout
+    )
+    first = _vllm_generate_ex(
+        messages,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        endpoint=endpoint,
+    )
+    if not first.text or first.finish_reason != "length":
+        set_last_generation_meta(
+            {
+                "finish_reason": first.finish_reason,
+                "continuation_rounds": 0,
+                "model": eff_model,
+            }
+        )
+        return first
+
+    accumulated = first.text
+    cur_finish = first.finish_reason
+    merged_usage = first.usage
+    rounds_used = 0
+
+    for _ in range(max(0, max_rounds)):
+        if cur_finish != "length":
+            break
+        if deadline is not None and time.monotonic() >= deadline:
+            break
+        rem_timeout = timeout
+        if deadline is not None:
+            rem = max(1.0, deadline - time.monotonic())
+            rem_timeout = min(rem, timeout) if timeout is not None else rem
+
+        cont_messages = [dict(m) for m in messages] + [
+            {"role": "assistant", "content": accumulated}
+        ]
+        nxt = _vllm_generate_ex(
+            cont_messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            timeout=rem_timeout,
+            endpoint=endpoint,
+            extra_body={
+                "continue_final_message": True,
+                "add_generation_prompt": False,
+            },
+        )
+        if not nxt.text:
+            fallback_messages = cont_messages + [
+                {
+                    "role": "user",
+                    "content": "Continue exactly where you stopped. Do not repeat anything.",
+                }
+            ]
+            nxt = _vllm_generate_ex(
+                fallback_messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                timeout=rem_timeout,
+                endpoint=endpoint,
+            )
+        if not nxt.text:
+            break
+        accumulated = _stitch_continuation(accumulated, nxt.text)
+        rounds_used += 1
+        cur_finish = nxt.finish_reason
+        merged_usage = _merge_usage(merged_usage, nxt.usage)
+
+    if cur_finish == "length":
+        trimmed = trim_to_complete_boundary(accumulated)
+        accumulated = f"{trimmed}\n\n{SHORTENED_CONTINUATION_NOTE}" if trimmed else SHORTENED_CONTINUATION_NOTE
+
+    set_last_generation_meta(
+        {
+            "finish_reason": cur_finish,
+            "continuation_rounds": rounds_used,
+            "model": eff_model,
+        }
+    )
+    return Generation(
+        text=accumulated,
+        finish_reason=cur_finish,
+        usage=merged_usage,
+        continuation_rounds=rounds_used,
+    )
+
+
+async def async_vllm_generate_ex(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    endpoint: Any = None,
+) -> Generation:
+    """Non-blocking asynchronous vLLM chat generation returning :class:`Generation`."""
     try:
         import asyncio
 
         eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
             _resolve_vllm_endpoint_params(endpoint, max_tokens=max_tokens, timeout=timeout)
         )
+        work_messages = [dict(m) for m in messages]
         # The budget asks the server for counts; keep that off the event loop.
         safe_max_tokens = await asyncio.to_thread(
             _fit_to_context,
-            messages,
+            work_messages,
             req_max_tokens,
             base_url=eff_base_url if endpoint is not None else None,
             model=eff_model if endpoint is not None else None,
@@ -1446,7 +1708,7 @@ async def async_vllm_generate(
 
         body_dict = {
             "model": eff_model,
-            "messages": messages,
+            "messages": work_messages,
             "temperature": LLM_TEMPERATURE if temperature is None else temperature,
             "top_p": 0.95 if top_p is None else top_p,
             "min_p": LLM_MIN_P,
@@ -1468,23 +1730,38 @@ async def async_vllm_generate(
                 resp.raise_for_status()
                 payload = resp.json()
                 call.response(payload)
-            choices = payload.get("choices", [])
+            choices = payload.get("choices", []) if isinstance(payload, dict) else []
             if not choices:
-                return ""
-            msg = choices[0].get("message", {}) or {}
+                return Generation(text="", finish_reason=None, usage=None)
+            choice0 = choices[0] or {}
+            finish_reason = (
+                str(choice0.get("finish_reason"))
+                if choice0.get("finish_reason") is not None
+                else None
+            )
+            usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else None
+            msg = choice0.get("message", {}) or {}
             reasoning_content = msg.get("reasoning_content") or msg.get("reasoning")
             if reasoning_content:
                 logger.debug("vLLM reasoning_content suppressed (%d chars)", len(str(reasoning_content)))
-            return strip_thought(
+            text = strip_thought(
                 str(msg.get("content", "") or ""),
                 preseeded_think=uses_native_long_context_without_yarn(),
             )
+            set_last_generation_meta(
+                {
+                    "finish_reason": finish_reason,
+                    "continuation_rounds": 0,
+                    "model": eff_model,
+                }
+            )
+            return Generation(text=text, finish_reason=finish_reason, usage=usage, continuation_rounds=0)
     except Exception as exc:
-        logger.debug("async_vllm_generate dispatch fallback: %s", exc)
+        logger.debug("async_vllm_generate_ex dispatch fallback: %s", exc)
     import asyncio
 
     return await asyncio.to_thread(
-        _vllm_generate,
+        _vllm_generate_ex,
         messages,
         temperature=temperature,
         top_p=top_p,
@@ -1492,6 +1769,27 @@ async def async_vllm_generate(
         timeout=timeout,
         endpoint=endpoint,
     )
+
+
+async def async_vllm_generate(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float | None = None,
+    top_p: float | None = None,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+    endpoint: Any = None,
+) -> str:
+    """Non-blocking asynchronous vLLM chat generation."""
+    res = await async_vllm_generate_ex(
+        messages,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        endpoint=endpoint,
+    )
+    return res.text
 
 
 def _vllm_chat_completion(
@@ -1638,71 +1936,160 @@ def _stream_tokens(lines: Any, call: Any, json_module: Any) -> Generator[str, No
             yield token
 
 
+def _vllm_stream_single_round(
+    messages: list[dict[str, str]],
+    *,
+    eff_base_url: str,
+    eff_model: str,
+    eff_thinking: bool,
+    req_max_tokens: int,
+    effective_timeout: float,
+    endpoint: Any = None,
+    extra_body: dict[str, Any] | None = None,
+    round_meta: dict[str, Any] | None = None,
+) -> Generator[str, None, None]:
+    """Stream one vLLM /chat/completions request and record ``finish_reason`` in *round_meta*."""
+    import json as _json
+    import urllib.request
+
+    stream_max_tokens = _fit_to_context(
+        messages,
+        req_max_tokens,
+        base_url=eff_base_url if endpoint is not None else None,
+        model=eff_model if endpoint is not None else None,
+    )
+    body_dict: dict[str, Any] = {
+        "model": eff_model,
+        "messages": messages,
+        "temperature": LLM_TEMPERATURE,
+        "top_p": 0.95,
+        "min_p": LLM_MIN_P,
+        "presence_penalty": LLM_PRESENCE_PENALTY,
+        "max_tokens": stream_max_tokens,
+        "repetition_penalty": LLM_REPETITION_PENALTY,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "chat_template_kwargs": {"enable_thinking": eff_thinking},
+    }
+    if extra_body:
+        body_dict.update(extra_body)
+    body = _json.dumps(body_dict).encode("utf-8")
+    url = f"{eff_base_url}/chat/completions"
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
+        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+
+    client = _get_vllm_client(effective_timeout)
+    if client is not None:
+        try:
+            with (
+                llm_call("chat", eff_model, "vllm", streaming=True) as call,
+                client.stream("POST", url, content=body, headers=headers, timeout=effective_timeout) as resp,
+            ):
+                yield from _stream_tokens(resp.iter_lines(), call, _json)
+                if round_meta is not None:
+                    round_meta["finish_reason"] = getattr(call, "finish_reason", None)
+            return
+        except GeneratorExit:
+            raise
+        except Exception:
+            logger.debug("httpx stream failed, falling back to urllib", exc_info=True)
+
+    req = _vllm_build_request(url, body, accept_stream=True)
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    with (
+        llm_call("chat", eff_model, "vllm", streaming=True) as call,
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+        urllib.request.urlopen(req, timeout=effective_timeout) as resp,  # nosec B310 # noqa: S310
+    ):
+        yield from _stream_tokens(resp, call, _json)
+        if round_meta is not None:
+            round_meta["finish_reason"] = getattr(call, "finish_reason", None)
+
+
 def _vllm_generate_stream(
     messages: list[dict[str, str]],
     *,
     endpoint: Any = None,
+    stream_meta: dict[str, Any] | None = None,
+    max_continuation_rounds: int = 2,
 ) -> Generator[str, None, None]:
-    """Stream tokens from vLLM /chat/completions with ``stream=true``.
+    """Stream tokens from vLLM /chat/completions with ``stream=true`` and bounded continuation.
 
     Parses the OpenAI-compatible Server-Sent-Events stream
-    (``data: {...}\\n\\n`` lines, terminated by ``data: [DONE]``).
+    (``data: {...}\\n\\n`` lines, terminated by ``data: [DONE]``). When a stream
+    terminates with ``finish_reason == "length"``, automatically opens up to
+    *max_continuation_rounds* continuation streams and yields their tokens into
+    the same response stream.
     """
     try:
-        import json as _json
-        import urllib.request
-
         eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
             _resolve_vllm_endpoint_params(endpoint)
         )
-        # The streamed answer had no budget at all: a long thread overran the window.
-        stream_max_tokens = _fit_to_context(
+        accumulated_parts: list[str] = []
+        round_meta: dict[str, Any] = {"finish_reason": None}
+
+        for token in _vllm_stream_single_round(
             messages,
-            req_max_tokens,
-            base_url=eff_base_url if endpoint is not None else None,
-            model=eff_model if endpoint is not None else None,
-        )
-        body_dict = {
-            "model": eff_model,
-            "messages": messages,
-            "temperature": LLM_TEMPERATURE,
-            "top_p": 0.95,
-            "min_p": LLM_MIN_P,
-            "presence_penalty": LLM_PRESENCE_PENALTY,
-            "max_tokens": stream_max_tokens,
-            "repetition_penalty": LLM_REPETITION_PENALTY,
-            "stream": True,
-            "stream_options": {"include_usage": True},
-            "chat_template_kwargs": {"enable_thinking": eff_thinking},
-        }
-        body = _json.dumps(body_dict).encode("utf-8")
-        url = f"{eff_base_url}/chat/completions"
-        headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
-        if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
-            headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
-
-        client = _get_vllm_client(effective_timeout)
-        if client is not None:
-            try:
-                with (
-                    llm_call("chat", eff_model, "vllm", streaming=True) as call,
-                    client.stream("POST", url, content=body, headers=headers, timeout=effective_timeout) as resp,
-                ):
-                    yield from _stream_tokens(resp.iter_lines(), call, _json)
-                return
-            except GeneratorExit:
-                raise
-            except Exception:
-                logger.debug("httpx stream failed, falling back to urllib", exc_info=True)
-
-        req = _vllm_build_request(url, body, accept_stream=True)
-        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        with (
-            llm_call("chat", eff_model, "vllm", streaming=True) as call,
-            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            urllib.request.urlopen(req, timeout=effective_timeout) as resp,  # nosec B310 # noqa: S310
+            eff_base_url=eff_base_url,
+            eff_model=eff_model,
+            eff_thinking=eff_thinking,
+            req_max_tokens=req_max_tokens,
+            effective_timeout=effective_timeout,
+            endpoint=endpoint,
+            round_meta=round_meta,
         ):
-            yield from _stream_tokens(resp, call, _json)
+            accumulated_parts.append(token)
+            yield token
+
+        cur_finish = round_meta.get("finish_reason")
+        rounds_used = 0
+
+        for _ in range(max(0, max_continuation_rounds)):
+            if cur_finish != "length" or not accumulated_parts:
+                break
+            partial_text = "".join(accumulated_parts)
+            cont_messages = [dict(m) for m in messages] + [
+                {"role": "assistant", "content": partial_text}
+            ]
+            cont_meta: dict[str, Any] = {"finish_reason": None}
+            cont_tokens: list[str] = []
+            for token in _vllm_stream_single_round(
+                cont_messages,
+                eff_base_url=eff_base_url,
+                eff_model=eff_model,
+                eff_thinking=eff_thinking,
+                req_max_tokens=req_max_tokens,
+                effective_timeout=effective_timeout,
+                endpoint=endpoint,
+                extra_body={
+                    "continue_final_message": True,
+                    "add_generation_prompt": False,
+                },
+                round_meta=cont_meta,
+            ):
+                if not cont_tokens and partial_text and partial_text[-1].isalnum() and token and token[0].isalnum():
+                    token = " " + token
+                cont_tokens.append(token)
+                accumulated_parts.append(token)
+                yield token
+
+            if not cont_tokens:
+                break
+            rounds_used += 1
+            cur_finish = cont_meta.get("finish_reason")
+
+        if cur_finish == "length" and accumulated_parts:
+            yield f"\n\n{SHORTENED_CONTINUATION_NOTE}"
+
+        meta_out = {
+            "finish_reason": cur_finish,
+            "continuation_rounds": rounds_used,
+            "model": eff_model,
+        }
+        set_last_generation_meta(meta_out)
+        if stream_meta is not None:
+            stream_meta.update(meta_out)
     except GeneratorExit:
         raise
     except Exception:
@@ -1741,7 +2128,13 @@ def generate(
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
-        return _vllm_generate(messages) if endpoint is None else _vllm_generate(messages, endpoint=endpoint)
+        if _vllm_generate is not _ORIGINAL_VLLM_GENERATE:
+            return (
+                _vllm_generate(messages)
+                if endpoint is None
+                else _vllm_generate(messages, endpoint=endpoint)
+            )
+        return complete_with_continuation(messages, endpoint=endpoint).text
 
     if not _load_model() or _tokenizer is None or _model is None:
         return ""
@@ -2162,6 +2555,7 @@ def generate_stream(
     tone_hint: str = "",
     context_summary: str = "",
     endpoint: Any = None,
+    stream_meta: dict[str, Any] | None = None,
 ) -> Generator[str, None, None]:
     """Yield tokens incrementally for SSE streaming.
 
@@ -2187,10 +2581,15 @@ def generate_stream(
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
+        stream_kwargs: dict[str, Any] = {}
+        if endpoint is not None:
+            stream_kwargs["endpoint"] = endpoint
+        if stream_meta is not None:
+            stream_kwargs["stream_meta"] = stream_meta
         stream_gen = (
             _vllm_generate_stream(messages)
-            if endpoint is None
-            else _vllm_generate_stream(messages, endpoint=endpoint)
+            if not stream_kwargs
+            else _vllm_generate_stream(messages, **stream_kwargs)
         )
         yield from filter_thought_stream(stream_gen)
         return

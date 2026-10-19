@@ -73,7 +73,7 @@ services:
       - VLLM_HTTP_TIMEOUT=120
       - LLM_CONTEXT_WINDOW=${LLM_CONTEXT_WINDOW:-262144}
       - LLM_MAX_CONCURRENCY=${LLM_MAX_CONCURRENCY:-12}
-      - LLM_MAX_TOKENS=512
+      - LLM_MAX_TOKENS=768
       - ANALYTICS_DB_DIR=/tmp/ura-analytics
       # G126: Restore dense model on GPU and cross-encoder reranker on GPU overlay
       - RETRIEVER_DENSE_DEVICE=${RETRIEVER_DENSE_DEVICE:-cuda:0}
