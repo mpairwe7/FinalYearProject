@@ -1084,7 +1084,21 @@ _FALLBACK_CHARS_PER_TOKEN = 2.5
 #: Ask again after this long when the server could not answer.
 _VLLM_LIMITS_RETRY_S = 300.0
 _vllm_limits: dict[str, float] = {"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0}
+_vllm_limits_by_url: dict[str, dict[str, float]] = {}
 _vllm_limits_lock = threading.Lock()
+
+
+def _limits_for_base_url(base_url: str | None = None) -> dict[str, float]:
+    """Return the per-base-URL limit cache entry (preserving ``_vllm_limits`` for the default URL)."""
+    default_key = VLLM_BASE_URL.rstrip("/")
+    norm_key = (base_url or VLLM_BASE_URL).rstrip("/")
+    if base_url is None or norm_key == default_key:
+        _vllm_limits_by_url[default_key] = _vllm_limits
+        return _vllm_limits
+    return _vllm_limits_by_url.setdefault(
+        norm_key,
+        {"max_model_len": 0.0, "models_checked_at": 0.0, "tokenize_down_until": 0.0},
+    )
 
 
 def _vllm_auth_headers() -> dict[str, str]:
@@ -1094,25 +1108,27 @@ def _vllm_auth_headers() -> dict[str, str]:
     return headers
 
 
-def _vllm_root_url() -> str:
+def _vllm_root_url(base_url: str | None = None) -> str:
     """``/tokenize`` is served at the root, beside ``/v1``."""
-    base = VLLM_BASE_URL.rstrip("/")
+    base = (base_url or VLLM_BASE_URL).rstrip("/")
     return base[: -len("/v1")] if base.endswith("/v1") else base
 
 
-def _served_context_window() -> int:
-    """The context length the vLLM server was started with, or 0 if unknown."""
+def _served_context_window(base_url: str | None = None) -> int:
+    """The context length the vLLM server at *base_url* was started with, or 0 if unknown."""
+    eff_base = (base_url or VLLM_BASE_URL).rstrip("/")
     now = time.time()
     with _vllm_limits_lock:
-        known = int(_vllm_limits["max_model_len"])
-        if known or now - _vllm_limits["models_checked_at"] < _VLLM_LIMITS_RETRY_S:
+        limits = _limits_for_base_url(base_url)
+        known = int(limits["max_model_len"])
+        if known or now - limits["models_checked_at"] < _VLLM_LIMITS_RETRY_S:
             return known
-        _vllm_limits["models_checked_at"] = now
+        limits["models_checked_at"] = now
     length = 0
     try:
         client = _get_vllm_client(5.0)
         if client is not None:
-            resp = client.get(f"{VLLM_BASE_URL.rstrip('/')}/models", headers=_vllm_auth_headers(), timeout=5.0)
+            resp = client.get(f"{eff_base}/models", headers=_vllm_auth_headers(), timeout=5.0)
             resp.raise_for_status()
             for model in resp.json().get("data", []):
                 if model.get("max_model_len"):
@@ -1121,21 +1137,28 @@ def _served_context_window() -> int:
     except Exception:
         logger.debug("vLLM /models unavailable; the prompt budget uses LLM_CONTEXT_WINDOW", exc_info=True)
     with _vllm_limits_lock:
-        _vllm_limits["max_model_len"] = float(length)
+        limits = _limits_for_base_url(base_url)
+        limits["max_model_len"] = float(length)
     return length
 
 
-def _count_prompt_tokens(messages: list[dict[str, Any]]) -> int | None:
-    """The prompt's exact token count from the server, chat template included."""
-    if time.time() < _vllm_limits["tokenize_down_until"]:
+def _count_prompt_tokens(
+    messages: list[dict[str, Any]],
+    *,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> int | None:
+    """The prompt's exact token count from the same server as generation, chat template included."""
+    limits = _limits_for_base_url(base_url)
+    if time.time() < limits["tokenize_down_until"]:
         return None
     try:
         client = _get_vllm_client(5.0)
         if client is None:
             return None
         resp = client.post(
-            f"{_vllm_root_url()}/tokenize",
-            json={"model": LLM_MODEL, "messages": messages, "add_generation_prompt": True},
+            f"{_vllm_root_url(base_url)}/tokenize",
+            json={"model": model or LLM_MODEL, "messages": messages, "add_generation_prompt": True},
             headers=_vllm_auth_headers(),
             timeout=5.0,
         )
@@ -1143,7 +1166,7 @@ def _count_prompt_tokens(messages: list[dict[str, Any]]) -> int | None:
         count = resp.json().get("count")
         return int(count) if count is not None else None
     except Exception:
-        _vllm_limits["tokenize_down_until"] = time.time() + _VLLM_LIMITS_RETRY_S
+        limits["tokenize_down_until"] = time.time() + _VLLM_LIMITS_RETRY_S
         logger.debug("vLLM /tokenize unavailable; the budget falls back to an estimate", exc_info=True)
         return None
 
@@ -1156,7 +1179,35 @@ def _estimate_prompt_tokens(messages: list[dict[str, Any]]) -> int:
     return sum(_estimate_tokens(str(m.get("content") or "")) + 8 for m in messages)
 
 
-def _count_text_tokens(text: str) -> int:
+def _call_served_context_window(base_url: str | None = None) -> int:
+    if base_url is None:
+        return _served_context_window()
+    try:
+        return _served_context_window(base_url)
+    except TypeError:
+        return _served_context_window()
+
+
+def _call_count_prompt_tokens(
+    messages: list[dict[str, Any]],
+    *,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> int | None:
+    if base_url is None and model is None:
+        return _count_prompt_tokens(messages)
+    try:
+        return _count_prompt_tokens(messages, base_url=base_url, model=model)
+    except TypeError:
+        return _count_prompt_tokens(messages)
+
+
+def _count_text_tokens(
+    text: str,
+    *,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> int:
     """Tokens in *text* as the server counts them; an estimate when it cannot say.
 
     Counted as one user message, so it includes the few tokens of chat-template
@@ -1164,11 +1215,20 @@ def _count_text_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    exact = _count_prompt_tokens([{"role": "user", "content": text}])
+    exact = _call_count_prompt_tokens(
+        [{"role": "user", "content": text}],
+        base_url=base_url,
+        model=model,
+    )
     return exact if exact is not None else _estimate_tokens(text)
 
 
-def _tool_schema_tokens(tools: list[dict[str, Any]] | None) -> int:
+def _tool_schema_tokens(
+    tools: list[dict[str, Any]] | None,
+    *,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> int:
     """What *tools* cost in the prompt.
 
     ``/tokenize`` does not see tools, so the count is of the schema JSON the
@@ -1183,7 +1243,7 @@ def _tool_schema_tokens(tools: list[dict[str, Any]] | None) -> int:
     from .tool_budget import TOOLS_BLOCK_OVERHEAD_TOKENS  # noqa: PLC0415
 
     blob = "\n".join(_json.dumps(tool, ensure_ascii=False) for tool in tools)
-    return _count_text_tokens(blob) + TOOLS_BLOCK_OVERHEAD_TOKENS
+    return _count_text_tokens(blob, base_url=base_url, model=model) + TOOLS_BLOCK_OVERHEAD_TOKENS
 
 
 def _shorten_passages(content: str, keep_ratio: float) -> str:
@@ -1203,7 +1263,14 @@ def _shorten_passages(content: str, keep_ratio: float) -> str:
     return f"{head[:keep].rstrip()}\n\n{tail}" if keep else tail
 
 
-def _fit_to_context(messages: list[dict[str, Any]], max_tokens: int, *, extra_tokens: int = 0) -> int:
+def _fit_to_context(
+    messages: list[dict[str, Any]],
+    max_tokens: int,
+    *,
+    extra_tokens: int = 0,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> int:
     """Trim *messages* in place to the served window; return a safe ``max_tokens``.
 
     Drops the oldest replayed exchanges first (whole user/assistant pairs), then
@@ -1213,17 +1280,17 @@ def _fit_to_context(messages: list[dict[str, Any]], max_tokens: int, *, extra_to
     calls and their results, which mean nothing without the question.
     ``extra_tokens`` covers what the messages do not carry, such as tool schemas.
     """
-    served = _served_context_window()
+    served = _call_served_context_window(base_url)
     window = min(LLM_CONTEXT_WINDOW, served) if served else LLM_CONTEXT_WINDOW
     answer = max(64, min(max_tokens, window // 2))
     budget = max(256, window - answer - 16)
 
-    exact = _count_prompt_tokens(messages)
+    exact = _call_count_prompt_tokens(messages, base_url=base_url, model=model)
     count = (exact if exact is not None else _estimate_prompt_tokens(messages)) + extra_tokens
     if count > budget:
         active = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=len(messages) - 1)
         while count > budget and active > 1:
-            pair = active > 2 and messages[1].get("role") == "user" and messages[2].get("role") == "assistant"
+            pair = active > 2 and messages[1].get("role") and messages[1].get("role") == "user" and messages[2].get("role") == "assistant"
             drop = 2 if pair else 1
             removed = messages[1 : 1 + drop]
             del messages[1 : 1 + drop]
@@ -1235,10 +1302,39 @@ def _fit_to_context(messages: list[dict[str, Any]], max_tokens: int, *, extra_to
             request_tokens = max(1, _estimate_tokens(content))
             room = request_tokens - (count - budget)
             request["content"] = _shorten_passages(content, room / request_tokens)
-        recount = _count_prompt_tokens(messages)
+        recount = _call_count_prompt_tokens(messages, base_url=base_url, model=model)
         count = (recount if recount is not None else _estimate_prompt_tokens(messages)) + extra_tokens
         logger.info("Prompt trimmed to the %d-token window (%d prompt tokens)", window, count)
     return max(16, min(max_tokens, window - count - 8))
+
+
+def _resolve_vllm_endpoint_params(
+    endpoint: Any = None,
+    *,
+    max_tokens: int | None = None,
+    timeout: float | None = None,
+) -> tuple[str, str, bool, int, float]:
+    """Return ``(base_url, model, thinking, max_tokens, timeout_s)`` for *endpoint* or default env."""
+    if endpoint is not None:
+        base_url = str(getattr(endpoint, "base_url", "") or VLLM_BASE_URL).rstrip("/")
+        model = str(getattr(endpoint, "model", "") or LLM_MODEL)
+        thinking = bool(getattr(endpoint, "thinking", False))
+        ep_max_tokens = int(getattr(endpoint, "max_tokens", LLM_MAX_TOKENS) or LLM_MAX_TOKENS)
+        ep_timeout = float(getattr(endpoint, "timeout_s", VLLM_HTTP_TIMEOUT) or VLLM_HTTP_TIMEOUT)
+        return (
+            base_url,
+            model,
+            thinking,
+            ep_max_tokens if max_tokens is None else max_tokens,
+            ep_timeout if timeout is None else timeout,
+        )
+    return (
+        VLLM_BASE_URL.rstrip("/"),
+        LLM_MODEL,
+        False,
+        LLM_MAX_TOKENS if max_tokens is None else max_tokens,
+        VLLM_HTTP_TIMEOUT if timeout is None else timeout,
+    )
 
 
 def _vllm_generate(
@@ -1248,6 +1344,7 @@ def _vllm_generate(
     top_p: float | None = None,
     max_tokens: int | None = None,
     timeout: float | None = None,
+    endpoint: Any = None,
 ) -> str:
     """Call a vLLM OpenAI-compatible /chat/completions endpoint.
 
@@ -1259,10 +1356,18 @@ def _vllm_generate(
         import json as _json
         import urllib.request
 
-        safe_max_tokens = _fit_to_context(messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens)
+        eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
+            _resolve_vllm_endpoint_params(endpoint, max_tokens=max_tokens, timeout=timeout)
+        )
+        safe_max_tokens = _fit_to_context(
+            messages,
+            req_max_tokens,
+            base_url=eff_base_url if endpoint is not None else None,
+            model=eff_model if endpoint is not None else None,
+        )
 
         body_dict = {
-            "model": LLM_MODEL,
+            "model": eff_model,
             "messages": messages,
             "temperature": LLM_TEMPERATURE if temperature is None else temperature,
             "top_p": 0.95 if top_p is None else top_p,
@@ -1271,11 +1376,10 @@ def _vllm_generate(
             "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "chat_template_kwargs": {"enable_thinking": eff_thinking},
         }
         body = _json.dumps(body_dict).encode("utf-8")
-        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
-        effective_timeout = timeout if timeout is not None else VLLM_HTTP_TIMEOUT
+        url = f"{eff_base_url}/chat/completions"
 
         payload = None
         client = _get_vllm_client(effective_timeout)
@@ -1283,7 +1387,7 @@ def _vllm_generate(
         if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
             headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
 
-        with llm_call("chat", LLM_MODEL, "vllm") as call:
+        with llm_call("chat", eff_model, "vllm") as call:
             if client is not None:
                 try:
                     resp = client.post(url, content=body, headers=headers, timeout=effective_timeout)
@@ -1294,6 +1398,7 @@ def _vllm_generate(
 
             if payload is None:
                 req = _vllm_build_request(url, body, accept_stream=False)
+                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
                     payload = _json.loads(resp.read().decode("utf-8"))
             call.response(payload)
@@ -1301,8 +1406,12 @@ def _vllm_generate(
         choices = payload.get("choices", [])
         if not choices:
             return ""
+        msg = choices[0].get("message", {}) or {}
+        reasoning_content = msg.get("reasoning_content") or msg.get("reasoning")
+        if reasoning_content:
+            logger.debug("vLLM reasoning_content suppressed (%d chars)", len(str(reasoning_content)))
         return strip_thought(
-            str(choices[0].get("message", {}).get("content", "")),
+            str(msg.get("content", "") or ""),
             preseeded_think=uses_native_long_context_without_yarn(),
         )
     except Exception:
@@ -1317,18 +1426,26 @@ async def async_vllm_generate(
     top_p: float | None = None,
     max_tokens: int | None = None,
     timeout: float | None = None,
+    endpoint: Any = None,
 ) -> str:
     """Non-blocking asynchronous vLLM chat generation."""
     try:
         import asyncio
 
+        eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
+            _resolve_vllm_endpoint_params(endpoint, max_tokens=max_tokens, timeout=timeout)
+        )
         # The budget asks the server for counts; keep that off the event loop.
         safe_max_tokens = await asyncio.to_thread(
-            _fit_to_context, messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens
+            _fit_to_context,
+            messages,
+            req_max_tokens,
+            base_url=eff_base_url if endpoint is not None else None,
+            model=eff_model if endpoint is not None else None,
         )
 
         body_dict = {
-            "model": LLM_MODEL,
+            "model": eff_model,
             "messages": messages,
             "temperature": LLM_TEMPERATURE if temperature is None else temperature,
             "top_p": 0.95 if top_p is None else top_p,
@@ -1337,17 +1454,16 @@ async def async_vllm_generate(
             "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "chat_template_kwargs": {"enable_thinking": eff_thinking},
         }
-        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
-        effective_timeout = timeout if timeout is not None else VLLM_HTTP_TIMEOUT
+        url = f"{eff_base_url}/chat/completions"
         headers = {"Content-Type": "application/json"}
         if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
             headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
 
         aclient = await _get_vllm_async_client(effective_timeout)
         if aclient is not None:
-            with llm_call("chat", LLM_MODEL, "vllm") as call:
+            with llm_call("chat", eff_model, "vllm") as call:
                 resp = await aclient.post(url, json=body_dict, headers=headers, timeout=effective_timeout)
                 resp.raise_for_status()
                 payload = resp.json()
@@ -1355,8 +1471,12 @@ async def async_vllm_generate(
             choices = payload.get("choices", [])
             if not choices:
                 return ""
+            msg = choices[0].get("message", {}) or {}
+            reasoning_content = msg.get("reasoning_content") or msg.get("reasoning")
+            if reasoning_content:
+                logger.debug("vLLM reasoning_content suppressed (%d chars)", len(str(reasoning_content)))
             return strip_thought(
-                str(choices[0].get("message", {}).get("content", "")),
+                str(msg.get("content", "") or ""),
                 preseeded_think=uses_native_long_context_without_yarn(),
             )
     except Exception as exc:
@@ -1370,6 +1490,7 @@ async def async_vllm_generate(
         top_p=top_p,
         max_tokens=max_tokens,
         timeout=timeout,
+        endpoint=endpoint,
     )
 
 
@@ -1381,19 +1502,31 @@ def _vllm_chat_completion(
     temperature: float | None = None,
     top_p: float | None = None,
     max_tokens: int | None = None,
+    endpoint: Any = None,
 ) -> dict[str, Any]:
     """Call vLLM OpenAI-compatible /chat/completions endpoint with tool calling support."""
     try:
         import json as _json
         import urllib.request
 
-        tools_tokens = _tool_schema_tokens(tools)
+        eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
+            _resolve_vllm_endpoint_params(endpoint, max_tokens=max_tokens)
+        )
+        tools_tokens = _tool_schema_tokens(
+            tools,
+            base_url=eff_base_url if endpoint is not None else None,
+            model=eff_model if endpoint is not None else None,
+        )
         safe_max_tokens = _fit_to_context(
-            messages, LLM_MAX_TOKENS if max_tokens is None else max_tokens, extra_tokens=tools_tokens
+            messages,
+            req_max_tokens,
+            extra_tokens=tools_tokens,
+            base_url=eff_base_url if endpoint is not None else None,
+            model=eff_model if endpoint is not None else None,
         )
 
         payload: dict[str, Any] = {
-            "model": LLM_MODEL,
+            "model": eff_model,
             "messages": messages,
             "temperature": LLM_TEMPERATURE if temperature is None else temperature,
             "top_p": 0.95 if top_p is None else top_p,
@@ -1402,23 +1535,27 @@ def _vllm_chat_completion(
             "max_tokens": safe_max_tokens,
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
+            "chat_template_kwargs": {"enable_thinking": eff_thinking},
         }
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = tool_choice or "auto"
 
         body = _json.dumps(payload).encode("utf-8")
-        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
+        url = f"{eff_base_url}/chat/completions"
         req = _vllm_build_request(url, body, accept_stream=False)
-        with llm_call("chat", LLM_MODEL, "vllm") as call:
-            with urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+        with llm_call("chat", eff_model, "vllm") as call:
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
                 data = _json.loads(resp.read().decode("utf-8"))
             call.response(data)
         choices = data.get("choices", [])
         if not choices:
             return {"content": "", "tool_calls": []}
-        msg = choices[0].get("message", {})
+        msg = choices[0].get("message", {}) or {}
+        reasoning_content = msg.get("reasoning_content") or msg.get("reasoning")
+        if reasoning_content:
+            logger.debug("vLLM reasoning_content suppressed (%d chars)", len(str(reasoning_content)))
         content = str(msg.get("content") or "").strip()
 
         parsed_calls: list[dict[str, Any]] = []
@@ -1501,7 +1638,11 @@ def _stream_tokens(lines: Any, call: Any, json_module: Any) -> Generator[str, No
             yield token
 
 
-def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None, None]:
+def _vllm_generate_stream(
+    messages: list[dict[str, str]],
+    *,
+    endpoint: Any = None,
+) -> Generator[str, None, None]:
     """Stream tokens from vLLM /chat/completions with ``stream=true``.
 
     Parses the OpenAI-compatible Server-Sent-Events stream
@@ -1511,10 +1652,18 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
         import json as _json
         import urllib.request
 
+        eff_base_url, eff_model, eff_thinking, req_max_tokens, effective_timeout = (
+            _resolve_vllm_endpoint_params(endpoint)
+        )
         # The streamed answer had no budget at all: a long thread overran the window.
-        stream_max_tokens = _fit_to_context(messages, LLM_MAX_TOKENS)
+        stream_max_tokens = _fit_to_context(
+            messages,
+            req_max_tokens,
+            base_url=eff_base_url if endpoint is not None else None,
+            model=eff_model if endpoint is not None else None,
+        )
         body_dict = {
-            "model": LLM_MODEL,
+            "model": eff_model,
             "messages": messages,
             "temperature": LLM_TEMPERATURE,
             "top_p": 0.95,
@@ -1524,20 +1673,20 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
             "repetition_penalty": LLM_REPETITION_PENALTY,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "chat_template_kwargs": {"enable_thinking": False},
+            "chat_template_kwargs": {"enable_thinking": eff_thinking},
         }
         body = _json.dumps(body_dict).encode("utf-8")
-        url = f"{VLLM_BASE_URL.rstrip('/')}/chat/completions"
+        url = f"{eff_base_url}/chat/completions"
         headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
         if VLLM_API_KEY and VLLM_API_KEY.lower() not in ("not-needed", "none", ""):
             headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
 
-        client = _get_vllm_client(VLLM_HTTP_TIMEOUT)
+        client = _get_vllm_client(effective_timeout)
         if client is not None:
             try:
                 with (
-                    llm_call("chat", LLM_MODEL, "vllm", streaming=True) as call,
-                    client.stream("POST", url, content=body, headers=headers, timeout=VLLM_HTTP_TIMEOUT) as resp,
+                    llm_call("chat", eff_model, "vllm", streaming=True) as call,
+                    client.stream("POST", url, content=body, headers=headers, timeout=effective_timeout) as resp,
                 ):
                     yield from _stream_tokens(resp.iter_lines(), call, _json)
                 return
@@ -1547,9 +1696,11 @@ def _vllm_generate_stream(messages: list[dict[str, str]]) -> Generator[str, None
                 logger.debug("httpx stream failed, falling back to urllib", exc_info=True)
 
         req = _vllm_build_request(url, body, accept_stream=True)
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         with (
-            llm_call("chat", LLM_MODEL, "vllm", streaming=True) as call,
-            urllib.request.urlopen(req, timeout=VLLM_HTTP_TIMEOUT) as resp,  # nosec B310 # noqa: S310
+            llm_call("chat", eff_model, "vllm", streaming=True) as call,
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            urllib.request.urlopen(req, timeout=effective_timeout) as resp,  # nosec B310 # noqa: S310
         ):
             yield from _stream_tokens(resp, call, _json)
     except GeneratorExit:
@@ -1570,6 +1721,7 @@ def generate(
     personalization_context: str = "",
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> str:
     """Generate a grounded answer from retrieved passages.
 
@@ -1589,7 +1741,7 @@ def generate(
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
-        return _vllm_generate(messages)
+        return _vllm_generate(messages) if endpoint is None else _vllm_generate(messages, endpoint=endpoint)
 
     if not _load_model() or _tokenizer is None or _model is None:
         return ""
@@ -2009,6 +2161,7 @@ def generate_stream(
     personalization_context: str = "",
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> Generator[str, None, None]:
     """Yield tokens incrementally for SSE streaming.
 
@@ -2034,7 +2187,12 @@ def generate_stream(
             tone_hint=tone_hint,
             context_summary=context_summary,
         )
-        yield from filter_thought_stream(_vllm_generate_stream(messages))
+        stream_gen = (
+            _vllm_generate_stream(messages)
+            if endpoint is None
+            else _vllm_generate_stream(messages, endpoint=endpoint)
+        )
+        yield from filter_thought_stream(stream_gen)
         return
 
     if not _load_model() or _tokenizer is None or _model is None:
@@ -2198,6 +2356,18 @@ _TOOL_CALL_RE = _re.compile(
     r"<tool_call>\s*(\{.*?\})\s*</tool_call>",
     _re.DOTALL,
 )
+_TOOL_CALL_XML_FUNC_RE = _re.compile(
+    r"<tool_call>\s*<function=([^>]+)>(.*?)</function>\s*</tool_call>",
+    _re.DOTALL,
+)
+_TOOL_CALL_XML_PARAM_RE = _re.compile(
+    r"<parameter=([^>]+)>(.*?)</parameter>",
+    _re.DOTALL,
+)
+_ANY_TOOL_CALL_BLOCK_RE = _re.compile(
+    r"<tool_call>.*?</tool_call>",
+    _re.DOTALL,
+)
 
 
 # System-prompt extension used when tool-calling is active.  We bolt
@@ -2261,6 +2431,21 @@ def _parse_tool_calls(text: str) -> list[dict[str, Any]]:
         if not isinstance(args, dict):
             args = {}
         calls.append({"name": name, "arguments": args})
+
+    for fn_match in _TOOL_CALL_XML_FUNC_RE.finditer(text):
+        fn_name = fn_match.group(1).strip()
+        fn_body = fn_match.group(2)
+        if not fn_name:
+            continue
+        xml_args: dict[str, Any] = {}
+        for param_match in _TOOL_CALL_XML_PARAM_RE.finditer(fn_body):
+            p_key = param_match.group(1).strip()
+            p_raw = param_match.group(2).strip()
+            try:
+                xml_args[p_key] = _json.loads(p_raw)
+            except Exception:
+                xml_args[p_key] = p_raw
+        calls.append({"name": fn_name, "arguments": xml_args})
     return calls
 
 
@@ -2272,7 +2457,7 @@ def _strip_tool_calls(text: str) -> str:
     iterations.  We strip them before returning to the caller so the
     user never sees the raw tags.
     """
-    return _TOOL_CALL_RE.sub("", text).strip()
+    return _ANY_TOOL_CALL_BLOCK_RE.sub("", text).strip()
 
 
 def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
@@ -2540,6 +2725,8 @@ def _fit_tools_to_window(
     tool_specs: list[dict[str, Any]],
     *,
     whole_prompt: bool = False,
+    base_url: str | None = None,
+    model: str | None = None,
 ) -> list[dict[str, Any]]:
     """Keep *tool_specs* inside the served window beside *messages*.
 
@@ -2556,7 +2743,7 @@ def _fit_tools_to_window(
         return tool_specs
     from .tool_budget import fit_tool_specs, tool_names  # noqa: PLC0415
 
-    served = _served_context_window()
+    served = _call_served_context_window(base_url)
     window = min(LLM_CONTEXT_WINDOW, served) if served else LLM_CONTEXT_WINDOW
     answer = max(64, min(LLM_MAX_TOKENS, window // 2))
     question = str(messages[-1].get("content") or "") if messages else ""
@@ -2567,12 +2754,16 @@ def _fit_tools_to_window(
     else:
         floor_messages = [messages[0], {"role": "user", "content": question[marker:] if marker > 0 else question}]
         reserve = _PASSAGE_RESERVE_TOKENS
-    floor = _count_prompt_tokens(floor_messages)
+    floor = _call_count_prompt_tokens(floor_messages, base_url=base_url, model=model)
     if floor is None:
         floor = _estimate_prompt_tokens(floor_messages)
     budget = window - answer - 16 - floor - reserve
 
-    fitted = fit_tool_specs(tool_specs, budget, _count_text_tokens)
+    fitted = fit_tool_specs(
+        tool_specs,
+        budget,
+        lambda t: _count_text_tokens(t, base_url=base_url, model=model),
+    )
     if len(fitted) != len(tool_specs) or fitted != tool_specs:
         dropped = [n for n in tool_names(tool_specs) if n not in tool_names(fitted)]
         logger.info(
@@ -2604,6 +2795,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
     connector_namespaces: list[str] | None = None,
     forced_operations: list[str] | None = None,
     summarise_records: bool = True,
+    endpoint: Any = None,
 ) -> dict[str, Any]:
     """Run a bounded tool-calling loop with the local Qwen3 model.
 
@@ -2774,7 +2966,9 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
         context_summary=context_summary,
         connector_note=_connector_turn_note(connector_tools),
     )
-    tool_specs = _fit_tools_to_window(messages, tool_specs)
+    ep_base = str(getattr(endpoint, "base_url", "") or "").rstrip("/") if endpoint is not None else None
+    ep_model = str(getattr(endpoint, "model", "") or "") if endpoint is not None else None
+    tool_specs = _fit_tools_to_window(messages, tool_specs, base_url=ep_base, model=ep_model)
     allowed_tool_names = {str(spec["function"]["name"]) for spec in tool_specs}
     forced_queue = [
         name for name in (forced_operations or []) if name in allowed_tool_names and name in connector_descriptors
@@ -2798,6 +2992,7 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
             personalization_context=personalization_context,
             tone_hint=tone_hint,
             context_summary=context_summary,
+            endpoint=endpoint,
         )
         return {"text": text, "tool_calls": [], "iterations": 1, "truncated": False}
 
@@ -2839,10 +3034,19 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     if message.get("role") == "user":
                         message["content"] = f"{message.get('content') or ''}\n\n{scope}"
                         break
-                turn_res = _vllm_chat_completion(
-                    scoped_messages,
-                    tools=[forced_spec],
-                    tool_choice={"type": "function", "function": {"name": forced_name}},
+                turn_res = (
+                    _vllm_chat_completion(
+                        scoped_messages,
+                        tools=[forced_spec],
+                        tool_choice={"type": "function", "function": {"name": forced_name}},
+                    )
+                    if endpoint is None
+                    else _vllm_chat_completion(
+                        scoped_messages,
+                        tools=[forced_spec],
+                        tool_choice={"type": "function", "function": {"name": forced_name}},
+                        endpoint=endpoint,
+                    )
                 )
             else:
                 round_specs = tool_specs
@@ -2850,8 +3054,14 @@ def generate_with_tools(  # noqa: PLR0913 — request-scoped configuration
                     # Results are in the prompt now. Offer only the tools that
                     # still fit beside them; none is a valid answer — the model
                     # then writes the reply from what it was given.
-                    round_specs = _fit_tools_to_window(messages, tool_specs, whole_prompt=True)
-                turn_res = _vllm_chat_completion(messages, tools=round_specs or None)
+                    round_specs = _fit_tools_to_window(
+                        messages, tool_specs, whole_prompt=True, base_url=ep_base, model=ep_model
+                    )
+                turn_res = (
+                    _vllm_chat_completion(messages, tools=round_specs or None)
+                    if endpoint is None
+                    else _vllm_chat_completion(messages, tools=round_specs or None, endpoint=endpoint)
+                )
             response = turn_res.get("content", "")
             parsed_calls = turn_res.get("tool_calls", [])
             if forced_name:

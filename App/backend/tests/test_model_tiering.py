@@ -21,6 +21,8 @@ from app.providers.routing import (
     MODEL_SLOTS,
     ModelTier,
     TierDecision,
+    record_tier_turn,
+    reset_tier_window,
     select_tier,
 )
 
@@ -123,6 +125,28 @@ class PromotionTests(unittest.TestCase):
         decision = select_tier("rag", multi_hop=True)
         self.assertIn("multi-hop", decision.reason)
 
+    def test_planner_tool_with_how_why_explain_promotes_to_t3(self) -> None:
+        decision = select_tier(
+            "rag",
+            query="How does URA value a company car and housing benefit?",
+            planner_tool_count=2,
+        )
+        self.assertIs(decision.tier, ModelTier.T3)
+        self.assertTrue(decision.promoted)
+        self.assertIn("planner", decision.reason)
+
+    def test_premise_contradiction_promotes_to_t3(self) -> None:
+        decision = select_tier("rag", premise_contradiction=True)
+        self.assertIs(decision.tier, ModelTier.T3)
+        self.assertTrue(decision.promoted)
+        self.assertIn("premise contradiction", decision.reason)
+
+    def test_two_or_more_tax_heads_in_conversation_promotes_to_t3(self) -> None:
+        decision = select_tier("rag", tax_heads_count=2)
+        self.assertIs(decision.tier, ModelTier.T3)
+        self.assertTrue(decision.promoted)
+        self.assertIn("multi-head", decision.reason)
+
 
 class AdapterBindingTests(unittest.TestCase):
     """The constraint that would silently degrade Ugandan-language answers."""
@@ -156,8 +180,23 @@ class AdapterBindingTests(unittest.TestCase):
     def test_greeting_in_a_pinned_locale_still_needs_no_model(self) -> None:
         self.assertIs(select_tier("greet", locale="lg").tier, ModelTier.T0)
 
+    def test_translated_locales_stay_t1_while_flag_off_and_promote_when_on(self) -> None:
+        for locale in ("lg", "sw"):
+            with mock.patch.dict(os.environ, {"FLAG_REASONER_FOR_TRANSLATED_LOCALES": "false"}):
+                off_dec = select_tier("rag", locale=locale, multi_hop=True)
+                self.assertIs(off_dec.tier, ModelTier.T1, locale)
+            with mock.patch.dict(os.environ, {"FLAG_REASONER_FOR_TRANSLATED_LOCALES": "true"}):
+                on_dec = select_tier("rag", locale=locale, multi_hop=True)
+                self.assertIs(on_dec.tier, ModelTier.T3, locale)
+
 
 class BudgetCapTests(unittest.TestCase):
+    def setUp(self) -> None:
+        reset_tier_window()
+
+    def tearDown(self) -> None:
+        reset_tier_window()
+
     def test_exhausted_budget_caps_at_t2(self) -> None:
         decision = select_tier("rag", multi_hop=True, budget_exhausted=True)
         self.assertIs(decision.tier, ModelTier.T2)
@@ -166,6 +205,17 @@ class BudgetCapTests(unittest.TestCase):
     def test_cap_does_not_disturb_lower_tiers(self) -> None:
         self.assertIs(select_tier("rag", budget_exhausted=True).tier, ModelTier.T1)
         self.assertIs(select_tier("greet", budget_exhausted=True).tier, ModelTier.T0)
+
+    def test_rolling_200_turn_share_caps_t3_at_t2_when_exceeding_reasoner_max_share(self) -> None:
+        with mock.patch.dict(os.environ, {"REASONER_MAX_SHARE": "0.25"}):
+            for _ in range(14):
+                record_tier_turn(ModelTier.T1)
+            for _ in range(6):
+                record_tier_turn(ModelTier.T3)
+            # 6 / 20 = 0.30 > 0.25 -> automatically capped at T2
+            decision = select_tier("rag", multi_hop=True)
+            self.assertIs(decision.tier, ModelTier.T2)
+            self.assertIn("capped: T3 budget exhausted", decision.reason)
 
 
 class DistributionTests(unittest.TestCase):

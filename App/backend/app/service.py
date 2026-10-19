@@ -119,7 +119,15 @@ from .conversational import handle_conversational_turn
 # Tier selection is pure policy over the supervisor's decision — no cloud
 # SDK, no key, no network — so unlike the rest of ``providers`` it is safe
 # to import at module scope.
-from .providers.routing import log_tier, select_tier
+from .providers.routing import (
+    ENDPOINTS,
+    ModelEndpoint,
+    ModelTier,
+    get_endpoint,
+    log_tier,
+    log_tier_fallback,
+    select_tier,
+)
 from .providers.scope import cloud_models_allowed, local_models_only
 from .cache import create_cache
 from .calculator_router import (
@@ -1049,6 +1057,56 @@ def _evaluate_calculation_context(query: str) -> str:
     return ""
 
 
+def _is_non_t1_endpoint(endpoint: Any) -> bool:
+    """Return True when *endpoint* resolves to a local reasoning server distinct from T1."""
+    if endpoint is None:
+        return False
+    t1_ep = get_endpoint(ModelTier.T1)
+    if t1_ep is None:
+        return False
+    return (
+        getattr(endpoint, "base_url", "") != t1_ep.base_url
+        or getattr(endpoint, "model", "") != t1_ep.model
+    )
+
+
+def _count_conversation_tax_heads(
+    query: str,
+    conv_ctx: Any = None,
+    conversation_history: list[dict[str, Any]] | None = None,
+) -> int:
+    """Count distinct statutory tax heads across the conversation and current query."""
+    try:
+        from .context_manager import extract_conversation_entities, normalize_history_turns
+
+        heads: set[str] = set()
+        if conv_ctx is not None:
+            active_entities = (
+                conv_ctx.get("active_entities")
+                if isinstance(conv_ctx, dict)
+                else getattr(conv_ctx, "active_entities", None)
+            )
+            if active_entities is not None:
+                keys = (
+                    active_entities.get("tax_topic_keys")
+                    if isinstance(active_entities, dict)
+                    else getattr(active_entities, "tax_topic_keys", None)
+                )
+                for k in keys or []:
+                    if k and k != "general_tax":
+                        heads.add(str(k))
+        turns = normalize_history_turns(conversation_history) + [
+            {"user_message": str(query or ""), "bot_reply": ""}
+        ]
+        extracted = extract_conversation_entities(turns)
+        for k in extracted.tax_topic_keys:
+            if k and k != "general_tax":
+                heads.add(str(k))
+        return len(heads)
+    except Exception:
+        return 0
+
+
 def _call_llm_with_deadline(
     query: str,
     passages: list[dict[str, Any]],
@@ -1058,6 +1116,7 @@ def _call_llm_with_deadline(
     deadline_s: float = LLM_DEADLINE_SECONDS,
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> str:
     """Generate a reply, honouring the hybrid cloud/local routing policy.
 
@@ -1092,6 +1151,7 @@ def _call_llm_with_deadline(
             allow_cloud_fallback=False,  # cloud already attempted above
             tone_hint=tone_hint,
             context_summary=context_summary,
+            endpoint=endpoint,
         ))
     return strip_thought(_local_llm_then_cloud(
         query,
@@ -1103,6 +1163,7 @@ def _call_llm_with_deadline(
         allow_cloud_fallback=True,
         tone_hint=tone_hint,
         context_summary=context_summary,
+        endpoint=endpoint,
     ))
 
 
@@ -1117,6 +1178,7 @@ def _local_llm_then_cloud(
     allow_cloud_fallback: bool = True,
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
@@ -1131,6 +1193,37 @@ def _local_llm_then_cloud(
     # correspondingly less time for the cloud chain rather than the two
     # budgets stacking on top of each other.
     chain_deadline = time.monotonic() + LLM_TOTAL_BUDGET_SECONDS
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    effective_deadline = deadline_s
+    if is_reasoner:
+        try:
+            effective_deadline = float(
+                os.getenv("REASONER_DEADLINE_S") or getattr(endpoint, "timeout_s", deadline_s)
+            )
+        except ValueError:
+            effective_deadline = deadline_s
+
+    def _fallback_to_t1(reason: str) -> str:
+        log_tier_fallback(reason=reason)
+        t1_ep = get_endpoint(ModelTier.T1)
+        logger.warning(
+            "Reasoner endpoint (%s) failed (%s) — falling back to local T1 (%s) with verified-facts context",
+            getattr(endpoint, "model", ""),
+            reason,
+            getattr(t1_ep, "model", ""),
+        )
+        return _local_llm_then_cloud(
+            query,
+            passages,
+            conversation_history,
+            locale,
+            personalization_context,
+            deadline_s,
+            allow_cloud_fallback=False,
+            tone_hint=tone_hint,
+            context_summary=context_summary,
+            endpoint=t1_ep,
+        )
 
     def _cloud() -> str:
         if not allow_cloud_fallback:
@@ -1149,21 +1242,27 @@ def _local_llm_then_cloud(
         logger.warning("LLM circuit breaker OPEN — trying cloud fallback")
         return _cloud()
 
+    gen_kwargs: dict[str, Any] = {
+        "query": query,
+        "passages": passages,
+        "conversation_history": conversation_history,
+        "locale": locale,
+        "personalization_context": personalization_context,
+        "tone_hint": tone_hint,
+        "context_summary": context_summary,
+    }
+    if endpoint is not None:
+        gen_kwargs["endpoint"] = endpoint
+
     # copy_context: the pool thread then sees this turn's trace span and its
     # token-usage tally (tracing.turn_usage_scope); a bare submit loses both.
     future = _LLM_EXECUTOR.submit(
         contextvars.copy_context().run,
         llm_module.generate,
-        query=query,
-        passages=passages,
-        conversation_history=conversation_history,
-        locale=locale,
-        personalization_context=personalization_context,
-        tone_hint=tone_hint,
-        context_summary=context_summary,
+        **gen_kwargs,
     )
     try:
-        reply = future.result(timeout=deadline_s)
+        reply = future.result(timeout=effective_deadline)
         if reply and reply.strip():
             _LLM_CIRCUIT.record_success()
             if not _looks_truncated(reply):
@@ -1178,6 +1277,8 @@ def _local_llm_then_cloud(
             )
             cloud_reply = _cloud()
             return cloud_reply if (cloud_reply and cloud_reply.strip()) else reply
+        if is_reasoner:
+            return _fallback_to_t1("empty")
         # Empty reply — llm_module.generate logs+swallows its own errors and
         # returns "" (e.g. _vllm_generate on HTTP failure), so an empty string
         # is our only failure signal here. Mirror the streaming path: record a
@@ -1188,10 +1289,14 @@ def _local_llm_then_cloud(
         return _cloud()
     except concurrent.futures.TimeoutError:
         future.cancel()  # best-effort; transformers generate may ignore
+        if is_reasoner:
+            return _fallback_to_t1("deadline")
         _LLM_CIRCUIT.record_failure()
-        logger.warning("LLM deadline %.1fs exceeded", deadline_s)
+        logger.warning("LLM deadline %.1fs exceeded", effective_deadline)
         return _cloud()
     except Exception:
+        if is_reasoner:
+            return _fallback_to_t1("error")
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM generation raised")
         return _cloud()
@@ -1206,6 +1311,7 @@ def stream_llm_tokens(
     cancel_event: threading.Event | None = None,
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> Generator[str, None, None]:
     """Stream LLM tokens through the shared circuit breaker.
 
@@ -1252,6 +1358,7 @@ def stream_llm_tokens(
                 allow_cloud_fallback=False,  # cloud already attempted above
                 tone_hint=tone_hint,
                 context_summary=context_summary,
+                endpoint=endpoint,
             )
             return
         yield from _stream_local_then_cloud(
@@ -1264,6 +1371,7 @@ def stream_llm_tokens(
             allow_cloud_fallback=True,
             tone_hint=tone_hint,
             context_summary=context_summary,
+            endpoint=endpoint,
         )
 
     yield from filter_thought_stream(_raw_stream())
@@ -1280,6 +1388,7 @@ def _stream_local_then_cloud(
     allow_cloud_fallback: bool = True,
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> Generator[str, None, None]:
     """Stream from the local model; route to the cloud chain on failure.
 
@@ -1302,17 +1411,22 @@ def _stream_local_then_cloud(
         yield from _cloud_stream()
         return
 
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    stream_kwargs: dict[str, Any] = {
+        "query": query,
+        "passages": passages,
+        "conversation_history": conversation_history,
+        "locale": locale,
+        "personalization_context": personalization_context,
+        "tone_hint": tone_hint,
+        "context_summary": context_summary,
+    }
+    if endpoint is not None:
+        stream_kwargs["endpoint"] = endpoint
+
     saw_tokens = False
     try:
-        for token in llm_module.generate_stream(
-            query=query,
-            passages=passages,
-            conversation_history=conversation_history,
-            locale=locale,
-            personalization_context=personalization_context,
-            tone_hint=tone_hint,
-            context_summary=context_summary,
-        ):
+        for token in llm_module.generate_stream(**stream_kwargs):
             if cancel_event is not None and cancel_event.is_set():
                 logger.info("LLM stream cancelled by caller")
                 break
@@ -1323,12 +1437,43 @@ def _stream_local_then_cloud(
 
         if saw_tokens:
             _LLM_CIRCUIT.record_success()
+        elif is_reasoner:
+            log_tier_fallback(reason="empty")
+            t1_ep = get_endpoint(ModelTier.T1)
+            yield from _stream_local_then_cloud(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                personalization_context,
+                cancel_event,
+                allow_cloud_fallback=False,
+                tone_hint=tone_hint,
+                context_summary=context_summary,
+                endpoint=t1_ep,
+            )
         else:
             # Empty stream counts as a soft failure — the breaker tracks
             # it so a continually empty worker eventually trips.
             _LLM_CIRCUIT.record_failure()
             yield from _cloud_stream()
     except Exception:
+        if is_reasoner and not saw_tokens:
+            log_tier_fallback(reason="error")
+            t1_ep = get_endpoint(ModelTier.T1)
+            yield from _stream_local_then_cloud(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                personalization_context,
+                cancel_event,
+                allow_cloud_fallback=False,
+                tone_hint=tone_hint,
+                context_summary=context_summary,
+                endpoint=t1_ep,
+            )
+            return
         _LLM_CIRCUIT.record_failure()
         logger.exception("LLM streaming raised")
         yield from _cloud_stream()
@@ -1429,6 +1574,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     context_summary: str = "",
     connector_namespaces: list[str] | None = None,
     forced_operations: list[str] | None = None,
+    endpoint: Any = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1452,45 +1598,133 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     if max_iterations is None:
         max_iterations = _resolve_tool_max_iterations()
 
-    future = _LLM_EXECUTOR.submit(
-        contextvars.copy_context().run,
-        llm_module.generate_with_tools,
-        query=query,
-        passages=passages or None,
-        tool_names=tool_names,
-        conversation_history=conversation_history,
-        locale=locale,
-        max_iterations=max_iterations,
-        personalization_context=personalization_context,
-        tone_hint=tone_hint,
-        tenant_id=tenant_id,
-        user_id=user_id,
-        user_role=user_role,
-        granted_purposes=granted_purposes or [],
-        event_callback=event_callback,
-        agent_role=agent_role,
-        context_summary=context_summary,
-        connector_namespaces=connector_namespaces or [],
-        forced_operations=forced_operations or [],
+    is_reasoner = _is_non_t1_endpoint(endpoint)
+    effective_deadline = deadline_s
+    if is_reasoner:
+        try:
+            effective_deadline = float(
+                os.getenv("REASONER_DEADLINE_S") or getattr(endpoint, "timeout_s", deadline_s)
+            )
+        except ValueError:
+            effective_deadline = deadline_s
+
+    tool_kwargs: dict[str, Any] = {
+        "query": query,
+        "passages": passages or None,
+        "tool_names": tool_names,
+        "conversation_history": conversation_history,
+        "locale": locale,
+        "max_iterations": max_iterations,
+        "personalization_context": personalization_context,
+        "tone_hint": tone_hint,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "user_role": user_role,
+        "granted_purposes": granted_purposes or [],
+        "event_callback": event_callback,
+        "agent_role": agent_role,
+        "context_summary": context_summary,
+        "connector_namespaces": connector_namespaces or [],
+        "forced_operations": forced_operations or [],
         # A record is worded by connector_outcome and then translated, rather
         # than summarised by a model that, asked in Luganda or Swahili, writes
         # claims the record does not make.
-        summarise_records=not (connector_namespaces and locale not in ("", "en")),
+        "summarise_records": not (connector_namespaces and locale not in ("", "en")),
+    }
+    if endpoint is not None:
+        tool_kwargs["endpoint"] = endpoint
+
+    future = _LLM_EXECUTOR.submit(
+        contextvars.copy_context().run,
+        llm_module.generate_with_tools,
+        **tool_kwargs,
     )
     try:
-        result = _with_connector_outcomes(future.result(timeout=deadline_s))
+        result = _with_connector_outcomes(future.result(timeout=effective_deadline))
         if result and result.get("text"):
             _LLM_CIRCUIT.record_success()
             return result
+        if is_reasoner:
+            log_tier_fallback(reason="empty")
+            t1_ep = get_endpoint(ModelTier.T1)
+            return _call_llm_agentic(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                tool_names=tool_names,
+                max_iterations=max_iterations,
+                personalization_context=personalization_context,
+                tone_hint=tone_hint,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                deadline_s=deadline_s,
+                event_callback=event_callback,
+                agent_role=agent_role,
+                context_summary=context_summary,
+                connector_namespaces=connector_namespaces,
+                forced_operations=forced_operations,
+                endpoint=t1_ep,
+            )
         # Empty text counts as a soft failure
         _LLM_CIRCUIT.record_failure()
         return result or empty
     except concurrent.futures.TimeoutError:
         future.cancel()
+        if is_reasoner:
+            log_tier_fallback(reason="deadline")
+            t1_ep = get_endpoint(ModelTier.T1)
+            return _call_llm_agentic(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                tool_names=tool_names,
+                max_iterations=max_iterations,
+                personalization_context=personalization_context,
+                tone_hint=tone_hint,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                deadline_s=deadline_s,
+                event_callback=event_callback,
+                agent_role=agent_role,
+                context_summary=context_summary,
+                connector_namespaces=connector_namespaces,
+                forced_operations=forced_operations,
+                endpoint=t1_ep,
+            )
         _LLM_CIRCUIT.record_failure()
-        logger.warning("agentic LLM deadline %.1fs exceeded", deadline_s)
+        logger.warning("agentic LLM deadline %.1fs exceeded", effective_deadline)
         return empty
     except Exception:
+        if is_reasoner:
+            log_tier_fallback(reason="error")
+            t1_ep = get_endpoint(ModelTier.T1)
+            return _call_llm_agentic(
+                query,
+                passages,
+                conversation_history,
+                locale,
+                tool_names=tool_names,
+                max_iterations=max_iterations,
+                personalization_context=personalization_context,
+                tone_hint=tone_hint,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                user_role=user_role,
+                granted_purposes=granted_purposes,
+                deadline_s=deadline_s,
+                event_callback=event_callback,
+                agent_role=agent_role,
+                context_summary=context_summary,
+                connector_namespaces=connector_namespaces,
+                forced_operations=forced_operations,
+                endpoint=t1_ep,
+            )
         _LLM_CIRCUIT.record_failure()
         logger.exception("agentic LLM generation raised")
         return empty
@@ -2100,6 +2334,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         force_tool_whitelist = result.get("_force_tool_whitelist")
         connector_forced = list(result.get("_connector_forced") or [])
         agent_role = str(result.get("agent_role") or "rag_answerer")
+        turn_endpoint = result.get("_tier_endpoint")
         use_agentic = (
             (
                 force_agentic
@@ -2133,6 +2368,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 agent_role=agent_role,
                 connector_namespaces=connector_namespaces,
                 forced_operations=connector_forced or None,
+                endpoint=turn_endpoint,
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -2305,16 +2541,19 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
 
             def _pump_tokens() -> None:
                 try:
-                    for token in stream_llm_tokens(
-                        query=rewritten_query,
-                        passages=hits,
-                        conversation_history=conversation_history or None,
-                        locale=locale,
-                        personalization_context=str(personalization_context or ""),
-                        cancel_event=cancel_event,
-                        tone_hint=tone_hint,
-                        context_summary=context_summary,
-                    ):
+                    stream_call_kwargs: dict[str, Any] = {
+                        "query": rewritten_query,
+                        "passages": hits,
+                        "conversation_history": conversation_history or None,
+                        "locale": locale,
+                        "personalization_context": str(personalization_context or ""),
+                        "cancel_event": cancel_event,
+                        "tone_hint": tone_hint,
+                        "context_summary": context_summary,
+                    }
+                    if turn_endpoint is not None:
+                        stream_call_kwargs["endpoint"] = turn_endpoint
+                    for token in stream_llm_tokens(**stream_call_kwargs):
                         # Bounded queue: if the consumer is slow, block here
                         # rather than balloon memory.  call_soon_threadsafe
                         # schedules an awaitable put on the event loop.
@@ -2580,6 +2819,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     agent_role: str = "",
     connector_namespaces: list[str] | None = None,
     forced_operations: list[str] | None = None,
+    endpoint: Any = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -2609,25 +2849,27 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
             logger.debug("agentic event drop", exc_info=True)
 
     async def _run_in_thread() -> dict[str, Any]:
-        return await asyncio.to_thread(
-            _call_llm_agentic,
-            query=rewritten_query,
-            passages=hits,
-            conversation_history=conversation_history,
-            locale=locale,
-            tool_names=tool_names,
-            personalization_context=personalization_context,
-            tone_hint=tone_hint,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            user_role=user_role,
-            granted_purposes=granted_purposes,
-            event_callback=_emit,
-            agent_role=agent_role,
-            context_summary=context_summary,
-            connector_namespaces=connector_namespaces,
-            forced_operations=forced_operations,
-        )
+        call_kwargs: dict[str, Any] = {
+            "query": rewritten_query,
+            "passages": hits,
+            "conversation_history": conversation_history,
+            "locale": locale,
+            "tool_names": tool_names,
+            "personalization_context": personalization_context,
+            "tone_hint": tone_hint,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "user_role": user_role,
+            "granted_purposes": granted_purposes,
+            "event_callback": _emit,
+            "agent_role": agent_role,
+            "context_summary": context_summary,
+            "connector_namespaces": connector_namespaces,
+            "forced_operations": forced_operations,
+        }
+        if endpoint is not None:
+            call_kwargs["endpoint"] = endpoint
+        return await asyncio.to_thread(_call_llm_agentic, **call_kwargs)
 
 
     agentic_task: asyncio.Task[dict[str, Any]] = asyncio.create_task(_run_in_thread())
@@ -10217,6 +10459,10 @@ class ChatModel:
             #     to one of: RAG (default), TOOLS, a specialist, CLARIFY
             #     (ask for details), or ESCALATE (human handoff).
             route_decision = None
+            tier_decision = None
+            turn_endpoint: ModelEndpoint | None = None
+            tiering_enabled = flags.is_enabled("model_tiering", subject=user_id)
+            tax_heads_count = _count_conversation_tax_heads(rewritten, conv_ctx, conversation_history)
             force_agentic = False
             force_tool_whitelist: list[str] | None = None
             suppress_agentic_fallback = False
@@ -10247,15 +10493,37 @@ class ChatModel:
                 # what the single configured model has always been.
                 tier_decision = select_tier(
                     route_decision.route.value,
+                    query=rewritten,
                     confidence=route_decision.confidence,
                     tool_count=len(route_decision.suggested_tools),
                     locale=locale,
                     escalation_reason=route_decision.reason,
                     distress=detect_user_distress(rewritten) or "",
-                    enabled=flags.is_enabled("model_tiering"),
+                    multi_hop=len(route_decision.suggested_tools) >= 2 or tax_heads_count >= 2,
+                    tax_heads_count=tax_heads_count,
+                    enabled=tiering_enabled,
                 )
+                turn_endpoint = tier_decision.endpoint if tiering_enabled else None
                 trace_ctx["model_tier"] = tier_decision.tier.value
                 trace_ctx["model_tier_reason"] = tier_decision.reason
+                if turn_endpoint is not None:
+                    trace_ctx["endpoint_model"] = turn_endpoint.model
+                log_tier("chat", tier_decision)
+            elif tiering_enabled:
+                tier_decision = select_tier(
+                    "rag",
+                    query=rewritten,
+                    locale=locale,
+                    distress=detect_user_distress(rewritten) or "",
+                    multi_hop=tax_heads_count >= 2,
+                    tax_heads_count=tax_heads_count,
+                    enabled=True,
+                )
+                turn_endpoint = tier_decision.endpoint
+                trace_ctx["model_tier"] = tier_decision.tier.value
+                trace_ctx["model_tier_reason"] = tier_decision.reason
+                if turn_endpoint is not None:
+                    trace_ctx["endpoint_model"] = turn_endpoint.model
                 log_tier("chat", tier_decision)
 
                 # Early returns — CLARIFY and ESCALATE don't need retrieval.
@@ -10781,29 +11049,32 @@ class ChatModel:
                     else rewritten
                 )
                 with trace_stage("llm_agentic", timings=timings):
-                    agentic = _call_llm_agentic(
-                        query=agentic_query,
+                    agentic_call_kwargs: dict[str, Any] = {
+                        "query": agentic_query,
                         # A lookup is answered from the service, not from
                         # passages: they only spend the context window.
-                        passages=[] if connector_intent is not None else hits,
-                        conversation_history=conversation_history or None,
-                        locale=locale,
-                        tool_names=force_tool_whitelist,
-                        personalization_context=self._build_effective_personalization_context(
+                        "passages": [] if connector_intent is not None else hits,
+                        "conversation_history": conversation_history or None,
+                        "locale": locale,
+                        "tool_names": force_tool_whitelist,
+                        "personalization_context": self._build_effective_personalization_context(
                             personalization, conv_ctx, router_rewritten or router_message
                         ),
-                        tone_hint=tone_hint,
-                        tenant_id=tenant_id or "default",
-                        user_id=user_id or "",
-                        user_role=user_role,
-                        granted_purposes=granted_purposes or [],
-                        agent_role=agent_role,
-                        context_summary=context_summary,
-                        connector_namespaces=connector_namespaces,
-                        forced_operations=(
+                        "tone_hint": tone_hint,
+                        "tenant_id": tenant_id or "default",
+                        "user_id": user_id or "",
+                        "user_role": user_role,
+                        "granted_purposes": granted_purposes or [],
+                        "agent_role": agent_role,
+                        "context_summary": context_summary,
+                        "connector_namespaces": connector_namespaces,
+                        "forced_operations": (
                             list(connector_intent.operations) if connector_intent is not None else None
                         ),
-                    )
+                    }
+                    if turn_endpoint is not None:
+                        agentic_call_kwargs["endpoint"] = turn_endpoint
+                    agentic = _call_llm_agentic(**agentic_call_kwargs)
                 agentic_reply = agentic.get("text", "")
                 if agentic.get("tool_calls"):
                     agentic_used_tools = True
@@ -10924,17 +11195,20 @@ class ChatModel:
                         else rewritten
                     )
                     with trace_stage("llm_generate", timings=timings):
-                        reply = _call_llm_with_deadline(
-                            query=llm_query,
-                            passages=hits,
-                            conversation_history=conversation_history or None,
-                            locale=locale,
-                            personalization_context=self._build_effective_personalization_context(
+                        gen_call_kwargs: dict[str, Any] = {
+                            "query": llm_query,
+                            "passages": hits,
+                            "conversation_history": conversation_history or None,
+                            "locale": locale,
+                            "personalization_context": self._build_effective_personalization_context(
                                 personalization, conv_ctx, router_rewritten or router_message
                             ),
-                            tone_hint=tone_hint,
-                            context_summary=context_summary,
-                        )
+                            "tone_hint": tone_hint,
+                            "context_summary": context_summary,
+                        }
+                        if turn_endpoint is not None:
+                            gen_call_kwargs["endpoint"] = turn_endpoint
+                        reply = _call_llm_with_deadline(**gen_call_kwargs)
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
                         valid_refs = [str(i) for i in range(1, len(hits) + 1)]
@@ -11015,16 +11289,27 @@ class ChatModel:
                             f"say which parts cannot be verified.\n\n"
                             f"Original question: {rewritten}"
                         )
-                        revised = _call_llm_with_deadline(
-                            query=revise_query,
-                            passages=hits,
-                            conversation_history=conversation_history or None,
-                            locale=locale,
-                            personalization_context=self._build_effective_personalization_context(
+                        revise_kwargs: dict[str, Any] = {
+                            "query": revise_query,
+                            "passages": hits,
+                            "conversation_history": conversation_history or None,
+                            "locale": locale,
+                            "personalization_context": self._build_effective_personalization_context(
                                 personalization, conv_ctx, router_rewritten or router_message
                             ),
-                            tone_hint=tone_hint,
-                        )
+                            "tone_hint": tone_hint,
+                        }
+                        if tiering_enabled:
+                            rev_decision = select_tier(
+                                route_decision.route.value if route_decision is not None else "rag",
+                                query=rewritten,
+                                locale=locale,
+                                evaluator_rejected=True,
+                                enabled=True,
+                            )
+                            if rev_decision.endpoint is not None:
+                                revise_kwargs["endpoint"] = rev_decision.endpoint
+                        revised = _call_llm_with_deadline(**revise_kwargs)
                     if revised:
                         reply = self._output_guard.sanitize(self._output_guard.redact_pii(revised))
                         leakage = self._output_guard.check_prompt_leakage(reply)
@@ -11092,8 +11377,8 @@ class ChatModel:
                     )
                     if allowed and self._llm_available:
                         with trace_stage("numeric_revision", timings=timings):
-                            revised = _call_llm_with_deadline(
-                                query=(
+                            num_rev_kwargs: dict[str, Any] = {
+                                "query": (
                                     f"{verdict.revision_note}\n\n"
                                     f"Rewrite the answer below so it states that "
                                     f"figure, keeping its citations and its "
@@ -11101,14 +11386,25 @@ class ChatModel:
                                     f"Answer:\n{reply}\n\n"
                                     f"Question: {rewritten}"
                                 ),
-                                passages=hits,
-                                conversation_history=conversation_history or None,
-                                locale=locale,
-                                personalization_context=(personalization or {}).get(
+                                "passages": hits,
+                                "conversation_history": conversation_history or None,
+                                "locale": locale,
+                                "personalization_context": (personalization or {}).get(
                                     "prompt_context", ""
                                 ),
-                                tone_hint=tone_hint,
-                            )
+                                "tone_hint": tone_hint,
+                            }
+                            if tiering_enabled:
+                                rev_decision = select_tier(
+                                    route_decision.route.value if route_decision is not None else "rag",
+                                    query=rewritten,
+                                    locale=locale,
+                                    evaluator_rejected=True,
+                                    enabled=True,
+                                )
+                                if rev_decision.endpoint is not None:
+                                    num_rev_kwargs["endpoint"] = rev_decision.endpoint
+                            revised = _call_llm_with_deadline(**num_rev_kwargs)
                             budget.spend()
                         if revised:
                             candidate = self._output_guard.sanitize(
@@ -11883,6 +12179,10 @@ class ChatModel:
                 })
 
         route_decision = None
+        stream_tier_decision = None
+        stream_tier_endpoint: ModelEndpoint | None = None
+        stream_tiering_enabled = flags.is_enabled("model_tiering", subject=user_id)
+        stream_tax_heads = _count_conversation_tax_heads(rewritten, conv_ctx, conversation_history)
         force_agentic = False
         force_tool_whitelist: list[str] | None = None
         suppress_agentic_fallback = False
@@ -11892,6 +12192,34 @@ class ChatModel:
                 has_conversation_history=bool(conversation_history),
                 locale=locale,
             )
+            stream_tier_decision = select_tier(
+                route_decision.route.value,
+                query=rewritten,
+                confidence=route_decision.confidence,
+                tool_count=len(route_decision.suggested_tools),
+                locale=locale,
+                escalation_reason=route_decision.reason,
+                distress=detect_user_distress(rewritten) or "",
+                multi_hop=len(route_decision.suggested_tools) >= 2 or stream_tax_heads >= 2,
+                tax_heads_count=stream_tax_heads,
+                enabled=stream_tiering_enabled,
+            )
+            stream_tier_endpoint = stream_tier_decision.endpoint if stream_tiering_enabled else None
+            log_tier("chat", stream_tier_decision)
+        elif stream_tiering_enabled:
+            stream_tier_decision = select_tier(
+                "rag",
+                query=rewritten,
+                locale=locale,
+                distress=detect_user_distress(rewritten) or "",
+                multi_hop=stream_tax_heads >= 2,
+                tax_heads_count=stream_tax_heads,
+                enabled=True,
+            )
+            stream_tier_endpoint = stream_tier_decision.endpoint
+            log_tier("chat", stream_tier_decision)
+
+        if route_decision is not None:
             if route_decision.route == AgentRoute.CLARIFY and not connector_namespaces:
                 return {
                     "reply": route_decision.clarification_question
@@ -12448,6 +12776,8 @@ class ChatModel:
             "_connector_forced": (
                 list(connector_intent.operations) if connector_intent is not None else []
             ),
+            "_tier_endpoint": stream_tier_endpoint,
+            "_model_tier": stream_tier_decision.tier.value if stream_tier_decision is not None else ModelTier.T1.value,
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
         }
 
