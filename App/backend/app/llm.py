@@ -1398,6 +1398,7 @@ def _vllm_generate(
 
             if payload is None:
                 req = _vllm_build_request(url, body, accept_stream=False)
+                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
                     payload = _json.loads(resp.read().decode("utf-8"))
             call.response(payload)
@@ -1544,7 +1545,8 @@ def _vllm_chat_completion(
         url = f"{eff_base_url}/chat/completions"
         req = _vllm_build_request(url, body, accept_stream=False)
         with llm_call("chat", eff_model, "vllm") as call:
-            with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310 # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
                 data = _json.loads(resp.read().decode("utf-8"))
             call.response(data)
         choices = data.get("choices", [])
@@ -1694,8 +1696,10 @@ def _vllm_generate_stream(
                 logger.debug("httpx stream failed, falling back to urllib", exc_info=True)
 
         req = _vllm_build_request(url, body, accept_stream=True)
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         with (
             llm_call("chat", eff_model, "vllm", streaming=True) as call,
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             urllib.request.urlopen(req, timeout=effective_timeout) as resp,  # nosec B310 # noqa: S310
         ):
             yield from _stream_tokens(resp, call, _json)
