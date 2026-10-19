@@ -161,6 +161,18 @@ def _require_bands(table: RateTable, key: str) -> list[tuple[float, float | None
     return bands
 
 
+def _require_rule(table: RateTable, key: str) -> Any:
+    """Fetch a rule parameter (string or scalar) from the rate table, failing closed if absent."""
+    value = table.get(key)
+    if value is None:
+        available = fiscal_years_defining(key)
+        hint = f" It is defined for: {', '.join(available)}." if available else ""
+        raise RateUnavailableError(
+            f"'{key}' is not defined in the {table.fiscal_year} rate table.{hint}"
+        )
+    return value
+
+
 def _ugx(amount: Decimal | float) -> str:
     return f"UGX {float(amount):,.2f}"
 
@@ -203,6 +215,9 @@ class CalculatorTool(Tool):
 
         payload = result.payload
         if payload.get("ok") is False:
+            if result.rate_keys:
+                payload.setdefault("fiscal_year", table.fiscal_year)
+                payload.setdefault("rate_basis", table.provenance(*result.rate_keys))
             return payload
         payload["ok"] = True
         payload["fiscal_year"] = table.fiscal_year
@@ -424,6 +439,30 @@ class PAYECalculator(CalculatorTool):
                         ),
                         "default": False,
                     },
+                    "benefits": {
+                        "type": "array",
+                        "description": (
+                            "Optional list of taxable benefits in kind to add to monthly gross "
+                            "before applying PAYE bands (each item: {kind, monthly_value, verified?})."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": {"type": "string"},
+                                "monthly_value": {"type": "number", "minimum": 0},
+                                "verified": {"type": "boolean", "default": True},
+                            },
+                            "required": ["kind", "monthly_value"],
+                        },
+                    },
+                    "compare_residency": {
+                        "type": "boolean",
+                        "description": (
+                            "Also compute the other residency's PAYE (resident vs non_resident) "
+                            "and the monthly difference."
+                        ),
+                        "default": False,
+                    },
                 },
                 ["monthly_gross"],
             ),
@@ -438,6 +477,8 @@ class PAYECalculator(CalculatorTool):
         monthly_gross: Any,
         residency: str = "resident",
         include_nssf: bool = False,
+        benefits: list[dict[str, Any]] | None = None,
+        compare_residency: bool = False,
         **_: Any,
     ) -> CalcResult:
         if residency not in ("resident", "non_resident"):
@@ -448,12 +489,28 @@ class PAYECalculator(CalculatorTool):
                 }
             )
         gross = to_decimal(monthly_gross, field="monthly_gross")
+        verified_bik = Decimal(0)
+        unverified_bik = Decimal(0)
+        unverified_kinds: list[str] = []
+        for b in benefits or []:
+            if not isinstance(b, dict):
+                continue
+            b_val = to_decimal(b.get("monthly_value", 0), field="monthly_value")
+            if b.get("verified", True) is False:
+                unverified_bik += b_val
+                unverified_kinds.append(str(b.get("kind") or "benefit"))
+            else:
+                verified_bik += b_val
+
+        chargeable_verified = gross + verified_bik
+        chargeable_conditional = chargeable_verified + unverified_bik
+
         key = f"paye_bands_{residency}"
         bands = _require_bands(table, key)
 
-        paye, breakdown = apply_bands(gross, bands)
-        lower, upper, marginal_rate = marginal_band(gross, bands)
-        effective_rate = (paye / gross) if gross > 0 else Decimal(0)
+        paye, breakdown = apply_bands(chargeable_verified, bands)
+        lower, upper, marginal_rate = marginal_band(chargeable_verified, bands)
+        effective_rate = (paye / chargeable_verified) if chargeable_verified > 0 else Decimal(0)
 
         # NSSF comes out of pay *after* PAYE: the employee's own
         # contribution is not a deduction against employment income, so
@@ -483,31 +540,71 @@ class PAYECalculator(CalculatorTool):
             )
         )
 
-        return CalcResult(
-            {
-                "monthly_gross": to_float(gross),
-                "residency": residency,
-                "paye": to_float(paye),
-                "nssf_included": include_nssf,
-                "nssf_employee": to_float(nssf),
-                "net_take_home": to_float(net),
-                "annual_paye": to_float(paye * 12),
-                "effective_rate": round(float(effective_rate), 4),
-                "band": {
-                    "lower": lower,
-                    "upper": upper,
-                    "marginal_rate": marginal_rate,
-                },
-                "bands_applied": breakdown,
-                "deductions_note": caveat,
-                "explanation": (
+        payload: dict[str, Any] = {
+            "monthly_gross": to_float(gross),
+            "chargeable_monthly": to_float(chargeable_verified),
+            "residency": residency,
+            "paye": to_float(paye),
+            "paye_verified": to_float(paye),
+            "nssf_included": include_nssf,
+            "nssf_employee": to_float(nssf),
+            "net_take_home": to_float(net),
+            "annual_paye": to_float(paye * 12),
+            "effective_rate": round(float(effective_rate), 4),
+            "band": {
+                "lower": lower,
+                "upper": upper,
+                "marginal_rate": marginal_rate,
+            },
+            "bands_applied": breakdown,
+            "deductions_note": caveat,
+            "explanation": (
+                f"On a chargeable monthly income of {_ugx(chargeable_verified)} "
+                f"(gross {_ugx(gross)} plus verified benefits {_ugx(verified_bik)}), "
+                f"the applicable band is {marginal_rate * 100:.0f}% above {_ugx(lower)}. "
+                f"After {deducted}, net pay = {_ugx(net)}. {caveat}"
+                if verified_bik > 0
+                else (
                     f"On a gross of {_ugx(gross)}, the applicable band is "
                     f"{marginal_rate * 100:.0f}% above {_ugx(lower)}. "
                     f"After {deducted}, net pay = {_ugx(net)}. {caveat}"
-                ),
-            },
-            rate_keys=tuple(keys),
-        )
+                )
+            ),
+        }
+
+        if benefits is not None:
+            payload["verified_benefits_monthly"] = to_float(verified_bik)
+            payload["unverified_benefits_monthly"] = to_float(unverified_bik)
+            if unverified_kinds:
+                paye_cond, _ = apply_bands(chargeable_conditional, bands)
+                payload["paye_conditional"] = to_float(paye_cond)
+                payload["annual_paye_conditional"] = to_float(paye_cond * 12)
+                payload["chargeable_monthly_conditional"] = to_float(chargeable_conditional)
+                payload["unverified_benefits"] = unverified_kinds
+                payload["conditional_label"] = "conditional on unverified rule"
+            else:
+                payload["paye_conditional"] = to_float(paye)
+
+        if compare_residency:
+            other_res = "non_resident" if residency == "resident" else "resident"
+            other_key = f"paye_bands_{other_res}"
+            other_bands = _require_bands(table, other_key)
+            other_paye, _ = apply_bands(chargeable_verified, other_bands)
+            if other_key not in keys:
+                keys.append(other_key)
+            diff = abs(other_paye - paye)
+            non_res_minus_res = (other_paye - paye) if residency == "resident" else (paye - other_paye)
+            payload["other_residency"] = other_res
+            payload["other_residency_paye"] = to_float(other_paye)
+            payload["residency_paye_difference"] = to_float(diff)
+            payload["comparison"] = {
+                "other_residency": other_res,
+                "other_paye": to_float(other_paye),
+                "monthly_difference": to_float(diff),
+                "non_resident_minus_resident_monthly": to_float(non_res_minus_res),
+            }
+
+        return CalcResult(payload, rate_keys=tuple(keys))
 
 
 # ---------------------------------------------------------------------------
@@ -616,7 +713,9 @@ class CapitalGainsCalculator(CalculatorTool):
                     "sale_price": to_float(sale),
                     "cost_base": to_float(cost),
                     "gain": to_float(gain),
+                    "rate": float(rate),
                     "tax": 0.0,
+                    "net_proceeds": to_float(sale),
                     "explanation": (
                         "No capital gain (or a loss) — no CGT is payable. "
                         "Losses may be offsettable against future gains; consult URA."
@@ -1118,6 +1217,1422 @@ class ExciseDutyCalculator(CalculatorTool):
 
 
 # ---------------------------------------------------------------------------
+# Phase F.4: Residency, Benefit in Kind, FX Conversion, and Per-Head Rule Tools
+# ---------------------------------------------------------------------------
+class ResidencyDeterminationTool(CalculatorTool):
+    """Determine individual tax residency under the Income Tax Act (183-day, 122-day average, permanent home, government posting)."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="determine_residency",
+            description=(
+                "Determine Ugandan individual tax residency status from physical presence days "
+                "(183 days in any 12-month period commencing or ending in the year of income), "
+                "3-year average presence (122 days), permanent home in Uganda, or Uganda "
+                "Government employee posted abroad. Never treats contract_months alone as "
+                "physical presence; contract_months only yields likely_resident=true."
+            ),
+            parameters=_schema_params(
+                {
+                    "days_in_uganda": {
+                        "type": ["integer", "null"],
+                        "minimum": 0,
+                        "description": "Physical presence days in Uganda in the relevant 12-month window.",
+                    },
+                    "contract_months": {
+                        "type": ["integer", "null"],
+                        "minimum": 0,
+                        "description": "Contract duration in months (not physical presence; only indicates likely_resident).",
+                    },
+                    "permanent_home": {
+                        "type": ["boolean", "null"],
+                        "description": "Whether the individual has a permanent home in Uganda.",
+                    },
+                    "avg_days_current_and_two_prior": {
+                        "type": ["number", "null"],
+                        "minimum": 0,
+                        "description": "Average days present in Uganda across the current and two preceding years of income.",
+                    },
+                    "gov_employee_posted_abroad": {
+                        "type": ["boolean", "null"],
+                        "description": "Whether the individual is an employee or official of the Government of Uganda posted abroad.",
+                    },
+                    "period_start": {
+                        "type": ["string", "null"],
+                        "description": "Optional start date (YYYY-MM-DD) of presence in Uganda.",
+                    },
+                    "period_end": {
+                        "type": ["string", "null"],
+                        "description": "Optional end date (YYYY-MM-DD) of presence in Uganda.",
+                    },
+                },
+                [],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        days_in_uganda: Any = None,
+        contract_months: Any = None,
+        permanent_home: bool | None = None,
+        permanent_home_in_uganda: bool | None = None,
+        avg_days_current_and_two_prior: Any = None,
+        gov_employee_posted_abroad: bool | None = None,
+        period_start: str | None = None,
+        period_end: str | None = None,
+        **_: Any,
+    ) -> CalcResult:
+        days_thresh = int(_require_scalar(table, "residency_days_threshold"))
+        avg_thresh = int(_require_scalar(table, "residency_avg_days_threshold"))
+        yoi_end = str(_require_rule(table, "year_of_income_end"))
+
+        perm_home = permanent_home if permanent_home is not None else permanent_home_in_uganda
+        days_val = int(to_decimal(days_in_uganda, field="days_in_uganda")) if days_in_uganda is not None else None
+        contract_val = int(to_decimal(contract_months, field="contract_months")) if contract_months is not None else None
+        avg_val = (
+            float(to_decimal(avg_days_current_and_two_prior, field="avg_days_current_and_two_prior"))
+            if avg_days_current_and_two_prior is not None
+            else None
+        )
+
+        tests = {
+            "permanent_home": {
+                "result": "pass" if perm_home is True else ("fail" if perm_home is False else "unknown"),
+                "threshold": True,
+            },
+            "presence_183_days": {
+                "result": (
+                    "pass"
+                    if days_val is not None and days_val >= days_thresh
+                    else ("fail" if days_val is not None else "unknown")
+                ),
+                "threshold": days_thresh,
+                "actual_days": days_val,
+            },
+            "three_year_average_122_days": {
+                "result": (
+                    "pass"
+                    if avg_val is not None and avg_val >= avg_thresh
+                    else ("fail" if avg_val is not None else "unknown")
+                ),
+                "threshold": avg_thresh,
+                "actual_avg_days": avg_val,
+            },
+            "gov_employee_posted_abroad": {
+                "result": (
+                    "pass"
+                    if gov_employee_posted_abroad is True
+                    else ("fail" if gov_employee_posted_abroad is False else "unknown")
+                ),
+                "threshold": True,
+            },
+        }
+
+        missing_facts: list[str] = []
+        if any(t["result"] == "pass" for t in tests.values()):
+            status = "resident"
+        elif days_val is not None and days_val < days_thresh:
+            status = "non_resident"
+            if perm_home is None:
+                missing_facts.append("whether they have a permanent home in Uganda")
+            if avg_val is None:
+                missing_facts.append(f"3-year average presence days ({avg_thresh}-day test)")
+        else:
+            status = "undetermined"
+            missing_facts.append("days physically present in Uganda")
+
+        estimated_contract_days = (contract_val * 30) if contract_val is not None else None
+        likely_resident = (
+            status == "resident"
+            or (
+                status == "undetermined"
+                and estimated_contract_days is not None
+                and estimated_contract_days >= days_thresh
+            )
+        )
+
+        years_affected: list[str] = [table.fiscal_year]
+        if period_start and period_end:
+            try:
+                ps = _dt.date.fromisoformat(str(period_start))
+                pe = _dt.date.fromisoformat(str(period_end))
+                end_month, end_day = (int(x) for x in yoi_end.split("-"))
+                fy_start = (
+                    f"FY{ps.year - 1}-{str(ps.year)[-2:]}"
+                    if (ps.month, ps.day) <= (end_month, end_day)
+                    else f"FY{ps.year}-{str(ps.year + 1)[-2:]}"
+                )
+                fy_end = (
+                    f"FY{pe.year - 1}-{str(pe.year)[-2:]}"
+                    if (pe.month, pe.day) <= (end_month, end_day)
+                    else f"FY{pe.year}-{str(pe.year + 1)[-2:]}"
+                )
+                years_affected = [fy_start] if fy_start == fy_end else [fy_start, fy_end]
+            except ValueError:
+                pass
+
+        if status == "resident":
+            explanation = (
+                f"Tax resident in Uganda: meets statutory residency criteria "
+                f"({days_thresh}-day physical presence test in any 12-month period commencing "
+                f"or ending in the year of income, {avg_thresh}-day 3-year average, permanent home, "
+                f"or Government employee posted abroad)."
+            )
+        elif status == "non_resident":
+            explanation = (
+                f"Non-resident in Uganda: physical presence of {days_val} days is below the "
+                f"{days_thresh}-day statutory threshold (assuming no permanent home in Uganda, "
+                f"no {avg_thresh}-day 3-year average, and not a Government employee posted abroad)."
+            )
+        elif likely_resident:
+            explanation = (
+                f"Residency is undetermined from contract length alone ({contract_val}-month contract "
+                f"≈ {estimated_contract_days} days), but LIKELY RESIDENT if physically present in Uganda "
+                f"for {days_thresh} days or more in any 12-month period commencing or ending in the year "
+                f"of income (ending {yoi_end}). Confirm actual days physically present in Uganda."
+            )
+        else:
+            explanation = (
+                f"Residency is undetermined: confirm actual days physically present in Uganda "
+                f"(threshold is {days_thresh} days in any 12-month period commencing or ending in the year of income)."
+            )
+
+        return CalcResult(
+            {
+                "status": status,
+                "likely_resident": likely_resident,
+                "days_in_uganda": days_val,
+                "contract_months": contract_val,
+                "residency_days_threshold": days_thresh,
+                "residency_avg_days_threshold": avg_thresh,
+                "year_of_income_end": yoi_end,
+                "tests": tests,
+                "missing_facts": missing_facts,
+                "years_of_income_affected": years_affected,
+                "explanation": explanation,
+            },
+            rate_keys=("residency_days_threshold", "residency_avg_days_threshold", "year_of_income_end"),
+        )
+
+
+class BenefitInKindValuationTool(CalculatorTool):
+    """Compute taxable value of employment benefits in kind per URA Taxation Handbook §12.2.3."""
+
+    _VALID_KINDS = (
+        "car",
+        "housing",
+        "domestic_staff",
+        "meals",
+        "utilities",
+        "low_interest_loan",
+        "loan",
+        "debt_waiver",
+        "property_or_services",
+        "furniture",
+        "other",
+    )
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="value_benefit_in_kind",
+            description=(
+                "Calculate the taxable value of an employment benefit in kind (BIK) in Uganda "
+                "(car/motor vehicle, housing/accommodation, domestic_staff, meals, utilities, "
+                "low_interest_loan, debt_waiver, property_or_services/furniture, other). "
+                "Benefits in kind are ADDED to employment income for PAYE, and non-cash benefits "
+                "under UGX 10,000/month are excluded."
+            ),
+            parameters=_schema_params(
+                {
+                    "kind": {
+                        "type": "string",
+                        "enum": list(self._VALID_KINDS),
+                        "description": "Category of benefit in kind.",
+                    },
+                    "market_value": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": (
+                            "Market value in UGX (for car: market value when first provided; "
+                            "for property/furniture/other: market value; for housing: monthly or annual market rent)."
+                        ),
+                    },
+                    "market_rent": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Market rent of accommodation in UGX (monthly by default unless rent_period='annual').",
+                    },
+                    "rent_period": {
+                        "type": "string",
+                        "enum": ["monthly", "annual"],
+                        "default": "monthly",
+                        "description": "Whether market_rent / employee_payment for housing is monthly or annual.",
+                    },
+                    "employment_income_annual": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Annual employment income in UGX (before housing benefit) for the 15% housing formula.",
+                    },
+                    "monthly_gross": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Monthly employment income in UGX (multiplied by 12 if employment_income_annual is omitted).",
+                    },
+                    "monthly_cost": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Monthly cost to employer in UGX (for domestic_staff, meals, utilities, housing).",
+                    },
+                    "annual_cost": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Annual cost to employer in UGX.",
+                    },
+                    "years_since_first_provided": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Number of subsequent years after the car was first provided (35% reducing-balance depreciation per year).",
+                    },
+                    "days_private_use": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Days in the year of income the vehicle was available for private use (B).",
+                    },
+                    "days_in_year": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Total days in the year of income (C, default 365).",
+                    },
+                    "employee_payment": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Amount paid by the employee towards the benefit (D).",
+                    },
+                    "loan_principal": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Loan amount in UGX (for low_interest_loan).",
+                    },
+                    "interest_rate_paid": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 0,
+                        "description": "Annual interest rate paid by the employee as a decimal fraction (e.g. 0.03 for 3%).",
+                    },
+                },
+                ["kind"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        kind: str,
+        market_value: Any = None,
+        market_rent: Any = None,
+        rent_period: str = "monthly",
+        employment_income_annual: Any = None,
+        monthly_gross: Any = None,
+        monthly_cost: Any = None,
+        annual_cost: Any = None,
+        years_since_first_provided: int = 0,
+        days_private_use: int | None = None,
+        days_in_year: int | None = None,
+        employee_payment: Any = 0,
+        loan_principal: Any = None,
+        interest_rate_paid: Any = 0,
+        **_: Any,
+    ) -> CalcResult:
+        if kind not in self._VALID_KINDS:
+            return CalcResult(
+                {"ok": False, "error": f"kind must be one of {self._VALID_KINDS} (got {kind!r})"}
+            )
+        de_minimis_monthly = _require_scalar(table, "bik_de_minimis_monthly_ugx")
+        emp_pay = to_decimal(employee_payment or 0, field="employee_payment")
+        keys: list[str] = ["bik_de_minimis_monthly_ugx"]
+        verified = True
+        formula_notes = ""
+
+        if kind == "car":
+            if market_value is None:
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "market_value",
+                        "error": "market_value (when first provided) is required to value a motor vehicle benefit.",
+                    }
+                )
+            mv = to_decimal(market_value, field="market_value")
+            inc_rate = _require_scalar(table, "bik_motor_vehicle_inclusion_rate")
+            dep_rate = _require_scalar(table, "bik_motor_vehicle_depreciation_rate")
+            std_days = int(_require_scalar(table, "bik_days_in_year_standard"))
+            keys.extend(
+                [
+                    "bik_motor_vehicle_inclusion_rate",
+                    "bik_motor_vehicle_depreciation_rate",
+                    "bik_days_in_year_standard",
+                ]
+            )
+            yrs = max(0, int(years_since_first_provided or 0))
+            c_days = int(days_in_year) if days_in_year is not None else std_days
+            b_days = int(days_private_use) if days_private_use is not None else c_days
+            if c_days <= 0:
+                return CalcResult({"ok": False, "error": "days_in_year must be positive"})
+            depreciated_a = mv * ((Decimal(1) - dep_rate) ** yrs)
+            raw_annual = max(
+                Decimal(0),
+                (inc_rate * depreciated_a * Decimal(b_days) / Decimal(c_days)) - emp_pay,
+            )
+            raw_monthly = raw_annual / Decimal(12)
+            formula_notes = (
+                f"(20% x A x B/C) - D where A={_ugx(depreciated_a)} "
+                f"(initial {_ugx(mv)} depreciated at {dep_rate * 100:.0f}% p.a. for {yrs} yr(s)), "
+                f"B={b_days}, C={c_days}, D={_ugx(emp_pay)}"
+            )
+
+        elif kind == "housing":
+            rent_raw = market_rent if market_rent is not None else (market_value if market_value is not None else monthly_cost)
+            if rent_raw is None and annual_cost is None:
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "market_rent",
+                        "error": "market_rent (or monthly_cost/annual_cost) is required to value a housing benefit.",
+                    }
+                )
+            housing_rate = _require_scalar(table, "bik_housing_employment_income_rate")
+            keys.append("bik_housing_employment_income_rate")
+            verified = "bik_housing_employment_income_rate" not in table.unverified
+
+            if annual_cost is not None and rent_raw is None:
+                annual_rent = to_decimal(annual_cost, field="annual_cost")
+                annual_emp_pay = emp_pay
+            elif rent_period == "annual":
+                annual_rent = to_decimal(rent_raw, field="market_rent")
+                annual_emp_pay = emp_pay
+            else:
+                annual_rent = to_decimal(rent_raw, field="market_rent") * Decimal(12)
+                annual_emp_pay = emp_pay * Decimal(12)
+
+            part_a = max(Decimal(0), annual_rent - annual_emp_pay)
+            if employment_income_annual is not None:
+                emp_inc_ann = to_decimal(employment_income_annual, field="employment_income_annual")
+            elif monthly_gross is not None:
+                emp_inc_ann = to_decimal(monthly_gross, field="monthly_gross") * Decimal(12)
+            else:
+                emp_inc_ann = None
+
+            if emp_inc_ann is not None:
+                # Exact handbook wording: "15% of the employment income, including the amount
+                # referred to in paragraph (a), paid by the employer to the employee for the year of income"
+                part_b = housing_rate * (emp_inc_ann + part_a)
+                raw_annual = min(part_a, part_b)
+                formula_notes = (
+                    f"lesser of (a) annual market rent less employee payment = {_ugx(part_a)} "
+                    f"and (b) {housing_rate * 100:.0f}% of (employment income {_ugx(emp_inc_ann)} + (a) {_ugx(part_a)}) = {_ugx(part_b)}"
+                )
+            else:
+                raw_annual = part_a
+                formula_notes = f"annual market rent less employee payment = {_ugx(part_a)}"
+            raw_monthly = raw_annual / Decimal(12)
+
+        elif kind in ("low_interest_loan", "loan"):
+            principal_raw = loan_principal if loan_principal is not None else market_value
+            if principal_raw is None:
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "loan_principal",
+                        "error": "loan_principal is required to value a low-interest loan benefit.",
+                    }
+                )
+            principal = to_decimal(principal_raw, field="loan_principal")
+            loan_thresh = _require_scalar(table, "bik_loan_principal_threshold_ugx")
+            keys.append("bik_loan_principal_threshold_ugx")
+            if principal <= loan_thresh:
+                raw_annual = Decimal(0)
+                raw_monthly = Decimal(0)
+                verified = True
+                formula_notes = (
+                    f"Loan principal {_ugx(principal)} does not exceed the {_ugx(loan_thresh)} "
+                    "statutory threshold, so the taxable benefit is nil."
+                )
+            else:
+                stat_rate = _require_scalar(table, "bik_loan_statutory_interest_rate")
+                keys.append("bik_loan_statutory_interest_rate")
+                verified = "bik_loan_statutory_interest_rate" not in table.unverified
+                paid_rate = to_rate(interest_rate_paid or 0, field="interest_rate_paid")
+                rate_diff = max(Decimal(0), stat_rate - paid_rate)
+                raw_annual = principal * rate_diff
+                raw_monthly = raw_annual / Decimal(12)
+                formula_notes = (
+                    f"Loan {_ugx(principal)} > {_ugx(loan_thresh)}: "
+                    f"({stat_rate * 100:.1f}% statutory rate - {paid_rate * 100:.1f}% paid) x {_ugx(principal)}"
+                )
+
+        elif kind == "debt_waiver":
+            waived_raw = (
+                market_value
+                if market_value is not None
+                else (annual_cost if annual_cost is not None else loan_principal)
+            )
+            if waived_raw is None:
+                return CalcResult(
+                    {"ok": False, "needs": "market_value", "error": "Amount of debt waived is required."}
+                )
+            raw_annual = to_decimal(waived_raw, field="market_value")
+            raw_monthly = raw_annual / Decimal(12)
+            formula_notes = f"Debt waiver: full amount waived ({_ugx(raw_annual)}) is taxable."
+
+        else:
+            # domestic_staff, meals, utilities, property_or_services, furniture, other
+            if monthly_cost is not None:
+                m_cost = to_decimal(monthly_cost, field="monthly_cost")
+                raw_monthly = max(Decimal(0), m_cost - emp_pay)
+                raw_annual = raw_monthly * Decimal(12)
+            elif annual_cost is not None:
+                a_cost = to_decimal(annual_cost, field="annual_cost")
+                raw_annual = max(Decimal(0), a_cost - emp_pay)
+                raw_monthly = raw_annual / Decimal(12)
+            elif market_value is not None:
+                mv = to_decimal(market_value, field="market_value")
+                raw_annual = max(Decimal(0), mv - emp_pay)
+                raw_monthly = raw_annual / Decimal(12)
+            else:
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "monthly_cost",
+                        "error": f"cost or market_value is required to value '{kind}' benefit.",
+                    }
+                )
+            formula_notes = f"Cost/market value less employee payment = {_ugx(raw_monthly)}/month ({_ugx(raw_annual)}/year)."
+
+        de_minimis_excluded = Decimal(0) < raw_monthly < de_minimis_monthly
+        taxable_monthly = Decimal(0) if de_minimis_excluded else raw_monthly
+        taxable_annual = Decimal(0) if de_minimis_excluded else raw_annual
+
+        return CalcResult(
+            {
+                "kind": kind,
+                "annual_value": to_float(taxable_annual),
+                "monthly_value": to_float(taxable_monthly),
+                "raw_annual_value": to_float(raw_annual),
+                "raw_monthly_value": to_float(raw_monthly),
+                "de_minimis_threshold_monthly": to_float(de_minimis_monthly),
+                "de_minimis_excluded": de_minimis_excluded,
+                "verified": verified,
+                "direction": "added_to_employment_income",
+                "explanation": (
+                    f"Benefit in kind ({kind}): {formula_notes} -> {_ugx(taxable_monthly)}/month "
+                    f"({_ugx(taxable_annual)}/year), ADDED to employment income for PAYE."
+                    + (
+                        f" Excluded under the {_ugx(de_minimis_monthly)}/month de-minimis relief."
+                        if de_minimis_excluded
+                        else ""
+                    )
+                    + (
+                        " [Conditional: statutory rule/rate is marked unverified in the rate table.]"
+                        if not verified
+                        else ""
+                    )
+                ),
+            },
+            rate_keys=tuple(keys),
+        )
+
+
+class CurrencyConversionTool(CalculatorTool):
+    """Convert foreign-currency amounts into UGX using user-supplied rate or BoU mid-rate snapshot."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="convert_currency",
+            description=(
+                "Convert a foreign currency amount (USD, EUR, GBP, KES) into UGX for Ugandan tax "
+                "calculations. Uses a user-supplied exchange_rate when provided, or checks the "
+                "Bank of Uganda mid-rate snapshot (BOU_mid_rates_2026.json). Never guesses an "
+                "exchange rate: returns ok=false, needs='exchange_rate' if no rate is available."
+            ),
+            parameters=_schema_params(
+                {
+                    "amount": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Monetary amount in the source currency.",
+                    },
+                    "currency": {
+                        "type": "string",
+                        "description": "ISO currency code (e.g. 'USD', 'EUR', 'GBP', 'KES', 'UGX').",
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Optional ISO date (YYYY-MM-DD or YYYY-MM) for the exchange rate lookup.",
+                    },
+                    "exchange_rate": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Optional user-supplied exchange rate (UGX per 1 unit of foreign currency). Always takes precedence.",
+                    },
+                },
+                ["amount", "currency"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        amount: Any,
+        currency: str,
+        date: str | None = None,
+        exchange_rate: Any = None,
+        **_: Any,
+    ) -> CalcResult:
+        amt = to_decimal(amount, field="amount")
+        curr = (currency or "UGX").strip().upper()
+        _require_rule(table, "fx_conversion_rule")
+
+        if curr == "UGX":
+            return CalcResult(
+                {
+                    "amount": to_float(amt),
+                    "currency": "UGX",
+                    "ugx_amount": to_float(amt),
+                    "amount_ugx": to_float(amt),
+                    "rate_used": 1.0,
+                    "rate_source": "identity",
+                    "verified": True,
+                    "explanation": f"{_ugx(amt)} is already denominated in UGX.",
+                },
+                rate_keys=("fx_conversion_rule",),
+            )
+
+        if exchange_rate is not None:
+            rate_dec = to_decimal(exchange_rate, field="exchange_rate")
+            if rate_dec <= 0:
+                return CalcResult({"ok": False, "error": "exchange_rate must be positive"})
+            ugx_val = amt * rate_dec
+            return CalcResult(
+                {
+                    "amount": to_float(amt),
+                    "currency": curr,
+                    "ugx_amount": to_float(ugx_val),
+                    "amount_ugx": to_float(ugx_val),
+                    "rate_used": to_float(rate_dec),
+                    "rate_source": "user_supplied",
+                    "verified": True,
+                    "explanation": (
+                        f"Converted {curr} {float(amt):,.2f} at user-supplied exchange rate "
+                        f"UGX {float(rate_dec):,.2f}/{curr} = {_ugx(ugx_val)}."
+                    ),
+                },
+                rate_keys=("fx_conversion_rule",),
+            )
+
+        # Check BOU_mid_rates_2026.json snapshot
+        import json as _json
+        from ..tax.tables import DATA_DIR
+
+        fx_path = DATA_DIR / "fx" / "BOU_mid_rates_2026.json"
+        snap_rate: Decimal | None = None
+        if fx_path.exists():
+            try:
+                fx_data = _json.loads(fx_path.read_text(encoding="utf-8"))
+                rates_map = (fx_data.get("rates") or {}).get(curr)
+                if isinstance(rates_map, int | float):
+                    snap_rate = Decimal(str(rates_map))
+                elif isinstance(rates_map, dict) and rates_map:
+                    month_key = (date or "")[:7]
+                    val = rates_map.get(month_key) or rates_map.get("default")
+                    if val is not None:
+                        snap_rate = Decimal(str(val))
+            except Exception:
+                snap_rate = None
+
+        if snap_rate is not None and snap_rate > 0:
+            ugx_val = amt * snap_rate
+            return CalcResult(
+                {
+                    "amount": to_float(amt),
+                    "currency": curr,
+                    "ugx_amount": to_float(ugx_val),
+                    "amount_ugx": to_float(ugx_val),
+                    "rate_used": to_float(snap_rate),
+                    "rate_source": "bou_snapshot",
+                    "verified": False,
+                    "explanation": (
+                        f"Converted {curr} {float(amt):,.2f} using BoU mid-rate snapshot "
+                        f"UGX {float(snap_rate):,.2f}/{curr} = {_ugx(ugx_val)}."
+                    ),
+                },
+                rate_keys=("fx_conversion_rule",),
+            )
+
+        return CalcResult(
+            {
+                "ok": False,
+                "needs": "exchange_rate",
+                "amount": to_float(amt),
+                "currency": curr,
+                "error": (
+                    f"No official Bank of Uganda mid-rate is loaded for {curr}; "
+                    f"please provide the exchange_rate (UGX per 1 {curr}) on the payment date."
+                ),
+                "explanation": (
+                    f"Cannot convert {curr} {float(amt):,.2f} to UGX without an exchange rate: "
+                    f"please state the Bank of Uganda mid-exchange rate (UGX per 1 {curr}) on the payment date."
+                ),
+            },
+            rate_keys=("fx_conversion_rule",),
+        )
+
+
+class ObjectionRequirementsTool(CalculatorTool):
+    """Statutory objection deadline (45 days), objection decision window (90 days), TAT appeal window (30 days), and 30% disputed tax deposit."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="objection_requirements",
+            description=(
+                "Compute statutory tax objection and Tax Appeals Tribunal (TAT) requirements in Uganda: "
+                "45-day objection deadline from service of assessment, 90-day Commissioner General decision "
+                "timeline, 30-day TAT appeal window, and mandatory 30% deposit of disputed tax (or undisputed "
+                "tax if higher) under Section 15 of the Tax Appeals Tribunals Act."
+            ),
+            parameters=_schema_params(
+                {
+                    "disputed_tax_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Total tax assessed / in dispute in UGX.",
+                    },
+                    "undisputed_tax_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Portion of assessed tax not in dispute in UGX.",
+                    },
+                    "days_since_assessment": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Optional days elapsed since the notice of assessment was served.",
+                    },
+                },
+                [],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        disputed_tax_ugx: Any = 0,
+        undisputed_tax_ugx: Any = 0,
+        days_since_assessment: int | None = None,
+        **_: Any,
+    ) -> CalcResult:
+        disputed = to_decimal(disputed_tax_ugx or 0, field="disputed_tax_ugx")
+        undisputed = to_decimal(undisputed_tax_ugx or 0, field="undisputed_tax_ugx")
+        obj_days = int(_require_scalar(table, "objection_timeline_days"))
+        dec_days = int(_require_scalar(table, "objection_decision_timeline_days"))
+        tat_days = int(_require_scalar(table, "tax_appeals_tribunal_deadline_days"))
+        dep_rate = _require_scalar(table, "tax_appeals_tribunal_deposit_rate")
+
+        thirty_pct = disputed * dep_rate
+        deposit = max(thirty_pct, undisputed)
+        within_window = (
+            (int(days_since_assessment) <= obj_days)
+            if days_since_assessment is not None
+            else None
+        )
+
+        return CalcResult(
+            {
+                "disputed_tax_ugx": to_float(disputed),
+                "undisputed_tax_ugx": to_float(undisputed),
+                "deposit_rate": float(dep_rate),
+                "deposit_amount": to_float(deposit),
+                "objection_deadline_days": obj_days,
+                "objection_decision_days": dec_days,
+                "tat_deadline_days": tat_days,
+                "within_objection_window": within_window,
+                "explanation": (
+                    f"An objection must be lodged with the Commissioner General within {obj_days} days "
+                    f"of service of the assessment notice (decision due within {dec_days} days). "
+                    f"An appeal to the Tax Appeals Tribunal (TAT) must be filed within {tat_days} days "
+                    f"and requires a mandatory deposit of {dep_rate * 100:.0f}% of the tax assessed "
+                    f"({_ugx(thirty_pct)}) or the undisputed tax ({_ugx(undisputed)}), whichever is greater "
+                    f"= {_ugx(deposit)}."
+                ),
+            },
+            rate_keys=(
+                "objection_timeline_days",
+                "objection_decision_timeline_days",
+                "tax_appeals_tribunal_deadline_days",
+                "tax_appeals_tribunal_deposit_rate",
+            ),
+        )
+
+
+class LateFilingPenaltyTool(CalculatorTool):
+    """Compute statutory penal tax for late filing of a return under TPC Act s.49(1) and late payment interest under s.39."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="penalty_late_filing",
+            description=(
+                "Calculate Ugandan penal tax for failing to file a tax return by the due date "
+                "(Tax Procedures Code Act s.49(1)): greater of UGX 200,000 or 2% of the tax payable "
+                "per month (or part of a month) the return remains unfiled, plus 2% per month "
+                "late payment interest (s.39)."
+            ),
+            parameters=_schema_params(
+                {
+                    "tax_payable_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Net tax payable on the return in UGX.",
+                    },
+                    "months_late": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1,
+                        "description": "Number of months (or part-months) the return is filed late.",
+                    },
+                },
+                ["tax_payable_ugx"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        tax_payable_ugx: Any,
+        months_late: int = 1,
+        **_: Any,
+    ) -> CalcResult:
+        tax_payable = to_decimal(tax_payable_ugx, field="tax_payable_ugx")
+        months = max(1, int(months_late or 1))
+        monthly_rate = _require_scalar(table, "penal_tax_late_filing_monthly_rate")
+        min_ugx = _require_scalar(table, "penal_tax_late_filing_minimum_ugx")
+        interest_rate = _require_scalar(table, "late_payment_interest_monthly_rate")
+
+        pct_penalty = tax_payable * monthly_rate * Decimal(months)
+        penal_tax = max(min_ugx, pct_penalty)
+        monthly_interest = tax_payable * interest_rate * Decimal(months)
+
+        return CalcResult(
+            {
+                "tax_payable_ugx": to_float(tax_payable),
+                "months_late": months,
+                "monthly_penalty_rate": float(monthly_rate),
+                "minimum_penalty_ugx": to_float(min_ugx),
+                "percentage_penalty_ugx": to_float(pct_penalty),
+                "penal_tax": to_float(penal_tax),
+                "late_payment_interest_monthly_rate": float(interest_rate),
+                "late_payment_interest_ugx": to_float(monthly_interest),
+                "explanation": (
+                    f"Late filing penal tax under TPC Act s.49(1) is the greater of {_ugx(min_ugx)} "
+                    f"or {monthly_rate * 100:.0f}% of tax payable per month ({_ugx(pct_penalty)} for "
+                    f"{months} month(s)) = {_ugx(penal_tax)}. Late payment interest under s.39 runs at "
+                    f"{interest_rate * 100:.0f}% per month."
+                ),
+            },
+            rate_keys=(
+                "penal_tax_late_filing_monthly_rate",
+                "penal_tax_late_filing_minimum_ugx",
+                "late_payment_interest_monthly_rate",
+            ),
+        )
+
+
+class VATInputClaimEligibilityTool(CalculatorTool):
+    """Evaluate VAT input tax credit eligibility (EFRIS e-invoice requirement, imported services reverse charge, mixed supplies apportionment)."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="vat_input_claim_eligibility",
+            description=(
+                "Check whether a VAT-registered taxpayer in Uganda can claim an input VAT credit "
+                "and compute the claimable amount: requires a valid EFRIS e-invoice/e-receipt for "
+                "domestic purchases, disallows input credit on reverse-charge imported services, "
+                "and apportions input VAT for mixed taxable/exempt supplies."
+            ),
+            parameters=_schema_params(
+                {
+                    "amount_net_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Purchase amount net of VAT in UGX.",
+                    },
+                    "has_efris_einvoice": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "Whether the purchase is supported by a valid EFRIS e-invoice/e-receipt.",
+                    },
+                    "is_imported_service": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Whether the VAT arises under the reverse charge on imported services.",
+                    },
+                    "taxable_supplies_ratio": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1,
+                        "default": 1.0,
+                        "description": "Ratio of taxable supplies to total supplies (0..1) for mixed-supply apportionment.",
+                    },
+                },
+                [],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        amount_net_ugx: Any = 0,
+        has_efris_einvoice: bool = True,
+        is_imported_service: bool = False,
+        taxable_supplies_ratio: Any = 1.0,
+        **_: Any,
+    ) -> CalcResult:
+        net = to_decimal(amount_net_ugx or 0, field="amount_net_ugx")
+        vat_rate = _require_scalar(table, "vat_standard")
+        efris_req = int(_require_scalar(table, "vat_input_efris_einvoice_required"))
+        rev_allowed = int(_require_scalar(table, "vat_imported_services_reverse_charge_input_credit_allowed"))
+        ratio = to_rate(taxable_supplies_ratio if taxable_supplies_ratio is not None else 1.0, field="taxable_supplies_ratio")
+
+        vat_amt = net * vat_rate
+        keys = [
+            "vat_standard",
+            "vat_input_efris_einvoice_required",
+            "vat_imported_services_reverse_charge_input_credit_allowed",
+        ]
+
+        if is_imported_service and rev_allowed == 0:
+            eligible = False
+            claimable = Decimal(0)
+            reason = (
+                f"Reverse-charge VAT of {_ugx(vat_amt)} ({vat_rate * 100:.0f}% on {_ugx(net)}) "
+                "must be accounted for by the recipient on imported services, but is NOT claimable "
+                "as an input tax credit under the VAT Act."
+            )
+        elif efris_req == 1 and not has_efris_einvoice:
+            eligible = False
+            claimable = Decimal(0)
+            reason = (
+                f"Input VAT of {_ugx(vat_amt)} ({vat_rate * 100:.0f}% on {_ugx(net)}) is NOT claimable "
+                "because a manual paper invoice does not qualify — a valid EFRIS e-invoice/e-receipt "
+                "is mandatory to claim input VAT credit."
+            )
+        else:
+            eligible = ratio > 0
+            claimable = vat_amt * ratio
+            reason = (
+                f"Input VAT of {_ugx(vat_amt)} apportioned by taxable supplies ratio ({ratio * 100:.1f}%) "
+                f"= {_ugx(claimable)} claimable."
+            )
+
+        return CalcResult(
+            {
+                "amount_net_ugx": to_float(net),
+                "vat_rate": float(vat_rate),
+                "vat_amount": to_float(vat_amt),
+                "eligible": eligible,
+                "claimable_input_vat": to_float(claimable),
+                "has_efris_einvoice": has_efris_einvoice,
+                "is_imported_service": is_imported_service,
+                "taxable_supplies_ratio": float(ratio),
+                "explanation": reason,
+            },
+            rate_keys=tuple(keys),
+        )
+
+
+class WHTNonResidentServiceTool(CalculatorTool):
+    """Compute 15% WHT on non-resident Ugandan-sourced service contracts and enforce the employment-contract exclusion."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="wht_non_resident_service",
+            description=(
+                "Calculate 15% withholding tax on payments to a non-resident for a Ugandan-sourced "
+                "service contract (Income Tax Act s.85), while excluding employment contracts "
+                "('A Ugandan-sourced service contract does not include an employment contract', "
+                "which is taxed under PAYE)."
+            ),
+            parameters=_schema_params(
+                {
+                    "amount_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Gross payment amount in UGX.",
+                    },
+                    "is_employment_contract": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "True if the payment is salary/remuneration under an employment contract.",
+                    },
+                },
+                ["amount_ugx"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        amount_ugx: Any,
+        is_employment_contract: bool = False,
+        **_: Any,
+    ) -> CalcResult:
+        amt = to_decimal(amount_ugx, field="amount_ugx")
+        rate = _require_scalar(table, "withholding_non_resident_service_contract")
+        if is_employment_contract:
+            return CalcResult(
+                {
+                    "amount_ugx": to_float(amt),
+                    "is_employment_contract": True,
+                    "wht_applicable": False,
+                    "rate": 0.0,
+                    "withholding_tax": 0.0,
+                    "net_payable": to_float(amt),
+                    "tax_head_applicable": "PAYE",
+                    "explanation": (
+                        "A Ugandan-sourced service contract does NOT include an employment contract "
+                        "(Withholding-Tax-FY-2024-25-1.pdf). Employment remuneration is taxed under "
+                        "PAYE, not 15% non-resident service WHT."
+                    ),
+                },
+                rate_keys=("withholding_non_resident_service_contract",),
+            )
+        wht = amt * rate
+        return CalcResult(
+            {
+                "amount_ugx": to_float(amt),
+                "is_employment_contract": False,
+                "wht_applicable": True,
+                "rate": float(rate),
+                "withholding_tax": to_float(wht),
+                "net_payable": to_float(amt - wht),
+                "tax_head_applicable": "WHT",
+                "explanation": (
+                    f"Non-resident Ugandan-sourced service contract WHT at {rate * 100:.0f}% on "
+                    f"{_ugx(amt)} = {_ugx(wht)} (net payable {_ugx(amt - wht)}). Note: employment "
+                    "contracts are excluded from service WHT and taxed under PAYE."
+                ),
+            },
+            rate_keys=("withholding_non_resident_service_contract",),
+        )
+
+
+class PresumptiveOrStartupTaxTool(CalculatorTool):
+    """Check small-business presumptive tax threshold eligibility and 3-year citizen start-up exemption eligibility."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_presumptive_or_startup_tax",
+            description=(
+                "Evaluate eligibility for the Ugandan small-business presumptive tax regime "
+                "(annual turnover between UGX 10,000,000 and UGX 150,000,000) and the 3-year "
+                "citizen start-up income tax exemption (investment capital up to UGX 500,000,000)."
+            ),
+            parameters=_schema_params(
+                {
+                    "annual_turnover_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Annual gross business turnover in UGX.",
+                    },
+                    "investment_capital_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Start-up investment capital in UGX.",
+                    },
+                    "chargeable_income_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Optional chargeable income in UGX if standard 30% corporate tax applies.",
+                    },
+                },
+                [],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        annual_turnover_ugx: Any = None,
+        investment_capital_ugx: Any = None,
+        chargeable_income_ugx: Any = None,
+        **_: Any,
+    ) -> CalcResult:
+        lower = _require_scalar(table, "presumptive_tax_lower_threshold")
+        upper = _require_scalar(table, "presumptive_tax_upper_threshold")
+        cap = _require_scalar(table, "startup_citizen_exemption_capital_cap_ugx")
+        years = int(_require_scalar(table, "startup_citizen_exemption_years"))
+        corp_rate = _require_scalar(table, "corporation_tax")
+
+        turnover = to_decimal(annual_turnover_ugx, field="annual_turnover_ugx") if annual_turnover_ugx is not None else None
+        capital = to_decimal(investment_capital_ugx, field="investment_capital_ugx") if investment_capital_ugx is not None else None
+        chargeable = to_decimal(chargeable_income_ugx, field="chargeable_income_ugx") if chargeable_income_ugx is not None else None
+
+        qualifies_presumptive = (
+            (lower <= turnover <= upper) if turnover is not None else None
+        )
+        qualifies_startup = (capital <= cap) if capital is not None else None
+        corp_tax = (
+            Decimal(0)
+            if qualifies_startup is True
+            else ((chargeable * corp_rate) if chargeable is not None else Decimal(0))
+        )
+
+        return CalcResult(
+            {
+                "presumptive_lower_threshold": to_float(lower),
+                "presumptive_upper_threshold": to_float(upper),
+                "qualifies_for_presumptive": qualifies_presumptive,
+                "startup_capital_cap": to_float(cap),
+                "startup_exemption_years": years,
+                "qualifies_for_startup_exemption": qualifies_startup,
+                "corporation_tax_rate": float(corp_rate),
+                "tax": to_float(corp_tax),
+                "explanation": (
+                    f"Presumptive tax applies to annual turnover between {_ugx(lower)} and {_ugx(upper)}. "
+                    f"The {years}-year citizen startup exemption applies to investment capital up to {_ugx(cap)}."
+                ),
+            },
+            rate_keys=(
+                "presumptive_tax_lower_threshold",
+                "presumptive_tax_upper_threshold",
+                "startup_citizen_exemption_capital_cap_ugx",
+                "startup_citizen_exemption_years",
+                "corporation_tax",
+            ),
+        )
+
+
+class StampDutyCalculator(CalculatorTool):
+    """Compute Ugandan stamp duty on property/land transfers, motor vehicle transfers, and motorcycle transfers."""
+
+    _INSTRUMENTS = ("property_transfer", "motor_vehicle_transfer", "motorcycle_transfer")
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_stamp_duty",
+            description=(
+                "Calculate Ugandan stamp duty under Schedule 2 of the Stamp Duty Act: "
+                "1% ad valorem on property/land transfers (on the Chief Government Valuer market value), "
+                "and fixed statutory stamp duty on motor vehicle and motorcycle transfers."
+            ),
+            parameters=_schema_params(
+                {
+                    "instrument_type": {
+                        "type": "string",
+                        "enum": list(self._INSTRUMENTS),
+                        "description": "Type of instrument being stamped.",
+                    },
+                    "value_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Market value of the property/land in UGX (required for property_transfer).",
+                    },
+                },
+                ["instrument_type"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        instrument_type: str,
+        value_ugx: Any = 0,
+        **_: Any,
+    ) -> CalcResult:
+        if instrument_type not in self._INSTRUMENTS:
+            return CalcResult(
+                {"ok": False, "error": f"instrument_type must be one of {self._INSTRUMENTS}"}
+            )
+        if instrument_type == "property_transfer":
+            val = to_decimal(value_ugx or 0, field="value_ugx")
+            rate = _require_scalar(table, "stamp_duty_property_transfer")
+            duty = val * rate
+            return CalcResult(
+                {
+                    "instrument_type": instrument_type,
+                    "value_ugx": to_float(val),
+                    "rate": float(rate),
+                    "stamp_duty": to_float(duty),
+                    "tax": to_float(duty),
+                    "explanation": (
+                        f"Stamp duty on property/land transfer at {rate * 100:.1f}% of {_ugx(val)} "
+                        f"= {_ugx(duty)}."
+                    ),
+                },
+                rate_keys=("stamp_duty_property_transfer",),
+            )
+        if instrument_type == "motor_vehicle_transfer":
+            fee = _require_scalar(table, "stamp_duty_motor_vehicle_transfer_ugx")
+            return CalcResult(
+                {
+                    "instrument_type": instrument_type,
+                    "stamp_duty": to_float(fee),
+                    "tax": to_float(fee),
+                    "explanation": f"Fixed stamp duty on motor vehicle transfer in {table.fiscal_year} is {_ugx(fee)}.",
+                },
+                rate_keys=("stamp_duty_motor_vehicle_transfer_ugx",),
+            )
+        fee = _require_scalar(table, "stamp_duty_motorcycle_transfer_ugx")
+        return CalcResult(
+            {
+                "instrument_type": instrument_type,
+                "stamp_duty": to_float(fee),
+                "tax": to_float(fee),
+                "explanation": f"Fixed stamp duty on motorcycle/tricycle transfer in {table.fiscal_year} is {_ugx(fee)}.",
+            },
+            rate_keys=("stamp_duty_motorcycle_transfer_ugx",),
+        )
+
+
+class DigitalServicesTaxCalculator(CalculatorTool):
+    """Compute 5% Digital Services Tax (DST) on non-resident digital service providers."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_digital_services_tax",
+            description=(
+                "Calculate Ugandan 5% Digital Services Tax (DST) under Income Tax Act s.86A "
+                "on gross revenue derived by a non-resident digital service provider from users in Uganda."
+            ),
+            parameters=_schema_params(
+                {
+                    "gross_uganda_revenue_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Gross revenue derived from Ugandan users in UGX.",
+                    },
+                },
+                ["gross_uganda_revenue_ugx"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        gross_uganda_revenue_ugx: Any,
+        **_: Any,
+    ) -> CalcResult:
+        rev = to_decimal(gross_uganda_revenue_ugx, field="gross_uganda_revenue_ugx")
+        rate = _require_scalar(table, "digital_services_tax_non_resident")
+        dst = rev * rate
+        return CalcResult(
+            {
+                "gross_uganda_revenue_ugx": to_float(rev),
+                "rate": float(rate),
+                "dst_tax": to_float(dst),
+                "tax": to_float(dst),
+                "explanation": (
+                    f"Non-resident Digital Services Tax at {rate * 100:.0f}% on gross Uganda revenue "
+                    f"of {_ugx(rev)} = {_ugx(dst)}."
+                ),
+            },
+            rate_keys=("digital_services_tax_non_resident",),
+        )
+
+
+class GamingAndBettingTaxCalculator(CalculatorTool):
+    """Compute operator gaming and betting tax on total stakes less payouts."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_gaming_tax",
+            description=(
+                "Calculate Ugandan gaming and betting tax on licensed operators "
+                "(30% in FY2026-27 on total money staked less payouts under the Lotteries and Gaming Act)."
+            ),
+            parameters=_schema_params(
+                {
+                    "total_stakes_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Total money staked in UGX.",
+                    },
+                    "total_payouts_ugx": {
+                        "type": "number",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Total winnings paid out to punters in UGX.",
+                    },
+                },
+                ["total_stakes_ugx"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        total_stakes_ugx: Any,
+        total_payouts_ugx: Any = 0,
+        **_: Any,
+    ) -> CalcResult:
+        stakes = to_decimal(total_stakes_ugx, field="total_stakes_ugx")
+        payouts = to_decimal(total_payouts_ugx or 0, field="total_payouts_ugx")
+        rate = _require_scalar(table, "gaming_and_betting_tax_rate")
+        net_stakes = max(Decimal(0), stakes - payouts)
+        tax = net_stakes * rate
+        return CalcResult(
+            {
+                "total_stakes_ugx": to_float(stakes),
+                "total_payouts_ugx": to_float(payouts),
+                "net_stakes_ugx": to_float(net_stakes),
+                "rate": float(rate),
+                "operator_gaming_tax": to_float(tax),
+                "tax": to_float(tax),
+                "explanation": (
+                    f"Operator gaming and betting tax at {rate * 100:.0f}% on net stakes of "
+                    f"{_ugx(net_stakes)} (stakes {_ugx(stakes)} minus payouts {_ugx(payouts)}) = {_ugx(tax)}."
+                ),
+            },
+            rate_keys=("gaming_and_betting_tax_rate",),
+        )
+
+
+class AdvanceVehicleTaxCalculator(CalculatorTool):
+    """Compute annual commercial motor vehicle advance income tax per seat or per tonne."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="calculate_advance_vehicle_tax",
+            description=(
+                "Calculate annual advance income tax on commercial transport vehicles in Uganda: "
+                "UGX 20,000 per passenger seat per year for PSVs, or UGX 50,000 per tonne per year "
+                "for goods vehicles."
+            ),
+            parameters=_schema_params(
+                {
+                    "vehicle_type": {
+                        "type": "string",
+                        "enum": ["passenger", "goods"],
+                        "description": "Commercial vehicle category ('passenger' or 'goods').",
+                    },
+                    "seats": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Number of passenger seats (for passenger vehicles).",
+                    },
+                    "tonnes": {
+                        "type": "number",
+                        "minimum": 0,
+                        "description": "Loading capacity in tonnes (for goods vehicles).",
+                    },
+                },
+                ["vehicle_type"],
+            ),
+            risk="low",
+            namespace=TAX_CALCULATOR_NAMESPACE,
+            output_schema=CALCULATOR_OUTPUT_SCHEMA,
+        )
+
+    def compute(
+        self,
+        table: RateTable,
+        vehicle_type: str,
+        seats: Any = None,
+        tonnes: Any = None,
+        **_: Any,
+    ) -> CalcResult:
+        if vehicle_type not in ("passenger", "goods"):
+            return CalcResult(
+                {"ok": False, "error": f"vehicle_type must be 'passenger' or 'goods' (got {vehicle_type!r})"}
+            )
+        if vehicle_type == "passenger":
+            rate = _require_scalar(table, "motor_vehicle_advance_tax_passenger_per_seat")
+            units = to_decimal(seats or 0, field="seats")
+            tax = units * rate
+            return CalcResult(
+                {
+                    "vehicle_type": "passenger",
+                    "seats": to_float(units),
+                    "rate_per_seat": to_float(rate),
+                    "annual_advance_tax": to_float(tax),
+                    "tax": to_float(tax),
+                    "explanation": (
+                        f"Annual advance tax for a {float(units):,.0f}-seat passenger vehicle at "
+                        f"{_ugx(rate)}/seat = {_ugx(tax)}."
+                    ),
+                },
+                rate_keys=("motor_vehicle_advance_tax_passenger_per_seat",),
+            )
+        rate = _require_scalar(table, "motor_vehicle_advance_tax_goods_per_tonne")
+        units = to_decimal(tonnes or 0, field="tonnes")
+        tax = units * rate
+        return CalcResult(
+            {
+                "vehicle_type": "goods",
+                "tonnes": to_float(units),
+                "rate_per_tonne": to_float(rate),
+                "annual_advance_tax": to_float(tax),
+                "tax": to_float(tax),
+                "explanation": (
+                    f"Annual advance tax for a {float(units):,.1f}-tonne goods vehicle at "
+                    f"{_ugx(rate)}/tonne = {_ugx(tax)}."
+                ),
+            },
+            rate_keys=("motor_vehicle_advance_tax_goods_per_tonne",),
+        )
+
+
+# ---------------------------------------------------------------------------
 # Register everything on import
 # ---------------------------------------------------------------------------
 CALCULATOR_TOOLS: tuple[CalculatorTool, ...] = (
@@ -1130,6 +2645,18 @@ CALCULATOR_TOOLS: tuple[CalculatorTool, ...] = (
     RentalIncomeTaxCalculator(),
     WithholdingTaxCalculator(),
     ExciseDutyCalculator(),
+    ResidencyDeterminationTool(),
+    BenefitInKindValuationTool(),
+    CurrencyConversionTool(),
+    ObjectionRequirementsTool(),
+    LateFilingPenaltyTool(),
+    VATInputClaimEligibilityTool(),
+    WHTNonResidentServiceTool(),
+    PresumptiveOrStartupTaxTool(),
+    StampDutyCalculator(),
+    DigitalServicesTaxCalculator(),
+    GamingAndBettingTaxCalculator(),
+    AdvanceVehicleTaxCalculator(),
 )
 
 for _tool in CALCULATOR_TOOLS:

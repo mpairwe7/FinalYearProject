@@ -1,0 +1,7 @@
+{
+  "source": "Bank of Uganda official published monthly mid-exchange rates (not bundled in offline corpus; pass exchange_rate explicitly or populate verified monthly snapshots here)",
+  "retrieved_on": null,
+  "status": "unverified",
+  "base_currency": "UGX",
+  "rates": {}
+}

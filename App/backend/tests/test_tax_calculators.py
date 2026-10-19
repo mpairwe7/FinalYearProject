@@ -527,3 +527,282 @@ class CustomsDutyExtendedTests(unittest.TestCase):
         self.assertEqual(result["vat"], 5_760_000.0)
         self.assertEqual(result["wht"], 1_200_000.0)  # 6% of 20m
         self.assertEqual(result["landed_cost"], 20_000_000 + 5_000_000 + 7_000_000 + 5_760_000 + 1_200_000)
+
+
+class PhaseFResidencyBikFxAndRuleToolTests(unittest.TestCase):
+    """Phase F.4 tests: expectations computed dynamically from rate-table values, never hardcoded literals."""
+
+    def setUp(self) -> None:
+        from app.tax.tables import get_table
+
+        self.table = get_table(FY26)
+
+    def test_determine_residency_edges_and_contract_months(self) -> None:
+        thresh_days = int(self.table["residency_days_threshold"])
+        thresh_avg = int(self.table["residency_avg_days_threshold"])
+
+        # 0 days -> non_resident
+        r0 = ToolRegistry.call("determine_residency", {"days_in_uganda": 0, "fiscal_year": FY26})
+        self.assertTrue(r0["ok"])
+        self.assertEqual(r0["status"], "non_resident")
+
+        # threshold - 1 (182 days) -> non_resident
+        r_below = ToolRegistry.call(
+            "determine_residency", {"days_in_uganda": thresh_days - 1, "fiscal_year": FY26}
+        )
+        self.assertEqual(r_below["status"], "non_resident")
+
+        # exact threshold (183 days) -> resident
+        r_exact = ToolRegistry.call(
+            "determine_residency", {"days_in_uganda": thresh_days, "fiscal_year": FY26}
+        )
+        self.assertEqual(r_exact["status"], "resident")
+        self.assertTrue(r_exact["likely_resident"])
+
+        # 3-year average at threshold (122 days) -> resident
+        r_avg = ToolRegistry.call(
+            "determine_residency",
+            {"avg_days_current_and_two_prior": thresh_avg, "fiscal_year": FY26},
+        )
+        self.assertEqual(r_avg["status"], "resident")
+
+        # permanent home or government employee posted abroad -> resident
+        self.assertEqual(
+            ToolRegistry.call(
+                "determine_residency", {"permanent_home": True, "fiscal_year": FY26}
+            )["status"],
+            "resident",
+        )
+        self.assertEqual(
+            ToolRegistry.call(
+                "determine_residency", {"gov_employee_posted_abroad": True, "fiscal_year": FY26}
+            )["status"],
+            "resident",
+        )
+
+        # contract_months=8 alone -> undetermined + likely_resident=True + missing_facts
+        r_contract = ToolRegistry.call(
+            "determine_residency",
+            {
+                "contract_months": 8,
+                "period_start": "2026-03-01",
+                "period_end": "2026-10-31",
+                "fiscal_year": FY26,
+            },
+        )
+        self.assertEqual(r_contract["status"], "undetermined")
+        self.assertTrue(r_contract["likely_resident"])
+        self.assertIn("days physically present in Uganda", r_contract["missing_facts"])
+        self.assertEqual(r_contract["years_of_income_affected"], ["FY2025-26", "FY2026-27"])
+
+    def test_value_benefit_in_kind_formulas_and_unverified_flags(self) -> None:
+        from decimal import Decimal
+
+        car_inc = Decimal(str(self.table["bik_motor_vehicle_inclusion_rate"]))
+        car_dep = Decimal(str(self.table["bik_motor_vehicle_depreciation_rate"]))
+        std_days = int(self.table["bik_days_in_year_standard"])
+        housing_rate = Decimal(str(self.table["bik_housing_employment_income_rate"]))
+        loan_thresh = Decimal(str(self.table["bik_loan_principal_threshold_ugx"]))
+        loan_stat_rate = Decimal(str(self.table["bik_loan_statutory_interest_rate"]))
+        de_minimis = Decimal(str(self.table["bik_de_minimis_monthly_ugx"]))
+
+        # 1. Car in year 2 (years_since_first_provided=1)
+        mv = Decimal("100000000")
+        expected_car_annual = float(car_inc * (mv * (Decimal(1) - car_dep)) * Decimal(std_days) / Decimal(std_days))
+        car_res = ToolRegistry.call(
+            "value_benefit_in_kind",
+            {
+                "kind": "car",
+                "market_value": float(mv),
+                "years_since_first_provided": 1,
+                "days_private_use": std_days,
+                "days_in_year": std_days,
+                "employee_payment": 0,
+                "fiscal_year": FY26,
+            },
+        )
+        self.assertTrue(car_res["ok"])
+        self.assertTrue(car_res["verified"])
+        self.assertAlmostEqual(car_res["annual_value"], expected_car_annual, places=2)
+        self.assertEqual(car_res["direction"], "added_to_employment_income")
+
+        # 2. Housing benefit -> lesser of (a) and 15% of (employment_income + (a)); verified=False
+        monthly_rent = Decimal("4000000")
+        annual_rent = monthly_rent * Decimal(12)
+        annual_salary = Decimal("180000000")
+        expected_housing_annual = float(min(annual_rent, housing_rate * (annual_salary + annual_rent)))
+        housing_res = ToolRegistry.call(
+            "value_benefit_in_kind",
+            {
+                "kind": "housing",
+                "market_rent": float(monthly_rent),
+                "employment_income_annual": float(annual_salary),
+                "fiscal_year": FY26,
+            },
+        )
+        self.assertTrue(housing_res["ok"])
+        self.assertFalse(housing_res["verified"])
+        self.assertIn("bik_housing_employment_income_rate", housing_res["rate_basis"]["unverified"])
+        self.assertAlmostEqual(housing_res["annual_value"], expected_housing_annual, places=2)
+
+        # 3. Low-interest loan at exact threshold (1,000,000) vs above threshold
+        loan_at_thresh = ToolRegistry.call(
+            "value_benefit_in_kind",
+            {
+                "kind": "low_interest_loan",
+                "loan_principal": float(loan_thresh),
+                "interest_rate_paid": 0.02,
+                "fiscal_year": FY26,
+            },
+        )
+        self.assertTrue(loan_at_thresh["ok"])
+        self.assertEqual(loan_at_thresh["annual_value"], 0.0)
+        self.assertTrue(loan_at_thresh["verified"])
+
+        loan_above = ToolRegistry.call(
+            "value_benefit_in_kind",
+            {
+                "kind": "low_interest_loan",
+                "loan_principal": float(loan_thresh * 10),
+                "interest_rate_paid": 0.02,
+                "fiscal_year": FY26,
+            },
+        )
+        expected_loan_annual = float((loan_thresh * 10) * (loan_stat_rate - Decimal("0.02")))
+        self.assertFalse(loan_above["verified"])
+        self.assertAlmostEqual(loan_above["annual_value"], expected_loan_annual, places=2)
+
+        # 4. De-minimis boundary (< 10,000/month excluded, == 10,000/month included)
+        below_dm = ToolRegistry.call(
+            "value_benefit_in_kind",
+            {"kind": "meals", "monthly_cost": float(de_minimis - 1), "fiscal_year": FY26},
+        )
+        self.assertTrue(below_dm["de_minimis_excluded"])
+        self.assertEqual(below_dm["monthly_value"], 0.0)
+
+        at_dm = ToolRegistry.call(
+            "value_benefit_in_kind",
+            {"kind": "meals", "monthly_cost": float(de_minimis), "fiscal_year": FY26},
+        )
+        self.assertFalse(at_dm["de_minimis_excluded"])
+        self.assertEqual(at_dm["monthly_value"], float(de_minimis))
+
+    def test_extended_paye_verified_vs_conditional_and_residency_comparison(self) -> None:
+        from decimal import Decimal
+        from app.tax.money import apply_bands
+
+        gross = Decimal("20000000")
+        car_monthly = Decimal("1000000")
+        housing_monthly = Decimal("2500000")
+
+        res_bands = self.table["paye_bands_resident"]
+        nonres_bands = self.table["paye_bands_non_resident"]
+        exp_verified, _ = apply_bands(gross + car_monthly, res_bands)
+        exp_conditional, _ = apply_bands(gross + car_monthly + housing_monthly, res_bands)
+        exp_nonres, _ = apply_bands(gross + car_monthly, nonres_bands)
+
+        result = ToolRegistry.call(
+            "calculate_paye",
+            {
+                "monthly_gross": float(gross),
+                "residency": "resident",
+                "compare_residency": True,
+                "benefits": [
+                    {"kind": "car", "monthly_value": float(car_monthly), "verified": True},
+                    {"kind": "housing", "monthly_value": float(housing_monthly), "verified": False},
+                ],
+                "fiscal_year": FY26,
+            },
+        )
+        self.assertTrue(result["ok"])
+        # Verified PAYE excludes the unverified housing benefit
+        self.assertEqual(result["paye"], float(exp_verified))
+        self.assertEqual(result["paye_verified"], float(exp_verified))
+        self.assertEqual(result["paye_conditional"], float(exp_conditional))
+        self.assertEqual(result["unverified_benefits"], ["housing"])
+        self.assertEqual(
+            result["comparison"]["non_resident_minus_resident_monthly"],
+            float(exp_nonres - exp_verified),
+        )
+
+    def test_convert_currency_asks_for_rate_when_missing_and_uses_user_rate(self) -> None:
+        missing = ToolRegistry.call(
+            "convert_currency", {"amount": 6000, "currency": "USD", "fiscal_year": FY26}
+        )
+        self.assertFalse(missing["ok"])
+        self.assertEqual(missing["needs"], "exchange_rate")
+
+        supplied = ToolRegistry.call(
+            "convert_currency",
+            {"amount": 6000, "currency": "USD", "exchange_rate": 3750, "fiscal_year": FY26},
+        )
+        self.assertTrue(supplied["ok"])
+        self.assertEqual(supplied["ugx_amount"], 6000 * 3750)
+        self.assertEqual(supplied["rate_source"], "user_supplied")
+
+    def test_per_head_rule_tools_and_capital_loss_rate_key(self) -> None:
+        # 1. objection_requirements
+        dep_rate = float(self.table["tax_appeals_tribunal_deposit_rate"])
+        obj = ToolRegistry.call(
+            "objection_requirements", {"disputed_tax_ugx": 50_000_000, "fiscal_year": FY26}
+        )
+        self.assertTrue(obj["ok"])
+        self.assertEqual(obj["deposit_amount"], 50_000_000 * dep_rate)
+        self.assertEqual(obj["objection_deadline_days"], int(self.table["objection_timeline_days"]))
+        self.assertEqual(
+            obj["tat_deadline_days"], int(self.table["tax_appeals_tribunal_deadline_days"])
+        )
+
+        # 2. penalty_late_filing (minimum > 2% on 3m)
+        pen = ToolRegistry.call(
+            "penalty_late_filing",
+            {"tax_payable_ugx": 3_000_000, "months_late": 1, "fiscal_year": FY26},
+        )
+        self.assertTrue(pen["ok"])
+        self.assertEqual(
+            pen["penal_tax"],
+            max(
+                float(self.table["penal_tax_late_filing_minimum_ugx"]),
+                3_000_000 * float(self.table["penal_tax_late_filing_monthly_rate"]),
+            ),
+        )
+
+        # 3. vat_input_claim_eligibility (manual invoice disallowed)
+        vat_elig = ToolRegistry.call(
+            "vat_input_claim_eligibility",
+            {"amount_net_ugx": 40_000_000, "has_efris_einvoice": False, "fiscal_year": FY26},
+        )
+        self.assertTrue(vat_elig["ok"])
+        self.assertFalse(vat_elig["eligible"])
+        self.assertEqual(vat_elig["claimable_input_vat"], 0.0)
+
+        # 4. wht_non_resident_service (service vs employment exclusion)
+        wht_srv = ToolRegistry.call(
+            "wht_non_resident_service",
+            {"amount_ugx": 30_000_000, "is_employment_contract": False, "fiscal_year": FY26},
+        )
+        self.assertTrue(wht_srv["wht_applicable"])
+        self.assertEqual(
+            wht_srv["withholding_tax"],
+            30_000_000 * float(self.table["withholding_non_resident_service_contract"]),
+        )
+        wht_emp = ToolRegistry.call(
+            "wht_non_resident_service",
+            {"amount_ugx": 10_000_000, "is_employment_contract": True, "fiscal_year": FY26},
+        )
+        self.assertFalse(wht_emp["wht_applicable"])
+        self.assertEqual(wht_emp["withholding_tax"], 0.0)
+
+        # 5. calculate_capital_gains on capital loss includes 'rate' key (fixes HTTP 500 in format_calc_reply)
+        from app.calculator_router import format_calc_reply
+
+        cgt_loss = ToolRegistry.call(
+            "calculate_capital_gains",
+            {"sale_price": 100_000_000, "cost_base": 140_000_000, "fiscal_year": FY26},
+        )
+        self.assertTrue(cgt_loss["ok"])
+        self.assertEqual(cgt_loss["tax"], 0.0)
+        self.assertEqual(cgt_loss["rate"], float(self.table["capital_gains_corporate"]))
+        self.assertIn("no CGT is payable", cgt_loss["explanation"])
+        formatted = format_calc_reply("calculate_capital_gains", cgt_loss, [])
+        self.assertIn("UGX 0", formatted)
