@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.llm import COMPLEX_ANSWER_CONTRACT, _build_messages
+from app.llm import COMPLEX_ANSWER_CONTRACT, _build_messages, _build_tool_messages
 from app.providers.routing import ENDPOINTS, ModelTier
 from app.query import decompose_query, extract_retrieval_preferences
 from app.retriever import (
@@ -91,6 +91,33 @@ def test_decompose_query_splits_multi_issue_numbered_and_auxiliary_questions() -
     parts = decompose_query(q)
     assert len(parts) == 3
 
+    # Also handles "1) ...? 2) ...?" format
+    q_paren = "1) What is VAT? 2) How is it paid?"
+    assert len(decompose_query(q_paren)) == 2
+
+
+def test_standalone_resident_and_token_boundary_and_rrf_rank_one_safeguard() -> None:
+    # 1. Standalone "resident" / "non-resident" query triggers employment/resident preferred sections
+    pref_res = extract_retrieval_preferences("Is he resident in Uganda for income tax?")
+    assert "resident" in pref_res.get("preferred_sections", [])
+
+    # 2. want_tax="vat" must not match substring "private"
+    hits_sub = [
+        {"text": "Private company share transfer rules.", "source": "other.pdf", "score_norm": 0.60, "score_rrf": 0.20},
+        {"text": "Standard VAT rate is 18%.", "source": "vat.pdf", "score_norm": 0.58, "score_rrf": 0.18},
+    ]
+    ranked_sub = apply_preference_boost(hits_sub, {"tax_type": "vat"})
+    assert ranked_sub[0]["source"] == "vat.pdf"
+    assert ranked_sub[1]["score_norm"] == 0.60  # "private" received no boost
+
+    # 3. RRF-only safeguard: a rank-5 hit (1/65) with a topic boost must NOT overtake an unboosted rank-1 hit (1/61)
+    rrf_hits = [
+        {"id": "rank1", "text": "Exact top match without topic keyword.", "source": "top.pdf", "score_rrf": 1.0 / 61.0},
+        {"id": "rank5", "text": "Lower hit mentioning VAT.", "source": "ura_vat_faqs.csv", "score_rrf": 1.0 / 65.0},
+    ]
+    ranked_rrf = apply_preference_boost(rrf_hits, {"tax_type": "vat"})
+    assert ranked_rrf[0]["id"] == "rank1"
+
 
 def test_complex_answer_contract_injected_only_when_verified_facts_or_t3() -> None:
     # 1. Simple T1 turn without verified facts -> no COMPLEX_ANSWER_CONTRACT
@@ -123,5 +150,34 @@ def test_complex_answer_contract_injected_only_when_verified_facts_or_t3() -> No
         "Explain the interaction between VAT apportionment and EFRIS e-invoicing.",
         passages=[],
         endpoint=ENDPOINTS[ModelTier.T3],
+        tier=ModelTier.T3,
     )
     assert "## Complex-Answer Contract" in t3_msgs[0]["content"]
+
+    # 4. Explicit T2 tier must NOT receive COMPLEX_ANSWER_CONTRACT when no verified facts exist,
+    # even though T2 and T3 share the same 27B ModelEndpoint.
+    t2_msgs = _build_messages(
+        "Look up VAT registration status.",
+        passages=[],
+        endpoint=ENDPOINTS[ModelTier.T2],
+        tier=ModelTier.T2,
+    )
+    assert "## Complex-Answer Contract" not in t2_msgs[0]["content"]
+
+    t2_tool_msgs = _build_tool_messages(
+        "Look up VAT registration status.",
+        passages=None,
+        conversation_history=None,
+        locale="en",
+        tier=ModelTier.T2,
+    )
+    assert "## Complex-Answer Contract" not in t2_tool_msgs[0]["content"]
+
+    t3_tool_msgs = _build_tool_messages(
+        "Analyse multi-year objection and residency.",
+        passages=None,
+        conversation_history=None,
+        locale="en",
+        tier=ModelTier.T3,
+    )
+    assert "## Complex-Answer Contract" in t3_tool_msgs[0]["content"]

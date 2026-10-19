@@ -1346,7 +1346,7 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 _DECOMPOSE_SPLIT_RE = re.compile(
     r" (?:and also|as well as|and then) |"
     r";\s*|"
-    r"\? (?=(?:\(\d\)\s*|\([a-d]\)\s*|\d\.\s*)?(?:what|how|when|where|which|who|is|are|can|could|does|do|will|should|must|calculate|compute|state|explain)\b)",
+    r"\? (?=(?:\(\d\)\s*|\([a-d]\)\s*|\d[.)]\s*|[a-d]\)\s*)?(?:what|how|when|where|which|who|is|are|can|could|does|do|will|should|must|calculate|compute|state|explain)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
@@ -1358,7 +1358,7 @@ _AND_QUESTION_RE = re.compile(
 # guide PDFs are soft-demoted by -0.06 so they do not crowd out the general Taxation Handbook.
 _SECTOR_QUERY_RE = re.compile(
     r"\b("
-    r"agricultur(?:e|al)|farm(?:ing|er|s)?|crop(?:s)?|livestock|poultry|dairy|"
+    r"agricultur(?:e|al)|farm(?:ing|ers?)?|crop(?:s)?|livestock|poultry|dairy|"
     r"hotel(?:s)?|accom+odation|tourism|tourist|hospitality|lodge(?:s)?|guest\s*house|"
     r"mining|mineral(?:s)?|quarry|quarrying|gold|cobalt|limestone|"
     r"petroleum|oil\s+and\s+gas|upstream|midstream|pipeline|"
@@ -1380,7 +1380,7 @@ _TOPIC_QUERY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
             r"\b(paye|pay[-\s]+as[-\s]+you[-\s]+earn|employment\s+income|salary|wages|"
             r"benefit(?:s)?\s+in\s+kind|housing\s+benefit|housing\s+allowance|"
             r"vehicle\s+benefit|motor\s+vehicle\s+benefit|domestic\s+servant|"
-            r"tax\s+resident|residency|183\s+days|expatriate|seconded)\b",
+            r"(?:non[-\s]+|tax\s+)?resident|residency|183\s+days|expatriate|seconded)\b",
             re.I,
         ),
         "employment",

@@ -481,6 +481,7 @@ TOPIC_SECTION_HINTS: dict[str, tuple[str, ...]] = {
     "employment": (
         "employment income",
         "benefits in kind",
+        "resident",
         "tax resident",
         "residency",
         "ura_employment_income_faqs.csv",
@@ -564,12 +565,16 @@ def apply_preference_boost(
         if not is_demoted_guide:
             matched_topic = False
             if want_tax:
-                blob = " ".join(
-                    str(hit.get(field) or "")
-                    for field in ("tax_type", "tag", "section", "source", "text", "question")
-                ).lower()
-                if want_tax in blob:
+                hit_tax = str(hit.get("tax_type") or "").strip().lower()
+                if hit_tax == want_tax:
                     matched_topic = True
+                else:
+                    blob = " ".join(
+                        str(hit.get(field) or "")
+                        for field in ("tag", "section", "source", "text", "question")
+                    ).lower()
+                    if re.search(r"\b" + re.escape(want_tax) + r"\b", blob):
+                        matched_topic = True
             if not matched_topic and preferred_sections:
                 sec_blob = " ".join(
                     [
@@ -598,9 +603,10 @@ def apply_preference_boost(
         try:
             rrf_base = float(hit.get("score_rrf") or 0.0)
             # On raw Qdrant RRF scale (1/(60+rank) <= 0.05) without a calibrated score_norm,
-            # scale the additive delta so a rank-5 hit does not leapfrog a rank-1 exact match.
+            # scale the additive delta (boost * 0.01 = +0.0005 / -0.0006) so it breaks close
+            # ties while a rank-5 hit (1/65 = 0.015385) never overtakes a rank-1 hit (1/61 = 0.016393).
             rrf_delta = (
-                boost * 0.12
+                boost * 0.01
                 if (hit.get("score_norm") is None and 0.0 < rrf_base <= 0.05)
                 else boost
             )
