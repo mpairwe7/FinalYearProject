@@ -1346,13 +1346,77 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 _DECOMPOSE_SPLIT_RE = re.compile(
     r" (?:and also|as well as|and then) |"
     r";\s*|"
-    r"\? (?=(?:what|how|when|where|which|who)\b)",
+    r"\? (?=(?:\(\d\)\s*|\([a-d]\)\s*|\d[.)]\s*|[a-d]\)\s*)?(?:what|how|when|where|which|who|is|are|can|could|does|do|will|should|must|calculate|compute|state|explain)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
     r" and (?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
+
+# Phase G.3: Sector keywords — unless one of these appears in the query, sector-specific
+# guide PDFs are soft-demoted by -0.06 so they do not crowd out the general Taxation Handbook.
+_SECTOR_QUERY_RE = re.compile(
+    r"\b("
+    r"agricultur(?:e|al)|farm(?:ing|ers?)?|crop(?:s)?|livestock|poultry|dairy|"
+    r"hotel(?:s)?|accom+odation|tourism|tourist|hospitality|lodge(?:s)?|guest\s*house|"
+    r"mining|mineral(?:s)?|quarry|quarrying|gold|cobalt|limestone|"
+    r"petroleum|oil\s+and\s+gas|upstream|midstream|pipeline|"
+    r"construction|contractor(?:s)?|building\s+contractor|civil\s+works|"
+    r"ngo(?:s)?|non[-\s]?governmental|charity|charities|religious|church|mosque|"
+    r"transport(?:ation)?|passenger\s+service|psv|goods\s+vehicle|haulage|freight|matatu|bus|taxi|"
+    r"fishing|fish\s+processing|aquaculture|"
+    r"manufactur(?:ing|er|ers)|factory|factories|pharmaceutical|"
+    r"wholesale|retail(?:er)?|supermarket|"
+    r"health\s+and\s+medical|hospital(?:s)?|clinic(?:s)?|medical\s+sector|"
+    r"government\s+agenc(?:y|ies)|ministry|local\s+government|mda(?:s)?"
+    r")\b",
+    re.I,
+)
+
+_TOPIC_QUERY_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(
+            r"\b(paye|pay[-\s]+as[-\s]+you[-\s]+earn|employment\s+income|salary|wages|"
+            r"benefit(?:s)?\s+in\s+kind|housing\s+benefit|housing\s+allowance|"
+            r"vehicle\s+benefit|motor\s+vehicle\s+benefit|domestic\s+servant|"
+            r"(?:non[-\s]+|tax\s+)?resident|residency|183\s+days|expatriate|seconded)\b",
+            re.I,
+        ),
+        "employment",
+    ),
+    (
+        re.compile(
+            r"\b(vat|value[-\s]+added\s+tax|input\s+tax|output\s+tax|taxable\s+suppl(?:y|ies)|zero[-\s]+rated)\b",
+            re.I,
+        ),
+        "vat",
+    ),
+    (re.compile(r"\b(withholding\s+tax|wht)\b", re.I), "wht"),
+    (re.compile(r"\b(rental\s+income|rental\s+tax|landlord|gross\s+rent)\b", re.I), "rental"),
+    (
+        re.compile(
+            r"\b(corporation\s+tax|corporate\s+income\s+tax|cit|thin\s+capitali[sz]ation)\b",
+            re.I,
+        ),
+        "cit",
+    ),
+    (re.compile(r"\b(capital\s+gains?(?:\s+tax)?|cgt|cost\s+base)\b", re.I), "cgt"),
+    (
+        re.compile(
+            r"\b(efris|fdn|fiscal\s+document\s+number|e[-\s]?invoice|e[-\s]?receipt)\b",
+            re.I,
+        ),
+        "efris",
+    ),
+    (
+        re.compile(
+            r"\b(objection(?:s)?|tax\s+appeals?\s+tribunal|tat|45\s+days)\b",
+            re.I,
+        ),
+        "objections",
+    ),
+]
 
 
 def _normalize_fy(start: str, end: str) -> str:
@@ -1383,7 +1447,7 @@ def extract_retrieval_preferences(
     query: str,
     history: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Soft ranking hints: mentioned tax type, 'current' fiscal year, and EQ relief terms."""
+    """Soft ranking hints: mentioned tax type, 'current' fiscal year, sector-guide demotion, topic sections, and EQ relief terms."""
     prefer: dict[str, Any] = {}
     text = query or ""
     if _CURRENT_FY_RE.search(text) and not extract_retrieval_filters(text):
@@ -1391,6 +1455,20 @@ def extract_retrieval_preferences(
     types = [name for pattern, name in _TAX_TYPE_PATTERNS if pattern.search(text)]
     if len(types) == 1:
         prefer["tax_type"] = types[0]
+    if text.strip():
+        if not _SECTOR_QUERY_RE.search(text):
+            prefer["demote_sector_guides"] = True
+        from .retriever import TOPIC_SECTION_HINTS
+
+        matched_topics = [topic for pat, topic in _TOPIC_QUERY_PATTERNS if pat.search(text)]
+        if matched_topics:
+            sections: list[str] = []
+            for t_name in matched_topics:
+                for hint in TOPIC_SECTION_HINTS.get(t_name, ()):
+                    if hint not in sections:
+                        sections.append(hint)
+            if sections:
+                prefer["preferred_sections"] = sections
     if text:
         try:
             from .flags import flags

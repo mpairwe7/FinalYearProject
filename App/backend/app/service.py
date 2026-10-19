@@ -1085,6 +1085,7 @@ def _call_llm_with_deadline(
     tone_hint: str = "",
     context_summary: str = "",
     endpoint: Any = None,
+    tier: Any = None,
 ) -> str:
     """Generate a reply, honouring the hybrid cloud/local routing policy.
 
@@ -1120,6 +1121,7 @@ def _call_llm_with_deadline(
             tone_hint=tone_hint,
             context_summary=context_summary,
             endpoint=endpoint,
+            tier=tier,
         ))
     return strip_thought(_local_llm_then_cloud(
         query,
@@ -1132,6 +1134,7 @@ def _call_llm_with_deadline(
         tone_hint=tone_hint,
         context_summary=context_summary,
         endpoint=endpoint,
+        tier=tier,
     ))
 
 
@@ -1147,6 +1150,7 @@ def _local_llm_then_cloud(
     tone_hint: str = "",
     context_summary: str = "",
     endpoint: Any = None,
+    tier: Any = None,
 ) -> str:
     """Run ``llm_module.generate`` under a hard wall-clock deadline.
 
@@ -1221,6 +1225,8 @@ def _local_llm_then_cloud(
     }
     if endpoint is not None:
         gen_kwargs["endpoint"] = endpoint
+    if tier is not None:
+        gen_kwargs["tier"] = tier
 
     def _invoke_generate() -> tuple[str, dict[str, Any]]:
         llm_module.clear_last_generation_meta()
@@ -1569,6 +1575,7 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     connector_namespaces: list[str] | None = None,
     forced_operations: list[str] | None = None,
     endpoint: Any = None,
+    tier: Any = None,
 ) -> dict[str, Any]:
     """Run :func:`llm_module.generate_with_tools` under breaker + deadline.
 
@@ -1627,6 +1634,8 @@ def _call_llm_agentic(  # noqa: PLR0913 — all args are request-scoped config
     }
     if endpoint is not None:
         tool_kwargs["endpoint"] = endpoint
+    if tier is not None:
+        tool_kwargs["tier"] = tier
 
     future = _LLM_EXECUTOR.submit(
         contextvars.copy_context().run,
@@ -2329,6 +2338,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
         connector_forced = list(result.get("_connector_forced") or [])
         agent_role = str(result.get("agent_role") or "rag_answerer")
         turn_endpoint = result.get("_tier_endpoint")
+        turn_tier = ModelTier(result.get("_model_tier", ModelTier.T1.value))
         use_agentic = (
             (
                 force_agentic
@@ -2363,6 +2373,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 connector_namespaces=connector_namespaces,
                 forced_operations=connector_forced or None,
                 endpoint=turn_endpoint,
+                tier=turn_tier,
             ):
                 if event[0] == "_full_reply":
                     full_reply = event[1]
@@ -2814,6 +2825,7 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
     connector_namespaces: list[str] | None = None,
     forced_operations: list[str] | None = None,
     endpoint: Any = None,
+    tier: Any = None,
 ) -> "AsyncIterator[tuple[str, Any]]":
     """Run the agentic tool-call loop and stream its events.
 
@@ -2863,6 +2875,8 @@ async def _stream_agentic_turn(  # noqa: PLR0913 — request-scoped configuratio
         }
         if endpoint is not None:
             call_kwargs["endpoint"] = endpoint
+        if tier is not None:
+            call_kwargs["tier"] = tier
         return await asyncio.to_thread(_call_llm_agentic, **call_kwargs)
 
 
@@ -11206,6 +11220,8 @@ class ChatModel:
                     }
                     if turn_endpoint is not None:
                         agentic_call_kwargs["endpoint"] = turn_endpoint
+                    if tier_decision is not None:
+                        agentic_call_kwargs["tier"] = tier_decision.tier
                     agentic = _call_llm_agentic(**agentic_call_kwargs)
                 agentic_reply = agentic.get("text", "")
                 if agentic.get("tool_calls"):
@@ -11340,6 +11356,8 @@ class ChatModel:
                         }
                         if turn_endpoint is not None:
                             gen_call_kwargs["endpoint"] = turn_endpoint
+                        if tier_decision is not None:
+                            gen_call_kwargs["tier"] = tier_decision.tier
                         reply = _call_llm_with_deadline(**gen_call_kwargs)
                     # Optional structured-output parse (LLM_STRUCTURED_OUTPUT=true)
                     if reply and llm_module.LLM_STRUCTURED_OUTPUT and not use_agentic:
