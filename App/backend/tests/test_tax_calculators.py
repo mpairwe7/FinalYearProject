@@ -541,16 +541,40 @@ class PhaseFResidencyBikFxAndRuleToolTests(unittest.TestCase):
         thresh_days = int(self.table["residency_days_threshold"])
         thresh_avg = int(self.table["residency_avg_days_threshold"])
 
-        # 0 days -> non_resident
-        r0 = ToolRegistry.call("determine_residency", {"days_in_uganda": 0, "fiscal_year": FY26})
+        # 0 days with secondary tests negative -> non_resident
+        r0 = ToolRegistry.call(
+            "determine_residency",
+            {
+                "days_in_uganda": 0,
+                "permanent_home": False,
+                "avg_days_current_and_two_prior": 0,
+                "gov_employee_posted_abroad": False,
+                "fiscal_year": FY26,
+            },
+        )
         self.assertTrue(r0["ok"])
         self.assertEqual(r0["status"], "non_resident")
 
-        # threshold - 1 (182 days) -> non_resident
+        # threshold - 1 (182 days) with secondary tests negative -> non_resident
         r_below = ToolRegistry.call(
-            "determine_residency", {"days_in_uganda": thresh_days - 1, "fiscal_year": FY26}
+            "determine_residency",
+            {
+                "days_in_uganda": thresh_days - 1,
+                "permanent_home": False,
+                "avg_days_current_and_two_prior": 0,
+                "gov_employee_posted_abroad": False,
+                "fiscal_year": FY26,
+            },
         )
         self.assertEqual(r_below["status"], "non_resident")
+
+        # threshold - 1 (182 days) alone (secondary tests unknown) -> undetermined + likely_non_resident
+        r_partial = ToolRegistry.call(
+            "determine_residency", {"days_in_uganda": thresh_days - 1, "fiscal_year": FY26}
+        )
+        self.assertEqual(r_partial["status"], "undetermined")
+        self.assertTrue(r_partial["likely_non_resident"])
+        self.assertTrue(r_partial["missing_facts"])
 
         # exact threshold (183 days) -> resident
         r_exact = ToolRegistry.call(

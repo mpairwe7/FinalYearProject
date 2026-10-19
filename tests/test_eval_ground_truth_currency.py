@@ -148,6 +148,10 @@ _DOMAIN_TOPICS: dict[str, tuple[str, ...]] = {
     "startup": (),
     "unbs": (),
     "ursb": (),
+    "bik": ("paye", "journey_employer_paye"),
+    "fx": (),
+    "residency": ("paye", "journey_employer_paye"),
+    "year": (),
 }
 
 

@@ -1334,14 +1334,21 @@ class ResidencyDeterminationTool(CalculatorTool):
         }
 
         missing_facts: list[str] = []
+        likely_non_resident = False
         if any(t["result"] == "pass" for t in tests.values()):
             status = "resident"
-        elif days_val is not None and days_val < days_thresh:
+        elif all(t["result"] == "fail" for t in tests.values()):
             status = "non_resident"
+            likely_non_resident = True
+        elif days_val is not None and days_val < days_thresh:
+            status = "undetermined"
+            likely_non_resident = True
             if perm_home is None:
                 missing_facts.append("whether they have a permanent home in Uganda")
             if avg_val is None:
                 missing_facts.append(f"3-year average presence days ({avg_thresh}-day test)")
+            if gov_employee_posted_abroad is None:
+                missing_facts.append("whether they are a Government of Uganda employee posted abroad")
         else:
             status = "undetermined"
             missing_facts.append("days physically present in Uganda")
@@ -1351,6 +1358,7 @@ class ResidencyDeterminationTool(CalculatorTool):
             status == "resident"
             or (
                 status == "undetermined"
+                and not likely_non_resident
                 and estimated_contract_days is not None
                 and estimated_contract_days >= days_thresh
             )
@@ -1386,8 +1394,13 @@ class ResidencyDeterminationTool(CalculatorTool):
         elif status == "non_resident":
             explanation = (
                 f"Non-resident in Uganda: physical presence of {days_val} days is below the "
-                f"{days_thresh}-day statutory threshold (assuming no permanent home in Uganda, "
-                f"no {avg_thresh}-day 3-year average, and not a Government employee posted abroad)."
+                f"{days_thresh}-day statutory threshold and all secondary residency tests failed."
+            )
+        elif likely_non_resident:
+            explanation = (
+                f"Physical presence of {days_val} days is below the {days_thresh}-day statutory "
+                f"threshold (likely non-resident unless they have a permanent home in Uganda, "
+                f"meet the {avg_thresh}-day 3-year average test, or are a Uganda Government employee posted abroad)."
             )
         elif likely_resident:
             explanation = (
@@ -1406,6 +1419,7 @@ class ResidencyDeterminationTool(CalculatorTool):
             {
                 "status": status,
                 "likely_resident": likely_resident,
+                "likely_non_resident": likely_non_resident,
                 "days_in_uganda": days_val,
                 "contract_months": contract_val,
                 "residency_days_threshold": days_thresh,
@@ -1644,8 +1658,18 @@ class BenefitInKindValuationTool(CalculatorTool):
                     f"and (b) {housing_rate * 100:.0f}% of (employment income {_ugx(emp_inc_ann)} + (a) {_ugx(part_a)}) = {_ugx(part_b)}"
                 )
             else:
-                raw_annual = part_a
-                formula_notes = f"annual market rent less employee payment = {_ugx(part_a)}"
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "employment_income_annual",
+                        "error": (
+                            "employment_income_annual (or monthly_gross) is required: the housing "
+                            "benefit is the lesser of market rent less payment and "
+                            f"{housing_rate * 100:.0f}% of employment income."
+                        ),
+                    },
+                    rate_keys=tuple(keys),
+                )
             raw_monthly = raw_annual / Decimal(12)
 
         elif kind in ("low_interest_loan", "loan"):
@@ -2287,6 +2311,15 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
                         "minimum": 0,
                         "description": "Optional chargeable income in UGX if standard 30% corporate tax applies.",
                     },
+                    "is_citizen_startup": {
+                        "type": "boolean",
+                        "description": "Whether the business is a Ugandan citizen start-up meeting s.21(1)(za) conditions.",
+                    },
+                    "years_in_operation": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Years since the start-up commenced operations.",
+                    },
                 },
                 [],
             ),
@@ -2301,6 +2334,8 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
         annual_turnover_ugx: Any = None,
         investment_capital_ugx: Any = None,
         chargeable_income_ugx: Any = None,
+        is_citizen_startup: bool | None = None,
+        years_in_operation: int | None = None,
         **_: Any,
     ) -> CalcResult:
         lower = _require_scalar(table, "presumptive_tax_lower_threshold")
@@ -2316,12 +2351,29 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
         qualifies_presumptive = (
             (lower <= turnover <= upper) if turnover is not None else None
         )
-        qualifies_startup = (capital <= cap) if capital is not None else None
-        corp_tax = (
-            Decimal(0)
-            if qualifies_startup is True
-            else ((chargeable * corp_rate) if chargeable is not None else Decimal(0))
-        )
+        capital_within_cap = (capital <= cap) if capital is not None else None
+        if (
+            capital_within_cap is False
+            or is_citizen_startup is False
+            or (years_in_operation is not None and int(years_in_operation) >= years)
+        ):
+            qualifies_startup: bool | None = False
+        elif (
+            capital_within_cap is True
+            and is_citizen_startup is True
+            and years_in_operation is not None
+            and int(years_in_operation) < years
+        ):
+            qualifies_startup = True
+        else:
+            qualifies_startup = None
+
+        if qualifies_presumptive is True or chargeable is None:
+            corp_tax: Decimal | None = None
+        elif qualifies_startup is True:
+            corp_tax = Decimal(0)
+        else:
+            corp_tax = chargeable * corp_rate
 
         return CalcResult(
             {
@@ -2330,9 +2382,10 @@ class PresumptiveOrStartupTaxTool(CalculatorTool):
                 "qualifies_for_presumptive": qualifies_presumptive,
                 "startup_capital_cap": to_float(cap),
                 "startup_exemption_years": years,
+                "capital_within_startup_cap": capital_within_cap,
                 "qualifies_for_startup_exemption": qualifies_startup,
                 "corporation_tax_rate": float(corp_rate),
-                "tax": to_float(corp_tax),
+                "tax": to_float(corp_tax) if corp_tax is not None else None,
                 "explanation": (
                     f"Presumptive tax applies to annual turnover between {_ugx(lower)} and {_ugx(upper)}. "
                     f"The {years}-year citizen startup exemption applies to investment capital up to {_ugx(cap)}."
@@ -2372,7 +2425,6 @@ class StampDutyCalculator(CalculatorTool):
                     "value_ugx": {
                         "type": "number",
                         "minimum": 0,
-                        "default": 0,
                         "description": "Market value of the property/land in UGX (required for property_transfer).",
                     },
                 },
@@ -2387,7 +2439,7 @@ class StampDutyCalculator(CalculatorTool):
         self,
         table: RateTable,
         instrument_type: str,
-        value_ugx: Any = 0,
+        value_ugx: Any = None,
         **_: Any,
     ) -> CalcResult:
         if instrument_type not in self._INSTRUMENTS:
@@ -2395,7 +2447,15 @@ class StampDutyCalculator(CalculatorTool):
                 {"ok": False, "error": f"instrument_type must be one of {self._INSTRUMENTS}"}
             )
         if instrument_type == "property_transfer":
-            val = to_decimal(value_ugx or 0, field="value_ugx")
+            if value_ugx is None:
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "value_ugx",
+                        "error": "value_ugx (market value) is required for property_transfer.",
+                    }
+                )
+            val = to_decimal(value_ugx, field="value_ugx")
             rate = _require_scalar(table, "stamp_duty_property_transfer")
             duty = val * rate
             return CalcResult(
@@ -2596,8 +2656,16 @@ class AdvanceVehicleTaxCalculator(CalculatorTool):
                 {"ok": False, "error": f"vehicle_type must be 'passenger' or 'goods' (got {vehicle_type!r})"}
             )
         if vehicle_type == "passenger":
+            if seats is None:
+                return CalcResult(
+                    {
+                        "ok": False,
+                        "needs": "seats",
+                        "error": "seats is required for passenger vehicles.",
+                    }
+                )
             rate = _require_scalar(table, "motor_vehicle_advance_tax_passenger_per_seat")
-            units = to_decimal(seats or 0, field="seats")
+            units = to_decimal(seats, field="seats")
             tax = units * rate
             return CalcResult(
                 {
@@ -2613,8 +2681,16 @@ class AdvanceVehicleTaxCalculator(CalculatorTool):
                 },
                 rate_keys=("motor_vehicle_advance_tax_passenger_per_seat",),
             )
+        if tonnes is None:
+            return CalcResult(
+                {
+                    "ok": False,
+                    "needs": "tonnes",
+                    "error": "tonnes is required for goods vehicles.",
+                }
+            )
         rate = _require_scalar(table, "motor_vehicle_advance_tax_goods_per_tonne")
-        units = to_decimal(tonnes or 0, field="tonnes")
+        units = to_decimal(tonnes, field="tonnes")
         tax = units * rate
         return CalcResult(
             {
