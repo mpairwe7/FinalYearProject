@@ -426,8 +426,6 @@ def _rule_vat(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
     )
     if turnover_val is not None:
         if re.search(r"\b(register\w*|registration|threshold|compulsory|forced)\b", question, re.IGNORECASE):
-            if re.search(r"\b(forced|must|required|compulsory|right)\b", question, re.IGNORECASE):
-                facts.vat_registered = True
             specs.append(
                 ToolCallSpec(
                     "check_vat_registration",
@@ -800,8 +798,8 @@ def build_verified_facts(
     specs = plan_tools(text, eff_facts)
 
     if not specs:
-        # Out-of-coverage disclosure when the question has numeric figures or an uncovered tax head
-        if has_money_amount(text) or eff_facts.amounts:
+        # Out-of-coverage disclosure when the current question has numeric figures on an uncovered topic
+        if has_money_amount(text):
             topic_label = ", ".join(eff_facts.tax_heads) if eff_facts.tax_heads else "this scenario"
             return (
                 "\n\n## Verified Statutory Facts & Calculations (tool ground truth — use these figures verbatim)\n"
@@ -864,13 +862,29 @@ def build_verified_facts(
                     if b.get("ok")
                 ]
             if "monthly_gross" not in paye_params or paye_params["monthly_gross"] is None:
-                bullet_lines.append(
-                    "- PAYE Bands Comparison (FY2026-27): Resident monthly bands have a 0% tax-free threshold "
-                    "up to UGX 335,000 (then 20% to 410,000; 25% to 485,000; 30% to 10,000,000; 40% above). "
-                    "Non-resident monthly bands have NO tax-free threshold and charge 10% on the first UGX 335,000 "
-                    "(then 20% to 410,000; 30% to 10,000,000; 40% above) — above UGX 485,000/month a non-resident "
-                    "pays exactly UGX 37,250/month more than a resident."
-                )
+                try:
+                    from decimal import Decimal
+                    from .tax.money import apply_bands
+                    from .tax.tables import get_table
+
+                    tbl = get_table()
+                    res_b = tbl["paye_bands_resident"]
+                    nonres_b = tbl["paye_bands_non_resident"]
+                    nil_ceil = res_b[0][1] or 0
+                    nonres_first_pct = nonres_b[0][2] * 100
+                    comp_threshold = Decimal(str(res_b[-2][0]))
+                    res_tax_at_comp, _ = apply_bands(comp_threshold, res_b)
+                    nonres_tax_at_comp, _ = apply_bands(comp_threshold, nonres_b)
+                    diff_monthly = nonres_tax_at_comp - res_tax_at_comp
+                    bullet_lines.append(
+                        f"- PAYE Bands Comparison ({tbl.fiscal_year}): Resident monthly bands have a 0% "
+                        f"tax-free threshold up to UGX {nil_ceil:,.0f}, whereas non-resident monthly bands "
+                        f"have NO tax-free threshold and charge {nonres_first_pct:.0f}% on the first "
+                        f"UGX {nil_ceil:,.0f} — above UGX {float(comp_threshold):,.0f}/month a non-resident "
+                        f"pays exactly UGX {float(diff_monthly):,.0f}/month more than a resident."
+                    )
+                except Exception:
+                    pass
                 continue
             spec = ToolCallSpec(spec.tool, params=paye_params, missing_inputs=spec.missing_inputs)
 
@@ -944,9 +958,10 @@ def build_verified_facts(
             bullet_lines.append(f"- Rental Tax: {res.get('explanation', '')}\n{breakdown}")
             if res.get("landlord_type") == "individual":
                 bullet_lines.append(
-                    "- Rental Pooling & Expenses Rule: All individual rental income from residential and commercial "
-                    "properties is pooled into one total annual gross rent; the UGX 2,820,000 threshold applies once, "
-                    "and individual landlords CANNOT deduct repair, maintenance, or interest expenses."
+                    "- Rental Pooling & Expenses Rule: Under Section 5(3) of the Income Tax Act, all individual "
+                    "rental income from residential and commercial properties is pooled into one total annual "
+                    "gross rent; the UGX 2,820,000 threshold applies once, and individual landlords are entitled to "
+                    "ZERO expense deductions (they CANNOT deduct repair, maintenance, or interest expenses)."
                 )
 
         else:

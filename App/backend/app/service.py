@@ -282,9 +282,11 @@ def _scoped_conversation_state(method: Callable[..., Any]) -> Callable[..., Any]
         )
         token = _ACTIVE_CONVERSATION_STATE.set(state_id)
         tenant_token = _ACTIVE_TENANT_ID.set(values.get("tenant_id") or "default")
+        facts_ctx_reset = _ACTIVE_CASE_FACTS.set(None)
         try:
             return method(*bound.args, **bound.kwargs)
         finally:
+            _ACTIVE_CASE_FACTS.reset(facts_ctx_reset)
             _ACTIVE_TENANT_ID.reset(tenant_token)
             _ACTIVE_CONVERSATION_STATE.reset(token)
 
@@ -4848,6 +4850,14 @@ class ChatModel:
                     if sk and sv not in ("", None) and sk not in prefill_slots:
                         prefill_slots[str(sk)] = sv
             active_facts = _ACTIVE_CASE_FACTS.get()
+            if active_facts is None:
+                from .case_facts import recall_case_facts
+
+                active_facts = recall_case_facts(
+                    _state_conversation_id(""),
+                    user_id=user_id or "",
+                    tenant_id=tenant_id or "default",
+                )
             if active_facts is not None:
                 sal = getattr(active_facts, "monthly_salary", None)
                 if sal is not None and sal.currency == "UGX" and "monthly_gross" not in prefill_slots:
@@ -11130,7 +11140,7 @@ class ChatModel:
                         if not plan_tools(agentic_query, _ACTIVE_CASE_FACTS.get()):
                             eff_tool_whitelist = [
                                 t.schema.name
-                                for t in ToolRegistry.all_tools()
+                                for t in ToolRegistry.all()
                                 if getattr(t.schema, "namespace", "") in ("tax_calculator", "rates")
                             ]
                     agentic_call_kwargs: dict[str, Any] = {

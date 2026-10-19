@@ -635,40 +635,53 @@ def has_money_amount(message: str) -> bool:
 
 
 # Phase F.2: Phrases asking how a rule/valuation/tax works rather than asking to compute a number.
+# Input is whitespace-collapsed to single spaces and matched with contiguous token patterns (zero ReDoS).
 _EXPLANATION_RE = re.compile(
-    r"\bhow\s+(?:exactly\s+|actually\s+)?(?:does|do|is|are|would|can|should)\s+"
-    r"(?:ura|uganda\s+revenue\s+authority(?:\s*\(ura\))?|the\s+law|the\s+act|it|they|an\s+employer|we)\s+"
-    r"(?:actually\s+|exactly\s+)?(?:determine|value|valuate|treat|work\s+out|assess|compute|calculate|apply|tax|handle)\b"
-    r"|\bwhat\s+(?:is|are)\s+the\s+(?:formula|basis|rules?|methods?|steps?|procedures?|conditions?|requirements?|criteria|treatments?)\b"
-    r"|\bhow\s+(?:exactly\s+|actually\s+)?(?:is|are)\b[^?.!]{0,120}\b(?:valued|valuated|determined|treated|taxed|assessed|accounted|apportioned|depreciated|calculated|computed)\b"
-    r"|\b(?:explain|why\s+(?:is|are|does|do)|what\s+counts\s+as|is\s+[^?.!]{1,60}\s+taxable|are\s+[^?.!]{1,60}\s+taxable)\b"
-    r"|\b(?:how\s+does\s+(?:ura|uganda\s+revenue\s+authority(?:\s*\(ura\))?)\s+(?:actually\s+|exactly\s+)?(?:value|determine|treat|assess|calculate|compute))\b"
-    r"|\b(?:nnyonnyola|annyonnyola|engeri\s+ura\s+gy['’]?ebalirira|kwa\s+nini|eleza|jinsi\s+ura\s+inavyokokotoa|jinsi\s+inavyokokotolewa)\b",
+    r"\bhow (?:exactly |actually )?(?:does|do|is|are|would|can|should) "
+    r"(?:ura|uganda revenue authority(?: \(ura\))?|the law|the act|it|they|an employer|we) "
+    r"(?:actually |exactly )?(?:determine|value|valuate|treat|work out|assess|compute|calculate|apply|tax|handle)\b"
+    r"|\bwhat (?:is|are) the (?:formula|basis|rules?|methods?|steps?|procedures?|conditions?|requirements?|criteria|treatments?)\b"
+    r"|\b(?:explain|why (?:is|are|does|do)|what counts as)\b"
+    r"|\b(?:nnyonnyola|annyonnyola|engeri ura gy['’]?ebalirira|kwa nini|eleza|jinsi ura inavyokokotoa|jinsi inavyokokotolewa)\b",
     re.IGNORECASE,
 )
+_HOW_IS_COPULA_RE = re.compile(r"\bhow (?:exactly |actually )?(?:is|are)\b", re.IGNORECASE)
+_EXPLANATION_PARTICIPLE_RE = re.compile(
+    r"\b(?:valued|valuated|determined|treated|taxed|assessed|accounted|apportioned|depreciated|calculated|computed)\b",
+    re.IGNORECASE,
+)
+_IS_ARE_INTERROGATIVE_RE = re.compile(r"\b(?:is|are) (?:a|an|the|my|our)\b", re.IGNORECASE)
 
 # Multi-issue / premise / rule-evaluation asks that must reach RAG + scenario_planner
 # rather than being short-circuited by a single-slot calculator reply or wizard.
 _SCENARIO_PLANNER_BYPASS_RE = re.compile(
-    r"\b(?:benefits?\s+in\s+kind|bik\b|company\s+(?:car|vehicle|suv)|motor\s+vehicle\s+benefit|"
-    r"furnished\s+(?:house|apartment)|rent[-\s]?free\s+house|employer[-\s]paid\s+housing|"
-    r"free\s+(?:company\s+)?(?:accommodation|housing)|low[-\s]?interest\s+loan|debt\s+waiver)\b"
-    r"|\b(?:compared\s+with|differ\s+from|why\s+is\s+there\s+a\s+difference)\b"
-    r"|\b(?:late\s+filing|filed\s+[^?.!]{0,30}\s+late|penal\s+tax|late\s+payment\s+interest|unstamped)\b"
-    r"|\b(?:manual\s+(?:handwritten\s+)?(?:paper\s+)?invoice|paper\s+(?:invoice|receipt)|without\s+(?:an?\s+)?efris)\b"
-    r"|\b(?:can\s+(?:i|we)\s+(?:deduct|claim|also\s+import)|should\s+we\s+deduct\s+[^?.!]{0,40}\s+from\s+both|"
-    r"apply\s+to\s+both|is\s+(?:he|she|that)\s+right|do\s+we\s+only\s+pay|do\s+i\s+get\s+the\s+[^?.!]{0,40}\s+exemption)\b"
-    r"|\b(?:stamp\s+duty|digital\s+services\s+tax|\bdst\b|advance\s+income\s+tax|\d+[-\s]?seater|sports\s+betting|total\s+stakes|presumptive\s+tax)\b",
+    r"\b(?:benefits? in kind|bik\b|company (?:car|vehicle|suv)|motor vehicle benefit|"
+    r"furnished (?:house|apartment)|rent[-\s]?free house|employer[-\s]paid housing|"
+    r"free (?:company )?(?:accommodation|housing)|low[-\s]?interest loan|debt waiver)\b"
+    r"|\b(?:compared with|differ from|why is there a difference)\b"
+    r"|\b(?:late filing|penal tax|late payment interest|unstamped)\b"
+    r"|\b(?:manual invoice|manual handwritten paper invoice|paper invoice|paper receipt|without an? efris)\b"
+    r"|\b(?:can (?:i|we) (?:deduct|claim|also import)|from both|apply to both|"
+    r"is (?:he|she|that) right|do we only pay|citizen start[-\s]?up)\b"
+    r"|\b(?:stamp duty|digital services tax|\bdst\b|advance income tax|\d{1,3}[-\s]?seater|sports betting|total stakes|presumptive tax)\b",
     re.IGNORECASE,
 )
 
 
+def _collapse_ws(text: str) -> str:
+    return " ".join((text or "").split())[:1500]
+
+
 def is_explanation_question(message: str) -> bool:
     """Return True when *message* asks how a rule works and carries no money amount of its own."""
-    text = (message or "").strip()
-    if not text:
+    norm = _collapse_ws(message)
+    if not norm or has_money_amount(norm):
         return False
-    return bool(_EXPLANATION_RE.search(text)) and not has_money_amount(text)
+    if _EXPLANATION_RE.search(norm):
+        return True
+    if _HOW_IS_COPULA_RE.search(norm) and _EXPLANATION_PARTICIPLE_RE.search(norm):
+        return True
+    return bool(_IS_ARE_INTERROGATIVE_RE.search(norm) and "taxable" in norm.lower())
 
 
 def prefill_plan_from_case_facts(plan: CalcPlan, facts: Any) -> CalcPlan:
@@ -779,7 +792,7 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         return None
     if is_explanation_question(text):
         return None
-    if _SCENARIO_PLANNER_BYPASS_RE.search(text):
+    if _SCENARIO_PLANNER_BYPASS_RE.search(_collapse_ws(text)):
         return None
     if (
         re.search(r"\b(?:example|in\s+theory|theoretically|explain\b|how\s+is\b.*\b(?:determined|defined|accounted))\b", text, re.IGNORECASE)

@@ -413,27 +413,40 @@ def _contradiction_residency(facts: Any, tool_results: dict[str, Any]) -> list[C
 
     out: list[Contradiction] = []
     if claim == "non_resident" and status == "resident":
+        presence_detail = (
+            f"physical presence of {days} days meets or exceeds the {thresh}-day threshold "
+            "in any 12-month period commencing or ending during the year of income"
+            if days is not None
+            else (
+                "they meet the statutory residency criteria (permanent home in Uganda, "
+                "122-day 3-year average presence, or Uganda Government posting abroad)"
+            )
+        )
         out.append(
             Contradiction(
                 code="residency_claim_non_resident_but_resident",
                 user_premise="the individual is a non-resident for tax purposes",
-                statutory_truth=(
-                    f"they are a Ugandan tax RESIDENT because physical presence of {days} days "
-                    f"meets or exceeds the {thresh}-day threshold in any 12-month period commencing "
-                    "or ending during the year of income (or meets permanent-home / 122-day average / "
-                    "Government posting criteria)."
-                ),
+                statutory_truth=f"they are a Ugandan tax RESIDENT because {presence_detail}.",
                 basis=basis,
             )
         )
     elif claim == "non_resident" and status == "undetermined" and res.get("likely_resident"):
+        user_prem = (
+            f"the individual is a non-resident on an {contract_months}-month contract"
+            if contract_months is not None
+            else "the individual is a non-resident for tax purposes"
+        )
+        contract_detail = (
+            f"an {contract_months}-month contract (~{contract_months * 30} days) means they are LIKELY RESIDENT"
+            if contract_months is not None
+            else "they are LIKELY RESIDENT"
+        )
         out.append(
             Contradiction(
                 code="residency_claim_non_resident_but_likely_resident",
-                user_premise=f"the individual is a non-resident on an {contract_months}-month contract",
+                user_premise=user_prem,
                 statutory_truth=(
-                    f"an {contract_months}-month contract (~{(contract_months or 0) * 30} days) means "
-                    f"they are LIKELY RESIDENT if physically present in Uganda for {thresh} days or "
+                    f"{contract_detail} if physically present in Uganda for {thresh} days or "
                     "more in any 12-month period commencing or ending in the year of income; confirm "
                     "the exact number of days they will be physically present in Uganda."
                 ),
@@ -441,15 +454,21 @@ def _contradiction_residency(facts: Any, tool_results: dict[str, Any]) -> list[C
             )
         )
     elif claim == "resident" and (status == "non_resident" or res.get("likely_non_resident")):
+        nonres_detail = (
+            f"physical presence of {days} days is below the {thresh}-day threshold, so they "
+            "are a NON-RESIDENT unless they have a permanent home in Uganda, meet the 122-day "
+            "3-year average test, or are a Uganda Government employee posted abroad."
+            if days is not None
+            else (
+                "none of the statutory residency criteria (183-day presence, 122-day 3-year average, "
+                "permanent home in Uganda, or Uganda Government posting abroad) are met, so they are a NON-RESIDENT."
+            )
+        )
         out.append(
             Contradiction(
                 code="residency_claim_resident_but_non_resident",
                 user_premise="the individual is a Ugandan tax resident",
-                statutory_truth=(
-                    f"physical presence of {days} days is below the {thresh}-day threshold, so they "
-                    "are a NON-RESIDENT unless they have a permanent home in Uganda, meet the 122-day "
-                    "3-year average test, or are a Uganda Government employee posted abroad."
-                ),
+                statutory_truth=nonres_detail,
                 basis=basis,
             )
         )
@@ -480,7 +499,10 @@ def _contradiction_vat_threshold(facts: Any, tool_results: dict[str, Any]) -> li
                 basis=basis,
             )
         )
-    elif getattr(facts, "vat_registered", None) is True and req is False:
+    elif (
+        getattr(facts, "claims_vat_compulsory", None) is True
+        or getattr(facts, "vat_registered", None) is True
+    ) and req is False:
         out.append(
             Contradiction(
                 code="vat_claimed_compulsory_but_below_threshold",
