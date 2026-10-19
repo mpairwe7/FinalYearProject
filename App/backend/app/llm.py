@@ -1356,6 +1356,19 @@ SHORTENED_CONTINUATION_NOTE: Final[str] = (
 _LAST_GEN_META: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
     "_LAST_GEN_META", default={}
 )
+_ACTIVE_GEN_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "_ACTIVE_GEN_DEADLINE", default=None
+)
+
+
+def set_active_generation_deadline(deadline: float | None) -> None:
+    """Set the monotonic deadline for the active generation and its continuation rounds."""
+    _ACTIVE_GEN_DEADLINE.set(deadline)
+
+
+def get_active_generation_deadline() -> float | None:
+    """Return the active monotonic generation deadline, if any."""
+    return _ACTIVE_GEN_DEADLINE.get()
 
 
 def clear_last_generation_meta() -> None:
@@ -1432,9 +1445,14 @@ def _stitch_continuation(prefix: str, continuation: str) -> str:
         return continuation
     if not continuation:
         return prefix
-    if prefix[-1].isalnum() and continuation[0].isalnum():
-        return f"{prefix} {continuation}"
-    return f"{prefix}{continuation}"
+    if prefix[-1].isspace() or continuation[0].isspace():
+        return f"{prefix}{continuation}"
+    # A new list item, heading, or table row starts on its own line.
+    if re.match(r"(?:\d{1,2}[.)]\s|[-*•]\s|#{1,6}\s|\|)", continuation):
+        return f"{prefix}\n{continuation}" if continuation.startswith("|") else f"{prefix}\n\n{continuation}"
+    if continuation[0] in ".,;:!?)]}%":
+        return f"{prefix}{continuation}"
+    return f"{prefix} {continuation}"
 
 
 def _merge_usage(u1: dict[str, Any] | None, u2: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1588,6 +1606,8 @@ def complete_with_continuation(
     trims to the last complete sentence/list item/table row and appends
     :data:`SHORTENED_CONTINUATION_NOTE`.
     """
+    if deadline is None:
+        deadline = get_active_generation_deadline()
     _, eff_model, _, _, _ = _resolve_vllm_endpoint_params(
         endpoint, max_tokens=max_tokens, timeout=timeout
     )
@@ -1996,15 +2016,12 @@ def _vllm_stream_single_round(
             logger.debug("httpx stream failed, falling back to urllib", exc_info=True)
 
     req = _vllm_build_request(url, body, accept_stream=True)
-    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-    with (
-        llm_call("chat", eff_model, "vllm", streaming=True) as call,
+    with llm_call("chat", eff_model, "vllm", streaming=True) as call:
         # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        urllib.request.urlopen(req, timeout=effective_timeout) as resp,  # nosec B310 # noqa: S310
-    ):
-        yield from _stream_tokens(resp, call, _json)
-        if round_meta is not None:
-            round_meta["finish_reason"] = getattr(call, "finish_reason", None)
+        with urllib.request.urlopen(req, timeout=effective_timeout) as resp:  # nosec B310 # noqa: S310
+            yield from _stream_tokens(resp, call, _json)
+            if round_meta is not None:
+                round_meta["finish_reason"] = getattr(call, "finish_reason", None)
 
 
 def _vllm_generate_stream(
@@ -2109,6 +2126,7 @@ def generate(
     tone_hint: str = "",
     context_summary: str = "",
     endpoint: Any = None,
+    deadline: float | None = None,
 ) -> str:
     """Generate a grounded answer from retrieved passages.
 
@@ -2134,7 +2152,7 @@ def generate(
                 if endpoint is None
                 else _vllm_generate(messages, endpoint=endpoint)
             )
-        return complete_with_continuation(messages, endpoint=endpoint).text
+        return complete_with_continuation(messages, endpoint=endpoint, deadline=deadline).text
 
     if not _load_model() or _tokenizer is None or _model is None:
         return ""

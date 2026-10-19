@@ -1256,11 +1256,17 @@ def _local_llm_then_cloud(
 
     def _invoke_generate() -> tuple[str, dict[str, Any]]:
         llm_module.clear_last_generation_meta()
-        # Input reaches _local_llm_then_cloud only after ChatModel.generate /
-        # generate_retrieval_only has checked InputGuard.check(message).
-        # nosemgrep: ura-llm01-raw-user-input-to-llm
-        out = llm_module.generate(**gen_kwargs)
-        return out, llm_module.get_last_generation_meta()
+        llm_module.set_active_generation_deadline(
+            time.monotonic() + max(1.0, effective_deadline - 2.0)
+        )
+        try:
+            # Input reaches _local_llm_then_cloud only after ChatModel.generate /
+            # generate_retrieval_only has checked InputGuard.check(message).
+            # nosemgrep: ura-llm01-raw-user-input-to-llm
+            out = llm_module.generate(**gen_kwargs)
+            return out, llm_module.get_last_generation_meta()
+        finally:
+            llm_module.set_active_generation_deadline(None)
 
     # copy_context: the pool thread then sees this turn's trace span and its
     # token-usage tally (tracing.turn_usage_scope); a bare submit loses both.

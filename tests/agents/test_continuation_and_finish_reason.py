@@ -134,8 +134,12 @@ def test_complete_with_continuation_always_length_trims_at_sentence_boundary_and
     assert gen.finish_reason == "length"
     assert gen.continuation_rounds == 2
     assert "contract val" not in gen.text
-    assert "VAT is charged at 18% on standard-rated supplies [2]." in gen.text
-    assert gen.text.endswith(llm.SHORTENED_CONTINUATION_NOTE)
+    assert (
+        gen.text
+        == "1. First statutory rule: PAYE is withheld monthly by the employer [1].\n\n"
+        "2. Second statutory rule: VAT is charged at 18% on standard-rated supplies [2].\n\n"
+        f"{llm.SHORTENED_CONTINUATION_NOTE}"
+    )
 
 
 def test_streaming_length_then_stop_yields_one_continuous_sse_answer() -> None:
