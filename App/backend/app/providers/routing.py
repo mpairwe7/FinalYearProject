@@ -89,21 +89,31 @@ class ModelTier(str, Enum):
     #: and it serves the largest share of traffic.
     T0 = "none"
 
-    #: Dense 8B. Single-hop retrieval, query rewriting, the supervisor's
-    #: own tiebreak, and **every** Ugandan-language turn (see
-    #: :data:`ADAPTER_BOUND_LOCALES`).
+    #: Dense 9B local model (``Sunbird/Sunflower-Qwen3.5-9B``). Single-hop
+    #: retrieval, query rewriting, the supervisor's own tiebreak, and
+    #: Ugandan-language localization (see :data:`ADAPTER_BOUND_LOCALES`).
     T1 = "small"
 
-    #: MoE, ~3B active of 30B. The agentic default: tool-calling loops,
-    #: workflows, the customs specialist. Roughly 8B-class decode cost
-    #: with materially better tool-call fidelity, which matters most
-    #: because the main loop *is* tool calling.
+    #: Local reasoning model (``Qwen/Qwen3.8-27B-FP8``) with ``thinking=False``.
+    #: Serves tool-calling loops, distressed turns, and T3 turns capped by
+    #: the rolling T3 share budget.
     T2 = "agentic"
 
-    #: MoE, ~22B active of 235B. Multi-hop statutory synthesis,
-    #: objections and disputes, and the evaluator role. Budget-gated;
-    #: this is the tier that must stay a small share of turns.
+    #: Local reasoning model (``Qwen/Qwen3.8-27B-FP8``). Multi-hop statutory
+    #: synthesis, objections and disputes, cross-border / multi-head analysis,
+    #: and the evaluator role. Budget-gated via ``REASONER_MAX_SHARE``.
     T3 = "deep"
+
+
+@dataclass(frozen=True)
+class ModelEndpoint:
+    """Resolved local vLLM endpoint configuration for a model tier."""
+
+    base_url: str
+    model: str
+    thinking: bool = False
+    max_tokens: int = 768
+    timeout_s: float = 120.0
 
 
 #: Tier → model id, environment-overridable.
@@ -114,23 +124,120 @@ class ModelTier(str, Enum):
 #: never from request data, which an allowlist check inside a validator does
 #: not prove to dataflow analysis.
 MODEL_SLOTS: dict[ModelTier, str] = {
-    ModelTier.T1: os.getenv("MODEL_T1", "Qwen/Qwen3-8B"),
-    ModelTier.T2: os.getenv("MODEL_T2", "Qwen/Qwen3-30B-A3B-Instruct-2507"),
-    ModelTier.T3: os.getenv("MODEL_T3", "Qwen/Qwen3-235B-A22B-Instruct-2507"),
+    ModelTier.T1: os.getenv("MODEL_T1", os.getenv("LLM_MODEL", "Sunbird/Sunflower-Qwen3.5-9B")),
+    ModelTier.T2: os.getenv("MODEL_T2", os.getenv("REASONER_MODEL", "Qwen/Qwen3.8-27B-FP8")),
+    ModelTier.T3: os.getenv("MODEL_T3", os.getenv("REASONER_MODEL", "Qwen/Qwen3.8-27B-FP8")),
 }
 
-#: Locales pinned to T1 regardless of how hard the question is.
-#:
-#: The ``lg``/``sw``/``nyn``/``ach`` LoRA adapters are trained against the
-#: Qwen3-8B base and loaded with ``set_adapter()``. A MoE has a different
-#: architecture, so promoting one of these turns would silently drop the
-#: adapter and answer a Luganda question with a model that has never been
-#: tuned for it — worse than the "cheaper" tier it was promoted from.
-#: Retraining the adapters is a separate, budgeted decision.
-#:
-#: Mirrors ``service.LOCAL_PRIMARY_LOCALES``; kept as its own name because
-#: the reason differs — that one is about cloud availability, this one is
-#: about which base weights the adapters fit.
+
+def build_endpoints() -> dict[ModelTier, ModelEndpoint]:
+    """Build the tier → :class:`ModelEndpoint` map exclusively from environment variables.
+
+    Keeps the dataflow guarantee of :data:`MODEL_SLOTS`: outbound URLs and model
+    identifiers originate only from this environment-constructed mapping, never
+    from request input. When ``REASONER_BASE_URL`` is unset, ``T2`` and ``T3``
+    fall back to the ``T1`` endpoint.
+    """
+    t1_base_url = (os.getenv("VLLM_BASE_URL") or "http://localhost:8001/v1").strip()
+    t1_model = (
+        os.getenv("MODEL_T1") or os.getenv("LLM_MODEL") or "Sunbird/Sunflower-Qwen3.5-9B"
+    ).strip()
+    try:
+        t1_max_out = int(os.getenv("LLM_MAX_TOKENS") or "768")
+    except ValueError:
+        t1_max_out = 768
+    try:
+        t1_timeout = float(os.getenv("VLLM_HTTP_TIMEOUT") or "60.0")
+    except ValueError:
+        t1_timeout = 60.0
+
+    t1_endpoint = ModelEndpoint(
+        base_url=t1_base_url,
+        model=t1_model,
+        thinking=False,
+        max_tokens=t1_max_out,
+        timeout_s=t1_timeout,
+    )
+
+    reasoner_base_url = (os.getenv("REASONER_BASE_URL") or "").strip()
+    if not reasoner_base_url:
+        return {
+            ModelTier.T1: t1_endpoint,
+            ModelTier.T2: t1_endpoint,
+            ModelTier.T3: t1_endpoint,
+        }
+
+    reasoner_model = (
+        os.getenv("REASONER_MODEL")
+        or os.getenv("MODEL_T3")
+        or "Qwen/Qwen3.8-27B-FP8"
+    ).strip()
+    reasoner_thinking = (os.getenv("REASONER_THINKING") or "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    default_reasoner_budget = 4096 if reasoner_thinking else 1536
+    try:
+        reasoner_max_out = int(os.getenv("REASONER_MAX_TOKENS") or str(default_reasoner_budget))
+    except ValueError:
+        reasoner_max_out = default_reasoner_budget
+    try:
+        reasoner_timeout = float(os.getenv("REASONER_DEADLINE_S") or "60.0")
+    except ValueError:
+        reasoner_timeout = 60.0
+
+    t3_endpoint = ModelEndpoint(
+        base_url=reasoner_base_url,
+        model=reasoner_model,
+        thinking=reasoner_thinking,
+        max_tokens=reasoner_max_out,
+        timeout_s=reasoner_timeout,
+    )
+    t2_endpoint = ModelEndpoint(
+        base_url=reasoner_base_url,
+        model=reasoner_model,
+        thinking=False,
+        max_tokens=min(reasoner_max_out, 1536),
+        timeout_s=reasoner_timeout,
+    )
+    return {
+        ModelTier.T1: t1_endpoint,
+        ModelTier.T2: t2_endpoint,
+        ModelTier.T3: t3_endpoint,
+    }
+
+
+ENDPOINTS: dict[ModelTier, ModelEndpoint] = build_endpoints()
+
+
+def sync_endpoints() -> dict[ModelTier, ModelEndpoint]:
+    """Refresh :data:`ENDPOINTS` and :data:`MODEL_SLOTS` in-place from current env vars."""
+    fresh = build_endpoints()
+    ENDPOINTS.clear()
+    ENDPOINTS.update(fresh)
+    MODEL_SLOTS[ModelTier.T1] = os.getenv(
+        "MODEL_T1", os.getenv("LLM_MODEL", "Sunbird/Sunflower-Qwen3.5-9B")
+    )
+    MODEL_SLOTS[ModelTier.T2] = os.getenv(
+        "MODEL_T2", os.getenv("REASONER_MODEL", "Qwen/Qwen3.8-27B-FP8")
+    )
+    MODEL_SLOTS[ModelTier.T3] = os.getenv(
+        "MODEL_T3", os.getenv("REASONER_MODEL", "Qwen/Qwen3.8-27B-FP8")
+    )
+    return ENDPOINTS
+
+
+def get_endpoint(tier: ModelTier) -> ModelEndpoint | None:
+    """Return the resolved :class:`ModelEndpoint` for *tier* (``None`` for ``T0``)."""
+    if tier is ModelTier.T0:
+        return None
+    sync_endpoints()
+    return ENDPOINTS.get(tier, ENDPOINTS[ModelTier.T1])
+
+
+#: Locales pinned to T1 unless ``reasoner_for_translated_locales`` is enabled.
 ADAPTER_BOUND_LOCALES: frozenset[str] = frozenset(
     s.strip().lower()
     for s in os.getenv("ADAPTER_BOUND_LOCALES", "lg,sw,nyn,ach").split(",")
@@ -160,6 +267,64 @@ _TIER_ORDER: dict[ModelTier, int] = {
     ModelTier.T3: 3,
 }
 
+#: Rolling 200-turn window used to enforce REASONER_MAX_SHARE (default 0.25).
+import collections
+import threading
+
+_TIER_WINDOW_MAXLEN = 200
+_RECENT_TIER_WINDOW: collections.deque[ModelTier] = collections.deque(maxlen=_TIER_WINDOW_MAXLEN)
+_TIER_WINDOW_LOCK = threading.Lock()
+
+
+def reset_tier_window() -> None:
+    """Clear the rolling T3 share window (for unit tests)."""
+    with _TIER_WINDOW_LOCK:
+        _RECENT_TIER_WINDOW.clear()
+
+
+def record_tier_turn(tier: ModelTier) -> float:
+    """Record a completed non-T0 turn into the rolling 200-turn window and return T3 share."""
+    if tier is ModelTier.T0:
+        return current_t3_share()
+    with _TIER_WINDOW_LOCK:
+        _RECENT_TIER_WINDOW.append(tier)
+        total = len(_RECENT_TIER_WINDOW)
+        t3_count = sum(1 for t in _RECENT_TIER_WINDOW if t is ModelTier.T3)
+        share = (t3_count / total) if total else 0.0
+    try:
+        metrics.set_gauge("model_tier_t3_rolling_share", share)
+    except Exception:
+        pass
+    return share
+
+
+def current_t3_share() -> float:
+    """Return the current rolling T3 share across the last up-to-200 turns."""
+    with _TIER_WINDOW_LOCK:
+        total = len(_RECENT_TIER_WINDOW)
+        if not total:
+            return 0.0
+        t3_count = sum(1 for t in _RECENT_TIER_WINDOW if t is ModelTier.T3)
+        return t3_count / total
+
+
+def is_reasoner_budget_exhausted() -> bool:
+    """Return True when the rolling T3 share in the last 200 turns exceeds REASONER_MAX_SHARE."""
+    try:
+        max_share = float(os.getenv("REASONER_MAX_SHARE") or "0.25")
+    except ValueError:
+        max_share = 0.25
+    if max_share <= 0.0:
+        return True
+    if max_share >= 1.0:
+        return False
+    with _TIER_WINDOW_LOCK:
+        total = len(_RECENT_TIER_WINDOW)
+        if total < 4:
+            return False
+        t3_count = sum(1 for t in _RECENT_TIER_WINDOW if t is ModelTier.T3)
+        return (t3_count / total) > max_share
+
 
 @dataclass(frozen=True)
 class TierDecision:
@@ -173,7 +338,17 @@ class TierDecision:
     @property
     def model(self) -> str:
         """Model id for this tier; empty string for :attr:`ModelTier.T0`."""
+        if self.tier is ModelTier.T0:
+            return ""
+        ep = self.endpoint
+        if ep is not None and (os.getenv("REASONER_BASE_URL") or "").strip():
+            return ep.model
         return MODEL_SLOTS.get(self.tier, "")
+
+    @property
+    def endpoint(self) -> ModelEndpoint | None:
+        """Resolved :class:`ModelEndpoint` for this decision (``None`` for ``T0``)."""
+        return get_endpoint(self.tier)
 
 
 def _base_tier(route: str, tool_count: int) -> tuple[ModelTier, str]:
@@ -202,8 +377,12 @@ def select_tier(
     distress: str = "",
     multi_hop: bool = False,
     evaluator_rejected: bool = False,
-    budget_exhausted: bool = False,
+    budget_exhausted: bool | None = None,
     enabled: bool = True,
+    planner_tool_count: int = 0,
+    premise_contradiction: bool = False,
+    tax_heads_count: int = 0,
+    allow_translated_locales: bool | None = None,
 ) -> TierDecision:
     """Pick the generation tier for one turn.
 
@@ -222,6 +401,7 @@ def select_tier(
     deliberate operational backstop rather than a quality decision, and
     it is reported in the reason so it is visible in the trace.
     """
+    sync_endpoints()
     if not enabled:
         return TierDecision(ModelTier.T1, "tiering disabled")
 
@@ -234,19 +414,44 @@ def select_tier(
 
     lang = (locale or "en").strip().lower().split("-")[0].split("_")[0]
     if lang in ADAPTER_BOUND_LOCALES:
-        return TierDecision(ModelTier.T1, f"{lang} is bound to the T1 LoRA adapters")
+        if allow_translated_locales is None:
+            try:
+                from ..flags import flags
+
+                allow_translated_locales = flags.is_enabled("reasoner_for_translated_locales")
+            except Exception:
+                allow_translated_locales = False
+        if not allow_translated_locales:
+            return TierDecision(ModelTier.T1, f"{lang} is bound to the T1 LoRA adapters")
 
     promotions: list[tuple[ModelTier, str]] = []
     if query:
         import re
+
         q_lower = query.lower()
         statutory_concepts = sum(
-            1 for c in ("wht", "withholding", "vat", "paye", "income tax", "rental", "customs", "excise", "efris")
+            1
+            for c in ("wht", "withholding", "vat", "paye", "income tax", "rental", "customs", "excise", "efris")
             if re.search(rf"\b{c}\b", q_lower)
         )
-        is_cross_border = bool(re.search(r"\b(cross[-\s]?border|non[-\s]?resident|foreign|abroad|imported\s+services?|reverse\s+charge|digital\s+services?)\b", q_lower))
-        is_dispute = bool(re.search(r"\b(dispute|disputed|objection|appeal|default\s+assessment|tribunal|tat)\b", q_lower))
-        has_complex_numbers = len(re.findall(r"\b\d+(?:[,\.]\d+)?\s*(?:m|million|bn|billion|k|thousand|ugx|usd|\$)\b", q_lower)) >= 2
+        is_cross_border = bool(
+            re.search(
+                r"\b(cross[-\s]?border|non[-\s]?resident|foreign|abroad|imported\s+services?|reverse\s+charge|digital\s+services?)\b",
+                q_lower,
+            )
+        )
+        is_dispute = bool(
+            re.search(r"\b(dispute|disputed|objection|appeal|default\s+assessment|tribunal|tat)\b", q_lower)
+        )
+        has_complex_numbers = (
+            len(re.findall(r"\b\d+(?:[,\.]\d+)?\s*(?:m|million|bn|billion|k|thousand|ugx|usd|\$)\b", q_lower)) >= 2
+        )
+        asks_how_why_explain = bool(
+            re.search(
+                r"\b(how|why|explain|walk\s+me\s+through|what\s+is\s+the\s+(?:rule|basis|formula|method))\b",
+                q_lower,
+            )
+        )
 
         if statutory_concepts >= 2:
             promotions.append((ModelTier.T3, "multiple statutory concepts"))
@@ -256,7 +461,15 @@ def select_tier(
             promotions.append((ModelTier.T3, "tax dispute / objection / assessment procedure"))
         elif has_complex_numbers:
             promotions.append((ModelTier.T3, "complex financial reconciliation"))
+        elif planner_tool_count >= 1 and asks_how_why_explain:
+            promotions.append((ModelTier.T3, "planner tool output with statutory explanation"))
+    elif planner_tool_count >= 1:
+        promotions.append((ModelTier.T3, "planner tool output with statutory explanation"))
 
+    if premise_contradiction:
+        promotions.append((ModelTier.T3, "premise contradiction in case facts"))
+    if tax_heads_count >= 2:
+        promotions.append((ModelTier.T3, f"multi-head conversation context ({tax_heads_count} tax heads)"))
     if evaluator_rejected:
         promotions.append((ModelTier.T3, "evaluator rejected the previous draft"))
     if multi_hop:
@@ -277,20 +490,34 @@ def select_tier(
         if _TIER_ORDER[candidate] > _TIER_ORDER[tier]:
             tier, reason, promoted = candidate, why, True
 
-    if budget_exhausted and _TIER_ORDER[tier] > _TIER_ORDER[ModelTier.T2]:
-        return TierDecision(ModelTier.T2, f"{reason} (capped: T3 budget exhausted)", promoted)
+    exhausted = is_reasoner_budget_exhausted() if budget_exhausted is None else budget_exhausted
+    if exhausted and _TIER_ORDER[tier] > _TIER_ORDER[ModelTier.T2]:
+        tier = ModelTier.T2
+        reason = f"{reason} (capped: T3 budget exhausted)"
+
+    if tier in (ModelTier.T2, ModelTier.T3) and not (os.getenv("REASONER_BASE_URL") or "").strip():
+        reason = f"{reason} (REASONER_BASE_URL unset; falling back to T1 endpoint)"
 
     return TierDecision(tier, reason, promoted)
 
 
 def log_tier(task: str, decision: TierDecision) -> None:
-    """Record the tier that served *task* (Prometheus ``model_tier_total``)."""
+    """Record the tier that served *task* (Prometheus ``model_tier_total``) and update rolling share."""
+    record_tier_turn(decision.tier)
     try:
         metrics.inc(
             "model_tier_total",
             labels={"task": task, "tier": decision.tier.value,
                     "promoted": str(decision.promoted).lower()},
         )
+    except Exception:
+        pass
+
+
+def log_tier_fallback(reason: str = "deadline") -> None:
+    """Record a reasoning-tier fallback to T1 (Prometheus ``model_tier_fallback_total``)."""
+    try:
+        metrics.inc("model_tier_fallback_total", labels={"reason": reason})
     except Exception:
         pass
 

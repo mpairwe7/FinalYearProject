@@ -362,9 +362,16 @@ _REGISTRY: dict[str, Flag] = {
         Flag(
             "model_tiering",
             False,
-            "Select the generation model per turn from the supervisor's route "
-            "decision (T0 none / T1 8B / T2 30B-A3B / T3 235B-A22B) instead of "
-            "sending every query to the single configured model.",
+            "Select the local generation model per turn from the supervisor's route "
+            "decision (T0 none / T1 Sunflower-Qwen3.5-9B / T2-T3 Qwen3.8-27B-FP8) "
+            "instead of sending every query to the single configured model.",
+        ),
+        Flag(
+            "reasoner_for_translated_locales",
+            False,
+            "Allow translated locales (lg/sw/nyn/ach) to promote to the T2/T3 "
+            "reasoning endpoint for English draft synthesis before Sunflower "
+            "localization.",
         ),
         Flag(
             "evaluator_optimizer",

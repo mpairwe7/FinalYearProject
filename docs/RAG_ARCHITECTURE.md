@@ -689,7 +689,8 @@ All major subsystems are behind feature flags for progressive rollout:
 | `voice_consent` | off | Enforce voice-specific consent checks |
 | `multilingual_routing` | off | Locale-specific supervisor patterns (lg/nyn/ach) |
 | `supervisor_llm_tiebreak` | off | Small-model second opinion on low-confidence routing |
-| `model_tiering` | off | Per-turn model tier (T0/T1/T2/T3) from the route decision |
+| `model_tiering` | off | Per-turn local model tier (T0 none / T1 Sunflower-Qwen3.5-9B / T2-T3 Qwen3.8-27B-FP8) from the route decision |
+| `reasoner_for_translated_locales` | off | Allow lg/sw/nyn/ach turns to use the T2/T3 reasoning endpoint for English draft synthesis before Sunflower localization |
 | `evaluator_optimizer` | off | Deterministic recomputation of money answers |
 | `tax_graph` | off | Load the statutory knowledge graph + `tax_graph` namespace |
 | `graph_fusion` | off | Fuse the graph leg into RRF (requires `tax_graph`) |
