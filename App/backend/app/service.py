@@ -1006,55 +1006,21 @@ def _prefer_cloud_primary(locale: str) -> bool:
     return _cloud_llm_ready()
 
 
-def _evaluate_calculation_context(query: str) -> str:
-    """Evaluate pure tax calculator if amounts/salary/turnover are in the query, returning structured context."""
-    from .calculator_router import format_calc_reply, plan_calculation, extract_amounts, has_money_amount
-    from .tools import ToolRegistry
+_ACTIVE_CASE_FACTS: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "_active_case_facts", default=None
+)
+
+
+def _evaluate_calculation_context(query: str, facts: Any = None) -> str:
+    """Build the verified statutory facts & calculations block via :mod:`app.scenario_planner`."""
+    from .scenario_planner import build_verified_facts
+
     try:
-        plan = plan_calculation(query)
-        if plan and not plan.missing:
-            from .mcp import get_client
-            call = get_client().call_tool(plan.tool, dict(plan.params), user_role="public")
-            if call and call.result and call.result.get("ok"):
-                breakdown = format_calc_reply(plan.tool, call.result, list(plan.assumptions))
-                return (
-                    f"\n\n## Verified Statutory Calculation (Tool Ground Truth)\n"
-                    f"{breakdown}\n"
-                    f"Present these exact computed figures in a clean Markdown table with statutory references."
-                )
-
-        # Specialized Multi-Property / Mixed-Use Rental Evaluation
-        # If query asks about rental tax and provides figures (e.g. 90M total, 40M residential, 50M commercial)
-        if re.search(r"\b(rent|rental)\b", query, re.IGNORECASE) and has_money_amount(query):
-            amounts = extract_amounts(query)
-            cleaned_amounts = [
-                val for val, s, e in amounts
-                if not (abs(val - 2_820_000.0) < 1.0 and re.search(r"\bthreshold\b", query[max(0, s - 25) : min(len(query), e + 25)], re.IGNORECASE))
-            ]
-            if cleaned_amounts:
-                vals = [v for v in cleaned_amounts]
-                max_v = max(vals)
-                others = [v for v in vals if v != max_v]
-                if others and abs(max_v - sum(others)) < 1.0:
-                    pooled_gross = max_v
-                elif len(vals) >= 2 and re.search(r"\b(residential|commercial|apartments?|shops?|units?|floors?)\b", query, re.IGNORECASE):
-                    pooled_gross = sum(vals)
-                else:
-                    pooled_gross = vals[0]
-
-                res = ToolRegistry.call("calculate_rental_tax", {"annual_gross_rent": pooled_gross, "landlord_type": "individual"})
-                if res and res.get("ok"):
-                    breakdown = format_calc_reply("calculate_rental_tax", res, ["pooled gross rental income across all residential and commercial units"])
-                    return (
-                        f"\n\n## Verified Statutory Calculation (Tool Ground Truth)\n"
-                        f"{breakdown}\n"
-                        f"- Pooling Rule: Under Section 5(3) of the Income Tax Act, all rental income from residential and commercial properties is pooled together into a single total annual gross rent. The UGX 2,820,000 threshold applies ONCE across the total combined rent, not per property or per stream.\n"
-                        f"- Expense Deductions: Individual landlords are entitled to ZERO expense deductions (the previous 20% expense deduction was repealed by the Income Tax Amendment Act; only corporate landlords retain expense deductions capped at 50%).\n"
-                        f"Present these exact computed figures in a clean Markdown table with statutory references."
-                    )
+        eff_facts = facts if facts is not None else _ACTIVE_CASE_FACTS.get()
+        return build_verified_facts(query, eff_facts)
     except Exception:
-        pass
-    return ""
+        logger.debug("build_verified_facts failed", exc_info=True)
+        return ""
 
 
 def _is_non_t1_endpoint(endpoint: Any) -> bool:
@@ -4881,6 +4847,17 @@ class ChatModel:
                 for sk, sv in slot_bank.items():
                     if sk and sv not in ("", None) and sk not in prefill_slots:
                         prefill_slots[str(sk)] = sv
+            active_facts = _ACTIVE_CASE_FACTS.get()
+            if active_facts is not None:
+                sal = getattr(active_facts, "monthly_salary", None)
+                if sal is not None and sal.currency == "UGX" and "monthly_gross" not in prefill_slots:
+                    prefill_slots["monthly_gross"] = float(sal.amount)
+                to_mon = getattr(active_facts, "annual_turnover", None)
+                if to_mon is not None and to_mon.currency == "UGX" and "annual_turnover" not in prefill_slots:
+                    prefill_slots["annual_turnover"] = float(to_mon.amount)
+                claim = getattr(active_facts, "residency_claim", None)
+                if claim and "residency" not in prefill_slots:
+                    prefill_slots["residency"] = claim
         if flags.is_enabled("continuous_relationship_memory", subject=user_id):
             try:
                 from .memory.resolution_ledger import build_resumption_prompt, case_for_prompt
@@ -8289,9 +8266,15 @@ class ChatModel:
         except Exception:
             pass
 
+        edu_sources = [
+            str(s.get("id") or s.get("title") or "ura_tax_education")
+            for s in ((lesson.get("rate_basis") or {}).get("sources") or [])
+            if isinstance(s, dict)
+        ] or ["ura_tax_education_curriculum"]
+
         return {
             "reply": final_reply,
-            "sources": [],
+            "sources": edu_sources,
             "citations": [],
             "faithfulness_score": None,
             "retrieval_mode": "education",
@@ -8893,6 +8876,46 @@ class ChatModel:
             "ticket_id": "",
         }
 
+    @staticmethod
+    def _update_turn_case_facts(
+        *,
+        thread_id: str,
+        message: str,
+        raw_message: str = "",
+        user_id: str | None = None,
+        tenant_id: str = "default",
+        conversation_history: list[dict[str, str]] | None = None,
+    ) -> Any:
+        """Extract, merge, and persist conversation-scoped :class:`CaseFacts` for this turn."""
+        try:
+            from .case_facts import extract_case_facts, recall_case_facts, remember_case_facts
+
+            prior = recall_case_facts(
+                thread_id, user_id=user_id or "", tenant_id=tenant_id or "default"
+            )
+            if prior is None and conversation_history:
+                for hist_turn in conversation_history:
+                    u_msg = str(hist_turn.get("user_message") or "").strip()
+                    if u_msg:
+                        prior = extract_case_facts(u_msg, prior)
+            combined_msg = (
+                f"{raw_message}\n{message}".strip()
+                if raw_message and raw_message != message
+                else message
+            )
+            updated = extract_case_facts(combined_msg, prior)
+            remember_case_facts(
+                thread_id,
+                updated,
+                user_id=user_id or "",
+                tenant_id=tenant_id or "default",
+            )
+            _ACTIVE_CASE_FACTS.set(updated)
+            return updated
+        except Exception:
+            logger.debug("Failed to update turn CaseFacts", exc_info=True)
+            return None
+
     def _maybe_handle_calculator(
         self,
         *,
@@ -8910,12 +8933,23 @@ class ChatModel:
         calculator workflow starts pre-filled with everything the message
         did contain, so the user is asked only for what's absent.
         """
+        from .calculator_router import is_explanation_question, prefill_plan_from_case_facts
+        from .case_facts import recall_case_facts
+
         # Rate-table inquiries carry no amounts and are answered by _maybe_handle_rate_lookup.
         if plan_rate_lookup(message) or plan_rate_lookup(rewritten):
+            return None
+        if is_explanation_question(message) or is_explanation_question(rewritten):
             return None
         plan = plan_calculation(message) or plan_calculation(rewritten)
         if plan is None:
             return None
+
+        facts = _ACTIVE_CASE_FACTS.get() or recall_case_facts(
+            thread_id, user_id=user_id or "", tenant_id=_state_tenant_id()
+        )
+        if facts is not None:
+            plan = prefill_plan_from_case_facts(plan, facts)
 
         if not plan.missing:
             try:
@@ -10095,6 +10129,14 @@ class ChatModel:
                     router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
             if turn_out is not None and router_message != message:
                 turn_out["english_message"] = router_message
+            self._update_turn_case_facts(
+                thread_id=thread_id,
+                message=router_message or message,
+                raw_message=message,
+                user_id=user_id,
+                tenant_id=tenant_id or "default",
+                conversation_history=conversation_history,
+            )
             # Attachment turns and ongoing multi-turn conversations are never cache-served
             # or cache-stored: context is specific to attachments or prior dialogue turns.
             cache_allowed = (
@@ -11075,6 +11117,22 @@ class ChatModel:
                     else rewritten
                 )
                 with trace_stage("llm_agentic", timings=timings):
+                    eff_tool_whitelist = force_tool_whitelist
+                    if (
+                        eff_tool_whitelist is None
+                        and connector_intent is None
+                        and not connector_namespaces
+                        and trace_ctx.get("model_tier") == ModelTier.T3.value
+                    ):
+                        from .scenario_planner import plan_tools
+                        from .tools import ToolRegistry
+
+                        if not plan_tools(agentic_query, _ACTIVE_CASE_FACTS.get()):
+                            eff_tool_whitelist = [
+                                t.schema.name
+                                for t in ToolRegistry.all_tools()
+                                if getattr(t.schema, "namespace", "") in ("tax_calculator", "rates")
+                            ]
                     agentic_call_kwargs: dict[str, Any] = {
                         "query": agentic_query,
                         # A lookup is answered from the service, not from
@@ -11082,7 +11140,7 @@ class ChatModel:
                         "passages": [] if connector_intent is not None else hits,
                         "conversation_history": conversation_history or None,
                         "locale": locale,
-                        "tool_names": force_tool_whitelist,
+                        "tool_names": eff_tool_whitelist,
                         "personalization_context": self._build_effective_personalization_context(
                             personalization, conv_ctx, router_rewritten or router_message
                         ),
@@ -11908,6 +11966,14 @@ class ChatModel:
         router_message, router_rewritten = self._english_router_form(message, rewritten, locale)
         if turn_out is not None and router_message != message:
             turn_out["english_message"] = router_message
+        self._update_turn_case_facts(
+            thread_id=thread_id,
+            message=router_message or message,
+            raw_message=message,
+            user_id=user_id,
+            tenant_id=tenant_id or "default",
+            conversation_history=conversation_history,
+        )
 
         # Attachment turns and ongoing multi-turn conversations are never cache-served
         # or cache-stored: context is specific to attachments or prior dialogue turns.

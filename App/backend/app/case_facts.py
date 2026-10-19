@@ -582,7 +582,7 @@ _SALARY_KW_RE = re.compile(
     re.IGNORECASE,
 )
 _TURNOVER_KW_RE = re.compile(
-    r"\b(turnover|annual\s+sales|gross\s+sales|annual\s+revenue|gross\s+turnover|mauzo)\b",
+    r"\b(turnover|annual\s+sales|gross\s+sales|taxable\s+sales|in\s+sales|annual\s+revenue|gross\s+turnover|mauzo)\b",
     re.IGNORECASE,
 )
 _MONTHLY_CADENCE_RE = re.compile(
@@ -708,7 +708,13 @@ def extract_case_facts(
         _set("service_contract_not_employment", True)
     if re.search(r"\b(deduct|claim)\b[^.?!]{0,40}\b(expenses?|repairs?|maintenance|mortgage\s+interest)\b", text, re.IGNORECASE) and re.search(r"\b(rent|rental|landlord)\b", text, re.IGNORECASE):
         _set("claims_rental_expense_deduction", True)
-    if re.search(r"\bno\s+efris\b|\bwithout\s+(?:an?\s+)?efris\b|\bnon[-\s]?fiscalised\b|\bmanual\s+invoice\b", text, re.IGNORECASE):
+    if re.search(
+        r"\b(?:no\s+efris|without\s+(?:an?\s+)?efris|non[-\s]?fiscalised|"
+        r"manual\s+(?:handwritten\s+)?(?:paper\s+)?(?:invoice|receipt)|"
+        r"paper\s+(?:invoice|receipt)|instead\s+of\s+(?:an?\s+)?efris)\b",
+        text,
+        re.IGNORECASE,
+    ):
         _set("has_efris_einvoice", False)
     elif re.search(r"\befris\s+e[-\s]?(?:invoice|receipt)\b|\bfiscalised\s+invoice\b", text, re.IGNORECASE):
         _set("has_efris_einvoice", True)

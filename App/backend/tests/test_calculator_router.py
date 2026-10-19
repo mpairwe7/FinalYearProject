@@ -758,3 +758,99 @@ class ExciseAndCustomsPlanningTests(unittest.TestCase):
         self.assertEqual(plan.params["goods_category"], "used_vehicle_5_to_8_years")
         self.assertTrue(plan.params["include_wht"])
         self.assertEqual(plan.params["cif_value"], 15_000_000.0)
+
+
+class ExplanationVsCalculationRoutingTests(unittest.TestCase):
+    """Phase F.2 & F.3: Explanation questions (and rewritten forms) return None; wizard reads CaseFacts."""
+
+    def test_section1_turn2_verbatim_and_rewritten_return_none(self) -> None:
+        turn2_verbatim = (
+            "How exactly does URA determine the taxable market value of the furnished house "
+            "and the motor vehicle benefit when calculating the gross taxable employment income for PAYE?"
+        )
+        turn2_alt = "and how does URA actually value the furnished house and the car for PAYE?"
+        for msg in (turn2_verbatim, turn2_alt):
+            rewritten = rewrite_query(msg, history=None)
+            self.assertIsNone(plan_calculation(msg), msg)
+            self.assertIsNone(plan_calculation(rewritten), rewritten)
+
+    def test_at_least_15_explanation_questions_across_tax_heads_return_none(self) -> None:
+        explanation_questions = [
+            "How does URA value a company car provided to an employee for PAYE?",
+            "How would the law determine whether an expat is a tax resident for PAYE?",
+            "What is the formula for valuing employer-provided accommodation under PAYE?",
+            "How is the taxable value of a low-interest staff loan determined when calculating PAYE?",
+            "When our payroll team is calculating PAYE for a manager with free housing, how does URA treat the benefit?",
+            "How does URA calculate input VAT apportionment for mixed taxable and exempt supplies?",
+            "What is the rule for claiming input VAT when a supplier issues a paper invoice?",
+            "Why is reverse-charge VAT on imported services not claimable as input tax credit?",
+            "How does URA treat management fees vs employment contracts for withholding tax?",
+            "What is the basis for deducting withholding tax on payments to non-resident consultants?",
+            "How is rental income tax calculated for an individual landlord vs a company?",
+            "Why are individual landlords not allowed to deduct repair expenses when calculating rental tax?",
+            "How does URA determine the customs value of imported goods under the 6 valuation methods?",
+            "What counts as a business asset when calculating corporate capital gains tax?",
+            "Is a mobile money wallet-to-wallet transfer taxable under excise duty?",
+            "Engeri URA gy'ebalirira omusolo gwa PAYE ku mmotoka ya kampuni?",
+            "Jinsi URA inavyokokotoa kodi ya PAYE kwenye nyumba ya mwajiri?",
+        ]
+        self.assertGreaterEqual(len(explanation_questions), 15)
+        for q in explanation_questions:
+            rewritten = rewrite_query(q, history=None)
+            with self.subTest(question=q):
+                self.assertIsNone(plan_calculation(q), f"raw matched: {q}")
+                self.assertIsNone(plan_calculation(rewritten), f"rewritten matched: {rewritten}")
+
+    def test_at_least_15_genuine_calculation_asks_still_plan(self) -> None:
+        genuine_calc_asks = [
+            ("Calculate PAYE on a monthly gross salary of UGX 4,500,000", "calculate_paye"),
+            ("How much PAYE will I pay?", "calculate_paye"),
+            ("Calculate my take-home pay on UGX 2,000,000 a month", "calculate_paye"),
+            ("Please calculate his exact monthly PAYE now", "calculate_paye"),
+            ("Calculate VAT on UGX 1,500,000", "calculate_vat"),
+            ("How much VAT is included in UGX 2,360,000?", "calculate_vat"),
+            ("Do I need to register for VAT if my annual turnover is UGX 350,000,000?", "check_vat_registration"),
+            ("Must I register for VAT?", "check_vat_registration"),
+            ("Calculate rental tax on UGX 24,000,000 annual rent", "calculate_rental_tax"),
+            ("How much rental income tax will I pay?", "calculate_rental_tax"),
+            ("Calculate withholding tax on a UGX 5,000,000 services invoice", "calculate_withholding"),
+            ("How much WHT do we deduct on UGX 20,000,000 for office stationery goods?", "calculate_withholding"),
+            ("Calculate corporation tax on chargeable income of UGX 80,000,000", "calculate_corporation_tax"),
+            ("Calculate capital gains: bought at 20m, sold for 50m", "calculate_capital_gains"),
+            ("Calculate customs duty on a car with CIF UGX 30,000,000", "calculate_customs_duty"),
+            ("Calculate excise duty on 2,000 litres of petrol", "calculate_excise_duty"),
+        ]
+        self.assertGreaterEqual(len(genuine_calc_asks), 15)
+        for q, expected_tool in genuine_calc_asks:
+            with self.subTest(question=q):
+                plan = plan_calculation(q)
+                self.assertIsNotNone(plan, f"Failed to plan: {q}")
+                self.assertEqual(plan.tool, expected_tool)
+
+    def test_wizard_prefills_from_case_facts_and_surfaces_assumptions(self) -> None:
+        from app.calculator_router import prefill_plan_from_case_facts
+        from app.case_facts import extract_case_facts
+
+        # Case 1: 240 days in Uganda + UGX 5m salary -> resident + no missing slots
+        facts_res = extract_case_facts(
+            "He will be physically present in Uganda for 240 days earning UGX 5,000,000 per month."
+        )
+        raw_plan = plan_calculation("Please calculate his monthly PAYE now.")
+        self.assertIsNotNone(raw_plan)
+        self.assertIn("monthly_gross", raw_plan.missing)
+        filled = prefill_plan_from_case_facts(raw_plan, facts_res)
+        self.assertEqual(filled.missing, [])
+        self.assertEqual(filled.params["monthly_gross"], 5_000_000.0)
+        self.assertEqual(filled.params["residency"], "resident")
+        self.assertTrue(any("240 days" in a and "resident" in a for a in filled.assumptions))
+
+        # Case 2: 8-month contract claiming non-resident -> keeps non_resident but surfaces 183-day caveat
+        facts_contract = extract_case_facts(
+            "We have a non-resident consultant on an 8-month contract earning UGX 10,000,000 a month."
+        )
+        filled_contract = prefill_plan_from_case_facts(raw_plan, facts_contract)
+        self.assertEqual(filled_contract.missing, [])
+        self.assertEqual(filled_contract.params["residency"], "non_resident")
+        self.assertTrue(
+            any("183+ days" in a and "how many days" in a for a in filled_contract.assumptions)
+        )
