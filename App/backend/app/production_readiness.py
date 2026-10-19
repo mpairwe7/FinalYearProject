@@ -354,6 +354,8 @@ def gap_gate_errors() -> list[str]:
         errors.extend(sovereign_mode_errors())
     if not is_production():
         return errors
+    if _truthy("EVAL_DEBUG"):
+        errors.append("EVAL_DEBUG=1 must not be enabled in production.")
     errors.extend(_account_errors())
     errors.extend(_document_errors())
     errors.extend(_notify_errors())
