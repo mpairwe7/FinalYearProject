@@ -301,6 +301,49 @@ Respond with a JSON object on a single line:
 Do not output anything outside the JSON object.
 """
 
+COMPLEX_ANSWER_CONTRACT = """\
+## Complex-Answer Contract
+When answering this turn, follow this structure strictly:
+1. Start with a 1–2 sentence direct answer.
+2. If the verified-facts block lists a premise contradiction (`Premise Check`), address and correct that premise first.
+3. **Assumptions** — list the case facts used (and their source turn when carried from earlier turns).
+4. **Step-by-step breakdown** — show the calculation and rules using the **verified figures verbatim** from the verified-facts block and cited passages; never compute or invent new figures yourself. When the verified block contains the exact computed figure, state that exact figure directly and do NOT tell the taxpayer to "consult URA for exact figures".
+5. **Legal basis** — cite the exact statutory `legal_basis` strings (e.g. `Income Tax Act Cap 340`, `Third Schedule Part I`) and inline `[1]`, `[2]` passage markers.
+6. **What I still need for an exact figure** — if the verified-facts block lists `Still needed for an exact figure` (from `needs`), state those items clearly; omit this section when all required inputs were verified.
+7. Answer **every** sub-question in the user's message completely (enumerate them internally first so none is skipped)."""
+
+
+def _split_verified_facts_from_personalization(personalization_context: str) -> tuple[str, str]:
+    """Split (other_personalization, calc_ground_truth) from *personalization_context*."""
+    if not personalization_context:
+        return "", ""
+    for marker in (
+        "## Verified Statutory Facts & Calculations",
+        "## Verified Statutory Calculation",
+    ):
+        if marker in personalization_context:
+            head, tail = personalization_context.split(marker, 1)
+            return head.strip(), (marker + tail).strip()
+    return personalization_context.strip(), ""
+
+
+def _is_t3_endpoint(endpoint: Any) -> bool:
+    """Return True when *endpoint* is the T3 reasoning endpoint."""
+    if endpoint is None:
+        return False
+    try:
+        from .providers.routing import ENDPOINTS, ModelTier
+
+        if endpoint == ENDPOINTS.get(ModelTier.T3):
+            return True
+    except Exception:
+        pass
+    tier = getattr(endpoint, "tier", None)
+    if tier is not None and getattr(tier, "value", str(tier)) in ("T3", "deep"):
+        return True
+    model_name = str(getattr(endpoint, "model", None) or getattr(endpoint, "model_id", "") or "").lower()
+    return "27b" in model_name or "reasoner" in model_name
+
 
 def _passage_marker(source: str, idx: int) -> str:
     """Derive a short, per-passage hash marker so the model cannot forge it.
@@ -512,6 +555,7 @@ def _build_messages(
     personalization_context: str = "",
     tone_hint: str = "",
     context_summary: str = "",
+    endpoint: Any = None,
 ) -> list[dict[str, str]]:
     """Build chat messages in the Qwen chat-template format.
 
@@ -521,15 +565,9 @@ def _build_messages(
     spotlight markers (LLM01 defence).
     """
     system_content = SYSTEM_PROMPT + (STRUCTURED_JSON_SUFFIX if structured else "")
-    calc_ground_truth = ""
-    other_personalization = ""
-    if personalization_context:
-        if "## Verified Statutory Calculation" in personalization_context:
-            parts_split = personalization_context.split("## Verified Statutory Calculation", 1)
-            other_personalization = parts_split[0].strip()
-            calc_ground_truth = "## Verified Statutory Calculation" + parts_split[1]
-        else:
-            other_personalization = personalization_context.strip()
+    other_personalization, calc_ground_truth = _split_verified_facts_from_personalization(
+        personalization_context
+    )
 
     if other_personalization:
         system_content += (
@@ -549,6 +587,8 @@ def _build_messages(
         )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
+    if calc_ground_truth or _is_t3_endpoint(endpoint):
+        system_content += f"\n\n{COMPLEX_ANSWER_CONTRACT}"
 
     has_attachment = any(
         "User-attached document" in str(p.get("text", ""))
@@ -643,9 +683,10 @@ def _build_messages(
             f"{calc_ground_truth}\n\n"
             "CRITICAL INSTRUCTIONS FOR THIS TURN:\n"
             "1. You MUST apply your statutory answer directly to the taxpayer's specific scenario and figures.\n"
-            "2. Use the exact pre-computed figures above in your answer. Do NOT substitute generic FAQ example figures (like UGX 6M) when the taxpayer gave you specific figures.\n"
-            "3. Address every specific sub-question the taxpayer asked.\n"
-            "4. Format the computation clearly with a Markdown table or step-by-step breakdown."
+            "2. Use the exact pre-computed figures above in your answer verbatim; never compute new figures yourself or say 'consult URA for exact figures' when the verified block already gives the figure.\n"
+            "3. If a `Premise Check` bullet appears above, address and correct that premise first.\n"
+            "4. Address every specific sub-question the taxpayer asked, citing the `legal_basis` strings and `[1]`, `[2]` passage markers.\n"
+            "5. Format the computation clearly with a Markdown table or step-by-step breakdown."
         )
         parts.append("")
 
@@ -2145,6 +2186,7 @@ def generate(
             personalization_context=personalization_context,
             tone_hint=tone_hint,
             context_summary=context_summary,
+            endpoint=endpoint,
         )
         if _vllm_generate is not _ORIGINAL_VLLM_GENERATE:
             return (
@@ -2598,6 +2640,7 @@ def generate_stream(
             personalization_context=personalization_context,
             tone_hint=tone_hint,
             context_summary=context_summary,
+            endpoint=endpoint,
         )
         stream_kwargs: dict[str, Any] = {}
         if endpoint is not None:
@@ -2906,15 +2949,9 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
     if connector_note:
         system_content += f"\n\n{connector_note}"
 
-    calc_ground_truth = ""
-    other_personalization = ""
-    if personalization_context:
-        if "## Verified Statutory Calculation" in personalization_context:
-            parts_split = personalization_context.split("## Verified Statutory Calculation", 1)
-            other_personalization = parts_split[0].strip()
-            calc_ground_truth = "## Verified Statutory Calculation" + parts_split[1]
-        else:
-            other_personalization = personalization_context.strip()
+    other_personalization, calc_ground_truth = _split_verified_facts_from_personalization(
+        personalization_context
+    )
 
     if other_personalization:
         system_content += (
@@ -2934,6 +2971,8 @@ def _build_tool_messages(  # noqa: PLR0913 — request-scoped configuration
         )
     if tone_hint:
         system_content += f"\n\n## This turn\n{tone_hint.strip()}"
+    if calc_ground_truth:
+        system_content += f"\n\n{COMPLEX_ANSWER_CONTRACT}"
     system_content = _inject_statutory_precedences(system_content)
     messages: list[dict[str, str]] = [
         {"role": "system", "content": system_content},

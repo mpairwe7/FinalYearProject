@@ -459,43 +459,157 @@ def lexical_relevance(
     return score
 
 
+#: Filename patterns for sector-specific guides that are soft-demoted (-0.06)
+#: when the user's query does not name a sector (§9.G.3, fixes D7).
+SECTOR_GUIDE_SOURCE_PATTERNS: tuple[str, ...] = (
+    r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+(?:the[-_\s]+)?[a-z0-9_-]+[-_\s]+sector",
+    r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+agricultural[-_\s]+sector",
+    r"guide[-_\s]+to[-_\s]+taxation[-_\s]+of[-_\s]+government[-_\s]+agencies",
+    r"hotel[-_\s]+and[-_\s]+accom+odation",
+    r"wholesale[-_\s]+and[-_\s]+retail[-_\s]+sector",
+    r"construction[-_\s]+sector",
+    r"overview[-_\s]+of[-_\s]+the[-_\s]+(?:health|fishing)[a-z0-9_\s-]*sector",
+    r"petroleum[-_\s]+sector[-_\s]+q[-_\s]+and[-_\s]+a",
+    r"advance[-_\s]+(?:income[-_\s]+)?tax[-_\s]+on[-_\s]+the[-_\s]+transport[-_\s]+sector",
+)
+_SECTOR_GUIDE_SOURCE_RE = re.compile("|".join(SECTOR_GUIDE_SOURCE_PATTERNS), re.IGNORECASE)
+SECTOR_GUIDE_DEMOTION: float = -0.06
+TOPIC_SECTION_BOOST: float = 0.05
+
+#: Topic -> preferred section/source hints (§9.G.3).
+TOPIC_SECTION_HINTS: dict[str, tuple[str, ...]] = {
+    "employment": (
+        "employment income",
+        "benefits in kind",
+        "tax resident",
+        "residency",
+        "ura_employment_income_faqs.csv",
+    ),
+    "vat": (
+        "ura_vat_faqs.csv",
+        "value-added-tax",
+        "value added tax",
+        "vat act",
+    ),
+    "wht": (
+        "ura_withholding_tax_faqs.csv",
+        "withholding-tax",
+        "withholding tax",
+    ),
+    "rental": (
+        "ura_rental_income_tax_faqs.csv",
+        "rental income",
+        "rental tax",
+    ),
+    "cit": (
+        "ura_corporation_tax_faqs.csv",
+        "corporation tax",
+        "business income",
+    ),
+    "cgt": (
+        "ura_capital_gains_faqs.csv",
+        "capital gains",
+    ),
+    "efris": (
+        "ura_efris_faqs.csv",
+        "efris-handbook",
+        "the-efris-handbook",
+    ),
+    "objections": (
+        "ura_objections_and_appeals_faqs.csv",
+        "objections and appeals",
+    ),
+}
+
+
+def is_sector_guide_source(source: str) -> bool:
+    """Return True if *source* matches a sector-specific tax guide filename pattern."""
+    return bool(source and _SECTOR_GUIDE_SOURCE_RE.search(source))
+
+
 def apply_preference_boost(
     hits: list[dict[str, Any]],
     prefer: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """Soft-boost hits that match query-time metadata preferences (G17).
+    """Soft-boost hits that match query-time metadata preferences (G17, §9.G.3).
 
     Hard filters can empty the result set when the preferred edition is
     missing from the collection. A small additive boost keeps recall and
-    still surfaces the current FY / mentioned tax type first.
+    still surfaces the current FY / mentioned tax type / preferred section
+    first, while soft-demoting sector-specific guides (-0.06) when the query
+    does not mention a sector.
     """
     if not hits or not prefer:
         return hits
     want_fy = str(prefer.get("fiscal_year") or "").strip()
     want_tax = str(prefer.get("tax_type") or "").strip().lower()
-    if not want_fy and not want_tax:
+    demote_sector = bool(prefer.get("demote_sector_guides"))
+    preferred_sections: list[str] = [
+        str(s).lower() for s in (prefer.get("preferred_sections") or []) if s
+    ]
+    if not want_fy and not want_tax and not demote_sector and not preferred_sections:
         return hits
 
+    any_adjusted = False
     for hit in hits:
         boost = 0.0
+        source_str = str(hit.get("source") or "")
+        is_demoted_guide = demote_sector and is_sector_guide_source(source_str)
+        if is_demoted_guide:
+            boost += SECTOR_GUIDE_DEMOTION
+
         if want_fy and str(hit.get("fiscal_year") or "") == want_fy:
             boost += 0.08
-        if want_tax:
-            blob = " ".join(
-                str(hit.get(field) or "")
-                for field in ("tax_type", "tag", "section", "source", "text", "question")
-            ).lower()
-            if want_tax in blob:
-                boost += 0.05
+
+        if not is_demoted_guide:
+            matched_topic = False
+            if want_tax:
+                blob = " ".join(
+                    str(hit.get(field) or "")
+                    for field in ("tax_type", "tag", "section", "source", "text", "question")
+                ).lower()
+                if want_tax in blob:
+                    matched_topic = True
+            if not matched_topic and preferred_sections:
+                sec_blob = " ".join(
+                    [
+                        str(hit.get("section") or ""),
+                        source_str,
+                        str(hit.get("tag") or ""),
+                        str(hit.get("tax_type") or ""),
+                        str(hit.get("text") or "")[:300],
+                    ]
+                ).lower()
+                if any(hint in sec_blob for hint in preferred_sections):
+                    matched_topic = True
+            if matched_topic:
+                boost += TOPIC_SECTION_BOOST
+
         if not boost:
             continue
+        any_adjusted = True
         if hit.get("score_norm") is not None:
             with suppress(TypeError, ValueError):
-                hit["score_norm"] = min(1.0, float(hit["score_norm"]) + boost)
+                hit["score_norm"] = max(0.0, min(1.0, float(hit["score_norm"]) + boost))
+        elif hit.get("score_rerank") is not None:
+            with suppress(TypeError, ValueError):
+                base_norm = normalize_rerank_score(float(hit["score_rerank"]))
+                hit["score_norm"] = max(0.0, min(1.0, base_norm + boost))
         try:
-            hit["score_rrf"] = float(hit.get("score_rrf") or 0.0) + boost
+            rrf_base = float(hit.get("score_rrf") or 0.0)
+            # On raw Qdrant RRF scale (1/(60+rank) <= 0.05) without a calibrated score_norm,
+            # scale the additive delta so a rank-5 hit does not leapfrog a rank-1 exact match.
+            rrf_delta = (
+                boost * 0.12
+                if (hit.get("score_norm") is None and 0.0 < rrf_base <= 0.05)
+                else boost
+            )
+            hit["score_rrf"] = max(0.0, rrf_base + rrf_delta)
         except (TypeError, ValueError):
-            hit["score_rrf"] = boost
+            hit["score_rrf"] = max(0.0, boost)
+
+    if not any_adjusted:
+        return hits
 
     hits.sort(
         key=lambda h: (
