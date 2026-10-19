@@ -12,6 +12,7 @@ import os
 import re
 from typing import Any
 
+from .claim_polarity import polarity_conflicts
 from .entailment import canonical_amounts, is_contradicted, percentages
 from .text_signals import is_courtesy_sentence
 
@@ -199,6 +200,7 @@ def verify_claims(
     min_support: float | None = None,
     query: str = "",
     locale: str = "en",
+    verified_facts: str = "",
 ) -> dict[str, Any]:
     """Return a claim-verification report for a draft answer."""
     threshold = _MIN_SUPPORT if min_support is None else min_support
@@ -216,7 +218,7 @@ def verify_claims(
     if not claims:
         return report
 
-    has_grounding = bool(citations or hits)
+    has_grounding = bool(citations or hits or verified_facts)
     if not has_grounding:
         report["decision"] = "escalate"
         report["score"] = 0.0
@@ -226,10 +228,13 @@ def verify_claims(
         return report
 
     supported = 0
+    saw_numeric_contradiction = False
     for claim in claims:
         refs = _CITATION_RE.findall(claim)
         clean_claim = _CITATION_RE.sub("", claim)
         contexts = _citation_contexts(refs, citations or [], hits or [])
+        if verified_facts:
+            contexts = [*contexts, verified_facts]
         claim_tokens = _tokens(clean_claim)
         context_text = " ".join(contexts)
         context_tokens = _tokens(context_text)
@@ -239,6 +244,8 @@ def verify_claims(
         # verify if the claim is supported across any of the other retrieved hits
         if overlap < threshold and hits:
             all_contexts = [str(h.get("text") or h.get("answer") or "") for h in hits]
+            if verified_facts:
+                all_contexts.append(verified_facts)
             all_tokens = _tokens(" ".join(all_contexts))
             all_overlap = len(claim_tokens & all_tokens) / max(1, len(claim_tokens))
             if all_overlap >= threshold:
@@ -277,27 +284,46 @@ def verify_claims(
         # unsupported so the response judge escalates rather than disclaiming.
         contradicted = is_contradicted(clean_claim, contexts, user_query=query)
         if contradicted:
+            saw_numeric_contradiction = True
             overlap = 0.0
 
-        item = {
+        # Phase G.1: directional polarity conflict against supporting passages/facts
+        pol_conflicts = polarity_conflicts(clean_claim, contexts, verified_facts)
+        if pol_conflicts:
+            overlap = 0.0
+
+        item: dict[str, Any] = {
             "text": clean_claim.strip()[:220],
             "refs": [f"[{ref}]" for ref in refs],
             "support_score": round(overlap, 4),
         }
+        if pol_conflicts:
+            item["kind"] = "polarity_conflict"
+            item["polarity_conflicts"] = [
+                {
+                    "pair": c.pair_name,
+                    "reply_cue": c.reply_cue,
+                    "supporting_cue": c.supporting_cue,
+                }
+                for c in pol_conflicts
+            ]
+        elif contradicted:
+            item["kind"] = "numeric_contradiction"
+
         if not refs and citations:
             report["uncited_claims"].append(item)
         if overlap >= threshold:
             supported += 1
         else:
             report["unsupported_claims"].append(item)
-            if contradicted:
+            if contradicted or pol_conflicts:
                 report["contradicted_claims"].append(item)
 
     report["supported_claim_count"] = supported
     report["score"] = round(supported / len(claims), 4)
 
-    if report["contradicted_claims"]:
+    if saw_numeric_contradiction:
         report["decision"] = "escalate"
-    elif report["unsupported_claims"] or report["uncited_claims"]:
+    elif report["contradicted_claims"] or report["unsupported_claims"] or report["uncited_claims"]:
         report["decision"] = "revise"
     return report
