@@ -382,3 +382,229 @@ def check_false_premise(
         )
 
     return FalsePremiseResult(is_false_premise=False)
+
+
+# ---------------------------------------------------------------------------
+# Phase F.5: Data-driven premise and fact contradiction checks
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Contradiction:
+    """A statutory contradiction between a taxpayer's stated premise and tool-verified law."""
+
+    code: str
+    user_premise: str
+    statutory_truth: str
+    basis: str
+
+    def format_bullet(self) -> str:
+        return f"Your premise: {self.user_premise}. Under {self.basis}, {self.statutory_truth}"
+
+
+def _contradiction_residency(facts: Any, tool_results: dict[str, Any]) -> list[Contradiction]:
+    res = tool_results.get("determine_residency")
+    if not isinstance(res, dict) or not res.get("ok"):
+        return []
+    claim = getattr(facts, "residency_claim", None)
+    status = res.get("status")
+    thresh = res.get("residency_days_threshold", 183)
+    days = getattr(facts, "days_in_uganda", None)
+    contract_months = getattr(facts, "contract_months", None)
+    basis = "Income Tax Act (Cap 338), s.9 and URA Taxation Handbook FY2025-26 (resident individual definition)"
+
+    out: list[Contradiction] = []
+    if claim == "non_resident" and status == "resident":
+        presence_detail = (
+            f"physical presence of {days} days meets or exceeds the {thresh}-day threshold "
+            "in any 12-month period commencing or ending during the year of income"
+            if days is not None
+            else (
+                "they meet the statutory residency criteria (permanent home in Uganda, "
+                "122-day 3-year average presence, or Uganda Government posting abroad)"
+            )
+        )
+        out.append(
+            Contradiction(
+                code="residency_claim_non_resident_but_resident",
+                user_premise="the individual is a non-resident for tax purposes",
+                statutory_truth=f"they are a Ugandan tax RESIDENT because {presence_detail}.",
+                basis=basis,
+            )
+        )
+    elif claim == "non_resident" and status == "undetermined" and res.get("likely_resident"):
+        user_prem = (
+            f"the individual is a non-resident on an {contract_months}-month contract"
+            if contract_months is not None
+            else "the individual is a non-resident for tax purposes"
+        )
+        contract_detail = (
+            f"an {contract_months}-month contract (~{contract_months * 30} days) means they are LIKELY RESIDENT"
+            if contract_months is not None
+            else "they are LIKELY RESIDENT"
+        )
+        out.append(
+            Contradiction(
+                code="residency_claim_non_resident_but_likely_resident",
+                user_premise=user_prem,
+                statutory_truth=(
+                    f"{contract_detail} if physically present in Uganda for {thresh} days or "
+                    "more in any 12-month period commencing or ending in the year of income; confirm "
+                    "the exact number of days they will be physically present in Uganda."
+                ),
+                basis=basis,
+            )
+        )
+    elif claim == "resident" and (status == "non_resident" or res.get("likely_non_resident")):
+        nonres_detail = (
+            f"physical presence of {days} days is below the {thresh}-day threshold, so they "
+            "are a NON-RESIDENT unless they have a permanent home in Uganda, meet the 122-day "
+            "3-year average test, or are a Uganda Government employee posted abroad."
+            if days is not None
+            else (
+                "none of the statutory residency criteria (183-day presence, 122-day 3-year average, "
+                "permanent home in Uganda, or Uganda Government posting abroad) are met, so they are a NON-RESIDENT."
+            )
+        )
+        out.append(
+            Contradiction(
+                code="residency_claim_resident_but_non_resident",
+                user_premise="the individual is a Ugandan tax resident",
+                statutory_truth=nonres_detail,
+                basis=basis,
+            )
+        )
+    return out
+
+
+def _contradiction_vat_threshold(facts: Any, tool_results: dict[str, Any]) -> list[Contradiction]:
+    vat_reg = tool_results.get("check_vat_registration")
+    if not isinstance(vat_reg, dict) or not vat_reg.get("ok"):
+        return []
+    req = vat_reg.get("registration_required")
+    turnover = vat_reg.get("annual_turnover", 0)
+    threshold = vat_reg.get("threshold", 300_000_000)
+    fy = vat_reg.get("fiscal_year", "FY2026-27")
+    basis = f"Value Added Tax Act (Cap 349), s.7 ({fy} threshold UGX {threshold:,.0f})"
+
+    out: list[Contradiction] = []
+    if getattr(facts, "vat_registered", None) is False and req is True:
+        out.append(
+            Contradiction(
+                code="vat_claimed_below_threshold_but_above",
+                user_premise="annual turnover is below the compulsory VAT registration threshold",
+                statutory_truth=(
+                    f"annual taxable turnover of UGX {turnover:,.0f} meets or exceeds the {fy} "
+                    f"compulsory VAT registration threshold of UGX {threshold:,.0f}, so VAT "
+                    "registration is compulsory."
+                ),
+                basis=basis,
+            )
+        )
+    elif (
+        getattr(facts, "claims_vat_compulsory", None) is True
+        or getattr(facts, "vat_registered", None) is True
+    ) and req is False:
+        out.append(
+            Contradiction(
+                code="vat_claimed_compulsory_but_below_threshold",
+                user_premise="compulsory VAT registration is required at this turnover",
+                statutory_truth=(
+                    f"annual taxable turnover of UGX {turnover:,.0f} is below the {fy} compulsory "
+                    f"VAT registration threshold of UGX {threshold:,.0f} (headroom UGX "
+                    f"{vat_reg.get('headroom', 0):,.0f}); registration is not compulsory, though "
+                    "voluntary registration is available."
+                ),
+                basis=basis,
+            )
+        )
+    return out
+
+
+def _contradiction_individual_rental_expenses(facts: Any, tool_results: dict[str, Any]) -> list[Contradiction]:
+    if not getattr(facts, "claims_rental_expense_deduction", False):
+        return []
+    rental_res = tool_results.get("calculate_rental_tax")
+    landlord_type = (
+        (rental_res or {}).get("landlord_type")
+        if isinstance(rental_res, dict)
+        else getattr(facts, "entity_type", None)
+    )
+    if landlord_type == "company":
+        return []
+    return [
+        Contradiction(
+            code="individual_rental_expense_deduction_disallowed",
+            user_premise="an individual landlord can deduct repair, maintenance, or interest expenses from rental income",
+            statutory_truth=(
+                "individual landlords CANNOT deduct any expenses from rental income; individual "
+                "rental tax is 12% on gross annual rental income above the UGX 2,820,000 threshold "
+                "(only corporate landlords may deduct allowable expenses capped at 50% of gross rent)."
+            ),
+            basis="Income Tax Act (Cap 338), s.5 and s.22(1)(c)",
+        )
+    ]
+
+
+def _contradiction_wht_employment_contract(facts: Any, tool_results: dict[str, Any]) -> list[Contradiction]:
+    wht_srv = tool_results.get("wht_non_resident_service")
+    has_emp = bool(getattr(facts, "employment_contract", False))
+    if not has_emp and not (isinstance(wht_srv, dict) and wht_srv.get("is_employment_contract")):
+        return []
+    if "withholding_tax" not in (getattr(facts, "tax_heads", None) or []) and wht_srv is None:
+        return []
+    return [
+        Contradiction(
+            code="wht_service_excludes_employment_contract",
+            user_premise="15% non-resident service withholding tax applies to an employment contract",
+            statutory_truth=(
+                "a Ugandan-sourced service contract does NOT include an employment contract; "
+                "remuneration under an employment contract is taxed under PAYE, not 15% WHT."
+            ),
+            basis="Income Tax Act (Cap 338), s.85 and URA Withholding Tax Guide (Withholding-Tax-FY-2024-25-1.pdf)",
+        )
+    ]
+
+
+def _contradiction_vat_input_without_efris(facts: Any, tool_results: dict[str, Any]) -> list[Contradiction]:
+    if getattr(facts, "has_efris_einvoice", None) is not False:
+        return []
+    elig = tool_results.get("vat_input_claim_eligibility")
+    if isinstance(elig, dict) and elig.get("eligible") is True:
+        return []
+    return [
+        Contradiction(
+            code="vat_input_requires_efris_einvoice",
+            user_premise="claiming input VAT credit using a manual paper invoice/receipt",
+            statutory_truth=(
+                "a VAT-registered buyer CANNOT claim input VAT credit on a manual paper invoice; "
+                "a valid EFRIS e-invoice or e-receipt with a Fiscal Document Number (FDN) is required."
+            ),
+            basis="Value Added Tax Act (Cap 349), s.28 and URA EFRIS Handbook FY2026-27",
+        )
+    ]
+
+
+_CONTRADICTION_RULES = (
+    _contradiction_residency,
+    _contradiction_vat_threshold,
+    _contradiction_individual_rental_expenses,
+    _contradiction_wht_employment_contract,
+    _contradiction_vat_input_without_efris,
+)
+
+
+def check_fact_contradictions(
+    facts: Any,
+    tool_results: dict[str, Any] | None = None,
+) -> list[Contradiction]:
+    """Run all declarative contradiction rules over *facts* and *tool_results*."""
+    if facts is None:
+        return []
+    results = tool_results or {}
+    contradictions: list[Contradiction] = []
+    seen_codes: set[str] = set()
+    for rule_fn in _CONTRADICTION_RULES:
+        for item in rule_fn(facts, results):
+            if item.code not in seen_codes:
+                seen_codes.add(item.code)
+                contradictions.append(item)
+    return contradictions

@@ -161,6 +161,7 @@ class CaseFacts:
     entity_type: EntityLiteral | None = None
     annual_turnover: Money | None = None
     vat_registered: bool | None = None
+    claims_vat_compulsory: bool | None = None
     has_efris_einvoice: bool | None = None
     service_contract_not_employment: bool | None = None
     employment_contract: bool | None = None
@@ -187,6 +188,7 @@ class CaseFacts:
             "entity_type": self.entity_type,
             "annual_turnover": self.annual_turnover.to_dict() if self.annual_turnover else None,
             "vat_registered": self.vat_registered,
+            "claims_vat_compulsory": self.claims_vat_compulsory,
             "has_efris_einvoice": self.has_efris_einvoice,
             "service_contract_not_employment": self.service_contract_not_employment,
             "employment_contract": self.employment_contract,
@@ -228,6 +230,7 @@ class CaseFacts:
             entity_type=raw.get("entity_type"),
             annual_turnover=Money.from_dict(raw.get("annual_turnover")),
             vat_registered=raw.get("vat_registered"),
+            claims_vat_compulsory=raw.get("claims_vat_compulsory"),
             has_efris_einvoice=raw.get("has_efris_einvoice"),
             service_contract_not_employment=raw.get("service_contract_not_employment"),
             employment_contract=raw.get("employment_contract"),
@@ -582,7 +585,7 @@ _SALARY_KW_RE = re.compile(
     re.IGNORECASE,
 )
 _TURNOVER_KW_RE = re.compile(
-    r"\b(turnover|annual\s+sales|gross\s+sales|annual\s+revenue|gross\s+turnover|mauzo)\b",
+    r"\b(turnover|annual\s+sales|gross\s+sales|taxable\s+sales|in\s+sales|annual\s+revenue|gross\s+turnover|mauzo)\b",
     re.IGNORECASE,
 )
 _MONTHLY_CADENCE_RE = re.compile(
@@ -708,7 +711,20 @@ def extract_case_facts(
         _set("service_contract_not_employment", True)
     if re.search(r"\b(deduct|claim)\b[^.?!]{0,40}\b(expenses?|repairs?|maintenance|mortgage\s+interest)\b", text, re.IGNORECASE) and re.search(r"\b(rent|rental|landlord)\b", text, re.IGNORECASE):
         _set("claims_rental_expense_deduction", True)
-    if re.search(r"\bno\s+efris\b|\bwithout\s+(?:an?\s+)?efris\b|\bnon[-\s]?fiscalised\b|\bmanual\s+invoice\b", text, re.IGNORECASE):
+    if re.search(
+        r"\b(?:forced\s+(?:by\s+law\s+)?to\s+register\s+for\s+vat|compulsory\s+to\s+register\s+for\s+vat|"
+        r"accountant\s+told\s+me\s+i\s+(?:am\s+forced|must|have)\s+to\s+register\s+for\s+vat)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        _set("claims_vat_compulsory", True)
+    if re.search(
+        r"\b(?:no\s+efris|without\s+(?:an?\s+)?efris|non[-\s]?fiscalised|"
+        r"manual\s+(?:handwritten\s+)?(?:paper\s+)?(?:invoice|receipt)|"
+        r"paper\s+(?:invoice|receipt)|instead\s+of\s+(?:an?\s+)?efris)\b",
+        text,
+        re.IGNORECASE,
+    ):
         _set("has_efris_einvoice", False)
     elif re.search(r"\befris\s+e[-\s]?(?:invoice|receipt)\b|\bfiscalised\s+invoice\b", text, re.IGNORECASE):
         _set("has_efris_einvoice", True)

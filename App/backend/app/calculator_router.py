@@ -634,6 +634,149 @@ def has_money_amount(message: str) -> bool:
     return bool(extract_amounts(message or ""))
 
 
+# Phase F.2: Phrases asking how a rule/valuation/tax works rather than asking to compute a number.
+# Input is whitespace-collapsed to single spaces and matched with contiguous token patterns (zero ReDoS).
+_EXPLANATION_RE = re.compile(
+    r"\bhow (?:exactly |actually )?(?:does|do|is|are|would|can|should) "
+    r"(?:ura|uganda revenue authority(?: \(ura\))?|the law|the act|it|they|an employer|we) "
+    r"(?:actually |exactly )?(?:determine|value|valuate|treat|work out|assess|compute|calculate|apply|tax|handle)\b"
+    r"|\bwhat (?:is|are) the (?:formula|basis|rules?|methods?|steps?|procedures?|conditions?|requirements?|criteria|treatments?)\b"
+    r"|\b(?:explain|why (?:is|are|does|do)|what counts as)\b"
+    r"|\b(?:nnyonnyola|annyonnyola|engeri ura gy['’]?ebalirira|kwa nini|eleza|jinsi ura inavyokokotoa|jinsi inavyokokotolewa)\b",
+    re.IGNORECASE,
+)
+_HOW_IS_COPULA_RE = re.compile(r"\bhow (?:exactly |actually )?(?:is|are)\b", re.IGNORECASE)
+_EXPLANATION_PARTICIPLE_RE = re.compile(
+    r"\b(?:valued|valuated|determined|treated|taxed|assessed|accounted|apportioned|depreciated|calculated|computed)\b",
+    re.IGNORECASE,
+)
+_IS_ARE_INTERROGATIVE_RE = re.compile(r"\b(?:is|are) (?:a|an|the|my|our)\b", re.IGNORECASE)
+
+# Multi-issue / premise / rule-evaluation asks that must reach RAG + scenario_planner
+# rather than being short-circuited by a single-slot calculator reply or wizard.
+_SCENARIO_PLANNER_BYPASS_RE = re.compile(
+    r"\b(?:benefits? in kind|bik\b|company (?:car|vehicle|suv)|motor vehicle benefit|"
+    r"furnished (?:house|apartment)|rent[-\s]?free house|employer[-\s]paid housing|"
+    r"free (?:company )?(?:accommodation|housing)|low[-\s]?interest loan|debt waiver)\b"
+    r"|\b(?:compared with|differ from|why is there a difference)\b"
+    r"|\b(?:late filing|penal tax|late payment interest|unstamped)\b"
+    r"|\b(?:manual invoice|manual handwritten paper invoice|paper invoice|paper receipt|without an? efris)\b"
+    r"|\b(?:can (?:i|we) (?:deduct|claim|also import)|from both|apply to both|"
+    r"is (?:he|she|that) right|do we only pay|citizen start[-\s]?up)\b"
+    r"|\b(?:stamp duty|digital services tax|\bdst\b|advance income tax|\d{1,3}[-\s]?seater|sports betting|total stakes|presumptive tax)\b",
+    re.IGNORECASE,
+)
+
+
+def _collapse_ws(text: str) -> str:
+    return " ".join((text or "").split())[:1500]
+
+
+def is_explanation_question(message: str) -> bool:
+    """Return True when *message* asks how a rule works and carries no money amount of its own."""
+    norm = _collapse_ws(message)
+    if not norm or has_money_amount(norm):
+        return False
+    if _EXPLANATION_RE.search(norm):
+        return True
+    if _HOW_IS_COPULA_RE.search(norm) and _EXPLANATION_PARTICIPLE_RE.search(norm):
+        return True
+    return bool(_IS_ARE_INTERROGATIVE_RE.search(norm) and "taxable" in norm.lower())
+
+
+def prefill_plan_from_case_facts(plan: CalcPlan, facts: Any) -> CalcPlan:
+    """Fill missing calculator plan slots from conversation-scoped :class:`CaseFacts` (§8.F.3)."""
+    if facts is None:
+        return plan
+
+    params = dict(plan.params)
+    missing = list(plan.missing)
+    assumptions = list(plan.assumptions)
+
+    if plan.tool == "calculate_paye":
+        # 1. Salary prefill (with FX conversion if needed)
+        if "monthly_gross" in missing and getattr(facts, "monthly_salary", None) is not None:
+            sal = facts.monthly_salary
+            if sal.currency == "UGX":
+                params["monthly_gross"] = float(sal.amount)
+                missing = [m for m in missing if m != "monthly_gross"]
+                assumptions.append(f"monthly gross salary of UGX {float(sal.amount):,.0f} from conversation context")
+            else:
+                from .tools import ToolRegistry
+
+                fx_args: dict[str, Any] = {"amount": float(sal.amount), "currency": sal.currency}
+                if getattr(facts, "exchange_rate_ugx", None) is not None:
+                    fx_args["exchange_rate"] = float(facts.exchange_rate_ugx)
+                fx_res = ToolRegistry.call("convert_currency", fx_args)
+                if fx_res.get("ok") and fx_res.get("ugx_amount") is not None:
+                    params["monthly_gross"] = float(fx_res["ugx_amount"])
+                    missing = [m for m in missing if m != "monthly_gross"]
+                    assumptions.append(
+                        f"{sal.currency} {float(sal.amount):,.2f} converted to UGX {float(fx_res['ugx_amount']):,.0f}/month"
+                    )
+
+        # 2. Residency prefill from determine_residency or user claim + contract caveat
+        days_in_ug = getattr(facts, "days_in_uganda", None)
+        perm_home = getattr(facts, "permanent_home_in_uganda", None)
+        gov_abroad = getattr(facts, "gov_employee_posted_abroad", None)
+        avg_days = getattr(facts, "avg_days_current_and_two_prior", None)
+        contract_months = getattr(facts, "contract_months", None)
+        claim = getattr(facts, "residency_claim", None)
+
+        if any(x is not None for x in (days_in_ug, perm_home, gov_abroad, avg_days)):
+            from .tools import ToolRegistry
+
+            res_out = ToolRegistry.call(
+                "determine_residency",
+                {
+                    "days_in_uganda": days_in_ug,
+                    "contract_months": contract_months,
+                    "permanent_home": perm_home,
+                    "avg_days_current_and_two_prior": avg_days,
+                    "gov_employee_posted_abroad": gov_abroad,
+                },
+            )
+            assumptions = [a for a in assumptions if "resident" not in a.lower()]
+            if res_out.get("status") == "resident":
+                params["residency"] = "resident"
+                if days_in_ug is not None:
+                    assumptions.append(f"you said they'll be in Uganda ~{days_in_ug} days → resident")
+                else:
+                    assumptions.append("statutory residency test met → resident")
+            elif res_out.get("status") == "non_resident" or res_out.get("likely_non_resident"):
+                params["residency"] = "non_resident"
+                if days_in_ug is not None:
+                    assumptions.append(f"you said they'll be in Uganda {days_in_ug} days (< 183 days) → non-resident")
+                else:
+                    assumptions.append("non-resident employee tax rates applied")
+        elif claim in ("resident", "non_resident"):
+            params["residency"] = claim
+            assumptions = [a for a in assumptions if "resident" not in a.lower()]
+            if claim == "non_resident" and contract_months is not None and contract_months * 30 >= 183:
+                assumptions.append(
+                    "I've used non-resident as you said, but if they're physically in Uganda 183+ days "
+                    "they are resident — how many days will they be here?"
+                )
+            elif claim == "non_resident":
+                assumptions.append("non-resident employee tax rates applied")
+            else:
+                assumptions.append("resident employee (from conversation context)")
+
+    elif plan.tool == "check_vat_registration":
+        if "annual_turnover" in missing and getattr(facts, "annual_turnover", None) is not None:
+            to_mon = facts.annual_turnover
+            if to_mon.currency == "UGX":
+                params["annual_turnover"] = float(to_mon.amount)
+                missing = [m for m in missing if m != "annual_turnover"]
+
+    elif plan.tool == "calculate_rental_tax":
+        ent = getattr(facts, "entity_type", None)
+        if ent in ("individual", "company"):
+            params["landlord_type"] = ent
+
+    return CalcPlan(plan.tool, plan.workflow_id, params, missing, assumptions)
+
+
 def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     """Map a chat message to a calculator plan, or None when not a calc ask.
 
@@ -646,6 +789,10 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
     """
     text = (message or "").strip()
     if not text or _INFO_ONLY_RE.search(text) or re.search(r"^\s*who\b", text, re.IGNORECASE):
+        return None
+    if is_explanation_question(text):
+        return None
+    if _SCENARIO_PLANNER_BYPASS_RE.search(_collapse_ws(text)):
         return None
     if (
         re.search(r"\b(?:example|in\s+theory|theoretically|explain\b|how\s+is\b.*\b(?:determined|defined|accounted))\b", text, re.IGNORECASE)
