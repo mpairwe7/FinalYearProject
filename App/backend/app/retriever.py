@@ -1837,24 +1837,35 @@ class HybridRetriever:
 
     # -- Grounding helpers ---------------------------------------------------
     @staticmethod
-    def compute_faithfulness(answer: str, contexts: list[str]) -> float:
+    def compute_faithfulness(
+        answer: str,
+        contexts: list[str],
+        verified_facts: str = "",
+    ) -> float:
         """Fraction of factual answer sentences grounded in the contexts.
 
         Lightweight runtime proxy for the RAGAS faithfulness metric: a
         sentence counts as grounded when >=50 % of its content tokens
-        (stopwords removed) appear in the retrieved contexts. Courtesy
-        sentences — greetings, empathy acknowledgments, contact footers,
-        follow-up suggestions (see text_signals.is_courtesy_sentence) —
-        carry no factual claims and are excluded from both sides of the
-        ratio, so polite phrasing never reads as hallucination. An answer
-        left with no factual sentences asserts nothing and scores 1.0;
-        the courtesy filter never matches sentences carrying figures, so
-        fabricated rates/amounts/deadlines still drive the score down.
+        (stopwords removed) appear in the retrieved contexts and it has no
+        directional polarity conflict against the supporting passages or
+        verified facts (Phase G.1). Courtesy sentences — greetings, empathy
+        acknowledgments, contact footers, follow-up suggestions (see
+        text_signals.is_courtesy_sentence) — carry no factual claims and are
+        excluded from both sides of the ratio, so polite phrasing never reads
+        as hallucination. An answer left with no factual sentences asserts
+        nothing and scores 1.0; the courtesy filter never matches sentences
+        carrying figures, so fabricated rates/amounts/deadlines still drive
+        the score down.
         """
-        if not answer or not contexts:
+        if not answer or (not contexts and not verified_facts):
             return 0.0
 
-        ctx_tokens = content_tokens(" ".join(contexts))
+        from .claim_polarity import polarity_conflicts
+
+        all_refs = list(contexts or [])
+        if verified_facts:
+            all_refs.append(verified_facts)
+        ctx_tokens = content_tokens(" ".join(all_refs))
         grounded = 0
         scoreable = 0
         for sent in split_sentences(answer):
@@ -1864,6 +1875,9 @@ class HybridRetriever:
             if len(sent_tokens) < 2:
                 continue
             scoreable += 1
+            if polarity_conflicts(sent, contexts, verified_facts):
+                # Directional inversion against supporting passage/fact -> ungrounded
+                continue
             if len(sent_tokens & ctx_tokens) / len(sent_tokens) >= 0.5:
                 grounded += 1
 

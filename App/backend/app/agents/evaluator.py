@@ -239,6 +239,198 @@ def verify_rate_currency(answer: str, effective_year: str) -> bool | None:
     return any(token and token in haystack for token in tokens)
 
 
+# ---------------------------------------------------------------------------
+# Phase G.2: Tool-backed figure lock & unverified sentence stripping
+# ---------------------------------------------------------------------------
+_FIGURE_LOCK_TOLERANCE = 0.005  # ±0.5% tolerance (e.g. 7,725,500 == 7.73m)
+_DAY_COUNT_RE = re.compile(r"\b(\d{1,3})[-\s]days?\b", re.IGNORECASE)
+_PHONE_SCRUB_RE = re.compile(r"\b(?:0800\s?117\s?000|0800\s?217\s?000|0772\s?140\s?000)\b")
+_CONDITIONAL_LABEL_RE = re.compile(r"\b(?:conditional|unverified|provisional|if\s+confirmed)\b", re.IGNORECASE)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+
+def _extract_locked_numbers(text: str) -> tuple[set[float], set[float], set[int]]:
+    """Extract (money_or_band_amounts, percentages_as_0_to_100, day_counts) from *text*."""
+    cleaned = _PHONE_SCRUB_RE.sub(" ", _CITATION_MARKER_RE.sub(" ", text or ""))
+    money_vals = {float(v) for v in canonical_amounts(cleaned) if abs(float(v)) >= MIN_VERIFIABLE_AMOUNT}
+    pct_vals: set[float] = set()
+    for p in percentages(cleaned):
+        try:
+            pct_vals.add(float(p))
+        except ValueError:
+            pass
+    day_vals = {int(m.group(1)) for m in _DAY_COUNT_RE.finditer(cleaned)}
+    return money_vals, pct_vals, day_vals
+
+
+def _collect_tool_numbers(obj: Any, money_out: set[float], pct_out: set[float], days_out: set[int]) -> None:
+    if isinstance(obj, bool) or obj is None:
+        return
+    if isinstance(obj, (int, float)):
+        val = float(obj)
+        if 0.0 < abs(val) <= 1.0:
+            pct_out.add(round(val * 100.0, 4))
+        if abs(val) >= MIN_VERIFIABLE_AMOUNT:
+            money_out.add(val)
+        elif 1 <= int(val) <= 366 and float(int(val)) == val:
+            days_out.add(int(val))
+        return
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k in ("paye_conditional", "annual_paye_conditional", "chargeable_monthly_conditional"):
+                continue
+            _collect_tool_numbers(v, money_out, pct_out, days_out)
+    elif isinstance(obj, (list, tuple)):
+        for item in obj:
+            _collect_tool_numbers(item, money_out, pct_out, days_out)
+
+
+def verify_figure_lock(
+    answer: str,
+    *,
+    query: str = "",
+    verified_facts: str = "",
+    passages: list[str] | None = None,
+    tool_outputs: list[dict[str, Any]] | None = None,
+) -> tuple[bool, list[str], dict[str, Any]]:
+    """Verify every money amount, percentage, day count, and band edge in *answer* (§9.G.2).
+
+    Allowed sources: ``tool_outputs ∪ verified_facts ∪ query ∪ passages``.
+    Conditional figures (labelled ``conditional on unverified`` in ``verified_facts``
+    or ``paye_conditional`` in ``tool_outputs``) are permitted only in sentences
+    that explicitly label them conditional/unverified.
+    """
+    if not answer or not answer.strip():
+        return True, [], {"offending_figures": []}
+
+    allowed_money: set[float] = set()
+    allowed_pcts: set[float] = set()
+    allowed_days: set[int] = set()
+    conditional_money: set[float] = set()
+
+    # 1. User query and retrieved passages
+    for src_text in [query, *(passages or [])]:
+        if src_text:
+            m_set, p_set, d_set = _extract_locked_numbers(src_text)
+            allowed_money |= m_set
+            allowed_pcts |= p_set
+            allowed_days |= d_set
+
+    # 2. Verified facts block (splitting conditional lines from verified lines)
+    if verified_facts:
+        for line in verified_facts.splitlines():
+            m_set, p_set, d_set = _extract_locked_numbers(line)
+            if _CONDITIONAL_LABEL_RE.search(line):
+                conditional_money |= m_set
+            else:
+                allowed_money |= m_set
+            allowed_pcts |= p_set
+            allowed_days |= d_set
+
+    # 3. Structured tool outputs
+    for t_out in tool_outputs or []:
+        if isinstance(t_out, dict):
+            _collect_tool_numbers(t_out, allowed_money, allowed_pcts, allowed_days)
+            if t_out.get("unverified_benefits"):
+                for ck in ("paye_conditional", "annual_paye_conditional", "chargeable_monthly_conditional"):
+                    c_val = t_out.get(ck)
+                    if isinstance(c_val, (int, float)) and abs(float(c_val)) >= MIN_VERIFIABLE_AMOUNT:
+                        conditional_money.add(float(c_val))
+
+    if not allowed_money and not allowed_pcts and not allowed_days and not conditional_money:
+        return True, [], {"offending_figures": [], "skipped": "no reference figures in context"}
+
+    def _money_matches(val: float, pool: set[float]) -> bool:
+        return any(
+            abs(val - ref) / max(abs(ref), 1.0) <= _FIGURE_LOCK_TOLERANCE
+            for ref in pool
+        )
+
+    def _pct_matches(val: float, pool: set[float]) -> bool:
+        return any(abs(val - ref) <= max(abs(ref) * _FIGURE_LOCK_TOLERANCE, 0.05) for ref in pool)
+
+    offending: list[str] = []
+    for sent in _SENTENCE_SPLIT_RE.split(answer):
+        if not sent.strip():
+            continue
+        s_money, s_pcts, s_days = _extract_locked_numbers(sent)
+        is_cond_labelled = bool(_CONDITIONAL_LABEL_RE.search(sent))
+        effective_money_pool = allowed_money | (conditional_money if is_cond_labelled else set())
+
+        for m_val in sorted(s_money):
+            if allowed_money or conditional_money:
+                if not _money_matches(m_val, effective_money_pool):
+                    formatted = f"UGX {m_val:,.0f}" if m_val == int(m_val) else f"UGX {m_val:,.2f}"
+                    if formatted not in offending:
+                        offending.append(formatted)
+
+        for p_val in sorted(s_pcts):
+            if allowed_pcts and not _pct_matches(p_val, allowed_pcts):
+                formatted_p = f"{p_val:g}%"
+                if formatted_p not in offending:
+                    offending.append(formatted_p)
+
+        for d_val in sorted(s_days):
+            if allowed_days and d_val not in allowed_days:
+                formatted_d = f"{d_val} days"
+                if formatted_d not in offending:
+                    offending.append(formatted_d)
+
+    return (
+        len(offending) == 0,
+        offending,
+        {"offending_figures": offending, "allowed_money_count": len(allowed_money)},
+    )
+
+
+def strip_unverified_figure_sentences(answer: str, offending_figures: list[str]) -> str:
+    """Remove sentences containing *offending_figures* and append the URA verification note (§9.G.2)."""
+    if not answer or not offending_figures:
+        return answer
+
+    offending_money: set[float] = set()
+    offending_pcts: set[float] = set()
+    offending_days: set[int] = set()
+    for item in offending_figures:
+        m_s, p_s, d_s = _extract_locked_numbers(item)
+        offending_money |= m_s
+        offending_pcts |= p_s
+        offending_days |= d_s
+
+    kept_lines: list[str] = []
+    removed_any = False
+    for line in answer.splitlines():
+        sentences = _SENTENCE_SPLIT_RE.split(line)
+        kept_sents: list[str] = []
+        for s in sentences:
+            if not s.strip():
+                continue
+            sm, sp, sd = _extract_locked_numbers(s)
+            has_bad_money = any(
+                any(abs(v - bad) / max(abs(bad), 1.0) <= _FIGURE_LOCK_TOLERANCE for bad in offending_money)
+                for v in sm
+            )
+            has_bad_pct = any(
+                any(abs(v - bad) <= 0.05 for bad in offending_pcts)
+                for v in sp
+            )
+            has_bad_day = bool(sd & offending_days)
+            if has_bad_money or has_bad_pct or has_bad_day:
+                removed_any = True
+            else:
+                kept_sents.append(s)
+        if kept_sents:
+            kept_lines.append(" ".join(kept_sents))
+        elif not line.strip():
+            kept_lines.append("")
+
+    cleaned = "\n".join(kept_lines).strip()
+    note = "Some figures could not be verified; please confirm with URA."
+    if removed_any or note not in cleaned:
+        cleaned = f"{cleaned}\n\n{note}".strip() if cleaned else note
+    return cleaned
+
+
 def evaluate(
     query: str,
     answer: str,
@@ -247,6 +439,9 @@ def evaluate(
     effective_year: str = "",
     faithfulness: float | None = None,
     faithfulness_floor: float = 0.50,
+    verified_facts: str = "",
+    passages: list[str] | None = None,
+    tool_outputs: list[dict[str, Any]] | None = None,
 ) -> Verdict:
     """Run the deterministic checks over a draft answer.
 
@@ -268,6 +463,21 @@ def evaluate(
             numerically_consistent = verdict
     else:
         unverified.append("numerically_consistent")
+
+    if verified_facts or passages or tool_outputs:
+        lock_ok, offending_figs, lock_detail = verify_figure_lock(
+            answer,
+            query=query,
+            verified_facts=verified_facts,
+            passages=passages,
+            tool_outputs=tool_outputs,
+        )
+        detail["figure_lock"] = lock_detail
+        if "numerically_consistent" in unverified and not lock_detail.get("skipped"):
+            unverified.remove("numerically_consistent")
+        if not lock_ok:
+            numerically_consistent = False
+            detail["offending_figures"] = offending_figs
 
     cites_year = verify_rate_currency(answer, effective_year)
     if cites_year is None:
@@ -322,7 +532,14 @@ def _note(numeric_ok: bool, year_ok: bool, grounded: bool, detail: dict[str, Any
                     f"returned {items_str}; use these numbers, not ones of your own."
                 )
         else:
-            notes.append("Call the calculator and state the figure it returns.")
+            offending = detail.get("offending_figures") or []
+            if offending:
+                notes.append(
+                    f"Remove or replace unverified figures ({', '.join(offending)}) "
+                    "using only figures from the verified facts block and cited passages."
+                )
+            else:
+                notes.append("Call the calculator and state the figure it returns.")
     if not year_ok:
         notes.append("Name the fiscal year the rate applies to; rates change on 1 July.")
     if not grounded:

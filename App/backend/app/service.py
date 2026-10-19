@@ -5084,8 +5084,13 @@ class ChatModel:
         unsupported_claims: list[dict[str, Any]],
         passages: list[dict[str, Any]],
         locale: str = "en",
+        *,
+        endpoint: Any = None,
+        verified_facts: str = "",
+        offending_figures: list[str] | None = None,
+        timeout_s: float = 60.0,
     ) -> str:
-        """Trigger a bounded reflection call to revise draft reply using retrieved passages."""
+        """Trigger a bounded reflection call on the same tier's endpoint to revise draft reply."""
         try:
             from . import llm
             if not hasattr(llm, "LLM_BACKEND") or (llm.LLM_BACKEND != "vllm" and not llm.is_available()):
@@ -5094,30 +5099,46 @@ class ChatModel:
             unsupported_text = "\n".join(
                 f"- {c.get('text', '')}" for c in unsupported_claims if isinstance(c, dict) and c.get("text")
             )
+            if offending_figures:
+                offending_line = f"- Offending unverified figures that MUST be removed or replaced: {', '.join(offending_figures)}"
+                unsupported_text = f"{offending_line}\n{unsupported_text}".strip()
             passages_text = "\n\n".join(
                 f"[{i+1}] {p.get('text') or p.get('answer', '')}"
                 for i, p in enumerate(passages[:4])
+            )
+            verified_section = (
+                f"\n\nVerified Statutory Facts & Calculations (use verbatim):\n{verified_facts.strip()}\n"
+                if verified_facts and verified_facts.strip()
+                else ""
             )
             prompt = (
                 f"You are the URA Taxpayer Assistant revising an earlier draft response.\n"
                 f"User Question: {query}\n\n"
                 f"Draft Response:\n{draft_reply}\n\n"
-                f"The following statements in the draft were flagged as weakly supported or ungrounded:\n"
-                f"{unsupported_text or 'Some claims lacked citations or direct statutory grounding.'}\n\n"
+                f"The following statements or figures in the draft were flagged as weakly supported, polarity-inverted, or ungrounded:\n"
+                f"{unsupported_text or 'Some claims lacked citations or direct statutory grounding.'}\n"
+                f"{verified_section}\n"
                 f"Official Grounding Passages:\n{passages_text}\n\n"
                 f"Instructions:\n"
-                f"1. Revise the draft response so that EVERY factual statement is strictly supported by the passages above with [1], [2] citations.\n"
-                f"2. Remove any speculation or ungrounded formulas.\n"
+                f"1. Revise the draft response so that EVERY factual statement and figure is strictly supported by the Verified Statutory Facts block or the passages above with [1], [2] citations.\n"
+                f"2. Remove any speculation, unverified numbers, or inverted directional claims.\n"
                 f"3. If the official passages do NOT contain the exact rule requested, explicitly state the statutory boundary and advise the taxpayer to consult URA directly (https://ura.go.ug or toll-free 0800 117 000 / 0800 217 000).\n"
                 f"4. Do NOT dump disconnected FAQ bullets or unrelated topics.\n"
                 f"Return ONLY the revised response text."
             )
             messages = [
-                {"role": "system", "content": "You are a professional URA tax legal editor ensuring 100% factual grounding."},
+                {"role": "system", "content": "You are a professional URA tax legal editor ensuring 100% factual and numeric grounding."},
                 {"role": "user", "content": prompt},
             ]
             if llm.LLM_BACKEND == "vllm":
-                revised = llm._vllm_generate(messages, max_tokens=1024, temperature=0.1, timeout=60.0)
+                vllm_kwargs: dict[str, Any] = {
+                    "max_tokens": 1024,
+                    "temperature": 0.1,
+                    "timeout": timeout_s,
+                }
+                if endpoint is not None:
+                    vllm_kwargs["endpoint"] = endpoint
+                revised = llm._vllm_generate(messages, **vllm_kwargs)
             else:
                 # Query has been pre-sanitized by InputGuard.check() in ChatModel
                 revised = llm.generate(prompt, passages=[], conversation_history=None, locale=locale)  # nosemgrep: ura-llm01-raw-user-input-to-llm
@@ -6984,6 +7005,8 @@ class ChatModel:
         escalation_reason: str,
         claim_report: dict[str, Any] | None = None,
         locale: str = "en",
+        endpoint: Any = None,
+        verified_facts: str = "",
     ) -> dict[str, Any]:
         """Classify the draft reply as approve / revise / escalate."""
         reasons: list[str] = []
@@ -7024,13 +7047,22 @@ class ChatModel:
 
         if claim_report:
             claim_decision = str(claim_report.get("decision", "approve"))
-            if claim_report.get("contradicted_claims"):
-                decision = "escalate"
-                reasons.append("claim verification found contradicted factual claims")
+            contradicted_list = claim_report.get("contradicted_claims") or []
+            if contradicted_list:
+                only_polarity = all(
+                    isinstance(c, dict) and c.get("kind") == "polarity_conflict"
+                    for c in contradicted_list
+                )
+                if only_polarity and decision != "escalate":
+                    decision = "revise"
+                    reasons.append("claim verification found directional polarity conflict")
+                else:
+                    decision = "escalate"
+                    reasons.append("claim verification found contradicted factual claims")
             elif claim_decision in ("escalate", "revise") and decision != "escalate":
                 # User-scenario mathematical calculations: intermediate and resulting figures
                 # computed from user amounts are valid arithmetic applications, not unsupported statutory claims.
-                if has_money_amount(message) and not claim_report.get("contradicted_claims"):
+                if has_money_amount(message) and not contradicted_list:
                     decision = "approve"
                     reasons.append("approved user-scenario calculation draft")
                 elif claim_report.get("unsupported_claims"):
@@ -7049,9 +7081,15 @@ class ChatModel:
                 unsupported_claims=claim_report.get("unsupported_claims", []) if isinstance(claim_report, dict) else [],
                 passages=hits,
                 locale=locale,
+                endpoint=endpoint,
+                verified_facts=verified_facts,
             )
-            # If the user presented specific figures, do not overwrite them with canned FAQ text
-            if not revised_reply and not has_money_amount(message):
+            active_facts = _ACTIVE_CASE_FACTS.get()
+            carries_user_figures = has_money_amount(message) or bool(
+                active_facts is not None and getattr(active_facts, "amounts", None)
+            )
+            # Never overwrite user-figure scenarios with canned FAQ text (§9.G.2)
+            if not revised_reply and not carries_user_figures:
                 revised_reply = self._build_grounded_revision(hits, citations, message)
             if not revised_reply:
                 if reply and not (claim_report or {}).get("contradicted_claims"):
@@ -11422,22 +11460,23 @@ class ChatModel:
                     if reflect_fired:
                         trace_ctx["self_reflected"] = True
 
-            # 7c. Deterministic verification of money answers.
-            #
-            #     Self-reflection above is a model grading its own output
-            #     against a faithfulness score; it catches ungrounded
-            #     prose and misses arithmetic. Whether a figure is right
-            #     is not a judgement call, so this re-derives it through
-            #     the same calculator the agent would have used and
-            #     compares it against what the reply actually printed.
-            #     No model, no tokens — and it can reject on its own.
-            if flags.is_enabled("evaluator_optimizer") and reply:
+            # 7c. Deterministic verification of money answers & Phase G.2 figure lock.
+            verified_facts_block = _evaluate_calculation_context(
+                router_rewritten or router_message or message
+            )
+            run_eval_opt = (
+                flags.is_enabled("evaluator_optimizer")
+                or trace_ctx.get("model_tier") == ModelTier.T3.value
+            )
+            if run_eval_opt and reply:
                 with trace_stage("numeric_verification", timings=timings):
                     verdict = evaluate(
                         rewritten,
                         reply,
                         call_tool=self._recompute_for_verification,
                         faithfulness=faithfulness_score,
+                        verified_facts=verified_facts_block if flags.is_enabled("evaluator_optimizer") else "",
+                        passages=contexts if flags.is_enabled("evaluator_optimizer") else None,
                     )
                 trace_ctx["numeric_verification"] = {
                     "accepted": verdict.accepted,
@@ -11445,50 +11484,22 @@ class ChatModel:
                     "unverified": list(verdict.unverified),
                 }
                 if not verdict.numerically_consistent:
-                    # A figure that disagrees with its own calculator is
-                    # the one error a taxpayer will act on.
                     logger.warning(
                         "numeric verification rejected the reply: %s",
-                        verdict.detail.get("money", {}).get("reason", ""),
+                        verdict.detail.get("money", {}).get("reason", "")
+                        or verdict.detail.get("offending_figures", ""),
                     )
                     metrics.inc("numeric_verification_rejected_total")
 
-                    # 7d. One bounded revision.
-                    #
-                    #     The evaluator knows the right figure — it just
-                    #     recomputed it — so the revision is told what to
-                    #     state rather than asked to think again. That is
-                    #     the difference between an optimizer and a retry:
-                    #     a critique the reviser has to interpret is a
-                    #     second chance to get it wrong.
-                    #
-                    #     Budgeted at one, on money-bearing turns only.
-                    #     Unbounded critique-revise is a cost incident
-                    #     with a quality story attached.
                     budget = RevisionBudget()
                     allowed, why = budget.may_revise(
                         carries_money=True, escalation_bound=False
                     )
+                    offending_figs = list(verdict.detail.get("offending_figures") or [])
                     if allowed and self._llm_available:
                         with trace_stage("numeric_revision", timings=timings):
-                            num_rev_kwargs: dict[str, Any] = {
-                                "query": (
-                                    f"{verdict.revision_note}\n\n"
-                                    f"Rewrite the answer below so it states that "
-                                    f"figure, keeping its citations and its "
-                                    f"structure. Change nothing else.\n\n"
-                                    f"Answer:\n{reply}\n\n"
-                                    f"Question: {rewritten}"
-                                ),
-                                "passages": hits,
-                                "conversation_history": conversation_history or None,
-                                "locale": locale,
-                                "personalization_context": (personalization or {}).get(
-                                    "prompt_context", ""
-                                ),
-                                "tone_hint": tone_hint,
-                            }
-                            if tiering_enabled:
+                            rev_ep = turn_endpoint
+                            if rev_ep is None and tiering_enabled:
                                 rev_decision = select_tier(
                                     route_decision.route.value if route_decision is not None else "rag",
                                     query=rewritten,
@@ -11496,9 +11507,40 @@ class ChatModel:
                                     evaluator_rejected=True,
                                     enabled=True,
                                 )
-                                if rev_decision.endpoint is not None:
-                                    num_rev_kwargs["endpoint"] = rev_decision.endpoint
-                            revised = _call_llm_with_deadline(**num_rev_kwargs)
+                                rev_ep = rev_decision.endpoint
+                            if offending_figs:
+                                revised = self._reflect_llm(
+                                    query=rewritten,
+                                    draft_reply=reply,
+                                    unsupported_claims=[],
+                                    passages=hits,
+                                    locale=locale,
+                                    endpoint=rev_ep,
+                                    verified_facts=verified_facts_block,
+                                    offending_figures=offending_figs,
+                                    timeout_s=60.0,
+                                )
+                            else:
+                                num_rev_kwargs: dict[str, Any] = {
+                                    "query": (
+                                        f"{verdict.revision_note}\n\n"
+                                        f"Rewrite the answer below so it states that "
+                                        f"figure, keeping its citations and its "
+                                        f"structure. Change nothing else.\n\n"
+                                        f"Answer:\n{reply}\n\n"
+                                        f"Question: {rewritten}"
+                                    ),
+                                    "passages": hits,
+                                    "conversation_history": conversation_history or None,
+                                    "locale": locale,
+                                    "personalization_context": (personalization or {}).get(
+                                        "prompt_context", ""
+                                    ),
+                                    "tone_hint": tone_hint,
+                                }
+                                if rev_ep is not None:
+                                    num_rev_kwargs["endpoint"] = rev_ep
+                                revised = _call_llm_with_deadline(**num_rev_kwargs)
                             budget.spend()
                         if revised:
                             candidate = self._output_guard.sanitize(
@@ -11507,15 +11549,13 @@ class ChatModel:
                             candidate = self._output_guard.check_prompt_leakage(
                                 candidate
                             ).sanitized_text
-                            # Re-verify. A revision that did not fix the
-                            # figure must not be published just because it
-                            # is newer — the budget is spent either way,
-                            # so the only question is which text is right.
                             recheck = evaluate(
                                 rewritten,
                                 candidate,
                                 call_tool=self._recompute_for_verification,
                                 faithfulness=faithfulness_score,
+                                verified_facts=verified_facts_block if flags.is_enabled("evaluator_optimizer") else "",
+                                passages=contexts if flags.is_enabled("evaluator_optimizer") else None,
                             )
                             trace_ctx["numeric_revision"] = {
                                 "attempted": True,
@@ -11532,11 +11572,26 @@ class ChatModel:
                                 metrics.inc("numeric_revision_fixed_total")
                             else:
                                 metrics.inc("numeric_revision_failed_total")
+                                if offending_figs:
+                                    from .agents.evaluator import strip_unverified_figure_sentences
+
+                                    rem_offending = list(
+                                        recheck.detail.get("offending_figures") or offending_figs
+                                    )
+                                    reply = strip_unverified_figure_sentences(candidate, rem_offending)
+                        elif offending_figs:
+                            from .agents.evaluator import strip_unverified_figure_sentences
+
+                            reply = strip_unverified_figure_sentences(reply, offending_figs)
                     else:
                         trace_ctx["numeric_revision"] = {
                             "attempted": False,
                             "reason": why if not allowed else "llm unavailable",
                         }
+                        if offending_figs:
+                            from .agents.evaluator import strip_unverified_figure_sentences
+
+                            reply = strip_unverified_figure_sentences(reply, offending_figs)
 
             # 8. Escalation check
             if connector_intent is not None or (agentic_used_tools and not hits):
@@ -11597,6 +11652,8 @@ class ChatModel:
                     escalation_reason=esc_reason,
                     claim_report=claim_report,
                     locale=locale,
+                    endpoint=turn_endpoint,
+                    verified_facts=verified_facts_block,
                 )
             # The report the judge acted on is the draft's; see the identical
             # note in _apply_output_guards. This branch is the non-streaming
