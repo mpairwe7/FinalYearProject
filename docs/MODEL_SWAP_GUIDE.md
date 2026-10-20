@@ -52,8 +52,9 @@ against the local in-process Transformers+BitsAndBytes path. See §1.
 
 | Model | Params | MMLU | License | VRAM | Context | Notes |
 |-------|--------|------|---------|------|---------|-------|
-| **Sunbird/Sunflower-Qwen3.5-9B** (default) | 9B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~9.5 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 65K–262K (native `max_position_embeddings: 262144` without YaRN) | Sunflower V2 built on Qwen3.5-9B; continued pretraining + SFT + GRPO across **67 African languages** + English (`enable_thinking=False` recommended). Served via `vllm serve Sunbird/Sunflower-Qwen3.5-9B --quantization fp8 --kv-cache-dtype fp8 --dtype auto --max-model-len 262144 --gpu-memory-utilization 0.90 --max-num-seqs 12`. Replaced `Sunbird/Sunflower-14B-FP8` in the local HF cache on 2026-10-15. |
-| **Sunbird/Sunflower-Qwen3.8-27B** (high-capacity option) | 27B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~27 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 128K–262K (native `max_position_embeddings: 262144`) | Larger Sunflower V2 sibling; uses the identical vLLM on-the-fly FP8 + FP8 KV-cache serving recipe (`SUNFLOWER_MODEL=Sunbird/Sunflower-Qwen3.8-27B`). |
+| **Sunbird/Sunflower-Qwen3.5-9B** (default T1) | 9B (FP8 on-the-fly) | n/a (67 African languages) | Apache-2.0 | ~9.5 GB weights (vLLM `--quantization fp8 --kv-cache-dtype fp8`) | 65K–262K (native `max_position_embeddings: 262144` without YaRN) | Sunflower V2 built on Qwen3.5-9B; continued pretraining + SFT + GRPO across **67 African languages** + English (`enable_thinking=False` recommended). Served via `vllm serve Sunbird/Sunflower-Qwen3.5-9B --quantization fp8 --kv-cache-dtype fp8 --dtype auto --max-model-len 262144 --gpu-memory-utilization 0.90 --max-num-seqs 12`. Replaced `Sunbird/Sunflower-14B-FP8` in the local HF cache on 2026-10-15. |
+| **Qwen/Qwen3.8-27B-FP8** (default T2/T3 reasoner) | 27.8B dense (pre-quantized FP8) | — | Apache-2.0 | ~29 GB weights + ~13 GB FP8 KV cache (~42.3 GB total on GPU 7) | 65,536 (`REASONER_MAX_MODEL_LEN=65536`) | Selected in Phase B bake-off (`docs/Reports/reasoner-bakeoff-2026-10.md`: `73.23/100` vs `61.25/100` on Sunflower-9B, `100%` `15/15` tool-calling accuracy). Served via `App/docker-compose.reasoner.yml` on GPU 7 (`127.0.0.1:8012:8001`) with `--tool-call-parser qwen3_coder --reasoning-parser qwen3` and `REASONER_THINKING=false`. |
+| **Sunbird/Sunflower-Qwen3.8-27B** (high-capacity BF16 option) | 27B (50.97 GiB BF16 checkpoint) | n/a (67 African languages) | Apache-2.0 | ~44.8 GB (requires non-Marlin FP8 or TP=2) | 65K–262K | Scored `71.60/100` in Phase B bake-off; note that stock vLLM `v0.17.1` `--quantization fp8` on Ampere (RTX A6000) hits `RuntimeError: size_n = 96 is not divisible by tile_n_size = 64` in `gptq_marlin_repack` on `linear_attn.in_proj_ba` unless pre-quantized or served across 2 GPUs in BF16 (see `G223`). |
 | Qwen/Qwen3-8B (previous default; simple/no-vLLM fallback) | 8B | 74.7 | Apache-2.0 | 16 GB | 128K | `llm.py`'s own code-level default when `LLM_MODEL` is unset entirely; ungated; hybrid thinking mode. The one path the lg/sw/nyn/ach LoRA adapters (`fine-tuning/adapters/`) apply to — they are trained against this base and loaded via `set_adapter()`, only on `LLM_BACKEND=local`. |
 | Qwen/Qwen3-30B-A3B | 30B (3B active) | 81.4 | Apache-2.0 | 18 GB | 128K | MoE — 30B quality at 3B cost; needs vLLM/SGLang |
 | Qwen/Qwen3-4B | 4B | ~68 | Apache-2.0 | 8 GB | 128K | Matches Qwen2.5-7B; fits small GPUs |
@@ -80,6 +81,19 @@ LLM_MODEL=Qwen/Qwen3-4B LLM_CONTEXT_WINDOW=8192
 
 # Legacy (rollback)
 LLM_MODEL=Qwen/Qwen2.5-3B-Instruct LLM_CONTEXT_WINDOW=6144
+
+# Swapping the T2/T3 Reasoner tier (App/docker-compose.reasoner.yml on GPU 7)
+REASONER_BASE_URL=http://vllm-reasoner:8001/v1
+REASONER_MODEL=Qwen/Qwen3.8-27B-FP8
+REASONER_LOCAL_MODEL_DIR=/mnt/nas1/caches/huggingface_cache/hub/models--Qwen--Qwen3.8-27B-FP8/snapshots/017b9c7af6b5689d5dd426a76e0bc077eb5ca20a
+REASONER_GPU_ID=7
+REASONER_THINKING=false
+REASONER_MAX_TOKENS=768
+REASONER_DEADLINE_S=90
+REASONER_MAX_SHARE=0.25
+FLAG_MODEL_TIERING=true
+# Benchmark a candidate T3 model before swapping:
+# PYTHONPATH=App/backend:. python3 scripts/bakeoff_reasoner.py --base-url http://127.0.0.1:8021/v1 --model <Model-ID>
 ```
 
 No code changes needed — the `LLM_MODEL` env var controls everything. For

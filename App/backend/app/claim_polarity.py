@@ -363,6 +363,16 @@ def polarity_conflicts(
         best_same = 0.0
         best_opposite: tuple[float, str, str, list[str]] | None = None
 
+        vf_list = _iter_reference_sentences(None, verified_facts)
+        if vf_list:
+            for vf_ref in vf_list:
+                vr_pole, _ = _sentence_pole(vf_ref.lower(), pair)
+                if vr_pole == s_pole:
+                    vf_subj = _subject_tokens(vf_ref)
+                    vf_score = _overlap(vf_subj)
+                    if len(sent_subj & vf_subj) >= 3 and vf_score >= 0.75:
+                        best_same = max(best_same, min(1.0, vf_score + 0.15))
+
         for ref in ref_sentences:
             ref_low = ref.lower()
             r_pole, r_cue = _sentence_pole(ref_low, pair)

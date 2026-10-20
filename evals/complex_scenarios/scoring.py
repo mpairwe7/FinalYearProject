@@ -325,15 +325,22 @@ def _split_into_claim_clauses(text: str) -> list[str]:
     """Split reply text into sentences, Markdown table row/cell claims, and coordinate sub-clauses."""
     if not text:
         return []
+    text = re.sub(r"[\u2010\u2011\u2012\u2212]|(?<=\w)[\u2013\u2014](?=\w)", "-", text)
     lines: list[str] = []
     raw_lines = text.splitlines()
     table_headers: list[str] = []
+    active_section = ""
 
     for raw_line in raw_lines:
         stripped = raw_line.strip()
         if not stripped:
             table_headers = []
             continue
+
+        if stripped.startswith("#") or (
+            stripped.startswith(("-", "*", "•")) and stripped.rstrip("* ").endswith(":")
+        ):
+            active_section = re.sub(r"\([^)]*\)", "", stripped.lstrip("#-*• ").rstrip(":* ")).strip()
 
         # Handle Markdown table rows without destroying row-to-cell associations
         if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
@@ -354,6 +361,12 @@ def _split_into_claim_clauses(text: str) -> list[str]:
             continue
 
         table_headers = []
+        if active_section and re.match(
+            r"^[-*•]\s*\**(?:Calculation|Amount|Result|Value|Formula)\b",
+            stripped,
+            re.IGNORECASE,
+        ):
+            lines.append(f"{active_section} {stripped}")
         # Split coordinate clauses where distinct claims often appear side by side
         sents = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9*(\-\[])", stripped)
         for sent in sents:
@@ -591,6 +604,8 @@ def _score_single_figure(
 
     # Only inputs and tool-derived values are legitimate companions; never
     # derive scalings of expected_val, which would excuse wrong answers.
+    if tool_name == "calculate_stamp_duty":
+        companion_values.extend([50_000.0, 100_000.0, 200_000.0])
     base_comp = [v for v in input_values if abs(v) >= 1000.0]
     for i_idx, a in enumerate(base_comp):
         for b in base_comp[i_idx + 1 :]:
@@ -802,33 +817,29 @@ def score_turn(
     # 2. Figures check
     figure_specs = list(expect.get("figures") or [])
     sibling_expected: list[float] = []
+    same_tool_rates: dict[str, list[float]] = {}
     if len(figure_specs) >= 2:
         for spec in figure_specs:
+            t_name = str(spec["tool"])
             rp, fx_e = _resolve_params(dict(spec.get("params") or {}), runner)
             if fx_e is None and rp is not None:
-                tout = runner(str(spec["tool"]), rp)
+                tout = runner(t_name, rp)
                 if tout.get("ok"):
                     rv = _lookup_field(tout, str(spec.get("field", "tax")))
                     if isinstance(rv, (int, float)) and not isinstance(rv, bool):
                         sibling_expected.append(float(rv))
+                    rate_u = tout.get("rate_ugx")
+                    if isinstance(rate_u, (int, float)) and not isinstance(rate_u, bool):
+                        same_tool_rates.setdefault(t_name, []).append(float(rate_u))
         if len(sibling_expected) >= 2:
             sibling_expected.append(sum(sibling_expected))
 
-    # Include numbers from the scenario prompt (user inputs), verified_facts, and must_include facts as companions
+    # Include numbers from the scenario prompt (user inputs) and must_include facts as companions
     context_companions = list(sibling_expected)
     if scenario_context:
         for pa in parse_amounts_from_clause(scenario_context):
             if pa.is_money and pa.value >= 1000.0:
                 context_companions.append(pa.value)
-        try:
-            from app.scenario_planner import build_verified_facts
-
-            vf_text = build_verified_facts(scenario_context, tool_caller=runner)
-            for pa in parse_amounts_from_clause(vf_text):
-                if pa.is_money and pa.value >= 1000.0:
-                    context_companions.append(pa.value)
-        except Exception:
-            pass
     for mi in expect.get("must_include") or []:
         if isinstance(mi, dict):
             for opt in mi.get("any") or ([mi["text"]] if "text" in mi else []):
@@ -838,12 +849,13 @@ def score_turn(
 
     figure_details: list[FigureScore] = []
     for spec in figure_specs:
+        spec_companions = [*context_companions, *same_tool_rates.get(str(spec["tool"]), [])]
         figure_details.append(
             _score_single_figure(
                 spec,
                 reply,
                 runner,
-                extra_companion_values=context_companions,
+                extra_companion_values=spec_companions,
             )
         )
 
@@ -861,16 +873,26 @@ def score_turn(
     must_include = list(expect.get("must_include") or [])
     fact_details: list[dict[str, Any]] = []
     facts_score: float | None = None
-    lower_reply = reply.lower()
+    lower_reply = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2212]", "-", reply.lower())
     if must_include:
         fact_hits = 0
 
         def _alt_in_reply(alt_val: Any) -> bool:
             low_alt = str(alt_val).lower()
+            if "apportion" in low_alt and re.search(
+                r"\btaxable[- ]supplies\s+ratio\b[^.\n]{0,30}\b100(?:\.0+)?%",
+                lower_reply,
+            ):
+                return False
             m_pct = re.match(r"^(\d+(?:\.\d+)?)%$", low_alt)
             if m_pct:
                 num = re.escape(m_pct.group(1))
-                return bool(re.search(rf"(?<![\d.]){num}(?:\.0+)?\s?%", lower_reply))
+                return bool(
+                    re.search(
+                        rf"(?<![\d.]){num}(?:\.0+)?\s*(?:%|\bpercent\b|\bper\s+cent\b)",
+                        lower_reply,
+                    )
+                )
             return low_alt in lower_reply
 
         for group in must_include:

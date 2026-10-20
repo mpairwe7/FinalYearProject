@@ -5154,6 +5154,7 @@ class ChatModel:
                 f"2. Remove any speculation, unverified numbers, or inverted directional claims.\n"
                 f"3. If the official passages do NOT contain the exact rule requested, explicitly state the statutory boundary and advise the taxpayer to consult URA directly (https://ura.go.ug or toll-free 0800 117 000 / 0800 217 000).\n"
                 f"4. Do NOT dump disconnected FAQ bullets or unrelated topics.\n"
+                f"5. Keep the revised response concise (150–250 words maximum; use compact bullets) so it completes in a single pass, and do NOT prefix with 'Revised Response:'.\n"
                 f"Return ONLY the revised response text."
             )
             messages = [

@@ -480,9 +480,19 @@ aibom_inventory:
   schema: "CycloneDX-AIBOM-1.6"
   models:
     - id: "Sunbird/Sunflower-Qwen3.5-9B"
-      role: "Primary multilingual RAG & agentic reasoning LLM (262k native context)"
+      role: "Primary T1 multilingual RAG & vernacular LLM (262k native context)"
+      license: "Apache-2.0"
+      sha: "c56081c5024b1c11186a69898f5f6a7a2dabe454"  # pragma: allowlist secret
+      hosting: "local"
       locales: ["en", "lg", "sw", "nyn", "ach"]
-      runtime: "vLLM (FP8 weights + FP8 KV cache)"
+      runtime: "vLLM (FP8 weights + FP8 KV cache, GPU 4)"
+    - id: "Qwen/Qwen3.8-27B-FP8"
+      role: "T2/T3 sovereign local reasoning & multi-tool tax legal synthesis LLM (65k context)"
+      license: "Apache-2.0"
+      sha: "017b9c7af6b5689d5dd426a76e0bc077eb5ca20a"  # pragma: allowlist secret
+      hosting: "local"
+      locales: ["en"]
+      runtime: "vLLM (pre-quantized FP8 weights + FP8 KV cache, GPU 7, enable_thinking=False)"
     - id: "Sunbird/orpheus-3b-tts-multilingual"
       role: "Primary neural text-to-speech synthesis sidecar"
       locales: ["en", "lg", "sw", "nyn", "ach"]

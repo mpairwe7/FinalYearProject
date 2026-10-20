@@ -12,6 +12,7 @@ This directory contains **Markdown Architectural Decision Records (MADR 4.0)** g
 | [ADR-0004](0004-mcp-security-threat-model-and-ai-governance-2026.md) | MCP Security (OWASP MCP01–10 / SAFE-MCP), MITRE ATLAS v5.x Threat Modeling & AI Governance Synchronization | Accepted | 2026-10-17 | `threat-model/validate_threats.py`, `scripts/validate-risk-register.py`, `governance/compliance_check.py` |
 | [ADR-0005](0005-mcp-mrtr-transport-hardening-and-csa-aicm-maestro.md) | MCP Multi Round-Trip State (MRTR) & HTTP Transport Hardening, 5-Locale Tool-RAG Parity, and CSA AICM v1.1 + MAESTRO 7-Layer Governance | Accepted | 2026-10-17 | `tests/agents/test_mcp_2026_october_audit.py`, `tests/test_monorepo_architecture_governance.py` |
 | [ADR-0006](0006-backend-resilience-security-headers-and-pool-hardening.md) | Backend Setup Hardening — CircuitBreaker Single-Probe HALF_OPEN, Global JSON Payload Ceiling, OWASP REST Security Headers & Graceful Pool Shutdown | Accepted | 2026-10-17 | `App/backend/tests/test_resilience.py`, `tests/agents/test_mcp_2026_october_audit.py` |
+| [ADR-0007](0007-sovereign-local-reasoning-tier-and-code-owned-tax-logic.md) | Sovereign Two-Tier Local Reasoning (`Qwen/Qwen3.8-27B-FP8` + `Sunbird/Sunflower-Qwen3.5-9B`), Code-Owned Tax Scenario Planner & Deterministic Figure Lock | Accepted | 2026-10-20 | `App/backend/tests/test_sovereign_mode.py`, `tests/agents/test_model_endpoints.py`, `tests/agents/test_scenario_planner.py`, `tests/agents/test_polarity_and_figure_lock.py` |
 
 ## Rules
 
