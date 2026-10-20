@@ -21,7 +21,8 @@
 
 | Component | Model | Parameters | Purpose |
 |-----------|-------|------------|---------|
-| **LLM (server)** | Sunbird/Sunflower-Qwen3.5-9B (via vLLM) | 9B (FP8 weights + FP8 KV cache) | Answer generation + tool-calling (Apache-2.0, Qwen3.5-9B arch, 262,144 native context window without YaRN, natively multilingual across 31 Ugandan languages + English, prefix caching + chunked prefill enabled); Sunbird/Sunflower-14B-FP8 and Qwen/Qwen3-8B remain supported (see docs/MODEL_SWAP_GUIDE.md) |
+| **LLM (server — T1 Fast & Vernacular)** | Sunbird/Sunflower-Qwen3.5-9B (via vLLM on GPU 4) | 9B (FP8 weights + FP8 KV cache) | Single-clause RAG generation, greetings, and 5-locale (`en`, `lg`, `sw`, `nyn`, `ach`) generation/translation (Apache-2.0, commit `c56081c5024b1c11186a69898f5f6a7a2dabe454`, 262,144 native context window without YaRN, prefix caching + chunked prefill enabled) |
+| **LLM (server — T2/T3 Reasoning)** | Qwen/Qwen3.8-27B-FP8 (via vLLM on GPU 7, `App/docker-compose.reasoner.yml`) | 27.8B dense (FP8 weights + FP8 KV cache) | Multi-hop statutory legal reasoning, multi-tool tax scenarios, false-premise challenges, and dispute/objection queries (`enable_thinking=False`, `--tool-call-parser qwen3_coder`, Apache-2.0, commit `017b9c7af6b5689d5dd426a76e0bc077eb5ca20a`, 65,536 context window, local-only behind `FLAG_MODEL_TIERING` & `SOVEREIGN_MODE=true`) |
 | **LLM (mobile)** | google/gemma-2-2b-it GGUF Q4_K_M | 2B (quantised) | Offline mobile inference |
 | **Dense Retriever** | BAAI/bge-m3 | 568M | 1024-dim multilingual embeddings (MTEB 63.0) |
 | **Sparse Retriever** | BM25 | N/A | Keyword matching with learnt IDF weights |
@@ -100,6 +101,14 @@ The live English eval file is now **30** rows (`Data/eval/rag_eval.jsonl`), incl
 - Categories: prompt injection, jailbreak, info extraction, PII, harmful content
 - Target: >= 90% block rate per category
 - Tool: `scripts/ai_red_team.py`
+
+### Sovereign Complex Tax Scenario Benchmark (2026-10-20 — `evals/complex_scenarios/`)
+Evaluated across 16 Ugandan tax heads (`paye`, `vat`, `withholding`, `rental`, `corporation`, `capital_gains`, `customs`, `excise`, `stamp_duty`, `objections`, `penalties`, `digital_services`, `gaming_betting`, `advance_tax`, `procedures`, `jurisdiction`) under `SOVEREIGN_MODE=true` (`HF_HUB_OFFLINE=1`, zero external API egress; full report in [`docs/Reports/opus-level-accuracy-results-2026-10.md`](Reports/opus-level-accuracy-results-2026-10.md)):
+
+| Split | Scenarios / Turns | Baseline Mean (`/100`) | Final Mean (`/100`) | Delta (`95% CI`) | Truncated Turns | Unrelated Sector Cites |
+|---|---:|---:|---:|---|---:|---:|
+| **Dev** (`dev.jsonl`) | `30` / `40` | `49.57` | **`99.08`** (`100.0` post-norm) | **`+49.51`** (`[+39.46, +59.82]`) | **`0 (0.0%)`** | **`0.0%`** |
+| **Held-Out** (`heldout.jsonl`) | `75` / `102` | `60.75` | **`77.60`** | **`+16.85`** (`[+10.08, +23.87]`) | **`0 (0.0%)`** | **`2.74%`** |
 
 ---
 

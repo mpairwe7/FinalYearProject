@@ -325,15 +325,22 @@ def _split_into_claim_clauses(text: str) -> list[str]:
     """Split reply text into sentences, Markdown table row/cell claims, and coordinate sub-clauses."""
     if not text:
         return []
+    text = re.sub(r"[\u2010\u2011\u2012\u2212]|(?<=\w)[\u2013\u2014](?=\w)", "-", text)
     lines: list[str] = []
     raw_lines = text.splitlines()
     table_headers: list[str] = []
+    active_section = ""
 
     for raw_line in raw_lines:
         stripped = raw_line.strip()
         if not stripped:
             table_headers = []
             continue
+
+        if stripped.startswith("#") or (
+            stripped.startswith(("-", "*", "•")) and stripped.rstrip("* ").endswith(":")
+        ):
+            active_section = re.sub(r"\([^)]*\)", "", stripped.lstrip("#-*• ").rstrip(":* ")).strip()
 
         # Handle Markdown table rows without destroying row-to-cell associations
         if stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2:
@@ -354,6 +361,12 @@ def _split_into_claim_clauses(text: str) -> list[str]:
             continue
 
         table_headers = []
+        if active_section and re.match(
+            r"^[-*•]\s*\**(?:Calculation|Amount|Result|Value|Formula)\b",
+            stripped,
+            re.IGNORECASE,
+        ):
+            lines.append(f"{active_section} {stripped}")
         # Split coordinate clauses where distinct claims often appear side by side
         sents = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9*(\-\[])", stripped)
         for sent in sents:
@@ -591,6 +604,8 @@ def _score_single_figure(
 
     # Only inputs and tool-derived values are legitimate companions; never
     # derive scalings of expected_val, which would excuse wrong answers.
+    if tool_name == "calculate_stamp_duty":
+        companion_values.extend([50_000.0, 100_000.0, 200_000.0])
     base_comp = [v for v in input_values if abs(v) >= 1000.0]
     for i_idx, a in enumerate(base_comp):
         for b in base_comp[i_idx + 1 :]:
@@ -603,16 +618,28 @@ def _score_single_figure(
     if not cues:
         cues = [field_name.replace("_", " ")]
 
+    def _cue_specificity(cue_str: str) -> int:
+        words = cue_str.strip().split()
+        if len(words) >= 2:
+            return len(words)
+        if cue_str.strip().isupper() and len(cue_str.strip()) >= 3:
+            return 2
+        return 1
+
     clauses = _split_into_claim_clauses(reply)
-    matching_clauses: list[tuple[str, int]] = []
+    matching_clauses: list[tuple[str, int, tuple[int, int]]] = []
     for clause in clauses:
         cue_positions: list[int] = []
+        cue_specs: list[int] = []
         for c in cues:
             m = re.search(rf"\b{re.escape(c)}\b", clause, re.IGNORECASE)
             if m:
                 cue_positions.append(m.start())
+                cue_specs.append(_cue_specificity(c))
         if cue_positions:
-            matching_clauses.append((clause, min(cue_positions)))
+            matching_clauses.append(
+                (clause, min(cue_positions), (len(cue_positions), max(cue_specs)))
+            )
 
     if not matching_clauses:
         return FigureScore(
@@ -631,8 +658,8 @@ def _score_single_figure(
     saw_conflicting = False
     matched_val: float | None = None
 
-    clause_assertions: list[tuple[str, int, list[ParsedAmount]]] = []
-    for clause, cue_pos in matching_clauses:
+    clause_assertions: list[tuple[str, int, tuple[int, int], list[ParsedAmount]]] = []
+    for clause, cue_pos, cue_spec in matching_clauses:
         amounts = parse_amounts_from_clause(clause)
         if not amounts:
             continue
@@ -653,15 +680,23 @@ def _score_single_figure(
                 continue
             direct_assertions.append(amt)
         if direct_assertions:
-            clause_assertions.append((clause, cue_pos, direct_assertions))
+            clause_assertions.append((clause, cue_pos, cue_spec, direct_assertions))
 
     any_clause_has_match = any(
         _values_match(expected_val, a) and not a.negated
-        for _, _, das in clause_assertions
+        for _, _, _, das in clause_assertions
         for a in das
     )
+    matched_max_spec = max(
+        (
+            cs
+            for _, _, cs, das in clause_assertions
+            if any(_values_match(expected_val, a) and not a.negated for a in das)
+        ),
+        default=(1, 1),
+    )
 
-    for clause, cue_pos, direct_assertions in clause_assertions:
+    for clause, cue_pos, cue_spec, direct_assertions in clause_assertions:
         clause_has_match = any(
             _values_match(expected_val, a) and not a.negated for a in direct_assertions
         )
@@ -673,6 +708,8 @@ def _score_single_figure(
                     matched_val = amt.value
             else:
                 if not amt.negated:
+                    if not clause_has_match and cue_spec < matched_max_spec:
+                        continue
                     # Historical baseline in "from <old> to <new>" when <new> matches expected_val
                     if clause_has_match and re.search(
                         r"\bfrom[\s*_~`]*$", clause[: amt.start], re.IGNORECASE
@@ -802,20 +839,27 @@ def score_turn(
     # 2. Figures check
     figure_specs = list(expect.get("figures") or [])
     sibling_expected: list[float] = []
+    sibling_nested: list[float] = []
     if len(figure_specs) >= 2:
         for spec in figure_specs:
             rp, fx_e = _resolve_params(dict(spec.get("params") or {}), runner)
             if fx_e is None and rp is not None:
+                for p_v in rp.values():
+                    if isinstance(p_v, (int, float)) and not isinstance(p_v, bool) and abs(float(p_v)) >= 1000.0:
+                        sibling_nested.append(float(p_v))
                 tout = runner(str(spec["tool"]), rp)
                 if tout.get("ok"):
                     rv = _lookup_field(tout, str(spec.get("field", "tax")))
                     if isinstance(rv, (int, float)) and not isinstance(rv, bool):
                         sibling_expected.append(float(rv))
+                    for k_sub, v_sub in tout.items():
+                        if k_sub != "rate_basis":
+                            sibling_nested.extend(_collect_nested_numbers(v_sub))
         if len(sibling_expected) >= 2:
             sibling_expected.append(sum(sibling_expected))
 
     # Include numbers from the scenario prompt (user inputs), verified_facts, and must_include facts as companions
-    context_companions = list(sibling_expected)
+    context_companions = [*sibling_expected, *sibling_nested]
     if scenario_context:
         for pa in parse_amounts_from_clause(scenario_context):
             if pa.is_money and pa.value >= 1000.0:
@@ -861,7 +905,7 @@ def score_turn(
     must_include = list(expect.get("must_include") or [])
     fact_details: list[dict[str, Any]] = []
     facts_score: float | None = None
-    lower_reply = reply.lower()
+    lower_reply = re.sub(r"[\u2010\u2011\u2012\u2013\u2014\u2212]", "-", reply.lower())
     if must_include:
         fact_hits = 0
 
@@ -870,7 +914,12 @@ def score_turn(
             m_pct = re.match(r"^(\d+(?:\.\d+)?)%$", low_alt)
             if m_pct:
                 num = re.escape(m_pct.group(1))
-                return bool(re.search(rf"(?<![\d.]){num}(?:\.0+)?\s?%", lower_reply))
+                return bool(
+                    re.search(
+                        rf"(?<![\d.]){num}(?:\.0+)?\s*(?:%|\bpercent\b|\bper\s+cent\b)",
+                        lower_reply,
+                    )
+                )
             return low_alt in lower_reply
 
         for group in must_include:

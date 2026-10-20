@@ -846,9 +846,9 @@ def build_verified_facts(
             kind = spec.params.get("kind", "benefit")
             if kind == "car":
                 bullet_lines.append(
-                    "- Car benefit: formula is (20% × A × B/C) − D where A is market value when first provided "
-                    "(depreciated at 35% p.a. reducing balance for subsequent years), B is private-use days, "
-                    "C is days in the year of income (365), and D is employee payment; ADDED to employment income "
+                    "- Car benefit: statutory formula is (20% × A × B/C) − D (20% of market value A when first provided, "
+                    "depreciated at 35% p.a. reducing balance for subsequent years, multiplied by private-use days B / "
+                    "days in the year of income C (365), minus employee payment D; state 20% explicitly); ADDED to employment income "
                     "(basis: TAXATION-HANDBOOK-FY-2025-26-1, s.12.2.3)."
                 )
             elif kind == "housing":

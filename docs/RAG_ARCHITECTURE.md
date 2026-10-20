@@ -919,6 +919,15 @@ answers.
 |---------|---------|--------|
 | `WITHHOLD_CONTRADICTED_CLAIMS` | `true` | Off only to diagnose a suspected false positive |
 
+### Sovereign Two-Tier Reasoning, Scenario Planner & Figure Lock (ADR-0007)
+
+When `FLAG_MODEL_TIERING=true`, `providers/routing.py` (`select_tier`, `ENDPOINTS`) dispatches each turn across two local vLLM endpoints while `SOVEREIGN_MODE=true` (`production_readiness.sovereign_mode_errors`, `SovereignModeViolationError`) guarantees zero external AI API egress:
+
+- **T1 (`Sunbird/Sunflower-Qwen3.5-9B`, `VLLM_BASE_URL`):** Fast single-clause RAG, greetings, local machine translation, and vernacular locales (`lg`, `sw`, `nyn`, `ach` unless `FLAG_REASONER_FOR_TRANSLATED_LOCALES=true`).
+- **T2 / T3 (`Qwen/Qwen3.8-27B-FP8`, `REASONER_BASE_URL`, `enable_thinking=False`):** Multi-hop legal reasoning, multi-tool tax scenarios (`planner_tool_count >= 2`), statutory premise contradictions (`premise_contradiction=True`), and dispute/objection turns. Capped by a rolling 200-turn window (`REASONER_MAX_SHARE=0.25`) and per-turn timeout (`REASONER_DEADLINE_S=90`) with automatic local T1 fallback (`reasoner_fallback_total`).
+- **Code-Owned Tax Scenario Planner (`case_facts.py`, `scenario_planner.py`, `premise_guard.py`):** Extracts conversation-scoped `CaseFacts`, executes deterministic calculators and rule tools (`determine_residency`, `value_benefit_in_kind`, `convert_currency`, `calculate_paye`, `vat_input_claim_eligibility`, `wht_applicability`, `objection_requirements`, `calculate_late_filing_penalty`), runs 8 statutory premise contradiction rules (`check_fact_contradictions`), and injects `## Verified Statutory Facts & Calculations` ahead of retrieved passages in both REST and SSE streaming paths.
+- **Polarity-Aware Faithfulness & Figure Lock (`claim_polarity.py`, `agents/evaluator.py`):** `DIRECTION_LEXICON` (22 opposing tax-law pole pairs) penalizes directional inversions in `compute_faithfulness` and `verify_claims`. `verify_figure_lock` verifies that every money amount, percentage, and day count in the draft reply traces to the user query, `verified_facts`, or retrieved passages, triggering a bounded same-tier `_reflect_llm` revision or sentence strip (`strip_unverified_figure_sentences`).
+
 Eval set: `Data/eval/rag_eval.jsonl` (30 English rows, including `reg-*` regression ids). Keyword self-retrieval gate: `App/backend/tests/test_retrieval_regression_gate.py`. Completeness: `test_eval_set_completeness.py`.
 
 Traceability record: [App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md](../App/docs/traceability/retrieval-agentic-upgrade-2026-08-17.md).

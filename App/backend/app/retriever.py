@@ -1912,7 +1912,13 @@ class HybridRetriever:
                 subject=subject,
                 locale=locale,
             )
-        hits = apply_preference_boost(hits, plan["prefer"])[:top_k]
+        hits = apply_preference_boost(hits, plan["prefer"])
+        if demote_sector and len(hits) > top_k:
+            non_sector = [h for h in hits if not is_sector_guide_source(str(h.get("source") or ""))]
+            sector = [h for h in hits if is_sector_guide_source(str(h.get("source") or ""))]
+            hits = non_sector[:top_k] if len(non_sector) >= 2 else (non_sector + sector)[:top_k]
+        else:
+            hits = hits[:top_k]
         return self._merge_translated_leg(
             query,
             hits,
