@@ -1332,45 +1332,65 @@ _TAX_TYPE_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # Split only on multi-intent markers. A bare "and" is too common
 # ("VAT and PAYE rates" is one comparison, not two searches).
 #
-# Possessive quantifiers (Python 3.11+): \s+ adjacent to alternation here
-# is exactly CodeQL's py/polynomial-redos shape — an adversarial run of
-# whitespace lets the backtracking engine try many equivalent ways to
-# split it across the \s+/\s* boundaries before a match ultimately fails.
-# Making them possessive (\s++, \s*+) is the standard fix: the engine
-# commits to the longest run and never backtracks into it. Verified
-# behavior-identical to the backtracking originals across representative
-# inputs, and empirically fast (µs, not seconds) on adversarial whitespace.
+# ReDoS safety (CodeQL py/polynomial-redos & Python 3.10+ compatibility):
+# Repeating \s* inside each branch of an alternation (e.g. \(\d\)\s*|\([a-d]\)\s*)
+# lets a backtracking engine try multiple equivalent whitespace splits before
+# failing. Factoring a single \s* outside the character-delimited alternation
+# ((?:\(\d+\)|\([a-d]\)|\d+[.)]|[a-d]\))\s*) eliminates intra-alternation
+# whitespace ambiguity while keeping Python 3.10+ regex syntax compatibility.
 # decompose_query() below also runs normalize() before matching, which
-# already collapses whitespace runs to one space — independently removing
-# the long-run precondition these patterns would otherwise need.
+# collapses whitespace runs to one space.
 _DECOMPOSE_SPLIT_RE = re.compile(
     r" (?:and also|as well as|and then) |"
     r";\s*|"
-    r"\? (?=(?:\(\d\)\s*|\([a-d]\)\s*|\d[.)]\s*|[a-d]\)\s*)?(?:what|how|when|where|which|who|is|are|can|could|does|do|will|should|must|calculate|compute|state|explain)\b)",
+    r"\? (?=(?:(?:\(\d+\)|\([a-d]\)|\d+[.)]|[a-d]\))\s*)?(?:what|how|when|where|which|who|is|are|can|could|does|do|will|should|must|calculate|compute|state|explain|determine)\b)|"
+    r"\. (?=(?:\(\d+\)|\([a-d]\)|\d+[.)]|[a-d]\))\s*(?:what|how|when|where|which|who|is|are|can|could|does|do|will|should|must|calculate|compute|state|explain|determine)\b)",
     re.I,
 )
 _AND_QUESTION_RE = re.compile(
     r" and (?=(?:what|how|when|where|which|who)\b)",
     re.I,
 )
+_ENUM_PREFIX_RE = re.compile(
+    r"^\s*(?:\(\d+\)|\([a-d]\)|\d{1,2}[.)](?=\s)|[a-d]\)(?=\s))\s*",
+    re.I,
+)
 
 # Phase G.3: Sector keywords — unless one of these appears in the query, sector-specific
 # guide PDFs are soft-demoted by -0.06 so they do not crowd out the general Taxation Handbook.
+# Ambiguous nouns that also appear in general PAYE BIK / WHT / VAT questions (e.g.
+# "accommodation", "contractor", "bus", "hospital") require sector-qualifying context.
 _SECTOR_QUERY_RE = re.compile(
     r"\b("
-    r"agricultur(?:e|al)|farm(?:ing|ers?)?|crop(?:s)?|livestock|poultry|dairy|"
-    r"hotel(?:s)?|accom+odation|tourism|tourist|hospitality|lodge(?:s)?|guest\s*house|"
+    r"agricultur(?:e|al)\s+(?:sector|input|inputs|produce|loan|equipment|machinery|activity|activities|business)|"
+    r"farm(?:ing|ers?)|crop(?:s)?|livestock|poultry|dairy|"
+    r"hotel(?:s)?|accom+odation\s+sector|tourism|tourist|hospitality|lodge(?:s)?|guest\s*house|"
     r"mining|mineral(?:s)?|quarry|quarrying|gold|cobalt|limestone|"
     r"petroleum|oil\s+and\s+gas|upstream|midstream|pipeline|"
-    r"construction|contractor(?:s)?|building\s+contractor|civil\s+works|"
+    r"construction|building\s+contractor(?:s)?|civil\s+works|"
     r"ngo(?:s)?|non[-\s]?governmental|charity|charities|religious|church|mosque|"
-    r"transport(?:ation)?|passenger\s+service|psv|goods\s+vehicle|haulage|freight|matatu|bus|taxi|"
+    r"transport(?:ation)?|passenger\s+service|psv|goods\s+vehicle|haulage|freight|matatu|bus\s+operator|taxi\s+operator|"
     r"fishing|fish\s+processing|aquaculture|"
     r"manufactur(?:ing|er|ers)|factory|factories|pharmaceutical|"
-    r"wholesale|retail(?:er)?|supermarket|"
-    r"health\s+and\s+medical|hospital(?:s)?|clinic(?:s)?|medical\s+sector|"
+    r"(?:wholesale|retail)\s+(?:sector|trade|business|shop)|wholesaler(?:s)?|retailer(?:s)?|supermarket\s+business|"
+    r"health\s+and\s+medical|medical\s+sector|hospital\s+sector|private\s+(?:hospital|clinic)|"
+    r"education\s+sector|entertainment\s+(?:and\s+events\s+)?sector|"
+    r"real\s+estate\s+sector|land\s+dealer(?:s)?|property\s+developer(?:s)?|"
+    r"gaming\s+and\s+pool\s+betting|pool\s+betting|"
     r"government\s+agenc(?:y|ies)|ministry|local\s+government|mda(?:s)?"
     r")\b",
+    re.I,
+)
+
+_EMPLOYMENT_STRONG_RE = re.compile(
+    r"\b(paye|pay[-\s]+as[-\s]+you[-\s]+earn|employment\s+income|employee(?:s)?|employer(?:s)?|salary|wages|"
+    r"benefit(?:s)?\s+in\s+kind|housing\s+benefit|housing\s+allowance|"
+    r"vehicle\s+benefit|motor\s+vehicle\s+benefit|domestic\s+servant|"
+    r"183\s+days|expatriate|seconded)\b",
+    re.I,
+)
+_NON_EMPLOYMENT_RESIDENCY_RE = re.compile(
+    r"\b(company|companies|corporation|corporate|cit|withholding\s+tax|wht|vendor|supplier|contractor|branch|repatriat(?:ed|ion))\b",
     re.I,
 )
 
@@ -1460,7 +1480,17 @@ def extract_retrieval_preferences(
             prefer["demote_sector_guides"] = True
         from .retriever import TOPIC_SECTION_HINTS
 
-        matched_topics = [topic for pat, topic in _TOPIC_QUERY_PATTERNS if pat.search(text)]
+        matched_topics: list[str] = []
+        for pat, topic in _TOPIC_QUERY_PATTERNS:
+            if not pat.search(text):
+                continue
+            if (
+                topic == "employment"
+                and not _EMPLOYMENT_STRONG_RE.search(text)
+                and _NON_EMPLOYMENT_RESIDENCY_RE.search(text)
+            ):
+                continue
+            matched_topics.append(topic)
         if matched_topics:
             sections: list[str] = []
             for t_name in matched_topics:
@@ -1490,7 +1520,7 @@ def extract_retrieval_preferences(
 
 
 def decompose_query(query: str) -> list[str]:
-    """Split a multi-intent question into at most three retrieval queries.
+    """Split a multi-intent question into at most four retrieval queries.
 
     Single-intent questions (the common case) return ``[query]`` unchanged.
     Used as a cheap stand-in for query decomposition / multi-hop planning
@@ -1502,19 +1532,21 @@ def decompose_query(query: str) -> list[str]:
     parts = [p.strip(" .?") for p in _DECOMPOSE_SPLIT_RE.split(text) if p.strip()]
     if len(parts) == 1:
         parts = [p.strip(" .?") for p in _AND_QUESTION_RE.split(text) if p.strip()]
+    strip_enum = len(parts) > 1
     cleaned: list[str] = []
     seen: set[str] = set()
     for part in parts:
-        if len(part.split()) < 2:
+        candidate = _ENUM_PREFIX_RE.sub("", part).strip(" .?") if strip_enum else part
+        if len(candidate.split()) < 2:
             continue
-        key = part.lower()
+        key = candidate.lower()
         if key in seen:
             continue
         seen.add(key)
-        cleaned.append(part)
+        cleaned.append(candidate)
     if len(cleaned) <= 1:
         return [text]
-    return cleaned[:3]
+    return cleaned[:4]
 
 
 def plan_retrieval(

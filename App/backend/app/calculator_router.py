@@ -969,7 +969,11 @@ def plan_calculation(message: str) -> CalcPlan | None:  # noqa: PLR0911, PLR0912
         if single is not None:
             params["amount"] = single
         else:
-            missing.append("amount")
+            m_litres = re.search(r"\b(\d[\d,]*(?:\.\d+)?)\s*litres?\b", text, re.IGNORECASE)
+            if m_litres:
+                params["amount"] = float(m_litres.group(1).replace(",", ""))
+            else:
+                missing.append("amount")
         return CalcPlan("calculate_excise_duty", "calc_excise_duty", params, missing, assumptions)
 
     if intent == "rental":
@@ -1788,7 +1792,17 @@ def plan_rate_lookup(message: str) -> RatePlan | None:
     text = (message or "").strip()
     if not text or extract_amounts(text):
         return None
-    if re.search(r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?|customs\s+valuation|valuation\s+method)\b", text, re.IGNORECASE):
+    if is_explanation_question(text):
+        return None
+    if re.search(
+        r"\b(unauthori[sz]|access|system|smuggl|fraud|offence|crime|conviction|prison|jail|imprison|allowances?|"
+        r"customs\s+val\w*|valuation\s+methods?|hierarchy|input\s+vat|input\s+tax|apportionment|exempt\s+residential|"
+        r"can\s+(?:i|we|they)\s+claim|shared\s+electricity|exempt\s+agricultural|"
+        r"file\s+and\s+pay|by\s+what\s+day|following\s+month|weekend|tax\s+in\s+dispute|"
+        r"within\s+how\s+many\s+days|tax\s+appeals?\s+tribunal|common\s+external\s+tariff|\bcet\b)\b",
+        text,
+        re.IGNORECASE,
+    ):
         return None
     short_ask = len(text.split()) <= 8 and re.search(
         r"\b(rates?|thresholds?|bands?|penalt(?:y|ies)?|fines?)\b", text, re.IGNORECASE

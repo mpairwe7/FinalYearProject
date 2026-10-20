@@ -165,6 +165,16 @@ def test_contradictory_same_claim_assertions_across_clauses_miss() -> None:
     assert ts.figure_details[0].status == "miss"
     assert "Conflicting" in ts.figure_details[0].reason
 
+    # A halved tax figure (e.g. 27M == 54M / 2) in a conflicting clause must also remain a miss
+    resp_halved = {
+        "reply": "Capital Gains Tax is UGX 54 million. Capital Gains Tax is UGX 27 million.",
+        "retrieval_mode": "hybrid",
+        "sources": [{"source": "TAXATION-HANDBOOK-FY-2025-26-1.pdf"}],
+    }
+    ts_halved = score_turn(cgt_expect, resp_halved)
+    assert ts_halved.figures == 0.0
+    assert ts_halved.figure_details[0].status == "miss"
+
 
 def test_figure_appearing_only_in_negation_misses() -> None:
     """Fixture 1: the correct value appearing only in a negation."""

@@ -351,11 +351,28 @@ def verify_figure_lock(
             allowed_pcts |= p_set
             allowed_days |= d_set
 
-    # 2. Verified facts block (splitting conditional lines from verified lines)
+    # 1b. Conversation-scoped CaseFacts (so Turn 1 amounts like $6,000 are allowed on Turn 2)
+    try:
+        from ..service import _ACTIVE_CASE_FACTS
+
+        active_facts = _ACTIVE_CASE_FACTS.get()
+        if active_facts is not None:
+            for mon in getattr(active_facts, "amounts", None) or []:
+                val_m = float(getattr(mon, "amount", 0) or 0)
+                if abs(val_m) >= MIN_VERIFIABLE_AMOUNT:
+                    allowed_money.add(val_m)
+            if getattr(active_facts, "days_in_uganda", None):
+                allowed_days.add(int(active_facts.days_in_uganda))
+            if getattr(active_facts, "contract_months", None):
+                allowed_days.add(int(active_facts.contract_months) * 30)
+    except Exception:
+        pass
+
+    # 2. Verified facts block (splitting conditional PAYE lines from verified lines)
     if verified_facts:
         for line in verified_facts.splitlines():
             m_set, p_set, d_set = _extract_locked_numbers(line)
-            if _CONDITIONAL_LABEL_RE.search(line):
+            if re.search(r"\bconditional\s+on\s+unverified\b", line, re.IGNORECASE):
                 conditional_money |= m_set
             else:
                 allowed_money |= m_set
@@ -374,6 +391,25 @@ def verify_figure_lock(
 
     if not allowed_money and not allowed_pcts and not allowed_days and not conditional_money:
         return True, [], {"offending_figures": [], "skipped": "no reference figures in context"}
+
+    # Expand allowed_money with pairwise sums/differences, total sum, and 12x / /12 equivalents
+    if allowed_money:
+        base_list = sorted(allowed_money)
+        derived_money: set[float] = set()
+        for a in base_list:
+            if a * 12.0 >= MIN_VERIFIABLE_AMOUNT:
+                derived_money.add(a * 12.0)
+            if a / 12.0 >= MIN_VERIFIABLE_AMOUNT:
+                derived_money.add(a / 12.0)
+        for i, a in enumerate(base_list):
+            for b in base_list[i + 1 :]:
+                if a + b >= MIN_VERIFIABLE_AMOUNT:
+                    derived_money.add(a + b)
+                if abs(a - b) >= MIN_VERIFIABLE_AMOUNT:
+                    derived_money.add(abs(a - b))
+        if len(base_list) >= 3:
+            derived_money.add(sum(base_list))
+        allowed_money |= derived_money
 
     def _money_matches(val: float, pool: set[float]) -> bool:
         return any(

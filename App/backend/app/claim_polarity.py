@@ -63,8 +63,14 @@ DIRECTION_LEXICON: tuple[PolarityPair, ...] = (
             "increases taxable employment income",
         ),
         negative_cues=(
-            "subtracted from",
-            "deducted from",
+            "subtracted from gross",
+            "subtracted from the employee",
+            "subtracted from employment",
+            "subtracted from salary",
+            "deducted from gross",
+            "deducted from the employee",
+            "deducted from employment",
+            "deducted from salary",
             "reduces gross salary",
             "reduces taxable employment income",
         ),
@@ -326,7 +332,31 @@ def polarity_conflicts(
         return len(sent_subj & ref_subj) / max(1, min(len(sent_subj), len(ref_subj)))
 
     for pair in DIRECTION_LEXICON:
-        s_pole, s_cue = _sentence_pole(sent_low, pair)
+        check_low = sent_low
+        if pair.name == "resident_vs_non_resident":
+            # Strip premise-only conditional clauses ("If he is a resident, ..." / "For a non-resident: ...")
+            # while still checking residency assertions in the conclusion clause.
+            stripped_cond = check_low.lstrip(" \t-*•")
+            for sep_ch in (",", ":", ";"):
+                if sep_ch in stripped_cond:
+                    head_clause, _, tail_clause = stripped_cond.partition(sep_ch)
+                    if (
+                        head_clause.startswith(
+                            (
+                                "if ",
+                                "where ",
+                                "whereas ",
+                                "when ",
+                                "for a resident",
+                                "for a non-resident",
+                                "for a non resident",
+                            )
+                        )
+                        and len(head_clause) <= 90
+                    ):
+                        check_low = tail_clause
+                    break
+        s_pole, s_cue = _sentence_pole(check_low, pair)
         if s_pole is None or s_cue is None:
             continue
 
