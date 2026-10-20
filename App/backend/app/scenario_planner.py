@@ -455,7 +455,7 @@ def _rule_vat(facts: CaseFacts, question: str) -> list[ToolCallSpec]:
             re.IGNORECASE,
         )
     )
-    if facts.has_efris_einvoice is False or is_imported_srv or re.search(r"\b(apportion\w*|mixed\s+suppl\w*|exempt\s+.*inputs?)\b", question, re.IGNORECASE):
+    if facts.has_efris_einvoice is False or is_imported_srv:
         specs.append(
             ToolCallSpec(
                 "vat_input_claim_eligibility",
@@ -1032,6 +1032,19 @@ def build_verified_facts(
     contradiction_lines = [f"- {c.format_bullet()}" for c in contradictions]
 
     _low_text = text.lower()
+    if re.search(
+        r"\b(apportion\w*|mixed\s+suppl\w*|shared\s+(?:electricity|rent|overheads?|inputs?|costs?))\b",
+        _low_text,
+    ):
+        bullet_lines.append(
+            "- Mixed Taxable & Exempt Supplies (Input VAT Apportionment Rule, VAT Act Cap 349 s.28): "
+            "No — a business making both taxable and exempt supplies CANNOT claim 100% of the input VAT "
+            "on shared overheads (such as electricity and rent); shared input VAT must be apportioned "
+            "using the standard formula A × B / C, where A is total input tax on shared purchases in the "
+            "period, B is total taxable supplies in the period, and C is total supplies (taxable + exempt) "
+            "in the period (subject to the 5% and 95% de minimis rules)."
+        )
+        _add_needed("taxable supplies amount (B) and total supplies amount (C) for the period")
     if (
         any(w in _low_text for w in ("personal", "private", "non-business", "non business"))
         and re.search(r"\bland\b", _low_text)

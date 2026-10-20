@@ -7,9 +7,9 @@
   "turn_count": 40,
   "reviewed_scenarios": 0,
   "unreviewed_scenarios": 30,
-  "overall_score_100": 99.08,
+  "overall_score_100": 98.08,
   "metrics": {
-    "mean_scenario_score_100": 99.08,
+    "mean_scenario_score_100": 98.08,
     "critical_forbidden_hits": 0,
     "figure_accuracy_all_pct": 96.15,
     "figure_accuracy_tool_covered_pct": 96.15,
@@ -97,8 +97,8 @@
     },
     "vat": {
       "count": 2,
-      "mean_score_100": 91.25,
-      "min_score_100": 82.5
+      "mean_score_100": 76.25,
+      "min_score_100": 52.5
     },
     "withholding": {
       "count": 1,
@@ -173,7 +173,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 53.127,
-          "reply_preview": "Great question — and there’s an important residency point to flag before we look at the rates.\n\n### Premise check: likely resident, not non-resident\n\nUnder the **Income Tax Act (Cap 338)**, s.9, an individual is a **resident** if physically present in Uganda for **183 days or more** in any 12‑month period commencing or ending in the year of income. An **8‑month contract (~240 days)** makes your specialist **likely resident**, unless they spend significant time outside Uganda during the contract.",
+          "reply_preview": "Great question \u2014 and there\u2019s an important residency point to flag before we look at the rates.\n\n### Premise check: likely resident, not non-resident\n\nUnder the **Income Tax Act (Cap 338)**, s.9, an individual is a **resident** if physically present in Uganda for **183 days or more** in any 12\u2011month period commencing or ending in the year of income. An **8\u2011month contract (~240 days)** makes your specialist **likely resident**, unless they spend significant time outside Uganda during the contract.",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -228,7 +228,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 39.25,
-          "reply_preview": "URA determines the taxable value of housing and vehicles using specific formulas found in the Third Schedule of the Income Tax Act. These values are treated as **benefits in kind** and must be added to the employee’s cash salary to calculate total gross employment income for PAYE purposes [1].\n\n### Valuation of the Motor Vehicle Benefit\n\nFor a company-provided vehicle, the taxable value is calculated using the following statutory formula:\n\n$$ \\text{Car Benefit} = \\left( 20\\% \\times A \\times \\fra",
+          "reply_preview": "URA determines the taxable value of housing and vehicles using specific formulas found in the Third Schedule of the Income Tax Act. These values are treated as **benefits in kind** and must be added to the employee\u2019s cash salary to calculate total gross employment income for PAYE purposes [1].\n\n### Valuation of the Motor Vehicle Benefit\n\nFor a company-provided vehicle, the taxable value is calculated using the following statutory formula:\n\n$$ \\text{Car Benefit} = \\left( 20\\% \\times A \\times \\fra",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -292,7 +292,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 26.072,
-          "reply_preview": "Great question! Here’s how URA values those two benefits-in-kind for PAYE purposes:\n\n### Company Car (Private Use)\n\nThe car benefit is added to the manager’s employment income using this statutory formula:\n\n**(20% × A × B/C) − D**\n\nWhere:\n- **A** = Market value of the car when first provided\n- Depreciation = **35% per annum reducing balance** for subsequent years\n- **B** = Number of days the car was available for private use\n- **C** = Days in the year of income (**365**)\n- **D** = Amount paid by",
+          "reply_preview": "Great question! Here\u2019s how URA values those two benefits-in-kind for PAYE purposes:\n\n### Company Car (Private Use)\n\nThe car benefit is added to the manager\u2019s employment income using this statutory formula:\n\n**(20% \u00d7 A \u00d7 B/C) \u2212 D**\n\nWhere:\n- **A** = Market value of the car when first provided\n- Depreciation = **35% per annum reducing balance** for subsequent years\n- **B** = Number of days the car was available for private use\n- **C** = Days in the year of income (**365**)\n- **D** = Amount paid by",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -484,7 +484,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 40.838,
-          "reply_preview": "Great question! Here’s how Uganda taxes your short‑term non‑resident technician’s employment income.\n\n### Direct answer\n\nBecause the technician is present in Uganda for only **40 days**, they are likely a **non‑resident** for tax purposes, so **PAYE** must be withheld monthly by you as employer using the **non‑resident PAYE bands**. On **UGX 5,000,000** monthly chargeable income, the verified PAYE due is **UGX 1,425,500 per month** (annual **UGX 17,106,000**) [1][3].\n\n### Assumptions\n\n- Status: ",
+          "reply_preview": "Great question! Here\u2019s how Uganda taxes your short\u2011term non\u2011resident technician\u2019s employment income.\n\n### Direct answer\n\nBecause the technician is present in Uganda for only **40 days**, they are likely a **non\u2011resident** for tax purposes, so **PAYE** must be withheld monthly by you as employer using the **non\u2011resident PAYE bands**. On **UGX 5,000,000** monthly chargeable income, the verified PAYE due is **UGX 1,425,500 per month** (annual **UGX 17,106,000**) [1][3].\n\n### Assumptions\n\n- Status: ",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -521,7 +521,7 @@
           "sources_relevant": null,
           "sector_guide_hits": [],
           "latency_s": 0.056,
-          "reply_preview": "**PAYE calculation — non-resident (FY2026-27)**\n\n- Gross monthly salary: UGX 5,000,000\n- PAYE due (28.5% effective): **UGX 1,425,500** per month\n- Net take-home: **UGX 3,574,500**\n- Band applied: 30% marginal (UGX 410,000–UGX 10,000,000)\n- _This is net of PAYE only — NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n- Statutory Basis: Income Tax Act\n\n_Assumptions: monthly gross salary of UGX 5,000,000 from conve",
+          "reply_preview": "**PAYE calculation \u2014 non-resident (FY2026-27)**\n\n- Gross monthly salary: UGX 5,000,000\n- PAYE due (28.5% effective): **UGX 1,425,500** per month\n- Net take-home: **UGX 3,574,500**\n- Band applied: 30% marginal (UGX 410,000\u2013UGX 10,000,000)\n- _This is net of PAYE only \u2014 NSSF (5%), Local Service Tax and any voluntary deductions still come off. Ask again with NSSF included for a closer take-home figure._\n- Statutory Basis: Income Tax Act\n\n_Assumptions: monthly gross salary of UGX 5,000,000 from conve",
           "sources_count": 0
         }
       ]
@@ -588,7 +588,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 27.351,
-          "reply_preview": "Great question! Here’s how the car benefit and the part-time board fee are treated under UGA law.\n\n### Assumptions\n\n- The SUV was first provided for private use **one year ago**.\n- Market value at first provision: **UGX 100,000,000**.\n- Private use: **every day** of the current year of income.\n\n- Employee payment toward the car: **UGX 0**.\n- The director also receives a **part-time board fee** from another company.\n\n### Step-by-step breakdown\n\n#### 1. Valuing the car benefit in its second year\n\n",
+          "reply_preview": "Great question! Here\u2019s how the car benefit and the part-time board fee are treated under UGA law.\n\n### Assumptions\n\n- The SUV was first provided for private use **one year ago**.\n- Market value at first provision: **UGX 100,000,000**.\n- Private use: **every day** of the current year of income.\n\n- Employee payment toward the car: **UGX 0**.\n- The director also receives a **part-time board fee** from another company.\n\n### Step-by-step breakdown\n\n#### 1. Valuing the car benefit in its second year\n\n",
           "sources_count": 2,
           "debug": {
             "finish_reason": "stop",
@@ -678,8 +678,8 @@
       "id": "dev_vat_threshold_and_apportionment_08",
       "tax_head": "vat",
       "difficulty": "medium",
-      "score": 0.825,
-      "score_100": 82.5,
+      "score": 0.525,
+      "score_100": 52.5,
       "critical_fail": false,
       "truncated_turns": 0,
       "turns": [
@@ -722,7 +722,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 32.768,
-          "reply_preview": "**I drafted an answer to this**, but the figures in it disagreed with the URA documents I was reading — so I have not shown it, because a wrong figure here is worse than no figure. The passages I found are listed below; a URA officer has been asked to give you a definitive answer. You can also call URA toll-free on 0800 117 000 / 0800 217 000.",
+          "reply_preview": "**I drafted an answer to this**, but the figures in it disagreed with the URA documents I was reading \u2014 so I have not shown it, because a wrong figure here is worse than no figure. The passages I found are listed below; a URA officer has been asked to give you a definitive answer. You can also call URA toll-free on 0800 117 000 / 0800 217 000.",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -732,13 +732,13 @@
           }
         },
         {
-          "score": 1.0,
+          "score": 0.4,
           "route_ok": true,
           "expected_route": "rag",
           "actual_route": "hybrid",
           "figures": null,
           "figure_details": [],
-          "facts": 1.0,
+          "facts": 0.0,
           "fact_details": [
             {
               "any": [
@@ -747,8 +747,8 @@
                 "mixed",
                 "exempt"
               ],
-              "ok": true,
-              "matched": "apportion"
+              "ok": false,
+              "matched": null
             }
           ],
           "forbidden_hits": [],
@@ -834,7 +834,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 31.328,
-          "reply_preview": "Great question! Here’s how your rental tax works—and importantly, **you cannot deduct the UGX 25 million repair cost**.\n\n### Assumptions\n\n- You are a **resident individual** landlord.\n\n- All rental income (residential + commercial) is **pooled** into one total annual gross rent.\n\n- Year of income: **July to June**.\n\n### Step-by-Step Calculation\n\n| Item | Amount (UGX) |\n|---|---|\n| Residential flats rent | 40,000,000 |\n| Commercial shops rent | 50,000,000 |\n| **Total gross annual rent (R)** | **9",
+          "reply_preview": "Great question! Here\u2019s how your rental tax works\u2014and importantly, **you cannot deduct the UGX 25 million repair cost**.\n\n### Assumptions\n\n- You are a **resident individual** landlord.\n\n- All rental income (residential + commercial) is **pooled** into one total annual gross rent.\n\n- Year of income: **July to June**.\n\n### Step-by-Step Calculation\n\n| Item | Amount (UGX) |\n|---|---|\n| Residential flats rent | 40,000,000 |\n| Commercial shops rent | 50,000,000 |\n| **Total gross annual rent (R)** | **9",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -898,7 +898,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 40.053,
-          "reply_preview": "No — your assumption is incorrect because URA caps allowable rental expenses at **50% of gross rent**, not the actual 70% you incurred. Therefore, you cannot deduct the full UGX 140 million.\n\n### Assumptions\n\n- Entity type: Corporate body (company).\n\n- Year of income: Standard July–June cycle.\n\n- All rental income and expenses are sourced from Uganda.\n\n### Step-by-Step Breakdown\n\nUnder the *Income Tax Act*, company rental tax is calculated as follows:\n\n1.  **Determine Gross Rent:** Your total an",
+          "reply_preview": "No \u2014 your assumption is incorrect because URA caps allowable rental expenses at **50% of gross rent**, not the actual 70% you incurred. Therefore, you cannot deduct the full UGX 140 million.\n\n### Assumptions\n\n- Entity type: Corporate body (company).\n\n- Year of income: Standard July\u2013June cycle.\n\n- All rental income and expenses are sourced from Uganda.\n\n### Step-by-Step Breakdown\n\nUnder the *Income Tax Act*, company rental tax is calculated as follows:\n\n1.  **Determine Gross Rent:** Your total an",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -973,7 +973,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 37.136,
-          "reply_preview": "Great question—here’s exactly where you stand and what to do next.\n\n### Direct Answer\n\nYou have **45 days** from the date the assessment notice was served to lodge a formal written objection with URA [2][4]. If you later appeal to the Tax Appeals Tribunal (TAT), you must deposit **30%** of the tax in dispute before the appeal can be heard [1][3].\n\n### Assumptions\n\n- URA served an administrative default withholding-tax assessment of **UGX 50,000,000**.\n- You intend to dispute the entire amount.\n\n",
+          "reply_preview": "Great question\u2014here\u2019s exactly where you stand and what to do next.\n\n### Direct Answer\n\nYou have **45 days** from the date the assessment notice was served to lodge a formal written objection with URA [2][4]. If you later appeal to the Tax Appeals Tribunal (TAT), you must deposit **30%** of the tax in dispute before the appeal can be heard [1][3].\n\n### Assumptions\n\n- URA served an administrative default withholding-tax assessment of **UGX 50,000,000**.\n- You intend to dispute the entire amount.\n\n",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -1042,7 +1042,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 41.314,
-          "reply_preview": "Great question — this payment triggers three distinct tax layers. Here’s how each applies to your **UGX 15,000,000/month** SaaS fee paid to an Irish provider:\n\n### 1. Withholding Tax (WHT)\n\nBecause the supplier is a **non-resident** providing **Ugandan-source services** (cloud/SaaS consumed in Kampala), you must withhold tax at the **6%** rate under the Income Tax Act provisions for non-resident service providers [1][3].\n\n```text\nWHT = 6% × UGX 15,000,000 = UGX 900,000\n```\n\n- File the WHT return",
+          "reply_preview": "Great question \u2014 this payment triggers three distinct tax layers. Here\u2019s how each applies to your **UGX 15,000,000/month** SaaS fee paid to an Irish provider:\n\n### 1. Withholding Tax (WHT)\n\nBecause the supplier is a **non-resident** providing **Ugandan-source services** (cloud/SaaS consumed in Kampala), you must withhold tax at the **6%** rate under the Income Tax Act provisions for non-resident service providers [1][3].\n\n```text\nWHT = 6% \u00d7 UGX 15,000,000 = UGX 900,000\n```\n\n- File the WHT return",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -1106,7 +1106,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 39.721,
-          "reply_preview": "No — you should **not** deduct 15% non-resident service WHT from both payments. Only the **UGX 30,000,000** consulting fee attracts 15% WHT; the **UGX 10,000,000** salary is taxed under **PAYE**, not service WHT [1].\n\n### Assumptions\n\n- Consulting fee: UGX 30,000,000 to a foreign firm under a management advisory contract.\n\n- Salary: UGX 10,000,000 to a full-time employee under an employment contract.\n\n- Employee residency status is **undetermined**; final PAYE depends on physical presence in Uga",
+          "reply_preview": "No \u2014 you should **not** deduct 15% non-resident service WHT from both payments. Only the **UGX 30,000,000** consulting fee attracts 15% WHT; the **UGX 10,000,000** salary is taxed under **PAYE**, not service WHT [1].\n\n### Assumptions\n\n- Consulting fee: UGX 30,000,000 to a foreign firm under a management advisory contract.\n\n- Salary: UGX 10,000,000 to a full-time employee under an employment contract.\n\n- Employee residency status is **undetermined**; final PAYE depends on physical presence in Uga",
           "sources_count": 2,
           "debug": {
             "finish_reason": "stop",
@@ -1143,7 +1143,7 @@
           "sources_relevant": null,
           "sector_guide_hits": [],
           "latency_s": 0.056,
-          "reply_preview": "**Withholding tax — services (FY2026-27)**\n\n- Gross payment: UGX 20,000,000\n- WHT at 6%: **UGX 1,200,000**\n- Net payable to payee: UGX 18,800,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "reply_preview": "**Withholding tax \u2014 services (FY2026-27)**\n\n- Gross payment: UGX 20,000,000\n- WHT at 6%: **UGX 1,200,000**\n- Net payable to payee: UGX 18,800,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
           "sources_count": 0
         }
       ]
@@ -1203,7 +1203,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 28.29,
-          "reply_preview": "**No**: you do **not** qualify for the 3‑year citizen start‑up income tax exemption because your investment capital exceeds the statutory limit.\n\n### Assumptions\n\n- You are a Ugandan citizen establishing a new business after **1 July 2025**.\n- Registered investment capital: **UGX 800,000,000**.\n- Year‑1 “charitable profit” treated as chargeable income: **UGX 120,000,000**.\n\n### Step‑by‑step breakdown\n\n1. **Exemption test:** The 3‑year income tax exemption applies only where the business is regis",
+          "reply_preview": "**No**: you do **not** qualify for the 3\u2011year citizen start\u2011up income tax exemption because your investment capital exceeds the statutory limit.\n\n### Assumptions\n\n- You are a Ugandan citizen establishing a new business after **1 July 2025**.\n- Registered investment capital: **UGX 800,000,000**.\n- Year\u20111 \u201ccharitable profit\u201d treated as chargeable income: **UGX 120,000,000**.\n\n### Step\u2011by\u2011step breakdown\n\n1. **Exemption test:** The 3\u2011year income tax exemption applies only where the business is regis",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -1332,7 +1332,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 36.025,
-          "reply_preview": "Great question! Here’s how your warehouse sale is treated for capital gains purposes.\n\n### Direct Answer\n\nYour limited company will owe **UGX 54,000,000** in capital gains tax on the **UGX 180,000,000** gain from the warehouse sale. This is calculated at the statutory **30%** rate applied to the net capital gain [2][3][4].\n\n### Assumptions\n\n- Sale proceeds: **UGX 500,000,000**\n- Original cost (including improvements): **UGX 320,000,000**\n- Asset held for more than 12 months (indexation applies i",
+          "reply_preview": "Great question! Here\u2019s how your warehouse sale is treated for capital gains purposes.\n\n### Direct Answer\n\nYour limited company will owe **UGX 54,000,000** in capital gains tax on the **UGX 180,000,000** gain from the warehouse sale. This is calculated at the statutory **30%** rate applied to the net capital gain [2][3][4].\n\n### Assumptions\n\n- Sale proceeds: **UGX 500,000,000**\n- Original cost (including improvements): **UGX 320,000,000**\n- Asset held for more than 12 months (indexation applies i",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -1440,7 +1440,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 27.364,
-          "reply_preview": "Here’s what applies to your two vehicles based on current URA Customs Services rules.\n\n### 1. 10-Year-Old Station Wagon (CIF UGX 30,000,000)\n\nBecause the vehicle is older than 8 years, the **environmental levy is 50%** of the customs value [2]. The full tax breakdown is:\n\n| Component | Rate | Calculation | Amount (UGX) |\n| :--- | :--- | :--- | :--- |\n| **Import Duty** | **25%** | 25% × 30,000,000 | **7,500,000** |\n| **Environmental Levy** | **50%** | 50% × 30,000,000 | **15,000,000** |\n| **VAT**",
+          "reply_preview": "Here\u2019s what applies to your two vehicles based on current URA Customs Services rules.\n\n### 1. 10-Year-Old Station Wagon (CIF UGX 30,000,000)\n\nBecause the vehicle is older than 8 years, the **environmental levy is 50%** of the customs value [2]. The full tax breakdown is:\n\n| Component | Rate | Calculation | Amount (UGX) |\n| :--- | :--- | :--- | :--- |\n| **Import Duty** | **25%** | 25% \u00d7 30,000,000 | **7,500,000** |\n| **Environmental Levy** | **50%** | 50% \u00d7 30,000,000 | **15,000,000** |\n| **VAT**",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -1502,7 +1502,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 23.948,
-          "reply_preview": "Great question! Here’s how URA Customs handles valuation when invoices are doubted, along with the full hierarchy.\n\n### Number of Valuation Methods\n\nThere are **six** customs valuation methods applied sequentially under the East African Community Customs Management Act (EACCMA) [1]:\n\n1. Transaction value\n2. Transaction value of identical goods\n3. Transaction value of similar goods\n4. Deductive value\n5. Computed value\n6. Fallback method\n\n*Note:\n\n- Methods 4 and 5 can be swapped upon the importer’",
+          "reply_preview": "Great question! Here\u2019s how URA Customs handles valuation when invoices are doubted, along with the full hierarchy.\n\n### Number of Valuation Methods\n\nThere are **six** customs valuation methods applied sequentially under the East African Community Customs Management Act (EACCMA) [1]:\n\n1. Transaction value\n2. Transaction value of identical goods\n3. Transaction value of similar goods\n4. Deductive value\n5. Computed value\n6. Fallback method\n\n*Note:\n\n- Methods 4 and 5 can be swapped upon the importer\u2019",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -1653,7 +1653,7 @@
           "sources_relevant": null,
           "sector_guide_hits": [],
           "latency_s": 0.078,
-          "reply_preview": "**Excise duty — fuel petrol (FY2026-27)**\n\n- Base: 2,000 litres\n- Statutory rate: UGX 1,750/litre\n- Excise duty payable: **UGX 3,500,000**\n- Statutory Basis: Excise Duty Act 2014 (as amended)\n\nFigures use the official URA FY2026-27 rate table.",
+          "reply_preview": "**Excise duty \u2014 fuel petrol (FY2026-27)**\n\n- Base: 2,000 litres\n- Statutory rate: UGX 1,750/litre\n- Excise duty payable: **UGX 3,500,000**\n- Statutory Basis: Excise Duty Act 2014 (as amended)\n\nFigures use the official URA FY2026-27 rate table.",
           "sources_count": 0
         }
       ]
@@ -1706,7 +1706,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 21.25,
-          "reply_preview": "Here’s what you need to know:\n\n### What is the Digital Tracking Solution (DTS)?\n\nThe **Digital Tracking Solution (DTS)** is a track-and-trace platform jointly operated by the **Uganda Revenue Authority (URA)** and the **Uganda National Bureau of Standards (UNBS)**. It captures and transmits real-time production and importation data for specific regulated products to both agencies [1][2][3][4].\n\nUnder this system, covered goods are marked with two types of stamps:\n- **Digital Tax Stamps (DTS):** ",
+          "reply_preview": "Here\u2019s what you need to know:\n\n### What is the Digital Tracking Solution (DTS)?\n\nThe **Digital Tracking Solution (DTS)** is a track-and-trace platform jointly operated by the **Uganda Revenue Authority (URA)** and the **Uganda National Bureau of Standards (UNBS)**. It captures and transmits real-time production and importation data for specific regulated products to both agencies [1][2][3][4].\n\nUnder this system, covered goods are marked with two types of stamps:\n- **Digital Tax Stamps (DTS):** ",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -1781,7 +1781,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 27.649,
-          "reply_preview": "Here’s how your stamp duty works for FY2026‑27:\n\n### Land transfer (UGX 150,000,000)\n\nStamp duty on a property/land transfer is calculated at **1.0%** of the total value [1][2].\n\n```text\n1.0% × UGX 150,000,000 = UGX 1,500,000\n```\n\nSo, the stamp duty payable on the land transfer is **UGX 1,500,000**.\n\n### Motor vehicle transfer\n\nUnder the revised Schedule 2 introduced by the Stamp Duty (Amendment) Act, 2026, the fixed stamp duty for the registration or transfer of “any other motor vehicle” is **U",
+          "reply_preview": "Here\u2019s how your stamp duty works for FY2026\u201127:\n\n### Land transfer (UGX 150,000,000)\n\nStamp duty on a property/land transfer is calculated at **1.0%** of the total value [1][2].\n\n```text\n1.0% \u00d7 UGX 150,000,000 = UGX 1,500,000\n```\n\nSo, the stamp duty payable on the land transfer is **UGX 1,500,000**.\n\n### Motor vehicle transfer\n\nUnder the revised Schedule 2 introduced by the Stamp Duty (Amendment) Act, 2026, the fixed stamp duty for the registration or transfer of \u201cany other motor vehicle\u201d is **U",
           "sources_count": 2,
           "debug": {
             "finish_reason": "stop",
@@ -1837,7 +1837,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 20.63,
-          "reply_preview": "You must file your appeal with the **Tax Appeals Tribunal (TAT)** within **30 days** of receiving the Commissioner General’s objection decision [2].\n\n### Assumptions\n\n- You have received a final objection decision from the Commissioner General.\n\n- You intend to pursue a formal legal appeal rather than Alternative Dispute Resolution (ADR).\n\n### Step-by-Step Breakdown\n\n1.  **File the Appeal:** Submit your application to the TAT within **30 days** of the objection decision date.\n2.  **Mandatory Dep",
+          "reply_preview": "You must file your appeal with the **Tax Appeals Tribunal (TAT)** within **30 days** of receiving the Commissioner General\u2019s objection decision [2].\n\n### Assumptions\n\n- You have received a final objection decision from the Commissioner General.\n\n- You intend to pursue a formal legal appeal rather than Alternative Dispute Resolution (ADR).\n\n### Step-by-Step Breakdown\n\n1.  **File the Appeal:** Submit your application to the TAT within **30 days** of the objection decision date.\n2.  **Mandatory Dep",
           "sources_count": 1,
           "debug": {
             "finish_reason": "stop",
@@ -1948,7 +1948,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 26.718,
-          "reply_preview": "**No**: your clerk’s calculation is incorrect because the law requires paying the **higher** of two amounts, not just the percentage.\n\n### Assumptions\n\n- Tax type: Rental Income (based on the specific penalty provisions cited).\n\n- Delay: **1 month**.\n- Tax payable: **UGX 3,000,000**.\n\n### Step-by-Step Breakdown\n\nUnder URA enforcement guidelines, the late filing penalty is the **greater** of:\n1.  **Fixed Penalty:** **UGX 200,000** per month [1].\n2.  **Percentage Penalty:** **2%** of the tax liabi",
+          "reply_preview": "**No**: your clerk\u2019s calculation is incorrect because the law requires paying the **higher** of two amounts, not just the percentage.\n\n### Assumptions\n\n- Tax type: Rental Income (based on the specific penalty provisions cited).\n\n- Delay: **1 month**.\n- Tax payable: **UGX 3,000,000**.\n\n### Step-by-Step Breakdown\n\nUnder URA enforcement guidelines, the late filing penalty is the **greater** of:\n1.  **Fixed Penalty:** **UGX 200,000** per month [1].\n2.  **Percentage Penalty:** **2%** of the tax liabi",
           "sources_count": 4,
           "debug": {
             "finish_reason": "stop",
@@ -2013,7 +2013,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 27.34,
-          "reply_preview": "Great question! Here’s what applies to your situation:\n\n### Direct Answer\n\nThe Digital Services Tax (DST) rate is **5%** on gross revenue earned from providing digital services to individuals in Uganda [1][2][3][4]. Based on your stated gross revenue of **UGX 400,000,000**, the DST due is **UGX 20,000,000**.\n\n### Assumptions\n\n- You are a **non-resident** digital service provider (streaming/digital advertising) with no physical presence in Uganda.\n\n- The **UGX 400,000,000** represents **gross rev",
+          "reply_preview": "Great question! Here\u2019s what applies to your situation:\n\n### Direct Answer\n\nThe Digital Services Tax (DST) rate is **5%** on gross revenue earned from providing digital services to individuals in Uganda [1][2][3][4]. Based on your stated gross revenue of **UGX 400,000,000**, the DST due is **UGX 20,000,000**.\n\n### Assumptions\n\n- You are a **non-resident** digital service provider (streaming/digital advertising) with no physical presence in Uganda.\n\n- The **UGX 400,000,000** represents **gross rev",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -2078,7 +2078,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 21.617,
-          "reply_preview": "For FY 2026/27, the gaming and betting tax rate for operators is **30%** of the total amount of money staked less the payouts [1][3].\n\n### Step-by-step breakdown\n\nUsing your figures:\n\n| Item | Amount (UGX) |\n| :--- | :--- |\n| Total Stakes | 500,000,000 |\n| Less: Payouts | 350,000,000 |\n| **Net Stakes (Taxable Base)** | **150,000,000** |\n| **Gaming Tax Rate** | **30%** |\n| **Total Gaming Tax Due** | **45,000,000** |\n\n- **Calculation:** 30% × UGX 150,000,000 = **UGX 45,000,000** [1][3].\n- **\"Payou",
+          "reply_preview": "For FY 2026/27, the gaming and betting tax rate for operators is **30%** of the total amount of money staked less the payouts [1][3].\n\n### Step-by-step breakdown\n\nUsing your figures:\n\n| Item | Amount (UGX) |\n| :--- | :--- |\n| Total Stakes | 500,000,000 |\n| Less: Payouts | 350,000,000 |\n| **Net Stakes (Taxable Base)** | **150,000,000** |\n| **Gaming Tax Rate** | **30%** |\n| **Total Gaming Tax Due** | **45,000,000** |\n\n- **Calculation:** 30% \u00d7 UGX 150,000,000 = **UGX 45,000,000** [1][3].\n- **\"Payou",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",
@@ -2115,7 +2115,7 @@
           "sources_relevant": null,
           "sector_guide_hits": [],
           "latency_s": 0.056,
-          "reply_preview": "**Withholding tax — betting winnings (FY2026-27)**\n\n- Gross payment: UGX 10,000,000\n- WHT at 15%: **UGX 1,500,000**\n- Net payable to payee: UGX 8,500,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
+          "reply_preview": "**Withholding tax \u2014 betting winnings (FY2026-27)**\n\n- Gross payment: UGX 10,000,000\n- WHT at 15%: **UGX 1,500,000**\n- Net payable to payee: UGX 8,500,000\n- Statutory Basis: Income Tax Act\n\nFigures use the official URA FY2026-27 rate table.",
           "sources_count": 0
         }
       ]
@@ -2189,7 +2189,7 @@
           "sources_relevant": 1.0,
           "sector_guide_hits": [],
           "latency_s": 28.062,
-          "reply_preview": "Here’s how your annual advance income tax works for both vehicles.\n\n### Assumptions\n\n- You own a **14-seater commercial taxi** (passenger vehicle/PSV).\n\n- You own a **10-tonne cargo lorry** (goods vehicle above 2 tonnes).\n\n- Both are registered for advance tax under the transport sector regime.\n\n### Step-by-step breakdown\n\n| Vehicle | Rate | Calculation | Annual Advance Tax |\n| :--- | :--- | :--- | :--- |\n| 14-Seater Taxi | **UGX 20,000** per passenger seat | 14 seats × UGX 20,000 | **UGX 280,00",
+          "reply_preview": "Here\u2019s how your annual advance income tax works for both vehicles.\n\n### Assumptions\n\n- You own a **14-seater commercial taxi** (passenger vehicle/PSV).\n\n- You own a **10-tonne cargo lorry** (goods vehicle above 2 tonnes).\n\n- Both are registered for advance tax under the transport sector regime.\n\n### Step-by-step breakdown\n\n| Vehicle | Rate | Calculation | Annual Advance Tax |\n| :--- | :--- | :--- | :--- |\n| 14-Seater Taxi | **UGX 20,000** per passenger seat | 14 seats \u00d7 UGX 20,000 | **UGX 280,00",
           "sources_count": 3,
           "debug": {
             "finish_reason": "stop",

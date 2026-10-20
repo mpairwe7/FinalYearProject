@@ -402,17 +402,11 @@ def verify_figure_lock(
             if a / 12.0 >= MIN_VERIFIABLE_AMOUNT:
                 derived_money.add(a / 12.0)
         for i, a in enumerate(base_list):
-            for j, b in enumerate(base_list[i + 1 :], i + 1):
+            for b in base_list[i + 1 :]:
                 if a + b >= MIN_VERIFIABLE_AMOUNT:
                     derived_money.add(a + b)
                 if abs(a - b) >= MIN_VERIFIABLE_AMOUNT:
                     derived_money.add(abs(a - b))
-                if len(base_list) <= 45:
-                    for c in base_list[j + 1 :]:
-                        if a + b + c >= MIN_VERIFIABLE_AMOUNT:
-                            derived_money.add(a + b + c)
-                        if abs(c - a - b) >= MIN_VERIFIABLE_AMOUNT:
-                            derived_money.add(abs(c - a - b))
         if len(base_list) >= 3:
             derived_money.add(sum(base_list))
         allowed_money |= derived_money

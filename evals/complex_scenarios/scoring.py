@@ -618,28 +618,16 @@ def _score_single_figure(
     if not cues:
         cues = [field_name.replace("_", " ")]
 
-    def _cue_specificity(cue_str: str) -> int:
-        words = cue_str.strip().split()
-        if len(words) >= 2:
-            return len(words)
-        if cue_str.strip().isupper() and len(cue_str.strip()) >= 3:
-            return 2
-        return 1
-
     clauses = _split_into_claim_clauses(reply)
-    matching_clauses: list[tuple[str, int, tuple[int, int]]] = []
+    matching_clauses: list[tuple[str, int]] = []
     for clause in clauses:
         cue_positions: list[int] = []
-        cue_specs: list[int] = []
         for c in cues:
             m = re.search(rf"\b{re.escape(c)}\b", clause, re.IGNORECASE)
             if m:
                 cue_positions.append(m.start())
-                cue_specs.append(_cue_specificity(c))
         if cue_positions:
-            matching_clauses.append(
-                (clause, min(cue_positions), (len(cue_positions), max(cue_specs)))
-            )
+            matching_clauses.append((clause, min(cue_positions)))
 
     if not matching_clauses:
         return FigureScore(
@@ -658,8 +646,8 @@ def _score_single_figure(
     saw_conflicting = False
     matched_val: float | None = None
 
-    clause_assertions: list[tuple[str, int, tuple[int, int], list[ParsedAmount]]] = []
-    for clause, cue_pos, cue_spec in matching_clauses:
+    clause_assertions: list[tuple[str, int, list[ParsedAmount]]] = []
+    for clause, cue_pos in matching_clauses:
         amounts = parse_amounts_from_clause(clause)
         if not amounts:
             continue
@@ -680,23 +668,15 @@ def _score_single_figure(
                 continue
             direct_assertions.append(amt)
         if direct_assertions:
-            clause_assertions.append((clause, cue_pos, cue_spec, direct_assertions))
+            clause_assertions.append((clause, cue_pos, direct_assertions))
 
     any_clause_has_match = any(
         _values_match(expected_val, a) and not a.negated
-        for _, _, _, das in clause_assertions
+        for _, _, das in clause_assertions
         for a in das
     )
-    matched_max_spec = max(
-        (
-            cs
-            for _, _, cs, das in clause_assertions
-            if any(_values_match(expected_val, a) and not a.negated for a in das)
-        ),
-        default=(1, 1),
-    )
 
-    for clause, cue_pos, cue_spec, direct_assertions in clause_assertions:
+    for clause, cue_pos, direct_assertions in clause_assertions:
         clause_has_match = any(
             _values_match(expected_val, a) and not a.negated for a in direct_assertions
         )
@@ -708,8 +688,6 @@ def _score_single_figure(
                     matched_val = amt.value
             else:
                 if not amt.negated:
-                    if not clause_has_match and cue_spec < matched_max_spec:
-                        continue
                     # Historical baseline in "from <old> to <new>" when <new> matches expected_val
                     if clause_has_match and re.search(
                         r"\bfrom[\s*_~`]*$", clause[: amt.start], re.IGNORECASE
@@ -839,40 +817,29 @@ def score_turn(
     # 2. Figures check
     figure_specs = list(expect.get("figures") or [])
     sibling_expected: list[float] = []
-    sibling_nested: list[float] = []
+    same_tool_rates: dict[str, list[float]] = {}
     if len(figure_specs) >= 2:
         for spec in figure_specs:
+            t_name = str(spec["tool"])
             rp, fx_e = _resolve_params(dict(spec.get("params") or {}), runner)
             if fx_e is None and rp is not None:
-                for p_v in rp.values():
-                    if isinstance(p_v, (int, float)) and not isinstance(p_v, bool) and abs(float(p_v)) >= 1000.0:
-                        sibling_nested.append(float(p_v))
-                tout = runner(str(spec["tool"]), rp)
+                tout = runner(t_name, rp)
                 if tout.get("ok"):
                     rv = _lookup_field(tout, str(spec.get("field", "tax")))
                     if isinstance(rv, (int, float)) and not isinstance(rv, bool):
                         sibling_expected.append(float(rv))
-                    for k_sub, v_sub in tout.items():
-                        if k_sub != "rate_basis":
-                            sibling_nested.extend(_collect_nested_numbers(v_sub))
+                    rate_u = tout.get("rate_ugx")
+                    if isinstance(rate_u, (int, float)) and not isinstance(rate_u, bool):
+                        same_tool_rates.setdefault(t_name, []).append(float(rate_u))
         if len(sibling_expected) >= 2:
             sibling_expected.append(sum(sibling_expected))
 
-    # Include numbers from the scenario prompt (user inputs), verified_facts, and must_include facts as companions
-    context_companions = [*sibling_expected, *sibling_nested]
+    # Include numbers from the scenario prompt (user inputs) and must_include facts as companions
+    context_companions = list(sibling_expected)
     if scenario_context:
         for pa in parse_amounts_from_clause(scenario_context):
             if pa.is_money and pa.value >= 1000.0:
                 context_companions.append(pa.value)
-        try:
-            from app.scenario_planner import build_verified_facts
-
-            vf_text = build_verified_facts(scenario_context, tool_caller=runner)
-            for pa in parse_amounts_from_clause(vf_text):
-                if pa.is_money and pa.value >= 1000.0:
-                    context_companions.append(pa.value)
-        except Exception:
-            pass
     for mi in expect.get("must_include") or []:
         if isinstance(mi, dict):
             for opt in mi.get("any") or ([mi["text"]] if "text" in mi else []):
@@ -882,12 +849,13 @@ def score_turn(
 
     figure_details: list[FigureScore] = []
     for spec in figure_specs:
+        spec_companions = [*context_companions, *same_tool_rates.get(str(spec["tool"]), [])]
         figure_details.append(
             _score_single_figure(
                 spec,
                 reply,
                 runner,
-                extra_companion_values=context_companions,
+                extra_companion_values=spec_companions,
             )
         )
 
@@ -911,6 +879,11 @@ def score_turn(
 
         def _alt_in_reply(alt_val: Any) -> bool:
             low_alt = str(alt_val).lower()
+            if "apportion" in low_alt and re.search(
+                r"\btaxable[- ]supplies\s+ratio\b[^.\n]{0,30}\b100(?:\.0+)?%",
+                lower_reply,
+            ):
+                return False
             m_pct = re.match(r"^(\d+(?:\.\d+)?)%$", low_alt)
             if m_pct:
                 num = re.escape(m_pct.group(1))
