@@ -1808,6 +1808,7 @@ def _apply_output_guards(
     locale: str = "en",
     tool_grounded: bool = False,
     verified_facts: str = "",
+    calculation_message: str | None = None,
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1831,7 +1832,9 @@ def _apply_output_guards(
     if tool_grounded:
         hits, citations = [], []
     contexts = [h.get("text") or h.get("answer", "") for h in hits]
-    calc_verified_facts = _evaluate_calculation_context(message)
+    calc_verified_facts = _evaluate_calculation_context(
+        calculation_message if calculation_message is not None else message
+    )
     if verified_facts and calc_verified_facts and verified_facts not in calc_verified_facts:
         verified_facts_block = f"{calc_verified_facts}\n\n{verified_facts}".strip()
     else:
@@ -2453,6 +2456,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                     tenant_id=tenant_id or "default",
                     locale=locale,
                     tool_grounded=bool(connector_forced and agentic_used_tools),
+                    calculation_message=str(result.get("_english_message") or message),
                 )
                 full_reply = guard["reply"]
                 if guard["revised"]:
@@ -2731,6 +2735,7 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
                 user_id=user_id or "",
                 tenant_id=tenant_id or "default",
                 locale=locale,
+                calculation_message=str(result.get("_english_message") or message),
             )
             full_reply = guard["reply"]
             faith = guard["faithfulness"]
@@ -12506,12 +12511,15 @@ class ChatModel:
         force_agentic = False
         force_tool_whitelist: list[str] | None = None
         suppress_agentic_fallback = False
-        from .premise_guard import check_fact_contradictions
-        from .scenario_planner import plan_tools
+        planned_specs_s: list[Any] = []
+        has_premise_contra_s = False
+        if flags.is_enabled("agentic_mode") or stream_tiering_enabled:
+            from .premise_guard import check_fact_contradictions
+            from .scenario_planner import plan_tools
 
-        active_cf_s = _ACTIVE_CASE_FACTS.get()
-        planned_specs_s = plan_tools(rewritten, active_cf_s)
-        has_premise_contra_s = bool(check_fact_contradictions(active_cf_s))
+            active_cf_s = _ACTIVE_CASE_FACTS.get()
+            planned_specs_s = plan_tools(rewritten, active_cf_s)
+            has_premise_contra_s = bool(check_fact_contradictions(active_cf_s))
         if flags.is_enabled("agentic_mode"):
             route_decision = supervisor.classify(
                 rewritten,

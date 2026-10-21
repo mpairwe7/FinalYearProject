@@ -32,6 +32,7 @@ def isolated_sqlite_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def test_phase41_web_research_flags_registered() -> None:
+    """Verify live_web_research and auto_qdrant_web_sync are registered with default False."""
     all_flags = flags.all()
     assert "live_web_research" in all_flags
     assert "auto_qdrant_web_sync" in all_flags
@@ -40,6 +41,7 @@ def test_phase41_web_research_flags_registered() -> None:
 
 
 def test_web_sync_ledger_insert_lookup_and_ttl(isolated_sqlite_db: Path) -> None:
+    """Verify SQLite web_sync_ledger insert, lookup by family/topic/pair, in-place upsert, and TTL expiry."""
     now = datetime.now(timezone.utc)
     future = (now + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     past = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -69,6 +71,21 @@ def test_web_sync_ledger_insert_lookup_and_ttl(isolated_sqlite_db: Path) -> None
     by_topic = db.get_active_web_sync_entry(topic_key="real_estate_rental_tax")
     assert by_topic is not None
     assert by_topic["id"] == rec["id"]
+
+    # Lookup by both doc_family AND topic_key requires both to match
+    by_both = db.get_active_web_sync_entry(
+        doc_family="sector_guide_real_estate",
+        topic_key="real_estate_rental_tax",
+    )
+    assert by_both is not None
+    assert by_both["id"] == rec["id"]
+    assert (
+        db.get_active_web_sync_entry(
+            doc_family="sector_guide_real_estate",
+            topic_key="mismatched_topic",
+        )
+        is None
+    )
 
     # Upsert same family+topic updates in place
     rec2 = db.upsert_web_sync_entry(
@@ -103,7 +120,10 @@ def test_web_sync_ledger_insert_lookup_and_ttl(isolated_sqlite_db: Path) -> None
     assert len(db.list_web_sync_entries(limit=10)) == 2
 
 
-def test_web_sync_ledger_validation_and_postgres_parity(isolated_sqlite_db: Path) -> None:
+def test_web_sync_ledger_validation_and_postgres_parity(
+    isolated_sqlite_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify input validation, signature parity, and PostgreSQL recording-pool SQL generation."""
     with pytest.raises(ValueError, match="topic_key or doc_family"):
         db.upsert_web_sync_entry(
             topic_key="",
@@ -132,8 +152,122 @@ def test_web_sync_ledger_validation_and_postgres_parity(isolated_sqlite_db: Path
             inspect.signature(getattr(pg, fn_name)).parameters
         )
 
+    # When pool is None, upsert_web_sync_entry raises RuntimeError rather than silently dropping the write
+    monkeypatch.setattr(pg, "_get_pool", lambda: None)
+    with pytest.raises(RuntimeError, match="PostgreSQL connection pool is unavailable"):
+        pg.upsert_web_sync_entry(
+            topic_key="vat",
+            doc_family="vat_guide",
+            source_uri="doc.pdf",
+            ura_url="https://ura.go.ug/doc.pdf",
+            pdf_sha256="1" * 64,
+        )
+
+    # Recording pool test for PostgreSQL SQL and bound parameters
+    executed: list[tuple[str, Any]] = []
+    fake_row = (
+        "wsync_1234",
+        "vat_topic",
+        "vat_guide",
+        "VAT-Guide-2026-27.pdf",
+        "https://ura.go.ug/vat.pdf",
+        "d" * 64,
+        "FY2026-27",
+        "replaced_outdated",
+        "VAT-Guide-2024-25.pdf",
+        "2026-10-21T12:00:00.000000Z",
+        "2026-10-28T12:00:00.000000Z",
+    )
+
+    class _FakeCursor:
+        """Fake psycopg cursor recording SQL statements and parameters."""
+
+        def __enter__(self) -> _FakeCursor:
+            """Enter context manager."""
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            """Exit context manager."""
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            """Record executed SQL and parameters."""
+            executed.append((sql, params))
+
+        def fetchone(self) -> Any:
+            """Return single fake row."""
+            return fake_row
+
+        def fetchall(self) -> list[Any]:
+            """Return list of fake rows."""
+            return [fake_row]
+
+    class _FakeConn:
+        """Fake psycopg connection."""
+
+        def __init__(self) -> None:
+            """Initialize committed state."""
+            self.committed = False
+
+        def __enter__(self) -> _FakeConn:
+            """Enter context manager."""
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            """Exit context manager."""
+
+        def cursor(self) -> _FakeCursor:
+            """Return fake cursor."""
+            return _FakeCursor()
+
+        def commit(self) -> None:
+            """Record commit."""
+            self.committed = True
+
+    class _FakePool:
+        """Fake psycopg connection pool."""
+
+        def __init__(self) -> None:
+            """Initialize connection holder."""
+            self.conn = _FakeConn()
+
+        def connection(self) -> _FakeConn:
+            """Return fake connection."""
+            return self.conn
+
+    fake_pool = _FakePool()
+    monkeypatch.setattr(pg, "_get_pool", lambda: fake_pool)
+
+    pg_rec = pg.upsert_web_sync_entry(
+        topic_key="vat_topic",
+        doc_family="vat_guide",
+        source_uri="VAT-Guide-2026-27.pdf",
+        ura_url="https://ura.go.ug/vat.pdf",
+        pdf_sha256="d" * 64,
+        fiscal_year="FY2026-27",
+        action_taken="replaced_outdated",
+        superseded_source="VAT-Guide-2024-25.pdf",
+    )
+    assert pg_rec["doc_family"] == "vat_guide"
+    assert fake_pool.conn.committed is True
+    assert "ON CONFLICT(id) DO UPDATE" in executed[-1][0]
+
+    active_pg = pg.get_active_web_sync_entry(
+        doc_family="vat_guide",
+        topic_key="vat_topic",
+        now_iso="2026-10-22T00:00:00Z",
+    )
+    assert active_pg is not None
+    assert active_pg["source_uri"] == "VAT-Guide-2026-27.pdf"
+    assert "WHERE doc_family = %s AND topic_key = %s AND expires_at > %s" in executed[-1][0]
+    assert executed[-1][1] == ("vat_guide", "vat_topic", "2026-10-22T00:00:00.000000Z")
+
+    listed_pg = pg.list_web_sync_entries(limit=5)
+    assert len(listed_pg) == 1
+    assert listed_pg[0]["id"] == "wsync_1234"
+
 
 def test_scenario_planner_bypass_regex_matches_compared_to_and_versus() -> None:
+    """Verify _SCENARIO_PLANNER_BYPASS_RE matches 'compared to' and 'versus'."""
     assert _SCENARIO_PLANNER_BYPASS_RE.search(
         "How much PAYE as a tax resident compared to a non-resident?"
     )
@@ -143,11 +277,15 @@ def test_scenario_planner_bypass_regex_matches_compared_to_and_versus() -> None:
 
 
 def test_streaming_apply_output_guards_honors_verified_facts() -> None:
+    """Verify _apply_output_guards passes verified_facts and calculation_message to judge and claim verifier."""
     from app.guardrails import OutputGuard
     from app.service import _apply_output_guards
 
     class _StubModel:
+        """Minimal stub model for testing _apply_output_guards."""
+
         def _evaluate_response_judge(self, **kwargs: Any) -> dict[str, Any]:
+            """Verify verified_facts reaches the response judge."""
             assert "verified_facts" in kwargs
             assert "8,608,000" in kwargs["verified_facts"]
             return {
@@ -159,9 +297,11 @@ def test_streaming_apply_output_guards_honors_verified_facts() -> None:
             }
 
         def _build_handoff_packet(self, **kwargs: Any) -> dict[str, Any]:
+            """Return empty handoff packet."""
             return {}
 
         def _maybe_create_ticket(self, **kwargs: Any) -> str:
+            """Return empty ticket id."""
             return ""
 
     hits = [
@@ -183,7 +323,8 @@ def test_streaming_apply_output_guards_honors_verified_facts() -> None:
     )
     guard_out = _apply_output_guards(
         _StubModel(),
-        message="Calculate resident vs non-resident PAYE on UGX 22,200,000 per month",
+        message="Bala omusolo gwa PAYE",
+        calculation_message="Calculate resident vs non-resident PAYE on UGX 22,200,000 per month",
         reply=reply,
         hits=hits,
         citations=citations,

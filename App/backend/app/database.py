@@ -3141,6 +3141,7 @@ def upsert_web_sync_entry(
     synced_at: str = "",
     expires_at: str = "",
 ) -> dict[str, Any]:
+    """Insert or update a ``web_sync_ledger`` entry for a ``(doc_family, topic_key)`` pair."""
     t_key = str(topic_key or "").strip()
     d_fam = str(doc_family or "").strip()
     s_uri = str(source_uri or "").strip()
@@ -3219,35 +3220,38 @@ def get_active_web_sync_entry(
     topic_key: str = "",
     now_iso: str = "",
 ) -> dict[str, Any] | None:
+    """Return the most recent non-expired ``web_sync_ledger`` entry matching the given keys."""
     d_fam = str(doc_family or "").strip()
     t_key = str(topic_key or "").strip()
     if not d_fam and not t_key:
         return None
     now_str = _normalize_utc_iso(now_iso)
     conn = _get_connection()
-    cols = (
-        "id, topic_key, doc_family, source_uri, ura_url, pdf_sha256, "
-        "fiscal_year, action_taken, superseded_source, synced_at, expires_at"
-    )
     if d_fam and t_key:
         row = conn.execute(
-            f"SELECT {cols} FROM web_sync_ledger "
-            "WHERE (doc_family = ? OR topic_key = ?) AND expires_at > ? "
-            "ORDER BY synced_at DESC LIMIT 1",
+            """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                      fiscal_year, action_taken, superseded_source, synced_at, expires_at
+               FROM web_sync_ledger
+               WHERE doc_family = ? AND topic_key = ? AND expires_at > ?
+               ORDER BY synced_at DESC LIMIT 1""",
             (d_fam, t_key, now_str),
         ).fetchone()
     elif d_fam:
         row = conn.execute(
-            f"SELECT {cols} FROM web_sync_ledger "
-            "WHERE doc_family = ? AND expires_at > ? "
-            "ORDER BY synced_at DESC LIMIT 1",
+            """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                      fiscal_year, action_taken, superseded_source, synced_at, expires_at
+               FROM web_sync_ledger
+               WHERE doc_family = ? AND expires_at > ?
+               ORDER BY synced_at DESC LIMIT 1""",
             (d_fam, now_str),
         ).fetchone()
     else:
         row = conn.execute(
-            f"SELECT {cols} FROM web_sync_ledger "
-            "WHERE topic_key = ? AND expires_at > ? "
-            "ORDER BY synced_at DESC LIMIT 1",
+            """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                      fiscal_year, action_taken, superseded_source, synced_at, expires_at
+               FROM web_sync_ledger
+               WHERE topic_key = ? AND expires_at > ?
+               ORDER BY synced_at DESC LIMIT 1""",
             (t_key, now_str),
         ).fetchone()
     if not row:
@@ -3268,6 +3272,7 @@ def get_active_web_sync_entry(
 
 
 def list_web_sync_entries(limit: int = 100) -> list[dict[str, Any]]:
+    """List recent ``web_sync_ledger`` entries ordered by ``synced_at`` descending."""
     conn = _get_connection()
     rows = conn.execute(
         """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,

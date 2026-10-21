@@ -2504,6 +2504,7 @@ def upsert_web_sync_entry(
     synced_at: str = "",
     expires_at: str = "",
 ) -> dict[str, Any]:
+    """Insert or update a ``web_sync_ledger`` entry for a ``(doc_family, topic_key)`` pair."""
     t_key = str(topic_key or "").strip()
     d_fam = str(doc_family or "").strip()
     s_uri = str(source_uri or "").strip()
@@ -2543,7 +2544,7 @@ def upsert_web_sync_entry(
     }
     pool = _get_pool()
     if pool is None:
-        return record
+        raise RuntimeError("PostgreSQL connection pool is unavailable")
     with pool.connection() as conn, conn.cursor() as cur:
         cur.execute(
             """INSERT INTO web_sync_ledger (
@@ -2586,6 +2587,7 @@ def get_active_web_sync_entry(
     topic_key: str = "",
     now_iso: str = "",
 ) -> dict[str, Any] | None:
+    """Return the most recent non-expired ``web_sync_ledger`` entry matching the given keys."""
     d_fam = str(doc_family or "").strip()
     t_key = str(topic_key or "").strip()
     if not d_fam and not t_key:
@@ -2594,30 +2596,32 @@ def get_active_web_sync_entry(
     if pool is None:
         return None
     now_str = _normalize_utc_iso(now_iso)
-    cols = (
-        "id, topic_key, doc_family, source_uri, ura_url, pdf_sha256, "
-        "fiscal_year, action_taken, superseded_source, synced_at, expires_at"
-    )
     with pool.connection() as conn, conn.cursor() as cur:
         if d_fam and t_key:
             cur.execute(
-                f"SELECT {cols} FROM web_sync_ledger "
-                "WHERE (doc_family = %s OR topic_key = %s) AND expires_at > %s "
-                "ORDER BY synced_at DESC LIMIT 1",
+                """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                          fiscal_year, action_taken, superseded_source, synced_at, expires_at
+                   FROM web_sync_ledger
+                   WHERE doc_family = %s AND topic_key = %s AND expires_at > %s
+                   ORDER BY synced_at DESC LIMIT 1""",
                 (d_fam, t_key, now_str),
             )
         elif d_fam:
             cur.execute(
-                f"SELECT {cols} FROM web_sync_ledger "
-                "WHERE doc_family = %s AND expires_at > %s "
-                "ORDER BY synced_at DESC LIMIT 1",
+                """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                          fiscal_year, action_taken, superseded_source, synced_at, expires_at
+                   FROM web_sync_ledger
+                   WHERE doc_family = %s AND expires_at > %s
+                   ORDER BY synced_at DESC LIMIT 1""",
                 (d_fam, now_str),
             )
         else:
             cur.execute(
-                f"SELECT {cols} FROM web_sync_ledger "
-                "WHERE topic_key = %s AND expires_at > %s "
-                "ORDER BY synced_at DESC LIMIT 1",
+                """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                          fiscal_year, action_taken, superseded_source, synced_at, expires_at
+                   FROM web_sync_ledger
+                   WHERE topic_key = %s AND expires_at > %s
+                   ORDER BY synced_at DESC LIMIT 1""",
                 (t_key, now_str),
             )
         row = cur.fetchone()
@@ -2639,6 +2643,7 @@ def get_active_web_sync_entry(
 
 
 def list_web_sync_entries(limit: int = 100) -> list[dict[str, Any]]:
+    """List recent ``web_sync_ledger`` entries ordered by ``synced_at`` descending."""
     pool = _get_pool()
     if pool is None:
         return []
