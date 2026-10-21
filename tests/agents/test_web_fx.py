@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 
+from app import flags as flags_mod
 from app import web_fx
 from app.case_facts import extract_case_facts
-from app.flags import flags
 from app.scenario_planner import build_verified_facts, plan_tools
 from app.tools import ToolRegistry
 
@@ -24,14 +25,14 @@ def _reset_fx_cache():
 
 def test_parse_xe_rate_variants() -> None:
     """Verify XE.com HTML parser handles JSON manifest, midMarketRate, initialRatesData, and text fallback."""
-    html_manifest = '{"dataManifest":{"k":{"timestamp":1792594800000,"rates":{"USD":1,"UGX":3745.55}}}}'
+    html_manifest = '{"dataManifest":{"k":{"timestamp":999999,"rates":{"USD":1,"UGX":3745.55}}}}'
     assert web_fx._parse_xe_rate(html_manifest, "USD", "UGX") == pytest.approx(3745.55)
 
     html_mid = '<script>{"toCurrency":"UGX","midMarketRate":"3,688.42"}</script>'
     assert web_fx._parse_xe_rate(html_mid, "USD", "UGX") == pytest.approx(3688.42)
 
     html_init = (
-        '{"initialRatesData":{"timestamp":1792594800000,'
+        '{"initialRatesData":{"timestamp":999999,'
         '"rates":{"USD":1,"EUR":0.90,"UGX":3780.0}}}'
     )
     # 1 EUR = 3780.0 / 0.90 = 4200.0 UGX
@@ -72,9 +73,10 @@ def test_lookup_live_exchange_rate_cross_checks_xe_and_google() -> None:
 
     def _fake_fetch(url: str) -> str:
         """Return mocked XE or Google HTML."""
-        if "xe.com" in url:
+        host = (urlparse(url).hostname or "").lower()
+        if host == "www.xe.com":
             return '{"midMarketRate":"3,750.00"}'
-        if "google.com/finance" in url:
+        if host == "www.google.com":
             return '<div data-last-price="3755.00"></div>'
         raise AssertionError(f"Unexpected URL {url}")
 
@@ -90,7 +92,8 @@ def test_lookup_live_exchange_rate_falls_back_to_open_er_and_offline() -> None:
 
     def _mirror_fetch(url: str) -> str:
         """Simulate XE/Google failure and Open ER success."""
-        if "open.er-api.com" in url:
+        host = (urlparse(url).hostname or "").lower()
+        if host == "open.er-api.com":
             return json.dumps({"result": "success", "rates": {"UGX": 3762.25}})
         raise RuntimeError("upstream timeout")
 
@@ -176,7 +179,8 @@ def test_scenario1_expat_salary_computes_full_paye_on_turn1_with_live_fx(
         "lookup_live_exchange_rate",
         lambda currency, target="UGX", **kw: fake_quote if currency == "USD" else None,
     )
-    flags.set("live_web_research", True)
+    monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
+    flags_mod.flags.set("live_web_research", True)
     try:
         msg = (
             "We are hiring a foreign technical specialist on an 8-month contract in Entebbe. "
@@ -210,4 +214,4 @@ def test_scenario1_expat_salary_computes_full_paye_on_turn1_with_live_fx(
         assert "37,250" in block
         assert "exchange rate" not in block.split("Still needed for an exact figure:")[-1]
     finally:
-        flags.clear("live_web_research")
+        flags_mod.flags.clear("live_web_research")

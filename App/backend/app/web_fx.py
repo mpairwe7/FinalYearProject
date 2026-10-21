@@ -190,7 +190,7 @@ def _parse_xe_rate(html: str, currency: str, target: str = "UGX") -> float | Non
     cur = currency.strip().upper()
     tgt = target.strip().upper()
 
-    # 1. Direct JSON pair manifest: "rates":{"USD":1,"UGX":4192.1550465981}
+    # 1. Direct JSON pair manifest: "rates":{"USD":1,"UGX":3750.25}
     pair_pat = re.compile(
         rf'"rates"\s*:\s*\{{\s*"{re.escape(cur)}"\s*:\s*1(?:\.0+)?\s*,\s*"{re.escape(tgt)}"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
         re.IGNORECASE,
