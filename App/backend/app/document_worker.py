@@ -24,9 +24,18 @@ def isolated_enabled() -> bool:
 
 def _child(kind: str, data: bytes, conn: Any) -> None:
     try:
-        from .documents import _EXTRACTORS
+        if kind == "sandbox_pdf":
+            from .ephemeral_pdf_sandbox import _extract_pdf_pages
 
-        extraction = _EXTRACTORS[kind](data)
+            extraction = _extract_pdf_pages(data)
+        elif kind == "sandbox_xlsx":
+            from .ephemeral_pdf_sandbox import _extract_xlsx_pages
+
+            extraction = _extract_xlsx_pages(data)
+        else:
+            from .documents import _EXTRACTORS
+
+            extraction = _EXTRACTORS[kind](data)
         conn.send(("ok", extraction))
     except Exception as exc:  # noqa: BLE001
         conn.send(("err", f"{type(exc).__name__}: {exc}"))

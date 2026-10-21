@@ -215,3 +215,54 @@ def test_malicious_javascript_pdf_and_oversized_download_rejected(
                 d,
                 byte_fetcher=lambda _u, _m: b"%PDF-1.7",
             )
+
+    # Legacy .xls workbook is rejected with SandboxDownloadRejected
+    with pytest.raises(sbx.SandboxDownloadRejected, match="Legacy .xls"):
+        sbx.fetch_and_extract_sandbox_document(
+            "https://ura.go.ug/en/wp-content/uploads/2026/07/Old-Schedule.xls",
+            "valuation schedule",
+            turn_id="turn-xls",
+            byte_fetcher=lambda _u, _m: b"BIFF8",
+            base_dir=tmp_path,
+        )
+
+
+def test_redirect_to_disallowed_target_and_isolated_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verify _default_stream_downloader blocks redirects to non-Tier-1/SSRF URLs and DOCUMENT_PARSE_ISOLATED works."""
+    import httpx
+
+    def _mock_handler(request: httpx.Request) -> httpx.Response:
+        """Simulate an open redirect from ura.go.ug to an internal metadata IP."""
+        return httpx.Response(
+            status_code=302,
+            headers={"Location": "http://169.254.169.254/latest/meta-data/"},
+            request=request,
+        )
+
+    orig_client = httpx.Client
+
+    def _patched_client(*args: Any, **kwargs: Any) -> httpx.Client:
+        """Return httpx.Client wired to MockTransport."""
+        kwargs["transport"] = httpx.MockTransport(_mock_handler)
+        return orig_client(*args, **kwargs)
+
+    monkeypatch.setattr(sbx.httpx, "Client", _patched_client)
+    with pytest.raises(sbx.SandboxDownloadRejected, match="Disallowed sandbox redirect target"):
+        sbx._default_stream_downloader("https://ura.go.ug/redirect-doc.pdf", 1024 * 1024)
+
+    # Verify DOCUMENT_PARSE_ISOLATED=true routes extraction through document_worker subprocess
+    monkeypatch.setenv("DOCUMENT_PARSE_ISOLATED", "true")
+    pdf_bytes = _make_pdf_bytes(["URA Isolated Subprocess Extraction Test FY 2026-27"])
+    doc = sbx.fetch_and_extract_sandbox_document(
+        "https://ura.go.ug/en/wp-content/uploads/2026/07/Isolated-Test-FY-2026-27.pdf",
+        "isolated subprocess extraction",
+        turn_id="turn-isolated",
+        byte_fetcher=lambda _u, _m: pdf_bytes,
+        base_dir=tmp_path,
+    )
+    assert doc.page_count == 1
+    assert doc.fiscal_year == "FY2026-27"
+    assert "Isolated Subprocess" in doc.chunks[0]["text"]
+

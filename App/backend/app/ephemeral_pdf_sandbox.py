@@ -37,7 +37,9 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from .document_worker import try_isolated
 from .guardrails import scan_retrieved_text
+from .malware_scan import MalwareRejected, scan_bytes
 from .mcp.validation import screen_tool_result
 from .pdf_guards import QUERY_PDF_LIMITS, PdfRejected, inspect_pdf_bytes
 from .web_research import (
@@ -134,10 +136,6 @@ def ephemeral_sandbox(turn_id: str = "", *, base_dir: Path | None = None) -> Ite
     sandbox_dir = root / f"{safe_turn}_{unique_suffix}"
     sandbox_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
-        os.chmod(sandbox_dir, 0o700)
-    except OSError:
-        pass
-    try:
         yield sandbox_dir
     finally:
         shutil.rmtree(sandbox_dir, ignore_errors=True)
@@ -156,7 +154,7 @@ def _safe_filename_from_url(url: str, *, default_ext: str = ".pdf") -> str:
 
 
 def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
-    """Stream *url* over HTTPS while enforcing *max_bytes* mid-stream."""
+    """Stream *url* over HTTPS while enforcing *max_bytes* mid-stream and validating redirect hops."""
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -164,24 +162,37 @@ def _default_stream_downloader(url: str, max_bytes: int) -> bytes:
         ),
         "Accept": "application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*;q=0.8",
     }
-    buf = bytearray()
-    with httpx.Client(timeout=SANDBOX_DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        with client.stream("GET", url, headers=headers) as resp:
-            resp.raise_for_status()
-            content_len = resp.headers.get("Content-Length")
-            if content_len and content_len.isdigit() and int(content_len) > max_bytes:
-                raise SandboxDownloadRejected(
-                    f"Remote Content-Length ({content_len} bytes) exceeds sandbox cap ({max_bytes} bytes)."
-                )
-            for chunk in resp.iter_bytes(chunk_size=65536):
-                if not chunk:
+    current = url
+    with httpx.Client(timeout=SANDBOX_DOWNLOAD_TIMEOUT_SECONDS, follow_redirects=False) as client:
+        for _hop in range(5):
+            with client.stream("GET", current, headers=headers) as resp:
+                if resp.is_redirect:
+                    loc = resp.headers.get("Location", "").strip()
+                    if not loc:
+                        raise SandboxDownloadRejected("Redirect response missing Location header.")
+                    nxt = str(resp.url.join(loc))
+                    problem = validate_outbound_research_url(nxt)
+                    if problem or classify_source_authority(nxt).tier != 1:
+                        raise SandboxDownloadRejected(f"Disallowed sandbox redirect target: {nxt}")
+                    current = nxt
                     continue
-                buf.extend(chunk)
-                if len(buf) > max_bytes:
+                resp.raise_for_status()
+                content_len = resp.headers.get("Content-Length")
+                if content_len and content_len.isdigit() and int(content_len) > max_bytes:
                     raise SandboxDownloadRejected(
-                        f"Streamed download exceeded sandbox cap of {max_bytes} bytes."
+                        f"Remote Content-Length ({content_len} bytes) exceeds sandbox cap ({max_bytes} bytes)."
                     )
-    return bytes(buf)
+                buf = bytearray()
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    buf.extend(chunk)
+                    if len(buf) > max_bytes:
+                        raise SandboxDownloadRejected(
+                            f"Streamed download exceeded sandbox cap of {max_bytes} bytes."
+                        )
+                return bytes(buf)
+        raise SandboxDownloadRejected("Too many redirects while downloading sandbox document.")
 
 
 def download_to_sandbox(
@@ -212,10 +223,6 @@ def download_to_sandbox(
     filename = _safe_filename_from_url(url)
     file_path = sandbox_dir / filename
     file_path.write_bytes(raw_bytes)
-    try:
-        os.chmod(file_path, 0o600)
-    except OSError:
-        pass
     return file_path, raw_bytes, sha256_hex
 
 
@@ -268,6 +275,7 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
         logger.debug("pypdfium2 extraction failed; trying pdfplumber/fitz fallback", exc_info=True)
 
     # 2. Secondary: pdfplumber
+    pages = []
     try:
         import pdfplumber  # type: ignore[import-untyped]
 
@@ -285,6 +293,7 @@ def _extract_pdf_pages(raw_bytes: bytes) -> list[tuple[int, str]]:
         logger.debug("pdfplumber extraction failed; trying PyMuPDF fallback", exc_info=True)
 
     # 3. Tertiary: PyMuPDF (fitz)
+    pages = []
     try:
         import fitz  # type: ignore[import-untyped]
 
@@ -494,6 +503,13 @@ def fetch_and_extract_sandbox_document(
         )
         filename = file_path.name
         stem = file_path.stem
+        lower = filename.lower()
+        if lower.endswith(".xls"):
+            raise SandboxDownloadRejected("Legacy .xls workbooks are not supported by the sandbox.")
+        try:
+            scan_bytes(raw_bytes, filename=filename)
+        except MalwareRejected as exc:
+            raise SandboxDownloadRejected(str(exc)) from exc
 
         cached = _get_cached_doc_payload(sha256_hex)
         if cached is not None:
@@ -513,8 +529,18 @@ def fetch_and_extract_sandbox_document(
                 from_cache=True,
             )
 
-        is_xlsx = filename.lower().endswith((".xlsx", ".xls"))
-        pages = _extract_xlsx_pages(raw_bytes) if is_xlsx else _extract_pdf_pages(raw_bytes)
+        is_xlsx = lower.endswith(".xlsx")
+        worker_kind = "sandbox_xlsx" if is_xlsx else "sandbox_pdf"
+        isolated_pages = try_isolated(worker_kind, raw_bytes)
+        if isolated_pages is not None:
+            pages = list(isolated_pages)
+        elif is_xlsx:
+            try:
+                pages = _extract_xlsx_pages(raw_bytes)
+            except Exception as exc:
+                raise SandboxDownloadRejected(f"Workbook could not be parsed: {exc}") from exc
+        else:
+            pages = _extract_pdf_pages(raw_bytes)
         if not pages:
             raise PdfRejected("No readable text pages remained after security screening.")
 
