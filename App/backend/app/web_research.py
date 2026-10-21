@@ -94,13 +94,16 @@ TIER1_DOMAINS: frozenset[str] = frozenset(
     }
 )
 
-# Only ura.go.ug (and ulii.org for enacted Ugandan Acts) may ever persist/replace in Qdrant
+# Only ura.go.ug, ulii.org, and parliament.go.ug (for enacted Ugandan Acts & Tax Bills) may ever persist/replace in Qdrant
 QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = frozenset(
     {
         "ura.go.ug",
         "www.ura.go.ug",
         "ulii.org",
         "www.ulii.org",
+        "parliament.go.ug",
+        "www.parliament.go.ug",
+        "bills.parliament.ug",
     }
 )
 
@@ -213,7 +216,7 @@ _FX_SYMBOL_MAP: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 _EXPLICIT_FX_RATE_RE = re.compile(
-    r"\b(?:exchange\s+rate|rate\s+of|@\s*ugx|1\s*(?:usd|eur|gbp|kes)\s*=\s*(?:ugx\s*)?\d{2,5})\b",
+    r"\b(?:exchange\s+rate\s*(?:is|of|=|:)?\s*(?:ugx\s*)?\d[\d,]*|rate\s+of\s*(?:ugx\s*)?\d[\d,]*|@\s*ugx\s*\d[\d,]*|1\s*(?:usd|eur|gbp|kes)\s*=\s*(?:ugx\s*)?\d{2,5})\b",
     re.IGNORECASE,
 )
 
@@ -347,6 +350,8 @@ def classify_source_authority(
             host in QDRANT_SYNC_ALLOWED_HOSTS
             or _hostname_matches_root(host, "ura.go.ug")
             or _hostname_matches_root(host, "ulii.org")
+            or _hostname_matches_root(host, "parliament.go.ug")
+            or _hostname_matches_root(host, "bills.parliament.ug")
         )
         return SourceAuthority(1, 1.0, host, can_qdrant, "Tier 1 official primary source")
 
@@ -816,7 +821,7 @@ def parse_search_results_html(html_body: str, *, default_doc_family: str = "") -
 
         seen_urls.add(raw_url)
         low_path = (urlparse(raw_url).path or "").lower()
-        is_pdf = low_path.endswith(".pdf") or "filetype:pdf" in raw_url.lower()
+        is_pdf = low_path.endswith(".pdf") or "filetype:pdf" in raw_url.lower() or "wpdmdl=" in raw_url.lower()
         is_sheet = low_path.endswith((".xlsx", ".xls", ".csv"))
         fy = extract_fiscal_year(f"{title} {raw_url} {snippet}")
         fam = default_doc_family or infer_doc_family(f"{title} {raw_url}")

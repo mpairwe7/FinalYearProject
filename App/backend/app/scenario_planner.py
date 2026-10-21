@@ -766,9 +766,31 @@ def _rule_advance_vehicle_tax(facts: CaseFacts, question: str) -> list[ToolCallS
     return specs
 
 
+def _rule_foreign_currency(facts: CaseFacts, _question: str) -> list[ToolCallSpec]:
+    """Plan convert_currency for any non-UGX monetary amount in *facts.amounts*."""
+    from .flags import flags
+
+    live_fx_enabled = flags.is_enabled("live_web_research")
+    specs: list[ToolCallSpec] = []
+    for mon in facts.amounts:
+        if mon.currency and mon.currency != "UGX" and float(mon.amount) > 0:
+            fx_params: dict[str, Any] = {
+                "amount": float(mon.amount),
+                "currency": mon.currency,
+            }
+            fx_missing: list[str] = []
+            if facts.exchange_rate_ugx is not None:
+                fx_params["exchange_rate"] = float(facts.exchange_rate_ugx)
+            elif not live_fx_enabled:
+                fx_missing.append(f"exchange rate ({mon.currency} to UGX) on payment date")
+            specs.append(ToolCallSpec("convert_currency", params=fx_params, missing_inputs=fx_missing))
+    return specs
+
+
 _PLANNER_RULES: tuple[Callable[[CaseFacts, str], list[ToolCallSpec]], ...] = (
     _rule_residency,
     _rule_paye_and_bik,
+    _rule_foreign_currency,
     _rule_rental,
     _rule_vat,
     _rule_withholding,

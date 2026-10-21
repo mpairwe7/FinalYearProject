@@ -734,7 +734,7 @@ All major subsystems are behind feature flags for progressive rollout:
 | `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Phase 41: self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` / `ulii.org` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, archives replaced `.jsonl` files, and records 7-day state in `web_sync_ledger` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**84** in total, including the per-phase switches for voice, offline and
+**85** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).
