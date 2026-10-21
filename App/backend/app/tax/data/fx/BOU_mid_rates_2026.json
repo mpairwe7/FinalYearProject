@@ -3,5 +3,21 @@
   "retrieved_on": null,
   "status": "unverified",
   "base_currency": "UGX",
-  "rates": {}
+  "rates": {},
+  "reference_mid_rates_2026": {
+    "USD": 3900.0,
+    "EUR": 4350.0,
+    "GBP": 5150.0,
+    "KES": 30.0,
+    "TZS": 1.5,
+    "RWF": 2.75,
+    "AED": 1060.0,
+    "CNY": 570.0,
+    "ZAR": 230.0,
+    "JPY": 25.5,
+    "INR": 44.0,
+    "CAD": 2800.0,
+    "CHF": 4650.0,
+    "AUD": 2700.0
+  }
 }
