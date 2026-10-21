@@ -29,6 +29,7 @@ import os
 import threading
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 _hashlib = hashlib
@@ -356,6 +357,22 @@ def init_db() -> None:
         updated_at        DOUBLE PRECISION NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_statutory_precedences_enabled ON statutory_precedences(enabled);
+
+    CREATE TABLE IF NOT EXISTS web_sync_ledger (
+        id                TEXT PRIMARY KEY,
+        topic_key         TEXT NOT NULL,
+        doc_family        TEXT NOT NULL,
+        source_uri        TEXT NOT NULL,
+        ura_url           TEXT NOT NULL,
+        pdf_sha256        TEXT NOT NULL,
+        fiscal_year       TEXT NOT NULL DEFAULT '',
+        action_taken      TEXT NOT NULL CHECK(action_taken IN ('replaced_outdated', 'added_new', 'verified_current', 'skipped_older')),
+        superseded_source TEXT NOT NULL DEFAULT '',
+        synced_at         TEXT NOT NULL,
+        expires_at        TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_web_sync_family ON web_sync_ledger(doc_family);
+    CREATE INDEX IF NOT EXISTS idx_web_sync_topic ON web_sync_ledger(topic_key);
 
     CREATE TABLE IF NOT EXISTS conversation_topics (
         conversation_id TEXT PRIMARY KEY,
@@ -2443,6 +2460,208 @@ def get_active_corpus_tombstones() -> list[dict[str, Any]]:
                 "chunk_id": r[2],
                 "reason": r[3],
                 "superseded_by": r[4],
+            }
+            for r in cur.fetchall()
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Web Sync Ledger (Phase 41 — Self-Updating Qdrant Memory)
+# ---------------------------------------------------------------------------
+_WEB_SYNC_ACTIONS = frozenset(
+    {"replaced_outdated", "added_new", "verified_current", "skipped_older"}
+)
+
+
+def _normalize_utc_iso(value: str = "", *, fallback_ts: float | None = None) -> str:
+    """Normalize an ISO-8601 timestamp or unix epoch to canonical ``YYYY-MM-DDTHH:MM:SS.ffffffZ``."""
+    raw = str(value or "").strip()
+    if raw:
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+            return parsed.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        except ValueError:
+            pass
+    ts = _time.time() if fallback_ts is None else float(fallback_ts)
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def upsert_web_sync_entry(
+    *,
+    topic_key: str,
+    doc_family: str,
+    source_uri: str,
+    ura_url: str,
+    pdf_sha256: str,
+    fiscal_year: str = "",
+    action_taken: str = "verified_current",
+    superseded_source: str = "",
+    ttl_seconds: float = 7 * 86400.0,
+    synced_at: str = "",
+    expires_at: str = "",
+) -> dict[str, Any]:
+    t_key = str(topic_key or "").strip()
+    d_fam = str(doc_family or "").strip()
+    s_uri = str(source_uri or "").strip()
+    u_url = str(ura_url or "").strip()
+    sha = str(pdf_sha256 or "").strip()
+    fy = str(fiscal_year or "").strip()
+    action = str(action_taken or "verified_current").strip()
+    superseded = str(superseded_source or "").strip()
+
+    if not (t_key or d_fam):
+        raise ValueError("topic_key or doc_family is required")
+    if not s_uri:
+        raise ValueError("source_uri is required")
+    if action not in _WEB_SYNC_ACTIONS:
+        raise ValueError(f"action_taken must be one of {sorted(_WEB_SYNC_ACTIONS)}")
+
+    now_ts = _time.time()
+    synced_iso = _normalize_utc_iso(synced_at, fallback_ts=now_ts)
+    expires_iso = _normalize_utc_iso(
+        expires_at, fallback_ts=now_ts + max(0.0, float(ttl_seconds))
+    )
+    key_seed = f"{d_fam}:{t_key}" if (d_fam and t_key) else (d_fam or t_key)
+    entry_id = f"wsync_{_hashlib.sha256(key_seed.encode('utf-8')).hexdigest()[:16]}"
+
+    record = {
+        "id": entry_id,
+        "topic_key": t_key,
+        "doc_family": d_fam,
+        "source_uri": s_uri,
+        "ura_url": u_url,
+        "pdf_sha256": sha,
+        "fiscal_year": fy,
+        "action_taken": action,
+        "superseded_source": superseded,
+        "synced_at": synced_iso,
+        "expires_at": expires_iso,
+    }
+    pool = _get_pool()
+    if pool is None:
+        return record
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO web_sync_ledger (
+                   id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                   fiscal_year, action_taken, superseded_source, synced_at, expires_at
+               )
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT(id) DO UPDATE SET
+                   topic_key = EXCLUDED.topic_key,
+                   doc_family = EXCLUDED.doc_family,
+                   source_uri = EXCLUDED.source_uri,
+                   ura_url = EXCLUDED.ura_url,
+                   pdf_sha256 = EXCLUDED.pdf_sha256,
+                   fiscal_year = EXCLUDED.fiscal_year,
+                   action_taken = EXCLUDED.action_taken,
+                   superseded_source = EXCLUDED.superseded_source,
+                   synced_at = EXCLUDED.synced_at,
+                   expires_at = EXCLUDED.expires_at""",
+            (
+                entry_id,
+                t_key,
+                d_fam,
+                s_uri,
+                u_url,
+                sha,
+                fy,
+                action,
+                superseded,
+                synced_iso,
+                expires_iso,
+            ),
+        )
+        conn.commit()
+    return record
+
+
+def get_active_web_sync_entry(
+    *,
+    doc_family: str = "",
+    topic_key: str = "",
+    now_iso: str = "",
+) -> dict[str, Any] | None:
+    d_fam = str(doc_family or "").strip()
+    t_key = str(topic_key or "").strip()
+    if not d_fam and not t_key:
+        return None
+    pool = _get_pool()
+    if pool is None:
+        return None
+    now_str = _normalize_utc_iso(now_iso)
+    cols = (
+        "id, topic_key, doc_family, source_uri, ura_url, pdf_sha256, "
+        "fiscal_year, action_taken, superseded_source, synced_at, expires_at"
+    )
+    with pool.connection() as conn, conn.cursor() as cur:
+        if d_fam and t_key:
+            cur.execute(
+                f"SELECT {cols} FROM web_sync_ledger "
+                "WHERE (doc_family = %s OR topic_key = %s) AND expires_at > %s "
+                "ORDER BY synced_at DESC LIMIT 1",
+                (d_fam, t_key, now_str),
+            )
+        elif d_fam:
+            cur.execute(
+                f"SELECT {cols} FROM web_sync_ledger "
+                "WHERE doc_family = %s AND expires_at > %s "
+                "ORDER BY synced_at DESC LIMIT 1",
+                (d_fam, now_str),
+            )
+        else:
+            cur.execute(
+                f"SELECT {cols} FROM web_sync_ledger "
+                "WHERE topic_key = %s AND expires_at > %s "
+                "ORDER BY synced_at DESC LIMIT 1",
+                (t_key, now_str),
+            )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "topic_key": row[1],
+        "doc_family": row[2],
+        "source_uri": row[3],
+        "ura_url": row[4],
+        "pdf_sha256": row[5],
+        "fiscal_year": row[6],
+        "action_taken": row[7],
+        "superseded_source": row[8],
+        "synced_at": row[9],
+        "expires_at": row[10],
+    }
+
+
+def list_web_sync_entries(limit: int = 100) -> list[dict[str, Any]]:
+    pool = _get_pool()
+    if pool is None:
+        return []
+    with pool.connection() as conn, conn.cursor() as cur:
+        cur.execute(
+            """SELECT id, topic_key, doc_family, source_uri, ura_url, pdf_sha256,
+                      fiscal_year, action_taken, superseded_source, synced_at, expires_at
+               FROM web_sync_ledger ORDER BY synced_at DESC LIMIT %s""",
+            (max(1, min(int(limit), 500)),),
+        )
+        return [
+            {
+                "id": r[0],
+                "topic_key": r[1],
+                "doc_family": r[2],
+                "source_uri": r[3],
+                "ura_url": r[4],
+                "pdf_sha256": r[5],
+                "fiscal_year": r[6],
+                "action_taken": r[7],
+                "superseded_source": r[8],
+                "synced_at": r[9],
+                "expires_at": r[10],
             }
             for r in cur.fetchall()
         ]

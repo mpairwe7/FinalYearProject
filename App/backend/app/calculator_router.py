@@ -658,7 +658,7 @@ _SCENARIO_PLANNER_BYPASS_RE = re.compile(
     r"\b(?:benefits? in kind|bik\b|company (?:car|vehicle|suv)|motor vehicle benefit|"
     r"furnished (?:house|apartment)|rent[-\s]?free house|employer[-\s]paid housing|"
     r"free (?:company )?(?:accommodation|housing)|low[-\s]?interest loan|debt waiver)\b"
-    r"|\b(?:compared with|differ from|why is there a difference)\b"
+    r"|\b(?:compared\s+(?:with|to)|versus|\bvs\.?\b|differ\s+from|why\s+is\s+there\s+a\s+difference)\b"
     r"|\b(?:late filing|penal tax|late payment interest|unstamped)\b"
     r"|\b(?:manual invoice|manual handwritten paper invoice|paper invoice|paper receipt|without an? efris)\b"
     r"|\b(?:can (?:i|we) (?:deduct|claim|also import)|from both|apply to both|"

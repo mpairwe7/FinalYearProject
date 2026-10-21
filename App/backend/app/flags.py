@@ -615,6 +615,20 @@ _REGISTRY: dict[str, Flag] = {
             "Escalations after 11 PM when no live officer is online queue for priority morning "
             "review/callback with SLA pause/resume and transparent 5-locale after-hours disclosure.",
         ),
+        Flag(
+            "live_web_research",
+            False,
+            "Phase 41 (FLAG_LIVE_WEB_RESEARCH): enable live FX lookup (XE.com / Google Currency) "
+            "and tiered official web/PDF research (ura.go.ug, ulii.org, bou.or.ug, eac.int) "
+            "inside an ephemeral RAM-backed document sandbox.",
+        ),
+        Flag(
+            "auto_qdrant_web_sync",
+            False,
+            "Phase 41 (FLAG_AUTO_QDRANT_WEB_SYNC): automatically compare ura.go.ug PDFs against "
+            "Qdrant, delete/tombstone outdated editions, upsert newer editions into Qdrant, and "
+            "record updates in web_sync_ledger to prevent redundant web searches.",
+        ),
     ]
 }
 

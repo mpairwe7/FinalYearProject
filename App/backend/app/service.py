@@ -1807,6 +1807,7 @@ def _apply_output_guards(
     tenant_id: str = "default",
     locale: str = "en",
     tool_grounded: bool = False,
+    verified_facts: str = "",
 ) -> dict[str, Any]:
     """Run the full post-generation guard pipeline for a streamed turn.
 
@@ -1830,7 +1831,16 @@ def _apply_output_guards(
     if tool_grounded:
         hits, citations = [], []
     contexts = [h.get("text") or h.get("answer", "") for h in hits]
-    faith = HybridRetriever.compute_faithfulness(reply, contexts) if contexts else None
+    calc_verified_facts = _evaluate_calculation_context(message)
+    if verified_facts and calc_verified_facts and verified_facts not in calc_verified_facts:
+        verified_facts_block = f"{calc_verified_facts}\n\n{verified_facts}".strip()
+    else:
+        verified_facts_block = verified_facts or calc_verified_facts
+    faith = (
+        HybridRetriever.compute_faithfulness(reply, contexts, verified_facts=verified_facts_block)
+        if (contexts or verified_facts_block)
+        else None
+    )
     escalate, esc_reason = output_guard.should_escalate(faith, hits) if hits else (False, "")
 
     claim_report: dict[str, Any] | None = None
@@ -1846,7 +1856,14 @@ def _apply_output_guards(
                 else:
                     reply = f"{reply.rstrip()} [1]"
         try:
-            claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
+            claim_report = verify_claims(
+                reply,
+                citations,
+                hits,
+                query=message,
+                locale=locale,
+                verified_facts=verified_facts_block,
+            )
         except Exception:
             logger.debug("claim verification failed", exc_info=True)
             claim_report = None
@@ -1870,6 +1887,7 @@ def _apply_output_guards(
             escalation_reason=esc_reason,
             claim_report=claim_report,
             locale=locale,
+            verified_facts=verified_facts_block,
         )
 
     revised = False
@@ -1881,7 +1899,9 @@ def _apply_output_guards(
     draft_claim_report = claim_report
     if response_judge.get("decision") == "revise" and response_judge.get("revised_reply"):
         reply = output_guard.sanitize(output_guard.redact_pii(response_judge["revised_reply"]))
-        faith = HybridRetriever.compute_faithfulness(reply, contexts)
+        faith = HybridRetriever.compute_faithfulness(
+            reply, contexts, verified_facts=verified_facts_block
+        )
         escalate, esc_reason = output_guard.should_escalate(faith, hits)
         response_judge["applied_revision"] = True
         response_judge["final_decision"] = "escalate" if escalate else "approve"
@@ -1904,7 +1924,14 @@ def _apply_output_guards(
         # unsupported claims.
         if citations:
             try:
-                claim_report = verify_claims(reply, citations, hits, query=message, locale=locale)
+                claim_report = verify_claims(
+                    reply,
+                    citations,
+                    hits,
+                    query=message,
+                    locale=locale,
+                    verified_facts=verified_facts_block,
+                )
                 if claim_report.get("decision") == "escalate":
                     response_judge["final_decision"] = "escalate"
             except Exception:
@@ -2220,6 +2247,8 @@ async def _run_chat_turn_events(  # noqa: PLR0912, PLR0915 — long but mirrors 
             connector_namespaces=connector_namespaces,
             turn_out=turn_out,
         )
+        if result.get("_case_facts") is not None:
+            _ACTIVE_CASE_FACTS.set(result["_case_facts"])
         if turn_out.get("source"):
             result.setdefault("locale_source", turn_out["source"])
         if turn_out.get("english_message"):
@@ -12477,21 +12506,37 @@ class ChatModel:
         force_agentic = False
         force_tool_whitelist: list[str] | None = None
         suppress_agentic_fallback = False
+        from .premise_guard import check_fact_contradictions
+        from .scenario_planner import plan_tools
+
+        active_cf_s = _ACTIVE_CASE_FACTS.get()
+        planned_specs_s = plan_tools(rewritten, active_cf_s)
+        has_premise_contra_s = bool(check_fact_contradictions(active_cf_s))
         if flags.is_enabled("agentic_mode"):
             route_decision = supervisor.classify(
                 rewritten,
                 has_conversation_history=bool(conversation_history),
                 locale=locale,
             )
+            eff_route_conf_s = (
+                1.0
+                if (
+                    route_decision.route == AgentRoute.RAG
+                    and route_decision.reason == "default factual query"
+                )
+                else route_decision.confidence
+            )
             stream_tier_decision = select_tier(
                 route_decision.route.value,
                 query=rewritten,
-                confidence=route_decision.confidence,
+                confidence=eff_route_conf_s,
                 tool_count=len(route_decision.suggested_tools),
                 locale=locale,
                 escalation_reason=route_decision.reason,
                 distress=detect_user_distress(rewritten) or "",
-                multi_hop=len(route_decision.suggested_tools) >= 2 or stream_tax_heads >= 2,
+                multi_hop=len(route_decision.suggested_tools) >= 2 or len(planned_specs_s) >= 2 or stream_tax_heads >= 2,
+                planner_tool_count=len(planned_specs_s),
+                premise_contradiction=has_premise_contra_s,
                 tax_heads_count=stream_tax_heads,
                 enabled=stream_tiering_enabled,
             )
@@ -12503,7 +12548,9 @@ class ChatModel:
                 query=rewritten,
                 locale=locale,
                 distress=detect_user_distress(rewritten) or "",
-                multi_hop=stream_tax_heads >= 2,
+                multi_hop=len(planned_specs_s) >= 2 or stream_tax_heads >= 2,
+                planner_tool_count=len(planned_specs_s),
+                premise_contradiction=has_premise_contra_s,
                 tax_heads_count=stream_tax_heads,
                 enabled=True,
             )
@@ -13069,6 +13116,7 @@ class ChatModel:
             ),
             "_tier_endpoint": stream_tier_endpoint,
             "_model_tier": stream_tier_decision.tier.value if stream_tier_decision is not None else ModelTier.T1.value,
+            "_case_facts": _ACTIVE_CASE_FACTS.get(),
             "current_topic": str(stream_topic_ctx.get("current_topic") or ""),
         }
 
