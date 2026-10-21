@@ -119,26 +119,34 @@ def clear_sandbox_cache() -> None:
 
 
 def _default_sandbox_root() -> Path:
-    """Return the base directory for ephemeral turn sandboxes."""
+    """Return the base directory for ephemeral turn sandboxes (preferring /dev/shm RAM tmpfs when available)."""
     configured = os.getenv("URA_WEB_SANDBOX_DIR", "").strip()
     if configured:
         return Path(configured)
+    shm_root = Path("/dev/shm")
+    if shm_root.is_dir() and os.access(shm_root, os.W_OK):
+        return shm_root / "ura-web-sandbox"
     return Path(tempfile.gettempdir()) / "ura-web-sandbox"
 
 
 @contextlib.contextmanager
 def ephemeral_sandbox(turn_id: str = "", *, base_dir: Path | None = None) -> Iterator[Path]:
     """Create an isolated 0o700 turn directory and unconditionally delete it on exit."""
-    safe_turn = re.sub(r"[^A-Za-z0-9_-]+", "_", str(turn_id or "turn").strip())[:48] or "turn"
-    unique_suffix = uuid.uuid4().hex[:10]
+    _ = turn_id
+    unique_id = uuid.uuid4().hex
     root = base_dir if base_dir is not None else _default_sandbox_root()
     root.mkdir(parents=True, exist_ok=True)
-    sandbox_dir = root / f"{safe_turn}_{unique_suffix}"
+    sandbox_dir = root / f"sbx_{unique_id}"
     sandbox_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         yield sandbox_dir
     finally:
-        shutil.rmtree(sandbox_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(sandbox_dir)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.error("Failed to wipe ephemeral sandbox directory sbx_%s", unique_id, exc_info=True)
 
 
 def _safe_filename_from_url(url: str, *, default_ext: str = ".pdf") -> str:

@@ -127,12 +127,21 @@ def test_source_authority_tiering_and_qdrant_persistence_gate() -> None:
         "https://ura.go.ug/en/wp-content/uploads/2026/07/Real-Estate-Guide-FY2026-27.pdf"
     )
 
-    # Tier 1 ULII Act -> trust 1.0, can_write_qdrant=True
+    # Tier 1 ULII Act & Parliament of Uganda Tax Bills -> trust 1.0, can_write_qdrant=True
     ulii_auth = wr.classify_source_authority(
         "https://ulii.org/akn/ug/act/2026/14/eng@2026-07-01"
     )
     assert ulii_auth.tier == 1
     assert ulii_auth.can_write_qdrant is True
+
+    parl_auth = wr.classify_source_authority(
+        "https://www.parliament.go.ug/sites/default/files/Income%20Tax%20(Amendment)%20Bill%2C%202026.pdf"
+    )
+    assert parl_auth.tier == 1
+    assert parl_auth.can_write_qdrant is True
+    assert wr.can_persist_to_qdrant(
+        "https://www.parliament.go.ug/sites/default/files/Income%20Tax%20(Amendment)%20Bill%2C%202026.pdf"
+    )
 
     # Tier 1 Bank of Uganda -> trust 1.0, can_write_qdrant=False (only ura.go.ug / ulii.org write to Qdrant)
     bou_auth = wr.classify_source_authority("https://www.bou.or.ug/monetary-policy-statement.pdf")

@@ -61,6 +61,9 @@ _QDRANT_SYNC_ALLOWED_HOSTS: frozenset[str] = frozenset(
         "www.ura.go.ug",
         "ulii.org",
         "www.ulii.org",
+        "parliament.go.ug",
+        "www.parliament.go.ug",
+        "bills.parliament.ug",
     }
 )
 
@@ -800,8 +803,13 @@ def compare_and_sync_ura_document(
                 )
                 written_jsonl = str(new_path)
                 snap_target = freshness_snapshot_path or SNAPSHOT_PATH
-                roots = freshness_roots if freshness_roots is not None else [target_jsonl_dir]
-                if freshness_snapshot_path is not None or snap_target.is_file():
+                is_default_jsonl_dir = target_jsonl_dir.resolve() == PDF_JSONL_DIR.resolve()
+                if freshness_snapshot_path is not None or (is_default_jsonl_dir and snap_target.is_file()):
+                    roots = (
+                        freshness_roots
+                        if freshness_roots is not None
+                        else (None if is_default_jsonl_dir and freshness_snapshot_path is None else [target_jsonl_dir])
+                    )
                     with contextlib.suppress(Exception):
                         write_snapshot(path=snap_target, roots=roots)
 
@@ -858,8 +866,13 @@ def compare_and_sync_ura_document(
             )
             written_jsonl = str(new_path)
             snap_target = freshness_snapshot_path or SNAPSHOT_PATH
-            roots = freshness_roots if freshness_roots is not None else [target_jsonl_dir]
-            if freshness_snapshot_path is not None or snap_target.is_file():
+            is_default_jsonl_dir = target_jsonl_dir.resolve() == PDF_JSONL_DIR.resolve()
+            if freshness_snapshot_path is not None or (is_default_jsonl_dir and snap_target.is_file()):
+                roots = (
+                    freshness_roots
+                    if freshness_roots is not None
+                    else (None if is_default_jsonl_dir and freshness_snapshot_path is None else [target_jsonl_dir])
+                )
                 with contextlib.suppress(Exception):
                     write_snapshot(path=snap_target, roots=roots)
 

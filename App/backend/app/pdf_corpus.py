@@ -37,24 +37,49 @@ raw text is what gets displayed and cited.
 from __future__ import annotations
 
 import hashlib
+import html as _html
 import json
 import logging
 import os
 import re
+import shutil
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote, urljoin, urlparse
 
 from .faq_corpus import CorpusValidationError
-from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_path
+from .malware_scan import MalwareRejected, scan_bytes
+from .pdf_guards import CORPUS_PDF_LIMITS, PdfRejected, inspect_pdf_bytes, inspect_pdf_path
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterable, Iterator
 
 logger = logging.getLogger(__name__)
 
 PDF_JSONL_SCHEMA_VERSION = 1
 PDF_MANIFEST_NAME = "pdf_corpus_manifest.json"
+
+#: Official Ugandan statutory PDF portal sources (October 2026 standard):
+#: 1. Parliament of Uganda 2026 Tax Bills portal
+#: 2. Uganda Revenue Authority Laws, Acts & Regulations download archive
+DEFAULT_STATUTORY_PDF_SOURCE_URLS: tuple[str, ...] = (
+    "https://www.parliament.go.ug/page/tax-bills-2026",
+    "https://ura.go.ug/download-category/laws-and-acts/",
+)
+DEFAULT_STATUTORY_PDF_SOURCES_CSV = ",".join(DEFAULT_STATUTORY_PDF_SOURCE_URLS)
+
+ALLOWED_STATUTORY_PDF_HOSTS: frozenset[str] = frozenset(
+    {
+        "ura.go.ug",
+        "www.ura.go.ug",
+        "parliament.go.ug",
+        "www.parliament.go.ug",
+        "bills.parliament.ug",
+        "ulii.org",
+        "www.ulii.org",
+    }
+)
 
 #: Ingest without the source PDFs present, trusting the manifest's own hashes.
 #:
@@ -76,6 +101,7 @@ TRUST_MANIFEST = os.getenv("CORPUS_TRUST_MANIFEST", "false").lower() in ("1", "t
 PDF_CHUNK_TARGET_CHARS = int(os.getenv("PDF_CHUNK_TARGET_CHARS", "2000"))
 PDF_CHUNK_HARD_MAX_CHARS = int(os.getenv("PDF_CHUNK_HARD_MAX_CHARS", "4000"))
 PDF_CHUNK_MIN_CHARS = int(os.getenv("PDF_CHUNK_MIN_CHARS", "200"))
+PDF_CORPUS_MAX_BYTES = int(os.getenv("PDF_CORPUS_MAX_BYTES", str(100 * 1024 * 1024)))
 
 # URA's PDFs embed the period as a non-standard glyph that decodes to U+FFFD,
 # so extracted text shows "1�2" for "1.2" and renders table-of-contents
@@ -258,7 +284,12 @@ def _chunk_pdf_records(pdf_path: Path, source_sha256: str) -> Iterator[dict[str,
         }
 
 
-def export_pdf_chunks_to_jsonl(pdf_dir: Path, jsonl_dir: Path) -> dict[str, Any]:
+def export_pdf_chunks_to_jsonl(
+    pdf_dir: Path,
+    jsonl_dir: Path,
+    *,
+    force_rechunk: bool = False,
+) -> dict[str, Any]:
     """Chunk every PDF in *pdf_dir* into one canonical JSONL file each.
 
     Deterministic: unchanged PDF bytes and unchanged chunker parameters
@@ -274,6 +305,23 @@ def export_pdf_chunks_to_jsonl(pdf_dir: Path, jsonl_dir: Path) -> dict[str, Any]
         raise CorpusValidationError(f"No PDF files found in {pdf_dir}")
 
     jsonl_dir.mkdir(parents=True, exist_ok=True)
+    existing_by_pdf: dict[str, dict[str, Any]] = {}
+    existing_manifest_path = jsonl_dir / PDF_MANIFEST_NAME
+    if not force_rechunk and existing_manifest_path.is_file():
+        try:
+            prev_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+            if (
+                isinstance(prev_manifest, dict)
+                and prev_manifest.get("schema_version") == PDF_JSONL_SCHEMA_VERSION
+                and prev_manifest.get("chunker") == _chunker_params()
+                and isinstance(prev_manifest.get("sources"), list)
+            ):
+                for item in prev_manifest["sources"]:
+                    if isinstance(item, dict) and item.get("pdf") and not item.get("duplicate_of"):
+                        existing_by_pdf[str(item["pdf"])] = item
+        except Exception:
+            existing_by_pdf = {}
+
     manifest_sources: list[dict[str, Any]] = []
     empty_sources: list[str] = []
     # The corpus holds the same document under more than one name — usually with
@@ -304,9 +352,33 @@ def export_pdf_chunks_to_jsonl(pdf_dir: Path, jsonl_dir: Path) -> dict[str, Any]
             continue
         canonical_by_hash[source_sha256] = pdf_path.name
 
+        output_path = jsonl_dir / f"{pdf_path.stem}.jsonl"
+        cached_entry = existing_by_pdf.get(pdf_path.name)
+        if (
+            cached_entry is not None
+            and cached_entry.get("sha256") == source_sha256
+            and cached_entry.get("jsonl") == output_path.name
+            and output_path.is_file()
+        ):
+            rec_count = int(cached_entry.get("records") or 0)
+            char_count = int(cached_entry.get("chars") or 0)
+            if rec_count == 0:
+                empty_sources.append(pdf_path.name)
+            total_records += rec_count
+            manifest_sources.append(
+                {
+                    "pdf": pdf_path.name,
+                    "jsonl": output_path.name,
+                    "sha256": source_sha256,
+                    "records": rec_count,
+                    "fiscal_year": fiscal_year_from_name(pdf_path.stem),
+                    "chars": char_count,
+                }
+            )
+            continue
+
         records = list(_chunk_pdf_records(pdf_path, source_sha256))
 
-        output_path = jsonl_dir / f"{pdf_path.stem}.jsonl"
         temporary_path = output_path.with_suffix(".jsonl.tmp")
         with temporary_path.open("w", encoding="utf-8", newline="\n") as handle:
             for record in records:
@@ -534,3 +606,566 @@ def ingest_pdf_jsonls(pdf_dir: Path, jsonl_dir: Path) -> list[dict[str, Any]]:
             f"does not match loaded documents ({total_records})"
         )
     return sorted(documents, key=lambda item: (item["source"], item["chunk_index"]))
+
+
+# ---------------------------------------------------------------------------
+# Statutory Portal PDF Harvester & Qdrant / JSONL Sync (October 2026 Standard)
+# ---------------------------------------------------------------------------
+
+
+def parse_pdf_source_urls(raw: str | Iterable[str] | None = None) -> list[str]:
+    """Parse and validate a comma-separated string or iterable of HTTPS statutory source URLs."""
+    if raw is None:
+        raw = os.getenv("PDF_SOURCE_URLS") or DEFAULT_STATUTORY_PDF_SOURCES_CSV
+    if isinstance(raw, str):
+        items = [part.strip() for part in re.split(r"[,;\r\n]+", raw) if part.strip()]
+    else:
+        items = []
+        for item in raw:
+            for sub in re.split(r"[,;\r\n]+", str(item or "")):
+                if sub.strip():
+                    items.append(sub.strip())
+
+    if not items:
+        raise CorpusValidationError("No statutory PDF source URLs configured.")
+
+    validated: list[str] = []
+    seen: set[str] = set()
+    for url in items:
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").strip().lower().rstrip(".")
+        if parsed.scheme != "https" or not host:
+            raise CorpusValidationError(f"Statutory PDF source URL must use https: {url!r}")
+        if host not in ALLOWED_STATUTORY_PDF_HOSTS:
+            raise CorpusValidationError(
+                f"Host {host!r} is not in ALLOWED_STATUTORY_PDF_HOSTS ({sorted(ALLOWED_STATUTORY_PDF_HOSTS)})."
+            )
+        if url not in seen:
+            seen.add(url)
+            validated.append(url)
+    return validated
+
+
+def _normalise_statutory_link(raw_href: str, base_url: str) -> str:
+    """Resolve *raw_href* against *base_url*, keeping WPDM `wpdmdl` and pagination `cp` query params."""
+    href = _html.unescape(str(raw_href or "").strip())
+    if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
+        return ""
+    joined = urljoin(base_url, href).split("#")[0]
+    parsed = urlparse(joined)
+    if parsed.scheme in ("http", "https"):
+        host = (parsed.hostname or "").strip().lower().rstrip(".")
+        if host in ALLOWED_STATUTORY_PDF_HOSTS and parsed.scheme == "http":
+            joined = "https://" + joined[len("http://") :]
+            parsed = urlparse(joined)
+    if parsed.scheme != "https":
+        return ""
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if host not in ALLOWED_STATUTORY_PDF_HOSTS:
+        return ""
+    if "?" in joined:
+        path_part, query_part = joined.split("?", 1)
+        kept = [
+            kv
+            for kv in query_part.split("&")
+            if kv.lower().startswith(("wpdmdl=", "cp="))
+        ]
+        return f"{path_part}?{'&'.join(kept)}" if kept else path_part
+    return joined
+
+
+def discover_statutory_pdf_links(
+    html_body: str,
+    base_url: str,
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Extract ``(pdf_links, pagination_urls)`` from a Parliament or URA statutory portal page.
+
+    Applies October 2026 DOM content-scope isolation:
+    * On Parliament of Uganda Drupal pages (``parliament.go.ug/page/tax-bills-2026``),
+      scopes extraction to ``div.node__content`` so navbar/sidebar unrelated PDFs
+      (e.g. ``MEMBERS.pdf`` or sidebar acts) are never harvested.
+    * On URA WordPress Download Manager pages (``ura.go.ug/download-category/laws-and-acts/``),
+      scopes extraction to ``#content_wpdm_package_1``, resolves ``data-downloadurl``
+      (preserving ``?wpdmdl=<id>`` while stripping ephemeral ``&refresh=...`` tokens),
+      and extracts ``?cp=<page>`` pagination links.
+    """
+    if not html_body:
+        return [], []
+
+    pdf_items: list[dict[str, str]] = []
+    next_pages: list[str] = []
+    seen_pdfs: set[str] = set()
+    seen_pages: set[str] = set()
+    base_parsed = urlparse(base_url)
+    base_path = (base_parsed.path or "").rstrip("/")
+
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_body, "html.parser")
+        # 1. Discover pagination links before decomposing chrome
+        for pg_a in soup.select("ul.wpdm-pagination a[href], ul.pagination a[href], a.page-numbers[href]"):
+            pg_url = _normalise_statutory_link(str(pg_a.get("href") or ""), base_url)
+            if not pg_url or pg_url == base_url or pg_url in seen_pages:
+                continue
+            pg_parsed = urlparse(pg_url)
+            if (pg_parsed.path or "").rstrip("/").startswith(base_path) and "cp=" in (pg_parsed.query or ""):
+                seen_pages.add(pg_url)
+                next_pages.append(pg_url)
+
+        # 2. Isolate primary content container
+        scope = (
+            soup.find("div", class_="node__content")
+            or soup.find(id="content_wpdm_package_1")
+        )
+        if scope is None:
+            for chrome in soup.find_all(["nav", "header", "footer", "aside", "script", "style"]):
+                chrome.decompose()
+            for sidebar in soup.select(".region-sidebar-second, .site-nav, .site-nav-large, .aside"):
+                sidebar.decompose()
+            scope = soup.find("article") or soup.find("main") or soup
+
+        # 3. Extract WordPress Download Manager (WPDM) cards first
+        for card in scope.select("div.card, div.link-template-default"):
+            dl_a = card.find("a", attrs={"data-downloadurl": True})
+            if not dl_a:
+                continue
+            dl_url = _normalise_statutory_link(str(dl_a.get("data-downloadurl") or ""), base_url)
+            if not dl_url or dl_url in seen_pdfs:
+                continue
+            title_el = card.find(["h3", "h4", "h2"], class_="package-title") or card.find(["h3", "h4", "h2"])
+            title = title_el.get_text(" ", strip=True) if title_el else dl_a.get_text(" ", strip=True)
+            seen_pdfs.add(dl_url)
+            pdf_items.append(
+                {
+                    "url": dl_url,
+                    "title": _clean(title),
+                    "source_page": base_url,
+                }
+            )
+
+        # 4. Extract direct .pdf links and any remaining data-downloadurl anchors in scope
+        for a in scope.find_all("a"):
+            raw_dl = a.get("data-downloadurl")
+            raw_href = a.get("href")
+            for candidate in (raw_dl, raw_href):
+                if not candidate:
+                    continue
+                norm = _normalise_statutory_link(str(candidate), base_url)
+                if not norm or norm in seen_pdfs:
+                    continue
+                low = norm.lower()
+                if low.endswith(".pdf") or "wpdmdl=" in low:
+                    seen_pdfs.add(norm)
+                    pdf_items.append(
+                        {
+                            "url": norm,
+                            "title": _clean(a.get_text(" ", strip=True)),
+                            "source_page": base_url,
+                        }
+                    )
+        return pdf_items, next_pages
+    except ImportError:
+        pass
+
+    # Pure-stdlib regex fallback if BeautifulSoup is unavailable
+    for m in re.finditer(r'data-downloadurl=["\']([^"\']+)["\']', html_body, re.IGNORECASE):
+        norm = _normalise_statutory_link(m.group(1), base_url)
+        if norm and norm not in seen_pdfs:
+            seen_pdfs.add(norm)
+            pdf_items.append({"url": norm, "title": "", "source_page": base_url})
+    for m in re.finditer(r'<a[^>]+href=["\']([^"\']+\.pdf)["\'][^>]*>(.*?)</a>', html_body, re.IGNORECASE | re.DOTALL):
+        norm = _normalise_statutory_link(m.group(1), base_url)
+        if norm and norm not in seen_pdfs:
+            seen_pdfs.add(norm)
+            title = re.sub(r"<[^>]+>", " ", _html.unescape(m.group(2))).strip()
+            pdf_items.append({"url": norm, "title": title, "source_page": base_url})
+    return pdf_items, next_pages
+
+
+def canonical_statutory_pdf_filename(
+    url: str,
+    *,
+    title: str = "",
+    content_disposition: str = "",
+    source_page: str = "",
+) -> str:
+    """Derive a clean, deterministic `.pdf` filename with fiscal-year normalization for Tax Bills."""
+    # 1. Honour authoritative server Content-Disposition filename when present
+    if content_disposition:
+        cd_match = re.search(
+            r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';\r\n]+)',
+            content_disposition,
+            re.IGNORECASE,
+        )
+        if cd_match:
+            cd_name = unquote(cd_match.group(1).strip())
+            clean_cd = re.sub(r"[^A-Za-z0-9._-]+", "-", cd_name).strip("-_")
+            if clean_cd.lower().endswith(".pdf"):
+                return clean_cd[:120]
+
+    # 2. Derive from title or URL path
+    parsed = urlparse(url)
+    path_name = unquote(Path(parsed.path or "").name).strip()
+    if path_name.lower().endswith(".pdf"):
+        raw_stem = path_name[:-4]
+        raw_stem = re.sub(r"_\d+$", "", raw_stem)
+    elif title:
+        raw_stem = title
+    else:
+        parts = [p for p in (parsed.path or "").split("/") if p and p not in ("en", "download")]
+        raw_stem = parts[-1] if parts else f"statutory-{_stable_id(url)[:10]}"
+
+    # Normalize punctuation -> hyphenated tokens
+    normalized = raw_stem.replace("&", " and ")
+    normalized = re.sub(r"[(),:;'\"]+", " ", normalized)
+    tokens = [tok for tok in re.split(r"[^A-Za-z0-9.]+", normalized) if tok]
+    stem = "-".join(tokens).strip("-.")
+    if not stem:
+        stem = f"statutory-{_stable_id(url)[:10]}"
+
+    # 3. Append canonical FY20XX-YY suffix for Parliamentary Tax Bills (e.g. Bill 2026 -> FY2026-27)
+    combined_context = f"{stem} {title} {source_page}"
+    if not fiscal_year_from_name(stem) and re.search(r"\bBill\b", combined_context, re.IGNORECASE):
+        yr_match = re.search(r"\b(202\d)\b", combined_context)
+        if yr_match:
+            yr = int(yr_match.group(1))
+            stem = f"{stem}-FY{yr}-{(yr + 1) % 100:02d}"
+
+    return f"{stem[:110]}.pdf"
+
+
+def _default_page_fetcher(url: str, timeout: float = 30.0) -> str:
+    """Fetch HTML from a validated HTTPS statutory portal page."""
+    import httpx
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return resp.text
+
+
+def _default_pdf_fetcher(url: str, timeout: float = 45.0) -> tuple[bytes, dict[str, str]]:
+    """Stream a statutory PDF over HTTPS while enforcing host allowlists and ``PDF_CORPUS_MAX_BYTES``."""
+    import httpx
+
+    max_bytes = PDF_CORPUS_MAX_BYTES
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/pdf,*/*;q=0.8",
+    }
+    current = url
+    with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
+        for _hop in range(6):
+            with client.stream("GET", current) as resp:
+                if resp.is_redirect:
+                    loc = resp.headers.get("Location", "").strip()
+                    if not loc:
+                        raise CorpusValidationError(f"Redirect missing Location header for {current}")
+                    nxt = str(resp.url.join(loc))
+                    parsed = urlparse(nxt)
+                    host = (parsed.hostname or "").strip().lower().rstrip(".")
+                    if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
+                        raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
+                    current = nxt
+                    continue
+                resp.raise_for_status()
+                buf = bytearray()
+                for chunk in resp.iter_bytes(chunk_size=65536):
+                    if not chunk:
+                        continue
+                    buf.extend(chunk)
+                    if len(buf) > max_bytes:
+                        raise CorpusValidationError(
+                            f"Remote PDF {url} exceeded corpus max_bytes ({max_bytes})."
+                        )
+                resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+                return bytes(buf), resp_headers
+        raise CorpusValidationError(f"Too many redirects fetching PDF {url}")
+
+
+def harvest_remote_pdfs(
+    pdf_dir: Path,
+    *,
+    source_urls: str | Iterable[str] | None = None,
+    mirror_dirs: Iterable[Path] = (),
+    max_pages_per_source: int = 5,
+    timeout: float = 30.0,
+    page_fetcher: Callable[[str], str] | None = None,
+    pdf_fetcher: Callable[[str], tuple[bytes, dict[str, str]]] | None = None,
+) -> dict[str, Any]:
+    """Retrieve and download statutory PDFs from *source_urls* into *pdf_dir* with SHA-256 deduplication.
+
+    Supports both ``https://www.parliament.go.ug/page/tax-bills-2026`` and
+    ``https://ura.go.ug/download-category/laws-and-acts/`` (including WPDM
+    ``?wpdmdl=`` download links and ``?cp=`` pagination).
+    """
+    urls = parse_pdf_source_urls(source_urls)
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    mirrors = [Path(m) for m in mirror_dirs if Path(m).resolve() != pdf_dir.resolve()]
+    for m_dir in mirrors:
+        m_dir.mkdir(parents=True, exist_ok=True)
+
+    fetch_page = page_fetcher or (lambda u: _default_page_fetcher(u, timeout=timeout))
+    fetch_pdf = pdf_fetcher or (lambda u: _default_pdf_fetcher(u, timeout=max(timeout, 45.0)))
+
+    # Map existing PDFs by SHA-256, lowercase filename, and byte size for zero-waste pre-stream & post-stream dedup
+    existing_by_sha: dict[str, str] = {}
+    existing_by_name: dict[str, tuple[str, int, str]] = {}
+    existing_by_size: dict[int, tuple[str, str]] = {}
+    for existing_pdf in sorted(pdf_dir.glob("*.pdf")):
+        try:
+            sha = _sha256_file(existing_pdf)
+            sz = existing_pdf.stat().st_size
+            existing_by_sha.setdefault(sha, existing_pdf.name)
+            existing_by_name[existing_pdf.name.lower()] = (existing_pdf.name, sz, sha)
+            existing_by_size.setdefault(sz, (existing_pdf.name, sha))
+        except Exception:
+            logger.debug("Failed hashing existing PDF %s", existing_pdf, exc_info=True)
+
+    discovered_items: list[dict[str, str]] = []
+    seen_pdf_urls: set[str] = set()
+    visited_pages: list[str] = []
+    page_errors: list[dict[str, str]] = []
+
+    for seed_url in urls:
+        queue = [seed_url]
+        pages_for_seed = 0
+        while queue and pages_for_seed < max_pages_per_source:
+            page_url = queue.pop(0)
+            if page_url in visited_pages:
+                continue
+            visited_pages.append(page_url)
+            pages_for_seed += 1
+            try:
+                html_body = fetch_page(page_url)
+            except Exception as exc:
+                logger.warning("Failed fetching statutory source page %s: %s", page_url, exc)
+                page_errors.append({"url": page_url, "error": str(exc)})
+                continue
+
+            found_pdfs, next_pages = discover_statutory_pdf_links(html_body, page_url)
+            for item in found_pdfs:
+                if item["url"] not in seen_pdf_urls:
+                    seen_pdf_urls.add(item["url"])
+                    discovered_items.append(item)
+            for nxt in next_pages:
+                if nxt not in visited_pages and nxt not in queue:
+                    queue.append(nxt)
+
+    downloaded: list[dict[str, Any]] = []
+    verified_existing: list[dict[str, Any]] = []
+    rejected: list[dict[str, Any]] = []
+
+    def _probe_or_fetch_item(item: dict[str, str]) -> dict[str, Any]:
+        pdf_url = item["url"]
+        title = item.get("title", "")
+        source_page = item.get("source_page", "")
+        guessed_name = canonical_statutory_pdf_filename(pdf_url, title=title, source_page=source_page)
+        if pdf_fetcher is None and guessed_name.lower() in existing_by_name:
+            ex_name, ex_sz, ex_sha = existing_by_name[guessed_name.lower()]
+            return {
+                "status": "existing",
+                "pdf": ex_name,
+                "url": pdf_url,
+                "title": title,
+                "sha256": ex_sha,
+                "bytes": ex_sz,
+            }
+        if pdf_fetcher is None:
+            # Fast header check before streaming multi-megabyte bodies when Content-Disposition or Content-Length matches
+            import httpx
+
+            headers_req = {
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/pdf,*/*;q=0.8",
+            }
+            current = pdf_url
+            with httpx.Client(timeout=max(timeout, 45.0), follow_redirects=False, headers=headers_req) as client:
+                for _hop in range(6):
+                    with client.stream("GET", current) as resp:
+                        if resp.is_redirect:
+                            loc = resp.headers.get("Location", "").strip()
+                            if not loc:
+                                raise CorpusValidationError(f"Redirect missing Location header for {current}")
+                            nxt = str(resp.url.join(loc))
+                            parsed = urlparse(nxt)
+                            host = (parsed.hostname or "").strip().lower().rstrip(".")
+                            if parsed.scheme != "https" or host not in ALLOWED_STATUTORY_PDF_HOSTS:
+                                raise CorpusValidationError(f"Disallowed PDF redirect target: {nxt}")
+                            current = nxt
+                            continue
+                        resp.raise_for_status()
+                        resp_headers = {str(k).lower(): str(v) for k, v in resp.headers.items()}
+                        cd_header = resp_headers.get("content-disposition", "")
+                        cand_name = canonical_statutory_pdf_filename(
+                            current,
+                            title=title,
+                            content_disposition=cd_header,
+                            source_page=source_page,
+                        )
+                        if cand_name.lower() in existing_by_name:
+                            ex_name, ex_sz, ex_sha = existing_by_name[cand_name.lower()]
+                            return {
+                                "status": "existing",
+                                "pdf": ex_name,
+                                "url": pdf_url,
+                                "title": title,
+                                "sha256": ex_sha,
+                                "bytes": ex_sz,
+                            }
+                        cl_str = resp_headers.get("content-length", "")
+                        if cl_str.isdigit() and int(cl_str) in existing_by_size:
+                            ex_name, ex_sha = existing_by_size[int(cl_str)]
+                            return {
+                                "status": "existing",
+                                "pdf": ex_name,
+                                "url": pdf_url,
+                                "title": title,
+                                "sha256": ex_sha,
+                                "bytes": int(cl_str),
+                            }
+                        buf = bytearray()
+                        for chunk in resp.iter_bytes(chunk_size=65536):
+                            if not chunk:
+                                continue
+                            buf.extend(chunk)
+                            if len(buf) > PDF_CORPUS_MAX_BYTES:
+                                raise CorpusValidationError(
+                                    f"Remote PDF {pdf_url} exceeded corpus max_bytes ({PDF_CORPUS_MAX_BYTES})."
+                                )
+                        return {
+                            "status": "fetched",
+                            "url": pdf_url,
+                            "title": title,
+                            "source_page": source_page,
+                            "raw_bytes": bytes(buf),
+                            "headers": resp_headers,
+                        }
+                raise CorpusValidationError(f"Too many redirects fetching PDF {pdf_url}")
+
+        raw_bytes, headers = fetch_pdf(pdf_url)
+        return {
+            "status": "fetched",
+            "url": pdf_url,
+            "title": title,
+            "source_page": source_page,
+            "raw_bytes": raw_bytes,
+            "headers": headers,
+        }
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    max_workers = min(6, max(1, len(discovered_items)))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = [(item, pool.submit(_probe_or_fetch_item, item)) for item in discovered_items]
+        for item, fut in futures:
+            pdf_url = item["url"]
+            title = item.get("title", "")
+            source_page = item.get("source_page", "")
+            try:
+                outcome = fut.result()
+            except Exception as exc:
+                logger.warning("Failed downloading statutory PDF %s: %s", pdf_url, exc)
+                rejected.append({"url": pdf_url, "title": title, "reason": f"download_failed: {exc}"})
+                continue
+
+            if outcome.get("status") == "existing":
+                verified_existing.append(
+                    {
+                        "pdf": outcome["pdf"],
+                        "url": outcome["url"],
+                        "title": outcome["title"],
+                        "sha256": outcome["sha256"],
+                        "bytes": outcome["bytes"],
+                    }
+                )
+                continue
+
+            raw_bytes = outcome["raw_bytes"]
+            headers = outcome["headers"]
+            sha256_hex = hashlib.sha256(raw_bytes).hexdigest()
+            existing_name = existing_by_sha.get(sha256_hex)
+            if existing_name is not None:
+                verified_existing.append(
+                    {
+                        "pdf": existing_name,
+                        "url": pdf_url,
+                        "title": title,
+                        "sha256": sha256_hex,
+                        "bytes": len(raw_bytes),
+                    }
+                )
+                continue
+
+            cd_header = headers.get("content-disposition", "")
+            filename = canonical_statutory_pdf_filename(
+                pdf_url,
+                title=title,
+                content_disposition=cd_header,
+                source_page=source_page,
+            )
+            try:
+                inspect_pdf_bytes(raw_bytes, limits=CORPUS_PDF_LIMITS)
+                scan_bytes(raw_bytes, filename=filename)
+            except (PdfRejected, MalwareRejected) as exc:
+                logger.warning("Rejected downloaded PDF %s (%s): %s", filename, pdf_url, exc)
+                rejected.append({"url": pdf_url, "pdf": filename, "reason": str(exc)})
+                continue
+
+            target_path = pdf_dir / filename
+            tmp_path = target_path.with_suffix(".pdf.tmp")
+            tmp_path.write_bytes(raw_bytes)
+            tmp_path.replace(target_path)
+            existing_by_sha[sha256_hex] = filename
+            existing_by_name[filename.lower()] = (filename, len(raw_bytes), sha256_hex)
+
+            downloaded.append(
+                {
+                    "pdf": filename,
+                    "url": pdf_url,
+                    "title": title,
+                    "sha256": sha256_hex,
+                    "bytes": len(raw_bytes),
+                    "fiscal_year": fiscal_year_from_name(Path(filename).stem),
+                }
+            )
+            logger.info("Downloaded statutory PDF %s (%d bytes) from %s", filename, len(raw_bytes), pdf_url)
+
+    # Keep any configured mirror_dirs (e.g. App/Data/pdfs) in sync with pdf_dir
+    mirrored_count = 0
+    if mirrors:
+        for src_pdf in sorted(pdf_dir.glob("*.pdf")):
+            for m_dir in mirrors:
+                dest_pdf = m_dir / src_pdf.name
+                if not dest_pdf.is_file() or _sha256_file(dest_pdf) != _sha256_file(src_pdf):
+                    shutil.copy2(src_pdf, dest_pdf)
+                    mirrored_count += 1
+
+    return {
+        "source_urls": urls,
+        "pages_scanned": visited_pages,
+        "discovered_count": len(discovered_items),
+        "downloaded_count": len(downloaded),
+        "verified_existing_count": len(verified_existing),
+        "rejected_count": len(rejected),
+        "mirrored_files": mirrored_count,
+        "downloaded": downloaded,
+        "verified_existing": verified_existing,
+        "rejected": rejected,
+        "page_errors": page_errors,
+    }
+
