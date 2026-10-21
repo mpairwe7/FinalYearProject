@@ -96,9 +96,13 @@ class CrawlConfig:
             "https://ura.go.ug/en/customs",
             "https://ura.go.ug/en/tax-types",
             "https://ura.go.ug/en/downloads",
+            "https://ura.go.ug/download-category/laws-and-acts/",
+            "https://www.parliament.go.ug/page/tax-bills-2026",
         ]
     )
-    allowed_domains: list[str] = field(default_factory=lambda: ["ura.go.ug"])
+    allowed_domains: list[str] = field(
+        default_factory=lambda: ["ura.go.ug", "parliament.go.ug", "www.parliament.go.ug"]
+    )
     max_pages: int = 500
     rate_limit_s: float = 0.3
     request_timeout: int = 20
@@ -378,7 +382,19 @@ def _extract_pdf_text(pdf_path: Path) -> str:
 def _normalise_href(raw: str, base_url: str) -> str | None:
     if not raw or raw.startswith(("javascript:", "mailto:", "tel:", "#")):
         return None
-    href = urljoin(base_url, raw).split("#")[0].split("?")[0]
+    joined = urljoin(base_url, raw).split("#")[0]
+    if "?" in joined:
+        path_part, query_part = joined.split("?", 1)
+        # Preserve WordPress Download Manager (`wpdmdl`) and pagination (`cp`)
+        # parameters while stripping ephemeral `&refresh=...` tokens.
+        kept_params = [
+            kv
+            for kv in query_part.split("&")
+            if kv.lower().startswith(("wpdmdl=", "cp="))
+        ]
+        href = f"{path_part}?{'&'.join(kept_params)}" if kept_params else path_part
+    else:
+        href = joined
     # Unwrap Wayback Machine links back to the page they archived. The host has
     # to come from the parsed URL, not from `"web.archive.org" in href`: that
     # substring also appears in `https://evil.example/web.archive.org/web/1/...`,
@@ -394,19 +410,43 @@ def _normalise_href(raw: str, base_url: str) -> str | None:
     return href
 
 
+def _is_pdf_download_url(href: str) -> bool:
+    low = href.lower()
+    return low.endswith(".pdf") or "wpdmdl=" in low
+
+
 def _discover_links(
     soup: BeautifulSoup, base_url: str, allowed: list[str],
 ) -> tuple[list[str], list[str]]:
     """Return (page_urls, pdf_urls) discovered in a page."""
     pages, pdfs = [], []
     seen: set[str] = set()
+    # Scope PDF link discovery on Drupal / WPDM statutory pages to main content
+    # so navigation/sidebar PDFs (e.g. MEMBERS.pdf or non-tax sidebar acts) are excluded.
+    pdf_scope = (
+        soup.find("div", class_="node__content")
+        or soup.find(id="content_wpdm_package_1")
+        or soup
+    )
+    for a in pdf_scope.find_all("a"):
+        for attr in ("data-downloadurl", "href"):
+            raw_val = a.get(attr)
+            if not raw_val:
+                continue
+            href = _normalise_href(str(raw_val), base_url)
+            if not href or href in seen:
+                continue
+            if _is_pdf_download_url(href) and _is_same_domain(href, allowed):
+                seen.add(href)
+                pdfs.append(href)
     for a in soup.find_all("a", href=True):
         href = _normalise_href(a["href"], base_url)
         if not href or href in seen:
             continue
         seen.add(href)
-        if href.lower().endswith(".pdf"):
-            pdfs.append(href)
+        if _is_pdf_download_url(href):
+            if pdf_scope is soup and _is_same_domain(href, allowed):
+                pdfs.append(href)
         elif _is_same_domain(href, allowed):
             pages.append(href)
     for link in soup.find_all("link", rel=True, href=True):
@@ -451,7 +491,7 @@ def _process_response(
     ct = resp.headers.get("Content-Type", "")
 
     # --- PDF ---
-    if "application/pdf" in ct or url.lower().endswith(".pdf"):
+    if "application/pdf" in ct or _is_pdf_download_url(url):
         return _handle_pdf(resp, url, config, state)
 
     # --- HTML ---
@@ -493,7 +533,13 @@ def _handle_pdf(
     if h in state.get("pdf_hashes", {}):
         return None
 
-    slug = urlparse(url).path.split("/")[-1] or "page.pdf"
+    cd = resp.headers.get("Content-Disposition", "") if hasattr(resp, "headers") else ""
+    cd_match = re.search(r'filename\*?=(?:UTF-8\'\')?["\']?([^"\';\r\n]+)', cd, re.IGNORECASE)
+    if cd_match:
+        slug = cd_match.group(1).strip()
+    else:
+        path_parts = [p for p in urlparse(url).path.split("/") if p and p not in ("en", "download")]
+        slug = path_parts[-1] if path_parts else "page.pdf"
     if not slug.lower().endswith(".pdf"):
         slug += ".pdf"
     safe = re.sub(r"[^\w\-.]", "_", f"{urlparse(url).hostname}-{slug}")

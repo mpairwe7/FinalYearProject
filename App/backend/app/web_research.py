@@ -216,7 +216,7 @@ _FX_SYMBOL_MAP: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 _EXPLICIT_FX_RATE_RE = re.compile(
-    r"\b(?:exchange\s+rate\s*(?:is|of|=|:)?\s*(?:ugx\s*)?\d[\d,]*|rate\s+of\s*(?:ugx\s*)?\d[\d,]*|@\s*ugx\s*\d[\d,]*|1\s*(?:usd|eur|gbp|kes)\s*=\s*(?:ugx\s*)?\d{2,5})\b",
+    r"\b(?:exchange\s{1,4}rate\s{1,4}(?:(?:is|of|=|:)\s{1,4})?ugx\s{1,4}\d[\d,]{2,9}|rate\s{1,4}of\s{1,4}ugx\s{1,4}\d[\d,]{2,9}|@\s{0,4}ugx\s{1,4}\d[\d,]{2,9}|1\s{0,4}(?:usd|eur|gbp|kes)\s{0,4}=\s{0,4}(?:ugx\s{1,4})?\d[\d,]{2,9})\b",
     re.IGNORECASE,
 )
 
@@ -543,10 +543,16 @@ def detect_research_triggers(
         text,
         re.IGNORECASE,
     ):
+        notice_tokens = [
+            tok
+            for tok in re.findall(r"[a-z0-9]+", text.lower())
+            if len(tok) >= 3 and tok not in _STOPWORDS_FOR_SEARCH and tok not in {"ura", "public", "notice", "latest", "check"}
+        ][:4]
+        notice_slug = "_".join(notice_tokens) if notice_tokens else "latest"
         _add(
             TRIGGER_PUBLIC_NOTICE,
             "Query references URA public notice, practice note, waiver window, or filing extension",
-            topic_key="ura_public_notice_latest",
+            topic_key=f"ura_public_notice_{notice_slug}",
             doc_family="public_notice",
         )
 

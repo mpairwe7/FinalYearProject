@@ -235,7 +235,8 @@ def _publications_errors() -> list[str]:
     raw = (os.getenv("URA_PUBLICATIONS_URL") or "").strip()
     if raw in {"", "fixture", "fixture://ura-publications"}:
         return ["G15: URA_PUBLICATIONS_URL must be an https URL in production (fixture is demo-only)."]
-    if not _https_url(raw):
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts or not all(_https_url(p) for p in parts):
         return ["G15: URA_PUBLICATIONS_URL must be https in production."]
     return []
 

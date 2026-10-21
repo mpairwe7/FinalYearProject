@@ -298,6 +298,21 @@ class TestChunkers:
         )
         assert Chunk(text="b", doc_id="D", source="D.pdf", chunk_id=0).contextual_prefix == "[Document: D]"
 
+    def test_statutory_headings_injected_when_markdown_has_no_hash_headers(self):
+        from ml.scripts.data_aug.chunkers import _split_headings
+
+        plain_statute = (
+            "MEMORANDUM\n\n"
+            "The object of this Bill is to amend the Income Tax Act.\n\n"
+            "PART I - PRELIMINARY\n\n"
+            "1. Commencement\n\n"
+            "This Act shall come into force on 1st July 2026.\n"
+        )
+        sections = _split_headings(plain_statute)
+        trails = [tuple(trail) for trail, _ in sections]
+        assert ("MEMORANDUM",) in trails
+        assert ("PART I - PRELIMINARY", "1. Commencement") in trails
+
 
 class TestLoaders:
     def test_load_csv_faqs_basic(self):

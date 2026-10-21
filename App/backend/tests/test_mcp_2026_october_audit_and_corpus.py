@@ -221,6 +221,8 @@ class Statutory2024To2027CorpusAndRatesTests(unittest.TestCase):
         "Stamp-Duty-Amendment-Bill-2026-FY2026-27.pdf",
         "Lotteries-and-Gaming-Amendment-Bill-2026-FY2026-27.pdf",
         "External-Trade-Amendment-Bill-2026-FY2026-27.pdf",
+        "Traffic-and-Road-Safety-Amendment-Bill-2026-FY2026-27.pdf",
+        "COMESA-Protocol-on-Rules-of-Origin-2015-1-1-1.pdf",
         "URA-EFRIS-Handbook-FY2026-27-English.pdf",
         "URA-EFRIS-Handbook-FY2026-27-Luganda.pdf",
         "URA-EFRIS-Handbook-FY2026-27-Swahili.pdf",

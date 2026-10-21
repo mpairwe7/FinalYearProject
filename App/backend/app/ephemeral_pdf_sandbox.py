@@ -119,10 +119,13 @@ def clear_sandbox_cache() -> None:
 
 
 def _default_sandbox_root() -> Path:
-    """Return the base directory for ephemeral turn sandboxes."""
+    """Return the base directory for ephemeral turn sandboxes (preferring /dev/shm RAM tmpfs when available)."""
     configured = os.getenv("URA_WEB_SANDBOX_DIR", "").strip()
     if configured:
         return Path(configured)
+    shm_root = Path("/dev/shm")
+    if shm_root.is_dir() and os.access(shm_root, os.W_OK):
+        return shm_root / "ura-web-sandbox"
     return Path(tempfile.gettempdir()) / "ura-web-sandbox"
 
 
@@ -138,7 +141,12 @@ def ephemeral_sandbox(turn_id: str = "", *, base_dir: Path | None = None) -> Ite
     try:
         yield sandbox_dir
     finally:
-        shutil.rmtree(sandbox_dir, ignore_errors=True)
+        try:
+            shutil.rmtree(sandbox_dir)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.error("Failed to wipe ephemeral sandbox directory %s", sandbox_dir, exc_info=True)
 
 
 def _safe_filename_from_url(url: str, *, default_ext: str = ".pdf") -> str:

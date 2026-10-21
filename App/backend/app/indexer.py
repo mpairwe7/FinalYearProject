@@ -75,16 +75,24 @@ from .crawl_corpus import (
     ingest_crawl_jsonls,
 )
 from .pdf_corpus import (
+    DEFAULT_STATUTORY_PDF_SOURCES_CSV,
     PDF_MANIFEST_NAME,
     export_pdf_chunks_to_jsonl,
     fiscal_year_from_name,
+    harvest_remote_pdfs,
     ingest_pdf_jsonls,
 )
 
 DATA_DIR = Path(os.getenv("DATA_DIR", str(_APP_DATA_ROOT / "dataset")))
 FAQ_JSONL_DIR = Path(os.getenv("FAQ_JSONL_DIR", str(_APP_DATA_ROOT / "faq_jsonl")))
 TEACHER_QA_DIR = Path(os.getenv("TEACHER_QA_DIR", str(_APP_DATA_ROOT / "teacher_qa")))
-PDF_DIR = Path(os.getenv("PDF_DIR", str(_APP_DATA_ROOT / "pdfs")))
+# Tracked PDFs live at the repository root (`Data/pdfs`), matching `Data/crawl/pages`.
+_DEFAULT_PDF_DIR = (
+    _PROJECT_ROOT / "Data" / "pdfs"
+    if (_PROJECT_ROOT / "Data" / "pdfs").is_dir()
+    else _APP_DATA_ROOT / "pdfs"
+)
+PDF_DIR = Path(os.getenv("PDF_DIR", str(_DEFAULT_PDF_DIR)))
 PDF_JSONL_DIR = Path(os.getenv("PDF_JSONL_DIR", str(_APP_DATA_ROOT / "pdf_jsonl")))
 # The crawl lives at the repository root (it is committed), not under App/Data.
 CRAWL_PAGES_DIR = Path(os.getenv("CRAWL_PAGES_DIR", str(_PROJECT_ROOT / "Data" / "crawl" / "pages")))
@@ -446,6 +454,20 @@ def main() -> None:
         action="store_true",
         help="Chunk the newest capture of every substantive crawled page (offline; needs ml/)",
     )
+    parser.add_argument(
+        "--download-pdfs",
+        action="store_true",
+        help="Retrieve/download statutory PDFs from --pdf-source-urls into --pdf-dir before export/indexing",
+    )
+    parser.add_argument(
+        "--pdf-source-urls",
+        type=str,
+        default=os.getenv("PDF_SOURCE_URLS", DEFAULT_STATUTORY_PDF_SOURCES_CSV),
+        help=(
+            "Comma-separated HTTPS statutory portal URLs to harvest PDFs from "
+            f"(default: {DEFAULT_STATUTORY_PDF_SOURCES_CSV})"
+        ),
+    )
     parser.add_argument("--recreate", action="store_true", help="Drop and recreate collection")
     parser.add_argument("--csv-dir", type=str, default=str(DATA_DIR))
     parser.add_argument("--faq-jsonl-dir", type=str, default=str(FAQ_JSONL_DIR))
@@ -464,6 +486,28 @@ def main() -> None:
     crawl_pages_dir = Path(args.crawl_pages_dir)
     crawl_jsonl_dir = Path(args.crawl_jsonl_dir)
 
+    if args.download_pdfs:
+        try:
+            mirror_dirs = (
+                [_APP_DATA_ROOT / "pdfs"]
+                if (_APP_DATA_ROOT / "pdfs").resolve() != pdf_dir.resolve()
+                else []
+            )
+            harvest_stats = harvest_remote_pdfs(
+                pdf_dir,
+                source_urls=args.pdf_source_urls,
+                mirror_dirs=mirror_dirs,
+            )
+            logger.info("Statutory PDF harvest complete: %s", harvest_stats)
+            if not args.export_pdf_jsonl:
+                logger.info(
+                    "PDF chunk JSONL export complete: %s",
+                    export_pdf_chunks_to_jsonl(pdf_dir, pdf_jsonl_dir),
+                )
+        except CorpusValidationError as exc:
+            logger.error("Statutory PDF harvest/export failed: %s", exc)
+            raise SystemExit(2) from exc
+
     if args.export_faq_jsonl or args.export_pdf_jsonl or args.export_crawl_jsonl:
         try:
             if args.export_faq_jsonl:
@@ -481,7 +525,10 @@ def main() -> None:
         except CorpusValidationError as exc:
             logger.error("Corpus export failed: %s", exc)
             raise SystemExit(2) from exc
-        return
+        if not args.recreate and not (
+            args.faq_jsonl_only or args.teacher_qa_only or args.pdf_jsonl_only or args.crawl_jsonl_only
+        ):
+            return
 
     # At most one --*-only flag is accepted (mutually exclusive group); it pins
     # the run to a single corpus. Otherwise every corpus is indexed, except that

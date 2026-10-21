@@ -32,14 +32,30 @@ SNAPSHOT_PATH = Path(
 CRAWL_DIR = Path(os.getenv("CRAWL_JSONL_DIR", str(APP_DATA_ROOT / "crawl_jsonl")))
 
 
+def publications_urls(raw: str | None = None) -> list[str]:
+    """Return validated https URLs from a single or comma-separated `URA_PUBLICATIONS_URL`."""
+    value = (raw if raw is not None else (os.getenv("URA_PUBLICATIONS_URL") or "")).strip()
+    if value in {"fixture", "fixture://ura-publications"}:
+        return ["fixture://ura-publications"]
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    if not parts:
+        return []
+    valid: list[str] = []
+    for part in parts:
+        parsed = urlparse(part)
+        if parsed.scheme != "https" or not parsed.netloc:
+            return []
+        valid.append(part)
+    return valid
+
+
 def publications_url() -> str:
-    url = (os.getenv("URA_PUBLICATIONS_URL") or "").strip()
-    if url in {"fixture", "fixture://ura-publications"}:
-        return "fixture://ura-publications"
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or not parsed.netloc:
+    urls = publications_urls()
+    if not urls:
         return ""
-    return url
+    if urls == ["fixture://ura-publications"]:
+        return "fixture://ura-publications"
+    return ",".join(urls)
 
 
 def fixture_path() -> Path:
@@ -97,12 +113,15 @@ def _write_snapshot(payload: dict[str, Any], path: Path | None = None) -> Path:
 
 
 def fetch_publications(url: str | None = None) -> tuple[bytes, str]:
-    target = url if url is not None else publications_url()
-    if not target:
+    targets = publications_urls(url)
+    if not targets or targets == ["fixture://ura-publications"]:
         raise ValueError("URA_PUBLICATIONS_URL must be an https URL")
-    req = Request(target, headers={"User-Agent": "ura-chatbot-freshness/1.0"})
-    with urlopen(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
-        body = resp.read()
+    chunks: list[bytes] = []
+    for target in targets:
+        req = Request(target, headers={"User-Agent": "ura-chatbot-freshness/1.0"})
+        with urlopen(req, timeout=20) as resp:  # nosec B310 # noqa: S310 — https-only above
+            chunks.append(resp.read())
+    body = b"\n".join(chunks)
     return body, _digest(body)
 
 
@@ -112,17 +131,21 @@ def ingest_publications(
     snapshot_path: Path | None = None,
     crawl_dir: Path | None = None,
     body: bytes | None = None,
+    download_pdfs: bool = False,
+    pdf_dir: Path | None = None,
+    pdf_jsonl_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Fetch (or accept) publication bytes, persist if the hash changed."""
-    source = url if url is not None else publications_url()
+    source = publications_url() if url is None else (publications_url() if not url.strip() else url.strip())
     if body is None:
         if _use_fixture(source or ""):
             body = load_fixture_body()
             source = source or "fixture://ura-publications"
             digest = _digest(body)
-        elif not source:
+        elif not publications_urls(source):
             return {"ok": False, "error": "URA_PUBLICATIONS_URL unset or not https"}
         else:
+            source = ",".join(publications_urls(source))
             try:
                 body, digest = fetch_publications(source)
             except (URLError, TimeoutError, OSError, ValueError) as exc:
@@ -137,6 +160,17 @@ def ingest_publications(
     now = datetime.now(timezone.utc).isoformat()
     written = None
     enqueued = False
+    pdf_harvest: dict[str, Any] | None = None
+    if download_pdfs and source and not source.startswith("fixture:") and source != "inline":
+        from .indexer import PDF_DIR, PDF_JSONL_DIR
+        from .pdf_corpus import export_pdf_chunks_to_jsonl, harvest_remote_pdfs
+
+        target_pdf_dir = pdf_dir or PDF_DIR
+        target_jsonl_dir = pdf_jsonl_dir or PDF_JSONL_DIR
+        pdf_harvest = harvest_remote_pdfs(target_pdf_dir, source_urls=source)
+        pdf_harvest["jsonl_export"] = export_pdf_chunks_to_jsonl(target_pdf_dir, target_jsonl_dir)
+        if pdf_harvest.get("downloaded_count", 0) > 0:
+            changed = True
     if changed:
         dest = crawl_dir or CRAWL_DIR
         dest.mkdir(parents=True, exist_ok=True)
@@ -164,7 +198,7 @@ def ingest_publications(
         {"url": source, "sha256": digest, "checked_at": now, "changed": changed},
         snapshot_path,
     )
-    return {
+    out: dict[str, Any] = {
         "ok": True,
         "changed": changed,
         "sha256": digest,
@@ -172,15 +206,19 @@ def ingest_publications(
         "reindex_requested": enqueued,
         "reindex_hint": "python -m app.indexer --recreate",
     }
+    if pdf_harvest is not None:
+        out["pdf_harvest"] = pdf_harvest
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default="", help="Override URA_PUBLICATIONS_URL")
+    parser.add_argument("--url", default="", help="Override URA_PUBLICATIONS_URL (supports comma-separated https URLs)")
+    parser.add_argument("--download-pdfs", action="store_true", help="Retrieve/download PDFs from source URLs and export PDF JSONL")
     args = parser.parse_args(argv)
-    result = ingest_publications(url=args.url or None)
+    result = ingest_publications(url=args.url or None, download_pdfs=args.download_pdfs)
     print(json.dumps(result, indent=2))
     return 0 if result.get("ok") else 2
 

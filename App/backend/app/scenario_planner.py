@@ -772,6 +772,14 @@ def _rule_foreign_currency(facts: CaseFacts, _question: str) -> list[ToolCallSpe
 
     live_fx_enabled = flags.is_enabled("live_web_research")
     specs: list[ToolCallSpec] = []
+    foreign_currencies = {
+        mon.currency
+        for mon in facts.amounts
+        if mon.currency and mon.currency != "UGX" and float(mon.amount) > 0
+    }
+    sal_currency = facts.monthly_salary.currency if (facts.monthly_salary and facts.monthly_salary.currency != "UGX") else ""
+    rate_currency = sal_currency or (next(iter(foreign_currencies)) if len(foreign_currencies) == 1 else "")
+
     for mon in facts.amounts:
         if mon.currency and mon.currency != "UGX" and float(mon.amount) > 0:
             fx_params: dict[str, Any] = {
@@ -779,7 +787,7 @@ def _rule_foreign_currency(facts: CaseFacts, _question: str) -> list[ToolCallSpe
                 "currency": mon.currency,
             }
             fx_missing: list[str] = []
-            if facts.exchange_rate_ugx is not None:
+            if facts.exchange_rate_ugx is not None and mon.currency == rate_currency:
                 fx_params["exchange_rate"] = float(facts.exchange_rate_ugx)
             elif not live_fx_enabled:
                 fx_missing.append(f"exchange rate ({mon.currency} to UGX) on payment date")

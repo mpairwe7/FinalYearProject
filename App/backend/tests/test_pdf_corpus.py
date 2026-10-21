@@ -16,12 +16,17 @@ from unittest import mock
 
 from app.faq_corpus import CorpusValidationError
 from app.pdf_corpus import (
+    DEFAULT_STATUTORY_PDF_SOURCES_CSV,
     PDF_MANIFEST_NAME,
+    canonical_statutory_pdf_filename,
+    discover_statutory_pdf_links,
     export_pdf_chunks_to_jsonl,
     fiscal_year_from_name,
+    harvest_remote_pdfs,
     ingest_pdf_jsonls,
     normalise_extracted_text,
     normalise_heading,
+    parse_pdf_source_urls,
 )
 
 
@@ -411,6 +416,162 @@ class PdfCorpusExportIngestTests(unittest.TestCase):
             (root / "pdfs").mkdir()
             with self.assertRaisesRegex(CorpusValidationError, "No PDF files found"):
                 export_pdf_chunks_to_jsonl(root / "pdfs", root / "pdf_jsonl")
+
+
+class StatutoryPortalHarvestTests(unittest.TestCase):
+    def test_parse_pdf_source_urls_accepts_parliament_and_ura_csv(self) -> None:
+        urls = parse_pdf_source_urls(
+            "https://www.parliament.go.ug/page/tax-bills-2026,https://ura.go.ug/download-category/laws-and-acts/"
+        )
+        self.assertEqual(
+            urls,
+            [
+                "https://www.parliament.go.ug/page/tax-bills-2026",
+                "https://ura.go.ug/download-category/laws-and-acts/",
+            ],
+        )
+        self.assertEqual(parse_pdf_source_urls(None), urls)
+        with self.assertRaisesRegex(CorpusValidationError, "https"):
+            parse_pdf_source_urls("http://ura.go.ug/download-category/laws-and-acts/")
+        with self.assertRaisesRegex(CorpusValidationError, "ALLOWED_STATUTORY_PDF_HOSTS"):
+            parse_pdf_source_urls("https://www.kra.go.ke/downloads/")
+
+    def test_discover_statutory_pdf_links_isolates_drupal_content_and_wpdm_pagination(self) -> None:
+        parliament_html = """
+        <html><body>
+          <nav><a href="/sites/default/files/MEMBERS.pdf">Members</a></nav>
+          <div class="node__content">
+            <ol>
+              <li><a href="/sites/default/files/Income%20Tax%20(Amendment)%20Bill%2C%202026.pdf">Income Tax (Amendment) Bill, 2026</a></li>
+              <li><a href="/sites/default/files/Traffic%20and%20Road%20Safety%20(Amendment)%20Bill%2C%202026.pdf">Traffic and Road Safety (Amendment) Bill, 2026</a></li>
+            </ol>
+          </div>
+          <div class="region-sidebar-second">
+            <a href="/sites/default/files/The%20Markets%20Act%2C%202023_0.pdf">The Markets Act, 2023</a>
+          </div>
+        </body></html>
+        """
+        pdfs_p, next_p = discover_statutory_pdf_links(
+            parliament_html,
+            "https://www.parliament.go.ug/page/tax-bills-2026",
+        )
+        self.assertEqual(len(pdfs_p), 2)
+        self.assertEqual(next_p, [])
+        self.assertTrue(all("MEMBERS.pdf" not in item["url"] for item in pdfs_p))
+        self.assertTrue(all("Markets" not in item["url"] for item in pdfs_p))
+
+        ura_wpdm_html = """
+        <html><body>
+          <div id="content_wpdm_package_1">
+            <div class="link-template-default card mb-2">
+              <h3 class="package-title"><a href="https://ura.go.ug/en/download/stamp-duty-act-2014/">Stamp Duty Act 2014</a></h3>
+              <a class="wpdm-download-link" href="#" data-downloadurl="https://ura.go.ug/en/download/stamp-duty-act-2014/?wpdmdl=20305&amp;refresh=abc123">Download</a>
+            </div>
+            <ul class="pagination wpdm-pagination">
+              <li><a class="page-numbers" href="https://ura.go.ug/download-category/laws-and-acts/?cp=2">2</a></li>
+            </ul>
+          </div>
+        </body></html>
+        """
+        pdfs_u, next_u = discover_statutory_pdf_links(
+            ura_wpdm_html,
+            "https://ura.go.ug/download-category/laws-and-acts/",
+        )
+        self.assertEqual(
+            pdfs_u,
+            [
+                {
+                    "url": "https://ura.go.ug/en/download/stamp-duty-act-2014/?wpdmdl=20305",
+                    "title": "Stamp Duty Act 2014",
+                    "source_page": "https://ura.go.ug/download-category/laws-and-acts/",
+                }
+            ],
+        )
+        self.assertEqual(next_u, ["https://ura.go.ug/download-category/laws-and-acts/?cp=2"])
+
+    def test_harvest_remote_pdfs_downloads_deduplicates_and_exports_jsonl(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pdf_dir = root / "pdfs"
+            mirror_dir = root / "mirror_pdfs"
+            jsonl_dir = root / "pdf_jsonl"
+
+            pages = {
+                "https://www.parliament.go.ug/page/tax-bills-2026": """
+                    <div class="node__content">
+                      <a href="/sites/default/files/Traffic%20and%20Road%20Safety%20(Amendment)%20Bill%2C%202026.pdf">Traffic and Road Safety (Amendment) Bill, 2026</a>
+                    </div>
+                """,
+                "https://ura.go.ug/download-category/laws-and-acts/": """
+                    <div id="content_wpdm_package_1">
+                      <div class="card">
+                        <h3 class="package-title">Stamp Duty Act 2014</h3>
+                        <a data-downloadurl="https://ura.go.ug/en/download/stamp-duty-act-2014/?wpdmdl=20305&refresh=111">Download</a>
+                      </div>
+                      <ul class="wpdm-pagination">
+                        <li><a class="page-numbers" href="https://ura.go.ug/download-category/laws-and-acts/?cp=2">2</a></li>
+                      </ul>
+                    </div>
+                """,
+                "https://ura.go.ug/download-category/laws-and-acts/?cp=2": """
+                    <div id="content_wpdm_package_1">
+                      <div class="card">
+                        <h3 class="package-title">COMESA - Protocol on Rules of Origin - 2015</h3>
+                        <a data-downloadurl="https://ura.go.ug/en/download/comesa-protocol-on-rules-of-origin-2015/?wpdmdl=279">Download</a>
+                      </div>
+                    </div>
+                """,
+            }
+
+            import fitz
+
+            def _make_clean_pdf(text: str) -> bytes:
+                doc = fitz.open()
+                page = doc.new_page()
+                page.insert_text((72, 72), text)
+                raw = doc.tobytes()
+                doc.close()
+                return raw
+
+            pdf_payloads = {
+                "https://www.parliament.go.ug/sites/default/files/Traffic%20and%20Road%20Safety%20(Amendment)%20Bill%2C%202026.pdf": (
+                    _make_clean_pdf("Traffic and Road Safety Amendment Bill 2026 Clause 1"),
+                    {},
+                ),
+                "https://ura.go.ug/en/download/stamp-duty-act-2014/?wpdmdl=20305": (
+                    _make_clean_pdf("Stamp Duty Act 2014 Schedule 2"),
+                    {"content-disposition": 'inline;filename="Stamp-duty-Act-2014.pdf"'},
+                ),
+                "https://ura.go.ug/en/download/comesa-protocol-on-rules-of-origin-2015/?wpdmdl=279": (
+                    _make_clean_pdf("COMESA Protocol on Rules of Origin 2015 Part I"),
+                    {"content-disposition": 'inline;filename="COMESA-Protocol-on-Rules-of-Origin-2015-1-1-1.pdf"'},
+                ),
+            }
+
+            stats = harvest_remote_pdfs(
+                pdf_dir,
+                source_urls=DEFAULT_STATUTORY_PDF_SOURCES_CSV,
+                mirror_dirs=[mirror_dir],
+                page_fetcher=lambda u: pages[u],
+                pdf_fetcher=lambda u: pdf_payloads[u],
+            )
+            self.assertEqual(stats["discovered_count"], 3)
+            self.assertEqual(stats["downloaded_count"], 3)
+            self.assertEqual(stats["rejected_count"], 0)
+            self.assertTrue((pdf_dir / "Traffic-and-Road-Safety-Amendment-Bill-2026-FY2026-27.pdf").is_file())
+            self.assertTrue((pdf_dir / "Stamp-duty-Act-2014.pdf").is_file())
+            self.assertTrue((pdf_dir / "COMESA-Protocol-on-Rules-of-Origin-2015-1-1-1.pdf").is_file())
+            self.assertTrue((mirror_dir / "Traffic-and-Road-Safety-Amendment-Bill-2026-FY2026-27.pdf").is_file())
+
+            # Second run deduplicates all 3 by SHA-256 without re-writing
+            stats_second = harvest_remote_pdfs(
+                pdf_dir,
+                source_urls=DEFAULT_STATUTORY_PDF_SOURCES_CSV,
+                page_fetcher=lambda u: pages[u],
+                pdf_fetcher=lambda u: pdf_payloads[u],
+            )
+            self.assertEqual(stats_second["downloaded_count"], 0)
+            self.assertEqual(stats_second["verified_existing_count"], 3)
 
 
 if __name__ == "__main__":

@@ -60,10 +60,40 @@ class Chunk:
 # ---------------------------------------------------------------------------
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
+# Statutory headings in plain-text Ugandan Bills, Acts, and Regulations when
+# extracted by engines that do not emit markdown `#` markers (e.g. pypdfium2).
+_STATUTORY_PART_RE = re.compile(
+    r"^\s*((?:PART|CHAPTER)\s+[IVXLCDM0-9]+[^\n]{0,90}|MEMORANDUM\b[^\n]{0,60}|"
+    r"(?:FIRST|SECOND|THIRD|FOURTH|FIFTH|SIXTH)?\s*SCHEDULE(?:\s+[0-9IVX]+)?\b[^\n]{0,80}|"
+    r"ARRANGEMENT\s+OF\s+(?:SECTIONS|CLAUSES|REGULATIONS|ARTICLES)\b[^\n]{0,60})\s*$",
+    re.IGNORECASE,
+)
+_STATUTORY_CLAUSE_RE = re.compile(
+    r"^\s*((?:SECTION|CLAUSE|ARTICLE|REGULATION|RULE)\s+\d+[A-Za-z]?\b[^\n]{0,90}|"
+    r"\d{1,3}\.\s+(?:Amendment|Insertion|Repeal|Substitution|Commencement|Interpretation|"
+    r"Application|Imposition|Exemption|Rate|Duty|Tax|Offences?|Penalt\w+|Regulations?)\b[^\n]{0,90})\s*$",
+    re.IGNORECASE,
+)
 # A paragraph is a maximal run of non-blank lines. Tables are treated as a
 # single paragraph so they survive as one chunk.
 _PARAGRAPH_SPLIT = re.compile(r"\n[ \t]*\n+")
 _TABLE_LINE_RE = re.compile(r"^\s*\|.+\|\s*$")
+
+
+def _inject_statutory_headings(text: str) -> str:
+    """Promote plain-text statutory Part/Schedule/Section/Clause lines to markdown headings."""
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and len(stripped) <= 110 and not _TABLE_LINE_RE.match(stripped):
+            if _STATUTORY_PART_RE.match(stripped):
+                out_lines.append(f"# {stripped}")
+                continue
+            if _STATUTORY_CLAUSE_RE.match(stripped):
+                out_lines.append(f"## {stripped}")
+                continue
+        out_lines.append(line)
+    return "\n".join(out_lines)
 
 
 def _split_headings(markdown: str) -> list[tuple[list[str], str]]:
@@ -73,6 +103,8 @@ def _split_headings(markdown: str) -> list[tuple[list[str], str]]:
     section, e.g. ``["Taxation Handbook", "Part A", "1.2 Origin of Taxation"]``.
     This is what powers the contextual prefix.
     """
+    if markdown and not _HEADING_RE.search(markdown):
+        markdown = _inject_statutory_headings(markdown)
     sections: list[tuple[list[str], str]] = []
     trail: list[str] = []
     current_body: list[str] = []
@@ -237,18 +269,29 @@ def extract_markdown(pdf_path: Path) -> str | None:
     except Exception:
         pass
 
-    # 2. Secondary: pypdfium2 (Apache-2.0)
+    # 2. Secondary: pypdfium2 (Apache-2.0) — always close native handles in finally
     try:
         import pypdfium2 as pdfium
 
         pdf = pdfium.PdfDocument(str(pdf_path))
-        pages_md = []
-        for i in range(len(pdf)):
-            page_text = pdf[i].get_textpage().get_text_range() or ""
-            if page_text.strip():
-                pages_md.append(page_text.strip())
-        if pages_md:
-            return "\n\n---\n\n".join(pages_md)
+        try:
+            pages_md = []
+            for i in range(len(pdf)):
+                page = pdf[i]
+                try:
+                    textpage = page.get_textpage()
+                    try:
+                        page_text = textpage.get_text_range() or ""
+                    finally:
+                        textpage.close()
+                finally:
+                    page.close()
+                if page_text.strip():
+                    pages_md.append(page_text.strip())
+            if pages_md:
+                return "\n\n---\n\n".join(pages_md)
+        finally:
+            pdf.close()
     except Exception:
         pass
 
