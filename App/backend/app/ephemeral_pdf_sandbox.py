@@ -132,11 +132,11 @@ def _default_sandbox_root() -> Path:
 @contextlib.contextmanager
 def ephemeral_sandbox(turn_id: str = "", *, base_dir: Path | None = None) -> Iterator[Path]:
     """Create an isolated 0o700 turn directory and unconditionally delete it on exit."""
-    safe_turn = re.sub(r"[^A-Za-z0-9_-]+", "_", str(turn_id or "turn").strip())[:48] or "turn"
-    unique_suffix = uuid.uuid4().hex[:10]
+    _ = turn_id
+    unique_id = uuid.uuid4().hex
     root = base_dir if base_dir is not None else _default_sandbox_root()
     root.mkdir(parents=True, exist_ok=True)
-    sandbox_dir = root / f"{safe_turn}_{unique_suffix}"
+    sandbox_dir = root / f"sbx_{unique_id}"
     sandbox_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         yield sandbox_dir
@@ -146,7 +146,7 @@ def ephemeral_sandbox(turn_id: str = "", *, base_dir: Path | None = None) -> Ite
         except FileNotFoundError:
             pass
         except OSError:
-            logger.error("Failed to wipe ephemeral sandbox directory %s", sandbox_dir, exc_info=True)
+            logger.error("Failed to wipe ephemeral sandbox directory sbx_%s", unique_id, exc_info=True)
 
 
 def _safe_filename_from_url(url: str, *, default_ext: str = ".pdf") -> str:
