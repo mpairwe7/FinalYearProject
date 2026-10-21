@@ -730,9 +730,11 @@ All major subsystems are behind feature flags for progressive rollout:
 | `workflow_emotional_offramp` | off | Phase 39: a guided flow pauses (answers kept) instead of answering distress or enforcement news with a validation error, offering an officer, the instalments question, "Continue the steps" and "Cancel"; after repeated invalid answers it offers a way out (`WorkflowTurn.failed_attempts`) |
 | `wellbeing_checkin` | off | Phase 39: hopelessness said amid hardship or enforcement (this or the last two messages) gets a check-in with the crisis lines before the tax answer, once per conversation, on REST and stream alike |
 | `cxp_business_hours` (`FLAG_CXP_BUSINESS_HOURS`) | off | Phase 40 (G174): timezone-aware URA CXP operating schedule (`07:00–23:00 EAT`, closing at 11:00 PM EAT). Escalations after 11:00 PM when no live officer is online queue for priority morning review/callback with SLA pause/resume (`business_hours_elapsed_seconds`) and transparent 5-locale after-hours disclosure |
+| `live_web_research` (`FLAG_LIVE_WEB_RESEARCH`) | off | Planned (Phase 41; Phase A only): live FX lookup (`XE.com` / Google Currency) and 8-trigger tiered official web/PDF research (`ura.go.ug`, `ulii.org`, `bou.or.ug`, `eac.int`) via ephemeral `tmpfs` document sandbox |
+| `auto_qdrant_web_sync` (`FLAG_AUTO_QDRANT_WEB_SYNC`) | off | Planned (Phase 41; Phase A only): self-updating Qdrant comparator (`corpus_sync.py`) that compares `ura.go.ug` PDFs against Qdrant, tombstones/deletes superseded documents, upserts newer editions, and records state in `web_sync_ledger` |
 
 The table above lists the flags that gate a subsystem; `flags.py` holds
-**82** in total, including the per-phase switches for voice, offline and
+**84** in total, including the per-phase switches for voice, offline and
 quantization. `flags.all()` is the authoritative list. Production also
 forces `auth_required`, `multi_tenant`, `audit_ledger`, `ticket_queue`,
 and `voice_consent` unless explicitly disabled (startup then refuses).
