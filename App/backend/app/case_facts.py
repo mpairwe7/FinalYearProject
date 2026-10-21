@@ -589,6 +589,10 @@ _SALARY_KW_RE = re.compile(
     r"\b(salar(?:y|ies)|earn(?:s|ing)?|paid|pay(?:ing)?|gross\s+pay|monthly\s+gross|remuneration|stipend|retainer|wage|compensation|omusaala|mshahara)\b",
     re.IGNORECASE,
 )
+_STRONG_SALARY_KW_RE = re.compile(
+    r"\b(salar(?:y|ies)|earn(?:s|ing)?|gross\s+pay|monthly\s+gross|remuneration|stipend|retainer|wage|compensation|omusaala|mshahara)\b",
+    re.IGNORECASE,
+)
 _TURNOVER_KW_RE = re.compile(
     r"\b(turnover|annual\s+sales|gross\s+sales|taxable\s+sales|in\s+sales|annual\s+revenue|gross\s+turnover|mauzo)\b",
     re.IGNORECASE,
@@ -749,9 +753,11 @@ def extract_case_facts(
         saw_salary_in_turn = False
         for mon, ms, me in money_spans:
             ctx_window = text[max(0, ms - 50) : min(len(text), me + 50)]
-            tight_window = text[max(0, ms - 25) : min(len(text), me + 35)]
-            is_benefit_span = any(pat.search(tight_window) for _, pat in _BENEFIT_PATTERNS)
-            has_explicit_salary_kw = bool(_SALARY_KW_RE.search(tight_window))
+            pre_clause = re.split(r"(?:[,;]|\b(?:plus|and|with)\b)", text[max(0, ms - 35) : ms], flags=re.I)[-1]
+            post_clause = re.split(r"(?:[,;]|\b(?:plus|and|with)\b)", text[me : min(len(text), me + 35)], flags=re.I)[0]
+            same_clause_window = f"{pre_clause} {text[ms:me]} {post_clause}"
+            is_benefit_span = any(pat.search(same_clause_window) for _, pat in _BENEFIT_PATTERNS)
+            has_explicit_salary_kw = bool(_STRONG_SALARY_KW_RE.search(same_clause_window))
             if _TURNOVER_KW_RE.search(ctx_window):
                 mon.label = "annual_turnover"
                 _set("annual_turnover", mon)

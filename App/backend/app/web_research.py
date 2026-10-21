@@ -594,7 +594,11 @@ def detect_research_triggers(
         )
     )
     max_score = max(
-        (float(h.get("score") or h.get("rerank_score") or 0.0) for h in hit_list if isinstance(h, dict)),
+        (
+            float(h.get("score_norm") or h.get("score_rerank") or h.get("score") or h.get("rerank_score") or 0.0)
+            for h in hit_list
+            if isinstance(h, dict)
+        ),
         default=1.0 if not hit_list else 0.0,
     )
     low_conf = (faithfulness is not None and faithfulness < 0.45) or (bool(hit_list) and max_score < 0.45)

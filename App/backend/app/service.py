@@ -11567,7 +11567,11 @@ class ChatModel:
                 from .calculator_router import _SCENARIO_PLANNER_BYPASS_RE
 
                 if _SCENARIO_PLANNER_BYPASS_RE.search(router_rewritten or router_message or message):
-                    reply = f"{calc_facts_block}\n\n{reply}".strip() if reply != NO_HITS_REPLY else calc_facts_block
+                    user_facts = re.sub(r"^\s*##[^\n]*\n", "", calc_facts_block, count=1)
+                    user_facts = user_facts.replace(
+                        "Present these exact computed figures and statutory rules clearly.", ""
+                    ).strip()
+                    reply = f"{user_facts}\n\n{reply}".strip() if reply != NO_HITS_REPLY else user_facts
             if calc_facts_block and web_verified_facts:
                 verified_facts_block = f"{calc_facts_block}\n\n{web_verified_facts}".strip()
             else:
@@ -13122,7 +13126,11 @@ class ChatModel:
             from .calculator_router import _SCENARIO_PLANNER_BYPASS_RE
 
             if _SCENARIO_PLANNER_BYPASS_RE.search(router_rewritten or router_message or message):
-                reply = f"{calc_facts_block}\n\n{reply}".strip() if reply != NO_HITS_REPLY else calc_facts_block
+                user_facts = re.sub(r"^\s*##[^\n]*\n", "", calc_facts_block, count=1)
+                user_facts = user_facts.replace(
+                    "Present these exact computed figures and statutory rules clearly.", ""
+                ).strip()
+                reply = f"{user_facts}\n\n{reply}".strip() if reply != NO_HITS_REPLY else user_facts
         if calc_facts_block and web_verified_facts:
             verified_facts_block = f"{calc_facts_block}\n\n{web_verified_facts}".strip()
         else:

@@ -118,8 +118,12 @@ def test_scenario1_expat_usd_paye_live_fx_verified_across_guards(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify Scenario 1 ($6,000/month expat salary) live FX conversion passes verify_figure_lock and _apply_output_guards."""
+    import app.flags as flags_mod
+
+    monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
+    monkeypatch.setenv("FLAG_AUTO_QDRANT_WEB_SYNC", "true")
     monkeypatch.setattr(
-        flags,
+        flags_mod.flags,
         "is_enabled",
         lambda name, **_kw: True if name in {"live_web_research", "auto_qdrant_web_sync"} else False,
     )
@@ -142,7 +146,7 @@ def test_scenario1_expat_usd_paye_live_fx_verified_across_guards(
     verified_block = svc._evaluate_calculation_context(user_msg)
     assert "3,785.50" in verified_block
     assert "22,713,000" in verified_block
-    assert "XE.com" in verified_block
+    assert "Source: XE" in verified_block
 
     # Extract the computed PAYE figures from verified_block and verify a draft reply citing them passes all guards
     draft_reply = (
@@ -186,8 +190,13 @@ def test_turn1_outdated_guide_replacement_and_turn2_zero_network_skip(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify Turn 1 replaces an outdated FY2024-25 guide in Qdrant and Turn 2 skips web search via web_sync_ledger."""
+    import app.flags as flags_mod
+
+    monkeypatch.setenv("FLAG_LIVE_WEB_RESEARCH", "true")
+    monkeypatch.setenv("FLAG_AUTO_QDRANT_WEB_SYNC", "true")
+    monkeypatch.setenv("FLAG_KNOWLEDGE_DISCREPANCY_REPORTING", "true")
     monkeypatch.setattr(
-        flags,
+        flags_mod.flags,
         "is_enabled",
         lambda name, **_kw: True if name in {"live_web_research", "auto_qdrant_web_sync", "knowledge_discrepancy_reporting"} else False,
     )
